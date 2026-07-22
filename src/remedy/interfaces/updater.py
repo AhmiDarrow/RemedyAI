@@ -33,7 +33,11 @@ def _get_installed_version() -> str:
     try:
         return importlib_version("remedy")
     except PackageNotFoundError:
-        return "0.0.0"
+        try:
+            from remedy import __version__
+            return __version__
+        except ImportError:
+            return "unknown"
 
 
 def _get_latest_version() -> str | None:
