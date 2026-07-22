@@ -40,6 +40,7 @@ from remedy.skills.adapters.openclaw_deep import deep_load_openclaw_skill
 from remedy.core.learning_loop import LearningLoop
 from remedy.core.learning.reflection import ReflectionEngine, ExecutionTrace, TraceStep
 from remedy.core.learning.refiner import SkillRefiner
+from remedy.gateway.cli import main_gateway
 
 console = Console()
 
@@ -170,6 +171,18 @@ def build_parser() -> argparse.ArgumentParser:
     mig_oc = migrate_sub.add_parser("openclaw", help="Migrate from OpenClaw")
     mig_oc.add_argument("path", help="Path to OpenClaw skills directory")
     mig_oc.add_argument("--no-copy", action="store_true")
+
+    # remedy gateway start|status|serve|channels
+    gw = sub.add_parser("gateway", help="Gateway operations")
+    gw_sub = gw.add_subparsers(dest="gateway_cmd")
+    gw_start = gw_sub.add_parser("start", help="Start the gateway daemon")
+    gw_start.add_argument("--telegram-token", default="")
+    gw_start.add_argument("--discord-token", default="")
+    gw_start.add_argument("--slack-token", default="")
+    gw_start.add_argument("--heartbeat", type=float, default=60.0)
+    gw_status = gw_sub.add_parser("status", help="Show gateway status")
+    gw_serve = gw_sub.add_parser("serve", help="Start the REST API server")
+    gw_channels = gw_sub.add_parser("channels", help="List available channels")
 
     return parser
 
@@ -693,6 +706,8 @@ def main(args: Optional[list[str]] = None) -> None:
         asyncio.run(_cmd_tool(parsed))
     elif parsed.command == "learn":
         asyncio.run(_cmd_learn(parsed, db_path))
+    elif parsed.command == "gateway":
+        main_gateway(parsed)
     else:
         parser.print_help()
 
