@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { healthCheck } from '../api/client'
+import logoSrc from '/logo.png'
 
 interface SplashScreenProps {
   onReady: () => void
@@ -51,15 +52,15 @@ export function SplashScreen({ onReady, onError }: SplashScreenProps) {
 
   return (
     <div
-      className="flex flex-col items-center justify-center h-full gap-4"
+      className="flex flex-col items-center justify-center h-full gap-6"
       style={{ background: 'var(--bg-primary)', color: 'var(--text-primary)' }}
     >
-      <div
-        className="text-5xl font-bold"
-        style={{ color: 'var(--accent)' }}
-      >
-        Remedy
-      </div>
+      <img
+        src={logoSrc}
+        alt="Remedy"
+        className="w-[256px] h-auto"
+        style={{ imageRendering: 'pixelated' }}
+      />
       <div
         className="text-sm tracking-wide"
         style={{ color: 'var(--text-secondary)' }}
