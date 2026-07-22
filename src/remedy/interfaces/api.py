@@ -29,6 +29,7 @@ from pydantic import BaseModel, Field
 
 from remedy.core.errors import SecurityError
 from remedy.core.security import safe_path
+from remedy import __version__ as _remedy_version
 from remedy.models import (
     ChannelKind,
     ChatMessageRole,
@@ -249,7 +250,7 @@ def create_app(
     gateway=None,
     memory=None,
     title: str = "Remedy AI",
-    version: str = "0.7.0",
+    version: str = _remedy_version,
     *,
     api_key: str = "",
 ) -> FastAPI:
