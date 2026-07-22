@@ -1038,8 +1038,21 @@ def _cmd_chat(args) -> None:
 
 def _cmd_desktop(parsed: argparse.Namespace) -> None:
     """Handle the `remedy desktop` subcommand."""
-    package_dir = Path(__file__).resolve().parent.parent.parent
-    desktop_dir = package_dir / "desktop"
+    # Try package-relative path first (editable install), then working dir
+    repo_root = Path(__file__).resolve().parent.parent.parent.parent
+    desktop_dir = repo_root / "desktop"
+
+    if not desktop_dir.exists():
+        # Fall back to searching from cwd upward
+        cur = Path.cwd()
+        for _ in range(5):
+            candidate = cur / "desktop"
+            if candidate.exists():
+                desktop_dir = candidate
+                break
+            if (cur / ".git").exists():
+                break
+            cur = cur.parent
 
     if not desktop_dir.exists():
         console.print(f"[red]Desktop directory not found at {desktop_dir}[/red]")
