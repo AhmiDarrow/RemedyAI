@@ -5,7 +5,7 @@ These models form the data contract across all Remedy modules.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Any, Optional
 from uuid import UUID, uuid4
@@ -157,8 +157,8 @@ class MemoryEntry(BaseModel):
     content: str = Field(default="")
     tags: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     session_id: Optional[str] = Field(default=None)
     importance: float = Field(default=0.5, ge=0.0, le=1.0)
 
@@ -180,7 +180,7 @@ class HandoffNote(BaseModel):
     context_summary: Optional[str] = Field(default=None)
     action_items: list[str] = Field(default_factory=list)
     decisions: list[str] = Field(default_factory=list)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     acknowledged: bool = Field(default=False)
 
 
@@ -189,7 +189,7 @@ class SessionSummary(BaseModel):
 
     session_id: str
     started_at: datetime
-    ended_at: datetime = Field(default_factory=datetime.utcnow)
+    ended_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     tasks_completed: int = 0
     skills_created: int = 0
     skills_refined: int = 0
@@ -210,8 +210,8 @@ class Task(BaseModel):
     parent_id: Optional[UUID] = Field(default=None)
     sub_tasks: list[UUID] = Field(default_factory=list)
     assigned_skill: Optional[str] = Field(default=None)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     completed_at: Optional[datetime] = Field(default=None)
     tags: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -257,7 +257,7 @@ class GatewayEvent(BaseModel):
     channel: ChannelKind
     source_id: str = Field(default="")
     payload: dict[str, Any] = Field(default_factory=dict)
-    received_at: datetime = Field(default_factory=datetime.utcnow)
+    received_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     session_id: Optional[str] = Field(default=None)
     raw: Optional[str] = Field(default=None)
 

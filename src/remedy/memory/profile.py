@@ -6,7 +6,7 @@ to provide contextually-aware, personalized responses across sessions.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import UUID, uuid4
 
@@ -20,8 +20,8 @@ class UserTrait(BaseModel):
     value: Any = Field(description="Current value")
     confidence: float = Field(default=0.5, ge=0.0, le=1.0, description="How confident we are")
     source: str = Field(default="inferred", description="How this trait was acquired")
-    first_observed: datetime = Field(default_factory=datetime.utcnow)
-    last_updated: datetime = Field(default_factory=datetime.utcnow)
+    first_observed: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    last_updated: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     observation_count: int = Field(default=1)
 
 
@@ -33,8 +33,8 @@ class UserFact(BaseModel):
     category: str = Field(default="general", description="e.g. 'work', 'personal', 'project'")
     confidence: float = Field(default=0.7, ge=0.0, le=1.0)
     source: str = Field(default="inferred")
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    last_referenced: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    last_referenced: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     reference_count: int = Field(default=1)
 
 
@@ -52,8 +52,8 @@ class UserProfile(BaseModel):
         "preferred_channels": [],
         "avg_session_duration_minutes": 0.0,
     })
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    last_active: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    last_active: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     def get_trait(self, key: str, default: Any = None) -> Any:
         t = self.traits.get(key)
@@ -64,7 +64,7 @@ class UserProfile(BaseModel):
             t = self.traits[key]
             t.value = value
             t.confidence = max(t.confidence, confidence)
-            t.last_updated = datetime.utcnow()
+            t.last_updated = datetime.now(timezone.utc)
             t.observation_count += 1
         else:
             self.traits[key] = UserTrait(
@@ -84,7 +84,7 @@ class UserProfile(BaseModel):
         self.stats["avg_session_duration_minutes"] = (
             (prev_avg * (n - 1) + duration_minutes) / n
         )
-        self.last_active = datetime.utcnow()
+        self.last_active = datetime.now(timezone.utc)
 
     def record_skill_use(self, skill_name: str) -> None:
         self.stats["skills_used"][skill_name] = self.stats["skills_used"].get(skill_name, 0) + 1

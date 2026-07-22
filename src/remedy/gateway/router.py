@@ -13,7 +13,7 @@ import json
 import logging
 import time
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, AsyncIterator, Callable, Optional, Union
 from uuid import UUID, uuid4
@@ -128,7 +128,7 @@ class Gateway:
 
     async def start(self) -> None:
         self._running = True
-        self._started_at = datetime.utcnow()
+        self._started_at = datetime.now(timezone.utc)
         self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
         self._queue_task = asyncio.create_task(self._process_queue())
 
@@ -225,7 +225,7 @@ class Gateway:
                 channel=ChannelKind.CLI,
                 source_id="system",
                 payload={
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                     "uptime": self._uptime_str(),
                     "events": self._event_counter,
                 },
@@ -257,7 +257,7 @@ class Gateway:
     def _uptime_str(self) -> str:
         if self._started_at is None:
             return "0s"
-        delta = datetime.utcnow() - self._started_at
+        delta = datetime.now(timezone.utc) - self._started_at
         total = int(delta.total_seconds())
         h, m, s = total // 3600, (total % 3600) // 60, total % 60
         return f"{h}h {m}m {s}s"

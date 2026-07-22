@@ -9,7 +9,7 @@ Monitors skill execution success/failure signals and:
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from typing import Optional
 from uuid import UUID, uuid4
@@ -30,7 +30,7 @@ class RefinementRecord:
     change_description: str = ""
     triggered_by: str = ""  # "feedback", "manual", "auto-analysis"
     feedback_context: Optional[str] = None
-    applied_at: datetime = field(default_factory=datetime.utcnow)
+    applied_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 @dataclass
@@ -89,7 +89,7 @@ class SkillRefiner:
                 stats.avg_duration_ms * (stats.total_executions - 1) + duration_ms
             ) / stats.total_executions
 
-        stats.last_executed = datetime.utcnow()
+        stats.last_executed = datetime.now(timezone.utc)
         if session_id:
             stats.execution_by_session[session_id] = stats.execution_by_session.get(session_id, 0) + 1
 

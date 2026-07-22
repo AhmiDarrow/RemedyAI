@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import UUID
 
@@ -113,7 +113,7 @@ class ToolRegistry:
             "tool_name": call.tool_name,
             "success": result.success,
             "duration_ms": result.duration_ms,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         })
 
     def get_stats(self) -> dict[str, Any]:

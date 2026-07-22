@@ -9,7 +9,7 @@ Bridges the learning loop to the memory system:
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from typing import Optional
 from uuid import UUID, uuid4
@@ -35,7 +35,7 @@ class LearningEvent:
     source_session_id: Optional[str] = None
     confidence_at_creation: float = 0.0
     description: str = ""
-    occurred_at: datetime = field(default_factory=datetime.utcnow)
+    occurred_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 @dataclass

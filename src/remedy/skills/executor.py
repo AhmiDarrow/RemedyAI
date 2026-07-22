@@ -11,7 +11,7 @@ import hashlib
 import re
 import tempfile
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 from uuid import UUID, uuid4
@@ -53,7 +53,7 @@ class SkillExecutor:
         timeout: float = 300.0,
     ) -> ExecutionResult:
         """Execute a skill script via subprocess."""
-        result = ExecutionResult(started_at=datetime.utcnow())
+        result = ExecutionResult(started_at=datetime.now(timezone.utc))
 
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -63,7 +63,7 @@ class SkillExecutor:
                 env=env,
                 cwd=str(script_path.parent),
             )
-            result.started_at = datetime.utcnow()
+            result.started_at = datetime.now(timezone.utc)
 
             try:
                 stdout, stderr = await asyncio.wait_for(
@@ -85,7 +85,7 @@ class SkillExecutor:
             result.error = str(e)
             result.success = False
 
-        result.ended_at = datetime.utcnow()
+        result.ended_at = datetime.now(timezone.utc)
         if result.started_at:
             result.duration_ms = (
                 result.ended_at - result.started_at
@@ -145,8 +145,8 @@ class SkillExecutor:
         env: Optional[dict[str, str]] = None,
     ) -> ExecutionResult:
         """Execute a shell code block."""
-        result = ExecutionResult(started_at=datetime.utcnow())
-        result.started_at = datetime.utcnow()
+        result = ExecutionResult(started_at=datetime.now(timezone.utc))
+        result.started_at = datetime.now(timezone.utc)
 
         try:
             proc = await asyncio.create_subprocess_shell(
@@ -172,7 +172,7 @@ class SkillExecutor:
             result.error = str(e)
             result.success = False
 
-        result.ended_at = datetime.utcnow()
+        result.ended_at = datetime.now(timezone.utc)
         if result.started_at:
             result.duration_ms = (
                 result.ended_at - result.started_at

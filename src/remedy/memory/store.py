@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 from uuid import UUID, uuid4
@@ -198,7 +198,7 @@ class MemoryStore:
     async def upsert(self, entry: MemoryEntry) -> MemoryEntry:
         """Insert or update a memory entry. Returns the saved entry."""
         db = self._ensure_db()
-        entry.updated_at = datetime.utcnow()
+        entry.updated_at = datetime.now(timezone.utc)
 
         db.execute(
             """
@@ -510,7 +510,7 @@ class MemoryStore:
 
     async def save_user_profile(self, profile: UserProfile) -> None:
         db = self._ensure_db()
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         db.execute(
             "INSERT OR REPLACE INTO user_profile (user_id, profile_json, updated_at) VALUES (?, ?, ?)",
             (profile.user_id, profile.model_dump_json(indent=2), now),

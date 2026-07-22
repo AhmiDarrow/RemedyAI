@@ -1,10 +1,22 @@
 [project]
 name = "remedy"
 version = "0.1.0"
-description = "Add your description here"
+description = "A self-improving, multi-channel AI agent framework with memory, learning, and extensibility"
 readme = "README.md"
+license = { text = "MIT" }
 authors = [
     { name = "Ahmi", email = "ahmitdarrow@gmail.com" }
+]
+keywords = ["ai", "agent", "framework", "skill", "memory", "learning", "llm", "tools"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
 ]
 requires-python = ">=3.12"
 dependencies = [
@@ -17,12 +29,21 @@ dependencies = [
     "uvicorn>=0.51.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/anomalyco/remedy"
+Repository = "https://github.com/anomalyco/remedy"
+
 [project.scripts]
 remedy = "remedy.interfaces.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.11.31,<0.12.0"]
 build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = ["-v", "--tb=short", "--strict-markers"]
+testpaths = ["tests"]
 
 [dependency-groups]
 dev = [

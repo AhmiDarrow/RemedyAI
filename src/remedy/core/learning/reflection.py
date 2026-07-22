@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 from collections import Counter
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import UUID
 
@@ -86,7 +86,7 @@ class GeneratedSkill:
     estimated_success_rate: float = 0.8
     source_trace_id: Optional[UUID] = None
     source_task_title: str = ""
-    generated_at: datetime = field(default_factory=datetime.utcnow)
+    generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 _MIN_TRACE_LENGTH = 3

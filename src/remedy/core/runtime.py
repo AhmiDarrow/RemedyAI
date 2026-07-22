@@ -7,7 +7,7 @@ Inspired by Hermes' ReAct loop with learning and self-improvement.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Optional
 from uuid import UUID, uuid4
 
@@ -107,7 +107,7 @@ class AgentRuntime(ABC):
 
     async def remember(self, content: str, title: str = "", importance: float = 0.5) -> MemoryEntry:
         entry = MemoryEntry(
-            title=title or f"Memory {datetime.utcnow().isoformat()}",
+            title=title or f"Memory {datetime.now(timezone.utc).isoformat()}",
             content=content,
             entry_type=MemoryEntryType.NOTE,
             importance=importance,
@@ -144,7 +144,7 @@ class AgentRuntime(ABC):
     async def start_session(self, session_id: Optional[str] = None) -> str:
         """Begin a new session, loading pending handoffs and user profile."""
         self._session_id = session_id or str(uuid4())
-        self._session_started_at = datetime.utcnow()
+        self._session_started_at = datetime.now(timezone.utc)
 
         # Load user profile
         self._user_profile = await self.memory.get_or_create_profile()
@@ -182,7 +182,7 @@ class AgentRuntime(ABC):
 
         # Update profile stats
         if self._session_started_at and self._user_profile:
-            duration = (datetime.utcnow() - self._session_started_at).total_seconds() / 60.0
+            duration = (datetime.now(timezone.utc) - self._session_started_at).total_seconds() / 60.0
             self._user_profile.record_session(duration)
             await self.memory.save_user_profile(self._user_profile)
 
@@ -196,7 +196,7 @@ class AgentRuntime(ABC):
         # Generate session summary
         await self.handoff.generate_session_summary(
             session_id=self._session_id,
-            started_at=self._session_started_at or datetime.utcnow(),
+            started_at=self._session_started_at or datetime.now(timezone.utc),
             tasks_completed=len(completed),
             key_decisions=[],
             open_items=[t.title for t in open_tasks_list],
