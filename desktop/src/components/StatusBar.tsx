@@ -17,6 +17,8 @@ interface StatusBarProps {
   onTogglePlanMode: () => void
   panel?: 'memory' | 'skills' | 'settings' | null
   onTogglePanel: (panel: 'memory' | 'skills' | 'settings') => void
+  updateAvailable: boolean
+  onCheckUpdates: () => void
 }
 
 export function StatusBar({
@@ -32,6 +34,8 @@ export function StatusBar({
   onTogglePlanMode,
   panel,
   onTogglePanel,
+  updateAvailable,
+  onCheckUpdates,
 }: StatusBarProps) {
   const [version, setVersion] = useState('')
   const [status, setStatus] = useState<'connected' | 'disconnected' | 'checking'>('checking')
@@ -141,6 +145,20 @@ export function StatusBar({
 
         {sessionId && <span style={{ color: 'var(--text-muted)' }}>{sessionId.slice(0, 8)}</span>}
         {streaming && <span style={{ color: 'var(--accent)' }}>Streaming...</span>}
+
+        {updateAvailable && (
+          <button
+            onClick={onCheckUpdates}
+            className="px-2 py-0.5 rounded text-xs font-medium animate-pulse"
+            title="Update available — click to view"
+            style={{
+              background: 'var(--accent)',
+              color: '#fff',
+            }}
+          >
+            Update Available
+          </button>
+        )}
 
         {status === 'disconnected' && (
           <button

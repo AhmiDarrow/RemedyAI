@@ -7,14 +7,17 @@ import { TabBar } from './components/TabBar'
 import { MemoryPanel, SkillsPanel } from './components/Panels'
 import { SettingsPanel } from './components/SettingsPanel'
 import { SplashScreen } from './components/SplashScreen'
+import { SetupWizard } from './components/SetupWizard'
 import { CommandPalette, type CommandItem } from './components/CommandPalette'
 import { useSessions } from './hooks/useSessions'
 import { useMessages } from './hooks/useMessages'
 import { useTheme } from './hooks/useTheme'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import { useNotifications } from './hooks/useNotifications'
+import { useUpdateChecker } from './hooks/useUpdateChecker'
 import { revertMessageApi, listAgents, listCommands, exportSession } from './api/messages'
 import { apiFetch } from './api/client'
+import { getSettings } from './api/settings'
 
 export interface ModelInfo {
   id: string
@@ -43,6 +46,9 @@ export default function App() {
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [agentDefs, setAgentDefs] = useState<{ name: string; description: string }[]>([])
   const { notify } = useNotifications()
+  const { updateInfo, checking: checkingUpdates, check: checkUpdates } = useUpdateChecker()
+  const [showSetupWizard, setShowSetupWizard] = useState(false)
+  const [configChecked, setConfigChecked] = useState(false)
 
   useEffect(() => {
     if (isTauri()) {
@@ -74,6 +80,18 @@ export default function App() {
       })
       .catch(() => {})
   }, [serverState])
+
+  useEffect(() => {
+    if (serverState !== 'ready' || configChecked) return
+    getSettings()
+      .then((s) => {
+        if (!s.config_exists) {
+          setShowSetupWizard(true)
+        }
+      })
+      .catch(() => {})
+      .finally(() => setConfigChecked(true))
+  }, [serverState, configChecked])
 
   const handleNewSession = useCallback(async () => {
     const s = await create()
@@ -246,6 +264,15 @@ export default function App() {
     )
   }
 
+  if (showSetupWizard) {
+    return (
+      <SetupWizard
+        open={showSetupWizard}
+        onComplete={() => setShowSetupWizard(false)}
+      />
+    )
+  }
+
   return (
     <div className="flex h-full" style={{ background: 'var(--bg-primary)' }}>
       <CommandPalette
@@ -300,7 +327,7 @@ export default function App() {
               onStop={stop}
               onCommand={handleCommand}
               streaming={streaming}
-              disabled={!activeId}
+              disabled={false}
               planMode={planMode}
               agents={agentDefs}
             />
@@ -319,6 +346,9 @@ export default function App() {
             onClose={() => setPanel(null)}
             themeId={themeId}
             onThemeChange={setTheme}
+            updateInfo={updateInfo}
+            checkingUpdates={checkingUpdates}
+            onCheckUpdates={checkUpdates}
           />
         </div>
 
@@ -335,6 +365,8 @@ export default function App() {
           onTogglePlanMode={() => setPlanMode((p) => !p)}
           panel={panel}
           onTogglePanel={(p) => setPanel((prev) => (prev === p ? null : p))}
+          updateAvailable={updateInfo?.update_available ?? false}
+          onCheckUpdates={checkUpdates}
         />
       </div>
     </div>

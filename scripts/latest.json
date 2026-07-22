@@ -1,0 +1,23 @@
+{
+  "version": "0.9.1",
+  "notes": "Release notes here",
+  "pub_date": "0.9.1",
+  "platforms": {
+    "windows-x86_64": {
+      "signature": "",
+      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.9.0/Remedy_Desktop_0.9.0_x64-setup.exe"
+    },
+    "darwin-x86_64": {
+      "signature": "",
+      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.9.0/Remedy_Desktop_0.9.0_x64.dmg"
+    },
+    "darwin-aarch64": {
+      "signature": "",
+      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.9.0/Remedy_Desktop_0.9.0_aarch64.dmg"
+    },
+    "linux-x86_64": {
+      "signature": "",
+      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.9.0/Remedy_Desktop_0.9.0_amd64.AppImage"
+    }
+  }
+}

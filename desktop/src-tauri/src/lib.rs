@@ -93,6 +93,7 @@ pub fn run() {
         })
         .setup(|app| {
             let _shell = app.handle().plugin(tauri_plugin_shell::init())?;
+            let _updater = app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
             let app_handle = app.handle().clone();
 
             let remedy_cmd = find_remedy();

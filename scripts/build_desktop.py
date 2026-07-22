@@ -18,6 +18,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 DESKTOP_BIN = ROOT / "desktop" / "bin"
+DIST_DIR = ROOT / "dist"
+NSIS_DIR = (
+    ROOT / "desktop" / "src-tauri" / "target" / "release" / "bundle" / "nsis"
+)
 
 
 def ensure_pyinstaller():
@@ -179,6 +183,26 @@ if __name__ == "__main__":
 
     p = argparse.ArgumentParser(description="Build Remedy Desktop standalone exe")
     p.add_argument("--clean", action="store_true", help="Clean PyInstaller cache before build")
+    p.add_argument(
+        "--stage", action="store_true", help="Copy final installer to dist/ dir"
+    )
     args = p.parse_args()
 
-    build(cache_clean=args.clean)
+    code = build(cache_clean=args.clean)
+
+    if args.stage:
+        candidates = sorted(
+            NSIS_DIR.glob("*.exe") if NSIS_DIR.exists() else [],
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        if candidates:
+            DIST_DIR.mkdir(exist_ok=True)
+            dest = DIST_DIR / candidates[0].name
+            shutil.copy2(candidates[0], dest)
+            size_mb = dest.stat().st_size / (1024 * 1024)
+            print(f"\nStaged installer: {dest} ({size_mb:.1f} MB)")
+        else:
+            print("\nNo NSIS installer found — run tauri build first.")
+
+    raise SystemExit(code)

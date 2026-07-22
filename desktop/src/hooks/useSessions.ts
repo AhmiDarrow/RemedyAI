@@ -31,10 +31,14 @@ export function useSessions() {
     loading,
     refresh,
     create: useCallback(async (title?: string) => {
-      const s = await createSession({ title })
-      setSessions((prev) => [s, ...prev])
-      setActiveId(s.id)
-      return s
+      try {
+        const s = await createSession({ title })
+        setSessions((prev) => [s, ...prev])
+        setActiveId(s.id)
+        return s
+      } catch {
+        return null
+      }
     }, []),
     remove: useCallback(async (id: string) => {
       await deleteSession(id)

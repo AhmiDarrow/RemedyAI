@@ -1038,6 +1038,7 @@ def create_app(
     @app.get("/api/settings")
     async def get_settings():
         cfg = load_config()
+        config_path = _find_config_path()
         return {
             "llm_provider": cfg.get("llm_provider", os.environ.get("REMEDY_LLM_PROVIDER", "openai")),
             "llm_model": cfg.get("llm_model", os.environ.get("REMEDY_LLM_MODEL", "gpt-4o-mini")),
@@ -1046,6 +1047,7 @@ def create_app(
             "name": cfg.get("name", "Remedy"),
             "project_path": cfg.get("project_path", os.getcwd()),
             "version": version,
+            "config_exists": config_path is not None,
         }
 
     @app.put("/api/settings")
@@ -1066,6 +1068,63 @@ def create_app(
 
         changes = list(updates.keys())
         return {"status": "saved", "changes": changes, "config_path": str(config_path)}
+
+    # -- updates ------------------------------------------------------------
+    @app.get("/api/updates/check")
+    async def check_updates():
+        current = version
+        latest_python = None
+        latest_desktop = None
+        release_url = None
+        error = None
+
+        try:
+            import json as _json
+            import urllib.request as _urllib
+
+            req = _urllib.Request(
+                "https://pypi.org/pypi/remedy-ai/json",
+                headers={"Accept": "application/json"},
+            )
+            with _urllib.request.urlopen(req, timeout=8) as resp:
+                data = _json.loads(resp.read().decode())
+                latest_python = data["info"]["version"]
+        except Exception as e:
+            error = f"PyPI check failed: {e}"
+
+        try:
+            import json as _json
+            import urllib.request as _urllib
+
+            req = _urllib.Request(
+                "https://github.com/AhmiDarrow/RemedyAI/releases/latest/download/latest.json",
+                headers={"Accept": "application/json"},
+            )
+            with _urllib.request.urlopen(req, timeout=8) as resp:
+                data = _json.loads(resp.read().decode())
+                latest_desktop = data.get("version")
+                release_url = data.get("url")
+        except Exception:
+            pass
+
+        update_available = False
+        if latest_python:
+            from remedy.interfaces.updater import _parse_version
+            if _parse_version(latest_python) > _parse_version(current):
+                update_available = True
+        if latest_desktop:
+            from remedy.interfaces.updater import _parse_version
+            if _parse_version(latest_desktop) > _parse_version(current):
+                update_available = True
+
+        return {
+            "current_version": current,
+            "latest_python": latest_python,
+            "latest_desktop": latest_desktop,
+            "release_url": release_url,
+            "update_available": update_available,
+            "error": error,
+        }
 
     # -- OpenAPI schema export -----------------------------------------------
     @app.get("/api/openapi.yaml", include_in_schema=False)

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { getSettings, updateSettings, type Settings, type SettingsUpdate } from '../api/settings'
 import type { ThemeId } from '../themes'
+import type { UpdateInfo } from '../api/updates'
 import { THEME_LIST } from '../themes'
 
 interface SettingsPanelProps {
@@ -8,6 +9,9 @@ interface SettingsPanelProps {
   onClose: () => void
   themeId: ThemeId
   onThemeChange: (id: ThemeId) => void
+  updateInfo: UpdateInfo | null
+  checkingUpdates: boolean
+  onCheckUpdates: () => void
 }
 
 const PROVIDERS = [
@@ -20,7 +24,7 @@ const PROVIDERS = [
   { id: 'custom', name: 'Custom / KoboldCPP' },
 ]
 
-export function SettingsPanel({ open, onClose, themeId, onThemeChange }: SettingsPanelProps) {
+export function SettingsPanel({ open, onClose, themeId, onThemeChange, updateInfo, checkingUpdates, onCheckUpdates }: SettingsPanelProps) {
   const [settings, setSettings] = useState<Settings | null>(null)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -209,6 +213,53 @@ export function SettingsPanel({ open, onClose, themeId, onThemeChange }: Setting
                   <span style={{ color: 'var(--text-muted)' }}>Config</span>
                   <span style={{ fontFamily: 'monospace', fontSize: '0.65rem' }}>~/.remedy/config.toml</span>
                 </div>
+              </div>
+
+              <div className="mt-3 pt-3 border-t" style={{ borderColor: 'var(--border)' }}>
+                <button
+                  onClick={onCheckUpdates}
+                  disabled={checkingUpdates}
+                  className="w-full py-1.5 rounded text-xs font-medium transition-colors"
+                  style={{
+                    background: checkingUpdates ? 'var(--bg-tertiary)' : 'var(--bg-tertiary)',
+                    color: checkingUpdates ? 'var(--text-muted)' : 'var(--text-primary)',
+                    border: '1px solid var(--border)',
+                  }}
+                >
+                  {checkingUpdates ? 'Checking...' : 'Check for Updates'}
+                </button>
+                {updateInfo && (
+                  <div className="mt-2 space-y-1">
+                    <div className="flex justify-between text-xs">
+                      <span style={{ color: 'var(--text-muted)' }}>Current</span>
+                      <span style={{ color: 'var(--text-primary)' }}>{updateInfo.current_version}</span>
+                    </div>
+                    {updateInfo.latest_python && (
+                      <div className="flex justify-between text-xs">
+                        <span style={{ color: 'var(--text-muted)' }}>Latest (PyPI)</span>
+                        <span style={{ color: updateInfo.update_available ? 'var(--accent)' : 'var(--text-primary)' }}>
+                          {updateInfo.latest_python}
+                        </span>
+                      </div>
+                    )}
+                    {updateInfo.update_available && updateInfo.release_url && (
+                      <a
+                        href={updateInfo.release_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block mt-1 text-xs font-medium"
+                        style={{ color: 'var(--accent)' }}
+                      >
+                        Download update
+                      </a>
+                    )}
+                    {updateInfo.update_available && !updateInfo.release_url && (
+                      <div className="mt-1 text-xs" style={{ color: 'var(--accent)' }}>
+                        Run <code style={{ background: 'var(--bg-tertiary)', padding: '1px 4px', borderRadius: 3 }}>remedy update</code> in terminal
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </section>
           </>

@@ -195,9 +195,7 @@ export function Composer({ onSend, onStop, onCommand, streaming, disabled, planM
           placeholder={
             planMode
               ? 'Plan mode — describe what to do (no tools executed)'
-              : disabled
-                ? 'Select or create a session to begin'
-                : 'Type a message, /command, @agent, or @file...'
+              : 'Type a message, /command, @agent, or @file...'
           }
           disabled={disabled}
           rows={1}

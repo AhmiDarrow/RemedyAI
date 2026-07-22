@@ -8,6 +8,7 @@ export interface Settings {
   name: string
   project_path: string
   version: string
+  config_exists: boolean
 }
 
 export interface SettingsUpdate {
