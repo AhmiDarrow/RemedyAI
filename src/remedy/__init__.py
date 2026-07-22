@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 
@@ -12,15 +13,29 @@ def _get_version() -> str:
     except Exception:
         pass
 
+    candidates = [
+        Path(__file__).resolve().parents[2] / "pyproject.toml",
+        Path(sys.executable).parent / "pyproject.toml",
+        Path(sys.executable).parent / "_internal" / "pyproject.toml",
+        Path(sys.prefix) / "pyproject.toml",
+        Path(sys.prefix) / "_internal" / "pyproject.toml",
+    ]
     try:
-        _pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
-        for line in _pyproject.read_text(encoding="utf-8").splitlines():
-            stripped = line.strip()
-            if stripped.startswith("version"):
-                _v = stripped.split("=", 1)[1].strip().strip('"')
-                return _v
+        if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+            candidates.insert(0, Path(sys._MEIPASS) / "pyproject.toml")
     except Exception:
         pass
+
+    for candidate in candidates:
+        try:
+            if candidate.exists():
+                for line in candidate.read_text(encoding="utf-8").splitlines():
+                    stripped = line.strip()
+                    if stripped.startswith("version"):
+                        _v = stripped.split("=", 1)[1].strip().strip('"')
+                        return _v
+        except Exception:
+            continue
 
     return "0.0.0"
 

@@ -20,31 +20,41 @@ fn current_exe_dir() -> Option<std::path::PathBuf> {
     env::current_exe().ok()?.parent().map(|p| p.to_path_buf())
 }
 
-fn find_remedy() -> String {
-    if let Some(dir) = current_exe_dir() {
-        let triple_name = dir.join("remedy-desktop-x86_64-pc-windows-msvc.exe");
-        if triple_name.exists() {
-            log::info!("Found sidecar at: {}", triple_name.display());
-            return triple_name.to_string_lossy().to_string();
+fn find_remedy() -> (String, String) {
+    let searched = |label: &str, p: &std::path::Path| -> Option<String> {
+        if p.exists() {
+            log::info!("Found sidecar at: {} ({})", p.display(), label);
+            Some(p.to_string_lossy().to_string())
+        } else {
+            None
         }
-        let plain_name = dir.join("remedy-desktop.exe");
-        if plain_name.exists() {
-            log::info!("Found sidecar at: {}", plain_name.display());
-            return plain_name.to_string_lossy().to_string();
+    };
+
+    if let Some(dir) = current_exe_dir() {
+        if let Some(path) = searched(
+            "triple",
+            &dir.join("remedy-desktop-x86_64-pc-windows-msvc.exe"),
+        ) {
+            return (path, String::new());
+        }
+        if let Some(path) = searched("plain", &dir.join("remedy-desktop.exe")) {
+            return (path, String::new());
         }
     }
 
-    // Dev mode: search up from cwd/bin/ for the PyInstaller output
     if let Ok(cwd) = env::current_dir() {
         let dev_path = cwd.join("bin").join("remedy-desktop.exe");
-        if dev_path.exists() {
-            log::info!("Found sidecar (dev) at: {}", dev_path.display());
-            return dev_path.to_string_lossy().to_string();
+        if let Some(path) = searched("dev", &dev_path) {
+            return (path, String::new());
         }
     }
 
-    log::info!("Sidecar not found in app directory, trying PATH");
-    "remedy-desktop.exe".to_string()
+    let msg = format!(
+        "Sidecar not found — checked exe dir {:?}, cwd/bin/",
+        current_exe_dir()
+    );
+    log::error!("{}", msg);
+    ("remedy-desktop.exe".to_string(), msg)
 }
 
 fn spawn_remedy(cmd: &str) -> Option<Child> {
@@ -96,7 +106,13 @@ pub fn run() {
             let _updater = app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
             let app_handle = app.handle().clone();
 
-            let remedy_cmd = find_remedy();
+            let (remedy_cmd, find_err) = find_remedy();
+            if !find_err.is_empty() {
+                log::error!("{}", find_err);
+                let _ = app_handle.emit("server-error", &find_err);
+                return Ok(());
+            }
+
             log::info!("Starting remedy: {}", remedy_cmd);
             let _ = app_handle.emit("server-starting", ());
 

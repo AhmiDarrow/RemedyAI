@@ -906,6 +906,11 @@ def _cmd_serve(args) -> None:
         api_key=api_key,
     )
 
+    if not agent_config.llm_api_key:
+        console.print("[bold yellow]WARNING: No LLM API key configured.[/bold yellow]")
+        console.print("  Set REMEDY_LLM_API_KEY env var or run [bold]remedy setup[/bold] to configure.")
+        console.print("  The server will run in [bold]fallback (echo)[/bold] mode without a real LLM.\n")
+
     console.print(f"[green]Starting Remedy API on http://{args.host}:{args.port}[/green]")
     console.print("[dim]Dashboard:[/dim] /dashboard")
     console.print("[dim]OpenAPI:[/dim]   /api/openapi.json  /api/openapi.yaml")

@@ -147,5 +147,35 @@ export function useMessages(sessionId: string | null) {
     [sessionId],
   )
 
-  return { messages, loading, streaming, partialText, send, stop, runCommand, load }
+  const addCommandMessage = useCallback((command: string, response: string) => {
+    const userMsg: ChatMessage = {
+      id: crypto.randomUUID(),
+      role: 'user',
+      content: command,
+      thinking: null,
+      tool_calls: [],
+      tool_results: [],
+      model: null,
+      agent: null,
+      tokens: null,
+      created_at: new Date().toISOString(),
+      reverted: false,
+    }
+    const assistantMsg: ChatMessage = {
+      id: crypto.randomUUID(),
+      role: 'assistant',
+      content: response,
+      thinking: null,
+      tool_calls: [],
+      tool_results: [],
+      model: null,
+      agent: null,
+      tokens: null,
+      created_at: new Date().toISOString(),
+      reverted: false,
+    }
+    setMessages((prev) => [...prev, userMsg, assistantMsg])
+  }, [])
+
+  return { messages, loading, streaming, partialText, send, stop, runCommand, load, addCommandMessage }
 }

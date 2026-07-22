@@ -34,7 +34,7 @@ function isTauri(): boolean {
 
 export default function App() {
   const { sessions, activeId, setActiveId, create, remove, refresh: refreshSessions } = useSessions()
-  const { messages, loading: messagesLoading, streaming, partialText, send, stop, runCommand, load } = useMessages(activeId)
+  const { messages, loading: messagesLoading, streaming, partialText, send, stop, runCommand, load, addCommandMessage } = useMessages(activeId)
   const { themeId, theme, set: setTheme } = useTheme()
   const [model, setModel] = useState('gpt-4o-mini')
   const [models, setModels] = useState<ModelInfo[]>([])
@@ -59,10 +59,10 @@ export default function App() {
       }
       ;(window as any).__TAURI_INTERNALS__?.invoke('plugin:event|listen', {
         event: 'server-ready', handler: handleReady,
-      }).catch(() => {})
+      }).catch((e: any) => console.warn('Tauri listen(server-ready) failed:', e))
       ;(window as any).__TAURI_INTERNALS__?.invoke('plugin:event|listen', {
         event: 'server-error', handler: handleError,
-      }).catch(() => {})
+      }).catch((e: any) => console.warn('Tauri listen(server-error) failed:', e))
     }
   }, [])
 
@@ -78,7 +78,10 @@ export default function App() {
         if (def) setModel(def.id)
         setAgentDefs(Array.isArray(agents) ? agents : agents?.agents || [])
       })
-      .catch(() => {})
+      .catch((e: any) => {
+        setServerState('error')
+        setServerError(`Failed to load server config: ${e?.message || e}`)
+      })
   }, [serverState])
 
   useEffect(() => {
@@ -89,7 +92,7 @@ export default function App() {
           setShowSetupWizard(true)
         }
       })
-      .catch(() => {})
+      .catch((e: any) => console.warn('Settings fetch failed:', e?.message || e))
       .finally(() => setConfigChecked(true))
   }, [serverState, configChecked])
 
@@ -138,18 +141,21 @@ export default function App() {
       const sid = activeId || (await create())?.id
       if (!sid) return { text: 'No session available.' }
       const result = await runCommand(command, sid)
+      if (result.text && sid) {
+        addCommandMessage(command, result.text)
+      }
       if (result.action === 'new_session') {
         await handleNewSession()
       }
       return result
     },
-    [runCommand, handleNewSession, activeId, create],
+    [runCommand, handleNewSession, activeId, create, addCommandMessage],
   )
 
   const handleSend = useCallback(
     async (text: string) => {
       if (text.startsWith('/')) {
-        handleCommand(text)
+        await handleCommand(text)
       } else {
         const sid = activeId || (await create())?.id
         if (sid) send(text, model, sid)
@@ -164,8 +170,8 @@ export default function App() {
       try {
         await revertMessageApi(activeId, msgId)
         await load()
-      } catch {
-        // ignore
+      } catch (e: unknown) {
+        console.warn('Revert failed:', e instanceof Error ? e.message : e)
       }
     },
     [activeId, load],
@@ -182,8 +188,8 @@ export default function App() {
         a.download = filename
         a.click()
         URL.revokeObjectURL(url)
-      } catch {
-        // ignore
+      } catch (e: unknown) {
+        console.warn('Export failed:', e instanceof Error ? e.message : e)
       }
     },
     [],
