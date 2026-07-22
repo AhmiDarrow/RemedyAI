@@ -208,6 +208,14 @@ def build_parser() -> argparse.ArgumentParser:
     cfg_show = config_sub.add_parser("show", help="Show current configuration")
     cfg_path = config_sub.add_parser("path", help="Show config file path")
 
+    # remedy chat
+    chat_cmd = sub.add_parser("chat", help="Launch interactive chat with the Remedy agent")
+    chat_cmd.add_argument("--config", dest="config_file", default=None)
+    chat_cmd.add_argument("--session", dest="session_id", default=None,
+                          help="Resume an existing session")
+    chat_cmd.add_argument("--no-memory", action="store_true",
+                          help="Don't persist conversation to memory")
+
     # remedy serve
     serve_cmd = sub.add_parser("serve", help="Start the full API server (with config)")
     serve_cmd.add_argument("--host", default="127.0.0.1")
@@ -883,6 +891,125 @@ def _cmd_serve(args) -> None:
     uvicorn.run(app, host=args.host, port=args.port, log_level=config.get("log_level", "info").lower())
 
 
+def _cmd_chat(args) -> None:
+    import asyncio as _asyncio
+
+    from remedy.core.agent import BasicRuntime
+    from remedy.gateway.router import Gateway
+    from remedy.memory.store import MemoryStore
+    from remedy.models import ChannelKind, EventKind, GatewayEvent
+
+    home = Path(args.home).expanduser()
+    home.mkdir(parents=True, exist_ok=True)
+
+    config = resolve_config(
+        config_path=Path(args.config_file) if args.config_file else None,
+        home_dir=str(home),
+    )
+    agent_config = config_to_agent_config(config)
+
+    async def _chat_loop():
+        memory = MemoryStore(
+            agent_config.memory_db_path or f"{agent_config.home_dir}/memory.db"
+        )
+        await memory.initialize()
+
+        runtime = BasicRuntime(agent_config, memory=memory)
+        await runtime.start()
+
+        skills_dir = home / "skills"
+        if skills_dir.is_dir():
+            runtime.skills.discover(str(skills_dir), recurse=True)
+
+        gateway = Gateway(runtime=runtime, memory_store=memory)
+        gateway.register_handler(runtime.handle_event)
+        await gateway.start()
+
+        sid = args.session_id or await runtime.start_session()
+
+        llm_ready = bool(agent_config.llm_api_key)
+        model = agent_config.llm_model or "none"
+
+        console.print()
+        console.print(Panel(
+            f"[bold green]{agent_config.name}[/bold green] is ready.\n\n"
+            f"Session: [dim]{sid}[/dim]\n"
+            f"LLM:     [{'green' if llm_ready else 'red'}]{model}[/{'green' if llm_ready else 'red'}]\n"
+            f"Skills:  {len(runtime.skills.skills)} loaded\n"
+            f"Memory:  {'enabled' if not args.no_memory else 'disabled'}\n\n"
+            f"[dim]Type /help for commands, /exit to quit[/dim]",
+            title="Remedy Chat",
+            border_style="green",
+        ))
+
+        try:
+            while True:
+                try:
+                    user_input = console.input("[bold cyan]You:[/bold cyan] ").strip()
+                except (KeyboardInterrupt, EOFError):
+                    console.print("\n[dim]Goodbye.[/dim]")
+                    break
+
+                if not user_input:
+                    continue
+
+                if user_input.startswith("/"):
+                    cmd = user_input[1:].strip().lower()
+                    if cmd in ("exit", "quit", "q"):
+                        console.print("[dim]Goodbye.[/dim]")
+                        break
+                    elif cmd == "help":
+                        console.print("""
+[bold]Commands:[/bold]
+  /exit, /quit, /q  — End this chat session
+  /help             — Show this help
+  /session          — Show current session ID
+  /skills           — List loaded skills
+  /clear            — Clear the screen
+  Any other input   — Send a message to Remedy
+""")
+                        continue
+                    elif cmd == "session":
+                        console.print(f"[dim]Session: {sid}[/dim]")
+                        continue
+                    elif cmd == "skills":
+                        if runtime.skills.skills:
+                            for name, skill in sorted(runtime.skills.skills.items()):
+                                desc = getattr(skill, "description", "") or ""
+                                console.print(f"  [cyan]{name}[/cyan] {desc[:60]}")
+                        else:
+                            console.print("[dim]No skills loaded.[/dim]")
+                        continue
+                    elif cmd == "clear":
+                        console.clear()
+                        continue
+                    else:
+                        console.print(f"[dim]Unknown command: /{cmd}. Type /help[/dim]")
+                        continue
+
+                event = GatewayEvent(
+                    kind=EventKind.MESSAGE,
+                    channel=ChannelKind.CLI,
+                    source_id="user",
+                    payload={"message": user_input},
+                    session_id=sid,
+                )
+
+                with console.status("[dim]Thinking...[/dim]", spinner="dots"):
+                    responses = await gateway.emit(event)
+
+                for r in responses:
+                    if isinstance(r, str):
+                        console.print(f"[bold green]Remedy:[/bold green] {r}")
+                        break
+
+        finally:
+            await runtime.stop()
+            await gateway.stop()
+
+    _asyncio.run(_chat_loop())
+
+
 def main(args: list[str] | None = None) -> None:
     parser = build_parser()
     parsed = parser.parse_args(args)
@@ -915,6 +1042,8 @@ def main(args: list[str] | None = None) -> None:
         asyncio.run(_cmd_exec(parsed))
     elif parsed.command == "config":
         asyncio.run(_cmd_config(parsed))
+    elif parsed.command == "chat":
+        _cmd_chat(parsed)
     elif parsed.command == "serve":
         _cmd_serve(parsed)
     elif parsed.command == "setup":

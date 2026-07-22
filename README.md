@@ -19,10 +19,14 @@ pip install remedy
 ## Quick Start
 
 ```bash
-remedy --help                    # See all 12 commands
+remedy --help                    # See all 16 commands
 remedy config init               # Create ~/.remedy/config.toml
 remedy skill discover ./skills   # Load bundled & custom skills
 remedy memory add "test" "Hello, Remedy!"
+
+# Launch interactive chat with the agent
+remedy chat
+# Type /help for commands, /exit to quit
 
 # Start the API server
 remedy serve --host 127.0.0.1 --port 8000
@@ -67,6 +71,7 @@ remedy serve --host 127.0.0.1 --port 8000
 
 | Command | Subcommands | Description |
 |---------|------------|-------------|
+| `remedy chat` | | Interactive REPL chat with the agent |
 | `remedy memory` | `search`, `list`, `add`, `consolidate`, `repair`, `backup` | Persistent knowledge store with FTS5 search |
 | `remedy skill` | `list`, `discover`, `info`, `load`, `run`, `test`, `export` | Skill lifecycle management |
 | `remedy learn` | `reflect`, `history`, `changelog`, `stats`, `sync` | Self-improvement loop |
