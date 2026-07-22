@@ -55,6 +55,7 @@ from remedy.interfaces.config import (
 )
 from remedy.interfaces.wizard import run_wizard
 from remedy.interfaces.updater import run_update
+from remedy.interfaces.uninstaller import run_uninstall
 
 console = Console()
 
@@ -222,6 +223,15 @@ def build_parser() -> argparse.ArgumentParser:
     serve_cmd.add_argument("--host", default="127.0.0.1")
     serve_cmd.add_argument("--port", type=int, default=8000)
     serve_cmd.add_argument("--config", dest="config_file", default=None)
+
+    # remedy uninstall
+    uninstall_cmd = sub.add_parser("uninstall", help="Uninstall Remedy")
+    uninstall_cmd.add_argument(
+        "--purge", action="store_true", help="Also delete ~/.remedy/ user data"
+    )
+    uninstall_cmd.add_argument(
+        "--dry-run", action="store_true", help="Show what would be removed"
+    )
 
     # remedy update
     update_cmd = sub.add_parser("update", help="Check for and apply updates")
@@ -864,6 +874,8 @@ def main(args: Optional[list[str]] = None) -> None:
         run_wizard(quick=parsed.quick)
     elif parsed.command == "update":
         run_update(check_only=parsed.check)
+    elif parsed.command == "uninstall":
+        run_uninstall(purge=parsed.purge, dry_run=parsed.dry_run)
     else:
         parser.print_help()
 
