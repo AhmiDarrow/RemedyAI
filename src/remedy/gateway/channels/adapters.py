@@ -12,10 +12,11 @@ Full implementations can be swapped in for production use.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 
 from remedy.gateway.router import ChannelAdapter
-from remedy.models import ChannelKind
+from remedy.models import ChannelKind, EventKind, GatewayEvent
 
 logger = logging.getLogger(__name__)
 
@@ -60,16 +61,16 @@ class CLIChannel(ChannelAdapter):
 
 
 class TelegramChannel(ChannelAdapter):
-    """Telegram bot channel adapter (stub).
+    """Telegram bot channel adapter with long-poll inbound + send outbound.
 
-    Requires a bot token (TELEGRAM_BOT_TOKEN). Uses long-polling
-    to receive messages and sends replies via the Telegram Bot API.
+    Requires a bot token (TELEGRAM_BOT_TOKEN). When started with a token,
+    long-polls getUpdates and emits GatewayEvents for text messages.
     """
 
     def __init__(self, gateway, *, bot_token: str = "", chat_ids: list[str] | None = None) -> None:
         super().__init__(ChannelKind.TELEGRAM, gateway)
         self.bot_token = bot_token
-        self.chat_ids: list[str] = chat_ids or []
+        self.chat_ids: list[str] = [str(c) for c in (chat_ids or [])]
         self._poll_task: asyncio.Task | None = None
         self._last_update_id: int = 0
 
@@ -77,8 +78,19 @@ class TelegramChannel(ChannelAdapter):
         await super().start()
         if self.bot_token:
             logger.info("Telegram channel active (chats=%d)", len(self.chat_ids))
+            self._poll_task = asyncio.create_task(self._poll_loop())
         else:
             logger.info("Telegram channel: stub mode (no token)")
+
+    async def stop(self) -> None:
+        if self._poll_task is not None:
+            self._poll_task.cancel()
+            try:
+                await self._poll_task
+            except asyncio.CancelledError:
+                pass
+            self._poll_task = None
+        await super().stop()
 
     async def send(self, message: str, target: str | None = None) -> bool:
         if not self.bot_token:
@@ -96,18 +108,89 @@ class TelegramChannel(ChannelAdapter):
                 async with session.post(url, json={
                     "chat_id": chat_id,
                     "text": message[:4096],
-                    "parse_mode": "Markdown",
                 }) as resp:
                     return resp.status == 200
             except Exception as e:
                 logger.error("Telegram send failed: %s", e)
                 return False
 
+    async def _poll_loop(self) -> None:
+        """Long-poll Telegram getUpdates until the channel stops."""
+        while self._running:
+            try:
+                updates = await self._get_updates(timeout=25)
+                for update in updates:
+                    await self._handle_update(update)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Telegram poll error")
+                await asyncio.sleep(2.0)
+
+    async def _get_updates(self, timeout: int = 25) -> list[dict]:
+        import aiohttp
+        url = f"https://api.telegram.org/bot{self.bot_token}/getUpdates"
+        params = {
+            "timeout": timeout,
+            "offset": self._last_update_id + 1 if self._last_update_id else 0,
+            "allowed_updates": json.dumps(["message", "edited_message"]),
+        }
+        async with (
+            aiohttp.ClientSession() as session,
+            session.get(
+                url,
+                params=params,
+                timeout=aiohttp.ClientTimeout(total=timeout + 10),
+            ) as resp,
+        ):
+            if resp.status != 200:
+                text = await resp.text()
+                logger.warning("Telegram getUpdates %s: %s", resp.status, text[:200])
+                await asyncio.sleep(1.0)
+                return []
+            data = await resp.json()
+            if not data.get("ok"):
+                return []
+            return list(data.get("result") or [])
+
+    async def _handle_update(self, update: dict) -> None:
+        uid = update.get("update_id")
+        if isinstance(uid, int):
+            self._last_update_id = max(self._last_update_id, uid)
+
+        msg = update.get("message") or update.get("edited_message") or {}
+        text = msg.get("text")
+        if not text:
+            return
+
+        chat = msg.get("chat") or {}
+        chat_id = str(chat.get("id", ""))
+        if self.chat_ids and chat_id not in self.chat_ids:
+            return
+
+        from_user = msg.get("from") or {}
+        source_id = str(from_user.get("id") or chat_id)
+        event = GatewayEvent(
+            kind=EventKind.MESSAGE,
+            channel=ChannelKind.TELEGRAM,
+            source_id=source_id,
+            session_id=chat_id or None,
+            payload={
+                "message": text,
+                "chat_id": chat_id,
+                "username": from_user.get("username"),
+            },
+            raw=str(update)[:2000],
+        )
+        # Outbound replies go through gateway handlers → send_to / channel.send
+        await self.gateway.emit(event)
+
 
 class DiscordChannel(ChannelAdapter):
-    """Discord bot channel adapter (stub).
+    """Discord bot channel — outbound REST only.
 
-    Requires a bot token (DISCORD_BOT_TOKEN) and optionally a guild/channel ID.
+    Inbound Gateway WebSocket is not implemented yet. Outbound send works
+    when DISCORD_BOT_TOKEN is set.
     """
 
     def __init__(self, gateway, *, bot_token: str = "", channel_id: str = "") -> None:
@@ -145,9 +228,10 @@ class DiscordChannel(ChannelAdapter):
 
 
 class SlackChannel(ChannelAdapter):
-    """Slack channel adapter (stub).
+    """Slack bot channel — outbound Web API only.
 
-    Requires a bot token (SLACK_BOT_TOKEN) and a channel ID.
+    Inbound Events API / Socket Mode is not implemented yet. Outbound
+    chat.postMessage works when SLACK_BOT_TOKEN is set.
     """
 
     def __init__(self, gateway, *, bot_token: str = "", channel_id: str = "") -> None:

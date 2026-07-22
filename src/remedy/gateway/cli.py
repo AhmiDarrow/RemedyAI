@@ -48,9 +48,16 @@ async def run_gateway(
     )
 
     async def _handle_event(event: GatewayEvent):
+        # Prefer chat_id for Telegram/Discord/Slack reply targets
+        target = (
+            event.payload.get("chat_id")
+            or event.payload.get("channel_id")
+            or event.source_id
+            or None
+        )
         async for chunk in runtime.handle_event(event):
             if chunk is not None:
-                await gw.send_to(event.channel, str(chunk), target=event.source_id or None)
+                await gw.send_to(event.channel, str(chunk), target=str(target) if target else None)
                 yield chunk
 
     gw.register_handler(_handle_event)

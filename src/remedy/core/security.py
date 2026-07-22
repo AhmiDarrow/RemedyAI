@@ -68,12 +68,12 @@ def safe_path(user_input: str, base_dir: Path | None = None) -> Path:
 
     try:
         candidate.relative_to(base)
-    except ValueError:
+    except ValueError as err:
         raise SecurityError(
             f"Path traversal detected: {user_input}",
             rule="path_traversal",
             detail={"input": user_input, "base": str(base), "resolved": str(candidate)},
-        )
+        ) from err
 
     if len(candidate.parts) > len(base.parts) + MAX_PATH_DEPTH:
         raise SecurityError(

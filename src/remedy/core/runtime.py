@@ -6,7 +6,7 @@ Inspired by Hermes' ReAct loop with learning and self-improvement.
 
 from __future__ import annotations
 
-from abc import ABC
+from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
@@ -89,19 +89,22 @@ class AgentRuntime(ABC):
 
     # -- event handling ------------------------------------------------------
 
+    @abstractmethod
     async def handle_event(self, event: GatewayEvent) -> AsyncIterator[Any]:
         """Process an incoming gateway event and yield responses.
 
-        This is the main entry point for channel events. The default
-        implementation routes to the appropriate handler based on event kind.
+        This is the main entry point for channel events. Concrete runtimes
+        implement routing, LLM calls, and tool use here.
         """
-        yield f"[{self.config.name}] Received {event.kind.value} from {event.channel.value}"
+        ...
+        yield  # pragma: no cover — makes this an async generator for type checkers
 
     # -- tool execution ------------------------------------------------------
 
+    @abstractmethod
     async def call_tool(self, tool_call: ToolCall) -> ToolResult:
         """Execute a tool and return the result."""
-        raise NotImplementedError
+        ...
 
     # -- memory --------------------------------------------------------------
 

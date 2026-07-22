@@ -404,12 +404,12 @@ async def _cmd_user(args, db_path: Path) -> None:
 
 
 async def _cmd_session(args, db_path: Path) -> None:
-    from remedy.core.runtime import AgentRuntime
+    from remedy.core.agent import BasicRuntime
     config = AgentConfig(
         memory_db_path=str(db_path),
         home_dir=str(db_path.parent),
     )
-    runtime = AgentRuntime(config)
+    runtime = BasicRuntime(config)
     await runtime.start()
 
     if args.session_cmd == "start":
