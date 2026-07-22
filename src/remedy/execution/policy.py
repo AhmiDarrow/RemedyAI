@@ -73,7 +73,7 @@ class ExecutionPolicy:
     # -- rule evaluation -----------------------------------------------------
 
     def evaluate(self, tool_name: str, context: dict[str, Any] | None = None) -> PolicyDecision:
-        ctx = context or {}
+        _ = context  # reserved for future context-aware rules
 
         # Find all matching rules (wildcard or exact)
         deny_reason = ""

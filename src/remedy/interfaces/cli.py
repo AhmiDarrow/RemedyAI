@@ -90,12 +90,12 @@ def build_parser() -> argparse.ArgumentParser:
     mem_repair = mem_sub.add_parser("repair", help="Run memory integrity checks")
     mem_repair.add_argument("--vacuum", action="store_true", help="Also vacuum database")
 
-    mem_backup = mem_sub.add_parser("backup", help="Backup the memory database")
+    mem_sub.add_parser("backup", help="Backup the memory database")
 
     # remedy user profile|facts
     user = sub.add_parser("user", help="User profile operations")
     user_sub = user.add_subparsers(dest="user_cmd")
-    user_show = user_sub.add_parser("show", help="Show user profile")
+    user_sub.add_parser("show", help="Show user profile")
     user_facts = user_sub.add_parser("facts", help="Search user facts")
     user_facts.add_argument("query", nargs="?", default="")
     user_facts.add_argument("--limit", type=int, default=10)
@@ -103,13 +103,13 @@ def build_parser() -> argparse.ArgumentParser:
     # remedy session start|end
     session = sub.add_parser("session", help="Session management")
     session_sub = session.add_subparsers(dest="session_cmd")
-    session_start = session_sub.add_parser("start", help="Start a new session")
-    session_end = session_sub.add_parser("end", help="End current session")
+    session_sub.add_parser("start", help="Start a new session")
+    session_sub.add_parser("end", help="End current session")
 
     # remedy skill discover <path>
     skill = sub.add_parser("skill", help="Skill operations")
     skill_sub = skill.add_subparsers(dest="skill_cmd")
-    skill_list = skill_sub.add_parser("list", help="List registered skills")
+    skill_sub.add_parser("list", help="List registered skills")
     skill_discover = skill_sub.add_parser("discover", help="Discover skills in a directory")
     skill_discover.add_argument("path", help="Directory to scan")
     skill_discover.add_argument("--no-recurse", action="store_true")
@@ -134,10 +134,10 @@ def build_parser() -> argparse.ArgumentParser:
     # remedy tool list|search
     tool = sub.add_parser("tool", help="Tool operations")
     tool_sub = tool.add_subparsers(dest="tool_cmd")
-    tool_list = tool_sub.add_parser("list", help="List registered tools")
+    tool_sub.add_parser("list", help="List registered tools")
     tool_search = tool_sub.add_parser("search", help="Search tools")
     tool_search.add_argument("query", help="Search query")
-    tool_stats = tool_sub.add_parser("stats", help="Tool invocation statistics")
+    tool_sub.add_parser("stats", help="Tool invocation statistics")
     tool_run = tool_sub.add_parser("run", help="Execute a tool through the runtime")
     tool_run.add_argument("name", help="Tool name")
     tool_run.add_argument("--args", dest="tool_args", default="{}", help="JSON arguments")
@@ -165,7 +165,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     learn_stats = learn_sub.add_parser("stats", help="Show skill execution stats")
     learn_stats.add_argument("--skill", dest="skill_name", default=None)
-    learn_sync = learn_sub.add_parser("sync", help="Sync learning events to memory store")
+    learn_sub.add_parser("sync", help="Sync learning events to memory store")
 
     # remedy handoff create ...
     handoff = sub.add_parser("handoff", help="Handoff note operations")
@@ -200,16 +200,16 @@ def build_parser() -> argparse.ArgumentParser:
     gw_start.add_argument("--discord-token", default="")
     gw_start.add_argument("--slack-token", default="")
     gw_start.add_argument("--heartbeat", type=float, default=60.0)
-    gw_status = gw_sub.add_parser("status", help="Show gateway status")
-    gw_serve = gw_sub.add_parser("serve", help="Start the REST API server")
-    gw_channels = gw_sub.add_parser("channels", help="List available channels")
+    gw_sub.add_parser("status", help="Show gateway status")
+    gw_sub.add_parser("serve", help="Start the REST API server")
+    gw_sub.add_parser("channels", help="List available channels")
 
     # remedy config init|show|path
     config_cmd = sub.add_parser("config", help="Configuration management")
     config_sub = config_cmd.add_subparsers(dest="config_cmd")
-    cfg_init = config_sub.add_parser("init", help="Create default config file")
-    cfg_show = config_sub.add_parser("show", help="Show current configuration")
-    cfg_path = config_sub.add_parser("path", help="Show config file path")
+    config_sub.add_parser("init", help="Create default config file")
+    config_sub.add_parser("show", help="Show current configuration")
+    config_sub.add_parser("path", help="Show config file path")
 
     # remedy chat
     chat_cmd = sub.add_parser("chat", help="Launch interactive chat with the Remedy agent")

@@ -90,7 +90,6 @@ def run_uninstall(purge: bool = False, dry_run: bool = False) -> None:
     else:
         console.print("\n[bold]Package:[/bold]  [dim]not found (may already be removed)[/dim]")
 
-    has_data = any(f.is_file() for d, f in data_files if f.is_file()) if data_files else False
     for desc, path in data_files:
         if path.is_file():
             console.print(f"  {desc}: [dim]{path}[/dim]")

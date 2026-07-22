@@ -100,7 +100,7 @@ def load_mcp_skill(server_name: str, tool_names: list[str]) -> Skill:
         "tools": tool_names,
         "tags": ["mcp", server_name],
     })
-    frontmatter, body = yaml.safe_load(synthetic_frontmatter), ""
+    frontmatter = yaml.safe_load(synthetic_frontmatter)
     manifest = _build_manifest(
         frontmatter, SkillKind.MCP, Path(f"mcp://{server_name}/SKILL.md")
     )

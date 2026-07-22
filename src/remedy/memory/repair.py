@@ -24,7 +24,7 @@ class MemoryRepair:
         db = self.store._ensure_db()
         result = db.execute("PRAGMA integrity_check").fetchone()
         fts_result = db.execute("PRAGMA quick_check").fetchone()
-        wal_size = db.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchall()
+        db.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchall()
         page_count = db.execute("PRAGMA page_count").fetchone()[0]
         freelist = db.execute("PRAGMA freelist_count").fetchone()[0]
 

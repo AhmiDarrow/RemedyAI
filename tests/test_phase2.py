@@ -293,6 +293,9 @@ class TestToolRegistry:
         registry = ToolRegistry()
         stats = registry.get_stats()
         assert stats["total_calls"] == 0
+        assert stats["registered_tools"] == 0
+        assert stats["success_rate"] == 0.0
+        assert stats["by_source"] == {}
 
 
 class TestHermesDeepAdapter:
