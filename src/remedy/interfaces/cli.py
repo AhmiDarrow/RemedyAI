@@ -28,6 +28,8 @@ from remedy.models import (
     HandoffNote,
     MemoryEntry,
     MemoryEntryType,
+    ToolCall,
+    ToolSource,
 )
 from remedy.skills.loader import load_skill_from_dir
 from remedy.skills.registry import SkillRegistry
@@ -41,6 +43,9 @@ from remedy.core.learning_loop import LearningLoop
 from remedy.core.learning.reflection import ReflectionEngine, ExecutionTrace, TraceStep
 from remedy.core.learning.refiner import SkillRefiner
 from remedy.gateway.cli import main_gateway
+from remedy.execution.policy import ExecutionPolicy, PolicyAction, PolicyRule
+from remedy.execution.runtime import ToolRuntime, ToolContext
+from remedy.execution.sandbox import SubprocessSandbox
 
 console = Console()
 
@@ -133,6 +138,18 @@ def build_parser() -> argparse.ArgumentParser:
     tool_search = tool_sub.add_parser("search", help="Search tools")
     tool_search.add_argument("query", help="Search query")
     tool_stats = tool_sub.add_parser("stats", help="Tool invocation statistics")
+    tool_run = tool_sub.add_parser("run", help="Execute a tool through the runtime")
+    tool_run.add_argument("name", help="Tool name")
+    tool_run.add_argument("--args", dest="tool_args", default="{}", help="JSON arguments")
+    tool_run.add_argument("--timeout", type=float, default=30.0)
+    tool_run.add_argument("--retries", type=int, default=0)
+
+    # remedy exec <command...>
+    exec_cmd = sub.add_parser("exec", help="Execute a command in the sandbox")
+    exec_cmd.add_argument("--timeout", type=float, default=30.0)
+    exec_cmd.add_argument("--workdir", default=None)
+    exec_cmd.add_argument("--shell", default=None, help="Shell to use (pwsh, cmd, bash)")
+    exec_cmd.add_argument("cmdline", nargs=argparse.REMAINDER, help="Command and arguments to run")
 
     # remedy learn reflect|refine|history|stats
     learn = sub.add_parser("learn", help="Learning loop operations")
@@ -524,6 +541,30 @@ async def _cmd_tool(args) -> None:
             title="Tool Stats",
         ))
 
+    elif args.tool_cmd == "run":
+        sandbox = SubprocessSandbox()
+        runtime = ToolRuntime(sandbox=sandbox)
+        tool_args = json.loads(args.tool_args)
+
+        tool_call = ToolCall(
+            tool_name=args.name,
+            arguments=tool_args,
+            source=ToolSource.BUILTIN,
+        )
+
+        console.print(f"[bold]Running:[/bold] {args.name}")
+        result = await runtime.execute(
+            tool_call,
+            timeout=args.timeout,
+        )
+
+        if result.success:
+            console.print("[green]Success[/green]")
+            if result.data:
+                console.print(json.dumps(result.data, indent=2))
+        else:
+            console.print(f"[red]Failed:[/red] {result.error}")
+
 
 async def _cmd_handoff(args, db_path: Path) -> None:
     async with MemoryStore(db_path) as store:
@@ -680,6 +721,28 @@ async def _cmd_learn(args, db_path: Path) -> None:
             console.print(f"[green]Synced {count} learning events to memory.[/green]")
 
 
+async def _cmd_exec(args) -> None:
+    import json as _json
+    sandbox = SubprocessSandbox()
+    policy = ExecutionPolicy()
+
+    command = list(args.cmdline) if args.cmdline else []
+    console.print(f"[bold]Executing:[/bold] {' '.join(command)}")
+
+    result = await sandbox.execute(
+        command=command,
+        workdir=args.workdir,
+        timeout_seconds=args.timeout,
+    )
+
+    if result.stdout:
+        console.print(result.stdout)
+    if result.stderr:
+        console.print(f"[red]{result.stderr}[/red]")
+
+    console.print(f"[dim]Exit code: {result.exit_code} ({result.duration_ms:.0f}ms)[/dim]")
+
+
 def main(args: Optional[list[str]] = None) -> None:
     parser = build_parser()
     parsed = parser.parse_args(args)
@@ -708,6 +771,8 @@ def main(args: Optional[list[str]] = None) -> None:
         asyncio.run(_cmd_learn(parsed, db_path))
     elif parsed.command == "gateway":
         main_gateway(parsed)
+    elif parsed.command == "exec":
+        asyncio.run(_cmd_exec(parsed))
     else:
         parser.print_help()
 

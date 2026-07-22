@@ -235,6 +235,8 @@ class ToolCall(BaseModel):
     tool_name: str
     arguments: dict[str, Any] = Field(default_factory=dict)
     task_id: Optional[UUID] = Field(default=None)
+    source: Optional[ToolSource] = Field(default=None)
+    approved: bool = Field(default=False)
 
 
 class ToolResult(BaseModel):

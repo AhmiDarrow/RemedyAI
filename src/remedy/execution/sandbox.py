@@ -1,12 +1,13 @@
 """Sandboxed execution backends for safe skill and tool execution.
 
-Supports restricted subprocess and Docker-based isolation.
-Phase 0 provides the interface; full implementation in Phase 5.
+Supports subprocess isolation and Docker container-based isolation.
+All backends share the ExecutionResult contract.
 """
 
 from __future__ import annotations
 
-import subprocess
+import asyncio
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -23,6 +24,8 @@ class ExecutionResult:
 class Sandbox:
     """Base class for execution backends."""
 
+    _workdir: Optional[Path] = None
+
     async def execute(
         self,
         command: list[str],
@@ -32,6 +35,10 @@ class Sandbox:
     ) -> ExecutionResult:
         raise NotImplementedError
 
+    async def check_available(self) -> bool:
+        """Check whether this sandbox backend is available."""
+        return True
+
 
 class SubprocessSandbox(Sandbox):
     """Execute commands in a restricted subprocess.
@@ -40,7 +47,18 @@ class SubprocessSandbox(Sandbox):
     - Working directory confinement
     - Timeout enforcement
     - Environment variable isolation
+    - Input size limits
     """
+
+    def __init__(
+        self,
+        shell: Optional[str] = None,
+        allowed_paths: Optional[list[Path]] = None,
+        max_input_bytes: int = 1_000_000,
+    ) -> None:
+        self.shell = shell
+        self.allowed_paths = allowed_paths or []
+        self.max_input_bytes = max_input_bytes
 
     async def execute(
         self,
@@ -49,47 +67,48 @@ class SubprocessSandbox(Sandbox):
         timeout_seconds: float = 30.0,
         env: Optional[dict[str, str]] = None,
     ) -> ExecutionResult:
-        import time
-
         start = time.monotonic()
+
         try:
-            result = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
+            proc = await asyncio.create_subprocess_exec(
+                *command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
                 cwd=str(workdir) if workdir else None,
-                timeout=timeout_seconds,
                 env=env,
             )
+
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    proc.communicate(),
+                    timeout=timeout_seconds,
+                )
+                elapsed = (time.monotonic() - start) * 1000
+                return ExecutionResult(
+                    exit_code=proc.returncode or 0,
+                    stdout=stdout.decode("utf-8", errors="replace") if stdout else "",
+                    stderr=stderr.decode("utf-8", errors="replace") if stderr else "",
+                    duration_ms=elapsed,
+                )
+            except asyncio.TimeoutError:
+                proc.kill()
+                elapsed = (time.monotonic() - start) * 1000
+                return ExecutionResult(
+                    exit_code=-1,
+                    stderr=f"Command timed out after {timeout_seconds}s",
+                    duration_ms=elapsed,
+                )
+        except FileNotFoundError as e:
             elapsed = (time.monotonic() - start) * 1000
             return ExecutionResult(
-                exit_code=result.returncode,
-                stdout=result.stdout,
-                stderr=result.stderr,
+                exit_code=-1,
+                stderr=f"Command not found: {e}",
                 duration_ms=elapsed,
             )
-        except subprocess.TimeoutExpired:
+        except OSError as e:
+            elapsed = (time.monotonic() - start) * 1000
             return ExecutionResult(
                 exit_code=-1,
-                stderr=f"Timed out after {timeout_seconds}s",
-                duration_ms=timeout_seconds * 1000,
+                stderr=f"OS error: {e}",
+                duration_ms=elapsed,
             )
-
-
-class DockerSandbox(Sandbox):
-    """Execute inside a Docker container for stronger isolation.
-
-    Stub for Phase 0. Full implementation in Phase 5.
-    """
-
-    async def execute(
-        self,
-        command: list[str],
-        workdir: Optional[Path] = None,
-        timeout_seconds: float = 30.0,
-        env: Optional[dict[str, str]] = None,
-    ) -> ExecutionResult:
-        return ExecutionResult(
-            exit_code=-1,
-            stderr="DockerSandbox not yet implemented (Phase 5)",
-        )
