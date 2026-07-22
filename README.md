@@ -23,7 +23,7 @@ pip install -e .
 ## Quick Start
 
 ```bash
-remedy --help                    # See all 16 commands
+remedy --help                    # See all commands
 remedy config init               # Create ~/.remedy/config.toml
 remedy skill discover ./skills   # Load bundled & custom skills
 remedy memory add "test" "Hello, Remedy!"
@@ -36,6 +36,11 @@ remedy chat
 remedy serve --host 127.0.0.1 --port 8000
 # Dashboard at http://127.0.0.1:8000/dashboard
 # OpenAPI docs at http://127.0.0.1:8000/docs
+
+# Run the desktop app
+remedy desktop install          # Install Node deps (one-time)
+remedy desktop dev              # Start desktop dev server
+# Open http://localhost:5173
 ```
 
 ---
@@ -86,6 +91,7 @@ remedy serve --host 127.0.0.1 --port 8000
 | `remedy gateway` | `start`, `status`, `serve`, `channels` | Multi-channel gateway |
 | `remedy config` | `init`, `show`, `path` | TOML/YAML configuration |
 | `remedy serve` | | Full API server (config-aware) |
+| `remedy desktop` | `install`, `dev`, `build` | Desktop app management |
 | `remedy migrate` | `hermes`, `openclaw` | Import from other frameworks |
 | `remedy exec` | | Execute commands in sandbox |
 
@@ -231,10 +237,10 @@ Full session management, streaming SSE events, file search, and command executio
 Remedy includes a native Tauri desktop application (Windows) with a React frontend.
 
 ```bash
-cd desktop
-npm install
-npm run dev        # Web UI at http://localhost:5173 (requires remedy serve)
-npm run tauri:dev  # Full Tauri desktop with auto-launched server
+remedy desktop install    # Install Node.js deps (one-time)
+remedy desktop dev        # Start dev server at http://localhost:5173
+# Requires: remedy serve running in another terminal
+npm run tauri:dev  # Full Tauri desktop (from desktop/ dir) — requires Rust toolchain
 ```
 
 ### Features

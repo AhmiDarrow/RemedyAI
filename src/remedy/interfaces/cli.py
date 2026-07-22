@@ -225,6 +225,14 @@ def build_parser() -> argparse.ArgumentParser:
     serve_cmd.add_argument("--port", type=int, default=8000)
     serve_cmd.add_argument("--config", dest="config_file", default=None)
 
+    # remedy desktop
+    desktop_cmd = sub.add_parser("desktop", help="Desktop app management")
+    desktop_sub = desktop_cmd.add_subparsers(dest="desktop_cmd")
+    desktop_sub.add_parser("install", help="Install desktop Node dependencies")
+    desktop_dev = desktop_sub.add_parser("dev", help="Start desktop dev server")
+    desktop_dev.add_argument("--open", action="store_true", help="Open browser")
+    desktop_sub.add_parser("build", help="Build desktop for production")
+
     # remedy uninstall
     uninstall_cmd = sub.add_parser("uninstall", help="Uninstall Remedy")
     uninstall_cmd.add_argument(
@@ -1028,6 +1036,74 @@ def _cmd_chat(args) -> None:
     _asyncio.run(_chat_loop())
 
 
+def _cmd_desktop(parsed: argparse.Namespace) -> None:
+    """Handle the `remedy desktop` subcommand."""
+    package_dir = Path(__file__).resolve().parent.parent.parent
+    desktop_dir = package_dir / "desktop"
+
+    if not desktop_dir.exists():
+        console.print(f"[red]Desktop directory not found at {desktop_dir}[/red]")
+        console.print("[dim]Run `git clone` again or ensure the desktop/ folder is present.[/dim]")
+        return
+
+    npm = _find_npm()
+    subcommand = parsed.desktop_cmd or "install"
+
+    if subcommand == "install":
+        console.print(f"[bold]Installing desktop dependencies...[/bold]")
+        import subprocess
+        result = subprocess.run(
+            [npm, "install"],
+            cwd=str(desktop_dir),
+            shell=True,
+        )
+        if result.returncode == 0:
+            console.print("[green]Desktop dependencies installed.[/green]")
+            console.print(f"[dim]Run 'remedy desktop dev' to start, then open http://localhost:5173[/dim]")
+        else:
+            console.print("[red]npm install failed. Is Node.js installed?[/red]")
+
+    elif subcommand == "dev":
+        console.print(f"[bold]Starting desktop dev server...[/bold]")
+        console.print(f"[dim]Make sure 'remedy serve' is running in another terminal.[/dim]")
+        console.print(f"[dim]Open http://localhost:5173 in your browser.[/dim]")
+        console.print()
+        import subprocess
+        subprocess.run(
+            [npm, "run", "dev"] + (["--", "--open"] if getattr(parsed, "open", False) else []),
+            cwd=str(desktop_dir),
+            shell=True,
+        )
+
+    elif subcommand == "build":
+        console.print(f"[bold]Building desktop for production...[/bold]")
+        import subprocess
+        result = subprocess.run(
+            [npm, "run", "build"],
+            cwd=str(desktop_dir),
+            shell=True,
+        )
+        if result.returncode == 0:
+            console.print(f"[green]Desktop built to {desktop_dir / 'dist'}[/green]")
+        else:
+            console.print("[red]Build failed.[/red]")
+
+    else:
+        console.print(f"[yellow]Unknown desktop subcommand: {subcommand}[/yellow]")
+        console.print("Available: install, dev, build")
+
+
+def _find_npm() -> str:
+    """Find the npm executable."""
+    import shutil
+    npm = shutil.which("npm") or shutil.which("pnpm") or shutil.which("yarn")
+    if npm is None:
+        console.print("[red]No Node package manager found (npm/pnpm/yarn).[/red]")
+        console.print("[dim]Install Node.js from https://nodejs.org[/dim]")
+        raise SystemExit(1)
+    return npm
+
+
 def main(args: list[str] | None = None) -> None:
     parser = build_parser()
     parsed = parser.parse_args(args)
@@ -1064,6 +1140,8 @@ def main(args: list[str] | None = None) -> None:
         _cmd_chat(parsed)
     elif parsed.command == "serve":
         _cmd_serve(parsed)
+    elif parsed.command == "desktop":
+        _cmd_desktop(parsed)
     elif parsed.command == "setup":
         run_wizard(
             quick=parsed.quick,
