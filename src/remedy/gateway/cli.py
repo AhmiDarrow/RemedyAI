@@ -165,7 +165,7 @@ def _serve_api(db_path: Path) -> None:
 
     from remedy.interfaces.api import create_app
 
-    app = create_app(title="Remedy AI", version="0.1.0")
+    app = create_app(title="Remedy AI", version="0.7.0")
     console.print("[green]Starting Remedy API on http://127.0.0.1:8000[/green]")
     console.print("[dim]Endpoints: /api/status /api/chat /api/memory/search /api/skills[/dim]")
     uvicorn.run(app, host="127.0.0.1", port=8000, log_level="info")

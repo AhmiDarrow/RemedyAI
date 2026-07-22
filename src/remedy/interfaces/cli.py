@@ -872,7 +872,7 @@ def _cmd_serve(args) -> None:
         gateway=gateway,
         memory=memory,
         title=config.get("name", "Remedy AI"),
-        version="0.1.0",
+        version="0.7.0",
         api_key=api_key,
     )
 

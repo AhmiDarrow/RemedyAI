@@ -96,7 +96,7 @@ def create_app(
     gateway=None,
     memory=None,
     title: str = "Remedy AI",
-    version: str = "0.1.0",
+    version: str = "0.7.0",
     *,
     api_key: str = "",
 ) -> FastAPI:

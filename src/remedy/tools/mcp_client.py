@@ -73,7 +73,7 @@ class MCPClient:
             result = await self._send_request(server_name, "initialize", {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {},
-                "clientInfo": {"name": "Remedy", "version": "0.1.0"},
+                "clientInfo": {"name": "Remedy", "version": "0.7.0"},
             })
 
             if result.get("error"):
