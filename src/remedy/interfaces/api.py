@@ -63,6 +63,13 @@ class MemorySearchRequest(BaseModel):
     limit: int = Field(default=10, ge=1, le=50)
 
 
+class MemoryAddRequest(BaseModel):
+    title: str = Field(..., description="Title for the memory entry")
+    content: str = Field(..., description="Memory content")
+    tags: list[str] = Field(default_factory=list, description="Optional tags")
+    importance: float = Field(default=0.5, ge=0.0, le=1.0)
+
+
 class SkillInfo(BaseModel):
     name: str
     description: str
@@ -95,6 +102,8 @@ def create_app(
     memory=None,
     title: str = "Remedy AI",
     version: str = "0.1.0",
+    *,
+    api_key: str = "",
 ) -> FastAPI:
     app = FastAPI(
         title=title,
@@ -108,6 +117,16 @@ def create_app(
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    if api_key:
+        @app.middleware("http")
+        async def require_auth(request: Request, call_next):
+            if request.url.path in ("/docs", "/redoc", "/openapi.json", "/dashboard", "/api/status"):
+                return await call_next(request)
+            auth = request.headers.get("Authorization", "")
+            if auth != f"Bearer {api_key}":
+                return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+            return await call_next(request)
 
     # -- middleware: request logging + timing --------------------------------
     @app.middleware("http")
@@ -125,10 +144,21 @@ def create_app(
     async def get_status():
         gw_stats = gateway.stats() if gateway else {"running": False}
         mem_count = 0
+        skills_count = 0
+        sessions_count = 0
         if memory:
             try:
                 entries = await memory.list_recent(limit=1)
-                mem_count = len(entries)
+                if entries:
+                    db = memory._ensure_db()
+                    mem_count = db.execute("SELECT COUNT(*) FROM memory_entries").fetchone()[0]
+                    sessions_count = db.execute("SELECT COUNT(*) FROM session_summaries").fetchone()[0]
+            except Exception:
+                pass
+
+        if runtime and hasattr(runtime, "skills") and runtime.skills:
+            try:
+                skills_count = len(runtime.skills.skills)
             except Exception:
                 pass
 
@@ -137,6 +167,8 @@ def create_app(
             uptime=gw_stats.get("uptime", "N/A"),
             gateway=gw_stats,
             memory_entries=mem_count,
+            skills_count=skills_count,
+            sessions_count=sessions_count,
         )
 
     # -- chat ----------------------------------------------------------------
@@ -200,15 +232,17 @@ def create_app(
 
     # -- memory add ----------------------------------------------------------
     @app.post("/api/memory/add")
-    async def add_memory(req: MemorySearchRequest):
+    async def add_memory(req: MemoryAddRequest):
         if memory is None:
             raise HTTPException(503, "Memory store not available")
 
         from remedy.models import MemoryEntry
         entry = MemoryEntry(
-            title=req.query,
-            content=req.query,
+            title=req.title,
+            content=req.content,
             entry_type=MemoryEntryType.NOTE,
+            tags=req.tags,
+            importance=req.importance,
         )
         saved = await memory.upsert(entry)
         return {"id": str(saved.id), "title": saved.title, "status": "saved"}

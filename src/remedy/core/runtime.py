@@ -37,9 +37,9 @@ class AgentRuntime(ABC):
     the gateway, CLI, and other components use.
     """
 
-    def __init__(self, config: AgentConfig) -> None:
+    def __init__(self, config: AgentConfig, memory: Optional[MemoryStore] = None) -> None:
         self.config = config
-        self.memory = MemoryStore(
+        self.memory = memory or MemoryStore(
             config.memory_db_path
             or f"{config.home_dir}/memory.db"
         )

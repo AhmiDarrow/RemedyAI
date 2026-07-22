@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Optional
 from uuid import UUID, uuid4
 
+from remedy.core.security import sanitize_search_query
 from remedy.models import (
     HandoffNote,
     MemoryEntry,
@@ -280,6 +281,7 @@ class MemoryStore:
         self, query: str, limit: int = 20, entry_type: Optional[MemoryEntryType] = None
     ) -> list[MemoryEntry]:
         """Full-text search across title, content, and tags."""
+        query = sanitize_search_query(query, max_length=500)
         db = self._ensure_db()
         type_filter = ""
         params: list[Any] = []

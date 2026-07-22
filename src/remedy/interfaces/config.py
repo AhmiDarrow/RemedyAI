@@ -131,6 +131,9 @@ def config_to_agent_config(config: dict[str, Any]) -> AgentConfig:
         auto_approve_threshold=config.get("auto_approve_threshold", 0.8),
         log_level=config.get("log_level", "INFO"),
         sarcasm_mode=config.get("sarcasm_mode", False),
+        llm_api_key=config.get("llm_api_key", os.environ.get("REMEDY_LLM_API_KEY", "")),
+        llm_model=config.get("llm_model", os.environ.get("REMEDY_LLM_MODEL", "gpt-4o-mini")),
+        llm_base_url=config.get("llm_base_url", os.environ.get("REMEDY_LLM_BASE_URL", "https://api.openai.com/v1")),
     )
 
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Optional
@@ -812,7 +813,10 @@ async def _cmd_config(args) -> None:
 def _cmd_serve(args) -> None:
     import uvicorn
     from remedy.interfaces.api import create_app
-    from remedy.core.runtime import AgentRuntime
+    from remedy.gateway.router import Gateway
+    from remedy.memory.store import MemoryStore
+    from remedy.core.agent import BasicRuntime
+    from remedy.skills.registry import SkillRegistry
 
     home = Path(args.home).expanduser()
     home.mkdir(parents=True, exist_ok=True)
@@ -822,11 +826,38 @@ def _cmd_serve(args) -> None:
     )
     agent_config = config_to_agent_config(config)
 
-    runtime = AgentRuntime(agent_config)
+    async def _start():
+        memory = MemoryStore(
+            agent_config.memory_db_path
+            or f"{agent_config.home_dir}/memory.db"
+        )
+        await memory.initialize()
+
+        runtime = BasicRuntime(agent_config, memory=memory)
+        await runtime.start()
+
+        # Discover skills
+        skills_dir = Path(agent_config.home_dir).expanduser() / "skills"
+        if skills_dir.is_dir():
+            runtime.skills.discover(str(skills_dir), recurse=True)
+        runtime.tool_registry = ToolRegistry()
+
+        gateway = Gateway(runtime=runtime, memory_store=memory)
+        gateway.register_handler(runtime.handle_event)
+        await gateway.start()
+
+        return runtime, gateway, memory
+
+    runtime, gateway, memory = asyncio.run(_start())
+
+    api_key = os.environ.get("REMEDY_API_KEY", config.get("api_key", ""))
     app = create_app(
         runtime=runtime,
+        gateway=gateway,
+        memory=memory,
         title=config.get("name", "Remedy AI"),
         version="0.1.0",
+        api_key=api_key,
     )
 
     console.print(f"[green]Starting Remedy API on http://{args.host}:{args.port}[/green]")
