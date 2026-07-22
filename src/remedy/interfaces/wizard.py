@@ -108,7 +108,7 @@ def run_wizard(
 
     # -- Step 4: Runtime Settings ---------------------------------------------
     console.rule("[bold]Step 4: Runtime Settings")
-    config["home_dir"] = str(Path("~/.remedy").expanduser())
+    config["home_dir"] = Path("~/.remedy").expanduser().as_posix()
 
     if quick:
         config["log_level"] = "INFO"
@@ -480,7 +480,9 @@ def _write_config(config: dict) -> Path:
 
     for key, value in config.items():
         if key in ("home_dir",):
-            lines.append(f'{key} = "{value}"')
+            # Normalize Windows backslashes to forward slashes for TOML safety
+            safe = value.replace("\\", "/")
+            lines.append(f'{key} = "{safe}"')
         elif key in ("name", "persona", "log_level", "llm_model", "llm_base_url") or key == "llm_api_key":
             if value:
                 lines.append(f'{key} = "{value}"')
