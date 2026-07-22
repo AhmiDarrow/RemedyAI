@@ -10,7 +10,9 @@ Usage:
 
 from __future__ import annotations
 
+import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -22,6 +24,45 @@ DIST_DIR = ROOT / "dist"
 NSIS_DIR = (
     ROOT / "desktop" / "src-tauri" / "target" / "release" / "bundle" / "nsis"
 )
+
+
+def _get_root_version() -> str:
+    content = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    m = re.search(r'^version\s*=\s*"([^"]+)"', content, re.MULTILINE)
+    if not m:
+        print("ERROR: could not find version in pyproject.toml")
+        sys.exit(1)
+    return m.group(1)
+
+
+def sync_versions() -> str:
+    v = _get_root_version()
+    changes = []
+
+    pkg_json = ROOT / "desktop" / "package.json"
+    if pkg_json.exists():
+        pkg = json.loads(pkg_json.read_text(encoding="utf-8"))
+        if pkg.get("version") != v:
+            pkg["version"] = v
+            pkg_json.write_text(json.dumps(pkg, indent=2) + "\n", encoding="utf-8")
+            changes.append(f"package.json: {pkg.get('version')} -> {v}")
+
+    tauri_conf = ROOT / "desktop" / "src-tauri" / "tauri.conf.json"
+    if tauri_conf.exists():
+        conf = json.loads(tauri_conf.read_text(encoding="utf-8"))
+        if conf.get("version") != v:
+            conf["version"] = v
+            tauri_conf.write_text(json.dumps(conf, indent=2) + "\n", encoding="utf-8")
+            changes.append(f"tauri.conf.json: {conf.get('version')} -> {v}")
+
+    if changes:
+        print(f"Synced version to {v}:")
+        for c in changes:
+            print(f"  {c}")
+    else:
+        print(f"Version {v} already synced across all configs.")
+
+    return v
 
 
 def ensure_pyinstaller():
@@ -125,6 +166,7 @@ def build(cache_clean: bool = False):
     """Build the standalone remedy-desktop.exe via PyInstaller."""
     print(f"Building Remedy Desktop exe... (root={ROOT})")
 
+    sync_versions()
     ensure_pyinstaller()
 
     DESKTOP_BIN.mkdir(parents=True, exist_ok=True)
@@ -151,7 +193,7 @@ def build(cache_clean: bool = False):
         "--specpath",
         str(ROOT / "build" / "pyinstaller"),
         "--noupx",
-        "--console",  # show console window for the server
+        "--noconsole",
         "--add-data",
         f"{ROOT / 'src' / 'remedy'}{os.pathsep}remedy",
     ]

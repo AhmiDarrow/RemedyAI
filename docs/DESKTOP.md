@@ -77,7 +77,7 @@ event: error         → { message: "..." }
 │              │  │ Composer                  [model] ││
 │              │  │ [multiline input + send/stop]     ││
 │              │  └──────────────────────────────────┘│
-│              │  Status: ● Connected · remedy v0.7.0 │
+│              │  Status: ● Connected · remedy v0.9.0 │
 └──────────────┴──────────────────────────────────────┘
 ```
 
@@ -144,3 +144,27 @@ event: error         → { message: "..." }
 - [ ] `/new`, `/help`, stop generation work via UI
 - [ ] Same backend usable via `remedy web` in browser
 - [ ] No Electron dependency
+
+## Build Toolchain
+
+| Tool | Path | Notes |
+|------|------|-------|
+| Cargo | `~\.cargo\bin\cargo.exe` | Rust 1.97.1 MSVC; not on default PATH — prepend `$env:USERPROFILE\.cargo\bin` before running |
+| Rust | Same as cargo | `rustc 1.97.1` |
+| Tauri CLI | via `npm run tauri` in `desktop/` | Installed via npm, not globally |
+
+### Build from scratch
+
+```powershell
+# 1. Add Rust to PATH for this session
+$env:PATH = "$env:USERPROFILE\.cargo\bin;$env:PATH"
+
+# 2. Build Python sidecar (output: desktop/bin/remedy-desktop.exe)
+python scripts/build_desktop.py --clean
+
+# 3. Build Tauri app (output: desktop/src-tauri/target/release/bundle/nsis/)
+cd desktop
+npm run tauri build
+```
+
+The version is sourced from `pyproject.toml` only — `scripts/build_desktop.py` auto-syncs `desktop/package.json` and `tauri.conf.json` at build time. `src/remedy/__init__.py` reads it at runtime.

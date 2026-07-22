@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+
+from remedy import __version__
 import logging
 from typing import Any
 
@@ -73,7 +75,7 @@ class MCPClient:
             result = await self._send_request(server_name, "initialize", {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {},
-                "clientInfo": {"name": "Remedy", "version": "0.7.0"},
+                "clientInfo": {"name": "Remedy", "version": __version__},
             })
 
             if result.get("error"):

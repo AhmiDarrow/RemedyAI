@@ -10,7 +10,7 @@ use tauri::{Emitter, Manager};
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 #[cfg(target_os = "windows")]
-const DETACHED_PROCESS: u32 = 0x00000008;
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 struct ServerState {
     process: Mutex<Option<Child>>,
@@ -54,7 +54,7 @@ fn spawn_remedy(cmd: &str) -> Option<Child> {
     {
         Command::new(cmd)
             .args(&args)
-            .creation_flags(DETACHED_PROCESS)
+            .creation_flags(CREATE_NO_WINDOW)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
