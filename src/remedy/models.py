@@ -113,6 +113,9 @@ class SkillManifest(BaseModel):
     path: Optional[str] = Field(default=None, description="Filesystem path to the skill directory")
     loaded_at: Optional[datetime] = Field(default=None)
 
+    # Runtime metadata (populated by adapters, validators, etc.)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
     @property
     def is_native(self) -> bool:
         return self.kind == SkillKind.NATIVE

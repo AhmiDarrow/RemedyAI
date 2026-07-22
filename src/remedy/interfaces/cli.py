@@ -31,6 +31,12 @@ from remedy.models import (
 )
 from remedy.skills.loader import load_skill_from_dir
 from remedy.skills.registry import SkillRegistry
+from remedy.skills.executor import SkillExecutor
+from remedy.skills.validator import SkillValidator
+from remedy.skills.exporter import SkillExporter
+from remedy.skills.tool_registry import ToolRegistry
+from remedy.skills.adapters.hermes_deep import deep_load_hermes_skill
+from remedy.skills.adapters.openclaw_deep import deep_load_openclaw_skill
 
 console = Console()
 
@@ -102,6 +108,27 @@ def build_parser() -> argparse.ArgumentParser:
     skill_info.add_argument("name", help="Skill name")
     skill_load = skill_sub.add_parser("load", help="Load a single skill")
     skill_load.add_argument("path", help="Path to skill directory or SKILL.md")
+
+    skill_run = skill_sub.add_parser("run", help="Run a skill's scripts")
+    skill_run.add_argument("name", help="Skill name to run")
+    skill_run.add_argument("--script", dest="script", default=None, help="Specific script to run")
+
+    skill_test = skill_sub.add_parser("test", help="Validate and test a skill")
+    skill_test.add_argument("name", help="Skill name to validate")
+
+    skill_export = skill_sub.add_parser("export", help="Export a skill to another format")
+    skill_export.add_argument("name", help="Skill name to export")
+    skill_export.add_argument("output", help="Output directory")
+    skill_export.add_argument("--format", dest="fmt", default="native",
+                              choices=["native", "hermes", "openclaw", "zip"])
+
+    # remedy tool list|search
+    tool = sub.add_parser("tool", help="Tool operations")
+    tool_sub = tool.add_subparsers(dest="tool_cmd")
+    tool_list = tool_sub.add_parser("list", help="List registered tools")
+    tool_search = tool_sub.add_parser("search", help="Search tools")
+    tool_search.add_argument("query", help="Search query")
+    tool_stats = tool_sub.add_parser("stats", help="Tool invocation statistics")
 
     # remedy handoff create ...
     handoff = sub.add_parser("handoff", help="Handoff note operations")
@@ -308,6 +335,11 @@ async def _cmd_session(args, db_path: Path) -> None:
 
 async def _cmd_skill(args) -> None:
     registry = SkillRegistry()
+    if args.skill_cmd in ("discover", "info", "load", "run", "test", "export"):
+        if args.skill_cmd != "discover":
+            registry.discover("skills", recurse=True)
+        if args.skill_cmd in ("discover",):
+            pass
 
     if args.skill_cmd == "list":
         pass
@@ -336,8 +368,132 @@ async def _cmd_skill(args) -> None:
         skill = registry.load_single(args.path)
         console.print(f"[green]Loaded:[/green] {skill.manifest.name} v{skill.manifest.version}")
 
+    elif args.skill_cmd == "run":
+        skill = registry.get(args.name)
+        if skill is None:
+            console.print(f"[red]Skill not found: {args.name}[/red]")
+            return
+        executor = SkillExecutor()
+        if args.script and skill.source_skill_dir:
+            script_path = Path(skill.source_skill_dir) / args.script
+            if not script_path.is_file():
+                console.print(f"[red]Script not found: {args.script}[/red]")
+                return
+            result = await executor.run_script(script_path)
+            _print_exec_result(result)
+        elif skill.scripts and skill.source_skill_dir:
+            results = await executor.run_all_scripts(skill.scripts, Path(skill.source_skill_dir))
+            for name, res in results.items():
+                console.print(f"\n[bold]Script: {name}[/bold]")
+                _print_exec_result(res)
+        else:
+            console.print("[yellow]No scripts to run. Running instruction code blocks...[/yellow]")
+            results = await executor.run_instructions(skill.instructions)
+            for i, res in enumerate(results):
+                console.print(f"\n[bold]Block {i+1}[/bold]")
+                _print_exec_result(res)
+
+    elif args.skill_cmd == "test":
+        skill = registry.get(args.name)
+        if skill is None:
+            console.print(f"[red]Skill not found: {args.name}[/red]")
+            return
+        validator = SkillValidator()
+        results = [
+            validator.validate_metadata(skill),
+            validator.validate_dependencies(skill),
+            validator.validate_scripts(skill),
+        ]
+        test_result = await validator.run_tests(skill)
+        results.append(test_result)
+
+        for r in results:
+            status = "[green]PASS[/green]" if r.is_valid else "[red]FAIL[/red]"
+            console.print(f"\n{status} {r.skill_name}:")
+            for err in r.errors:
+                console.print(f"  [red]Error:[/red] {err}")
+            for warn in r.warnings:
+                console.print(f"  [yellow]Warning:[/yellow] {warn}")
+            for tr in r.test_results:
+                res = "[green]PASS[/green]" if tr["success"] else "[red]FAIL[/red]"
+                console.print(f"  Test {tr['file']}: {res}")
+
+        score = validator.compute_score(results)
+        console.print(f"\n[bold]Compliance Score: {score:.0%}[/bold]")
+
+    elif args.skill_cmd == "export":
+        skill = registry.get(args.name)
+        if skill is None:
+            console.print(f"[red]Skill not found: {args.name}[/red]")
+            return
+        exporter = SkillExporter(Path(args.output))
+        if args.fmt == "native":
+            dest = exporter.export_native(skill)
+        elif args.fmt == "hermes":
+            dest = exporter.export_hermes(skill)
+        elif args.fmt == "openclaw":
+            dest = exporter.export_openclaw(skill)
+        elif args.fmt == "zip":
+            dest = exporter.export_zip(skill, format="native")
+        else:
+            dest = exporter.export_native(skill)
+        console.print(f"[green]Exported to:[/green] {dest}")
+
     if args.skill_cmd in ("list", "discover", "load"):
         _print_skills(registry)
+
+
+def _print_exec_result(result) -> None:
+    status = "[green]SUCCESS[/green]" if result.success else "[red]FAILED[/red]"
+    console.print(f"  Status: {status}")
+    console.print(f"  Exit code: {result.exit_code}")
+    if result.stdout:
+        console.print(f"  stdout: {result.stdout[:200]}")
+    if result.stderr:
+        console.print(f"  [yellow]stderr: {result.stderr[:200]}[/yellow]")
+    if result.error:
+        console.print(f"  [red]Error: {result.error}[/red]")
+
+
+async def _cmd_tool(args) -> None:
+    registry = ToolRegistry()
+
+    registry.register_builtin("memory_search", "Search the memory store via FTS5")
+    registry.register_builtin("memory_add", "Add an entry to the memory store")
+    registry.register_builtin("skill_load", "Load a skill by name")
+    registry.register_builtin("skill_list", "List registered skills")
+    registry.register_builtin("file_read", "Read a file from disk")
+    registry.register_builtin("file_write", "Write content to a file")
+    registry.register_builtin("bash_exec", "Execute a shell command")
+
+    if args.tool_cmd == "list":
+        table = Table(title="Registered Tools")
+        table.add_column("Source")
+        table.add_column("Name")
+        table.add_column("Description")
+        for t in registry.tools:
+            table.add_row(t.source.value, t.name, t.description[:60])
+        console.print(table)
+
+    elif args.tool_cmd == "search":
+        results = registry.search(args.query)
+        if results:
+            for t in results:
+                console.print(f"[{t.source.value}] [bold]{t.name}[/bold]: {t.description}")
+        else:
+            console.print(f"[dim]No tools matching '{args.query}'[/dim]")
+
+    elif args.tool_cmd == "stats":
+        stats = registry.get_stats()
+        console.print(Panel(
+            f"Registered: {stats['registered_tools']}\n"
+            f"Total calls: {stats['total_calls']}\n"
+            f"Success rate: {stats['success_rate']:.1%}\n"
+            f"By source: {json.dumps(stats['by_source'])}"
+            if stats["total_calls"] > 0 else
+            f"Registered: {stats['registered_tools']}\nNo invocations yet.",
+            title="Tool Stats",
+        ))
 
 
 async def _cmd_handoff(args, db_path: Path) -> None:
@@ -427,6 +583,8 @@ def main(args: Optional[list[str]] = None) -> None:
         asyncio.run(_cmd_user(parsed, db_path))
     elif parsed.command == "session":
         asyncio.run(_cmd_session(parsed, db_path))
+    elif parsed.command == "tool":
+        asyncio.run(_cmd_tool(parsed))
     else:
         parser.print_help()
 
