@@ -3,15 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-import sys
 from pathlib import Path
-from typing import Optional
 
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from remedy.gateway.router import Gateway
 from remedy.gateway.channels.adapters import (
     CLIChannel,
     DiscordChannel,
@@ -19,6 +16,7 @@ from remedy.gateway.channels.adapters import (
     TelegramChannel,
     WebChannel,
 )
+from remedy.gateway.router import Gateway
 from remedy.models import AgentConfig, ChannelKind
 
 console = Console()
@@ -164,6 +162,7 @@ def main_gateway(args) -> None:
 
 def _serve_api(db_path: Path) -> None:
     import uvicorn
+
     from remedy.interfaces.api import create_app
 
     app = create_app(title="Remedy AI", version="0.1.0")

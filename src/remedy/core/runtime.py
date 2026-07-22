@@ -6,26 +6,26 @@ Inspired by Hermes' ReAct loop with learning and self-improvement.
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
-from datetime import datetime, timezone
-from typing import Any, AsyncIterator, Optional
+from abc import ABC
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID, uuid4
 
+from remedy.memory.handoff import AutoHandoffManager
+from remedy.memory.profile import UserProfile
+from remedy.memory.store import MemoryStore
 from remedy.models import (
     AgentConfig,
     GatewayEvent,
     HandoffNote,
     MemoryEntry,
     MemoryEntryType,
-    SessionSummary,
     Task,
     TaskStatus,
     ToolCall,
     ToolResult,
 )
-from remedy.memory.store import MemoryStore
-from remedy.memory.handoff import AutoHandoffManager
-from remedy.memory.profile import UserProfile
 from remedy.skills.registry import SkillRegistry
 
 
@@ -37,7 +37,7 @@ class AgentRuntime(ABC):
     the gateway, CLI, and other components use.
     """
 
-    def __init__(self, config: AgentConfig, memory: Optional[MemoryStore] = None) -> None:
+    def __init__(self, config: AgentConfig, memory: MemoryStore | None = None) -> None:
         self.config = config
         self.memory = memory or MemoryStore(
             config.memory_db_path
@@ -46,9 +46,9 @@ class AgentRuntime(ABC):
         self.skills = SkillRegistry()
         self.handoff = AutoHandoffManager(self.memory)
         self._tasks: dict[UUID, Task] = {}
-        self._session_id: Optional[str] = None
-        self._session_started_at: Optional[datetime] = None
-        self._user_profile: Optional[UserProfile] = None
+        self._session_id: str | None = None
+        self._session_started_at: datetime | None = None
+        self._user_profile: UserProfile | None = None
 
     # -- lifecycle -----------------------------------------------------------
 
@@ -66,8 +66,8 @@ class AgentRuntime(ABC):
         self,
         title: str,
         description: str = "",
-        parent_id: Optional[UUID] = None,
-        tags: Optional[list[str]] = None,
+        parent_id: UUID | None = None,
+        tags: list[str] | None = None,
     ) -> Task:
         task = Task(
             id=uuid4(),
@@ -79,10 +79,10 @@ class AgentRuntime(ABC):
         self._tasks[task.id] = task
         return task
 
-    def get_task(self, task_id: UUID) -> Optional[Task]:
+    def get_task(self, task_id: UUID) -> Task | None:
         return self._tasks.get(task_id)
 
-    def list_tasks(self, status: Optional[TaskStatus] = None) -> list[Task]:
+    def list_tasks(self, status: TaskStatus | None = None) -> list[Task]:
         if status is None:
             return list(self._tasks.values())
         return [t for t in self._tasks.values() if t.status == status]
@@ -107,7 +107,7 @@ class AgentRuntime(ABC):
 
     async def remember(self, content: str, title: str = "", importance: float = 0.5) -> MemoryEntry:
         entry = MemoryEntry(
-            title=title or f"Memory {datetime.now(timezone.utc).isoformat()}",
+            title=title or f"Memory {datetime.now(UTC).isoformat()}",
             content=content,
             entry_type=MemoryEntryType.NOTE,
             importance=importance,
@@ -123,9 +123,9 @@ class AgentRuntime(ABC):
         self,
         title: str,
         content: str,
-        action_items: Optional[list[str]] = None,
-        decisions: Optional[list[str]] = None,
-        context_summary: Optional[str] = None,
+        action_items: list[str] | None = None,
+        decisions: list[str] | None = None,
+        context_summary: str | None = None,
     ) -> HandoffNote:
         note = HandoffNote(
             title=title,
@@ -141,10 +141,10 @@ class AgentRuntime(ABC):
 
     # -- sessions with auto-handoff -------------------------------------------
 
-    async def start_session(self, session_id: Optional[str] = None) -> str:
+    async def start_session(self, session_id: str | None = None) -> str:
         """Begin a new session, loading pending handoffs and user profile."""
         self._session_id = session_id or str(uuid4())
-        self._session_started_at = datetime.now(timezone.utc)
+        self._session_started_at = datetime.now(UTC)
 
         # Load user profile
         self._user_profile = await self.memory.get_or_create_profile()
@@ -167,7 +167,7 @@ class AgentRuntime(ABC):
 
         return self._session_id
 
-    async def end_session(self) -> Optional[HandoffNote]:
+    async def end_session(self) -> HandoffNote | None:
         """End current session, auto-generating handoff and summary."""
         if self._session_id is None:
             return None
@@ -182,7 +182,7 @@ class AgentRuntime(ABC):
 
         # Update profile stats
         if self._session_started_at and self._user_profile:
-            duration = (datetime.now(timezone.utc) - self._session_started_at).total_seconds() / 60.0
+            duration = (datetime.now(UTC) - self._session_started_at).total_seconds() / 60.0
             self._user_profile.record_session(duration)
             await self.memory.save_user_profile(self._user_profile)
 
@@ -196,7 +196,7 @@ class AgentRuntime(ABC):
         # Generate session summary
         await self.handoff.generate_session_summary(
             session_id=self._session_id,
-            started_at=self._session_started_at or datetime.now(timezone.utc),
+            started_at=self._session_started_at or datetime.now(UTC),
             tasks_completed=len(completed),
             key_decisions=[],
             open_items=[t.title for t in open_tasks_list],
@@ -210,9 +210,9 @@ class AgentRuntime(ABC):
         return handoff
 
     @property
-    def session_id(self) -> Optional[str]:
+    def session_id(self) -> str | None:
         return self._session_id
 
     @property
-    def user_profile(self) -> Optional[UserProfile]:
+    def user_profile(self) -> UserProfile | None:
         return self._user_profile

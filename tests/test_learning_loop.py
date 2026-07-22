@@ -2,10 +2,9 @@
 
 import pytest
 
+from remedy.core.learning.reflection import ExecutionTrace, ReflectionEngine, TraceStep
 from remedy.core.learning_loop import LearningLoop
-from remedy.core.learning.reflection import ReflectionEngine, ExecutionTrace, TraceStep
-from remedy.core.learning.refiner import SkillRefiner
-from remedy.models import Task, Skill, SkillManifest, SkillKind
+from remedy.models import Task
 
 
 @pytest.fixture

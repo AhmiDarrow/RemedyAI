@@ -7,13 +7,11 @@ and provides structured result reporting.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import re
 import tempfile
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Optional
 from uuid import UUID, uuid4
 
 
@@ -28,9 +26,9 @@ class ExecutionResult:
     exit_code: int = -1
     duration_ms: float = 0.0
     artifact_paths: list[Path] = field(default_factory=list)
-    started_at: Optional[datetime] = None
-    ended_at: Optional[datetime] = None
-    error: Optional[str] = None
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
+    error: str | None = None
 
 
 class SkillExecutor:
@@ -42,18 +40,18 @@ class SkillExecutor:
     - Running the full skill instruction set as a guided workflow
     """
 
-    def __init__(self, sandbox_dir: Optional[Path] = None) -> None:
+    def __init__(self, sandbox_dir: Path | None = None) -> None:
         self.sandbox_dir = Path(sandbox_dir or tempfile.mkdtemp(prefix="remedy_exec_"))
 
     async def run_script(
         self,
         script_path: Path,
-        args: Optional[list[str]] = None,
-        env: Optional[dict[str, str]] = None,
+        args: list[str] | None = None,
+        env: dict[str, str] | None = None,
         timeout: float = 300.0,
     ) -> ExecutionResult:
         """Execute a skill script via subprocess."""
-        result = ExecutionResult(started_at=datetime.now(timezone.utc))
+        result = ExecutionResult(started_at=datetime.now(UTC))
 
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -63,7 +61,7 @@ class SkillExecutor:
                 env=env,
                 cwd=str(script_path.parent),
             )
-            result.started_at = datetime.now(timezone.utc)
+            result.started_at = datetime.now(UTC)
 
             try:
                 stdout, stderr = await asyncio.wait_for(
@@ -73,7 +71,7 @@ class SkillExecutor:
                 result.stderr = stderr.decode("utf-8", errors="replace")
                 result.exit_code = proc.returncode or 0
                 result.success = result.exit_code == 0
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 proc.kill()
                 result.error = f"Script timed out after {timeout}s"
                 result.success = False
@@ -85,7 +83,7 @@ class SkillExecutor:
             result.error = str(e)
             result.success = False
 
-        result.ended_at = datetime.now(timezone.utc)
+        result.ended_at = datetime.now(UTC)
         if result.started_at:
             result.duration_ms = (
                 result.ended_at - result.started_at
@@ -96,8 +94,8 @@ class SkillExecutor:
     async def run_instructions(
         self,
         instructions: str,
-        skill_dir: Optional[Path] = None,
-        env: Optional[dict[str, str]] = None,
+        skill_dir: Path | None = None,
+        env: dict[str, str] | None = None,
     ) -> list[ExecutionResult]:
         """Parse a skill's instruction markdown and execute inline code blocks.
 
@@ -124,8 +122,8 @@ class SkillExecutor:
     async def _run_python_block(
         self,
         code: str,
-        skill_dir: Optional[Path] = None,
-        env: Optional[dict[str, str]] = None,
+        skill_dir: Path | None = None,
+        env: dict[str, str] | None = None,
     ) -> ExecutionResult:
         """Write a Python code block to a temp file and execute it."""
         tmp = self.sandbox_dir / f"exec_{uuid4().hex[:8]}.py"
@@ -141,12 +139,12 @@ class SkillExecutor:
     async def _run_bash_block(
         self,
         code: str,
-        skill_dir: Optional[Path] = None,
-        env: Optional[dict[str, str]] = None,
+        skill_dir: Path | None = None,
+        env: dict[str, str] | None = None,
     ) -> ExecutionResult:
         """Execute a shell code block."""
-        result = ExecutionResult(started_at=datetime.now(timezone.utc))
-        result.started_at = datetime.now(timezone.utc)
+        result = ExecutionResult(started_at=datetime.now(UTC))
+        result.started_at = datetime.now(UTC)
 
         try:
             proc = await asyncio.create_subprocess_shell(
@@ -164,7 +162,7 @@ class SkillExecutor:
                 result.stderr = stderr.decode("utf-8", errors="replace")
                 result.exit_code = proc.returncode or 0
                 result.success = result.exit_code == 0
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 proc.kill()
                 result.error = "Shell block timed out after 120s"
                 result.success = False
@@ -172,7 +170,7 @@ class SkillExecutor:
             result.error = str(e)
             result.success = False
 
-        result.ended_at = datetime.now(timezone.utc)
+        result.ended_at = datetime.now(UTC)
         if result.started_at:
             result.duration_ms = (
                 result.ended_at - result.started_at
@@ -189,7 +187,7 @@ class SkillExecutor:
         self,
         scripts: list[str],
         base_dir: Path,
-        env: Optional[dict[str, str]] = None,
+        env: dict[str, str] | None = None,
     ) -> dict[str, ExecutionResult]:
         """Run every script in a skill's scripts/ directory."""
         results: dict[str, ExecutionResult] = {}

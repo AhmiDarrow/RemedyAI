@@ -9,21 +9,20 @@ from __future__ import annotations
 
 import asyncio
 import time
-import traceback
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Any, Callable, Optional
-from uuid import UUID, uuid4
+from typing import Any
+from uuid import UUID
 
 from remedy.execution.policy import ExecutionPolicy, PolicyDecision
-from remedy.models import ToolCall, ToolDefinition, ToolResult, ToolSource
+from remedy.models import ToolCall, ToolResult
 
 
 @dataclass
 class ToolContext:
-    session_id: Optional[str] = None
-    user_id: Optional[str] = None
-    channel: Optional[str] = None
+    session_id: str | None = None
+    user_id: str | None = None
+    channel: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -40,8 +39,8 @@ class ExecutionRecord:
     stderr: str = ""
     duration_ms: float = 0.0
     retries: int = 0
-    policy_decision: Optional[PolicyDecision] = None
-    context: Optional[ToolContext] = None
+    policy_decision: PolicyDecision | None = None
+    context: ToolContext | None = None
 
 
 class ToolRuntime:
@@ -59,7 +58,7 @@ class ToolRuntime:
     def __init__(
         self,
         sandbox=None,  # Sandbox
-        policy: Optional[ExecutionPolicy] = None,
+        policy: ExecutionPolicy | None = None,
         tool_registry=None,  # ToolRegistry
         max_retries: int = 3,
         retry_backoff: float = 1.0,
@@ -86,8 +85,8 @@ class ToolRuntime:
     async def execute(
         self,
         tool_call: ToolCall,
-        context: Optional[ToolContext] = None,
-        timeout: Optional[float] = None,
+        context: ToolContext | None = None,
+        timeout: float | None = None,
     ) -> ToolResult:
         """Run a tool through the full pipeline and return a result."""
         ctx = context or ToolContext()
@@ -242,7 +241,7 @@ class ToolRuntime:
 
     def get_history(
         self,
-        tool_name: Optional[str] = None,
+        tool_name: str | None = None,
         limit: int = 50,
     ) -> list[ExecutionRecord]:
         records = self._history

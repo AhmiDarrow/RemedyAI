@@ -8,10 +8,8 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Optional
 
 from remedy.core.errors import SecurityError
-
 
 HOME_DIR = Path("~/.remedy").expanduser()
 HOME_DIR.mkdir(parents=True, exist_ok=True)
@@ -27,7 +25,7 @@ VALID_CHARACTER_ID_RE = re.compile(
 )
 
 
-def safe_path(user_input: str, base_dir: Optional[Path] = None) -> Path:
+def safe_path(user_input: str, base_dir: Path | None = None) -> Path:
     """Resolve a user-supplied path safely within a base directory.
 
     Prevents path traversal by rejecting paths that escape base_dir.
@@ -157,3 +155,41 @@ def validate_execution_command(command: list[str]) -> list[str]:
         if not isinstance(arg, str):
             raise SecurityError(f"Command argument {i} must be a string", rule="arg_type")
     return command
+
+
+_DANGEROUS_COMMANDS = {
+    "sudo", "su", "chmod", "chown", "mkfs", "dd", "fdisk",
+    "passwd", "useradd", "usermod", "groupadd",
+}
+
+
+_DANGEROUS_PATTERNS = [
+    (r"(^|\s)(rm|del|erase)(\s|$)", "File deletion detected"),
+    (r"(^|\s)format(\s|$)", "Filesystem format"),
+    (r"(^|\s)shutdown(\s|$)", "System shutdown"),
+    (r"(^|\s)reboot(\s|$)", "System reboot"),
+    (r"2>/dev/null", "Error output suppression"),
+    (r"\|\s*(sh|bash|pwsh)", "Shell pipe injection"),
+    (r">\s*/dev/", "Device write"),
+]
+
+
+def check_dangerous_command(command: list[str]) -> str | None:
+    """Check a command list for dangerous operations.
+
+    Returns a warning string if dangerous, None if safe.
+    """
+    if not command:
+        return None
+
+    base = command[0].lower()
+    if base in _DANGEROUS_COMMANDS:
+        return f"Dangerous command: {base}"
+
+    full = " ".join(str(a) for a in command).lower()
+    for pattern, reason in _DANGEROUS_PATTERNS:
+        import re
+        if re.search(pattern, full):
+            return f"{reason}: {full[:100]}"
+
+    return None

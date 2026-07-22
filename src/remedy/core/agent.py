@@ -7,11 +7,9 @@ through the ToolRegistry.
 
 from __future__ import annotations
 
-import json
 import logging
-from datetime import datetime, timezone
-from typing import Any, AsyncIterator, Optional
-from uuid import uuid4
+from collections.abc import AsyncIterator
+from typing import Any
 
 import aiohttp
 
@@ -20,11 +18,8 @@ from remedy.memory.store import MemoryStore
 from remedy.models import (
     AgentConfig,
     GatewayEvent,
-    MemoryEntry,
-    MemoryEntryType,
     ToolCall,
     ToolResult,
-    ToolSource,
 )
 from remedy.skills.tool_registry import ToolRegistry
 
@@ -46,7 +41,7 @@ class BasicRuntime(AgentRuntime):
     - Falls back to echo-style responses when no LLM is configured
     """
 
-    def __init__(self, config: AgentConfig, memory: Optional[MemoryStore] = None) -> None:
+    def __init__(self, config: AgentConfig, memory: MemoryStore | None = None) -> None:
         super().__init__(config, memory=memory)
         self.tool_registry = ToolRegistry()
         self._system_prompt = _DEFAULT_SYSTEM_PROMPT
@@ -137,21 +132,20 @@ class BasicRuntime(AgentRuntime):
                 "max_tokens": 1024,
             }
 
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"{self._llm_base_url}/chat/completions",
-                    headers=headers,
-                    json=body,
-                    timeout=aiohttp.ClientTimeout(total=30),
-                ) as resp:
-                    if resp.status != 200:
-                        text = await resp.text()
-                        logger.error("LLM API error %d: %s", resp.status, text[:200])
-                        return f"[LLM error: {resp.status}]"
+            async with aiohttp.ClientSession() as session, session.post(
+                f"{self._llm_base_url}/chat/completions",
+                headers=headers,
+                json=body,
+                timeout=aiohttp.ClientTimeout(total=30),
+            ) as resp:
+                if resp.status != 200:
+                    text = await resp.text()
+                    logger.error("LLM API error %d: %s", resp.status, text[:200])
+                    return f"[LLM error: {resp.status}]"
 
-                    data = await resp.json()
-                    choice = data.get("choices", [{}])[0]
-                    return choice.get("message", {}).get("content", "") or ""
+                data = await resp.json()
+                choice = data.get("choices", [{}])[0]
+                return choice.get("message", {}).get("content", "") or ""
         except Exception as e:
             logger.exception("LLM call failed")
             return f"[LLM error: {e}]"
@@ -184,8 +178,8 @@ class BasicRuntime(AgentRuntime):
 
         if "help" in msg_lower or "?" in msg_lower:
             return (
-                f"I'm a basic agent runtime. I can remember conversations in my persistent store. "
-                f"Try using memory commands or tools if available."
+                "I'm a basic agent runtime. I can remember conversations in my persistent store. "
+                "Try using memory commands or tools if available."
             )
 
         if "remember" in msg_lower or "memory" in msg_lower:

@@ -1,10 +1,8 @@
 """Tests for the agentskills.io skill loader."""
 
-import tempfile
 from pathlib import Path
 
 import pytest
-import yaml
 
 from remedy.models import SkillKind, SkillStatus
 from remedy.skills.loader import (
@@ -15,7 +13,6 @@ from remedy.skills.loader import (
     load_skill_from_dir,
     load_skill_from_file,
 )
-
 
 SAMPLE_SKILL_MD = """---
 name: test-skill

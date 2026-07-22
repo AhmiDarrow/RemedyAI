@@ -9,17 +9,14 @@ Bridges the learning loop to the memory system:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from dataclasses import dataclass, field
-from typing import Optional
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from remedy.models import (
     MemoryEntry,
     MemoryEntryType,
     Skill,
-    SkillManifest,
-    SkillKind,
     SkillStatus,
 )
 
@@ -31,11 +28,11 @@ class LearningEvent:
     event_type: str = "created"  # "created", "refined", "promoted", "demoted", "replaced"
     skill_name: str = ""
     skill_version: str = ""
-    source_trace_id: Optional[UUID] = None
-    source_session_id: Optional[str] = None
+    source_trace_id: UUID | None = None
+    source_session_id: str | None = None
     confidence_at_creation: float = 0.0
     description: str = ""
-    occurred_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    occurred_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 @dataclass
@@ -49,8 +46,8 @@ class LearningHistory:
     def record_creation(
         self,
         skill: Skill,
-        source_trace_id: Optional[UUID] = None,
-        source_session_id: Optional[str] = None,
+        source_trace_id: UUID | None = None,
+        source_session_id: str | None = None,
     ) -> LearningEvent:
         event = LearningEvent(
             event_type="created",

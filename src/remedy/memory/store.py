@@ -9,20 +9,19 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID, uuid4
 
 from remedy.core.security import sanitize_search_query
+from remedy.memory.profile import UserProfile
 from remedy.models import (
     HandoffNote,
     MemoryEntry,
     MemoryEntryType,
     SessionSummary,
 )
-from remedy.memory.profile import UserFact, UserProfile, UserTrait
-
 
 _SCHEMA = """
 PRAGMA journal_mode = WAL;
@@ -147,7 +146,7 @@ class MemoryStore:
 
     def __init__(self, db_path: str | Path) -> None:
         self._db_path = Path(db_path).expanduser().resolve()
-        self._db: Optional[sqlite3.Connection] = None
+        self._db: sqlite3.Connection | None = None
 
     @property
     def path(self) -> Path:
@@ -199,7 +198,7 @@ class MemoryStore:
     async def upsert(self, entry: MemoryEntry) -> MemoryEntry:
         """Insert or update a memory entry. Returns the saved entry."""
         db = self._ensure_db()
-        entry.updated_at = datetime.now(timezone.utc)
+        entry.updated_at = datetime.now(UTC)
 
         db.execute(
             """
@@ -232,7 +231,7 @@ class MemoryStore:
         db.commit()
         return entry
 
-    async def get(self, entry_id: str | UUID) -> Optional[MemoryEntry]:
+    async def get(self, entry_id: str | UUID) -> MemoryEntry | None:
         db = self._ensure_db()
         row = db.execute(
             "SELECT * FROM memory_entries WHERE id = ?", (str(entry_id),)
@@ -278,7 +277,7 @@ class MemoryStore:
     # -- FTS5 search ---------------------------------------------------------
 
     async def search(
-        self, query: str, limit: int = 20, entry_type: Optional[MemoryEntryType] = None
+        self, query: str, limit: int = 20, entry_type: MemoryEntryType | None = None
     ) -> list[MemoryEntry]:
         """Full-text search across title, content, and tags."""
         query = sanitize_search_query(query, max_length=500)
@@ -361,7 +360,7 @@ class MemoryStore:
         await self.upsert(memory_entry)
         return note
 
-    async def get_handoff(self, handoff_id: str | UUID) -> Optional[HandoffNote]:
+    async def get_handoff(self, handoff_id: str | UUID) -> HandoffNote | None:
         db = self._ensure_db()
         row = db.execute(
             "SELECT * FROM handoff_notes WHERE id = ?", (str(handoff_id),)
@@ -468,7 +467,7 @@ class MemoryStore:
         db.commit()
         return summary
 
-    async def get_session_summary(self, session_id: str) -> Optional[SessionSummary]:
+    async def get_session_summary(self, session_id: str) -> SessionSummary | None:
         db = self._ensure_db()
         row = db.execute(
             "SELECT * FROM session_summaries WHERE session_id = ?", (session_id,)
@@ -512,7 +511,7 @@ class MemoryStore:
 
     async def save_user_profile(self, profile: UserProfile) -> None:
         db = self._ensure_db()
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         db.execute(
             "INSERT OR REPLACE INTO user_profile (user_id, profile_json, updated_at) VALUES (?, ?, ?)",
             (profile.user_id, profile.model_dump_json(indent=2), now),
@@ -548,7 +547,7 @@ class MemoryStore:
 
         db.commit()
 
-    async def load_user_profile(self, user_id: str = "default") -> Optional[UserProfile]:
+    async def load_user_profile(self, user_id: str = "default") -> UserProfile | None:
         db = self._ensure_db()
         row = db.execute(
             "SELECT profile_json FROM user_profile WHERE user_id = ?", (user_id,)

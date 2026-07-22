@@ -9,11 +9,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Any, Optional
-from uuid import UUID
+from typing import Any
 
 from remedy.models import ToolCall, ToolDefinition, ToolResult, ToolSource
-from remedy.skills.tool_registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +40,8 @@ class MCPClient:
         self,
         server_name: str,
         command: str,
-        args: Optional[list[str]] = None,
-        env: Optional[dict[str, str]] = None,
+        args: list[str] | None = None,
+        env: dict[str, str] | None = None,
     ) -> bool:
         """Spawn an MCP server subprocess and handshake."""
         if server_name in self._servers:
@@ -198,7 +196,7 @@ class MCPClient:
         self,
         name: str,
         description: str,
-        parameters: Optional[dict[str, Any]] = None,
+        parameters: dict[str, Any] | None = None,
         source: ToolSource = ToolSource.MCP,
     ) -> ToolDefinition:
         tool = ToolDefinition(
@@ -214,7 +212,7 @@ class MCPClient:
     def list_tools(self) -> list[ToolDefinition]:
         return list(self._tools.values())
 
-    def get_tool(self, name: str, server: Optional[str] = None) -> Optional[ToolDefinition]:
+    def get_tool(self, name: str, server: str | None = None) -> ToolDefinition | None:
         if server:
             return self._tools.get(f"mcp:{server}:{name}")
         for key, tool in self._tools.items():
@@ -268,7 +266,7 @@ class MCPClient:
         try:
             result = await asyncio.wait_for(fut, timeout=timeout)
             return result
-        except asyncio.TimeoutError:
+        except TimeoutError:
             self._pending.pop(request_id, None)
             return {"error": f"Request timed out after {timeout}s"}
         except Exception as e:

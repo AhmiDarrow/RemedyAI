@@ -1,27 +1,27 @@
 """Tests for Phase 2: skill executor, validator, exporter, tool registry, and deep adapters."""
 
-import asyncio
-import pytest
 from pathlib import Path
 
-from remedy.skills.executor import SkillExecutor, ExecutionResult
-from remedy.skills.validator import SkillValidator
-from remedy.skills.exporter import SkillExporter
-from remedy.skills.tool_registry import ToolRegistry
+import pytest
+
+from remedy.models import Skill, SkillManifest, SkillStatus, ToolDefinition, ToolSource
 from remedy.skills.adapters.hermes_deep import (
+    batch_migrate_hermes,
     deep_load_hermes_skill,
     map_hermes_tools,
-    batch_migrate_hermes,
     parse_hermes_config,
 )
 from remedy.skills.adapters.openclaw_deep import (
     deep_load_openclaw_skill,
-    parse_clawhub_manifest,
-    extract_mcp_servers,
     extract_channel_config,
+    extract_mcp_servers,
+    parse_clawhub_manifest,
     register_mcp_tools_from_skill,
 )
-from remedy.models import Skill, SkillManifest, SkillKind, SkillStatus, ToolDefinition, ToolSource
+from remedy.skills.executor import SkillExecutor
+from remedy.skills.exporter import SkillExporter
+from remedy.skills.tool_registry import ToolRegistry
+from remedy.skills.validator import SkillValidator
 
 
 class TestSkillExecutor:

@@ -15,13 +15,12 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from importlib.metadata import PackageNotFoundError, version as importlib_version
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as importlib_version
 from pathlib import Path
-from typing import Optional
 
 from rich.console import Console
 from rich.panel import Panel
-from rich.table import Table
 
 console = Console()
 
@@ -36,10 +35,10 @@ def _get_installed_version() -> str:
         return "0.0.0"
 
 
-def _get_latest_version() -> Optional[str]:
+def _get_latest_version() -> str | None:
     """Fetch latest PyPI version. Returns None on failure."""
-    import urllib.request
     import json
+    import urllib.request
 
     try:
         req = urllib.request.Request(
@@ -191,7 +190,7 @@ def _memory_check() -> bool:
     return True  # db may not exist yet for fresh installs
 
 
-def _find_project_root() -> Optional[Path]:
+def _find_project_root() -> Path | None:
     """Try to locate the git-cloned project root for editable installs."""
     try:
         import remedy

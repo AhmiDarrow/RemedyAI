@@ -9,16 +9,14 @@ Provides comprehensive migration from Hermes Agent setups, including:
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import yaml
 
-from remedy.models import Skill, SkillKind, SkillManifest, SkillStatus
-from remedy.skills.loader import SkillLoadError
+from remedy.models import Skill
 from remedy.skills.adapters.hermes_adapter import load_hermes_skill
-
+from remedy.skills.loader import SkillLoadError
 
 _TOOL_MAP: dict[str, str] = {
     "memory_search": "remedy_memory_search",
@@ -67,7 +65,7 @@ def extract_hermes_tools_from_config(config: dict) -> list[str]:
     return tools
 
 
-def deep_load_hermes_skill(skill_dir: str | Path, config_path: Optional[Path] = None) -> Skill:
+def deep_load_hermes_skill(skill_dir: str | Path, config_path: Path | None = None) -> Skill:
     """Load a Hermes skill with deep metadata mapping.
 
     In addition to basic loading, this:
@@ -116,7 +114,7 @@ def deep_load_hermes_skill(skill_dir: str | Path, config_path: Optional[Path] = 
 
 def batch_migrate_hermes(
     skills_dir: str | Path,
-    config_path: Optional[str | Path] = None,
+    config_path: str | Path | None = None,
 ) -> tuple[int, list[Skill], list[str]]:
     """Migrate all Hermes skills in a directory with progress reporting.
 

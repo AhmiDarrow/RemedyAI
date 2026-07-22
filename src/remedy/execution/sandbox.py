@@ -8,9 +8,8 @@ from __future__ import annotations
 
 import asyncio
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 
 @dataclass
@@ -24,14 +23,14 @@ class ExecutionResult:
 class Sandbox:
     """Base class for execution backends."""
 
-    _workdir: Optional[Path] = None
+    _workdir: Path | None = None
 
     async def execute(
         self,
         command: list[str],
-        workdir: Optional[Path] = None,
+        workdir: Path | None = None,
         timeout_seconds: float = 30.0,
-        env: Optional[dict[str, str]] = None,
+        env: dict[str, str] | None = None,
     ) -> ExecutionResult:
         raise NotImplementedError
 
@@ -52,8 +51,8 @@ class SubprocessSandbox(Sandbox):
 
     def __init__(
         self,
-        shell: Optional[str] = None,
-        allowed_paths: Optional[list[Path]] = None,
+        shell: str | None = None,
+        allowed_paths: list[Path] | None = None,
         max_input_bytes: int = 1_000_000,
     ) -> None:
         self.shell = shell
@@ -63,11 +62,33 @@ class SubprocessSandbox(Sandbox):
     async def execute(
         self,
         command: list[str],
-        workdir: Optional[Path] = None,
+        workdir: Path | None = None,
         timeout_seconds: float = 30.0,
-        env: Optional[dict[str, str]] = None,
+        env: dict[str, str] | None = None,
     ) -> ExecutionResult:
         start = time.monotonic()
+
+        # Enforce allowed_paths jail: verify workdir is within allowed paths
+        if self.allowed_paths and workdir:
+            resolved = workdir.resolve()
+            allowed = any(
+                resolved == p.resolve() or resolved.is_relative_to(p.resolve())
+                for p in self.allowed_paths
+            )
+            if not allowed:
+                return ExecutionResult(
+                    exit_code=-1,
+                    stderr=f"Workdir {workdir} not in allowed paths: {self.allowed_paths}",
+                    duration_ms=0.0,
+                )
+
+        # Sanitize environment: strip inheritable dangerous vars
+        safe_env = dict(env) if env else None
+        if safe_env is not None:
+            for key in list(safe_env):
+                upper = key.upper()
+                if upper in ("LD_PRELOAD", "LD_LIBRARY_PATH", "PYTHONPATH", "PYTHONSTARTUP"):
+                    safe_env.pop(key)
 
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -75,7 +96,7 @@ class SubprocessSandbox(Sandbox):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(workdir) if workdir else None,
-                env=env,
+                env=safe_env,
             )
 
             try:
@@ -90,7 +111,7 @@ class SubprocessSandbox(Sandbox):
                     stderr=stderr.decode("utf-8", errors="replace") if stderr else "",
                     duration_ms=elapsed,
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 proc.kill()
                 elapsed = (time.monotonic() - start) * 1000
                 return ExecutionResult(

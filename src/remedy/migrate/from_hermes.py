@@ -5,10 +5,8 @@ Helps users transition from either system into Remedy with minimal friction.
 
 from __future__ import annotations
 
-import json
 import shutil
 from pathlib import Path
-from typing import Optional
 
 from remedy.skills.adapters.hermes_adapter import discover_hermes_skills
 from remedy.skills.adapters.openclaw_mcp_adapter import discover_openclaw_skills
@@ -39,7 +37,7 @@ def migrate_from_hermes(
     registry: SkillRegistry,
     hermes_skills_dir: str | Path,
     copy_to_remedy: bool = True,
-    remedy_skills_dir: Optional[str | Path] = None,
+    remedy_skills_dir: str | Path | None = None,
 ) -> MigrationResult:
     """Import skills from a Hermes Agent installation.
 
@@ -85,7 +83,7 @@ def migrate_from_openclaw(
     registry: SkillRegistry,
     openclaw_skills_dir: str | Path,
     copy_to_remedy: bool = True,
-    remedy_skills_dir: Optional[str | Path] = None,
+    remedy_skills_dir: str | Path | None = None,
 ) -> MigrationResult:
     """Import skills from an OpenClaw/ClawHub installation.
 

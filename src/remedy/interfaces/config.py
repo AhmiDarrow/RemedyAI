@@ -8,9 +8,8 @@ merged config for all subsystems.
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import yaml
 
@@ -20,7 +19,6 @@ except ImportError:
     import tomli as tomllib  # type: ignore[no-redef]
 
 from remedy.models import AgentConfig, ChannelKind
-
 
 CONFIG_PATHS = [
     Path("~/.remedy/config.toml"),
@@ -32,7 +30,7 @@ CONFIG_PATHS = [
 ENV_PREFIX = "REMEDY_"
 
 
-def load_config(path: Optional[Path] = None) -> dict[str, Any]:
+def load_config(path: Path | None = None) -> dict[str, Any]:
     """Load config from a file, auto-detecting format (TOML or YAML)."""
     if path is None:
         for p in CONFIG_PATHS:
@@ -101,8 +99,8 @@ def _coerce(value: str) -> Any:
 
 
 def resolve_config(
-    config_path: Optional[Path] = None,
-    home_dir: Optional[str] = None,
+    config_path: Path | None = None,
+    home_dir: str | None = None,
     env_overrides: bool = True,
 ) -> dict[str, Any]:
     """Load and resolve full configuration.
@@ -187,7 +185,7 @@ channel_id = ""
 """
 
 
-def create_default_config(home_dir: Optional[Path] = None) -> Path:
+def create_default_config(home_dir: Path | None = None) -> Path:
     """Create a default config file in the home directory."""
     hd = (home_dir or Path("~/.remedy")).expanduser()
     hd.mkdir(parents=True, exist_ok=True)

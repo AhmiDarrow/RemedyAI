@@ -12,8 +12,8 @@ from __future__ import annotations
 import re
 from collections import Counter
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID
 
 
@@ -26,7 +26,7 @@ class TraceStep:
     result_summary: str = ""
     success: bool = True
     duration_ms: float = 0.0
-    error: Optional[str] = None
+    error: str | None = None
 
 
 @dataclass
@@ -39,7 +39,7 @@ class ExecutionTrace:
     overall_success: bool = True
     total_duration_ms: float = 0.0
     tags: list[str] = field(default_factory=list)
-    session_id: Optional[str] = None
+    session_id: str | None = None
 
     @property
     def step_count(self) -> int:
@@ -60,7 +60,7 @@ class Reflection:
     detected_errors: list[str] = field(default_factory=list)
     key_decision_points: list[str] = field(default_factory=list)
     suggested_tools: list[str] = field(default_factory=list)
-    generated_skill: Optional[GeneratedSkill] = None
+    generated_skill: GeneratedSkill | None = None
     reflection_text: str = ""
     confidence: float = 0.0
 
@@ -84,9 +84,9 @@ class GeneratedSkill:
     tags: list[str] = field(default_factory=list)
     tools_used: list[str] = field(default_factory=list)
     estimated_success_rate: float = 0.8
-    source_trace_id: Optional[UUID] = None
+    source_trace_id: UUID | None = None
     source_task_title: str = ""
-    generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    generated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 _MIN_TRACE_LENGTH = 3
@@ -211,7 +211,7 @@ class ReflectionEngine:
         self,
         trace: ExecutionTrace,
         patterns: list[ToolSequence],
-    ) -> Optional[GeneratedSkill]:
+    ) -> GeneratedSkill | None:
         if trace.step_count < self.min_steps:
             return None
 
@@ -255,7 +255,7 @@ class ReflectionEngine:
         lines = [
             f"# {trace.title}",
             "",
-            f"This skill was automatically generated from a successful execution.",
+            "This skill was automatically generated from a successful execution.",
             "",
             "## Steps",
             "",
@@ -328,7 +328,7 @@ class ReflectionEngine:
         trace: ExecutionTrace,
         patterns: list[ToolSequence],
         errors: list[str],
-        skill: Optional[GeneratedSkill],
+        skill: GeneratedSkill | None,
     ) -> str:
         parts = [
             f"Reflection on task '{trace.title}' ({trace.step_count} steps).",

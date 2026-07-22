@@ -6,10 +6,7 @@ Inspired by Hermes' memory reflection and compaction patterns.
 
 from __future__ import annotations
 
-import json
 from collections import Counter
-from datetime import datetime
-from typing import Optional
 
 from remedy.memory.store import MemoryStore
 from remedy.models import MemoryEntry, MemoryEntryType
@@ -24,7 +21,7 @@ class MemoryConsolidator:
 
     async def consolidate_session(
         self, session_id: str, max_entries: int = 100
-    ) -> Optional[MemoryEntry]:
+    ) -> MemoryEntry | None:
         """Summarize a session's entries into a single condensed note.
 
         Returns the consolidation entry, or None if nothing to consolidate.
@@ -45,7 +42,7 @@ class MemoryConsolidator:
             f"Session {session_id} consolidated summary.\n\n"
             f"**Topics**: {', '.join(topics[:5])}\n\n"
             f"**Highlights**:\n" + "\n".join(f"- {h}" for h in highlights[:5]) + "\n\n"
-            f"**Action items**:\n" + "\n".join(f"- {a}" for a in action_items[:5])
+            "**Action items**:\n" + "\n".join(f"- {a}" for a in action_items[:5])
             if action_items else ""
         )
 

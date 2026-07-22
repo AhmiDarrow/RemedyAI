@@ -7,14 +7,11 @@ decisions, and suggesting follow-up tasks.
 
 from __future__ import annotations
 
-import uuid as _uuid
 from datetime import datetime
-from typing import Optional
 
 from remedy.memory.store import MemoryStore
 from remedy.models import (
     HandoffNote,
-    MemoryEntryType,
     SessionSummary,
     Task,
     TaskStatus,
@@ -60,9 +57,9 @@ class AutoHandoffManager:
     async def generate_handoff(
         self,
         session_id: str,
-        tasks: Optional[list[Task]] = None,
-        open_tasks: Optional[list[Task]] = None,
-        extra_context: Optional[str] = None,
+        tasks: list[Task] | None = None,
+        open_tasks: list[Task] | None = None,
+        extra_context: str | None = None,
     ) -> HandoffNote:
         """Create a comprehensive handoff note for session transition.
 
@@ -119,8 +116,8 @@ class AutoHandoffManager:
         tasks_completed: int = 0,
         skills_created: int = 0,
         skills_refined: int = 0,
-        key_decisions: Optional[list[str]] = None,
-        open_items: Optional[list[str]] = None,
+        key_decisions: list[str] | None = None,
+        open_items: list[str] | None = None,
     ) -> SessionSummary:
         """Create and persist a session summary."""
         summary = SessionSummary(

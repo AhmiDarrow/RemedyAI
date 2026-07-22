@@ -30,8 +30,8 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/anomalyco/remedy"
-Repository = "https://github.com/anomalyco/remedy"
+Homepage = "https://github.com/AhmiDarrow/RemedyAI"
+Repository = "https://github.com/AhmiDarrow/RemedyAI"
 
 [project.scripts]
 remedy = "remedy.interfaces.cli:main"
@@ -45,9 +45,24 @@ minversion = "7.0"
 addopts = ["-v", "--tb=short", "--strict-markers"]
 testpaths = ["tests"]
 
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+lint.select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM"]
+lint.ignore = ["SIM114", "C419"]
+fix = true
+unsafe-fixes = false
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["N802", "N803", "N806", "E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+
 [dependency-groups]
 dev = [
     "httpx>=0.28.1",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
+    "ruff>=0.11.0",
 ]

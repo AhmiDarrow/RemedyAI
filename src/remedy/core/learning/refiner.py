@@ -9,14 +9,13 @@ Monitors skill execution success/failure signals and:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from dataclasses import dataclass, field
-from typing import Optional
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from packaging.version import Version
 
-from remedy.models import Skill, SkillManifest, SkillStatus
+from remedy.models import Skill, SkillStatus
 
 
 @dataclass
@@ -29,8 +28,8 @@ class RefinementRecord:
     change_type: str = ""  # "instruction", "tag", "tool", "confidence", "status"
     change_description: str = ""
     triggered_by: str = ""  # "feedback", "manual", "auto-analysis"
-    feedback_context: Optional[str] = None
-    applied_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    feedback_context: str | None = None
+    applied_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 @dataclass
@@ -41,7 +40,7 @@ class SkillStats:
     successes: int = 0
     failures: int = 0
     avg_duration_ms: float = 0.0
-    last_executed: Optional[datetime] = None
+    last_executed: datetime | None = None
     execution_by_session: dict[str, int] = field(default_factory=dict)
     common_errors: dict[str, int] = field(default_factory=dict)
 
@@ -73,7 +72,7 @@ class SkillRefiner:
         success: bool,
         duration_ms: float = 0.0,
         session_id: str = "",
-        error: Optional[str] = None,
+        error: str | None = None,
     ) -> None:
         stats = self._get_or_create_stats(skill_name)
         stats.total_executions += 1
@@ -89,7 +88,7 @@ class SkillRefiner:
                 stats.avg_duration_ms * (stats.total_executions - 1) + duration_ms
             ) / stats.total_executions
 
-        stats.last_executed = datetime.now(timezone.utc)
+        stats.last_executed = datetime.now(UTC)
         if session_id:
             stats.execution_by_session[session_id] = stats.execution_by_session.get(session_id, 0) + 1
 
@@ -115,7 +114,7 @@ class SkillRefiner:
         self,
         skill: Skill,
         suggestion: str,
-    ) -> Optional[RefinementRecord]:
+    ) -> RefinementRecord | None:
         """Add or update a section of the skill's instructions."""
         old_instructions = skill.instructions
         old_version = skill.manifest.version
@@ -146,7 +145,7 @@ class SkillRefiner:
         self,
         skill: Skill,
         skill_name: str,
-    ) -> Optional[RefinementRecord]:
+    ) -> RefinementRecord | None:
         """Adjust skill status based on execution feedback."""
         stats = self._get_or_create_stats(skill_name)
         old_status = skill.manifest.status

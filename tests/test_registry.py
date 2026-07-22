@@ -1,6 +1,5 @@
 """Tests for the skill registry."""
 
-import pytest
 
 from remedy.models import Skill, SkillKind, SkillManifest, SkillStatus
 from remedy.skills.registry import SkillRegistry

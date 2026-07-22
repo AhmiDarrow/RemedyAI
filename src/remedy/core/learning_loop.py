@@ -7,16 +7,20 @@ philosophy, inspired by Hermes' autonomous learning.
 
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
-from typing import Optional
-from uuid import UUID
 
 import yaml
 
+from remedy.core.learning.procedural import LearningEvent, LearningHistory
+from remedy.core.learning.refiner import SkillRefiner
+from remedy.core.learning.reflection import (
+    ExecutionTrace,
+    ReflectionEngine,
+    TraceStep,
+)
+from remedy.memory.store import MemoryStore
 from remedy.models import (
     MemoryEntryType,
-    SessionSummary,
     Skill,
     SkillKind,
     SkillManifest,
@@ -24,14 +28,6 @@ from remedy.models import (
     Task,
     TaskStatus,
 )
-from remedy.core.learning.reflection import (
-    ExecutionTrace,
-    ReflectionEngine,
-    TraceStep,
-)
-from remedy.core.learning.refiner import SkillRefiner
-from remedy.core.learning.procedural import LearningHistory, LearningEvent
-from remedy.memory.store import MemoryStore
 
 
 class LearningLoop:
@@ -68,7 +64,7 @@ class LearningLoop:
         self,
         task: Task,
         steps: list[dict],
-        session_id: Optional[str] = None,
+        session_id: str | None = None,
     ) -> ExecutionTrace:
         """Build an ExecutionTrace from a task and raw step dicts."""
         trace_steps = []
@@ -96,8 +92,8 @@ class LearningLoop:
     def learn_from_trace(
         self,
         trace: ExecutionTrace,
-        auto_approve: Optional[bool] = None,
-    ) -> Optional[Skill]:
+        auto_approve: bool | None = None,
+    ) -> Skill | None:
         """Full learning cycle: reflect -> generate -> save -> record.
 
         Returns the generated skill if one was produced, None otherwise.
@@ -132,7 +128,7 @@ class LearningLoop:
         success: bool,
         duration_ms: float = 0.0,
         session_id: str = "",
-        error: Optional[str] = None,
+        error: str | None = None,
     ) -> list[str]:
         """Record a single execution result for a skill.
 
@@ -188,8 +184,8 @@ class LearningLoop:
         self,
         task: Task,
         trace: list[dict],
-        proposed_name: Optional[str] = None,
-    ) -> Optional[str]:
+        proposed_name: str | None = None,
+    ) -> str | None:
         """Backward-compatible: generate a SKILL.md string from a raw trace."""
         exec_trace = self.build_trace_from_dict(task, trace)
         reflection = self.reflection.reflect(exec_trace)
@@ -219,7 +215,7 @@ class LearningLoop:
 
     async def propose_refinement(
         self, skill: Skill, feedback: str
-    ) -> Optional[str]:
+    ) -> str | None:
         """Given user feedback on a skill, store it and return suggestions."""
         await self.memory.upsert(
             type(

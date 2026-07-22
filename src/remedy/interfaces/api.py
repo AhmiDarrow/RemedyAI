@@ -11,19 +11,14 @@ Provides:
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import time
-from datetime import datetime
-from pathlib import Path
-from typing import Any, Optional
-from uuid import UUID, uuid4
+from typing import Any
+from uuid import uuid4
 
 import yaml
 from fastapi import (
-    APIRouter,
-    BackgroundTasks,
     FastAPI,
     HTTPException,
     Query,
@@ -31,7 +26,7 @@ from fastapi import (
     Response,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from remedy.models import (
@@ -46,15 +41,15 @@ logger = logging.getLogger(__name__)
 
 class ChatRequest(BaseModel):
     message: str = Field(..., description="User message to the agent")
-    session_id: Optional[str] = Field(default=None)
-    user_id: Optional[str] = Field(default="default")
-    channel: Optional[str] = Field(default="api")
+    session_id: str | None = Field(default=None)
+    user_id: str | None = Field(default="default")
+    channel: str | None = Field(default="api")
 
 
 class ChatResponse(BaseModel):
     response: str
     request_id: str
-    session_id: Optional[str] = None
+    session_id: str | None = None
     processing_time_ms: float = 0.0
 
 
@@ -93,7 +88,7 @@ class WebhookPayload(BaseModel):
     source: str
     event: str = "default"
     data: dict[str, Any] = Field(default_factory=dict)
-    signature: Optional[str] = None
+    signature: str | None = None
 
 
 def create_app(

@@ -8,11 +8,9 @@ and image caching.
 from __future__ import annotations
 
 import asyncio
-import os
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Optional
 
 from remedy.execution.sandbox import ExecutionResult, Sandbox
 
@@ -46,8 +44,8 @@ class DockerSandbox(Sandbox):
         self.cpu_limit = cpu_limit
         self.read_only = read_only
         self.timeout = timeout
-        self._workdir: Optional[Path] = None
-        self._available: Optional[bool] = None
+        self._workdir: Path | None = None
+        self._available: bool | None = None
 
     @property
     def available(self) -> bool:
@@ -84,10 +82,10 @@ class DockerSandbox(Sandbox):
     async def execute(
         self,
         command: list[str],
-        workdir: Optional[Path] = None,
+        workdir: Path | None = None,
         timeout_seconds: float = 30.0,
-        env: Optional[dict[str, str]] = None,
-        mounts: Optional[list[tuple[str, str]]] = None,
+        env: dict[str, str] | None = None,
+        mounts: list[tuple[str, str]] | None = None,
     ) -> ExecutionResult:
         if not self.available:
             return ExecutionResult(
@@ -139,7 +137,7 @@ class DockerSandbox(Sandbox):
                     proc.communicate(),
                     timeout=timeout_seconds,
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 proc.kill()
                 elapsed = (time.monotonic() - start) * 1000
                 return ExecutionResult(

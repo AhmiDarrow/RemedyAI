@@ -13,21 +13,21 @@ import json
 import logging
 import sys
 from contextvars import ContextVar
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 # -- context propagation ------------------------------------------------------
 
-_session_id: ContextVar[Optional[str]] = ContextVar("session_id", default=None)
-_channel: ContextVar[Optional[str]] = ContextVar("channel", default=None)
-_request_id: ContextVar[Optional[str]] = ContextVar("request_id", default=None)
+_session_id: ContextVar[str | None] = ContextVar("session_id", default=None)
+_channel: ContextVar[str | None] = ContextVar("channel", default=None)
+_request_id: ContextVar[str | None] = ContextVar("request_id", default=None)
 
 
 def set_log_context(
-    session_id: Optional[str] = None,
-    channel: Optional[str] = None,
-    request_id: Optional[str] = None,
+    session_id: str | None = None,
+    channel: str | None = None,
+    request_id: str | None = None,
 ) -> None:
     if session_id is not None:
         _session_id.set(session_id)
@@ -49,12 +49,12 @@ def clear_log_context() -> None:
 class StructuredFormatter(logging.Formatter):
     """JSON formatter for structured logging with context propagation."""
 
-    def __init__(self, fmt: Optional[str] = None, color: bool = True) -> None:
+    def __init__(self, fmt: str | None = None, color: bool = True) -> None:
         super().__init__()
         self.color = color and sys.stderr.isatty()
 
     def format(self, record: logging.LogRecord) -> str:
-        ts = datetime.now(timezone.utc).isoformat()
+        ts = datetime.now(UTC).isoformat()
 
         if self.color and record.levelno >= logging.WARNING:
             return self._format_colored(record, ts)
@@ -106,7 +106,7 @@ class TextFormatter(logging.Formatter):
     """Human-readable formatter with context."""
 
     def format(self, record: logging.LogRecord) -> str:
-        ts = datetime.now(timezone.utc).strftime("%H:%M:%S")
+        ts = datetime.now(UTC).strftime("%H:%M:%S")
         sid = _session_id.get()
         extra = f" [{sid[:8]}]" if sid else ""
         return f"{ts} {record.levelname:5s}{extra} {record.name}: {record.getMessage()}"
@@ -117,7 +117,7 @@ class TextFormatter(logging.Formatter):
 
 def setup_logging(
     level: str = "INFO",
-    log_dir: Optional[str] = None,
+    log_dir: str | None = None,
     json_output: bool = True,
     console_output: bool = True,
 ) -> None:

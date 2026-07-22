@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 
 @dataclass
@@ -137,7 +136,7 @@ class HealthChecker:
 
     def __init__(self) -> None:
         self._checks: dict[str, Any] = {}
-        self._started_at = datetime.now(timezone.utc)
+        self._started_at = datetime.now(UTC)
 
     def register(self, name: str, check_fn: Any) -> None:
         self._checks[name] = check_fn
@@ -159,11 +158,11 @@ class HealthChecker:
                 results[name] = {"status": "unhealthy", "error": str(e)}
                 healthy = False
 
-        uptime = (datetime.now(timezone.utc) - self._started_at).total_seconds()
+        uptime = (datetime.now(UTC) - self._started_at).total_seconds()
 
         return {
             "status": "ok" if healthy else "degraded",
             "uptime_seconds": uptime,
             "checks": results,
-            "checked_at": datetime.now(timezone.utc).isoformat(),
+            "checked_at": datetime.now(UTC).isoformat(),
         }

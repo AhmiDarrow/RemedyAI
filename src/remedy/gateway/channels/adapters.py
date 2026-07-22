@@ -13,10 +13,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Optional
 
-from remedy.models import ChannelKind
 from remedy.gateway.router import ChannelAdapter
+from remedy.models import ChannelKind
 
 logger = logging.getLogger(__name__)
 
@@ -30,17 +29,17 @@ class CLIChannel(ChannelAdapter):
     def __init__(self, gateway, *, prompt: str = "remedy> ") -> None:
         super().__init__(ChannelKind.CLI, gateway)
         self.prompt = prompt
-        self._reader_task: Optional[asyncio.Task] = None
+        self._reader_task: asyncio.Task | None = None
 
     async def start(self) -> None:
         await super().start()
         logger.info("CLI channel active (prompt: %r)", self.prompt)
 
-    async def send(self, message: str, target: Optional[str] = None) -> bool:
+    async def send(self, message: str, target: str | None = None) -> bool:
         print(f"\n{message}")
         return True
 
-    async def read_line(self, timeout: Optional[float] = None) -> Optional[str]:
+    async def read_line(self, timeout: float | None = None) -> str | None:
         """Read a single line from stdin (async-compatible wrapper)."""
         try:
             loop = asyncio.get_event_loop()
@@ -56,11 +55,11 @@ class TelegramChannel(ChannelAdapter):
     to receive messages and sends replies via the Telegram Bot API.
     """
 
-    def __init__(self, gateway, *, bot_token: str = "", chat_ids: Optional[list[str]] = None) -> None:
+    def __init__(self, gateway, *, bot_token: str = "", chat_ids: list[str] | None = None) -> None:
         super().__init__(ChannelKind.TELEGRAM, gateway)
         self.bot_token = bot_token
         self.chat_ids: list[str] = chat_ids or []
-        self._poll_task: Optional[asyncio.Task] = None
+        self._poll_task: asyncio.Task | None = None
         self._last_update_id: int = 0
 
     async def start(self) -> None:
@@ -70,7 +69,7 @@ class TelegramChannel(ChannelAdapter):
         else:
             logger.info("Telegram channel: stub mode (no token)")
 
-    async def send(self, message: str, target: Optional[str] = None) -> bool:
+    async def send(self, message: str, target: str | None = None) -> bool:
         if not self.bot_token:
             logger.debug("Telegram stub: %s", message[:50])
             return True
@@ -104,7 +103,7 @@ class DiscordChannel(ChannelAdapter):
         super().__init__(ChannelKind.DISCORD, gateway)
         self.bot_token = bot_token
         self.channel_id = channel_id
-        self._ws_task: Optional[asyncio.Task] = None
+        self._ws_task: asyncio.Task | None = None
 
     async def start(self) -> None:
         await super().start()
@@ -113,7 +112,7 @@ class DiscordChannel(ChannelAdapter):
         else:
             logger.info("Discord channel: stub mode (no token)")
 
-    async def send(self, message: str, target: Optional[str] = None) -> bool:
+    async def send(self, message: str, target: str | None = None) -> bool:
         if not self.bot_token:
             logger.debug("Discord stub: %s", message[:50])
             return True
@@ -152,7 +151,7 @@ class SlackChannel(ChannelAdapter):
         else:
             logger.info("Slack channel: stub mode (no token)")
 
-    async def send(self, message: str, target: Optional[str] = None) -> bool:
+    async def send(self, message: str, target: str | None = None) -> bool:
         if not self.bot_token:
             logger.debug("Slack stub: %s", message[:50])
             return True
@@ -188,7 +187,7 @@ class WebChannel(ChannelAdapter):
         super().__init__(ChannelKind.WEB, gateway)
         self._pending_responses: dict[str, asyncio.Future] = {}
 
-    async def send(self, message: str, target: Optional[str] = None) -> bool:
+    async def send(self, message: str, target: str | None = None) -> bool:
         if target and target in self._pending_responses:
             fut = self._pending_responses.pop(target)
             if not fut.done():

@@ -9,10 +9,8 @@ from __future__ import annotations
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 from remedy.memory.store import MemoryStore
-from remedy.models import MemoryEntry, MemoryEntryType
 
 
 class MemoryRepair:
@@ -60,7 +58,7 @@ class MemoryRepair:
             "reclaimed_bytes": max(0, before_size - after_size),
         }
 
-    async def backup(self, backup_dir: Optional[Path] = None) -> Path:
+    async def backup(self, backup_dir: Path | None = None) -> Path:
         """Create a timestamped backup of the memory database.
 
         Args:

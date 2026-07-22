@@ -6,11 +6,10 @@ Maintains the canonical set of skills available to the agent runtime.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 from uuid import UUID
 
 from remedy.models import Skill, SkillStatus
-from remedy.skills.loader import SkillLoadError, discover_skills, load_skill_from_dir
+from remedy.skills.loader import discover_skills, load_skill_from_dir
 
 
 class SkillRegistry:
@@ -97,7 +96,7 @@ class SkillRegistry:
 
     # -- lookup --------------------------------------------------------------
 
-    def get(self, name_or_id: str | UUID) -> Optional[Skill]:
+    def get(self, name_or_id: str | UUID) -> Skill | None:
         if isinstance(name_or_id, UUID):
             return self._skills.get(name_or_id)
         skill_id = self._by_name.get(name_or_id)

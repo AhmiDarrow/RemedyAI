@@ -14,9 +14,10 @@ import importlib
 import logging
 import sys
 from collections import defaultdict
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +68,7 @@ class HookManager:
         ]
         return len(self._hooks[hook_name]) < before
 
-    def clear(self, hook_name: Optional[str] = None) -> None:
+    def clear(self, hook_name: str | None = None) -> None:
         if hook_name:
             self._hooks.pop(hook_name, None)
         else:
@@ -154,7 +155,7 @@ class PluginManager:
                         found.append(entry.name)
         return found
 
-    def load(self, plugin_name: str, plugin_path: Optional[str] = None) -> bool:
+    def load(self, plugin_name: str, plugin_path: str | None = None) -> bool:
         """Import a plugin module by name."""
         if plugin_name in self._loaded:
             return True

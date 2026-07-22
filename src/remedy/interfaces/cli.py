@@ -10,20 +10,29 @@ import argparse
 import asyncio
 import json
 import os
-import sys
 from pathlib import Path
-from typing import Optional
 
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-from rich.text import Text
 
 from remedy import __version__
-from remedy.memory.store import MemoryStore
+from remedy.core.learning.reflection import ExecutionTrace, TraceStep
+from remedy.core.learning_loop import LearningLoop
+from remedy.execution.runtime import ToolRuntime
+from remedy.execution.sandbox import SubprocessSandbox
+from remedy.gateway.cli import main_gateway
+from remedy.interfaces.config import (
+    config_to_agent_config,
+    create_default_config,
+    resolve_config,
+)
+from remedy.interfaces.uninstaller import run_uninstall
+from remedy.interfaces.updater import run_update
+from remedy.interfaces.wizard import run_wizard
 from remedy.memory.consolidator import MemoryConsolidator
-from remedy.memory.handoff import AutoHandoffManager
 from remedy.memory.repair import MemoryRepair
+from remedy.memory.store import MemoryStore
 from remedy.models import (
     AgentConfig,
     HandoffNote,
@@ -32,31 +41,11 @@ from remedy.models import (
     ToolCall,
     ToolSource,
 )
-from remedy.skills.loader import load_skill_from_dir
-from remedy.skills.registry import SkillRegistry
 from remedy.skills.executor import SkillExecutor
-from remedy.skills.validator import SkillValidator
 from remedy.skills.exporter import SkillExporter
+from remedy.skills.registry import SkillRegistry
 from remedy.skills.tool_registry import ToolRegistry
-from remedy.skills.adapters.hermes_deep import deep_load_hermes_skill
-from remedy.skills.adapters.openclaw_deep import deep_load_openclaw_skill
-from remedy.core.learning_loop import LearningLoop
-from remedy.core.learning.reflection import ReflectionEngine, ExecutionTrace, TraceStep
-from remedy.core.learning.refiner import SkillRefiner
-from remedy.gateway.cli import main_gateway
-from remedy.execution.policy import ExecutionPolicy, PolicyAction, PolicyRule
-from remedy.execution.runtime import ToolRuntime, ToolContext
-from remedy.execution.sandbox import SubprocessSandbox
-from remedy.interfaces.config import (
-    create_default_config,
-    load_config,
-    resolve_config,
-    config_to_agent_config,
-    generate_default_config,
-)
-from remedy.interfaces.wizard import run_wizard
-from remedy.interfaces.updater import run_update
-from remedy.interfaces.uninstaller import run_uninstall
+from remedy.skills.validator import SkillValidator
 
 console = Console()
 
@@ -291,7 +280,7 @@ def _print_memory_entries(entries: list[MemoryEntry]) -> None:
                 f"{entry.content[:200]}{'...' if len(entry.content) > 200 else ''}\n\n"
                 f"[dim]ID: {entry.id} | Type: {entry.entry_type.value} | "
                 f"Importance: {entry.importance:.1f} | {entry.created_at.isoformat()}[/dim]",
-                title=f"Memory Entry",
+                title="Memory Entry",
             )
         )
 
@@ -426,14 +415,18 @@ async def _cmd_session(args, db_path: Path) -> None:
 
 async def _cmd_skill(args) -> None:
     registry = SkillRegistry()
-    if args.skill_cmd in ("discover", "info", "load", "run", "test", "export"):
-        if args.skill_cmd != "discover":
-            registry.discover("skills", recurse=True)
-        if args.skill_cmd in ("discover",):
-            pass
 
     if args.skill_cmd == "list":
-        pass
+        if hasattr(args, "path") and args.path:
+            registry.discover(args.path, recurse=True)
+        if not registry.skills:
+            console.print("[dim]No skills registered. Use 'remedy skill discover <path>'[/dim]")
+            return
+        console.print(f"[bold]{len(registry.skills)} skill(s):[/bold]")
+        for name, skill in sorted(registry.skills.items()):
+            desc = getattr(skill, "description", "") or ""
+            console.print(f"  [cyan]{name}[/cyan] {desc[:60]}")
+        return
     elif args.skill_cmd == "discover":
         count = registry.discover(args.path, recurse=not args.no_recurse)
         console.print(f"[green]Discovered {count} skill(s) from {args.path}[/green]")
@@ -768,10 +761,22 @@ async def _cmd_learn(args, db_path: Path) -> None:
 
 async def _cmd_exec(args) -> None:
     import json as _json
-    sandbox = SubprocessSandbox()
-    policy = ExecutionPolicy()
+
+    from remedy.core.security import check_dangerous_command
 
     command = list(args.cmdline) if args.cmdline else []
+    if not command:
+        console.print("[red]No command specified[/red]")
+        return
+
+    danger = check_dangerous_command(command)
+    if danger:
+        console.print(f"[bold red]WARNING: {danger}[/bold red]")
+        result = _json.dumps({"warning": danger, "command": " ".join(command)})
+        console.print("[yellow]Execution blocked by security policy[/yellow]")
+        return
+
+    sandbox = SubprocessSandbox()
     console.print(f"[bold]Executing:[/bold] {' '.join(command)}")
 
     result = await sandbox.execute(
@@ -812,11 +817,11 @@ async def _cmd_config(args) -> None:
 
 def _cmd_serve(args) -> None:
     import uvicorn
-    from remedy.interfaces.api import create_app
-    from remedy.gateway.router import Gateway
-    from remedy.memory.store import MemoryStore
+
     from remedy.core.agent import BasicRuntime
-    from remedy.skills.registry import SkillRegistry
+    from remedy.gateway.router import Gateway
+    from remedy.interfaces.api import create_app
+    from remedy.memory.store import MemoryStore
 
     home = Path(args.home).expanduser()
     home.mkdir(parents=True, exist_ok=True)
@@ -867,7 +872,7 @@ def _cmd_serve(args) -> None:
     uvicorn.run(app, host=args.host, port=args.port, log_level=config.get("log_level", "info").lower())
 
 
-def main(args: Optional[list[str]] = None) -> None:
+def main(args: list[str] | None = None) -> None:
     parser = build_parser()
     parsed = parser.parse_args(args)
 

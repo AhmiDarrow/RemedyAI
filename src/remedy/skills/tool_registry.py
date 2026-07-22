@@ -6,11 +6,9 @@ and builtins. Tracks invocation history and tool metadata.
 
 from __future__ import annotations
 
-import json
 from collections import defaultdict
-from datetime import datetime, timezone
-from typing import Any, Optional
-from uuid import UUID
+from datetime import UTC, datetime
+from typing import Any
 
 from remedy.models import ToolCall, ToolDefinition, ToolResult, ToolSource
 
@@ -42,7 +40,7 @@ class ToolRegistry:
         self,
         name: str,
         description: str,
-        parameters: Optional[dict[str, Any]] = None,
+        parameters: dict[str, Any] | None = None,
     ) -> ToolDefinition:
         return self.register(ToolDefinition(
             name=name,
@@ -80,7 +78,7 @@ class ToolRegistry:
             uri=f"skill://{skill_name}/{tool_name}",
         ))
 
-    def get(self, name: str, source: Optional[ToolSource] = None) -> Optional[ToolDefinition]:
+    def get(self, name: str, source: ToolSource | None = None) -> ToolDefinition | None:
         if source:
             return self._tools.get(f"{source.value}:{name}")
         for src in ToolSource:
@@ -113,7 +111,7 @@ class ToolRegistry:
             "tool_name": call.tool_name,
             "success": result.success,
             "duration_ms": result.duration_ms,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         })
 
     def get_stats(self) -> dict[str, Any]:

@@ -3,26 +3,23 @@
 from __future__ import annotations
 
 import asyncio
-import json
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
-from remedy.models import (
-    AgentConfig,
-    ChannelKind,
-    EventKind,
-    GatewayEvent,
-    MemoryEntryType,
-)
-from remedy.gateway.router import ChannelAdapter, Gateway
 from remedy.gateway.channels.adapters import (
     CLIChannel,
     DiscordChannel,
     SlackChannel,
     TelegramChannel,
     WebChannel,
+)
+from remedy.gateway.router import ChannelAdapter, Gateway
+from remedy.models import (
+    AgentConfig,
+    ChannelKind,
+    EventKind,
+    GatewayEvent,
 )
 
 

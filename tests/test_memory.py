@@ -1,6 +1,7 @@
 """Tests for the memory store with FTS5 and handoff support."""
 
 import asyncio
+from datetime import UTC
 
 import pytest
 
@@ -145,11 +146,11 @@ async def test_get_relevant_handoffs(store):
 
 @pytest.mark.asyncio
 async def test_session_summaries(store):
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     summary = SessionSummary(
         session_id="sess-001",
-        started_at=datetime.now(timezone.utc),
+        started_at=datetime.now(UTC),
         tasks_completed=5,
         skills_created=2,
         key_decisions=["Use SQLite"],
@@ -167,13 +168,13 @@ async def test_session_summaries(store):
 
 @pytest.mark.asyncio
 async def test_list_sessions(store):
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     await store.save_session_summary(
-        SessionSummary(session_id="s1", started_at=datetime.now(timezone.utc))
+        SessionSummary(session_id="s1", started_at=datetime.now(UTC))
     )
     await store.save_session_summary(
-        SessionSummary(session_id="s2", started_at=datetime.now(timezone.utc))
+        SessionSummary(session_id="s2", started_at=datetime.now(UTC))
     )
     sessions = await store.list_sessions()
     assert len(sessions) == 2

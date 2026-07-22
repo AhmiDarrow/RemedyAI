@@ -10,9 +10,8 @@ Checks:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
-from packaging.version import Version, InvalidVersion
+from packaging.version import InvalidVersion, Version
 
 from remedy.models import Skill, SkillStatus
 from remedy.skills.executor import SkillExecutor
@@ -44,7 +43,7 @@ class SkillValidator:
     """Validates skills against the agentskills.io specification and optional
     runtime tests."""
 
-    def __init__(self, executor: Optional[SkillExecutor] = None) -> None:
+    def __init__(self, executor: SkillExecutor | None = None) -> None:
         self.executor = executor or SkillExecutor()
 
     def validate_metadata(self, skill: Skill) -> ValidationResult:

@@ -1,6 +1,5 @@
 """Tests for the Hermes and OpenClaw adapters."""
 
-from pathlib import Path
 
 import pytest
 
@@ -15,7 +14,6 @@ from remedy.skills.adapters.openclaw_mcp_adapter import (
     load_openclaw_skill,
 )
 from remedy.skills.loader import SkillLoadError
-
 
 HERMES_SKILL = """---
 name: hermes-test

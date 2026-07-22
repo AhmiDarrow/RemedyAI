@@ -2,25 +2,20 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from remedy.execution.docker import DockerSandbox
 from remedy.execution.policy import (
     ExecutionPolicy,
     PolicyAction,
-    PolicyDecision,
     PolicyRule,
     default_policy,
 )
-from remedy.execution.runtime import ToolRuntime, ToolContext, ExecutionRecord
+from remedy.execution.runtime import ToolContext, ToolRuntime
 from remedy.execution.sandbox import ExecutionResult, SubprocessSandbox
-from remedy.execution.docker import DockerSandbox
-from remedy.models import ToolCall, ToolDefinition, ToolResult, ToolSource
-from remedy.skills.tool_registry import ToolRegistry
+from remedy.models import ToolCall, ToolSource
 
 
 class TestExecutionPolicy:

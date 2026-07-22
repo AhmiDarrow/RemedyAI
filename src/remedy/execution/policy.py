@@ -6,9 +6,9 @@ Policy rules are evaluated per-call — deny takes precedence.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, Optional
+from typing import Any
 
 
 class PolicyAction(StrEnum):
@@ -31,7 +31,7 @@ class PolicyDecision:
     allowed: bool
     reason: str = ""
     requires_approval: bool = False
-    matching_rule: Optional[PolicyRule] = None
+    matching_rule: PolicyRule | None = None
 
 
 class ExecutionPolicy:
@@ -64,7 +64,7 @@ class ExecutionPolicy:
     def require_approval(self, tool_name: str) -> None:
         self._always_require_approval.add(tool_name)
 
-    def clear_rules(self, scope: Optional[str] = None) -> None:
+    def clear_rules(self, scope: str | None = None) -> None:
         if scope:
             self._rules = [r for r in self._rules if r.scope != scope]
         else:
@@ -72,7 +72,7 @@ class ExecutionPolicy:
 
     # -- rule evaluation -----------------------------------------------------
 
-    def evaluate(self, tool_name: str, context: Optional[dict[str, Any]] = None) -> PolicyDecision:
+    def evaluate(self, tool_name: str, context: dict[str, Any] | None = None) -> PolicyDecision:
         ctx = context or {}
 
         # Find all matching rules (wildcard or exact)
@@ -80,7 +80,7 @@ class ExecutionPolicy:
         allow_reason = ""
         denied = False
         allowed = False
-        last_matched: Optional[PolicyRule] = None
+        last_matched: PolicyRule | None = None
 
         for rule in sorted(self._rules, key=lambda r: (r.scope != "global", r.scope != "user")):
             if self._match(rule.tool_name, tool_name):
@@ -116,7 +116,7 @@ class ExecutionPolicy:
             requires_approval=False,
         )
 
-    def check(self, tool_name: str, context: Optional[dict[str, Any]] = None) -> bool:
+    def check(self, tool_name: str, context: dict[str, Any] | None = None) -> bool:
         return self.evaluate(tool_name, context).allowed
 
     # -- helpers -------------------------------------------------------------

@@ -13,13 +13,12 @@ import json
 import logging
 import time
 from collections import defaultdict
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, AsyncIterator, Callable, Optional, Union
-from uuid import UUID, uuid4
+from collections.abc import AsyncIterator, Callable
+from datetime import UTC, datetime
+from typing import Any
 
-from remedy.models import ChannelKind, EventKind, GatewayEvent, MemoryEntry, MemoryEntryType
 from remedy.memory.store import MemoryStore
+from remedy.models import ChannelKind, EventKind, GatewayEvent, MemoryEntry, MemoryEntryType
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +28,7 @@ EventHandler = Callable[[GatewayEvent], AsyncIterator[Any]]
 class ChannelAdapter:
     """Base class for channel adapters."""
 
-    def __init__(self, kind: ChannelKind, gateway: "Gateway") -> None:
+    def __init__(self, kind: ChannelKind, gateway: Gateway) -> None:
         self.kind = kind
         self.gateway = gateway
         self._running = False
@@ -46,7 +45,7 @@ class ChannelAdapter:
         self._running = False
         logger.info("Channel %s stopped", self.kind.value)
 
-    async def send(self, message: str, target: Optional[str] = None) -> bool:
+    async def send(self, message: str, target: str | None = None) -> bool:
         """Send a message through this channel. Override for real implementations."""
         return True
 
@@ -60,7 +59,7 @@ class Gateway:
         runtime,  # AgentRuntime
         heartbeat_interval: float = 60.0,
         rate_limit: int = 60,  # max events per minute per channel
-        memory_store: Optional[MemoryStore] = None,
+        memory_store: MemoryStore | None = None,
     ) -> None:
         self.runtime = runtime
         self.heartbeat_interval = heartbeat_interval
@@ -69,14 +68,14 @@ class Gateway:
 
         self._handlers: list[EventHandler] = []
         self._running = False
-        self._heartbeat_task: Optional[asyncio.Task] = None
-        self._queue_task: Optional[asyncio.Task] = None
+        self._heartbeat_task: asyncio.Task | None = None
+        self._queue_task: asyncio.Task | None = None
         self._event_queue: asyncio.Queue[GatewayEvent] = asyncio.Queue()
 
         self._channels: dict[ChannelKind, ChannelAdapter] = {}
         self._rate_buckets: dict[ChannelKind, list[float]] = defaultdict(list)
         self._event_counter: int = 0
-        self._started_at: Optional[datetime] = None
+        self._started_at: datetime | None = None
 
     # -- properties ----------------------------------------------------------
 
@@ -97,10 +96,10 @@ class Gateway:
     def register_channel(self, adapter: ChannelAdapter) -> None:
         self._channels[adapter.kind] = adapter
 
-    def get_channel(self, kind: ChannelKind) -> Optional[ChannelAdapter]:
+    def get_channel(self, kind: ChannelKind) -> ChannelAdapter | None:
         return self._channels.get(kind)
 
-    async def broadcast(self, message: str, exclude: Optional[list[ChannelKind]] = None) -> dict[ChannelKind, bool]:
+    async def broadcast(self, message: str, exclude: list[ChannelKind] | None = None) -> dict[ChannelKind, bool]:
         """Send a message to all channels."""
         exclude = exclude or []
         results: dict[ChannelKind, bool] = {}
@@ -109,7 +108,7 @@ class Gateway:
                 results[kind] = await ch.send(message)
         return results
 
-    async def send_to(self, kind: ChannelKind, message: str, target: Optional[str] = None) -> bool:
+    async def send_to(self, kind: ChannelKind, message: str, target: str | None = None) -> bool:
         ch = self._channels.get(kind)
         if ch is None:
             return False
@@ -128,7 +127,7 @@ class Gateway:
 
     async def start(self) -> None:
         self._running = True
-        self._started_at = datetime.now(timezone.utc)
+        self._started_at = datetime.now(UTC)
         self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
         self._queue_task = asyncio.create_task(self._process_queue())
 
@@ -184,7 +183,6 @@ class Gateway:
 
         if self.memory:
             try:
-                from datetime import datetime as _dt
                 mem_entry = MemoryEntry(
                     entry_type=MemoryEntryType.SYSTEM,
                     title=f"Gateway event: {event.kind.value}",
@@ -225,7 +223,7 @@ class Gateway:
                 channel=ChannelKind.CLI,
                 source_id="system",
                 payload={
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                     "uptime": self._uptime_str(),
                     "events": self._event_counter,
                 },
@@ -240,7 +238,7 @@ class Gateway:
             try:
                 event = await asyncio.wait_for(self._event_queue.get(), timeout=1.0)
                 await self.emit(event)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
             except Exception:
                 logger.exception("Queue processing error")
@@ -257,7 +255,7 @@ class Gateway:
     def _uptime_str(self) -> str:
         if self._started_at is None:
             return "0s"
-        delta = datetime.now(timezone.utc) - self._started_at
+        delta = datetime.now(UTC) - self._started_at
         total = int(delta.total_seconds())
         h, m, s = total // 3600, (total % 3600) // 60, total % 60
         return f"{h}h {m}m {s}s"

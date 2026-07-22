@@ -1,8 +1,7 @@
 """Tests for user profile modeling and persistence."""
 
-import pytest
 
-from remedy.memory.profile import UserProfile, UserFact, UserTrait
+from remedy.memory.profile import UserProfile
 
 
 class TestUserProfile:

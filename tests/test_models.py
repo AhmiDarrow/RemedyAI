@@ -1,6 +1,5 @@
 """Tests for shared Pydantic models."""
 
-import pytest
 from remedy.models import (
     AgentConfig,
     HandoffNote,

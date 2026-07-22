@@ -3,19 +3,14 @@
 import json
 import os
 import sys
-import tempfile
 from pathlib import Path
 from unittest import mock
 
 import pytest
 from fastapi.testclient import TestClient
-from pydantic import BaseModel
 
-from remedy.gateway.router import Gateway
 from remedy.interfaces.api import create_app
 from remedy.interfaces.config import (
-    CONFIG_PATHS,
-    ENV_PREFIX,
     _coerce,
     config_to_agent_config,
     create_default_config,
@@ -24,16 +19,11 @@ from remedy.interfaces.config import (
     load_env_overrides,
     resolve_config,
 )
-from remedy.interfaces.plugin import HookManager, HookRegistration, PluginManager
+from remedy.interfaces.plugin import HookManager, PluginManager
 from remedy.models import (
     AgentConfig,
     ChannelKind,
-    EventKind,
-    GatewayEvent,
-    MemoryEntry,
-    MemoryEntryType,
 )
-
 
 # ============================================================================
 # Test Configuration System
@@ -415,7 +405,6 @@ class TestPluginManager:
 @pytest.fixture
 def test_client():
     from unittest import mock
-    from remedy.models import AgentConfig
 
     runtime = mock.MagicMock()
     runtime.config = AgentConfig(name="test", home_dir="~/.remedy")

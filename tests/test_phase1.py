@@ -1,13 +1,13 @@
 """Tests for memory consolidator, auto-handoff, and repair tools."""
 
 import asyncio
-import pytest
-from datetime import datetime
 
-from remedy.memory.store import MemoryStore
+import pytest
+
 from remedy.memory.consolidator import MemoryConsolidator
 from remedy.memory.handoff import AutoHandoffManager
 from remedy.memory.repair import MemoryRepair
+from remedy.memory.store import MemoryStore
 from remedy.models import (
     HandoffNote,
     MemoryEntry,

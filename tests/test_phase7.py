@@ -2,11 +2,6 @@
 
 import asyncio
 import logging
-import re
-import tempfile
-from datetime import timezone, datetime
-from pathlib import Path
-from unittest import mock
 
 import pytest
 
@@ -23,13 +18,12 @@ from remedy.core.errors import (
 from remedy.core.logging import (
     StructuredFormatter,
     TextFormatter,
-    clear_log_context,
-    get_logger,
-    set_log_context,
-    setup_logging,
-    _session_id,
     _channel,
     _request_id,
+    _session_id,
+    clear_log_context,
+    set_log_context,
+    setup_logging,
 )
 from remedy.core.metrics import (
     Counter,
@@ -39,9 +33,6 @@ from remedy.core.metrics import (
     MetricsRegistry,
 )
 from remedy.core.security import (
-    MAX_FILENAME_LENGTH,
-    MAX_PATH_DEPTH,
-    HOME_DIR,
     safe_path,
     sanitize_search_query,
     validate_execution_command,
@@ -50,7 +41,6 @@ from remedy.core.security import (
     validate_tags,
     validate_uuid,
 )
-
 
 # ============================================================================
 # Test Error Types

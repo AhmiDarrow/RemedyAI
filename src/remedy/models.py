@@ -5,9 +5,9 @@ These models form the data contract across all Remedy modules.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -98,20 +98,20 @@ class SkillManifest(BaseModel):
     name: str = Field(description="Unique skill identifier (kebab-case recommended)")
     description: str = Field(description="Short summary of what the skill does")
     version: str = Field(default="1.0.0", description="SemVer version")
-    author: Optional[str] = Field(default=None, description="Skill author or source")
-    license: Optional[str] = Field(default=None, description="SPDX license identifier")
+    author: str | None = Field(default=None, description="Skill author or source")
+    license: str | None = Field(default=None, description="SPDX license identifier")
     tags: list[str] = Field(default_factory=list, description="Discoverability tags")
     kind: SkillKind = Field(default=SkillKind.NATIVE)
     status: SkillStatus = Field(default=SkillStatus.DISCOVERED)
-    homepage: Optional[str] = Field(default=None)
-    repository: Optional[str] = Field(default=None)
+    homepage: str | None = Field(default=None)
+    repository: str | None = Field(default=None)
     requires: list[str] = Field(default_factory=list, description="Dependencies (pip packages)")
     tools: list[str] = Field(default_factory=list, description="MCP tool names this skill uses")
     raw_frontmatter: dict[str, Any] = Field(default_factory=dict)
 
     # File-system metadata (populated at load time)
-    path: Optional[str] = Field(default=None, description="Filesystem path to the skill directory")
-    loaded_at: Optional[datetime] = Field(default=None)
+    path: str | None = Field(default=None, description="Filesystem path to the skill directory")
+    loaded_at: datetime | None = Field(default=None)
 
     # Runtime metadata (populated by adapters, validators, etc.)
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -140,7 +140,7 @@ class Skill(BaseModel):
         default_factory=list,
         description="Relative paths to reference documents (references/ directory)",
     )
-    source_skill_dir: Optional[str] = Field(
+    source_skill_dir: str | None = Field(
         default=None,
         description="Absolute path to the original skill directory on disk",
     )
@@ -157,9 +157,9 @@ class MemoryEntry(BaseModel):
     content: str = Field(default="")
     tags: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    session_id: Optional[str] = Field(default=None)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    session_id: str | None = Field(default=None)
     importance: float = Field(default=0.5, ge=0.0, le=1.0)
 
 
@@ -175,12 +175,12 @@ class HandoffNote(BaseModel):
     title: str
     content: str
     tags: list[str] = Field(default_factory=list)
-    from_session: Optional[str] = Field(default=None)
-    to_session: Optional[str] = Field(default=None)
-    context_summary: Optional[str] = Field(default=None)
+    from_session: str | None = Field(default=None)
+    to_session: str | None = Field(default=None)
+    context_summary: str | None = Field(default=None)
     action_items: list[str] = Field(default_factory=list)
     decisions: list[str] = Field(default_factory=list)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     acknowledged: bool = Field(default=False)
 
 
@@ -189,7 +189,7 @@ class SessionSummary(BaseModel):
 
     session_id: str
     started_at: datetime
-    ended_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    ended_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     tasks_completed: int = 0
     skills_created: int = 0
     skills_refined: int = 0
@@ -207,15 +207,15 @@ class Task(BaseModel):
     title: str
     description: str = Field(default="")
     status: TaskStatus = Field(default=TaskStatus.CREATED)
-    parent_id: Optional[UUID] = Field(default=None)
+    parent_id: UUID | None = Field(default=None)
     sub_tasks: list[UUID] = Field(default_factory=list)
-    assigned_skill: Optional[str] = Field(default=None)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    completed_at: Optional[datetime] = Field(default=None)
+    assigned_skill: str | None = Field(default=None)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    completed_at: datetime | None = Field(default=None)
     tags: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
-    result_summary: Optional[str] = Field(default=None)
+    result_summary: str | None = Field(default=None)
 
 
 class ToolDefinition(BaseModel):
@@ -225,7 +225,7 @@ class ToolDefinition(BaseModel):
     description: str
     source: ToolSource
     parameters: dict[str, Any] = Field(default_factory=dict)
-    uri: Optional[str] = Field(default=None)
+    uri: str | None = Field(default=None)
 
 
 class ToolCall(BaseModel):
@@ -234,8 +234,8 @@ class ToolCall(BaseModel):
     id: UUID = Field(default_factory=uuid4)
     tool_name: str
     arguments: dict[str, Any] = Field(default_factory=dict)
-    task_id: Optional[UUID] = Field(default=None)
-    source: Optional[ToolSource] = Field(default=None)
+    task_id: UUID | None = Field(default=None)
+    source: ToolSource | None = Field(default=None)
     approved: bool = Field(default=False)
 
 
@@ -245,8 +245,8 @@ class ToolResult(BaseModel):
     call_id: UUID
     success: bool
     data: Any = Field(default=None)
-    error: Optional[str] = Field(default=None)
-    duration_ms: Optional[float] = Field(default=None)
+    error: str | None = Field(default=None)
+    duration_ms: float | None = Field(default=None)
 
 
 class GatewayEvent(BaseModel):
@@ -257,9 +257,9 @@ class GatewayEvent(BaseModel):
     channel: ChannelKind
     source_id: str = Field(default="")
     payload: dict[str, Any] = Field(default_factory=dict)
-    received_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    session_id: Optional[str] = Field(default=None)
-    raw: Optional[str] = Field(default=None)
+    received_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    session_id: str | None = Field(default=None)
+    raw: str | None = Field(default=None)
 
 
 class AgentConfig(BaseModel):
@@ -269,7 +269,7 @@ class AgentConfig(BaseModel):
     persona: str = Field(default="default")
     home_dir: str = Field(default="~/.remedy")
     skills_dir: list[str] = Field(default_factory=list)
-    memory_db_path: Optional[str] = Field(default=None)
+    memory_db_path: str | None = Field(default=None)
     enabled_channels: list[ChannelKind] = Field(default_factory=list)
     mcp_servers: list[str] = Field(default_factory=list)
     allow_skill_creation: bool = Field(default=True)

@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import time
 import logging
-from dataclasses import dataclass, field
-from enum import StrEnum
-from typing import Any, Callable, Coroutine, Optional, TypeVar
+import time
+from collections.abc import Callable, Coroutine
+from typing import Any, TypeVar
 
 T = TypeVar("T")
 logger = logging.getLogger(__name__)
@@ -16,7 +15,7 @@ logger = logging.getLogger(__name__)
 class RemedyError(Exception):
     """Base exception for all Remedy-specific errors."""
 
-    def __init__(self, message: str, code: Optional[str] = None, details: Optional[dict] = None) -> None:
+    def __init__(self, message: str, code: str | None = None, details: dict | None = None) -> None:
         super().__init__(message)
         self.code = code or "INTERNAL_ERROR"
         self.details = details or {}
@@ -33,7 +32,7 @@ class ConfigError(RemedyError):
 class SkillError(RemedyError):
     """Skill loading/validation/execution errors."""
 
-    def __init__(self, message: str, skill_name: Optional[str] = None, **kwargs: Any) -> None:
+    def __init__(self, message: str, skill_name: str | None = None, **kwargs: Any) -> None:
         super().__init__(message, code="SKILL_ERROR", details=dict(skill_name=skill_name, **kwargs))
 
 
@@ -47,21 +46,21 @@ class MemoryError(RemedyError):
 class GatewayError(RemedyError):
     """Gateway/routing errors."""
 
-    def __init__(self, message: str, channel: Optional[str] = None, **kwargs: Any) -> None:
+    def __init__(self, message: str, channel: str | None = None, **kwargs: Any) -> None:
         super().__init__(message, code="GATEWAY_ERROR", details=dict(channel=channel, **kwargs))
 
 
 class ExecutionError(RemedyError):
     """Tool/sandbox execution errors."""
 
-    def __init__(self, message: str, tool_name: Optional[str] = None, **kwargs: Any) -> None:
+    def __init__(self, message: str, tool_name: str | None = None, **kwargs: Any) -> None:
         super().__init__(message, code="EXECUTION_ERROR", details=dict(tool_name=tool_name, **kwargs))
 
 
 class SecurityError(RemedyError):
     """Security/policy violations."""
 
-    def __init__(self, message: str, rule: Optional[str] = None, **kwargs: Any) -> None:
+    def __init__(self, message: str, rule: str | None = None, **kwargs: Any) -> None:
         super().__init__(message, code="SECURITY_ERROR", details=dict(rule=rule, **kwargs))
 
 
@@ -109,7 +108,7 @@ class APIRetryPolicy:
         **kwargs: Any,
     ) -> T:
         """Execute with retry logic."""
-        last_error: Optional[Exception] = None
+        last_error: Exception | None = None
 
         for attempt in range(self.max_retries + 1):
             try:
