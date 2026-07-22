@@ -46,6 +46,13 @@ from remedy.gateway.cli import main_gateway
 from remedy.execution.policy import ExecutionPolicy, PolicyAction, PolicyRule
 from remedy.execution.runtime import ToolRuntime, ToolContext
 from remedy.execution.sandbox import SubprocessSandbox
+from remedy.interfaces.config import (
+    create_default_config,
+    load_config,
+    resolve_config,
+    config_to_agent_config,
+    generate_default_config,
+)
 
 console = Console()
 
@@ -200,6 +207,19 @@ def build_parser() -> argparse.ArgumentParser:
     gw_status = gw_sub.add_parser("status", help="Show gateway status")
     gw_serve = gw_sub.add_parser("serve", help="Start the REST API server")
     gw_channels = gw_sub.add_parser("channels", help="List available channels")
+
+    # remedy config init|show|path
+    config_cmd = sub.add_parser("config", help="Configuration management")
+    config_sub = config_cmd.add_subparsers(dest="config_cmd")
+    cfg_init = config_sub.add_parser("init", help="Create default config file")
+    cfg_show = config_sub.add_parser("show", help="Show current configuration")
+    cfg_path = config_sub.add_parser("path", help="Show config file path")
+
+    # remedy serve
+    serve_cmd = sub.add_parser("serve", help="Start the full API server (with config)")
+    serve_cmd.add_argument("--host", default="127.0.0.1")
+    serve_cmd.add_argument("--port", type=int, default=8000)
+    serve_cmd.add_argument("--config", dest="config_file", default=None)
 
     return parser
 
@@ -743,6 +763,55 @@ async def _cmd_exec(args) -> None:
     console.print(f"[dim]Exit code: {result.exit_code} ({result.duration_ms:.0f}ms)[/dim]")
 
 
+async def _cmd_config(args) -> None:
+    from pathlib import Path as _Path
+    home = _Path(args.home).expanduser()
+    home.mkdir(parents=True, exist_ok=True)
+
+    if args.config_cmd == "init":
+        cfg_path = create_default_config(home)
+        console.print(f"[green]Config created:[/green] {cfg_path}")
+    elif args.config_cmd == "show":
+        resolved = resolve_config(
+            home_dir=str(home),
+        )
+        console.print_json(data=resolved)
+    elif args.config_cmd == "path":
+        cfg_path = home / "config.toml"
+        if cfg_path.exists():
+            console.print(str(cfg_path))
+        else:
+            console.print(f"[dim]No config found at {cfg_path}[/dim]")
+            console.print("Run 'remedy config init' to create one.")
+
+
+def _cmd_serve(args) -> None:
+    import uvicorn
+    from remedy.interfaces.api import create_app
+    from remedy.core.runtime import AgentRuntime
+
+    home = Path(args.home).expanduser()
+    home.mkdir(parents=True, exist_ok=True)
+
+    config = resolve_config(
+        home_dir=str(home),
+    )
+    agent_config = config_to_agent_config(config)
+
+    runtime = AgentRuntime(agent_config)
+    app = create_app(
+        runtime=runtime,
+        title=config.get("name", "Remedy AI"),
+        version="0.1.0",
+    )
+
+    console.print(f"[green]Starting Remedy API on http://{args.host}:{args.port}[/green]")
+    console.print("[dim]Dashboard:[/dim] /dashboard")
+    console.print("[dim]OpenAPI:[/dim]   /api/openapi.json  /api/openapi.yaml")
+    console.print("[dim]Docs:[/dim]       /docs  /redoc")
+    uvicorn.run(app, host=args.host, port=args.port, log_level=config.get("log_level", "info").lower())
+
+
 def main(args: Optional[list[str]] = None) -> None:
     parser = build_parser()
     parsed = parser.parse_args(args)
@@ -773,6 +842,10 @@ def main(args: Optional[list[str]] = None) -> None:
         main_gateway(parsed)
     elif parsed.command == "exec":
         asyncio.run(_cmd_exec(parsed))
+    elif parsed.command == "config":
+        asyncio.run(_cmd_config(parsed))
+    elif parsed.command == "serve":
+        _cmd_serve(parsed)
     else:
         parser.print_help()
 

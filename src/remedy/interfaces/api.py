@@ -20,7 +20,9 @@ from pathlib import Path
 from typing import Any, Optional
 from uuid import UUID, uuid4
 
+import yaml
 from fastapi import (
+    APIRouter,
     BackgroundTasks,
     FastAPI,
     HTTPException,
@@ -29,7 +31,7 @@ from fastapi import (
     Response,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from remedy.models import (
@@ -289,4 +291,128 @@ def create_app(
             ]
         }
 
+    # -- SSE streaming --------------------------------------------------------
+    @app.post("/api/chat/stream")
+    async def chat_stream(req: ChatRequest):
+        if gateway is None:
+            raise HTTPException(503, "Gateway not available")
+
+        async def event_stream():
+            request_id = str(uuid4())
+            event = GatewayEvent(
+                id=uuid4(),
+                kind=EventKind.MESSAGE,
+                channel=ChannelKind.WEB,
+                source_id=req.user_id or "anonymous",
+                payload={"message": req.message, "request_id": request_id},
+                session_id=req.session_id,
+            )
+
+            yield f"data: {json.dumps({'type': 'start', 'request_id': request_id})}\n\n"
+
+            try:
+                responses = await gateway.emit(event)
+                for r in responses:
+                    if isinstance(r, str):
+                        yield f"data: {json.dumps({'type': 'content', 'text': r})}\n\n"
+            except Exception as e:
+                yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
+
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    # -- OpenAPI schema export -----------------------------------------------
+    @app.get("/api/openapi.yaml", include_in_schema=False)
+    async def export_openapi_yaml():
+        return Response(
+            content=yaml_schema(app),
+            media_type="application/yaml",
+        )
+
+    @app.get("/api/openapi.json", include_in_schema=False)
+    async def export_openapi_json():
+        return Response(
+            content=json.dumps(app.openapi(), indent=2),
+            media_type="application/json",
+        )
+
+    # -- dashboard (simple HTML) ---------------------------------------------
+    @app.get("/dashboard", include_in_schema=False)
+    async def dashboard():
+        html = DASHBOARD_HTML.replace("{{version}}", version)
+        return Response(content=html, media_type="text/html")
+
     return app
+
+
+def yaml_schema(app: FastAPI) -> str:
+    """Convert OpenAPI JSON to YAML."""
+    data = app.openapi()
+    import io
+    out = io.StringIO()
+    yaml.dump(data, out, default_flow_style=False, allow_unicode=True, sort_keys=False)
+    return out.getvalue()
+
+
+DASHBOARD_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Remedy AI - Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: system-ui, sans-serif; background: #0a0a1a; color: #e0e0e0; padding: 2rem; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { color: #7c3aed; font-size: 2rem; margin-bottom: 0.5rem; }
+        .subtitle { color: #888; margin-bottom: 2rem; }
+        .card { background: #12122a; border: 1px solid #1e1e3e; border-radius: 8px; padding: 1.5rem; margin-bottom: 1rem; }
+        .card h2 { color: #a78bfa; margin-bottom: 1rem; font-size: 1.1rem; }
+        .stat { display: flex; justify-content: space-between; padding: 0.3rem 0; border-bottom: 1px solid #1e1e3e; }
+        .stat:last-child { border-bottom: none; }
+        .stat-label { color: #888; }
+        .stat-value { color: #e0e0e0; font-weight: 600; }
+        .endpoint { font-family: monospace; background: #0a0a1a; padding: 0.5rem 1rem; border-radius: 4px; margin: 0.3rem 0; }
+        .method { color: #7c3aed; font-weight: bold; margin-right: 0.5rem; }
+        .path { color: #e0e0e0; }
+        .ok { color: #22c55e; }
+        .err { color: #ef4444; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Remedy AI</h1>
+        <p class="subtitle">Self-improving, multi-channel AI agent framework v{{version}}</p>
+
+        <div class="card">
+            <h2>Status</h2>
+            <div class="stat"><span class="stat-label">Version</span><span class="stat-value">{{version}}</span></div>
+            <div class="stat"><span class="stat-label">API</span><span class="stat-value ok">Online</span></div>
+        </div>
+
+        <div class="card">
+            <h2>API Endpoints</h2>
+            <div class="endpoint"><span class="method">GET</span><span class="path">/api/status</span></div>
+            <div class="endpoint"><span class="method">POST</span><span class="path">/api/chat</span></div>
+            <div class="endpoint"><span class="method">POST</span><span class="path">/api/chat/stream</span> (SSE)</div>
+            <div class="endpoint"><span class="method">GET</span><span class="path">/api/memory/search?query=...</span></div>
+            <div class="endpoint"><span class="method">POST</span><span class="path">/api/memory/add</span></div>
+            <div class="endpoint"><span class="method">GET</span><span class="path">/api/skills</span></div>
+            <div class="endpoint"><span class="method">POST</span><span class="path">/api/webhook/{source}</span></div>
+            <div class="endpoint"><span class="method">GET</span><span class="path">/api/sessions</span></div>
+            <div class="endpoint"><span class="method">GET</span><span class="path">/api/handoffs</span></div>
+            <div class="endpoint"><span class="method">GET</span><span class="path">/api/openapi.yaml</span></div>
+            <div class="endpoint"><span class="method">GET</span><span class="path">/api/openapi.json</span></div>
+        </div>
+    </div>
+</body>
+</html>"""
