@@ -30,8 +30,9 @@ export function useMessages(sessionId: string | null) {
   }, [load])
 
   const send = useCallback(
-    async (text: string, model?: string) => {
-      if (!sessionId) return
+    async (text: string, model?: string, sid?: string) => {
+      const targetId = sid || sessionId
+      if (!targetId) return
 
       const userMsg: ChatMessage = {
         id: crypto.randomUUID(),
@@ -52,7 +53,7 @@ export function useMessages(sessionId: string | null) {
       setPartialText('')
 
       const ctrl = streamMessage(
-        sessionId,
+        targetId,
         text,
         (token) => setPartialText((prev) => prev + token),
         (data) => {
@@ -133,10 +134,11 @@ export function useMessages(sessionId: string | null) {
   }, [streamCtrl])
 
   const runCommand = useCallback(
-    async (command: string): Promise<{ text: string; action?: string }> => {
-      if (!sessionId) return { text: 'No session active.' }
+    async (command: string, sid?: string): Promise<{ text: string; action?: string }> => {
+      const targetId = sid || sessionId
+      if (!targetId) return { text: 'No session active.' }
       try {
-        const r = await executeCommand(sessionId, command)
+        const r = await executeCommand(targetId, command)
         return { text: r.text, action: r.action }
       } catch {
         return { text: `Error executing ${command}` }

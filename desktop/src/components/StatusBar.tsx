@@ -15,8 +15,8 @@ interface StatusBarProps {
   onThemeChange: (id: ThemeId) => void
   planMode: boolean
   onTogglePlanMode: () => void
-  panel?: 'memory' | 'skills' | null
-  onTogglePanel: (panel: 'memory' | 'skills') => void
+  panel?: 'memory' | 'skills' | 'settings' | null
+  onTogglePanel: (panel: 'memory' | 'skills' | 'settings') => void
 }
 
 export function StatusBar({
@@ -125,6 +125,18 @@ export function StatusBar({
           }}
         >
           Skills
+        </button>
+
+        <button
+          onClick={() => onTogglePanel('settings')}
+          className="px-2 py-0.5 rounded text-xs transition-colors"
+          title="Settings panel"
+          style={{
+            background: panel === 'settings' ? 'var(--accent)' : 'var(--bg-tertiary)',
+            color: panel === 'settings' ? '#fff' : 'var(--text-secondary)',
+          }}
+        >
+          Settings
         </button>
 
         {sessionId && <span style={{ color: 'var(--text-muted)' }}>{sessionId.slice(0, 8)}</span>}

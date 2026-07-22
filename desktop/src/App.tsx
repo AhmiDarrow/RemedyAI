@@ -5,6 +5,7 @@ import { Composer } from './components/Composer'
 import { StatusBar } from './components/StatusBar'
 import { TabBar } from './components/TabBar'
 import { MemoryPanel, SkillsPanel } from './components/Panels'
+import { SettingsPanel } from './components/SettingsPanel'
 import { SplashScreen } from './components/SplashScreen'
 import { CommandPalette, type CommandItem } from './components/CommandPalette'
 import { useSessions } from './hooks/useSessions'
@@ -29,13 +30,13 @@ function isTauri(): boolean {
 }
 
 export default function App() {
-  const { sessions, activeId, setActiveId, create, remove } = useSessions()
+  const { sessions, activeId, setActiveId, create, remove, refresh: refreshSessions } = useSessions()
   const { messages, loading: messagesLoading, streaming, partialText, send, stop, runCommand, load } = useMessages(activeId)
   const { themeId, theme, set: setTheme } = useTheme()
   const [model, setModel] = useState('gpt-4o-mini')
   const [models, setModels] = useState<ModelInfo[]>([])
   const [planMode, setPlanMode] = useState(false)
-  const [panel, setPanel] = useState<'memory' | 'skills' | null>(null)
+  const [panel, setPanel] = useState<'memory' | 'skills' | 'settings' | null>(null)
   const [openTabs, setOpenTabs] = useState<Set<string>>(new Set())
   const [serverState, setServerState] = useState<ServerState>(isTauri() ? 'connecting' : 'ready')
   const [serverError, setServerError] = useState('')
@@ -81,6 +82,12 @@ export default function App() {
     }
   }, [create])
 
+  useEffect(() => {
+    if (serverState === 'ready') {
+      refreshSessions()
+    }
+  }, [serverState, refreshSessions])
+
   const handleSelect = useCallback(
     (id: string) => {
       setActiveId(id)
@@ -110,24 +117,27 @@ export default function App() {
 
   const handleCommand = useCallback(
     async (command: string) => {
-      const result = await runCommand(command)
+      const sid = activeId || (await create())?.id
+      if (!sid) return { text: 'No session available.' }
+      const result = await runCommand(command, sid)
       if (result.action === 'new_session') {
         await handleNewSession()
       }
       return result
     },
-    [runCommand, handleNewSession],
+    [runCommand, handleNewSession, activeId, create],
   )
 
   const handleSend = useCallback(
-    (text: string) => {
+    async (text: string) => {
       if (text.startsWith('/')) {
         handleCommand(text)
       } else {
-        send(text, model)
+        const sid = activeId || (await create())?.id
+        if (sid) send(text, model, sid)
       }
     },
-    [send, model, handleCommand],
+    [send, model, handleCommand, activeId, create],
   )
 
   const handleRevert = useCallback(
@@ -177,6 +187,7 @@ export default function App() {
       { id: 'plan', label: 'Toggle Plan Mode', description: 'Switch between plan and build', category: 'general', action: () => setPlanMode((p) => !p) },
       { id: 'memory', label: 'Memory Panel', description: 'Toggle memory panel', category: 'panel', action: () => setPanel((p) => (p === 'memory' ? null : 'memory')) },
       { id: 'skills', label: 'Skills Panel', description: 'Toggle skills panel', category: 'panel', action: () => setPanel((p) => (p === 'skills' ? null : 'skills')) },
+      { id: 'settings', label: 'Settings Panel', description: 'Toggle settings panel', category: 'panel', action: () => setPanel((p) => (p === 'settings' ? null : 'settings')) },
       ...sessions.map((s) => ({
         id: `session-${s.id}`,
         label: s.title || 'Untitled',
@@ -302,6 +313,12 @@ export default function App() {
           <SkillsPanel
             open={panel === 'skills'}
             onClose={() => setPanel(null)}
+          />
+          <SettingsPanel
+            open={panel === 'settings'}
+            onClose={() => setPanel(null)}
+            themeId={themeId}
+            onThemeChange={setTheme}
           />
         </div>
 

@@ -38,6 +38,8 @@ from remedy.models import (
     MemoryEntryType,
 )
 
+from remedy.interfaces.config import load_config as _load_toml_config, CONFIG_PATHS
+
 logger = logging.getLogger(__name__)
 
 
@@ -118,6 +120,15 @@ class SendMessageRequest(BaseModel):
 
 class CommandRequest(BaseModel):
     command: str = Field(..., description="Slash command to execute (e.g. /new)")
+
+
+class SettingsUpdateRequest(BaseModel):
+    llm_provider: str | None = None
+    llm_model: str | None = None
+    llm_base_url: str | None = None
+    llm_api_key: str | None = None
+    project_path: str | None = None
+    name: str | None = None
 
 
 # -- API factory -------------------------------------------------------------
@@ -249,6 +260,47 @@ async def handle_slash_command(
         return {"text": f"Project scan requested for: {path}\nUse the API endpoint POST /api/projects/scan?path=... for detailed results.", "action": "init_scan"}
 
     return {"text": f"Unknown command: {command}\nType /help for available commands."}
+
+
+def _find_config_path() -> Path | None:
+    for p in CONFIG_PATHS:
+        expanded = p.expanduser().resolve()
+        if expanded.exists():
+            return expanded
+    return None
+
+
+def load_config() -> dict[str, Any]:
+    path = _find_config_path()
+    if path is None:
+        return {}
+    return _load_toml_config(path)
+
+
+def _write_config(path: Path, cfg: dict[str, Any]) -> None:
+    lines = []
+    lines.append("# Remedy AI Configuration\n\n")
+    for key, value in cfg.items():
+        if isinstance(value, dict):
+            lines.append(f"[{key}]\n")
+            for k, v in value.items():
+                lines.append(f"{k} = {_serialize_toml(v)}\n")
+            lines.append("\n")
+        else:
+            lines.append(f"{key} = {_serialize_toml(value)}\n")
+    content = "".join(lines)
+    path.write_text(content, encoding="utf-8")
+
+
+def _serialize_toml(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, list):
+        items = ", ".join(_serialize_toml(v) for v in value)
+        return f"[{items}]"
+    return json.dumps(str(value))
 
 
 def create_app(
@@ -981,6 +1033,39 @@ def create_app(
         safe_name = "".join(c if c.isalnum() or c in "._- " else "_" for c in session_title)[:60]
         filename = f"remedy-export-{safe_name}.md"
         return {"markdown": markdown, "filename": filename}
+
+    # -- settings -----------------------------------------------------------
+    @app.get("/api/settings")
+    async def get_settings():
+        cfg = load_config()
+        return {
+            "llm_provider": cfg.get("llm_provider", os.environ.get("REMEDY_LLM_PROVIDER", "openai")),
+            "llm_model": cfg.get("llm_model", os.environ.get("REMEDY_LLM_MODEL", "gpt-4o-mini")),
+            "llm_base_url": cfg.get("llm_base_url", os.environ.get("REMEDY_LLM_BASE_URL", "https://api.openai.com/v1")),
+            "llm_api_key_set": bool(cfg.get("llm_api_key") or os.environ.get("REMEDY_LLM_API_KEY")),
+            "name": cfg.get("name", "Remedy"),
+            "project_path": cfg.get("project_path", os.getcwd()),
+            "version": version,
+        }
+
+    @app.put("/api/settings")
+    async def update_settings(req: SettingsUpdateRequest):
+        config_path = _find_config_path()
+        if config_path is None:
+            config_path = Path.home() / ".remedy" / "config.toml"
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+
+        cfg = load_config()
+        updates = req.model_dump(exclude_none=True)
+
+        if "llm_api_key" in updates and not updates["llm_api_key"]:
+            del updates["llm_api_key"]
+
+        cfg.update(updates)
+        _write_config(config_path, cfg)
+
+        changes = list(updates.keys())
+        return {"status": "saved", "changes": changes, "config_path": str(config_path)}
 
     # -- OpenAPI schema export -----------------------------------------------
     @app.get("/api/openapi.yaml", include_in_schema=False)

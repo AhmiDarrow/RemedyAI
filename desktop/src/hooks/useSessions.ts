@@ -1,46 +1,28 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import { listSessions, createSession, deleteSession, updateSession } from '../api/sessions'
 import type { ChatSession } from '../types'
 
 export function useSessions() {
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
+  const hasLoaded = useRef(false)
 
   const refresh = useCallback(async () => {
+    setLoading(true)
     try {
       const list = await listSessions()
       setSessions(list)
+      if (list.length > 0 && !activeId) {
+        setActiveId(list[0].id)
+      }
     } catch {
       // server not ready
     } finally {
       setLoading(false)
+      hasLoaded.current = true
     }
-  }, [])
-
-  useEffect(() => {
-    refresh()
-  }, [refresh])
-
-  const create = useCallback(async (title?: string) => {
-    const s = await createSession({ title })
-    setSessions((prev) => [s, ...prev])
-    setActiveId(s.id)
-    return s
-  }, [])
-
-  const remove = useCallback(async (id: string) => {
-    await deleteSession(id)
-    setSessions((prev) => prev.filter((s) => s.id !== id))
-    if (activeId === id) setActiveId(null)
   }, [activeId])
-
-  const rename = useCallback(async (id: string, title: string) => {
-    await updateSession(id, { title })
-    setSessions((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, title } : s)),
-    )
-  }, [])
 
   return {
     sessions,
@@ -48,8 +30,22 @@ export function useSessions() {
     setActiveId,
     loading,
     refresh,
-    create,
-    remove,
-    rename,
+    create: useCallback(async (title?: string) => {
+      const s = await createSession({ title })
+      setSessions((prev) => [s, ...prev])
+      setActiveId(s.id)
+      return s
+    }, []),
+    remove: useCallback(async (id: string) => {
+      await deleteSession(id)
+      setSessions((prev) => prev.filter((s) => s.id !== id))
+      if (activeId === id) setActiveId(null)
+    }, [activeId]),
+    rename: useCallback(async (id: string, title: string) => {
+      await updateSession(id, { title })
+      setSessions((prev) =>
+        prev.map((s) => (s.id === id ? { ...s, title } : s)),
+      )
+    }, []),
   }
 }
