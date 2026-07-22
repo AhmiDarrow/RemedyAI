@@ -39,6 +39,17 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "externalBin": [
+      "../bin/remedy-desktop"
+    ],
+    "resources": {
+      "../bin/remedy-desktop.exe": "remedy-desktop.exe"
+    }
+  },
+  "plugins": {
+    "shell": {
+      "sidecar": true
+    }
   }
 }

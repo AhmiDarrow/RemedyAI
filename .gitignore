@@ -44,3 +44,5 @@ coverage/
 # Runtime
 logs/
 *.pid
+
+desktop/bin/

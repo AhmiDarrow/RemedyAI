@@ -1,4 +1,4 @@
-import { apiFetch } from './client'
+import { apiFetch, API_BASE } from './client'
 import type { ChatMessage, ModelDefinition, AgentDefinition, CommandDefinition } from '../types'
 
 export async function listMessages(
@@ -36,7 +36,7 @@ export function streamMessage(
 
   ;(async () => {
     try {
-      const res = await fetch(`/api/sessions/${sessionId}/messages/stream`, {
+      const res = await fetch(`${API_BASE}/sessions/${sessionId}/messages/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message, model }),
@@ -142,4 +142,34 @@ export async function revertMessageApi(
   return apiFetch(`/sessions/${sessionId}/messages/${msgId}/revert`, {
     method: 'POST',
   })
+}
+
+export async function exportSession(sessionId: string): Promise<{ markdown: string; filename: string }> {
+  return apiFetch(`/sessions/${sessionId}/export`)
+}
+
+export async function listCustomCommands(): Promise<{ commands: { name: string; description: string; file: string }[] }> {
+  return apiFetch('/commands/custom')
+}
+
+export async function listCustomAgents(): Promise<{ agents: { name: string; description: string; file: string }[] }> {
+  return apiFetch('/agents/custom')
+}
+
+export async function getCustomCommand(name: string): Promise<{ content: string }> {
+  return apiFetch(`/commands/custom/${encodeURIComponent(name)}`)
+}
+
+export async function getCustomAgent(name: string): Promise<{ content: string }> {
+  return apiFetch(`/agents/custom/${encodeURIComponent(name)}`)
+}
+
+export async function scanProject(path = '.'): Promise<{
+  path: string
+  file_counts: Record<string, number>
+  top_files: Record<string, string[]>
+  python_deps: string
+  js_deps: string
+}> {
+  return apiFetch(`/projects/scan?path=${encodeURIComponent(path)}`, { method: 'POST' })
 }

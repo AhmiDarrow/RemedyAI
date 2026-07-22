@@ -154,6 +154,7 @@ _BUILTIN_COMMANDS: list[dict] = [
     {"name": "/memory", "description": "Search memory", "aliases": [], "arguments": "query"},
     {"name": "/skills", "description": "List available skills", "aliases": [], "arguments": None},
     {"name": "/handoff", "description": "List handoff notes", "aliases": [], "arguments": None},
+    {"name": "/init", "description": "Scan the project and generate AGENTS.md", "aliases": [], "arguments": "path"},
 ]
 
 _BUILTIN_MODELS: list[dict] = [
@@ -241,6 +242,11 @@ async def handle_slash_command(
 
     if stripped == "/compact":
         return {"text": "Session compaction requested (stub)."}
+
+    if stripped.startswith("/init"):
+        parts = stripped.split(" ", 1)
+        path = parts[1] if len(parts) > 1 else "."
+        return {"text": f"Project scan requested for: {path}\nUse the API endpoint POST /api/projects/scan?path=... for detailed results.", "action": "init_scan"}
 
     return {"text": f"Unknown command: {command}\nType /help for available commands."}
 
@@ -507,8 +513,8 @@ def create_app(
 
     @app.post("/api/sessions/{session_id}/messages")
     async def send_message(session_id: str, req: SendMessageRequest):
-        if gateway is None:
-            raise HTTPException(503, "Gateway not available")
+        if runtime is None:
+            raise HTTPException(503, "Runtime not available")
 
         request_id = str(uuid4())
 
@@ -531,24 +537,11 @@ def create_app(
                 content=req.message,
             ))
 
-        event = GatewayEvent(
-            id=uuid4(),
-            kind=EventKind.MESSAGE,
-            channel=ChannelKind.WEB,
-            source_id="web",
-            payload={"message": req.message, "request_id": request_id},
-            session_id=session_id,
-        )
-
         start = time.time()
-        responses = await gateway.emit(event)
-        elapsed = (time.time() - start) * 1000
-
         response_text = ""
-        for r in responses:
-            if isinstance(r, str):
-                response_text = r
-                break
+        async for token in runtime.stream_response(req.message, session_id=session_id):
+            response_text += token
+        elapsed = (time.time() - start) * 1000
 
         if memory and response_text:
             await memory.add_chat_message(ChatMessage(
@@ -567,8 +560,8 @@ def create_app(
     # -- SSE streaming (structured events) -----------------------------------
     @app.post("/api/sessions/{session_id}/messages/stream")
     async def stream_message(session_id: str, req: SendMessageRequest):
-        if gateway is None:
-            raise HTTPException(503, "Gateway not available")
+        if runtime is None:
+            raise HTTPException(503, "Runtime not available")
 
         request_id = str(uuid4())
 
@@ -597,22 +590,24 @@ def create_app(
             )
 
             try:
-                event = GatewayEvent(
-                    id=uuid4(),
-                    kind=EventKind.MESSAGE,
-                    channel=ChannelKind.WEB,
-                    source_id="web",
-                    payload={"message": req.message, "request_id": request_id},
-                    session_id=session_id,
-                )
-
-                responses = await gateway.emit(event)
                 full_response = ""
 
-                for r in responses:
-                    if isinstance(r, str):
-                        full_response += r
-                        yield await _sse_stream_text(r, event="token")
+                async for token in runtime.stream_response(req.message, session_id=session_id):
+                    if token.startswith("@@tool_call:"):
+                        tool_name = token[len("@@tool_call:"):]
+                        yield (
+                            f"event: tool_call\ndata: {json.dumps({'type': 'tool_call', 'name': tool_name})}\n\n"
+                        )
+                    elif token.startswith("@@tool_result:"):
+                        tool_name = token[len("@@tool_result:"):]
+                        yield (
+                            f"event: tool_result\ndata: {json.dumps({'type': 'tool_result', 'name': tool_name})}\n\n"
+                        )
+                    elif token == "@@tool_calls":
+                        pass
+                    else:
+                        full_response += token
+                        yield await _sse_stream_text(token, event="token")
 
                 if full_response and memory:
                     await memory.add_chat_message(ChatMessage(
@@ -640,8 +635,8 @@ def create_app(
     # -- legacy chat stream (maintained for backward compatibility) ----------
     @app.post("/api/chat/stream")
     async def chat_stream(req: ChatRequest):
-        if gateway is None:
-            raise HTTPException(503, "Gateway not available")
+        if runtime is None:
+            raise HTTPException(503, "Runtime not available")
 
         request_id = str(uuid4())
         session_id = req.session_id or str(uuid4())
@@ -652,18 +647,8 @@ def create_app(
             )
 
             try:
-                event = GatewayEvent(
-                    id=uuid4(),
-                    kind=EventKind.MESSAGE,
-                    channel=ChannelKind.WEB,
-                    source_id=req.user_id or "anonymous",
-                    payload={"message": req.message, "request_id": request_id},
-                    session_id=session_id,
-                )
-                responses = await gateway.emit(event)
-                for r in responses:
-                    if isinstance(r, str):
-                        yield await _sse_stream_text(r, event="token")
+                async for token in runtime.stream_response(req.message, session_id=session_id):
+                    yield await _sse_stream_text(token, event="token")
             except Exception as e:
                 yield f"event: error\ndata: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
 
@@ -693,6 +678,71 @@ def create_app(
     @app.get("/api/agents")
     async def list_agents():
         return {"agents": _BUILTIN_AGENTS}
+
+    # -- custom commands (markdown-based, ~/.remedy/commands/) ----------------
+    @app.get("/api/commands/custom")
+    async def list_custom_commands():
+        cmd_dir = Path.home() / ".remedy" / "commands"
+        if not cmd_dir.exists():
+            return {"commands": []}
+        commands: list[dict] = []
+        for f in sorted(cmd_dir.glob("*.md")):
+            name = f.stem
+            desc = ""
+            # try to read YAML frontmatter
+            content = f.read_text(encoding="utf-8", errors="replace")
+            if content.startswith("---"):
+                parts = content.split("---", 2)
+                if len(parts) >= 3:
+                    try:
+                        fm = yaml.safe_load(parts[1])
+                        if isinstance(fm, dict):
+                            name = fm.get("description", name)
+                            desc = fm.get("description", "")
+                    except Exception:
+                        pass
+            commands.append({"name": name, "description": desc, "file": str(f)})
+        return {"commands": commands}
+
+    @app.get("/api/commands/custom/{name}")
+    async def get_custom_command(name: str):
+        cmd_dir = Path.home() / ".remedy" / "commands"
+        path = safe_path(cmd_dir, name + ".md")
+        if not path or not path.exists():
+            raise HTTPException(404, f"Command '{name}' not found")
+        return {"content": path.read_text(encoding="utf-8", errors="replace")}
+
+    # -- custom agents (markdown-based, ~/.remedy/agents/) -------------------
+    @app.get("/api/agents/custom")
+    async def list_custom_agents():
+        agent_dir = Path.home() / ".remedy" / "agents"
+        if not agent_dir.exists():
+            return {"agents": []}
+        agents: list[dict] = []
+        for f in sorted(agent_dir.glob("*.md")):
+            name = f.stem
+            desc = ""
+            content = f.read_text(encoding="utf-8", errors="replace")
+            if content.startswith("---"):
+                parts = content.split("---", 2)
+                if len(parts) >= 3:
+                    try:
+                        fm = yaml.safe_load(parts[1])
+                        if isinstance(fm, dict):
+                            name = fm.get("name", name)
+                            desc = fm.get("description", "")
+                    except Exception:
+                        pass
+            agents.append({"name": name, "description": desc, "file": str(f)})
+        return {"agents": agents}
+
+    @app.get("/api/agents/custom/{name}")
+    async def get_custom_agent(name: str):
+        agent_dir = Path.home() / ".remedy" / "agents"
+        path = safe_path(agent_dir, name + ".md")
+        if not path or not path.exists():
+            raise HTTPException(404, f"Agent '{name}' not found")
+        return {"content": path.read_text(encoding="utf-8", errors="replace")}
 
     # -- memory search -------------------------------------------------------
     @app.get("/api/memory/search")
@@ -896,6 +946,42 @@ def create_app(
             raise HTTPException(404, "Message not found")
         return {"status": "reverted", "msg_id": msg_id}
 
+    # -- session export -------------------------------------------------------
+    @app.get("/api/sessions/{session_id}/export")
+    async def export_session(session_id: str):
+        if memory is None:
+            raise HTTPException(503, "Memory store not available")
+        session = await memory.get_chat_session(session_id)
+        if not session:
+            raise HTTPException(404, "Session not found")
+        messages = await memory.list_chat_messages(session_id, limit=10000)
+        session_title = getattr(session, "title", "Session") or "Session"
+        lines = [f"# {session_title}", "", f"**Session ID:** `{session_id}`", f"**Messages:** {len(messages)}", ""]
+        for m in messages:
+            role = getattr(m, "role", None) or (m.get("role") if isinstance(m, dict) else "user")
+            content = getattr(m, "content", None) or (m.get("content") if isinstance(m, dict) else "")
+            created = getattr(m, "created_at", None) or (m.get("created_at") if isinstance(m, dict) else "")
+            agent = getattr(m, "agent", None) or (m.get("agent") if isinstance(m, dict) else "")
+            model = getattr(m, "model", None) or (m.get("model") if isinstance(m, dict) else "")
+            header = f"**{role.capitalize()}**"
+            if agent:
+                header += f" ({agent})"
+            if model:
+                header += f" — {model}"
+            if created:
+                header += f" `{created[:19]}`"
+            lines.append(header)
+            lines.append("")
+            if content:
+                lines.append(content)
+                lines.append("")
+            lines.append("---")
+            lines.append("")
+        markdown = "\n".join(lines)
+        safe_name = "".join(c if c.isalnum() or c in "._- " else "_" for c in session_title)[:60]
+        filename = f"remedy-export-{safe_name}.md"
+        return {"markdown": markdown, "filename": filename}
+
     # -- OpenAPI schema export -----------------------------------------------
     @app.get("/api/openapi.yaml", include_in_schema=False)
     async def export_openapi_yaml():
@@ -910,6 +996,51 @@ def create_app(
             content=json.dumps(app.openapi(), indent=2),
             media_type="application/json",
         )
+
+    # -- project init scanner -------------------------------------------------
+    @app.post("/api/projects/scan")
+    async def scan_project(path: str = Query(default=".")):
+        target = Path(path).resolve()
+        if not target.exists():
+            raise HTTPException(404, f"Path not found: {path}")
+        if not target.is_dir():
+            target = target.parent
+
+        files: dict[str, list[str]] = {"python": [], "javascript": [], "typescript": [], "rust": [], "other": []}
+        exts_map = {
+            ".py": "python", ".js": "javascript", ".jsx": "javascript",
+            ".ts": "typescript", ".tsx": "typescript", ".mjs": "javascript",
+            ".rs": "rust", ".c": "other", ".cpp": "other", ".h": "other",
+            ".json": "other", ".yaml": "other", ".yml": "other", ".toml": "other",
+            ".md": "other", ".txt": "other", ".css": "other", ".html": "other",
+        }
+        ignored = {".git", "__pycache__", "node_modules", ".venv", "venv", "dist", "build", ".next", "target"}
+        for f in target.rglob("*"):
+            if f.is_file() and not any(p in ignored for p in f.parts):
+                ext = f.suffix.lower()
+                cat = exts_map.get(ext, "other")
+                rel = str(f.relative_to(target))
+                files[cat].append(rel)
+                if len(files[cat]) >= 100:
+                    continue
+
+        summary = {
+            "path": str(target),
+            "file_counts": {k: len(v) for k, v in files.items()},
+            "top_files": files,
+            "python_deps": "",
+            "js_deps": "",
+        }
+
+        # try reading pyproject.toml or package.json for deps
+        pp = target / "pyproject.toml"
+        if pp.exists():
+            summary["python_deps"] = pp.read_text(encoding="utf-8", errors="replace")[:2000]
+        pj = target / "package.json"
+        if pj.exists():
+            summary["js_deps"] = pj.read_text(encoding="utf-8", errors="replace")[:2000]
+
+        return summary
 
     # -- dashboard (simple HTML) ---------------------------------------------
     @app.get("/dashboard", include_in_schema=False)

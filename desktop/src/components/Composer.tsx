@@ -1,6 +1,11 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { searchFiles } from '../api/messages'
 
+export interface AgentDef {
+  name: string
+  description: string
+}
+
 interface ComposerProps {
   onSend: (text: string) => void
   onStop: () => void
@@ -8,17 +13,14 @@ interface ComposerProps {
   streaming: boolean
   disabled: boolean
   planMode?: boolean
+  agents?: AgentDef[]
 }
 
-interface FileMatch {
-  name: string
-  path: string
-  is_dir: boolean
-}
+type SuggestionItem = { label: string; value: string; icon: string; type: 'file' | 'agent' }
 
-export function Composer({ onSend, onStop, onCommand, streaming, disabled, planMode }: ComposerProps) {
+export function Composer({ onSend, onStop, onCommand, streaming, disabled, planMode, agents = [] }: ComposerProps) {
   const [input, setInput] = useState('')
-  const [suggestions, setSuggestions] = useState<FileMatch[]>([])
+  const [suggestions, setSuggestions] = useState<SuggestionItem[]>([])
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [suggestionIdx, setSuggestionIdx] = useState(0)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -31,18 +33,29 @@ export function Composer({ onSend, onStop, onCommand, streaming, disabled, planM
   }, [])
 
   const handleSuggestionSelect = useCallback(
-    (file: FileMatch) => {
+    (item: SuggestionItem) => {
       const cursorPos = textareaRef.current?.selectionStart ?? input.length
       const before = input.slice(0, cursorPos)
       const after = input.slice(cursorPos)
       const atIdx = before.lastIndexOf('@')
-      const newInput = before.slice(0, atIdx) + file.path + ' ' + after
+      const newInput = before.slice(0, atIdx) + item.value + ' ' + after
       setInput(newInput)
       setShowSuggestions(false)
       textareaRef.current?.focus()
     },
     [input],
   )
+
+  const handleSubmit = useCallback(() => {
+    const text = input.trim()
+    if (!text) return
+    if (text.startsWith('/')) {
+      onCommand(text)
+    } else {
+      onSend(text)
+    }
+    setInput('')
+  }, [input, onSend, onCommand])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -75,7 +88,7 @@ export function Composer({ onSend, onStop, onCommand, streaming, disabled, planM
         handleSubmit()
       }
     },
-    [showSuggestions, suggestions, suggestionIdx],
+    [showSuggestions, suggestions, suggestionIdx, handleSuggestionSelect, handleSubmit],
   )
 
   const handleChange = useCallback(
@@ -87,32 +100,49 @@ export function Composer({ onSend, onStop, onCommand, streaming, disabled, planM
       if (q !== null && q.length >= 1) {
         clearTimeout(suggestTimer.current ?? undefined)
         suggestTimer.current = setTimeout(async () => {
-          try {
-            const r = await searchFiles(q)
-            setSuggestions(r.results.slice(0, 8))
+          const items: SuggestionItem[] = []
+
+          const matchedAgents = agents
+            .filter((a) => a.name.toLowerCase().includes(q.toLowerCase()))
+            .slice(0, 4)
+            .map((a) => ({
+              label: a.name,
+              value: `@${a.name}`,
+              icon: '@',
+              type: 'agent' as const,
+            }))
+          items.push(...matchedAgents)
+
+          if (q.length >= 2) {
+            try {
+              const r = await searchFiles(q)
+              for (const f of r.results.slice(0, 6)) {
+                items.push({
+                  label: f.name,
+                  value: f.path,
+                  icon: f.is_dir ? '\u25B6' : '\u25CF',
+                  type: 'file' as const,
+                })
+              }
+            } catch {
+              // ignore
+            }
+          }
+
+          if (items.length > 0) {
+            setSuggestions(items)
             setSuggestionIdx(0)
             setShowSuggestions(true)
-          } catch {
+          } else {
             setShowSuggestions(false)
           }
-        }, 150)
+        }, 120)
       } else {
         setShowSuggestions(false)
       }
     },
-    [],
+    [agents, detectAtQuery],
   )
-
-  const handleSubmit = useCallback(() => {
-    const text = input.trim()
-    if (!text) return
-    if (text.startsWith('/')) {
-      onCommand(text)
-    } else {
-      onSend(text)
-    }
-    setInput('')
-  }, [input, onSend, onCommand])
 
   useEffect(() => {
     textareaRef.current?.focus()
@@ -131,9 +161,9 @@ export function Composer({ onSend, onStop, onCommand, streaming, disabled, planM
             borderColor: 'var(--border)',
           }}
         >
-          {suggestions.map((f, i) => (
+          {suggestions.map((s, i) => (
             <button
-              key={f.path}
+              key={`${s.type}-${s.value}`}
               className="flex items-center gap-2 w-full text-left px-3 py-1.5"
               style={{
                 background: i === suggestionIdx ? 'var(--bg-tertiary)' : 'transparent',
@@ -141,13 +171,16 @@ export function Composer({ onSend, onStop, onCommand, streaming, disabled, planM
               }}
               onMouseDown={(e) => {
                 e.preventDefault()
-                handleSuggestionSelect(f)
+                handleSuggestionSelect(s)
               }}
             >
-              <span style={{ color: 'var(--text-muted)' }}>
-                {f.is_dir ? '\u25B6' : '\u25CF'}
+              <span style={{ color: s.type === 'agent' ? 'var(--accent)' : 'var(--text-muted)', width: 16, textAlign: 'center' }}>
+                {s.icon}
               </span>
-              <span className="truncate">{f.path}</span>
+              <span className="truncate">{s.label}</span>
+              <span className="ml-auto text-[0.65rem]" style={{ color: 'var(--text-muted)' }}>
+                {s.type}
+              </span>
             </button>
           ))}
         </div>
@@ -164,7 +197,7 @@ export function Composer({ onSend, onStop, onCommand, streaming, disabled, planM
               ? 'Plan mode — describe what to do (no tools executed)'
               : disabled
                 ? 'Select or create a session to begin'
-                : 'Type a message, /command, or @file...'
+                : 'Type a message, /command, @agent, or @file...'
           }
           disabled={disabled}
           rows={1}

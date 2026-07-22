@@ -6,9 +6,10 @@ interface TabBarProps {
   onSelect: (id: string) => void
   onClose: (id: string) => void
   onNew: () => void
+  onExport?: (id: string) => void
 }
 
-export function TabBar({ tabs, activeId, onSelect, onClose, onNew }: TabBarProps) {
+export function TabBar({ tabs, activeId, onSelect, onClose, onNew, onExport }: TabBarProps) {
   if (tabs.length === 0) return null
 
   return (
@@ -32,6 +33,10 @@ export function TabBar({ tabs, activeId, onSelect, onClose, onNew }: TabBarProps
             borderBottom: tab.id === activeId ? '2px solid var(--accent)' : '2px solid transparent',
           }}
           onClick={() => onSelect(tab.id)}
+          onContextMenu={(e) => {
+            e.preventDefault()
+            onExport?.(tab.id)
+          }}
         >
           <span className="truncate max-w-[140px]">{tab.title || 'Untitled'}</span>
           <button

@@ -1,11 +1,15 @@
 import { useState, useEffect } from 'react'
 import { ThemeSwitcher } from './ThemeSwitcher'
+import { healthCheck } from '../api/client'
 import type { ThemeId, Theme } from '../themes'
+import type { ModelInfo } from '../App'
 
 interface StatusBarProps {
   sessionId: string | null
   streaming: boolean
   model: string
+  models?: ModelInfo[]
+  onModelChange?: (id: string) => void
   themeId: ThemeId
   theme: Theme
   onThemeChange: (id: ThemeId) => void
@@ -19,6 +23,8 @@ export function StatusBar({
   sessionId,
   streaming,
   model,
+  models = [],
+  onModelChange,
   themeId,
   theme,
   onThemeChange,
@@ -33,13 +39,21 @@ export function StatusBar({
   useEffect(() => {
     let cancelled = false
     async function check() {
+      setStatus('checking')
       try {
-        const res = await fetch('/api/status')
+        const ok = await healthCheck(3000)
         if (cancelled) return
-        if (res.ok) {
-          const data = await res.json()
+        if (ok) {
           setStatus('connected')
-          setVersion(data.version || '')
+          try {
+            const res = await fetch('http://127.0.0.1:8000/api/status')
+            if (!cancelled && res.ok) {
+              const data = await res.json()
+              setVersion(data.version || '')
+            }
+          } catch {
+            // version fetch is optional
+          }
         } else {
           setStatus('disconnected')
         }
@@ -80,7 +94,7 @@ export function StatusBar({
         <button
           onClick={onTogglePlanMode}
           className="px-2 py-0.5 rounded text-xs font-medium transition-colors"
-          title="Toggle plan mode (no tool execution)"
+          title={`Toggle plan mode (ctrl+b)`}
           style={{
             background: planMode ? 'var(--accent)' : 'var(--bg-tertiary)',
             color: planMode ? '#fff' : 'var(--text-secondary)',
@@ -115,10 +129,39 @@ export function StatusBar({
 
         {sessionId && <span style={{ color: 'var(--text-muted)' }}>{sessionId.slice(0, 8)}</span>}
         {streaming && <span style={{ color: 'var(--accent)' }}>Streaming...</span>}
+
+        {status === 'disconnected' && (
+          <button
+            onClick={() => window.location.reload()}
+            className="px-2 py-0.5 rounded text-xs"
+            style={{ background: 'var(--error)', color: '#fff' }}
+          >
+            Reconnect
+          </button>
+        )}
       </div>
 
       <div className="flex items-center gap-3">
-        <span>Model: {model}</span>
+        {models.length > 0 && onModelChange ? (
+          <select
+            value={model}
+            onChange={(e) => onModelChange(e.target.value)}
+            className="text-xs rounded px-1.5 py-0.5 outline-none"
+            style={{
+              background: 'var(--bg-tertiary)',
+              color: 'var(--text-primary)',
+              border: '1px solid var(--border)',
+            }}
+          >
+            {models.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.name}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <span>Model: {model}</span>
+        )}
         <ThemeSwitcher currentId={themeId} currentTheme={theme} onChange={onThemeChange} />
       </div>
     </div>
