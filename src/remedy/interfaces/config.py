@@ -144,6 +144,13 @@ name = "Remedy"
 persona = "default"
 home_dir = "{home_dir.as_posix()}"
 
+# --- LLM Provider ---
+# Supported providers: openai, anthropic, google, deepseek, openrouter, ollama, custom
+llm_model = "gpt-4o-mini"
+llm_base_url = "https://api.openai.com/v1"
+# llm_api_key - set via REMEDY_LLM_API_KEY env var or uncomment below:
+# llm_api_key = "sk-..."
+
 # Search paths for bundled + user skills
 skills_dir = []
 

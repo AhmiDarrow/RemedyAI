@@ -1,11 +1,16 @@
 """Interactive setup wizard for Remedy.
 
-Walks the user through initial configuration: agent identity, channels,
-provider tokens, skill directories, and logging preferences.
+Walks the user through initial configuration: agent identity, providers,
+messaging apps, skill directories, and runtime settings.
+
+Sections can be skipped individually with --skip-* flags or interactively.
 
 Usage:
-    remedy setup          # run the wizard
-    remedy setup --quick  # non-interactive, use defaults
+    remedy setup                                            # run the wizard
+    remedy setup --quick                                    # non-interactive, use defaults
+    remedy setup --skip-providers                           # skip LLM provider config
+    remedy setup --skip-messaging                           # skip messaging app config
+    remedy setup --skip-skills                              # skip skill discovery
 """
 
 from __future__ import annotations
@@ -66,7 +71,12 @@ PERSONAS = {
 LOG_LEVELS = ["DEBUG", "INFO", "WARNING", "ERROR"]
 
 
-def run_wizard(quick: bool = False) -> Path:
+def run_wizard(
+    quick: bool = False,
+    skip_providers: bool = False,
+    skip_messaging: bool = False,
+    skip_skills: bool = False,
+) -> Path:
     """Run the interactive setup wizard. Returns the config file path."""
     _print_welcome()
 
@@ -88,29 +98,22 @@ def run_wizard(quick: bool = False) -> Path:
             config["name"] = "remedy"
         config["persona"] = _pick_persona()
 
-    # -- Step 2: Channels -----------------------------------------------------
-    console.rule("[bold]Step 2: Channels")
+    # -- Step 2: Providers (LLM provider configuration) -----------------------
+    console.rule("[bold]Step 2: LLM Provider")
+    _configure_llm_provider(config, quick=quick, skip=skip_providers)
 
-    if quick:
-        config["enabled_channels"] = ["cli"]
-        console.print("[dim]Quick mode: CLI channel only[/dim]")
-    else:
-        config["enabled_channels"] = _pick_channels()
+    # -- Step 3: Messaging Apps -----------------------------------------------
+    console.rule("[bold]Step 3: Messaging Apps")
+    _configure_messaging(config, quick=quick, skip=skip_messaging)
 
-    # -- Step 3: Provider tokens ----------------------------------------------
-    console.rule("[bold]Step 3: Provider Setup")
-    if not quick:
-        _configure_providers(config)
-    else:
-        console.print("[dim]Quick mode: skipping token setup[/dim]")
-
-    # -- Step 4: Settings -----------------------------------------------------
+    # -- Step 4: Runtime Settings ---------------------------------------------
     console.rule("[bold]Step 4: Runtime Settings")
     config["home_dir"] = str(Path("~/.remedy").expanduser())
 
     if quick:
         config["log_level"] = "INFO"
         config["auto_approve_threshold"] = 0.8
+        config["allow_skill_creation"] = True
         console.print("[dim]Quick mode: INFO logging, 0.8 auto-approve[/dim]")
     else:
         config["log_level"] = _pick_option("Log level", LOG_LEVELS, default="INFO")
@@ -119,22 +122,15 @@ def run_wizard(quick: bool = False) -> Path:
             default=0.8,
             console=console,
         )
+        config["allow_skill_creation"] = Confirm.ask(
+            "Allow automatic skill creation from traces?", default=True, console=console
+        )
 
     # -- Step 5: Skills -------------------------------------------------------
     console.rule("[bold]Step 5: Skill Discovery")
+    _configure_skills(config, quick=quick, skip=skip_skills)
 
-    if quick:
-        config["skills_dir"] = []
-        console.print("[dim]Quick mode: no skill scanning[/dim]")
-    elif Confirm.ask("Scan for existing skills?", default=True, console=console):
-        skills_path = Prompt.ask(
-            "Skills directory path", default="skills", console=console
-        )
-        config["skills_dir"] = [skills_path]
-    else:
-        config["skills_dir"] = []
-
-    # -- Step 6: Gateway defaults ---------------------------------------------
+    # -- Gateway & execution defaults -----------------------------------------
     config["gateway"] = {"heartbeat_interval": 60, "rate_limit": 120}
     config["execution"] = {"default_timeout": 30, "max_retries": 3, "retry_backoff": 1.0}
 
@@ -255,15 +251,139 @@ def _pick_channels() -> list[str]:
     return selected or ["cli"]
 
 
-def _configure_providers(config: dict) -> None:
-    channels = config.get("enabled_channels", [])
+LLM_PROVIDERS: dict[str, dict[str, str]] = {
+    "openai": {
+        "label": "OpenAI",
+        "model": "gpt-4o-mini",
+        "base_url": "https://api.openai.com/v1",
+    },
+    "anthropic": {
+        "label": "Anthropic",
+        "model": "claude-sonnet-4-20250514",
+        "base_url": "https://api.anthropic.com",
+    },
+    "google": {
+        "label": "Google Gemini",
+        "model": "gemini-2.5-flash",
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+    },
+    "deepseek": {
+        "label": "DeepSeek",
+        "model": "deepseek-chat",
+        "base_url": "https://api.deepseek.com/v1",
+    },
+    "openrouter": {
+        "label": "OpenRouter",
+        "model": "openrouter/auto",
+        "base_url": "https://openrouter.ai/api/v1",
+    },
+    "ollama": {
+        "label": "Ollama (local)",
+        "model": "llama3.2",
+        "base_url": "http://localhost:11434/v1",
+    },
+    "custom": {
+        "label": "Custom OpenAI-compatible",
+        "model": "",
+        "base_url": "",
+    },
+}
+
+
+def _configure_llm_provider(config: dict, quick: bool = False, skip: bool = False) -> None:
+    """Configure the LLM provider (backend model)."""
+    if quick or skip:
+        if quick:
+            config["llm_model"] = LLM_PROVIDERS["openai"]["model"]
+            config["llm_base_url"] = LLM_PROVIDERS["openai"]["base_url"]
+            config["llm_api_key"] = ""
+            console.print("[dim]Quick mode: OpenAI / gpt-4o-mini (no API key)[/dim]")
+        if skip:
+            console.print("[dim]Skipping provider setup[/dim]")
+        return
+
+    if not Confirm.ask(
+        "Configure an LLM provider?", default=True, console=console
+    ):
+        console.print("[dim]Skipping provider setup. Set llm_api_key later in config.[/dim]")
+        return
+
+    # Pick provider
+    table = Table(title="Available LLM Providers")
+    table.add_column("#", style="dim")
+    table.add_column("Provider")
+    table.add_column("Default Model")
+    items = list(LLM_PROVIDERS.items())
+    for i, (_key, info) in enumerate(items, 1):
+        table.add_row(str(i), info["label"], info["model"] or "(custom)")
+    console.print(table)
+
+    choice = IntPrompt.ask(
+        f"Select provider (1-{len(items)})", default=1, console=console
+    )
+    idx = max(1, min(choice, len(items))) - 1
+    provider_key, provider_info = items[idx]
+    console.print(f"[green]Selected: {provider_info['label']}[/green]")
+
+    # API key
+    api_key_prompt = f"  {provider_info['label']} API key (or press Enter to skip)"
+    api_key = getpass.getpass(api_key_prompt + ": ").strip()
+    config["llm_api_key"] = api_key
+
+    # Model name
+    default_model = provider_info["model"]
+    if provider_key == "custom" or not default_model:
+        model = Prompt.ask("  Model name", default="gpt-4o-mini", console=console)
+    else:
+        model = Prompt.ask("  Model name", default=default_model, console=console)
+    config["llm_model"] = model
+
+    # Base URL
+    default_base = provider_info["base_url"]
+    if provider_key == "custom" or not default_base:
+        base_url = Prompt.ask(
+            "  API base URL", default="https://api.openai.com/v1", console=console
+        )
+    else:
+        base_url = Prompt.ask("  API base URL", default=default_base, console=console)
+    config["llm_base_url"] = base_url.rstrip("/")
+
+    if api_key:
+        console.print(f"  [green]{provider_info['label']} API key saved[/green]")
+    else:
+        console.print("  [dim]No API key set. Set REMEDY_LLM_API_KEY env var or edit config.[/dim]")
+
+    console.print(f"  [dim]Model: {model} | Base URL: {base_url}[/dim]")
+
+
+def _configure_messaging(config: dict, quick: bool = False, skip: bool = False) -> None:
+    """Configure messaging app channels and their tokens."""
+    if quick or skip:
+        config["enabled_channels"] = ["cli"]
+        if quick:
+            console.print("[dim]Quick mode: CLI channel only[/dim]")
+        if skip:
+            console.print("[dim]Skipping messaging app setup[/dim]")
+        return
+
+    if not Confirm.ask(
+        "Configure messaging apps (Telegram, Discord, Slack)?",
+        default=False,
+        console=console,
+    ):
+        config["enabled_channels"] = ["cli"]
+        console.print("[dim]Skipping messaging setup. CLI channel enabled by default.[/dim]")
+        return
+
+    config["enabled_channels"] = _pick_channels()
+
     needs_tokens = {
         "telegram": "Telegram Bot Token (from @BotFather)",
         "discord": "Discord Bot Token (from Discord Developer Portal)",
         "slack": "Slack Bot Token (from Slack API)",
     }
     for channel, prompt_text in needs_tokens.items():
-        if channel in channels:
+        if channel in config.get("enabled_channels", []):
             console.print(f"\n[bold]{prompt_text}[/bold]")
             if Confirm.ask(f"Do you have a {channel.title()} token?", default=False, console=console):
                 token = getpass.getpass(f"  {channel.title()} token: ").strip()
@@ -272,6 +392,38 @@ def _configure_providers(config: dict) -> None:
             else:
                 console.print(f"  [dim]Skipped. Add it later in ~/.remedy/config.toml under [{channel}][/dim]")
                 config[channel] = {"bot_token": ""}
+
+
+def _configure_skills(config: dict, quick: bool = False, skip: bool = False) -> None:
+    """Configure skill discovery directories."""
+    if quick or skip:
+        config["skills_dir"] = []
+        if quick:
+            console.print("[dim]Quick mode: no skill scanning[/dim]")
+        if skip:
+            console.print("[dim]Skipping skill discovery setup[/dim]")
+        return
+
+    if not Confirm.ask(
+        "Configure skill directories?", default=True, console=console
+    ):
+        config["skills_dir"] = []
+        console.print("[dim]Skipping skill discovery[/dim]")
+        return
+
+    paths: list[str] = []
+    while True:
+        p = Prompt.ask(
+            "Skills directory path (Enter empty to finish)",
+            default="skills" if not paths else "",
+            console=console,
+        )
+        if not p:
+            break
+        paths.append(p)
+    config["skills_dir"] = paths
+    if paths:
+        console.print(f"  [green]Will scan: {', '.join(paths)}[/green]")
 
 
 def _pick_option(prompt: str, options: list[str], default: str) -> str:
@@ -294,9 +446,21 @@ def _print_config_summary(config: dict) -> None:
     table.add_column("Value")
     table.add_row("Agent", config.get("name", "Remedy"))
     table.add_row("Persona", config.get("persona", "default"))
-    table.add_row("Channels", ", ".join(config.get("enabled_channels", [])))
+    # Provider row
+    model = config.get("llm_model", "gpt-4o-mini")
+    api_key = config.get("llm_api_key", "")
+    provider_label = model
+    if api_key:
+        provider_label += " [green](key set)[/green]"
+    else:
+        provider_label += " [yellow](no key)[/yellow]"
+    table.add_row("LLM Provider", provider_label)
+    # Channels
+    table.add_row("Channels", ", ".join(config.get("enabled_channels", [])) or "cli")
     table.add_row("Log Level", config.get("log_level", "INFO"))
     table.add_row("Auto-approve", str(config.get("auto_approve_threshold", 0.8)))
+    allow = config.get("allow_skill_creation", True)
+    table.add_row("Allow skill creation", "[green]yes[/green]" if allow else "[red]no[/red]")
     table.add_row("Skills dir", ", ".join(config.get("skills_dir", [])) or "(none)")
     table.add_row("Home", config.get("home_dir", "~/.remedy"))
     table.add_row("Memory DB", str(_db_path(config)))
@@ -317,10 +481,16 @@ def _write_config(config: dict) -> Path:
     for key, value in config.items():
         if key in ("home_dir",):
             lines.append(f'{key} = "{value}"')
-        elif key in ("name", "persona", "log_level"):
-            lines.append(f'{key} = "{value}"')
+        elif key in ("name", "persona", "log_level", "llm_model", "llm_base_url"):
+            if value:
+                lines.append(f'{key} = "{value}"')
+        elif key == "llm_api_key":
+            if value:
+                lines.append(f'{key} = "{value}"')
         elif key == "auto_approve_threshold":
             lines.append(f"{key} = {value}")
+        elif key == "allow_skill_creation":
+            lines.append(f"{key} = {'true' if value else 'false'}")
         elif key == "enabled_channels":
             items = ", ".join(f'"{c}"' for c in value)
             lines.append(f"{key} = [{items}]")
@@ -340,8 +510,6 @@ def _write_config(config: dict) -> Path:
                         lines.append(f'{k} = "{v}"')
                     else:
                         lines.append(f"{k} = {v}")
-        elif key == "allow_skill_creation":
-            lines.append(f"{key} = {'true' if value else 'false'}")
 
     content = "\n".join(lines) + "\n"
     cfg_path.write_text(content, encoding="utf-8")

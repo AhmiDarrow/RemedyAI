@@ -234,6 +234,18 @@ def build_parser() -> argparse.ArgumentParser:
     setup_cmd.add_argument(
         "--quick", action="store_true", help="Minimal prompts, use defaults"
     )
+    setup_cmd.add_argument(
+        "--skip-providers", action="store_true",
+        help="Skip LLM provider configuration",
+    )
+    setup_cmd.add_argument(
+        "--skip-messaging", action="store_true",
+        help="Skip messaging app configuration",
+    )
+    setup_cmd.add_argument(
+        "--skip-skills", action="store_true",
+        help="Skip skill discovery configuration",
+    )
 
     return parser
 
@@ -906,7 +918,12 @@ def main(args: list[str] | None = None) -> None:
     elif parsed.command == "serve":
         _cmd_serve(parsed)
     elif parsed.command == "setup":
-        run_wizard(quick=parsed.quick)
+        run_wizard(
+            quick=parsed.quick,
+            skip_providers=parsed.skip_providers,
+            skip_messaging=parsed.skip_messaging,
+            skip_skills=parsed.skip_skills,
+        )
     elif parsed.command == "update":
         run_update(check_only=parsed.check)
     elif parsed.command == "uninstall":
