@@ -37,6 +37,9 @@ from remedy.skills.exporter import SkillExporter
 from remedy.skills.tool_registry import ToolRegistry
 from remedy.skills.adapters.hermes_deep import deep_load_hermes_skill
 from remedy.skills.adapters.openclaw_deep import deep_load_openclaw_skill
+from remedy.core.learning_loop import LearningLoop
+from remedy.core.learning.reflection import ReflectionEngine, ExecutionTrace, TraceStep
+from remedy.core.learning.refiner import SkillRefiner
 
 console = Console()
 
@@ -129,6 +132,19 @@ def build_parser() -> argparse.ArgumentParser:
     tool_search = tool_sub.add_parser("search", help="Search tools")
     tool_search.add_argument("query", help="Search query")
     tool_stats = tool_sub.add_parser("stats", help="Tool invocation statistics")
+
+    # remedy learn reflect|refine|history|stats
+    learn = sub.add_parser("learn", help="Learning loop operations")
+    learn_sub = learn.add_subparsers(dest="learn_cmd")
+    learn_reflect = learn_sub.add_parser("reflect", help="Reflect on a completed task")
+    learn_reflect.add_argument("task_title", help="Task title to reflect on")
+    learn_reflect.add_argument("--steps", dest="steps_json", default="[]", help="JSON trace steps")
+    learn_history = learn_sub.add_parser("history", help="Show learning history")
+    learn_history.add_argument("--limit", type=int, default=20)
+    learn_changelog = learn_sub.add_parser("changelog", help="Show refinement changelog")
+    learn_stats = learn_sub.add_parser("stats", help="Show skill execution stats")
+    learn_stats.add_argument("--skill", dest="skill_name", default=None)
+    learn_sync = learn_sub.add_parser("sync", help="Sync learning events to memory store")
 
     # remedy handoff create ...
     handoff = sub.add_parser("handoff", help="Handoff note operations")
@@ -561,6 +577,96 @@ async def _cmd_migrate(args) -> None:
             console.print(f"[red]  Error: {err}[/red]")
 
 
+async def _cmd_learn(args, db_path: Path) -> None:
+    skills_dir = db_path.parent / "skills"
+    skills_dir.mkdir(parents=True, exist_ok=True)
+    async with MemoryStore(db_path) as store:
+        loop = LearningLoop(skills_dir=skills_dir, memory=store)
+
+        if args.learn_cmd == "reflect":
+            from uuid import uuid4 as _uuid4
+
+            trace_steps = []
+            try:
+                raw_steps = json.loads(args.steps_json)
+            except json.JSONDecodeError:
+                raw_steps = []
+
+            if raw_steps:
+                trace_steps = [
+                    TraceStep(
+                        index=i, tool_name=s.get("tool", f"step_{i}"),
+                        arguments=s.get("args", {}),
+                        result_summary=str(s.get("result", ""))[:200],
+                        success=s.get("success", True),
+                        error=s.get("error"),
+                    )
+                    for i, s in enumerate(raw_steps)
+                ]
+
+            trace = ExecutionTrace(
+                task_id=_uuid4(),
+                title=args.task_title,
+                steps=trace_steps,
+            )
+            result = loop.learn_from_trace(trace, auto_approve=False)
+            if result:
+                console.print(f"[green]Generated skill:[/green] {result.manifest.name}")
+                console.print(f"  Version: {result.manifest.version}")
+                console.print(f"  Tags: {', '.join(result.manifest.tags)}")
+                console.print(Panel(result.instructions[:400], title="Instructions (preview)"))
+            else:
+                console.print("[yellow]Trace too short for meaningful reflection.[/yellow]")
+
+        elif args.learn_cmd == "history":
+            events = loop.get_learning_history(limit=args.limit)
+            if events:
+                for e in events:
+                    ts = e.occurred_at.isoformat()[:19]
+                    console.print(
+                        f"[{e.event_type}] [bold]{e.skill_name}[/bold] v{e.skill_version} — "
+                        f"{e.description[:80]} [dim]({ts})[/dim]"
+                    )
+            else:
+                console.print("[dim]No learning events recorded.[/dim]")
+
+        elif args.learn_cmd == "changelog":
+            changelog = loop.get_refinement_changelog()
+            console.print(changelog)
+
+        elif args.learn_cmd == "stats":
+            if args.skill_name:
+                stats = loop.get_skill_stats(args.skill_name)
+                console.print(Panel(
+                    f"[bold]{stats.skill_name}[/bold]\n"
+                    f"Executions: {stats.total_executions}\n"
+                    f"Successes: {stats.successes}\n"
+                    f"Failures: {stats.failures}\n"
+                    f"Success rate: {stats.success_rate:.0%}\n"
+                    f"Avg duration: {stats.avg_duration_ms:.0f}ms\n"
+                    f"Last executed: {stats.last_executed}",
+                    title="Skill Stats",
+                ))
+                if stats.common_errors:
+                    console.print("\n[bold]Common Errors:[/bold]")
+                    for err, count in stats.common_errors.items():
+                        console.print(f"  ({count}x) {err}")
+            else:
+                all_stats = loop.refiner.get_all_stats()
+                if all_stats:
+                    for name, st in all_stats.items():
+                        console.print(
+                            f"[bold]{name}[/bold]: {st.successes}/{st.total_executions} "
+                            f"({st.success_rate:.0%})"
+                        )
+                else:
+                    console.print("[dim]No skill stats recorded.[/dim]")
+
+        elif args.learn_cmd == "sync":
+            count = await loop.sync_to_memory()
+            console.print(f"[green]Synced {count} learning events to memory.[/green]")
+
+
 def main(args: Optional[list[str]] = None) -> None:
     parser = build_parser()
     parsed = parser.parse_args(args)
@@ -585,6 +691,8 @@ def main(args: Optional[list[str]] = None) -> None:
         asyncio.run(_cmd_session(parsed, db_path))
     elif parsed.command == "tool":
         asyncio.run(_cmd_tool(parsed))
+    elif parsed.command == "learn":
+        asyncio.run(_cmd_learn(parsed, db_path))
     else:
         parser.print_help()
 

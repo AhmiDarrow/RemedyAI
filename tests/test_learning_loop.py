@@ -3,7 +3,9 @@
 import pytest
 
 from remedy.core.learning_loop import LearningLoop
-from remedy.models import Task
+from remedy.core.learning.reflection import ReflectionEngine, ExecutionTrace, TraceStep
+from remedy.core.learning.refiner import SkillRefiner
+from remedy.models import Task, Skill, SkillManifest, SkillKind
 
 
 @pytest.fixture
@@ -56,21 +58,29 @@ class TestLearningLoop:
         assert ll._slugify("  Spaces  everywhere  ") == "spaces-everywhere"
         assert ll._slugify("___") == "unnamed-skill"
 
-    def test_extract_tools(self, ll):
-        trace = [
-            {"tool": "read_file", "result": "..."},
-            {"tool": "edit_file", "result": "..."},
-            {"tool": "read_file", "result": "..."},  # duplicate
-        ]
-        tools = ll._extract_tools(trace)
-        assert tools == {"read_file", "edit_file"}
+    def test_extract_tools(self):
+        engine = ReflectionEngine()
+        trace = ExecutionTrace(
+            task_id=None, title="test",
+            steps=[
+                TraceStep(index=0, tool_name="read_file"),
+                TraceStep(index=1, tool_name="edit_file"),
+                TraceStep(index=2, tool_name="read_file"),
+            ],
+        )
+        tools = engine._suggest_reusable_tools(trace)
+        assert "read_file" in tools  # reused, appears 2x
+        assert "edit_file" not in tools  # only 1x
 
-    def test_extract_steps(self, ll):
-        trace = [
-            {"description": "Read config", "result": "found"},
-            {"tool": "write", "result": "saved"},
-        ]
-        steps = ll._extract_steps(trace)
-        assert len(steps) == 2
-        assert "Read config" in steps[0]
-        assert "write" in steps[1]
+    def test_extract_steps(self):
+        engine = ReflectionEngine()
+        trace = ExecutionTrace(
+            task_id=None, title="test",
+            steps=[
+                TraceStep(index=0, tool_name="read_config", success=True, error=None),
+                TraceStep(index=1, tool_name="write_file", success=False, error="permission denied"),
+            ],
+        )
+        errors = engine._extract_error_patterns(trace)
+        assert len(errors) == 1
+        assert "permission denied" in errors[0]
