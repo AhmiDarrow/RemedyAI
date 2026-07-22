@@ -1,6 +1,7 @@
 use std::env;
+use std::io::{BufRead, BufReader};
 use std::net::TcpStream;
-use std::process::{Child, Command};
+use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -9,7 +10,7 @@ use tauri::{Emitter, Manager};
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 #[cfg(target_os = "windows")]
-const CREATE_NO_WINDOW: u32 = 0x08000000;
+const DETACHED_PROCESS: u32 = 0x00000008;
 
 struct ServerState {
     process: Mutex<Option<Child>>,
@@ -21,7 +22,6 @@ fn current_exe_dir() -> Option<std::path::PathBuf> {
 
 fn find_remedy() -> String {
     if let Some(dir) = current_exe_dir() {
-        // Tauri externalBin convention: name-target_triple.exe
         let triple_name = dir.join("remedy-desktop-x86_64-pc-windows-msvc.exe");
         if triple_name.exists() {
             log::info!("Found sidecar at: {}", triple_name.display());
@@ -33,7 +33,16 @@ fn find_remedy() -> String {
             return plain_name.to_string_lossy().to_string();
         }
     }
-    // Fallback: look in PATH without running --version (avoid 2s delay)
+
+    // Dev mode: search up from cwd/bin/ for the PyInstaller output
+    if let Ok(cwd) = env::current_dir() {
+        let dev_path = cwd.join("bin").join("remedy-desktop.exe");
+        if dev_path.exists() {
+            log::info!("Found sidecar (dev) at: {}", dev_path.display());
+            return dev_path.to_string_lossy().to_string();
+        }
+    }
+
     log::info!("Sidecar not found in app directory, trying PATH");
     "remedy-desktop.exe".to_string()
 }
@@ -45,14 +54,35 @@ fn spawn_remedy(cmd: &str) -> Option<Child> {
     {
         Command::new(cmd)
             .args(&args)
-            .creation_flags(CREATE_NO_WINDOW)
+            .creation_flags(DETACHED_PROCESS)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
             .spawn()
             .ok()
     }
     #[cfg(not(target_os = "windows"))]
     {
-        Command::new(cmd).args(&args).spawn().ok()
+        Command::new(cmd)
+            .args(&args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .ok()
     }
+}
+
+fn forward_output(label: &str, reader: impl BufRead + Send + 'static) {
+    let label = label.to_string();
+    thread::spawn(move || {
+        for line in reader.lines() {
+            match line {
+                Ok(text) if !text.is_empty() => {
+                    log::info!("[remedy {}] {}", label, text);
+                }
+                _ => {}
+            }
+        }
+    });
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -71,7 +101,14 @@ pub fn run() {
 
             let child = spawn_remedy(&remedy_cmd);
 
-            if let Some(c) = child {
+            if let Some(mut c) = child {
+                if let Some(stdout) = c.stdout.take() {
+                    forward_output("out", BufReader::new(stdout));
+                }
+                if let Some(stderr) = c.stderr.take() {
+                    forward_output("err", BufReader::new(stderr));
+                }
+
                 let state = app.state::<ServerState>();
                 *state.process.lock().unwrap() = Some(c);
 

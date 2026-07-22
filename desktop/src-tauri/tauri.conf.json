@@ -49,7 +49,7 @@
   },
   "plugins": {
     "shell": {
-      "sidecar": true
+      "open": true
     }
   }
 }
