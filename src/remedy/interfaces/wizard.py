@@ -26,12 +26,22 @@ console = Console()
 
 
 WELCOME_ART = [
-    r"  ____                          _         ",
-    r" |  _ \ ___ _ __ ___   ___   __| |_   _   ",
-    r" | |_) / _ \ '_ ` _ \ / _ \ / _` | | | |  ",
-    r" |  _ <  __/ | | | | | (_) | (_| | |_| |  ",
-    r" |_| \_\___|_| |_| |_|\___/ \__,_|\__, |  ",
-    r"                                    |___/   ",
+    r"██████╗ ███████╗███╗   ███╗███████╗██████╗ ██╗   ██╗",
+    r"██╔══██╗██╔════╝████╗ ████║██╔════╝██╔══██╗╚██╗ ██╔╝",
+    r"██████╔╝█████╗  ██╔████╔██║█████╗  ██║  ██║ ╚████╔╝ ",
+    r"██╔══██╗██╔══╝  ██║╚██╔╝██║██╔══╝  ██║  ██║  ╚██╔╝  ",
+    r"██║  ██║███████╗██║ ╚═╝ ██║███████╗██████╔╝   ██║   ",
+    r"╚═╝  ╚═╝╚══════╝╚═╝     ╚═╝╚══════╝╚═════╝    ╚═╝   ",
+    r"",
+    r"  The self-improving, multi-channel AI agent framework.",
+]
+
+WELCOME_ASCII = [
+    r" #####  ######  #    #  ######  ####   #   # ",
+    r" #    #  #       ##  ##  #       #   #   # #  ",
+    r" #####   #####   # ## #  #####   #   #    #   ",
+    r" #  #    #       #    #  #       #   #    #   ",
+    r" #   ##  ######  #    #  ######  ####     #   ",
     r"",
     r"  The self-improving, multi-channel AI agent framework.",
 ]
@@ -165,14 +175,29 @@ def run_wizard(quick: bool = False) -> Path:
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _print_welcome() -> None:
-    """Print the welcome banner, gracefully handling any encoding issues."""
+def _supports_unicode() -> bool:
+    """Check if stdout can handle Unicode box-drawing characters."""
     try:
-        for line in WELCOME_ART:
-            console.print(line, style="bold magenta")
-    except Exception:
-        console.print("Remedy - The self-improving, multi-channel AI agent framework.",
-                       style="bold magenta")
+        # Try encoding a box-drawing character to the terminal encoding
+        "\u2588\u2502".encode(sys.stdout.encoding)
+        return True
+    except (UnicodeError, LookupError):
+        return False
+
+
+def _print_welcome() -> None:
+    """Print the welcome banner with fallback for legacy terminals."""
+    if _supports_unicode():
+        art = WELCOME_ART
+    else:
+        art = WELCOME_ASCII
+
+    for i, line in enumerate(art):
+        if 0 <= i < 6:
+            style = "bold green" if i % 2 == 0 else "bold #a855f7"
+        else:
+            style = "dim"
+        console.print(line, style=style)
 
     console.print(
         Panel.fit(
@@ -180,7 +205,7 @@ def _print_welcome() -> None:
             "I'll walk you through configuring your agent.\n"
             "You can always change these later in ~/.remedy/config.toml",
             title="Setup Wizard",
-            border_style="magenta",
+            border_style="bold green",
         )
     )
 
