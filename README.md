@@ -10,8 +10,12 @@ Remedy is a standalone AI agent framework designed for autonomous, long-running 
 - **Compatibility** — Native [agentskills.io](https://agentskills.io) support, plus adapters for Hermes and OpenClaw/ClawHub
 
 ```bash
-pip install remedy
-# or: git clone https://github.com/AhmiDarrow/Remedy && uv sync
+# PyPI name is remedy-ai (the name "remedy" is a different, unrelated package)
+pip install remedy-ai
+# or from source:
+git clone https://github.com/AhmiDarrow/RemedyAI && cd RemedyAI && uv sync
+# editable local install:
+pip install -e .
 ```
 
 ---

@@ -6,12 +6,20 @@ Detailed help for each command, configuration, and usage pattern.
 
 ## Installation
 
+### From PyPI
+
+```bash
+pip install remedy-ai
+# NOTE: do NOT `pip install remedy` — that is an unrelated package on PyPI.
+```
+
 ### From source
 
 ```bash
-git clone https://github.com/AhmiDarrow/Remedy.git
-cd Remedy
+git clone https://github.com/AhmiDarrow/RemedyAI.git
+cd RemedyAI
 uv sync
+# or: pip install -e .
 ```
 
 ### Verify

@@ -49,21 +49,28 @@ def _get_data_files() -> list[tuple[str, Path]]:
 
 
 def _pip_uninstall() -> bool:
-    """Run pip uninstall remedy."""
-    try:
-        result = subprocess.run(
-            [sys.executable, "-m", "pip", "uninstall", "-y", "remedy"],
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-        if result.returncode != 0:
-            console.print(f"[yellow]pip uninstall warning:[/yellow]\n{result.stderr}")
-        console.print(f"[dim]{result.stdout.strip()}[/dim]")
-        return True
-    except Exception as e:
-        console.print(f"[red]pip uninstall failed: {e}[/red]")
-        return False
+    """Run pip uninstall for both distribution names (remedy-ai and legacy remedy)."""
+    ok = True
+    # remedy-ai is the real PyPI name; also try "remedy" for editable/legacy installs
+    for dist in ("remedy-ai", "remedy"):
+        try:
+            result = subprocess.run(
+                [sys.executable, "-m", "pip", "uninstall", "-y", dist],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            out = (result.stdout or "").strip()
+            err = (result.stderr or "").strip()
+            if out:
+                console.print(f"[dim]{out}[/dim]")
+            if result.returncode != 0 and "not installed" not in err.lower() and "Skipping" not in err:
+                console.print(f"[yellow]pip uninstall warning ({dist}):[/yellow]\n{err}")
+                ok = False
+        except Exception as e:
+            console.print(f"[red]pip uninstall failed ({dist}): {e}[/red]")
+            ok = False
+    return ok
 
 
 def run_uninstall(purge: bool = False, dry_run: bool = False) -> None:
@@ -130,4 +137,7 @@ def run_uninstall(purge: bool = False, dry_run: bool = False) -> None:
     console.print()
     console.print("[green]Uninstall complete.[/green]")
     console.print("\nThanks for trying Remedy!")
-    console.print("To reinstall: [dim]pip install git+https://github.com/AhmiDarrow/Remedy.git[/dim]")
+    console.print(
+        "To reinstall: [dim]pip install remedy-ai[/dim] "
+        "or [dim]pip install -e .[/dim] from the repo"
+    )

@@ -129,7 +129,7 @@ def _pip_upgrade() -> bool:
     """Upgrade remedy via pip."""
     try:
         result = subprocess.run(
-            [sys.executable, "-m", "pip", "install", "--upgrade", "remedy"],
+            [sys.executable, "-m", "pip", "install", "--upgrade", "remedy-ai"],
             capture_output=True,
             text=True,
             timeout=120,

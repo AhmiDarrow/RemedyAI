@@ -1,5 +1,8 @@
 [project]
-name = "remedy"
+# Distribution name on PyPI. Do NOT use "remedy" — that name is occupied by an
+# unrelated package (remedy 0.0.6) that pulls ancient Jinja2/begins.
+# Import package and CLI entry point remain `remedy`.
+name = "remedy-ai"
 version = "0.7.0"
 description = "A self-improving, multi-channel AI agent framework with memory, learning, and extensibility"
 readme = "README.md"
@@ -39,6 +42,10 @@ remedy = "remedy.interfaces.cli:main"
 [build-system]
 requires = ["uv_build>=0.11.31,<0.12.0"]
 build-backend = "uv_build"
+
+# Dist name is remedy-ai; import package stays `remedy` under src/remedy/
+[tool.uv.build-backend]
+module-name = "remedy"
 
 [tool.pytest.ini_options]
 minversion = "7.0"

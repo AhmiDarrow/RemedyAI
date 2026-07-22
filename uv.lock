@@ -761,7 +761,7 @@ wheels = [
 ]
 
 [[package]]
-name = "remedy"
+name = "remedy-ai"
 version = "0.7.0"
 source = { editable = "." }
 dependencies = [
