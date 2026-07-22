@@ -54,6 +54,7 @@ from remedy.interfaces.config import (
     generate_default_config,
 )
 from remedy.interfaces.wizard import run_wizard
+from remedy.interfaces.updater import run_update
 
 console = Console()
 
@@ -221,6 +222,12 @@ def build_parser() -> argparse.ArgumentParser:
     serve_cmd.add_argument("--host", default="127.0.0.1")
     serve_cmd.add_argument("--port", type=int, default=8000)
     serve_cmd.add_argument("--config", dest="config_file", default=None)
+
+    # remedy update
+    update_cmd = sub.add_parser("update", help="Check for and apply updates")
+    update_cmd.add_argument(
+        "--check", action="store_true", help="Check only, don't apply"
+    )
 
     # remedy setup
     setup_cmd = sub.add_parser("setup", help="Interactive setup wizard")
@@ -854,8 +861,9 @@ def main(args: Optional[list[str]] = None) -> None:
     elif parsed.command == "serve":
         _cmd_serve(parsed)
     elif parsed.command == "setup":
-        from remedy.interfaces.wizard import run_wizard
         run_wizard(quick=parsed.quick)
+    elif parsed.command == "update":
+        run_update(check_only=parsed.check)
     else:
         parser.print_help()
 
