@@ -262,6 +262,74 @@ class GatewayEvent(BaseModel):
     raw: str | None = Field(default=None)
 
 
+# -- chat / session models -------------------------------------------------
+
+
+class ChatMessageRole(StrEnum):
+    """Role of a chat message in a conversation."""
+
+    USER = "user"
+    ASSISTANT = "assistant"
+    SYSTEM = "system"
+    TOOL = "tool"
+
+
+class ChatMessage(BaseModel):
+    """A single message within a chat session."""
+
+    id: UUID = Field(default_factory=uuid4)
+    session_id: str
+    role: ChatMessageRole
+    content: str
+    thinking: str | None = Field(default=None)
+    tool_calls: list[dict[str, Any]] = Field(default_factory=list)
+    tool_results: list[dict[str, Any]] = Field(default_factory=list)
+    model: str | None = Field(default=None)
+    agent: str | None = Field(default=None)
+    tokens: int | None = Field(default=None)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    reverted: bool = Field(default=False)
+
+
+class ChatSession(BaseModel):
+    """A persistent chat session with message history."""
+
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    title: str = Field(default="New Session")
+    model: str | None = Field(default=None)
+    agent: str | None = Field(default=None)
+    project_path: str | None = Field(default=None)
+    message_count: int = Field(default=0)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class CommandDefinition(BaseModel):
+    """A slash command available in the chat UI."""
+
+    name: str
+    description: str
+    aliases: list[str] = Field(default_factory=list)
+    arguments: str | None = Field(default=None)
+
+
+class AgentDefinition(BaseModel):
+    """An available agent profile for chat routing."""
+
+    name: str
+    description: str
+    build_mode: bool = Field(default=True)
+
+
+class ModelDefinition(BaseModel):
+    """An available LLM model."""
+
+    id: str
+    name: str
+    provider: str = Field(default="")
+    default: bool = Field(default=False)
+
+
 class AgentConfig(BaseModel):
     """Configuration for the Remedy agent runtime."""
 

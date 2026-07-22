@@ -17,6 +17,9 @@ from uuid import UUID, uuid4
 from remedy.core.security import sanitize_search_query
 from remedy.memory.profile import UserProfile
 from remedy.models import (
+    ChatMessage,
+    ChatMessageRole,
+    ChatSession,
     HandoffNote,
     MemoryEntry,
     MemoryEntryType,
@@ -112,6 +115,37 @@ CREATE TABLE IF NOT EXISTS user_facts (
     reference_count INTEGER NOT NULL DEFAULT 1,
     FOREIGN KEY (user_id) REFERENCES user_profile(user_id)
 );
+
+CREATE TABLE IF NOT EXISTS chat_sessions (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL DEFAULT 'New Session',
+    model TEXT,
+    agent TEXT,
+    project_path TEXT,
+    message_count INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_sessions_updated ON chat_sessions(updated_at);
+
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'user',
+    content TEXT NOT NULL DEFAULT '',
+    thinking TEXT,
+    tool_calls TEXT NOT NULL DEFAULT '[]',
+    tool_results TEXT NOT NULL DEFAULT '[]',
+    model TEXT,
+    agent TEXT,
+    tokens INTEGER,
+    created_at TEXT NOT NULL,
+    reverted INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id, created_at);
 
 CREATE TABLE IF NOT EXISTS user_traits (
     user_id TEXT NOT NULL,
@@ -573,3 +607,149 @@ class MemoryStore:
             (user_id, f"%{query}%", f"%{query}%", limit),
         ).fetchall()
         return [dict(r) for r in rows]
+
+    # -- chat sessions --------------------------------------------------------
+
+    def _row_to_session(self, row: sqlite3.Row) -> ChatSession:
+        return ChatSession(
+            id=row["id"],
+            title=row["title"],
+            model=row["model"],
+            agent=row["agent"],
+            project_path=row["project_path"],
+            message_count=row["message_count"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+        )
+
+    def _row_to_message(self, row: sqlite3.Row) -> ChatMessage:
+        return ChatMessage(
+            id=UUID(row["id"]),
+            session_id=row["session_id"],
+            role=ChatMessageRole(row["role"]),
+            content=row["content"],
+            thinking=row["thinking"],
+            tool_calls=json.loads(row["tool_calls"]),
+            tool_results=json.loads(row["tool_results"]),
+            model=row["model"],
+            agent=row["agent"],
+            tokens=row["tokens"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            reverted=bool(row["reverted"]),
+        )
+
+    async def create_chat_session(self, session: ChatSession) -> ChatSession:
+        db = self._ensure_db()
+        session.created_at = datetime.now(UTC)
+        session.updated_at = datetime.now(UTC)
+        db.execute(
+            """INSERT INTO chat_sessions (id, title, model, agent, project_path,
+               message_count, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                session.id, session.title, session.model, session.agent,
+                session.project_path, session.message_count,
+                session.created_at.isoformat(), session.updated_at.isoformat(),
+            ),
+        )
+        db.commit()
+        return session
+
+    async def get_chat_session(self, session_id: str) -> ChatSession | None:
+        db = self._ensure_db()
+        row = db.execute(
+            "SELECT * FROM chat_sessions WHERE id = ?", (session_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_session(row)
+
+    async def update_chat_session(self, session_id: str, **fields: Any) -> ChatSession | None:
+        db = self._ensure_db()
+        allowed = {"title", "model", "agent", "project_path", "message_count"}
+        updates = {k: v for k, v in fields.items() if k in allowed and v is not None}
+        if not updates:
+            return await self.get_chat_session(session_id)
+        updates["updated_at"] = datetime.now(UTC).isoformat()
+        set_clause = ", ".join(f"{k} = ?" for k in updates)
+        values = list(updates.values()) + [session_id]
+        db.execute(
+            f"UPDATE chat_sessions SET {set_clause} WHERE id = ?", values
+        )
+        db.commit()
+        return await self.get_chat_session(session_id)
+
+    async def delete_chat_session(self, session_id: str) -> bool:
+        db = self._ensure_db()
+        db.execute("DELETE FROM chat_messages WHERE session_id = ?", (session_id,))
+        cursor = db.execute("DELETE FROM chat_sessions WHERE id = ?", (session_id,))
+        db.commit()
+        return cursor.rowcount > 0
+
+    async def list_chat_sessions(
+        self, limit: int = 50, offset: int = 0
+    ) -> list[ChatSession]:
+        db = self._ensure_db()
+        rows = db.execute(
+            "SELECT * FROM chat_sessions ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+            (limit, offset),
+        ).fetchall()
+        return [self._row_to_session(r) for r in rows]
+
+    # -- chat messages --------------------------------------------------------
+
+    async def add_chat_message(self, msg: ChatMessage) -> ChatMessage:
+        db = self._ensure_db()
+        msg.created_at = datetime.now(UTC)
+        db.execute(
+            """INSERT INTO chat_messages (id, session_id, role, content, thinking,
+               tool_calls, tool_results, model, agent, tokens, created_at, reverted)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                str(msg.id), msg.session_id, msg.role.value, msg.content,
+                msg.thinking, json.dumps(msg.tool_calls),
+                json.dumps(msg.tool_results), msg.model, msg.agent,
+                msg.tokens, msg.created_at.isoformat(), int(msg.reverted),
+            ),
+        )
+        db.execute(
+            "UPDATE chat_sessions SET message_count = message_count + 1, "
+            "updated_at = ? WHERE id = ?",
+            (datetime.now(UTC).isoformat(), msg.session_id),
+        )
+        db.commit()
+        return msg
+
+    async def get_chat_messages(
+        self, session_id: str, limit: int = 50, offset: int = 0
+    ) -> list[ChatMessage]:
+        db = self._ensure_db()
+        rows = db.execute(
+            "SELECT * FROM chat_messages WHERE session_id = ? "
+            "ORDER BY created_at ASC LIMIT ? OFFSET ?",
+            (session_id, limit, offset),
+        ).fetchall()
+        return [self._row_to_message(r) for r in rows]
+
+    async def revert_message(self, msg_id: str) -> bool:
+        db = self._ensure_db()
+        cursor = db.execute(
+            "UPDATE chat_messages SET reverted = 1 WHERE id = ?", (msg_id,)
+        )
+        db.commit()
+        return cursor.rowcount > 0
+
+    async def revert_from(self, session_id: str, msg_id: str) -> int:
+        db = self._ensure_db()
+        target = db.execute(
+            "SELECT created_at FROM chat_messages WHERE id = ?", (msg_id,)
+        ).fetchone()
+        if target is None:
+            return 0
+        cursor = db.execute(
+            "UPDATE chat_messages SET reverted = 1 "
+            "WHERE session_id = ? AND created_at >= ?",
+            (session_id, target["created_at"]),
+        )
+        db.commit()
+        return cursor.rowcount
