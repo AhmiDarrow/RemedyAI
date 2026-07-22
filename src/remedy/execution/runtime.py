@@ -8,6 +8,8 @@ and MCP-based tool backends with retry, timeout, and streaming.
 from __future__ import annotations
 
 import asyncio
+import shutil
+import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -16,6 +18,14 @@ from uuid import UUID
 
 from remedy.execution.policy import ExecutionPolicy, PolicyDecision
 from remedy.models import ToolCall, ToolResult
+
+_SANDBOX_TOOL_ALLOWLIST = frozenset({
+    "bash_exec",
+    "shell_exec",
+    "python_exec",
+    "python_eval",
+    "python_run",
+})
 
 
 @dataclass
@@ -229,13 +239,35 @@ class ToolRuntime:
             )
 
     def _build_command(self, tool_call: ToolCall) -> list[str]:
-        """Build a command list from a tool call."""
-        if tool_call.tool_name == "bash_exec":
-            return ["pwsh", "-NoProfile", "-Command", tool_call.arguments.get("command", "")]
-        if tool_call.tool_name.startswith("python_"):
+        """Build a command list from a tool call (allowlisted tools only)."""
+        name = tool_call.tool_name
+        if name not in _SANDBOX_TOOL_ALLOWLIST and not name.startswith("python_"):
+            raise ValueError(
+                f"Tool '{name}' is not allowlisted for sandbox execution. "
+                f"Allowed: {sorted(_SANDBOX_TOOL_ALLOWLIST)}"
+            )
+
+        if name in ("bash_exec", "shell_exec"):
+            command = str(tool_call.arguments.get("command", ""))
+            return self._shell_command(command)
+
+        if name.startswith("python_") or name in ("python_exec", "python_eval", "python_run"):
             code = tool_call.arguments.get("code", tool_call.arguments.get("command", ""))
-            return ["python", "-c", code]
-        return [tool_call.tool_name] + [str(v) for v in tool_call.arguments.values()]
+            return [sys.executable, "-c", str(code)]
+
+        raise ValueError(f"No sandbox command mapping for tool: {name}")
+
+    @staticmethod
+    def _shell_command(command: str) -> list[str]:
+        """Resolve a portable shell argv for running a command string."""
+        if sys.platform == "win32":
+            pwsh = shutil.which("pwsh") or shutil.which("powershell")
+            if pwsh:
+                return [pwsh, "-NoProfile", "-NonInteractive", "-Command", command]
+            cmd = shutil.which("cmd") or "cmd.exe"
+            return [cmd, "/c", command]
+        sh = shutil.which("bash") or shutil.which("sh") or "/bin/sh"
+        return [sh, "-c", command]
 
     # -- provenance ----------------------------------------------------------
 
@@ -251,9 +283,6 @@ class ToolRuntime:
 
     def get_stats(self) -> dict[str, Any]:
         total = len(self._history)
-        if total == 0:
-            return {"total_calls": 0}
-
         success = sum(1 for r in self._history if r.success)
         tool_counts: dict[str, int] = {}
         for r in self._history:
@@ -265,8 +294,8 @@ class ToolRuntime:
             "total_calls": total,
             "success_count": success,
             "failure_count": total - success,
-            "success_rate": success / total,
-            "avg_duration_ms": sum(durations) / len(durations) if durations else 0,
+            "success_rate": (success / total) if total else 0.0,
+            "avg_duration_ms": sum(durations) / len(durations) if durations else 0.0,
             "by_tool": dict(sorted(tool_counts.items(), key=lambda x: -x[1])[:10]),
         }
 

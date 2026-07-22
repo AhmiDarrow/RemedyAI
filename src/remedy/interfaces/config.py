@@ -50,9 +50,7 @@ def load_config(path: Path | None = None) -> dict[str, Any]:
 
     if path.suffix in (".toml", ".tml"):
         return tomllib.loads(content)
-    elif path.suffix in (".yaml", ".yml"):
-        return yaml.safe_load(content) or {}
-    elif "---" in content[:100] or path.suffix == ".yaml":
+    elif path.suffix in (".yaml", ".yml") or "---" in content[:100] or path.suffix == ".yaml":
         return yaml.safe_load(content) or {}
     else:
         return tomllib.loads(content)

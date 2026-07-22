@@ -20,6 +20,7 @@ from remedy.core.learning.reflection import (
 )
 from remedy.memory.store import MemoryStore
 from remedy.models import (
+    MemoryEntry,
     MemoryEntryType,
     Skill,
     SkillKind,
@@ -142,8 +143,6 @@ class LearningLoop:
     def auto_refine_skill(self, skill: Skill) -> bool:
         """Check if a skill should be promoted/demoted based on stats,
         and apply the change if warranted."""
-        stats = self.refiner.get_stats(skill.manifest.name)
-
         if self.refiner.should_promote(skill.manifest.name):
             old_status = skill.manifest.status
             skill.manifest.status = SkillStatus.ACTIVE
@@ -167,8 +166,8 @@ class LearningLoop:
     def get_skill_stats(self, skill_name: str):
         return self.refiner.get_stats(skill_name)
 
-    def get_refinement_changelog(self) -> str:
-        return self.refiner.generate_changelog()
+    def get_refinement_changelog(self, skill_name: str | None = None) -> str:
+        return self.refiner.generate_changelog(skill_name=skill_name)
 
     # -- public API: history -------------------------------------------------
 
@@ -218,16 +217,12 @@ class LearningLoop:
     ) -> str | None:
         """Given user feedback on a skill, store it and return suggestions."""
         await self.memory.upsert(
-            type(
-                "MemoryEntry",
-                (),
-                {
-                    "entry_type": MemoryEntryType.SKILL_LEARNED,
-                    "title": f"Feedback on {skill.manifest.name}",
-                    "content": feedback,
-                    "tags": ["skill-feedback", skill.manifest.name],
-                    "importance": 0.7,
-                },
+            MemoryEntry(
+                entry_type=MemoryEntryType.SKILL_LEARNED,
+                title=f"Feedback on {skill.manifest.name}",
+                content=feedback,
+                tags=["skill-feedback", skill.manifest.name],
+                importance=0.7,
             )
         )
         return None

@@ -17,7 +17,7 @@ from remedy.gateway.channels.adapters import (
     WebChannel,
 )
 from remedy.gateway.router import Gateway
-from remedy.models import AgentConfig, ChannelKind
+from remedy.models import ChannelKind, EventKind, GatewayEvent
 
 console = Console()
 
@@ -31,13 +31,14 @@ async def run_gateway(
 ) -> None:
     """Start the Remedy gateway and all configured channels."""
 
-    from remedy.core.runtime import AgentRuntime
+    from remedy.core.agent import BasicRuntime
+    from remedy.models import AgentConfig
 
     config = AgentConfig(
         memory_db_path=str(db_path),
         home_dir=str(db_path.parent),
     )
-    runtime = AgentRuntime(config)
+    runtime = BasicRuntime(config)
     await runtime.start()
 
     gw = Gateway(
@@ -45,6 +46,14 @@ async def run_gateway(
         heartbeat_interval=heartbeat,
         rate_limit=120,
     )
+
+    async def _handle_event(event: GatewayEvent):
+        async for chunk in runtime.handle_event(event):
+            if chunk is not None:
+                await gw.send_to(event.channel, str(chunk), target=event.source_id or None)
+                yield chunk
+
+    gw.register_handler(_handle_event)
 
     # Always register CLI
     cli = CLIChannel(gw)
@@ -82,24 +91,14 @@ async def run_gateway(
             if line.strip().lower() in ("exit", "quit", "/quit"):
                 break
             if line.strip():
-                from remedy.models import EventKind, GatewayEvent
-                event = GatewayEvent.from_orm(type("Event", (), {
-                    "kind": EventKind.MESSAGE,
-                    "channel": ChannelKind.CLI,
-                    "source_id": "cli-user",
-                    "payload": {"message": line.strip()},
-                }))
-                await gw.emit(type("GatewayEvent", (), {
-                    "kind": EventKind.MESSAGE,
-                    "channel": ChannelKind.CLI,
-                    "id": None,
-                    "source_id": "cli-user",
-                    "payload": {"message": line.strip()},
-                    "received_at": None,
-                    "session_id": None,
-                    "raw": line.strip(),
-                    "model_config": {},
-                })())
+                event = GatewayEvent(
+                    kind=EventKind.MESSAGE,
+                    channel=ChannelKind.CLI,
+                    source_id="cli-user",
+                    payload={"message": line.strip()},
+                    raw=line.strip(),
+                )
+                await gw.emit(event)
 
     except KeyboardInterrupt:
         console.print("\n[dim]Shutting down...[/dim]")
@@ -115,7 +114,6 @@ async def gateway_status(db_path: Path) -> None:
     async with MemoryStore(db_path) as store:
         info = {}
         try:
-            entries = await store.list_recent(limit=1)
             all_entries = await store.list_recent(limit=1000)
             handoffs = await store.list_handoffs(limit=1000)
             sessions = await store.list_sessions(limit=1000)
@@ -163,9 +161,10 @@ def main_gateway(args) -> None:
 def _serve_api(db_path: Path) -> None:
     import uvicorn
 
+    from remedy import __version__
     from remedy.interfaces.api import create_app
 
-    app = create_app(title="Remedy AI", version="0.7.0")
+    app = create_app(title="Remedy AI", version=__version__)
     console.print("[green]Starting Remedy API on http://127.0.0.1:8000[/green]")
     console.print("[dim]Endpoints: /api/status /api/chat /api/memory/search /api/skills[/dim]")
     uvicorn.run(app, host="127.0.0.1", port=8000, log_level="info")

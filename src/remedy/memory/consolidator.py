@@ -26,10 +26,14 @@ class MemoryConsolidator:
 
         Returns the consolidation entry, or None if nothing to consolidate.
         """
-        entries = await self.store.list_recent(limit=max_entries)
+        if hasattr(self.store, "list_by_session"):
+            entries = await self.store.list_by_session(session_id, limit=max_entries)
+        else:
+            entries = await self.store.list_recent(limit=max_entries)
+            entries = [e for e in entries if e.session_id == session_id]
         session_entries = [
             e for e in entries
-            if e.session_id == session_id and e.entry_type != MemoryEntryType.SYSTEM
+            if e.entry_type != MemoryEntryType.SYSTEM
         ]
         if len(session_entries) < 3:
             return None

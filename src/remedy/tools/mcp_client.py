@@ -134,10 +134,41 @@ class MCPClient:
 
     # -- tool invocation -----------------------------------------------------
 
+    def _resolve_tool(
+        self, tool_call: ToolCall
+    ) -> tuple[ToolDefinition | None, str | None]:
+        """Resolve tool definition and MCP server name from a tool call.
+
+        Tools are stored under keys ``mcp:{server}:{name}``. ``ToolCall.source``
+        is a ``ToolSource`` enum (usually MCP), not the server name.
+        """
+        name = tool_call.tool_name
+
+        # Explicit server hint via arguments or metadata-style source string
+        source_hint = tool_call.arguments.get("_mcp_server")
+        if source_hint:
+            key = f"mcp:{source_hint}:{name}"
+            tool = self._tools.get(key)
+            if tool is not None:
+                return tool, str(source_hint)
+
+        # Match by registered key / uri
+        for key, tool in self._tools.items():
+            if tool.name != name:
+                continue
+            parts = key.split(":", 2)
+            if len(parts) == 3 and parts[0] == "mcp":
+                return tool, parts[1]
+            if tool.uri and tool.uri.startswith("mcp://"):
+                server = tool.uri[len("mcp://"):].split("/", 1)[0]
+                return tool, server
+            return tool, None
+
+        return None, None
+
     async def call_tool(self, tool_call: ToolCall) -> ToolResult:
         """Invoke a tool on an MCP server."""
-        key = f"mcp:{tool_call.source}:{tool_call.tool_name}"
-        tool = self._tools.get(key)
+        tool, server_name = self._resolve_tool(tool_call)
 
         if tool is None:
             return ToolResult(
@@ -146,12 +177,11 @@ class MCPClient:
                 error=f"MCP tool not found: {tool_call.tool_name}",
             )
 
-        server_name = tool_call.source
-        if server_name not in self._servers:
+        if not server_name or server_name not in self._servers:
             return ToolResult(
                 call_id=tool_call.id,
                 success=False,
-                error=f"MCP server not connected: {server_name}",
+                error=f"MCP server not connected: {server_name or 'unknown'}",
             )
 
         import time
@@ -215,7 +245,7 @@ class MCPClient:
     def get_tool(self, name: str, server: str | None = None) -> ToolDefinition | None:
         if server:
             return self._tools.get(f"mcp:{server}:{name}")
-        for key, tool in self._tools.items():
+        for tool in self._tools.values():
             if tool.name == name:
                 return tool
         return None
@@ -264,14 +294,32 @@ class MCPClient:
             return {"error": str(e)}
 
         try:
-            result = await asyncio.wait_for(fut, timeout=timeout)
-            return result
+            message = await asyncio.wait_for(fut, timeout=timeout)
+            return self._unwrap_jsonrpc(message)
         except TimeoutError:
             self._pending.pop(request_id, None)
             return {"error": f"Request timed out after {timeout}s"}
         except Exception as e:
             self._pending.pop(request_id, None)
             return {"error": str(e)}
+
+    @staticmethod
+    def _unwrap_jsonrpc(message: Any) -> dict[str, Any]:
+        """Extract the JSON-RPC result payload, normalizing errors."""
+        if not isinstance(message, dict):
+            return {"value": message}
+        if message.get("error") is not None:
+            err = message["error"]
+            if isinstance(err, dict):
+                return {"error": err.get("message", str(err))}
+            return {"error": str(err)}
+        if "result" in message:
+            result = message["result"]
+            if isinstance(result, dict):
+                return result
+            return {"value": result}
+        # Already-unwrapped or non-standard payload
+        return message
 
     async def _read_responses(self, server_name: str, proc: asyncio.subprocess.Process) -> None:
         """Continuously read JSON-RPC responses from a server's stdout."""

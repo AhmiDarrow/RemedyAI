@@ -21,6 +21,7 @@ from pathlib import Path
 
 from rich.console import Console
 from rich.panel import Panel
+from rich.prompt import Confirm
 
 console = Console()
 
@@ -186,7 +187,6 @@ def _config_check() -> bool:
 
 
 def _memory_check() -> bool:
-    db = Path("~/.remedy/memory.db").expanduser()
     return True  # db may not exist yet for fresh installs
 
 
@@ -195,12 +195,20 @@ def _find_project_root() -> Path | None:
     try:
         import remedy
 
-        src = Path(remedy.__file__).resolve().parent
-        root = src.parent  # src/remedy -> src -> project root
-        if (root / ".git").exists():
-            return root
-        if (root / "pyproject.toml").exists():
-            return root
+        # package file is .../src/remedy/__init__.py (or site-packages/remedy)
+        start = Path(remedy.__file__).resolve().parent
+        for root in (start, *start.parents):
+            if (root / ".git").exists() or (root / "pyproject.toml").exists():
+                # Prefer a root that looks like the Remedy project
+                if (root / "pyproject.toml").exists():
+                    try:
+                        text = (root / "pyproject.toml").read_text(encoding="utf-8")
+                        if 'name = "remedy"' in text or "name = 'remedy'" in text:
+                            return root
+                    except OSError:
+                        pass
+                if (root / ".git").exists() and (root / "src" / "remedy").exists():
+                    return root
     except Exception:
         pass
     return None
@@ -243,7 +251,7 @@ def run_update(check_only: bool = False) -> None:
             import shutil
             git = shutil.which("git")
             if git:
-                r = subprocess.run(
+                subprocess.run(
                     [git, "fetch", "origin"],
                     cwd=project_root,
                     capture_output=True,

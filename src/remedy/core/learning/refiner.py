@@ -192,11 +192,16 @@ class SkillRefiner:
 
         return suggestions
 
-    def generate_changelog(self) -> str:
-        if not self._history:
+    def generate_changelog(self, skill_name: str | None = None) -> str:
+        history = self._history
+        if skill_name:
+            history = [r for r in history if r.skill_name == skill_name]
+        if not history:
+            if skill_name:
+                return f"No refinements recorded for skill '{skill_name}'."
             return "No refinements recorded."
         lines = ["# Skill Refinement Changelog", ""]
-        for r in sorted(self._history, key=lambda x: x.applied_at, reverse=True):
+        for r in sorted(history, key=lambda x: x.applied_at, reverse=True):
             lines.append(
                 f"- **{r.skill_name}** {r.from_version} -> {r.to_version} "
                 f"({r.change_type}): {r.change_description}"

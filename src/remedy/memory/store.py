@@ -299,6 +299,18 @@ class MemoryStore:
         ).fetchall()
         return [self._row_to_entry(r) for r in rows]
 
+    async def list_by_session(
+        self, session_id: str, limit: int = 200, offset: int = 0
+    ) -> list[MemoryEntry]:
+        """Return memory entries belonging to a specific session."""
+        db = self._ensure_db()
+        rows = db.execute(
+            "SELECT * FROM memory_entries WHERE session_id = ? "
+            "ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (session_id, limit, offset),
+        ).fetchall()
+        return [self._row_to_entry(r) for r in rows]
+
     async def list_important(self, threshold: float = 0.7, limit: int = 50) -> list[MemoryEntry]:
         db = self._ensure_db()
         rows = db.execute(

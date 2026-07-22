@@ -17,7 +17,7 @@ uv sync
 ### Verify
 
 ```bash
-remedy --version   # remedy 0.1.0
+remedy --version   # remedy 0.7.0
 remedy --help      # Lists all commands
 ```
 

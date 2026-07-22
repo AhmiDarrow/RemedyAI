@@ -18,9 +18,33 @@ class SkillRegistry:
     Handles discovery, deduplication (by name), activation, and version tracking.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, auto_discover: bool | Path | str = False) -> None:
         self._skills: dict[UUID, Skill] = {}
         self._by_name: dict[str, UUID] = {}
+        if auto_discover is True:
+            self.discover_defaults()
+        elif auto_discover:
+            self.discover(auto_discover)
+
+    def discover_defaults(self) -> int:
+        """Discover skills from standard Remedy locations.
+
+        Paths (in order): ``$REMEDY_HOME/skills``, ``~/.remedy/skills``,
+        and ``./skills`` if present.
+        """
+        import os
+
+        paths: list[Path] = []
+        env_home = os.environ.get("REMEDY_HOME")
+        if env_home:
+            paths.append(Path(env_home).expanduser() / "skills")
+        paths.append(Path("~/.remedy/skills").expanduser())
+        paths.append(Path.cwd() / "skills")
+        total = 0
+        for p in paths:
+            if p.is_dir():
+                total += self.discover(p)
+        return total
 
     # -- properties ----------------------------------------------------------
 

@@ -47,7 +47,7 @@ class SkillExporter:
             "author": skill.manifest.author or "Remedy",
             "tags": skill.manifest.tags,
             "hermes_version": "2.0",
-            "remey_exported": datetime.now(UTC).isoformat(),
+            "remedy_exported": datetime.now(UTC).isoformat(),
         }
 
         skill_md_content = "---\n" + yaml.dump(fm, default_flow_style=False) + "---\n\n" + skill.instructions
@@ -120,7 +120,7 @@ class SkillExporter:
         if format == "hermes":
             fm = self._build_frontmatter(skill)
             fm["hermes_version"] = "2.0"
-            fm["remey_exported"] = datetime.now(UTC).isoformat()
+            fm["remedy_exported"] = datetime.now(UTC).isoformat()
         else:
             fm = self._build_frontmatter(skill)
 

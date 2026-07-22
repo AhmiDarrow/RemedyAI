@@ -40,10 +40,21 @@ class CLIChannel(ChannelAdapter):
         return True
 
     async def read_line(self, timeout: float | None = None) -> str | None:
-        """Read a single line from stdin (async-compatible wrapper)."""
+        """Read a single line from stdin (async-compatible wrapper).
+
+        When ``timeout`` is set, returns ``None`` if no line arrives in time
+        (does not cancel the underlying read — next call may get a stale line
+        on some platforms; acceptable for the gateway poll loop).
+        """
         try:
-            loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(None, input, self.prompt)
+            loop = asyncio.get_running_loop()
+            fut = loop.run_in_executor(None, input, self.prompt)
+            if timeout is None:
+                return await fut
+            try:
+                return await asyncio.wait_for(asyncio.shield(fut), timeout=timeout)
+            except TimeoutError:
+                return None
         except (EOFError, KeyboardInterrupt):
             return None
 

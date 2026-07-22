@@ -11,8 +11,41 @@ from pathlib import Path
 
 from remedy.core.errors import SecurityError
 
-HOME_DIR = Path("~/.remedy").expanduser()
-HOME_DIR.mkdir(parents=True, exist_ok=True)
+_HOME_DIR: Path | None = None
+
+
+def get_home_dir() -> Path:
+    """Return ~/.remedy, creating it on first use (not at import time)."""
+    global _HOME_DIR
+    if _HOME_DIR is None:
+        _HOME_DIR = Path("~/.remedy").expanduser()
+        _HOME_DIR.mkdir(parents=True, exist_ok=True)
+    return _HOME_DIR
+
+
+class _HomeDirProxy:
+    """Lazy Path-like proxy so existing ``HOME_DIR / x`` call sites keep working."""
+
+    def _path(self) -> Path:
+        return get_home_dir()
+
+    def __truediv__(self, other):
+        return self._path() / other
+
+    def __fspath__(self) -> str:
+        return str(self._path())
+
+    def __str__(self) -> str:
+        return str(self._path())
+
+    def __repr__(self) -> str:
+        return repr(self._path())
+
+    def __getattr__(self, name: str):
+        return getattr(self._path(), name)
+
+
+HOME_DIR = _HomeDirProxy()  # type: ignore[assignment]
 
 
 MAX_FILENAME_LENGTH = 255
@@ -30,7 +63,7 @@ def safe_path(user_input: str, base_dir: Path | None = None) -> Path:
 
     Prevents path traversal by rejecting paths that escape base_dir.
     """
-    base = (base_dir or HOME_DIR).resolve()
+    base = Path(base_dir or get_home_dir()).resolve()
     candidate = (base / user_input).resolve()
 
     try:
@@ -164,13 +197,19 @@ _DANGEROUS_COMMANDS = {
 
 
 _DANGEROUS_PATTERNS = [
-    (r"(^|\s)(rm|del|erase)(\s|$)", "File deletion detected"),
-    (r"(^|\s)format(\s|$)", "Filesystem format"),
-    (r"(^|\s)shutdown(\s|$)", "System shutdown"),
-    (r"(^|\s)reboot(\s|$)", "System reboot"),
+    (r"(^|[\s;&|])(rm|del|erase|rmdir|rd)(\s|$)", "File deletion detected"),
+    (r"(^|[\s;&|])format(\s|$)", "Filesystem format"),
+    (r"(^|[\s;&|])shutdown(\s|$)", "System shutdown"),
+    (r"(^|[\s;&|])reboot(\s|$)", "System reboot"),
+    (r"rm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+)*(/|~|\$home|c:\\)", "Recursive delete of system path"),
     (r"2>/dev/null", "Error output suppression"),
-    (r"\|\s*(sh|bash|pwsh)", "Shell pipe injection"),
+    (r"\|\s*(sh|bash|pwsh|powershell|cmd)", "Shell pipe injection"),
     (r">\s*/dev/", "Device write"),
+    (r"`[^`]+`", "Command substitution"),
+    (r"\$\([^)]+\)", "Command substitution"),
+    (r"invoke-expression|iex\s+", "PowerShell Invoke-Expression"),
+    (r"start-process\s+", "Process launch"),
+    (r"remove-item\s+.*-recurse", "PowerShell recursive delete"),
 ]
 
 
@@ -182,14 +221,16 @@ def check_dangerous_command(command: list[str]) -> str | None:
     if not command:
         return None
 
-    base = command[0].lower()
+    base = Path(str(command[0])).name.lower()
+    # strip extension on Windows
+    if base.endswith(".exe"):
+        base = base[:-4]
     if base in _DANGEROUS_COMMANDS:
         return f"Dangerous command: {base}"
 
     full = " ".join(str(a) for a in command).lower()
     for pattern, reason in _DANGEROUS_PATTERNS:
-        import re
-        if re.search(pattern, full):
+        if re.search(pattern, full, flags=re.IGNORECASE):
             return f"{reason}: {full[:100]}"
 
     return None

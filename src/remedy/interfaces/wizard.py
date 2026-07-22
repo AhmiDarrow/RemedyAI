@@ -481,10 +481,7 @@ def _write_config(config: dict) -> Path:
     for key, value in config.items():
         if key in ("home_dir",):
             lines.append(f'{key} = "{value}"')
-        elif key in ("name", "persona", "log_level", "llm_model", "llm_base_url"):
-            if value:
-                lines.append(f'{key} = "{value}"')
-        elif key == "llm_api_key":
+        elif key in ("name", "persona", "log_level", "llm_model", "llm_base_url") or key == "llm_api_key":
             if value:
                 lines.append(f'{key} = "{value}"')
         elif key == "auto_approve_threshold":

@@ -146,9 +146,6 @@ class ToolRegistry:
 
     def get_stats(self) -> dict[str, Any]:
         total = len(self._invocation_history)
-        if total == 0:
-            return {"total_calls": 0}
-
         success_count = sum(1 for h in self._invocation_history if h["success"])
         tool_counts: dict[str, int] = defaultdict(int)
         for h in self._invocation_history:
@@ -156,7 +153,7 @@ class ToolRegistry:
 
         return {
             "total_calls": total,
-            "success_rate": success_count / total if total > 0 else 0,
+            "success_rate": (success_count / total) if total > 0 else 0.0,
             "top_tools": dict(
                 sorted(tool_counts.items(), key=lambda x: x[1], reverse=True)[:10]
             ),

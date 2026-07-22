@@ -160,6 +160,9 @@ def build_parser() -> argparse.ArgumentParser:
     learn_history = learn_sub.add_parser("history", help="Show learning history")
     learn_history.add_argument("--limit", type=int, default=20)
     learn_changelog = learn_sub.add_parser("changelog", help="Show refinement changelog")
+    learn_changelog.add_argument(
+        "skill_name", nargs="?", default=None, help="Optional skill name filter"
+    )
     learn_stats = learn_sub.add_parser("stats", help="Show skill execution stats")
     learn_stats.add_argument("--skill", dest="skill_name", default=None)
     learn_sync = learn_sub.add_parser("sync", help="Sync learning events to memory store")
@@ -435,17 +438,18 @@ async def _cmd_session(args, db_path: Path) -> None:
 
 async def _cmd_skill(args) -> None:
     registry = SkillRegistry()
+    # Auto-load default skill dirs so list/info/run work without prior discover
+    if args.skill_cmd in ("list", "info", "run", "test", "export"):
+        registry.discover_defaults()
 
     if args.skill_cmd == "list":
-        if hasattr(args, "path") and args.path:
-            registry.discover(args.path, recurse=True)
         if not registry.skills:
             console.print("[dim]No skills registered. Use 'remedy skill discover <path>'[/dim]")
             return
         console.print(f"[bold]{len(registry.skills)} skill(s):[/bold]")
-        for name, skill in sorted(registry.skills.items()):
-            desc = getattr(skill, "description", "") or ""
-            console.print(f"  [cyan]{name}[/cyan] {desc[:60]}")
+        for skill in sorted(registry.skills, key=lambda s: s.manifest.name):
+            desc = skill.manifest.description or ""
+            console.print(f"  [cyan]{skill.manifest.name}[/cyan] {desc[:60]}")
         return
     elif args.skill_cmd == "discover":
         count = registry.discover(args.path, recurse=not args.no_recurse)
@@ -589,15 +593,19 @@ async def _cmd_tool(args) -> None:
 
     elif args.tool_cmd == "stats":
         stats = registry.get_stats()
-        console.print(Panel(
-            f"Registered: {stats['registered_tools']}\n"
-            f"Total calls: {stats['total_calls']}\n"
-            f"Success rate: {stats['success_rate']:.1%}\n"
-            f"By source: {json.dumps(stats['by_source'])}"
-            if stats["total_calls"] > 0 else
-            f"Registered: {stats['registered_tools']}\nNo invocations yet.",
-            title="Tool Stats",
-        ))
+        if stats["total_calls"] > 0:
+            body = (
+                f"Registered: {stats['registered_tools']}\n"
+                f"Total calls: {stats['total_calls']}\n"
+                f"Success rate: {stats['success_rate']:.1%}\n"
+                f"By source: {json.dumps(stats['by_source'])}"
+            )
+        else:
+            body = (
+                f"Registered: {stats['registered_tools']}\n"
+                "No invocations yet."
+            )
+        console.print(Panel(body, title="Tool Stats"))
 
     elif args.tool_cmd == "run":
         sandbox = SubprocessSandbox()
@@ -655,6 +663,7 @@ async def _cmd_migrate(args) -> None:
     registry = SkillRegistry()
     skills_dir = Path(args.home).expanduser() / "skills"
     skills_dir.mkdir(parents=True, exist_ok=True)
+    result = None
 
     if args.migrate_cmd == "hermes":
         from remedy.migrate.from_hermes import migrate_from_hermes
@@ -671,7 +680,7 @@ async def _cmd_migrate(args) -> None:
         )
 
     elif args.migrate_cmd == "openclaw":
-        from remedy.migrate.from_hermes import migrate_from_openclaw as migrate_from_oc
+        from remedy.migrate.from_openclaw import migrate_from_openclaw as migrate_from_oc
 
         result = migrate_from_oc(
             registry,
@@ -683,8 +692,11 @@ async def _cmd_migrate(args) -> None:
             f"[green]OpenClaw migration: {result.skills_imported} imported, "
             f"{result.skills_skipped} skipped[/green]"
         )
+    else:
+        console.print(f"[red]Unknown migrate command: {args.migrate_cmd}[/red]")
+        return
 
-    if result.errors:
+    if result is not None and result.errors:
         for err in result.errors:
             console.print(f"[red]  Error: {err}[/red]")
 
@@ -743,7 +755,9 @@ async def _cmd_learn(args, db_path: Path) -> None:
                 console.print("[dim]No learning events recorded.[/dim]")
 
         elif args.learn_cmd == "changelog":
-            changelog = loop.get_refinement_changelog()
+            changelog = loop.get_refinement_changelog(
+                skill_name=getattr(args, "skill_name", None)
+            )
             console.print(changelog)
 
         elif args.learn_cmd == "stats":
@@ -974,9 +988,13 @@ def _cmd_chat(args) -> None:
                         continue
                     elif cmd == "skills":
                         if runtime.skills.skills:
-                            for name, skill in sorted(runtime.skills.skills.items()):
-                                desc = getattr(skill, "description", "") or ""
-                                console.print(f"  [cyan]{name}[/cyan] {desc[:60]}")
+                            for skill in sorted(
+                                runtime.skills.skills, key=lambda s: s.manifest.name
+                            ):
+                                desc = skill.manifest.description or ""
+                                console.print(
+                                    f"  [cyan]{skill.manifest.name}[/cyan] {desc[:60]}"
+                                )
                         else:
                             console.print("[dim]No skills loaded.[/dim]")
                         continue

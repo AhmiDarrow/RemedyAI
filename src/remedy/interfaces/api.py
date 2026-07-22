@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from remedy.core.errors import SecurityError
+from remedy.core.security import safe_path
 from remedy.models import (
     ChannelKind,
     ChatMessageRole,
@@ -123,7 +126,10 @@ class CommandRequest(BaseModel):
 async def _sse_stream_text(text: str, *, event: str | None = None) -> str:
     """Format a single SSE frame."""
     prefix = f"event: {event}\n" if event else ""
-    payload = json.dumps({"text": text})
+    payload_obj: dict = {"text": text}
+    if event:
+        payload_obj["type"] = event
+    payload = json.dumps(payload_obj)
     return f"{prefix}data: {payload}\n\n"
 
 
@@ -185,7 +191,12 @@ async def handle_slash_command(
             return {"text": "No sessions found."}
         lines = []
         for s in sessions:
-            lines.append(f"  {s['title']} — {s['message_count']} msg — {s['id'][:8]}")
+            sid = getattr(s, "id", None) or (s.get("id") if isinstance(s, dict) else "")
+            title = getattr(s, "title", None) or (s.get("title") if isinstance(s, dict) else "Untitled")
+            count = getattr(s, "message_count", None)
+            if count is None and isinstance(s, dict):
+                count = s.get("message_count", 0)
+            lines.append(f"  {title} — {count or 0} msg — {str(sid)[:8]}")
         return {"text": "Recent sessions:\n" + "\n".join(lines)}
 
     if stripped in ("/models", "/m"):
@@ -248,11 +259,29 @@ def create_app(
         description="Remedy AI Agent Framework — Desktop & Web API",
     )
 
+    cors_origins_env = os.environ.get("REMEDY_CORS_ORIGINS", "").strip()
+    if cors_origins_env == "*":
+        cors_origins = ["*"]
+    elif cors_origins_env:
+        cors_origins = [o.strip() for o in cors_origins_env.split(",") if o.strip()]
+    else:
+        # Safe defaults for local desktop/dev; override with REMEDY_CORS_ORIGINS
+        cors_origins = [
+            "http://localhost:1420",
+            "http://127.0.0.1:1420",
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "tauri://localhost",
+            "http://tauri.localhost",
+        ]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=cors_origins,
         allow_methods=["*"],
         allow_headers=["*"],
+        allow_credentials=cors_origins != ["*"],
     )
 
     if api_key:
@@ -562,9 +591,9 @@ def create_app(
             ))
 
         async def event_stream():
-            yield f"event: start\ndata: {json.dumps({'request_id': request_id, 'session_id': session_id})}\n\n"
-
-            tokens = []
+            yield (
+                f"event: start\ndata: {json.dumps({'type': 'start', 'request_id': request_id, 'session_id': session_id})}\n\n"
+            )
 
             try:
                 event = GatewayEvent(
@@ -591,13 +620,15 @@ def create_app(
                         content=full_response,
                     ))
 
-                yield f"event: done\ndata: {json.dumps({'request_id': request_id})}\n\n"
+                yield (
+                    f"event: done\ndata: {json.dumps({'type': 'done', 'request_id': request_id})}\n\n"
+                )
 
             except asyncio.CancelledError:
                 yield await _sse_stream_text("Request cancelled.", event="error")
             except Exception as e:
                 logger.exception("SSE stream error")
-                yield f"event: error\ndata: {json.dumps({'message': str(e)})}\n\n"
+                yield f"event: error\ndata: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
 
         return StreamingResponse(
             event_stream(),
@@ -615,7 +646,9 @@ def create_app(
         session_id = req.session_id or str(uuid4())
 
         async def event_stream():
-            yield f"event: start\ndata: {json.dumps({'request_id': request_id, 'session_id': session_id})}\n\n"
+            yield (
+                f"event: start\ndata: {json.dumps({'type': 'start', 'request_id': request_id, 'session_id': session_id})}\n\n"
+            )
 
             try:
                 event = GatewayEvent(
@@ -631,9 +664,9 @@ def create_app(
                     if isinstance(r, str):
                         yield await _sse_stream_text(r, event="token")
             except Exception as e:
-                yield f"event: error\ndata: {json.dumps({'message': str(e)})}\n\n"
+                yield f"event: error\ndata: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
 
-            yield f"event: done\ndata: {json.dumps({'request_id': request_id})}\n\n"
+            yield f"event: done\ndata: {json.dumps({'type': 'done', 'request_id': request_id})}\n\n"
 
         return StreamingResponse(
             event_stream(),
@@ -777,41 +810,73 @@ def create_app(
             ]
         }
 
-    # -- file search ----------------------------------------------------------
+    # -- file search (cwd-jailed) ---------------------------------------------
+    def _files_base() -> Path:
+        override = os.environ.get("REMEDY_FILES_ROOT", "").strip()
+        return Path(override).expanduser().resolve() if override else Path.cwd().resolve()
+
+    def _resolve_jailed(path: str, base: Path) -> Path:
+        """Resolve path under base; reject traversal."""
+        if path in (".", "", None):
+            return base
+        try:
+            return safe_path(path, base_dir=base)
+        except SecurityError:
+            # Also allow absolute paths that still stay under base
+            candidate = Path(path).expanduser().resolve()
+            candidate.relative_to(base)
+            return candidate
+
     @app.get("/api/files")
     async def list_files(path: str = Query(default=".")):
-        """List files in a directory for @file autocompletion."""
+        """List files in a directory for @file autocompletion (jailed to cwd)."""
+        base = _files_base()
         try:
-            root = Path(path).resolve()
+            root = _resolve_jailed(path, base)
+        except (SecurityError, ValueError):
+            return {"files": [], "path": path, "error": "path outside allowed directory"}
+        try:
             if not root.exists():
                 return {"files": [], "path": path}
             entries = []
             for p in sorted(root.iterdir()):
                 if p.name.startswith(".") and p.name != ".":
                     continue
+                try:
+                    rel = str(p.relative_to(base))
+                except ValueError:
+                    continue
                 entries.append({
                     "name": p.name,
-                    "path": str(p.relative_to(Path.cwd())) if p.is_relative_to(Path.cwd()) else str(p),
+                    "path": rel,
                     "is_dir": p.is_dir(),
                 })
-            return {"files": entries[:200], "path": str(root)}
+            return {"files": entries[:200], "path": str(root.relative_to(base) if root != base else ".")}
         except Exception:
             return {"files": [], "path": path}
 
     @app.get("/api/files/search")
     async def search_files(query: str = Query(..., min_length=1)):
-        """Search the current directory tree for matching files."""
+        """Search the jailed directory tree for matching files."""
+        base = _files_base()
+        # Prevent glob injection / path escapes via query
+        safe_query = query.replace("/", "").replace("\\", "").replace("..", "")
+        if not safe_query:
+            return {"query": query, "results": []}
         try:
             results = []
-            base = Path.cwd()
-            for p in base.rglob(f"*{query}*"):
+            for p in base.rglob(f"*{safe_query}*"):
                 if ".git" in p.parts or "__pycache__" in p.parts or "node_modules" in p.parts:
                     continue
                 if p.name.startswith("."):
                     continue
+                try:
+                    rel = str(p.relative_to(base))
+                except ValueError:
+                    continue
                 results.append({
                     "name": p.name,
-                    "path": str(p.relative_to(base)),
+                    "path": rel,
                     "is_dir": p.is_dir(),
                 })
                 if len(results) >= 50:

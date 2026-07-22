@@ -8,11 +8,15 @@ from __future__ import annotations
 
 import asyncio
 import re
+import shutil
+import sys
 import tempfile
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID, uuid4
+
+from remedy.core.security import check_dangerous_command
 
 
 @dataclass
@@ -31,6 +35,18 @@ class ExecutionResult:
     error: str | None = None
 
 
+def _default_shell() -> list[str]:
+    """Return argv prefix for running a shell command string safely (no shell=True)."""
+    if sys.platform == "win32":
+        pwsh = shutil.which("pwsh") or shutil.which("powershell")
+        if pwsh:
+            return [pwsh, "-NoProfile", "-NonInteractive", "-Command"]
+        cmd = shutil.which("cmd") or "cmd.exe"
+        return [cmd, "/c"]
+    sh = shutil.which("bash") or shutil.which("sh") or "/bin/sh"
+    return [sh, "-c"]
+
+
 class SkillExecutor:
     """Executes skill scripts and extracted code blocks.
 
@@ -42,6 +58,7 @@ class SkillExecutor:
 
     def __init__(self, sandbox_dir: Path | None = None) -> None:
         self.sandbox_dir = Path(sandbox_dir or tempfile.mkdtemp(prefix="remedy_exec_"))
+        self.sandbox_dir.mkdir(parents=True, exist_ok=True)
 
     async def run_script(
         self,
@@ -50,12 +67,25 @@ class SkillExecutor:
         env: dict[str, str] | None = None,
         timeout: float = 300.0,
     ) -> ExecutionResult:
-        """Execute a skill script via subprocess."""
+        """Execute a skill script via subprocess (list form, no shell)."""
         result = ExecutionResult(started_at=datetime.now(UTC))
+        script_path = Path(script_path).resolve()
+
+        if not script_path.is_file():
+            result.error = f"Script not found: {script_path}"
+            result.ended_at = datetime.now(UTC)
+            return result
+
+        command = [sys.executable, str(script_path), *(args or [])]
+        danger = check_dangerous_command(command)
+        if danger:
+            result.error = f"Blocked by security policy: {danger}"
+            result.ended_at = datetime.now(UTC)
+            return result
 
         try:
             proc = await asyncio.create_subprocess_exec(
-                "python", str(script_path), *(args or []),
+                *command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=env,
@@ -128,7 +158,6 @@ class SkillExecutor:
         """Write a Python code block to a temp file and execute it."""
         tmp = self.sandbox_dir / f"exec_{uuid4().hex[:8]}.py"
         tmp.write_text(code, encoding="utf-8")
-        cwd = str(skill_dir or self.sandbox_dir)
         result = await self.run_script(tmp, env=env)
         try:
             tmp.unlink(missing_ok=True)
@@ -142,16 +171,25 @@ class SkillExecutor:
         skill_dir: Path | None = None,
         env: dict[str, str] | None = None,
     ) -> ExecutionResult:
-        """Execute a shell code block."""
+        """Execute a shell code block without shell=True (argv list form)."""
         result = ExecutionResult(started_at=datetime.now(UTC))
-        result.started_at = datetime.now(UTC)
+
+        shell_prefix = _default_shell()
+        command = [*shell_prefix, code]
+        danger = check_dangerous_command(command)
+        if danger:
+            result.error = f"Blocked by security policy: {danger}"
+            result.ended_at = datetime.now(UTC)
+            return result
+
+        cwd = str(skill_dir or self.sandbox_dir)
 
         try:
-            proc = await asyncio.create_subprocess_shell(
-                code,
+            proc = await asyncio.create_subprocess_exec(
+                *command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                cwd=str(skill_dir or self.sandbox_dir),
+                cwd=cwd,
                 env=env,
             )
             try:
@@ -191,8 +229,17 @@ class SkillExecutor:
     ) -> dict[str, ExecutionResult]:
         """Run every script in a skill's scripts/ directory."""
         results: dict[str, ExecutionResult] = {}
+        base = Path(base_dir).resolve()
         for script_rel in scripts:
-            script_path = base_dir / script_rel
+            script_path = (base / script_rel).resolve()
+            try:
+                script_path.relative_to(base)
+            except ValueError:
+                results[script_rel] = ExecutionResult(
+                    success=False,
+                    error=f"Script path escapes skill directory: {script_rel}",
+                )
+                continue
             if script_path.is_file():
                 results[script_rel] = await self.run_script(script_path, env=env)
             else:
