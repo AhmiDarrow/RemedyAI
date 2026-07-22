@@ -6,7 +6,9 @@ and builtins. Tracks invocation history and tool metadata.
 
 from __future__ import annotations
 
+import inspect
 from collections import defaultdict
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -21,6 +23,7 @@ class ToolRegistry:
         self._by_source: dict[ToolSource, list[str]] = defaultdict(list)
         self._invocation_history: list[dict[str, Any]] = []
         self._mcp_servers: dict[str, dict[str, Any]] = {}
+        self._handlers: dict[str, Callable] = {}
 
     @property
     def tools(self) -> list[ToolDefinition]:
@@ -48,6 +51,30 @@ class ToolRegistry:
             source=ToolSource.BUILTIN,
             parameters=parameters or {},
         ))
+
+    def register_handler(self, name: str, handler: Callable) -> None:
+        """Register an async callable handler for a tool."""
+        self._handlers[name] = handler
+
+    def register_builtin_handler(
+        self,
+        name: str,
+        description: str,
+        handler: Callable,
+        parameters: dict[str, Any] | None = None,
+    ) -> ToolDefinition:
+        """Register a tool definition + handler in one call."""
+        self._handlers[name] = handler
+        return self.register_builtin(name, description, parameters)
+
+    async def execute(self, name: str, **arguments: Any) -> Any:
+        """Invoke a tool by name with its registered handler."""
+        handler = self._handlers.get(name)
+        if handler is None:
+            raise ValueError(f"No handler registered for tool: {name}")
+        if inspect.iscoroutinefunction(handler):
+            return await handler(**arguments)
+        return handler(**arguments)
 
     def register_from_mcp(
         self,
@@ -78,7 +105,7 @@ class ToolRegistry:
             uri=f"skill://{skill_name}/{tool_name}",
         ))
 
-    def get(self, name: str, source: ToolSource | None = None) -> ToolDefinition | None:
+    def get_definition(self, name: str, source: ToolSource | None = None) -> ToolDefinition | None:
         if source:
             return self._tools.get(f"{source.value}:{name}")
         for src in ToolSource:
@@ -86,6 +113,9 @@ class ToolRegistry:
             if key in self._tools:
                 return self._tools[key]
         return None
+
+    def get(self, name: str, source: ToolSource | None = None) -> ToolDefinition | None:
+        return self.get_definition(name, source=source)
 
     def list_by_source(self, source: ToolSource) -> list[ToolDefinition]:
         return [

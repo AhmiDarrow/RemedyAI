@@ -82,21 +82,18 @@ class BasicRuntime(AgentRuntime):
 
     async def call_tool(self, tool_call: ToolCall) -> ToolResult:
         name = tool_call.tool_name
-        tool = self.tool_registry.get(name)
-
-        if tool is None:
-            return ToolResult(
-                call_id=tool_call.id,
-                success=False,
-                error=f"Tool not found: {name}",
-            )
-
         try:
-            result = await tool.execute(**tool_call.arguments)
+            result = await self.tool_registry.execute(name, **tool_call.arguments)
             return ToolResult(
                 call_id=tool_call.id,
                 success=True,
                 data=result,
+            )
+        except ValueError as e:
+            return ToolResult(
+                call_id=tool_call.id,
+                success=False,
+                error=str(e),
             )
         except Exception as e:
             logger.exception("Tool %s failed", name)
@@ -152,8 +149,11 @@ class BasicRuntime(AgentRuntime):
 
     async def _build_context(self) -> str:
         parts = []
-
-        recent = await self.recall("", limit=20)
+        recent = []
+        try:
+            recent = await self.memory.list_recent(limit=20)
+        except Exception:
+            pass
         if recent:
             lines = []
             for e in recent:
@@ -161,7 +161,7 @@ class BasicRuntime(AgentRuntime):
                 lines.append(f"[{ts}] {e.content[:200]}")
             parts.append("Recent memory:\n" + "\n".join(lines))
 
-        tools = self.tool_registry.list()
+        tools = self.tool_registry.tools
         if tools:
             names = ", ".join(t.name for t in tools)
             parts.append(f"Available tools: {names}")

@@ -84,7 +84,7 @@ class LearningLoop:
             title=task.title,
             description=task.description,
             steps=trace_steps,
-            overall_success=task.status == TaskStatus.CREATED or task.status != "failed",
+            overall_success=task.status == TaskStatus.COMPLETED,
             tags=task.tags,
             session_id=session_id,
         )

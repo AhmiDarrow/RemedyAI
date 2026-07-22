@@ -845,7 +845,6 @@ def _cmd_serve(args) -> None:
         skills_dir = Path(agent_config.home_dir).expanduser() / "skills"
         if skills_dir.is_dir():
             runtime.skills.discover(str(skills_dir), recurse=True)
-        runtime.tool_registry = ToolRegistry()
 
         gateway = Gateway(runtime=runtime, memory_store=memory)
         gateway.register_handler(runtime.handle_event)

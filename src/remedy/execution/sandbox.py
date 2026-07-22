@@ -11,6 +11,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from remedy.core.security import check_dangerous_command
+
 
 @dataclass
 class ExecutionResult:
@@ -67,6 +69,15 @@ class SubprocessSandbox(Sandbox):
         env: dict[str, str] | None = None,
     ) -> ExecutionResult:
         start = time.monotonic()
+
+        # Check for dangerous commands before executing
+        danger = check_dangerous_command(command)
+        if danger:
+            return ExecutionResult(
+                exit_code=-1,
+                stderr=f"Blocked by security policy: {danger}",
+                duration_ms=0.0,
+            )
 
         # Enforce allowed_paths jail: verify workdir is within allowed paths
         if self.allowed_paths and workdir:
