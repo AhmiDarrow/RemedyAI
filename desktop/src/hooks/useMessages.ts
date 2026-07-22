@@ -133,13 +133,13 @@ export function useMessages(sessionId: string | null) {
   }, [streamCtrl])
 
   const runCommand = useCallback(
-    async (command: string) => {
-      if (!sessionId) return ''
+    async (command: string): Promise<{ text: string; action?: string }> => {
+      if (!sessionId) return { text: 'No session active.' }
       try {
         const r = await executeCommand(sessionId, command)
-        return r.text
+        return { text: r.text, action: r.action }
       } catch {
-        return `Error executing ${command}`
+        return { text: `Error executing ${command}` }
       }
     },
     [sessionId],

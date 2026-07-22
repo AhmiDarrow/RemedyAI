@@ -126,3 +126,20 @@ export async function listAgents(): Promise<{ agents: AgentDefinition[] }> {
 export async function listCommands(): Promise<{ commands: CommandDefinition[] }> {
   return apiFetch('/commands')
 }
+
+export async function searchFiles(query: string): Promise<{
+  query: string
+  results: { name: string; path: string; is_dir: boolean }[]
+}> {
+  if (!query) return { query: '', results: [] }
+  return apiFetch(`/files/search?query=${encodeURIComponent(query)}`)
+}
+
+export async function revertMessageApi(
+  sessionId: string,
+  msgId: string,
+): Promise<{ status: string }> {
+  return apiFetch(`/sessions/${sessionId}/messages/${msgId}/revert`, {
+    method: 'POST',
+  })
+}

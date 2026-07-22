@@ -8,15 +8,26 @@ interface MessageFeedProps {
   partialText: string
   streaming: boolean
   loading: boolean
+  planMode?: boolean
+  onRevert?: (msgId: string) => void
 }
 
-function MessageBubble({ msg, partial }: { msg: ChatMessage; partial?: string }) {
+function MessageBubble({
+  msg,
+  partial,
+  onRevert,
+}: {
+  msg: ChatMessage
+  partial?: string
+  onRevert?: (msgId: string) => void
+}) {
   const isUser = msg.role === 'user'
   const isSystem = msg.role === 'system'
+  const text = msg.content + (partial || '')
 
   return (
     <div
-      className="flex gap-3 px-4 py-3"
+      className="group flex gap-3 px-4 py-3"
       style={{
         background: isUser ? 'transparent' : 'var(--bg-secondary)',
       }}
@@ -36,8 +47,8 @@ function MessageBubble({ msg, partial }: { msg: ChatMessage; partial?: string })
       </div>
 
       <div className="flex-1 min-w-0">
-        <div className="prose prose-invert max-w-none text-sm" style={{ color: 'var(--text-primary)' }}>
-          {msg.content || partial ? (
+        <div className="prose prose-invert max-w-none text-sm">
+          {text ? (
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               components={{
@@ -64,7 +75,7 @@ function MessageBubble({ msg, partial }: { msg: ChatMessage; partial?: string })
                 },
               }}
             >
-              {msg.content + (partial || '')}
+              {text}
             </ReactMarkdown>
           ) : (
             <span style={{ color: 'var(--text-muted)' }}>
@@ -90,12 +101,35 @@ function MessageBubble({ msg, partial }: { msg: ChatMessage; partial?: string })
             ))}
           </div>
         )}
+
+        {msg.role === 'assistant' && !msg.reverted && onRevert && (
+          <button
+            onClick={() => onRevert(msg.id)}
+            className="hidden group-hover:inline-block text-xs mt-1 px-1.5 py-0.5 rounded"
+            style={{
+              background: 'var(--bg-tertiary)',
+              color: 'var(--text-muted)',
+            }}
+            title="Undo this message"
+          >
+            Undo
+          </button>
+        )}
+
+        {msg.reverted && (
+          <span
+            className="text-xs italic mt-1"
+            style={{ color: 'var(--text-muted)' }}
+          >
+            (reverted)
+          </span>
+        )}
       </div>
     </div>
   )
 }
 
-export function MessageFeed({ messages, partialText, streaming, loading }: MessageFeedProps) {
+export function MessageFeed({ messages, partialText, streaming, loading, planMode, onRevert }: MessageFeedProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -104,6 +138,20 @@ export function MessageFeed({ messages, partialText, streaming, loading }: Messa
 
   return (
     <div className="flex-1 overflow-y-auto">
+      {planMode && (
+        <div
+          className="mx-4 mt-2 px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-2"
+          style={{
+            background: 'var(--bg-tertiary)',
+            border: '1px solid var(--accent)',
+            color: 'var(--accent)',
+          }}
+        >
+          <span>{'\u{1F9E0}'}</span>
+          Plan mode active — describing approach; no tools will be executed
+        </div>
+      )}
+
       {loading && messages.length === 0 && (
         <div className="px-4 py-8 text-center" style={{ color: 'var(--text-muted)' }}>
           Loading messages...
@@ -111,7 +159,7 @@ export function MessageFeed({ messages, partialText, streaming, loading }: Messa
       )}
 
       {messages.map((msg) => (
-        <MessageBubble key={msg.id} msg={msg} />
+        <MessageBubble key={msg.id} msg={msg} onRevert={onRevert} />
       ))}
 
       {streaming && partialText && (
@@ -140,9 +188,13 @@ export function MessageFeed({ messages, partialText, streaming, loading }: Messa
       )}
 
       {!loading && messages.length === 0 && !streaming && (
-        <div className="px-4 py-12 text-center" style={{ color: 'var(--text-muted)' }}>
-          <div className="text-lg mb-2">Remedy AI Desktop</div>
-          <div>Type a message below to start.</div>
+        <div className="flex flex-col items-center justify-center h-48 gap-3" style={{ color: 'var(--text-muted)' }}>
+          <span style={{ color: 'var(--accent)', fontSize: '2rem' }}>{'\u2728'}</span>
+          <div className="text-lg font-medium" style={{ color: 'var(--text-secondary)' }}>Remedy Desktop</div>
+          <div className="text-xs">Type a message below to start, or use <code style={{ color: 'var(--accent)' }}>/help</code> for commands</div>
+          <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
+            Tip: type <code style={{ color: 'var(--accent)' }}>@</code> to reference files
+          </div>
         </div>
       )}
 

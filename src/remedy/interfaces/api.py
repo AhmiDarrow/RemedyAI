@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import time
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -775,6 +776,59 @@ def create_app(
                 for h in handoffs
             ]
         }
+
+    # -- file search ----------------------------------------------------------
+    @app.get("/api/files")
+    async def list_files(path: str = Query(default=".")):
+        """List files in a directory for @file autocompletion."""
+        try:
+            root = Path(path).resolve()
+            if not root.exists():
+                return {"files": [], "path": path}
+            entries = []
+            for p in sorted(root.iterdir()):
+                if p.name.startswith(".") and p.name != ".":
+                    continue
+                entries.append({
+                    "name": p.name,
+                    "path": str(p.relative_to(Path.cwd())) if p.is_relative_to(Path.cwd()) else str(p),
+                    "is_dir": p.is_dir(),
+                })
+            return {"files": entries[:200], "path": str(root)}
+        except Exception:
+            return {"files": [], "path": path}
+
+    @app.get("/api/files/search")
+    async def search_files(query: str = Query(..., min_length=1)):
+        """Search the current directory tree for matching files."""
+        try:
+            results = []
+            base = Path.cwd()
+            for p in base.rglob(f"*{query}*"):
+                if ".git" in p.parts or "__pycache__" in p.parts or "node_modules" in p.parts:
+                    continue
+                if p.name.startswith("."):
+                    continue
+                results.append({
+                    "name": p.name,
+                    "path": str(p.relative_to(base)),
+                    "is_dir": p.is_dir(),
+                })
+                if len(results) >= 50:
+                    break
+            return {"query": query, "results": sorted(results, key=lambda r: len(r["path"]))}
+        except Exception:
+            return {"query": query, "results": []}
+
+    # -- message revert ---------------------------------------------------------
+    @app.post("/api/sessions/{session_id}/messages/{msg_id}/revert")
+    async def revert_message(session_id: str, msg_id: str):
+        if memory is None:
+            raise HTTPException(503, "Memory store not available")
+        reverted = await memory.revert_message(msg_id)
+        if not reverted:
+            raise HTTPException(404, "Message not found")
+        return {"status": "reverted", "msg_id": msg_id}
 
     # -- OpenAPI schema export -----------------------------------------------
     @app.get("/api/openapi.yaml", include_in_schema=False)

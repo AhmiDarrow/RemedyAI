@@ -9,6 +9,10 @@ interface StatusBarProps {
   themeId: ThemeId
   theme: Theme
   onThemeChange: (id: ThemeId) => void
+  planMode: boolean
+  onTogglePlanMode: () => void
+  panel?: 'memory' | 'skills' | null
+  onTogglePanel: (panel: 'memory' | 'skills') => void
 }
 
 export function StatusBar({
@@ -18,6 +22,10 @@ export function StatusBar({
   themeId,
   theme,
   onThemeChange,
+  planMode,
+  onTogglePlanMode,
+  panel,
+  onTogglePanel,
 }: StatusBarProps) {
   const [version, setVersion] = useState('')
   const [status, setStatus] = useState<'connected' | 'disconnected' | 'checking'>('checking')
@@ -60,15 +68,52 @@ export function StatusBar({
         color: 'var(--text-muted)',
       }}
     >
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-3">
         <div className="flex items-center gap-1.5">
           <span className="inline-block w-2 h-2 rounded-full" style={{ background: dotColor }} />
           <span>
             {status === 'connected' ? 'Connected' : status === 'checking' ? 'Checking...' : 'Disconnected'}
-            {version && ` · v${version}`}
+            {version && ` \u00B7 v${version}`}
           </span>
         </div>
-        {sessionId && <span>Session: {sessionId.slice(0, 8)}</span>}
+
+        <button
+          onClick={onTogglePlanMode}
+          className="px-2 py-0.5 rounded text-xs font-medium transition-colors"
+          title="Toggle plan mode (no tool execution)"
+          style={{
+            background: planMode ? 'var(--accent)' : 'var(--bg-tertiary)',
+            color: planMode ? '#fff' : 'var(--text-secondary)',
+          }}
+        >
+          {planMode ? 'Plan' : 'Build'}
+        </button>
+
+        <button
+          onClick={() => onTogglePanel('memory')}
+          className="px-2 py-0.5 rounded text-xs transition-colors"
+          title="Memory panel"
+          style={{
+            background: panel === 'memory' ? 'var(--accent)' : 'var(--bg-tertiary)',
+            color: panel === 'memory' ? '#fff' : 'var(--text-secondary)',
+          }}
+        >
+          Memory
+        </button>
+
+        <button
+          onClick={() => onTogglePanel('skills')}
+          className="px-2 py-0.5 rounded text-xs transition-colors"
+          title="Skills panel"
+          style={{
+            background: panel === 'skills' ? 'var(--accent)' : 'var(--bg-tertiary)',
+            color: panel === 'skills' ? '#fff' : 'var(--text-secondary)',
+          }}
+        >
+          Skills
+        </button>
+
+        {sessionId && <span style={{ color: 'var(--text-muted)' }}>{sessionId.slice(0, 8)}</span>}
         {streaming && <span style={{ color: 'var(--accent)' }}>Streaming...</span>}
       </div>
 
