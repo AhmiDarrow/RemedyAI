@@ -218,6 +218,58 @@ REMEDY_EXECUTION__MAX_RETRIES=5 remedy exec python --version
 | `GET /api/openapi.json` | OpenAPI schema |
 | `GET /dashboard` | HTML dashboard |
 
+Full session management, streaming SSE events, file search, and command execution — see the [desktop API docs](docs/DESKTOP.md).
+
+---
+
+## Desktop App
+
+Remedy includes a native Tauri desktop application (Windows) with a React frontend.
+
+```bash
+cd desktop
+npm install
+npm run dev        # Web UI at http://localhost:5173 (requires remedy serve)
+npm run tauri:dev  # Full Tauri desktop with auto-launched server
+```
+
+### Features
+
+| Feature | Description |
+|---------|-------------|
+| **Chat UI** | Streaming tokens, markdown rendering, syntax highlighting |
+| **Session tabs** | Multi-tab session management — open, switch, close tabs |
+| **Plan/Build mode** | Toggle between plan mode (no tools) and build mode |
+| **@file references** | Type `@` to search and autocomplete project files |
+| **Undo** | Hover any assistant message to revert it |
+| **Themes** | 6 themes — Dark, Light, Emerald, Amethyst, Amber, Ocean |
+| **Font** | Inter (open source, SIL license) |
+| **Side panels** | Memory browser and Skills viewer accessible from the status bar |
+| **Slash commands** | `/help`, `/new`, `/sessions`, `/models`, `/memory`, `/skills`, `/handoff` |
+| **Tray icon** | Minimize to system tray |
+
+### Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Shell | Tauri 2 (Rust) |
+| UI | React 19 + Vite + Tailwind CSS |
+| Server | `remedy serve` (FastAPI) auto-launched as sidecar |
+| Persistence | SQLite via the memory store |
+
+### Architecture
+
+```
+desktop/
+  src/                # React frontend
+    api/              # Typed REST + SSE client
+    components/       # Sidebar, MessageFeed, Composer, StatusBar, etc.
+    hooks/            # useSessions, useMessages, useTheme
+  src-tauri/          # Rust shell
+    src/lib.rs        # Server lifecycle, tray icon
+    tauri.conf.json   # Window, tray, bundle config
+```
+
 ---
 
 ## Plugin System
@@ -261,52 +313,28 @@ uv run remedy --help
 
 - Python 3.12+
 - [uv](https://docs.astral.sh/uv/) for package management
+- (Desktop) Node 20+, Rust toolchain for Tauri builds
 
 ### Project structure
 
 ```
-src/remedy/
-├── core/
-│   ├── runtime.py          # AgentRuntime
-│   ├── learning_loop.py    # Learning orchestration
-│   └── learning/           # Reflection, refiner, procedural memory
-│   ├── errors.py           # Error hierarchy + retry policies
-│   ├── logging.py          # Structured logging with context
-│   ├── metrics.py          # Counters, gauges, histograms, health checks
-│   └── security.py         # Input validation, path traversal guards
-├── memory/
-│   ├── store.py            # SQLite + FTS5 backend
-│   ├── profile.py          # User profile, traits, facts
-│   ├── consolidator.py     # Auto-summarization & dedup
-│   ├── handoff.py          # Session-boundary handoff generation
-│   └── repair.py           # Integrity, vacuum, backup
+Remedy/
+├── src/remedy/
+│   ├── core/           # Runtime, learning loop, security, metrics
+│   ├── memory/         # SQLite+FTS5 store, handoff, profiles
+│   ├── skills/         # Loader, registry, executor, adapters
+│   ├── gateway/        # Event router, channels
+│   ├── tools/          # MCP client
+│   ├── execution/      # Sandbox, policy
+│   ├── interfaces/     # CLI, API, plugin system
+│   └── migrate/        # Hermes/OpenClaw importers
+├── desktop/
+│   ├── src/            # React + Vite frontend
+│   ├── src-tauri/      # Tauri 2 shell (Rust)
+│   └── package.json
+├── tests/
 ├── skills/
-│   ├── loader.py           # SKILL.md parser
-│   ├── registry.py         # Skill registry
-│   ├── executor.py         # Script runner
-│   ├── validator.py        # Metadata, deps, tests
-│   ├── exporter.py         # Multi-format export
-│   ├── tool_registry.py    # Builtin + MCP tool registry
-│   └── adapters/           # Hermes, OpenClaw, MCP adapters
-├── gateway/
-│   ├── router.py           # Event router + heartbeat
-│   ├── cli.py              # Gateway daemon CLI
-│   └── channels/           # Channel adapters (CLI, Telegram, Discord, Slack, Web)
-├── tools/
-│   └── mcp_client.py       # MCP JSON-RPC stdio client
-├── execution/
-│   ├── sandbox.py          # Async subprocess sandbox
-│   ├── docker.py           # Docker sandbox with resource limits
-│   ├── policy.py           # Execution policy engine (allow/deny/approval)
-│   └── runtime.py          # Tool runtime with provenance
-├── interfaces/
-│   ├── cli.py              # All CLI dispatch
-│   ├── api.py              # FastAPI server
-│   ├── config.py           # TOML/YAML config + env overrides
-│   └── plugin.py           # Hook + plugin system
-└── migrate/
-    ├── from_hermes.py      # Hermes -> Remedy migration
-    └── from_openclaw.py    # OpenClaw -> Remedy migration
+└── docs/
 ```
 
 ---
