@@ -53,6 +53,7 @@ from remedy.interfaces.config import (
     config_to_agent_config,
     generate_default_config,
 )
+from remedy.interfaces.wizard import run_wizard
 
 console = Console()
 
@@ -220,6 +221,12 @@ def build_parser() -> argparse.ArgumentParser:
     serve_cmd.add_argument("--host", default="127.0.0.1")
     serve_cmd.add_argument("--port", type=int, default=8000)
     serve_cmd.add_argument("--config", dest="config_file", default=None)
+
+    # remedy setup
+    setup_cmd = sub.add_parser("setup", help="Interactive setup wizard")
+    setup_cmd.add_argument(
+        "--quick", action="store_true", help="Minimal prompts, use defaults"
+    )
 
     return parser
 
@@ -846,6 +853,9 @@ def main(args: Optional[list[str]] = None) -> None:
         asyncio.run(_cmd_config(parsed))
     elif parsed.command == "serve":
         _cmd_serve(parsed)
+    elif parsed.command == "setup":
+        from remedy.interfaces.wizard import run_wizard
+        run_wizard(quick=parsed.quick)
     else:
         parser.print_help()
 
