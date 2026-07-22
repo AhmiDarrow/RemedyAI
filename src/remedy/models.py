@@ -344,6 +344,10 @@ class AgentConfig(BaseModel):
     auto_approve_threshold: float = Field(default=0.8, ge=0.0, le=1.0)
     log_level: str = Field(default="INFO")
     sarcasm_mode: bool = Field(default=False)
-    llm_api_key: str = Field(default="", description="OpenAI-compatible API key for LLM calls")
+    llm_provider: str = Field(
+        default="openai",
+        description="LLM provider: openai, anthropic, google, deepseek, openrouter, ollama, custom",
+    )
+    llm_api_key: str = Field(default="", description="API key for LLM calls")
     llm_model: str = Field(default="gpt-4o-mini", description="LLM model name")
     llm_base_url: str = Field(default="https://api.openai.com/v1", description="LLM API base URL")

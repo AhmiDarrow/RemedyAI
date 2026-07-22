@@ -294,6 +294,7 @@ def _configure_llm_provider(config: dict, quick: bool = False, skip: bool = Fals
     """Configure the LLM provider (backend model)."""
     if quick or skip:
         if quick:
+            config["llm_provider"] = "openai"
             config["llm_model"] = LLM_PROVIDERS["openai"]["model"]
             config["llm_base_url"] = LLM_PROVIDERS["openai"]["base_url"]
             config["llm_api_key"] = ""
@@ -324,6 +325,8 @@ def _configure_llm_provider(config: dict, quick: bool = False, skip: bool = Fals
     idx = max(1, min(choice, len(items))) - 1
     provider_key, provider_info = items[idx]
     console.print(f"[green]Selected: {provider_info['label']}[/green]")
+
+    config["llm_provider"] = provider_key
 
     # API key
     api_key_prompt = f"  {provider_info['label']} API key (or press Enter to skip)"

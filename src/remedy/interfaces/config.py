@@ -113,8 +113,22 @@ def resolve_config(
     return config
 
 
+def _resolve_str(config_value: str | None, env_var: str, default: str) -> str:
+    """Resolve a config value, preferring non-empty config over env var over default."""
+    if config_value:
+        return config_value
+    env_value = os.environ.get(env_var, "").strip()
+    if env_value:
+        return env_value
+    return default
+
+
 def config_to_agent_config(config: dict[str, Any]) -> AgentConfig:
-    """Convert a config dict to a validated AgentConfig model."""
+    """Convert a config dict to a validated AgentConfig model.
+
+    API key resolution order:
+        non-empty config value > REMEDY_LLM_API_KEY env var > empty (fallback).
+    """
     return AgentConfig(
         name=config.get("name", "Remedy"),
         persona=config.get("persona", "default"),
@@ -127,9 +141,26 @@ def config_to_agent_config(config: dict[str, Any]) -> AgentConfig:
         auto_approve_threshold=config.get("auto_approve_threshold", 0.8),
         log_level=config.get("log_level", "INFO"),
         sarcasm_mode=config.get("sarcasm_mode", False),
-        llm_api_key=config.get("llm_api_key", os.environ.get("REMEDY_LLM_API_KEY", "")),
-        llm_model=config.get("llm_model", os.environ.get("REMEDY_LLM_MODEL", "gpt-4o-mini")),
-        llm_base_url=config.get("llm_base_url", os.environ.get("REMEDY_LLM_BASE_URL", "https://api.openai.com/v1")),
+        llm_provider=_resolve_str(
+            config.get("llm_provider"),
+            "REMEDY_LLM_PROVIDER",
+            "openai",
+        ),
+        llm_api_key=_resolve_str(
+            config.get("llm_api_key"),
+            "REMEDY_LLM_API_KEY",
+            "",
+        ),
+        llm_model=_resolve_str(
+            config.get("llm_model"),
+            "REMEDY_LLM_MODEL",
+            "gpt-4o-mini",
+        ),
+        llm_base_url=_resolve_str(
+            config.get("llm_base_url"),
+            "REMEDY_LLM_BASE_URL",
+            "https://api.openai.com/v1",
+        ),
     )
 
 
@@ -144,6 +175,7 @@ home_dir = "{home_dir.as_posix()}"
 
 # --- LLM Provider ---
 # Supported providers: openai, anthropic, google, deepseek, openrouter, ollama, custom
+llm_provider = "openai"
 llm_model = "gpt-4o-mini"
 llm_base_url = "https://api.openai.com/v1"
 # llm_api_key - set via REMEDY_LLM_API_KEY env var or uncomment below:

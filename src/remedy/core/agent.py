@@ -1,7 +1,7 @@
 """Concrete agent runtime -- BasicRuntime with LLM integration and ReAct tool use.
 
 Provides the default Remedy agent: a multi-step ReAct loop that stores conversation
-in memory, calls an OpenAI-compatible LLM when configured, and invokes tools
+in memory, calls LLM providers through the adapter layer, and invokes tools
 through the ToolRegistry.
 """
 
@@ -16,10 +16,13 @@ from uuid import uuid4
 
 import aiohttp
 
+from remedy.core.providers import ProviderAdapter, get_provider
 from remedy.core.runtime import AgentRuntime
 from remedy.memory.store import MemoryStore
 from remedy.models import (
     AgentConfig,
+    ChannelKind,
+    EventKind,
     GatewayEvent,
     ToolCall,
     ToolResult,
@@ -42,8 +45,9 @@ class BasicRuntime(AgentRuntime):
 
     Features:
     - Processes gateway events with conversation memory
-    - OpenAI-compatible LLM integration (via aiohttp)
+    - Multi-provider LLM integration via provider adapters
     - Multi-step ReAct tool loop when tools are registered
+    - Streaming and non-streaming response modes
     - Falls back to echo-style responses when no LLM is configured
     """
 
@@ -54,6 +58,8 @@ class BasicRuntime(AgentRuntime):
         self._llm_api_key: str = config.llm_api_key
         self._llm_model: str = config.llm_model
         self._llm_base_url: str = config.llm_base_url or "https://api.openai.com/v1"
+        self._llm_provider: str = getattr(config, "llm_provider", "openai") or "openai"
+        self._provider: ProviderAdapter = get_provider(self._llm_provider)
         self._max_react_steps = _MAX_REACT_STEPS
 
     async def handle_event(self, event: GatewayEvent) -> AsyncIterator[Any]:
@@ -138,6 +144,23 @@ class BasicRuntime(AgentRuntime):
         return tools
 
     async def _call_llm(self, message: str) -> str:
+        """Call the LLM with ReAct tool-use loop (non-streaming)."""
+        full = ""
+        try:
+            async for chunk in self._call_llm_stream(message):
+                full += chunk
+            return full
+        except Exception as e:
+            logger.exception("LLM call failed")
+            return f"[LLM error: {e}]"
+
+    async def _call_llm_stream(
+        self, message: str
+    ) -> AsyncIterator[str]:
+        """Call the LLM with ReAct tool-use loop, yielding tokens as they arrive.
+
+        Yields status tokens prefixed with '@@' for tool-call lifecycle events.
+        """
         try:
             context = await self._build_context()
             messages: list[dict[str, Any]] = [
@@ -145,51 +168,132 @@ class BasicRuntime(AgentRuntime):
                 {"role": "user", "content": message},
             ]
             tools = self._openai_tools()
-            headers = {
-                "Authorization": f"Bearer {self._llm_api_key}",
-                "Content-Type": "application/json",
-            }
 
             for step in range(self._max_react_steps):
-                body: dict[str, Any] = {
-                    "model": self._llm_model,
-                    "messages": messages,
-                    "temperature": 0.7,
-                    "max_tokens": 1024,
-                }
-                if tools:
-                    body["tools"] = tools
-                    body["tool_choice"] = "auto"
+                body = self._provider.build_body(
+                    model=self._llm_model,
+                    messages=messages,
+                    tools=tools or None,
+                    stream=True,
+                )
+                headers = self._provider.auth_headers(self._llm_api_key)
+                endpoint = self._provider.chat_endpoint(self._llm_base_url)
 
-                data = await self._post_chat(headers, body)
-                if isinstance(data, str):
-                    return data
+                collected: dict[str, Any] = {"content": None, "tool_calls": None}
+                tool_call_acc: dict[int, dict[str, Any]] = {}
 
-                choice = data.get("choices", [{}])[0]
-                msg = choice.get("message") or {}
-                tool_calls = msg.get("tool_calls") or []
+                async with (
+                    aiohttp.ClientSession() as session,
+                    session.post(
+                        endpoint,
+                        headers=headers,
+                        json=body,
+                        timeout=aiohttp.ClientTimeout(total=120),
+                    ) as resp,
+                ):
+                    if resp.status != 200:
+                        text = await resp.text()
+                        logger.error("LLM API error %d: %s", resp.status, text[:200])
+                        yield f"[LLM error: {resp.status}]"
+                        return
 
-                if not tool_calls:
-                    return (msg.get("content") or "").strip()
+                    if self._provider.provider_name == "openai":
+                        has_tool_calls = False
+                        async for line in resp.content:
+                            line_text = line.decode("utf-8").strip()
+                            if not line_text or line_text.startswith(":"):
+                                continue
+                            if line_text == "data: [DONE]":
+                                break
+                            if line_text.startswith("data: "):
+                                line_text = line_text[6:]
+                            try:
+                                chunk = json.loads(line_text)
+                            except json.JSONDecodeError:
+                                continue
+                            choice = (chunk.get("choices") or [{}])[0]
+                            delta = choice.get("delta") or {}
+                            content_delta = delta.get("content")
+                            if content_delta:
+                                yield content_delta
+                            tc_deltas = delta.get("tool_calls") or []
+                            for tc in tc_deltas:
+                                idx = tc.get("index", 0)
+                                if idx not in tool_call_acc:
+                                    tool_call_acc[idx] = {
+                                        "id": tc.get("id") or "",
+                                        "type": "function",
+                                        "function": {
+                                            "name": (
+                                                tc.get("function", {}).get("name")
+                                                or ""
+                                            ),
+                                            "arguments": (
+                                                tc.get("function", {}).get(
+                                                    "arguments"
+                                                )
+                                                or ""
+                                            ),
+                                        },
+                                    }
+                                else:
+                                    acc = tool_call_acc[idx]
+                                    fn_args = (
+                                        tc.get("function", {}).get("arguments")
+                                        or ""
+                                    )
+                                    if fn_args:
+                                        acc["function"]["arguments"] += fn_args
+                            finish = choice.get("finish_reason")
+                            if finish == "tool_calls":
+                                has_tool_calls = True
+                                yield "@@tool_calls"
+                        if has_tool_calls:
+                            yield "@@tool_calls"
+                    else:
+                        data = await resp.json()
+                        parsed = self._provider.extract_response(data)
+                        content = parsed.get("content")
+                        tool_calls_list_raw = parsed.get("tool_calls")
+                        if content:
+                            yield content
+                        if tool_calls_list_raw:
+                            tool_call_acc = dict(enumerate(tool_calls_list_raw))
+                            yield "@@tool_calls"
+                        collected = parsed
 
-                # Append assistant tool-call turn, then tool results
+                tool_calls_list = (
+                    list(tool_call_acc.values())
+                    if tool_call_acc
+                    else collected.get("tool_calls")
+                )
+
+                if not tool_calls_list:
+                    return
+
                 messages.append(
                     {
                         "role": "assistant",
-                        "content": msg.get("content"),
-                        "tool_calls": tool_calls,
+                        "content": collected.get("content"),
+                        "tool_calls": tool_calls_list,
                     }
                 )
-                for tc in tool_calls:
+                for tc in tool_calls_list:
                     fn = tc.get("function") or {}
                     name = fn.get("name") or ""
                     raw_args = fn.get("arguments") or "{}"
                     try:
-                        args = json.loads(raw_args) if isinstance(raw_args, str) else dict(raw_args)
+                        args = (
+                            json.loads(raw_args)
+                            if isinstance(raw_args, str)
+                            else dict(raw_args)
+                        )
                     except json.JSONDecodeError:
                         args = {}
                     if not isinstance(args, dict):
                         args = {}
+
+                    yield f"@@tool_call:{name}"
 
                     result = await self.call_tool(
                         ToolCall(tool_name=name, arguments=args)
@@ -199,7 +303,7 @@ class BasicRuntime(AgentRuntime):
                         if result.success
                         else {"error": result.error or "tool failed"}
                     )
-                    content = (
+                    content_str = (
                         payload
                         if isinstance(payload, str)
                         else json.dumps(payload, default=str)
@@ -208,23 +312,32 @@ class BasicRuntime(AgentRuntime):
                         {
                             "role": "tool",
                             "tool_call_id": tc.get("id") or str(uuid4()),
-                            "content": content,
+                            "content": content_str,
                         }
                     )
-                logger.debug("ReAct step %d executed %d tool call(s)", step + 1, len(tool_calls))
+                    yield f"@@tool_result:{name}"
 
-            return "[Reached maximum tool-use steps without a final answer]"
+                logger.debug(
+                    "ReAct step %d executed %d tool call(s)",
+                    step + 1,
+                    len(tool_calls_list),
+                )
+
+            yield "[Reached maximum tool-use steps without a final answer]"
         except Exception as e:
-            logger.exception("LLM call failed")
-            return f"[LLM error: {e}]"
+            logger.exception("LLM stream failed")
+            yield f"[LLM error: {e}]"
 
     async def _post_chat(
-        self, headers: dict[str, str], body: dict[str, Any]
+        self, body: dict[str, Any]
     ) -> dict[str, Any] | str:
+        headers = self._provider.auth_headers(self._llm_api_key)
+        endpoint = self._provider.chat_endpoint(self._llm_base_url)
+
         async with (
             aiohttp.ClientSession() as session,
             session.post(
-                f"{self._llm_base_url.rstrip('/')}/chat/completions",
+                endpoint,
                 headers=headers,
                 json=body,
                 timeout=aiohttp.ClientTimeout(total=60),
@@ -235,6 +348,32 @@ class BasicRuntime(AgentRuntime):
                 logger.error("LLM API error %d: %s", resp.status, text[:200])
                 return f"[LLM error: {resp.status}]"
             return await resp.json()
+
+    async def stream_response(
+        self, message: str, session_id: str | None = None
+    ) -> AsyncIterator[str]:
+        """Stream tokens from the LLM for real-time SSE delivery.
+
+        Yields individual tokens as they arrive from the provider.
+        Tool-call lifecycle events are prefixed with '@@'.
+        Falls back to the echo-style fallback when no API key is configured.
+        """
+        if not self._llm_api_key:
+            full = self._fallback_response(
+                message,
+                GatewayEvent(
+                    kind=EventKind.MESSAGE,
+                    channel=ChannelKind.WEB,
+                    source_id="stream",
+                    payload={"message": message},
+                    session_id=session_id,
+                ),
+            )
+            yield full
+            return
+
+        async for chunk in self._call_llm_stream(message):
+            yield chunk
 
     async def _build_context(self) -> str:
         parts = []
