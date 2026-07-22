@@ -17,12 +17,15 @@ from remedy.models import (
     HandoffNote,
     MemoryEntry,
     MemoryEntryType,
+    SessionSummary,
     Task,
     TaskStatus,
     ToolCall,
     ToolResult,
 )
 from remedy.memory.store import MemoryStore
+from remedy.memory.handoff import AutoHandoffManager
+from remedy.memory.profile import UserProfile
 from remedy.skills.registry import SkillRegistry
 
 
@@ -41,7 +44,11 @@ class AgentRuntime(ABC):
             or f"{config.home_dir}/memory.db"
         )
         self.skills = SkillRegistry()
+        self.handoff = AutoHandoffManager(self.memory)
         self._tasks: dict[UUID, Task] = {}
+        self._session_id: Optional[str] = None
+        self._session_started_at: Optional[datetime] = None
+        self._user_profile: Optional[UserProfile] = None
 
     # -- lifecycle -----------------------------------------------------------
 
@@ -131,3 +138,81 @@ class AgentRuntime(ABC):
 
     async def get_relevant_handoffs(self, query: str, limit: int = 5) -> list[HandoffNote]:
         return await self.memory.get_relevant_handoffs(query, limit=limit)
+
+    # -- sessions with auto-handoff -------------------------------------------
+
+    async def start_session(self, session_id: Optional[str] = None) -> str:
+        """Begin a new session, loading pending handoffs and user profile."""
+        self._session_id = session_id or str(uuid4())
+        self._session_started_at = datetime.utcnow()
+
+        # Load user profile
+        self._user_profile = await self.memory.get_or_create_profile()
+
+        # Log session start
+        await self.remember(
+            content=f"Session {self._session_id} started.",
+            title="Session started",
+            importance=0.3,
+        )
+
+        # Load pending handoffs for continuity
+        pending = await self.handoff.get_pending_handoffs()
+        if pending:
+            await self.remember(
+                content=f"Loaded {len(pending)} pending handoff notes from previous sessions.",
+                title="Pending handoffs loaded",
+                importance=0.7,
+            )
+
+        return self._session_id
+
+    async def end_session(self) -> Optional[HandoffNote]:
+        """End current session, auto-generating handoff and summary."""
+        if self._session_id is None:
+            return None
+
+        completed = [
+            t for t in self._tasks.values() if t.status == TaskStatus.COMPLETED
+        ]
+        open_tasks_list = [
+            t for t in self._tasks.values()
+            if t.status in (TaskStatus.CREATED, TaskStatus.QUEUED, TaskStatus.IN_PROGRESS)
+        ]
+
+        # Update profile stats
+        if self._session_started_at and self._user_profile:
+            duration = (datetime.utcnow() - self._session_started_at).total_seconds() / 60.0
+            self._user_profile.record_session(duration)
+            await self.memory.save_user_profile(self._user_profile)
+
+        # Generate handoff
+        handoff = await self.handoff.generate_handoff(
+            session_id=self._session_id,
+            tasks=completed,
+            open_tasks=open_tasks_list,
+        )
+
+        # Generate session summary
+        await self.handoff.generate_session_summary(
+            session_id=self._session_id,
+            started_at=self._session_started_at or datetime.utcnow(),
+            tasks_completed=len(completed),
+            key_decisions=[],
+            open_items=[t.title for t in open_tasks_list],
+        )
+
+        # Clear session state
+        self._session_id = None
+        self._session_started_at = None
+        self._tasks.clear()
+
+        return handoff
+
+    @property
+    def session_id(self) -> Optional[str]:
+        return self._session_id
+
+    @property
+    def user_profile(self) -> Optional[UserProfile]:
+        return self._user_profile

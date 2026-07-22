@@ -20,6 +20,9 @@ from rich.text import Text
 
 from remedy import __version__
 from remedy.memory.store import MemoryStore
+from remedy.memory.consolidator import MemoryConsolidator
+from remedy.memory.handoff import AutoHandoffManager
+from remedy.memory.repair import MemoryRepair
 from remedy.models import (
     AgentConfig,
     HandoffNote,
@@ -64,6 +67,29 @@ def build_parser() -> argparse.ArgumentParser:
     mem_add.add_argument("--type", dest="entry_type", default="note")
     mem_add.add_argument("--tags", default="")
     mem_add.add_argument("--importance", type=float, default=0.5)
+
+    mem_consolidate = mem_sub.add_parser("consolidate", help="Consolidate memory entries")
+    mem_consolidate.add_argument("session_id", help="Session ID to consolidate")
+    mem_consolidate.add_argument("--max-entries", type=int, default=100)
+
+    mem_repair = mem_sub.add_parser("repair", help="Run memory integrity checks")
+    mem_repair.add_argument("--vacuum", action="store_true", help="Also vacuum database")
+
+    mem_backup = mem_sub.add_parser("backup", help="Backup the memory database")
+
+    # remedy user profile|facts
+    user = sub.add_parser("user", help="User profile operations")
+    user_sub = user.add_subparsers(dest="user_cmd")
+    user_show = user_sub.add_parser("show", help="Show user profile")
+    user_facts = user_sub.add_parser("facts", help="Search user facts")
+    user_facts.add_argument("query", nargs="?", default="")
+    user_facts.add_argument("--limit", type=int, default=10)
+
+    # remedy session start|end
+    session = sub.add_parser("session", help="Session management")
+    session_sub = session.add_subparsers(dest="session_cmd")
+    session_start = session_sub.add_parser("start", help="Start a new session")
+    session_end = session_sub.add_parser("end", help="End current session")
 
     # remedy skill discover <path>
     skill = sub.add_parser("skill", help="Skill operations")
@@ -195,6 +221,90 @@ async def _cmd_memory(args, db_path: Path) -> None:
             await store.upsert(entry)
             console.print(f"[green]Memory entry saved:[/green] {entry.id}")
 
+        elif args.memory_cmd == "consolidate":
+            consolidator = MemoryConsolidator(store)
+            result = await consolidator.consolidate_session(args.session_id, max_entries=args.max_entries)
+            if result:
+                console.print(f"[green]Consolidated session {args.session_id}:[/green] {result.id}")
+            else:
+                console.print("[yellow]Not enough entries to consolidate.[/yellow]")
+
+        elif args.memory_cmd == "repair":
+            repair = MemoryRepair(store)
+            info = await repair.check_integrity()
+            console.print("[bold]Memory Store Integrity[/bold]")
+            for k, v in info.items():
+                console.print(f"  {k}: {v}")
+            if args.vacuum:
+                vacuum_result = await repair.vacuum()
+                console.print(f"\n[green]Vacuumed:[/green] reclaimed {vacuum_result['reclaimed_bytes']} bytes")
+
+        elif args.memory_cmd == "backup":
+            repair = MemoryRepair(store)
+            backup_path = await repair.backup()
+            console.print(f"[green]Backup created:[/green] {backup_path}")
+
+
+async def _cmd_user(args, db_path: Path) -> None:
+    async with MemoryStore(db_path) as store:
+        if args.user_cmd == "show":
+            profile = await store.get_or_create_profile()
+            console.print(Panel(
+                f"[bold]User: {profile.display_name or profile.user_id}[/bold]\n"
+                f"Sessions: {profile.stats['sessions_count']}\n"
+                f"Active since: {profile.created_at.isoformat()}\n"
+                f"Last active: {profile.last_active.isoformat()}\n\n"
+                f"[bold]Traits:[/bold]\n" +
+                "\n".join(f"  {k}: {v.value} (confidence: {v.confidence:.1f})" for k, v in profile.traits.items())
+                + "\n\n" +
+                f"[bold]Facts ({len(profile.facts)}):[/bold]\n" +
+                "\n".join(f"  [{f.category}] {f.fact}" for f in profile.facts[:10]),
+                title="User Profile",
+            ))
+            if len(profile.facts) > 10:
+                console.print(f"[dim]  ... and {len(profile.facts) - 10} more facts[/dim]")
+
+        elif args.user_cmd == "facts":
+            facts = await store.search_user_facts(args.query, limit=args.limit)
+            if facts:
+                for f in facts:
+                    console.print(f"  [{f['category']}] {f['fact']} (ref: {f['reference_count']})")
+            else:
+                console.print("[dim]No facts found.[/dim]")
+
+
+async def _cmd_session(args, db_path: Path) -> None:
+    from remedy.core.runtime import AgentRuntime
+    config = AgentConfig(
+        memory_db_path=str(db_path),
+        home_dir=str(db_path.parent),
+    )
+    runtime = AgentRuntime(config)
+    await runtime.start()
+
+    if args.session_cmd == "start":
+        sid = await runtime.start_session()
+        console.print(f"[green]Session started:[/green] {sid}")
+
+        pending = await runtime.handoff.get_pending_handoffs()
+        if pending:
+            console.print(f"[yellow]{len(pending)} pending handoff(s) from previous sessions:[/yellow]")
+            for h in pending:
+                console.print(f"  {h.title}: {h.content[:80]}...")
+
+    elif args.session_cmd == "end":
+        handoff = await runtime.end_session()
+        if handoff:
+            console.print(f"[green]Session ended. Handoff created:[/green] {handoff.id}")
+            console.print(Panel(
+                f"[bold]{handoff.title}[/bold]\n{handoff.content[:300]}",
+                title="Auto-Handoff",
+            ))
+        else:
+            console.print("[dim]No active session to end.[/dim]")
+
+    await runtime.stop()
+
 
 async def _cmd_skill(args) -> None:
     registry = SkillRegistry()
@@ -313,6 +423,10 @@ def main(args: Optional[list[str]] = None) -> None:
         asyncio.run(_cmd_handoff(parsed, db_path))
     elif parsed.command == "migrate":
         asyncio.run(_cmd_migrate(parsed))
+    elif parsed.command == "user":
+        asyncio.run(_cmd_user(parsed, db_path))
+    elif parsed.command == "session":
+        asyncio.run(_cmd_session(parsed, db_path))
     else:
         parser.print_help()
 

@@ -20,6 +20,7 @@ from remedy.models import (
     MemoryEntryType,
     SessionSummary,
 )
+from remedy.memory.profile import UserFact, UserProfile, UserTrait
 
 
 _SCHEMA = """
@@ -92,6 +93,38 @@ CREATE INDEX IF NOT EXISTS idx_memory_type ON memory_entries(entry_type);
 CREATE INDEX IF NOT EXISTS idx_memory_session ON memory_entries(session_id);
 CREATE INDEX IF NOT EXISTS idx_memory_importance ON memory_entries(importance);
 CREATE INDEX IF NOT EXISTS idx_memory_created ON memory_entries(created_at);
+
+CREATE TABLE IF NOT EXISTS user_profile (
+    user_id TEXT PRIMARY KEY,
+    profile_json TEXT NOT NULL DEFAULT '{}',
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS user_facts (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    fact TEXT NOT NULL,
+    category TEXT NOT NULL DEFAULT 'general',
+    confidence REAL NOT NULL DEFAULT 0.7,
+    source TEXT NOT NULL DEFAULT 'inferred',
+    created_at TEXT NOT NULL,
+    last_referenced TEXT NOT NULL,
+    reference_count INTEGER NOT NULL DEFAULT 1,
+    FOREIGN KEY (user_id) REFERENCES user_profile(user_id)
+);
+
+CREATE TABLE IF NOT EXISTS user_traits (
+    user_id TEXT NOT NULL,
+    key TEXT NOT NULL,
+    value_json TEXT NOT NULL,
+    confidence REAL NOT NULL DEFAULT 0.5,
+    source TEXT NOT NULL DEFAULT 'inferred',
+    first_observed TEXT NOT NULL,
+    last_updated TEXT NOT NULL,
+    observation_count INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (user_id, key),
+    FOREIGN KEY (user_id) REFERENCES user_profile(user_id)
+);
 """
 
 
@@ -472,3 +505,70 @@ class MemoryStore:
             )
             for r in rows
         ]
+
+    # -- user profile ---------------------------------------------------------
+
+    async def save_user_profile(self, profile: UserProfile) -> None:
+        db = self._ensure_db()
+        now = datetime.utcnow().isoformat()
+        db.execute(
+            "INSERT OR REPLACE INTO user_profile (user_id, profile_json, updated_at) VALUES (?, ?, ?)",
+            (profile.user_id, profile.model_dump_json(indent=2), now),
+        )
+
+        db.execute(
+            "DELETE FROM user_facts WHERE user_id = ?", (profile.user_id,)
+        )
+        db.execute(
+            "DELETE FROM user_traits WHERE user_id = ?", (profile.user_id,)
+        )
+
+        for fact in profile.facts:
+            db.execute(
+                "INSERT OR REPLACE INTO user_facts (id, user_id, fact, category, confidence, "
+                "source, created_at, last_referenced, reference_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (str(fact.id), profile.user_id, fact.fact, fact.category, fact.confidence,
+                 fact.source, fact.created_at.isoformat(), fact.last_referenced.isoformat(),
+                 fact.reference_count),
+            )
+
+        for key, trait in profile.traits.items():
+            import json as _json
+            db.execute(
+                "INSERT OR REPLACE INTO user_traits (user_id, key, value_json, confidence, "
+                "source, first_observed, last_updated, observation_count) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (profile.user_id, key, _json.dumps(trait.value, default=str),
+                 trait.confidence, trait.source,
+                 trait.first_observed.isoformat(), trait.last_updated.isoformat(),
+                 trait.observation_count),
+            )
+
+        db.commit()
+
+    async def load_user_profile(self, user_id: str = "default") -> Optional[UserProfile]:
+        db = self._ensure_db()
+        row = db.execute(
+            "SELECT profile_json FROM user_profile WHERE user_id = ?", (user_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        data = json.loads(row["profile_json"])
+        profile = UserProfile(**data)
+        return profile
+
+    async def get_or_create_profile(self, user_id: str = "default") -> UserProfile:
+        profile = await self.load_user_profile(user_id)
+        if profile is None:
+            profile = UserProfile(user_id=user_id)
+            await self.save_user_profile(profile)
+        return profile
+
+    async def search_user_facts(self, query: str, user_id: str = "default", limit: int = 10) -> list[dict]:
+        db = self._ensure_db()
+        rows = db.execute(
+            "SELECT * FROM user_facts WHERE user_id = ? AND (fact LIKE ? OR category LIKE ?) "
+            "ORDER BY reference_count DESC LIMIT ?",
+            (user_id, f"%{query}%", f"%{query}%", limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
