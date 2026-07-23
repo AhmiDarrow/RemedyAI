@@ -357,7 +357,7 @@ RemedyAI/
 │   ├── gateway/        # Event router, channels
 │   ├── tools/          # MCP client
 │   ├── execution/      # Sandbox, hidden process helpers, Docker
-│   ├── interfaces/     # CLI, API (api_models + api_support + create_app), plugins
+│   ├── interfaces/     # CLI, API (models/support/routes/*), plugins
 │   ├── bundled_skills/ # Default skills shipped with the package
 │   └── migrate/        # Hermes/OpenClaw importers
 ├── desktop/
