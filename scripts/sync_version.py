@@ -57,9 +57,36 @@ def _bump_tauri_conf(ver: str) -> None:
 def _bump_latest_json(ver: str) -> None:
     if not PATHS["latest_json"].exists():
         return
+    from datetime import datetime, timezone
+
     data = json.loads(PATHS["latest_json"].read_text(encoding="utf-8"))
-    data["version"] = ver
-    data["pub_date"] = f"{sys.argv[1] if len(sys.argv) > 1 else ''}"
+    old_raw = str(data.get("version", "")).lstrip("v")
+    data["version"] = f"v{ver}"
+    data["notes"] = f"Remedy Desktop v{ver} — Windows installer"
+    data["pub_date"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    # Prefer rewriting known GitHub release URL shape so notes/URL/version stay aligned.
+    installer_name = f"Remedy_Desktop_{ver}_x64-setup.exe"
+    default_url = (
+        f"https://github.com/AhmiDarrow/RemedyAI/releases/download/v{ver}/{installer_name}"
+    )
+
+    for plat in data.get("platforms", {}).values():
+        url = str(plat.get("url") or "")
+        if old_raw and old_raw != ver and url:
+            # Replace tag (vX.Y.Z) first, then bare version in filenames.
+            url = url.replace(f"v{old_raw}", f"v{ver}")
+            url = re.sub(
+                rf"(?<![0-9]){re.escape(old_raw)}(?![0-9])",
+                ver,
+                url,
+            )
+            plat["url"] = url
+        else:
+            plat["url"] = default_url
+        # Preserve existing signature if present; empty means unsigned / not ready.
+        plat.setdefault("signature", "")
+
     PATHS["latest_json"].write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
 

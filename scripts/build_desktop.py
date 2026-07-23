@@ -162,11 +162,16 @@ def get_hidden_imports() -> list[str]:
     ]
 
 
-def build(cache_clean: bool = False):
+def build(cache_clean: bool = False, ci: bool = False):
     """Build the standalone remedy-desktop.exe via PyInstaller."""
     print(f"Building Remedy Desktop exe... (root={ROOT})")
 
-    sync_versions()
+    if ci:
+        v = _get_root_version()
+        print(f"[CI] Version from pyproject.toml: {v} — skipping version sync")
+    else:
+        sync_versions()
+
     ensure_pyinstaller()
 
     DESKTOP_BIN.mkdir(parents=True, exist_ok=True)
@@ -246,9 +251,12 @@ if __name__ == "__main__":
     p.add_argument(
         "--stage", action="store_true", help="Copy final installer to dist/ dir"
     )
+    p.add_argument(
+        "--ci", action="store_true", help="CI mode — skip version sync and interactive prompts"
+    )
     args = p.parse_args()
 
-    code = build(cache_clean=args.clean)
+    code = build(cache_clean=args.clean, ci=args.ci)
 
     if args.stage:
         candidates = sorted(

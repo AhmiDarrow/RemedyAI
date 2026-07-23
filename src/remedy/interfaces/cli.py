@@ -55,6 +55,9 @@ def build_parser() -> argparse.ArgumentParser:
         prog="remedy",
         description="Remedy: The self-improving, multi-channel AI agent framework.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="For the best experience, download the desktop app:\n"
+               "  https://github.com/AhmiDarrow/RemedyAI/releases\n"
+               "Power users: use 'remedy serve' to run the API server.",
     )
     parser.add_argument("--version", action="version", version=f"remedy {__version__}")
     parser.add_argument(
@@ -232,6 +235,11 @@ def build_parser() -> argparse.ArgumentParser:
     desktop_dev = desktop_sub.add_parser("dev", help="Start desktop dev server")
     desktop_dev.add_argument("--open", action="store_true", help="Open browser")
     desktop_sub.add_parser("build", help="Build desktop for production")
+    desktop_sub.add_parser(
+        "launch",
+        help="Launch the installed desktop app (Windows only)",
+    )
+    desktop_sub.add_parser("status", help="Check if the desktop server is running")
 
     # remedy uninstall
     uninstall_cmd = sub.add_parser("uninstall", help="Uninstall Remedy")
@@ -1150,9 +1158,15 @@ def _cmd_desktop(parsed: argparse.Namespace) -> None:
         else:
             console.print("[red]Build failed.[/red]")
 
+    elif subcommand == "launch":
+        _desktop_launch()
+
+    elif subcommand == "status":
+        _desktop_status()
+
     else:
         console.print(f"[yellow]Unknown desktop subcommand: {subcommand}[/yellow]")
-        console.print("Available: install, dev, build")
+        console.print("Available: install, dev, build, launch, status")
 
 
 def _find_npm() -> str:
@@ -1164,6 +1178,73 @@ def _find_npm() -> str:
         console.print("[dim]Install Node.js from https://nodejs.org[/dim]")
         raise SystemExit(1)
     return npm
+
+
+def _desktop_launch() -> None:
+    """Find and launch the installed Remedy Desktop Tauri app (Windows only today)."""
+    import subprocess
+    import sys
+
+    if sys.platform != "win32":
+        console.print(
+            "[yellow]remedy desktop launch is currently Windows-only.[/yellow]"
+        )
+        console.print(
+            "[dim]On macOS/Linux, open the installed Remedy Desktop app from "
+            "your Applications menu or desktop entry.[/dim]"
+        )
+        console.print(
+            "[dim]Installer downloads: https://github.com/AhmiDarrow/RemedyAI/releases[/dim]"
+        )
+        return
+
+    candidate_paths: list[Path] = []
+    local = Path.home() / "AppData" / "Local"
+    if local.exists():
+        candidate_paths.extend(
+            local / "Programs" / p / "Remedy Desktop.exe"
+            for p in ("Remedy Desktop", "remedy-desktop")
+        )
+    prog = Path("C:/Program Files")
+    if prog.exists():
+        candidate_paths.append(prog / "Remedy Desktop" / "Remedy Desktop.exe")
+
+    # CREATE_NEW_PROCESS_GROUP — detach from this console so the CLI can exit.
+    create_new_process_group = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+
+    for p in candidate_paths:
+        if p.exists():
+            console.print(f"[green]Launching: {p}[/green]")
+            subprocess.Popen(
+                [str(p)],
+                creationflags=create_new_process_group,
+                close_fds=True,
+            )
+            return
+
+    console.print("[yellow]Installed desktop app not found.[/yellow]")
+    console.print("[dim]Download the installer: https://github.com/AhmiDarrow/RemedyAI/releases[/dim]")
+
+
+def _desktop_status() -> None:
+    """Check if the Remedy server is running (sidecar on port 7400)."""
+    import socket
+
+    console.print("[bold]Desktop Server Status[/bold]")
+
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(2)
+        result = sock.connect_ex(("127.0.0.1", 7400))
+        sock.close()
+        if result == 0:
+            console.print("  Server:    [green]Online[/green]  (127.0.0.1:7400)")
+        else:
+            console.print("  Server:    [red]Offline[/red] (port 7400 not reachable)")
+    except Exception as e:
+        console.print(f"  Server:    [red]Error[/red] — {e}")
+
+    console.print("[dim]Use 'remedy serve' to start the server manually.[/dim]")
 
 
 def main(args: list[str] | None = None) -> None:

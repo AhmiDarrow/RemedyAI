@@ -1,6 +1,7 @@
 use std::env;
-use std::io::{BufRead, BufReader};
-use std::net::TcpStream;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::{SocketAddr, TcpStream};
+use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::thread;
@@ -11,6 +12,20 @@ use tauri::{Emitter, Manager};
 use std::os::windows::process::CommandExt;
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+/// Sidecar / user-data home: `%USERPROFILE%\.remedy` on Windows, `~/.remedy` elsewhere.
+fn remedy_home() -> PathBuf {
+    let home = if cfg!(target_os = "windows") {
+        env::var("USERPROFILE").unwrap_or_else(|_| ".".to_string())
+    } else {
+        env::var("HOME").unwrap_or_else(|_| ".".to_string())
+    };
+    PathBuf::from(home).join(".remedy")
+}
+
+fn status_addr() -> SocketAddr {
+    SocketAddr::from(([127, 0, 0, 1], 7400))
+}
 
 struct ServerState {
     process: Mutex<Option<Child>>,
@@ -58,27 +73,22 @@ fn find_remedy() -> (String, String) {
 }
 
 fn spawn_remedy(cmd: &str) -> Option<Child> {
-    let home_dir = if cfg!(target_os = "windows") {
-        std::env::var("USERPROFILE")
-    } else {
-        std::env::var("HOME")
-    }
-    .unwrap_or_else(|_| ".".to_string())
-    .to_owned()
-    + "\\.remedy";
+    let home_dir = remedy_home();
+    let home_str = home_dir.to_string_lossy();
+    let args = [
+        "--home",
+        home_str.as_ref(),
+        "serve",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "7400",
+    ];
 
     #[cfg(target_os = "windows")]
     {
         Command::new(cmd)
-            .args([
-                "--home",
-                &home_dir,
-                "serve",
-                "--host",
-                "127.0.0.1",
-                "--port",
-                "7400",
-            ])
+            .args(args)
             .creation_flags(CREATE_NO_WINDOW)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -88,15 +98,7 @@ fn spawn_remedy(cmd: &str) -> Option<Child> {
     #[cfg(not(target_os = "windows"))]
     {
         Command::new(cmd)
-            .args([
-                "--home",
-                &home_dir,
-                "serve",
-                "--host",
-                "127.0.0.1",
-                "--port",
-                "7400",
-            ])
+            .args(args)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -118,12 +120,88 @@ fn forward_output(label: &str, reader: impl BufRead + Send + 'static) {
     });
 }
 
+fn check_health(timeout: Duration) -> bool {
+    match TcpStream::connect_timeout(&status_addr(), timeout) {
+        Ok(mut stream) => {
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .ok();
+            let req = "GET /api/status HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
+            if stream.write_all(req.as_bytes()).is_err() {
+                return false;
+            }
+            // Read until EOF or buffer full so we see status line + body.
+            let mut buf = Vec::with_capacity(1024);
+            let mut chunk = [0u8; 512];
+            loop {
+                match stream.read(&mut chunk) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        buf.extend_from_slice(&chunk[..n]);
+                        if buf.len() >= 4096 {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+            if buf.is_empty() {
+                return false;
+            }
+            let response = String::from_utf8_lossy(&buf);
+            // Prefer HTTP 200; also accept body {"status":"ok",...} from /api/status.
+            let status_ok = response
+                .lines()
+                .next()
+                .map(|line| line.contains(" 200 "))
+                .unwrap_or(false)
+                || response.contains("200 OK");
+            let body_ok = response.contains("\"status\"") && response.contains("\"ok\"");
+            status_ok || body_ok
+        }
+        Err(_) => false,
+    }
+}
+
+/// Open the Remedy user-data folder in the OS file manager.
+#[tauri::command]
+fn open_data_folder() -> Result<String, String> {
+    let dir = remedy_home();
+    std::fs::create_dir_all(&dir).map_err(|e| format!("create data folder: {e}"))?;
+    let path_str = dir.to_string_lossy().to_string();
+
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("explorer")
+            .arg(&path_str)
+            .spawn()
+            .map_err(|e| format!("Failed to open folder: {e}"))?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .arg(&path_str)
+            .spawn()
+            .map_err(|e| format!("Failed to open folder: {e}"))?;
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        Command::new("xdg-open")
+            .arg(&path_str)
+            .spawn()
+            .map_err(|e| format!("Failed to open folder: {e}"))?;
+    }
+
+    Ok(path_str)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .manage(ServerState {
             process: Mutex::new(None),
         })
+        .invoke_handler(tauri::generate_handler![open_data_folder])
         .setup(|app| {
             let _shell = app.handle().plugin(tauri_plugin_shell::init())?;
             let _updater = app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
@@ -158,19 +236,12 @@ pub fn run() {
                 let mut server_ready = false;
 
                 while started.elapsed() < max_wait {
-                    match TcpStream::connect_timeout(
-                        &"127.0.0.1:7400".parse().unwrap(),
-                        Duration::from_millis(500),
-                    ) {
-                        Ok(_) => {
-                            server_ready = true;
-                            break;
-                        }
-                        Err(_) => {
-                            thread::sleep(backoff);
-                            backoff = (backoff * 2).min(Duration::from_secs(2));
-                        }
+                    if check_health(Duration::from_millis(500)) {
+                        server_ready = true;
+                        break;
                     }
+                    thread::sleep(backoff);
+                    backoff = (backoff * 2).min(Duration::from_secs(2));
                 }
 
                 if server_ready {

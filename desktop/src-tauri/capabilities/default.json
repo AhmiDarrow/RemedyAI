@@ -8,8 +8,10 @@
   "permissions": [
     "core:default",
     "shell:default",
+    "shell:allow-open",
     "updater:default",
     "updater:allow-check",
-    "updater:allow-download-and-install"
+    "updater:allow-download-and-install",
+    "allow-open-data-folder"
   ]
 }

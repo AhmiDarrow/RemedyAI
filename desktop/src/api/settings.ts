@@ -6,9 +6,11 @@ export interface Settings {
   llm_base_url: string
   llm_api_key_set: boolean
   name: string
+  persona: string
   project_path: string
   version: string
   config_exists: boolean
+  setup_completed: boolean
 }
 
 export interface SettingsUpdate {
@@ -18,6 +20,8 @@ export interface SettingsUpdate {
   llm_api_key?: string
   project_path?: string
   name?: string
+  persona?: string
+  setup_completed?: boolean
 }
 
 export async function getSettings(): Promise<Settings> {

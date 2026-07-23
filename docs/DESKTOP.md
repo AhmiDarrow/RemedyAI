@@ -1,9 +1,19 @@
-# Remedy Desktop — Architecture & Implementation Plan
+# Remedy Desktop — Primary User Interface
+
+## Overview
+
+**Remedy Desktop** is the recommended way to use Remedy. It bundles the full Remedy
+server as a sidecar inside a native Tauri application, so users only need to
+download and run one installer — no Python, Node, or Rust toolchain required.
+
+The desktop app provides an OpenCode-like chat interface with streaming tokens,
+session management, slash commands, themes, and persistent memory.
 
 ## Goal
 
-A **Tauri desktop app** (Windows-first) with an OpenCode-like interactive chat UX,
-backed by an **extended Remedy FastAPI** server. v1 = chat core parity.
+A **Tauri desktop app** (Windows-first) with an interactive chat UX, backed by an
+**extended Remedy FastAPI** server. The desktop is the primary installation target;
+CLI and web UI remain available as power-user features.
 
 ## Architecture
 

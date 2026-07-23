@@ -88,7 +88,7 @@ export default function App() {
     if (serverState !== 'ready' || configChecked) return
     getSettings()
       .then((s) => {
-        if (!s.config_exists) {
+        if (!s.config_exists || !s.setup_completed) {
           setShowSetupWizard(true)
         }
       })
@@ -259,13 +259,40 @@ export default function App() {
         <div style={{ color: 'var(--error)' }} className="text-lg font-medium">
           {serverError || 'Server connection failed'}
         </div>
-        <button
-          onClick={() => setServerState('connecting')}
-          className="px-4 py-2 rounded-md text-sm"
-          style={{ background: 'var(--accent)', color: '#fff' }}
-        >
-          Retry
-        </button>
+        <div className="text-sm" style={{ color: 'var(--text-muted)' }}>
+          The Remedy server could not start. Try restarting the app.
+        </div>
+        <div className="flex gap-3">
+          <button
+            onClick={() => {
+              setServerState('connecting')
+              setServerError('')
+            }}
+            className="px-5 py-2 rounded-md text-sm"
+            style={{ background: 'var(--accent)', color: '#fff' }}
+          >
+            Retry
+          </button>
+          <button
+            onClick={() => {
+              if (!isTauri()) return
+              const invoke = (window as any).__TAURI_INTERNALS__?.invoke
+              if (!invoke) {
+                setServerError((prev) => prev || 'Cannot open data folder (Tauri bridge unavailable)')
+                return
+              }
+              invoke('open_data_folder').catch((e: unknown) => {
+                const msg = e instanceof Error ? e.message : String(e)
+                console.warn('Open data folder failed:', msg)
+                setServerError((prev) => `${prev ? prev + ' — ' : ''}Could not open data folder: ${msg}`)
+              })
+            }}
+            className="px-5 py-2 rounded-md text-sm"
+            style={{ background: 'var(--bg-tertiary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+          >
+            Open Data Folder
+          </button>
+        </div>
       </div>
     )
   }

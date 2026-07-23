@@ -16,7 +16,6 @@ from typing import Any
 from uuid import uuid4
 
 import aiohttp
-
 import yaml
 from fastapi import (
     FastAPI,
@@ -131,6 +130,8 @@ class SettingsUpdateRequest(BaseModel):
     llm_api_key: str | None = None
     project_path: str | None = None
     name: str | None = None
+    persona: str | None = None
+    setup_completed: bool | None = None
 
 
 # -- API factory -------------------------------------------------------------
@@ -1103,15 +1104,23 @@ def create_app(
     async def get_settings():
         cfg = load_config()
         config_path = _find_config_path()
+        # Pre-0.10 configs lack setup_completed; treat existing installs as done
+        # so upgrades do not force the multi-step wizard again.
+        if "setup_completed" in cfg:
+            setup_completed = bool(cfg["setup_completed"])
+        else:
+            setup_completed = config_path is not None
         return {
             "llm_provider": cfg.get("llm_provider", os.environ.get("REMEDY_LLM_PROVIDER", "openai")),
             "llm_model": cfg.get("llm_model", os.environ.get("REMEDY_LLM_MODEL", "gpt-4o-mini")),
             "llm_base_url": cfg.get("llm_base_url", os.environ.get("REMEDY_LLM_BASE_URL", "https://api.openai.com/v1")),
             "llm_api_key_set": bool(cfg.get("llm_api_key") or os.environ.get("REMEDY_LLM_API_KEY")),
             "name": cfg.get("name", "Remedy"),
+            "persona": cfg.get("persona", "default"),
             "project_path": cfg.get("project_path", os.getcwd()),
             "version": version,
             "config_exists": config_path is not None,
+            "setup_completed": setup_completed,
         }
 
     @app.put("/api/settings")

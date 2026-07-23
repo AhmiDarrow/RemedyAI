@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "allow-open-data-folder"
+description = "Open the Remedy user data folder in the system file manager."
+commands.allow = ["open_data_folder"]

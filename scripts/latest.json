@@ -1,23 +1,11 @@
 {
-  "version": "0.9.3",
-  "notes": "Release notes here",
-  "pub_date": "patch",
+  "version": "v0.10.0",
+  "notes": "Remedy Desktop v0.10.0 — Windows installer",
+  "pub_date": "2026-07-23T03:49:28Z",
   "platforms": {
     "windows-x86_64": {
       "signature": "",
-      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.9.0/Remedy_Desktop_0.9.0_x64-setup.exe"
-    },
-    "darwin-x86_64": {
-      "signature": "",
-      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.9.0/Remedy_Desktop_0.9.0_x64.dmg"
-    },
-    "darwin-aarch64": {
-      "signature": "",
-      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.9.0/Remedy_Desktop_0.9.0_aarch64.dmg"
-    },
-    "linux-x86_64": {
-      "signature": "",
-      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.9.0/Remedy_Desktop_0.9.0_amd64.AppImage"
+      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.10.0/Remedy_Desktop_0.10.0_x64-setup.exe"
     }
   }
 }

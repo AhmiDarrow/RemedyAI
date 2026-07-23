@@ -9,6 +9,65 @@ Remedy is a standalone AI agent framework designed for autonomous, long-running 
 - **Breadth** — Multi-channel gateway (CLI, REST API, Telegram, Discord, Slack, webhooks)
 - **Compatibility** — Native [agentskills.io](https://agentskills.io) support, plus adapters for Hermes and OpenClaw/ClawHub
 
+---
+
+## Download the Desktop App
+
+The recommended way to use Remedy is the native desktop application — no Python, Node, or Rust toolchain required.
+
+**[Download the latest installer](https://github.com/AhmiDarrow/RemedyAI/releases/latest)** (Windows)
+
+1. Download the `.exe` installer from GitHub Releases
+2. Run the installer — Remedy Desktop installs to your local app folder
+3. Launch from the Start Menu — the SetupWizard guides you through provider and model configuration
+4. Start chatting with `/help` to see available commands
+
+The desktop app bundles the full Remedy server as a sidecar, so everything runs locally on your machine.
+
+### Desktop Features
+
+| Feature | Description |
+|---------|-------------|
+| **Chat UI** | Streaming tokens, markdown rendering, syntax highlighting |
+| **Session tabs** | Multi-tab session management — open, switch, close tabs |
+| **Plan/Build mode** | Toggle between plan mode (no tools) and build mode |
+| **@file references** | Type `@` to search and autocomplete project files |
+| **Undo** | Hover any assistant message to revert it |
+| **Themes** | 6 themes — Dark, Light, Emerald, Amethyst, Amber, Ocean |
+| **Side panels** | Memory browser and Skills viewer accessible from the status bar |
+| **Slash commands** | `/help`, `/new`, `/sessions`, `/models`, `/memory`, `/skills`, `/handoff` |
+| **Tray icon** | Minimize to system tray |
+| **Auto-update** | Built-in Tauri updater (requires signed releases + configured pubkey) |
+
+### Architecture
+
+```
+┌─────────────────────────────────┐
+│        Remedy Desktop            │
+│  ┌───────────────────────────┐  │
+│  │   Tauri 2 Shell (Rust)    │  │
+│  │   • Server lifecycle       │  │
+│  │   • System tray            │  │
+│  │   • Auto-updater           │  │
+│  └──────────┬────────────────┘  │
+│             │ spawn sidecar     │
+│  ┌──────────▼────────────────┐  │
+│  │   remedy serve (Python)   │  │
+│  │   FastAPI on :7400        │  │
+│  └──────────┬────────────────┘  │
+│  ┌──────────▼────────────────┐  │
+│  │   React 19 + Vite (JS)   │  │
+│  │   REST + SSE client       │  │
+│  └───────────────────────────┘  │
+└─────────────────────────────────┘
+```
+
+---
+
+## Advanced / Power Users
+
+For users who prefer CLI, custom deployments, or development:
+
 ```bash
 # PyPI name is remedy-ai (the name "remedy" is a different, unrelated package)
 pip install remedy-ai
@@ -18,15 +77,12 @@ git clone https://github.com/AhmiDarrow/RemedyAI && cd RemedyAI && uv sync
 pip install -e .
 ```
 
----
-
-## Quick Start
+### CLI Quick Start
 
 ```bash
 remedy --help                    # See all commands
 remedy config init               # Create ~/.remedy/config.toml
 remedy skill discover ./skills   # Load bundled & custom skills
-remedy memory add "test" "Hello, Remedy!"
 
 # Launch interactive chat with the agent
 remedy chat
@@ -37,10 +93,22 @@ remedy serve --host 127.0.0.1 --port 7400
 # Dashboard at http://127.0.0.1:7400/dashboard
 # OpenAPI docs at http://127.0.0.1:7400/docs
 
-# Run the desktop app
-remedy desktop install          # Install Node deps (one-time)
-remedy desktop dev              # Start desktop dev server
-# Open http://localhost:5173
+# Desktop app management (for devs)
+remedy desktop launch            # Launch the installed desktop app
+remedy desktop status            # Check if the server is running
+remedy desktop install           # Install Node deps (for dev)
+remedy desktop dev               # Start desktop dev server
+```
+
+### Desktop Dev
+
+```bash
+remedy desktop install    # Install Node.js deps (one-time)
+remedy desktop dev        # Start dev server at http://localhost:5173
+# Requires: remedy serve running in another terminal
+
+# Or full Tauri desktop build (requires Rust toolchain):
+cd desktop && npm run tauri:dev
 ```
 
 ---
@@ -91,7 +159,7 @@ remedy desktop dev              # Start desktop dev server
 | `remedy gateway` | `start`, `status`, `serve`, `channels` | Multi-channel gateway |
 | `remedy config` | `init`, `show`, `path` | TOML/YAML configuration |
 | `remedy serve` | | Full API server (config-aware) |
-| `remedy desktop` | `install`, `dev`, `build` | Desktop app management |
+| `remedy desktop` | `install`, `dev`, `build`, `launch`, `status` | Desktop app management |
 | `remedy migrate` | `hermes`, `openclaw` | Import from other frameworks |
 | `remedy exec` | | Execute commands in sandbox |
 
@@ -229,56 +297,6 @@ REMEDY_EXECUTION__MAX_RETRIES=5 remedy exec python --version
 | `GET /dashboard` | HTML dashboard |
 
 Full session management, streaming SSE events, file search, and command execution — see the [desktop API docs](docs/DESKTOP.md).
-
----
-
-## Desktop App
-
-Remedy includes a native Tauri desktop application (Windows) with a React frontend.
-
-```bash
-remedy desktop install    # Install Node.js deps (one-time)
-remedy desktop dev        # Start dev server at http://localhost:5173
-# Requires: remedy serve running in another terminal
-npm run tauri:dev  # Full Tauri desktop (from desktop/ dir) — requires Rust toolchain
-```
-
-### Features
-
-| Feature | Description |
-|---------|-------------|
-| **Chat UI** | Streaming tokens, markdown rendering, syntax highlighting |
-| **Session tabs** | Multi-tab session management — open, switch, close tabs |
-| **Plan/Build mode** | Toggle between plan mode (no tools) and build mode |
-| **@file references** | Type `@` to search and autocomplete project files |
-| **Undo** | Hover any assistant message to revert it |
-| **Themes** | 6 themes — Dark, Light, Emerald, Amethyst, Amber, Ocean |
-| **Font** | Inter (open source, SIL license) |
-| **Side panels** | Memory browser and Skills viewer accessible from the status bar |
-| **Slash commands** | `/help`, `/new`, `/sessions`, `/models`, `/memory`, `/skills`, `/handoff` |
-| **Tray icon** | Minimize to system tray |
-
-### Stack
-
-| Layer | Technology |
-|-------|-----------|
-| Shell | Tauri 2 (Rust) |
-| UI | React 19 + Vite + Tailwind CSS |
-| Server | `remedy serve` (FastAPI) auto-launched as sidecar |
-| Persistence | SQLite via the memory store |
-
-### Architecture
-
-```
-desktop/
-  src/                # React frontend
-    api/              # Typed REST + SSE client
-    components/       # Sidebar, MessageFeed, Composer, StatusBar, etc.
-    hooks/            # useSessions, useMessages, useTheme
-  src-tauri/          # Rust shell
-    src/lib.rs        # Server lifecycle, tray icon
-    tauri.conf.json   # Window, tray, bundle config
-```
 
 ---
 
