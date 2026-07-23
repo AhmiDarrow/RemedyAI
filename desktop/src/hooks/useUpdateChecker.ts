@@ -43,7 +43,7 @@ export function useUpdateChecker() {
         if (desk.error) {
           try {
             const info = await checkUpdates()
-            setUpdateInfo((prev) => ({
+            setUpdateInfo({
               ...info,
               // Prefer desktop installer URL when the API has one.
               error: info.error || desk.error,
@@ -51,7 +51,7 @@ export function useUpdateChecker() {
                 desk.current_version !== 'unknown'
                   ? desk.current_version
                   : info.current_version,
-            }))
+            })
             if (info.update_available && info.installer_url) {
               setDesktopInfo({
                 current_version: info.current_version,

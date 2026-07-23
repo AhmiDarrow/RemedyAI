@@ -1,11 +1,11 @@
 {
-  "version": "v0.10.7",
-  "notes": "Remedy Desktop v0.10.7 \u2014 one-click update: silent NSIS /S, POSTINSTALL relaunch, auto-start download, PE validation, no more multi-step wizard.",
-  "pub_date": "2026-07-23T18:57:55Z",
+  "version": "v0.10.8",
+  "notes": "Remedy Desktop v0.10.8 \u2014 fix CI TypeScript build; includes one-click silent update pipeline.",
+  "pub_date": "2026-07-23T19:05:08Z",
   "platforms": {
     "windows-x86_64": {
       "signature": "",
-      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.10.7/Remedy_Desktop_0.10.7_x64-setup.exe"
+      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.10.8/Remedy_Desktop_0.10.8_x64-setup.exe"
     }
   }
 }

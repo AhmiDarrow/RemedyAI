@@ -2,6 +2,12 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.10.8] — 2026-07-23
+
+### Fixed
+
+- CI desktop build: TypeScript unused variable in useUpdateChecker failed tsc -b (blocked 0.10.5-0.10.7 installers).
+
 ## [0.10.7] — 2026-07-23
 
 ### Fixed (one-click update pipeline)
