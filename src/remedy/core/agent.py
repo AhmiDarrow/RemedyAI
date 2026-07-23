@@ -128,7 +128,12 @@ def _looks_like_pseudo_tools(text: str) -> bool:
 
 
 def _parse_pseudo_tool_calls(text: str) -> list[dict[str, Any]]:
-    """Best-effort parse of text-faked tools into OpenAI-style tool_call dicts."""
+    """Best-effort parse of text-faked tools into OpenAI-style tool_call dicts.
+
+    Models sometimes emit file_read("x") as plain text instead of native tool
+    calls. We recover them here and log aggressively so system prompts can be
+    tuned from real telemetry rather than growing more recovery heuristics.
+    """
     if not text:
         return []
     # file_read("path") / list_dir('src') / bash_exec("ls")
@@ -164,6 +169,15 @@ def _parse_pseudo_tool_calls(text: str) -> list[dict[str, Any]]:
         )
         if len(out) >= _MAX_PARALLEL_TOOLS:
             break
+    if out:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "pseudo_tool_recovery count=%s names=%s preview=%r",
+            len(out),
+            [c["function"]["name"] for c in out],
+            (text or "")[:200],
+        )
     return out
 
 
@@ -299,8 +313,8 @@ class BasicRuntime(AgentRuntime):
 
         async def bash_exec(command: str = "") -> str:
             import asyncio
-            import shutil
-            import sys
+
+            from remedy.execution.process import create_hidden_subprocess_exec, win_shell_prefix
 
             if not command or not str(command).strip():
                 return "Error: empty command"
@@ -308,17 +322,10 @@ class BasicRuntime(AgentRuntime):
             if danger:
                 return f"Blocked by security policy: {danger}"
             root = self.effective_project_path()
-            if sys.platform == "win32":
-                shell = shutil.which("pwsh") or shutil.which("powershell")
-                if shell:
-                    argv = [shell, "-NoProfile", "-NonInteractive", "-Command", command]
-                else:
-                    argv = [shutil.which("cmd") or "cmd.exe", "/c", command]
-            else:
-                sh = shutil.which("bash") or shutil.which("sh") or "/bin/sh"
-                argv = [sh, "-c", command]
+            argv = [*win_shell_prefix(), command]
             try:
-                proc = await asyncio.create_subprocess_exec(
+                # CREATE_NO_WINDOW / -WindowStyle Hidden — never flash a console on Windows.
+                proc = await create_hidden_subprocess_exec(
                     *argv,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,

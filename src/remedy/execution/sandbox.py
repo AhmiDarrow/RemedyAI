@@ -102,7 +102,9 @@ class SubprocessSandbox(Sandbox):
                     safe_env.pop(key)
 
         try:
-            proc = await asyncio.create_subprocess_exec(
+            from remedy.execution.process import create_hidden_subprocess_exec
+
+            proc = await create_hidden_subprocess_exec(
                 *command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,

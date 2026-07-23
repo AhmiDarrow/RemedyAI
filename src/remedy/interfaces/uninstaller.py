@@ -54,7 +54,9 @@ def _pip_uninstall() -> bool:
     # remedy-ai is the real PyPI name; also try "remedy" for editable/legacy installs
     for dist in ("remedy-ai", "remedy"):
         try:
-            result = subprocess.run(
+            from remedy.execution.process import run_hidden
+
+            result = run_hidden(
                 [sys.executable, "-m", "pip", "uninstall", "-y", dist],
                 capture_output=True,
                 text=True,

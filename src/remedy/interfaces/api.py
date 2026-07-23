@@ -388,6 +388,41 @@ def _apply_llm_to_runtime(
         runtime.set_project_path(project_path, as_default=True)
 
 
+# Cache config disk reads across chat messages; invalidate on mtime/size change.
+_config_cache: dict[str, Any] = {"path": None, "mtime": None, "size": None, "data": None}
+
+
+def _load_config_cached() -> dict[str, Any]:
+    """load_config() with a cheap mtime/size cache to avoid re-reading every message."""
+    from pathlib import Path
+
+    candidates = [
+        Path("~/.remedy/config.toml").expanduser(),
+        Path("~/.remedy/config.yaml").expanduser(),
+        Path("remedy.toml"),
+        Path("remedy.yaml"),
+    ]
+    path = next((p for p in candidates if p.exists()), None)
+    if path is None:
+        return load_config()
+    try:
+        st = path.stat()
+        mtime, size = st.st_mtime, st.st_size
+    except OSError:
+        return load_config()
+    if (
+        _config_cache["path"] == str(path)
+        and _config_cache["mtime"] == mtime
+        and _config_cache["size"] == size
+        and isinstance(_config_cache["data"], dict)
+    ):
+        return _config_cache["data"]
+    # Prefer explicit path when known; load_config() also scans defaults.
+    data = _load_toml_config(path) if path else load_config()
+    _config_cache.update({"path": str(path), "mtime": mtime, "size": size, "data": data})
+    return data
+
+
 def _sync_runtime_llm_from_config(
     runtime: Any,
     *,
@@ -395,13 +430,13 @@ def _sync_runtime_llm_from_config(
 ) -> str:
     """Reload provider/model/url/key from disk into the live runtime.
 
-    Returns the effective API key (may be empty). Always re-reads config so
-    settings saved after server start (or first-run wizard) are used on the
-    next chat message without a restart.
+    Returns the effective API key (may be empty). Re-reads config when the file
+    changes (or first call) so settings saved after server start apply without
+    a restart, without paying for a full disk parse on every message.
     """
     if runtime is None:
         return ""
-    cfg = load_config()
+    cfg = _load_config_cached()
     provider = str(
         cfg.get("llm_provider")
         or getattr(runtime, "_llm_provider", None)
@@ -489,23 +524,36 @@ def create_app(
         description="Remedy AI Agent Framework — Desktop & Web API",
     )
 
+    # CORS: REMEDY_CORS_ORIGINS env wins, then config.toml `cors_origins`, else safe defaults.
     cors_origins_env = os.environ.get("REMEDY_CORS_ORIGINS", "").strip()
     if cors_origins_env == "*":
         cors_origins = ["*"]
     elif cors_origins_env:
         cors_origins = [o.strip() for o in cors_origins_env.split(",") if o.strip()]
     else:
-        # Safe defaults for local desktop/dev; override with REMEDY_CORS_ORIGINS
-        cors_origins = [
-            "http://localhost:1420",
-            "http://127.0.0.1:1420",
-            "http://localhost:3000",
-            "http://127.0.0.1:3000",
-            "http://localhost:5173",
-            "http://127.0.0.1:5173",
-            "tauri://localhost",
-            "http://tauri.localhost",
-        ]
+        try:
+            _cfg = load_config()
+        except Exception:
+            _cfg = {}
+        cfg_origins = _cfg.get("cors_origins") if isinstance(_cfg, dict) else None
+        if cfg_origins == "*" or cfg_origins == ["*"]:
+            cors_origins = ["*"]
+        elif isinstance(cfg_origins, str) and cfg_origins.strip():
+            cors_origins = [o.strip() for o in cfg_origins.split(",") if o.strip()]
+        elif isinstance(cfg_origins, list) and cfg_origins:
+            cors_origins = [str(o).strip() for o in cfg_origins if str(o).strip()]
+        else:
+            # Safe defaults for local desktop/dev
+            cors_origins = [
+                "http://localhost:1420",
+                "http://127.0.0.1:1420",
+                "http://localhost:3000",
+                "http://127.0.0.1:3000",
+                "http://localhost:5173",
+                "http://127.0.0.1:5173",
+                "tauri://localhost",
+                "http://tauri.localhost",
+            ]
     app.add_middleware(
         CORSMiddleware,
         allow_origins=cors_origins,
