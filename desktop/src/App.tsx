@@ -49,7 +49,12 @@ export default function App() {
     addCommandMessage,
     beginEdit,
   } = useMessages(activeId)
-  const [editDraft, setEditDraft] = useState<string | null>(null)
+  /** Prefill for edit-and-resend; `key` forces re-apply even for identical text. */
+  const [editDraft, setEditDraft] = useState<{ text: string; key: number } | null>(null)
+  // Don't carry an edit draft across session switches.
+  useEffect(() => {
+    setEditDraft(null)
+  }, [activeId])
   const { themeId, theme, set: setTheme } = useTheme()
   const [model, setModel] = useState('gpt-4o-mini')
   const [models, setModels] = useState<ModelInfo[]>([])
@@ -202,6 +207,8 @@ export default function App() {
         is_text?: boolean
       }[],
     ) => {
+      // Clear edit prefill once the user sends (revised prompt is on its way).
+      setEditDraft(null)
       if (text.startsWith('/') && !attachments?.length) {
         await handleCommand(text)
       } else {
@@ -213,11 +220,16 @@ export default function App() {
   )
 
   const handleEditUserMessage = useCallback(
-    async (msgId: string) => {
+    async (msgId: string, content: string) => {
       if (!activeId || streaming) return
-      const text = await beginEdit(msgId)
-      if (text != null) {
-        setEditDraft(text)
+      // Immediately put the full original prompt in the chat bar (don't wait on API).
+      const localText = content ?? ''
+      setEditDraft({ text: localText, key: Date.now() })
+      // Soft-delete this message + later ones on the server; refresh history.
+      const serverText = await beginEdit(msgId, localText)
+      // Prefer server content if it differs (authoritative), re-apply with new key.
+      if (serverText != null && serverText !== localText) {
+        setEditDraft({ text: serverText, key: Date.now() })
       }
     },
     [activeId, streaming, beginEdit],
@@ -447,7 +459,6 @@ export default function App() {
               planMode={planMode}
               agents={agentDefs}
               editDraft={editDraft}
-              onEditDraftConsumed={() => setEditDraft(null)}
               sessionId={activeId}
               ensureSession={async () => {
                 if (activeId) return activeId

@@ -262,11 +262,14 @@ def register_workspace_routes(app: FastAPI, *, runtime=None, gateway=None, memor
             )
         if msg.reverted:
             raise HTTPException(400, "Message already reverted")
+        # Capture full original prompt before soft-delete (client loads this into composer).
+        original = msg.content if isinstance(msg.content, str) else str(msg.content or "")
         count = await memory.revert_from(session_id, msg_id)
         return {
             "status": "ready_to_edit",
             "msg_id": msg_id,
-            "content": msg.content,
+            "content": original,
+            "text": original,  # alias for older clients
             "reverted_count": count,
         }
 

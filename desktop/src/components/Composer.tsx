@@ -34,9 +34,11 @@ interface ComposerProps {
   disabled: boolean
   planMode?: boolean
   agents?: AgentDef[]
-  /** When set, loads text into the composer (edit-and-resend flow). */
-  editDraft?: string | null
-  onEditDraftConsumed?: () => void
+  /**
+   * Prefill for edit-and-resend. Use a new `key` every time so the same text
+   * re-applies, and keep the value until the parent clears it (survives remounts).
+   */
+  editDraft?: { text: string; key: number } | null
   sessionId?: string | null
   /** Create a session if needed before upload. */
   ensureSession?: () => Promise<string | null>
@@ -55,7 +57,6 @@ export function Composer({
   planMode,
   agents = [],
   editDraft,
-  onEditDraftConsumed,
   sessionId,
   ensureSession,
 }: ComposerProps) {
@@ -78,6 +79,8 @@ export function Composer({
   attachmentsRef.current = attachments
   /** Dedupe keys for drop/event/poll triple-fire (same file was attaching 3×). */
   const seenDropKeysRef = useRef<Set<string>>(new Set())
+  /** Last applied edit key — re-apply when parent issues a new edit, including remount. */
+  const lastEditKeyRef = useRef<number | null>(null)
 
   const dropKey = (p: DroppedFilePayload) =>
     `${p.filename}|${p.size}|${(p.data_base64 || '').slice(0, 48)}`
@@ -91,19 +94,25 @@ export function Composer({
     })
   }, [])
 
+  // Load full original prompt into the bar when the user clicks Edit.
+  // Parent keeps editDraft until send/session change so remounts don't blank it.
   useEffect(() => {
-    if (editDraft != null && editDraft !== '') {
-      setInput(editDraft)
-      onEditDraftConsumed?.()
-      requestAnimationFrame(() => {
-        const el = textareaRef.current
-        if (el) {
-          el.focus()
-          el.selectionStart = el.selectionEnd = el.value.length
-        }
-      })
-    }
-  }, [editDraft, onEditDraftConsumed])
+    if (!editDraft) return
+    if (lastEditKeyRef.current === editDraft.key) return
+    lastEditKeyRef.current = editDraft.key
+    const text = editDraft.text ?? ''
+    setInput(text)
+    requestAnimationFrame(() => {
+      const el = textareaRef.current
+      if (!el) return
+      el.focus()
+      const len = el.value.length
+      el.selectionStart = el.selectionEnd = len
+      // Grow textarea to fit the restored prompt.
+      el.style.height = 'auto'
+      el.style.height = `${Math.min(el.scrollHeight, 200)}px`
+    })
+  }, [editDraft])
 
   // Revoke blob preview URLs on unmount
   useEffect(() => {

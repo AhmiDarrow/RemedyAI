@@ -13,8 +13,8 @@ interface MessageFeedProps {
   planMode?: boolean
   /** Live tool activity while streaming (OpenCode-style cards). */
   activeTools?: ActiveTool[]
-  /** Edit+resend: only for user messages */
-  onEditUserMessage?: (msgId: string) => void
+  /** Edit+resend: only for user messages (id + full text for the composer). */
+  onEditUserMessage?: (msgId: string, content: string) => void
 }
 
 function MessageBubble({
@@ -25,7 +25,7 @@ function MessageBubble({
 }: {
   msg: ChatMessage
   partial?: string
-  onEditUserMessage?: (msgId: string) => void
+  onEditUserMessage?: (msgId: string, content: string) => void
   streaming?: boolean
 }) {
   const isUser = msg.role === 'user'
@@ -117,7 +117,7 @@ function MessageBubble({
       {showEdit && (
         <button
           type="button"
-          onClick={() => onEditUserMessage?.(msg.id)}
+          onClick={() => onEditUserMessage?.(msg.id, msg.content ?? '')}
           className="absolute top-3 right-3 text-xs px-1.5 py-0.5 rounded opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus:opacity-100 focus:pointer-events-auto"
           style={{
             background: 'var(--bg-tertiary)',

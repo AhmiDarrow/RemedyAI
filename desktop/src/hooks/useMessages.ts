@@ -195,25 +195,30 @@ export function useMessages(sessionId: string | null) {
 
   /**
    * Edit-and-resend: soft-delete this user message + all after it,
-   * return text for the composer.
+   * return text for the composer (falls back to *fallbackContent* if API omits it).
    */
   const beginEdit = useCallback(
-    async (msgId: string): Promise<string | null> => {
+    async (msgId: string, fallbackContent?: string): Promise<string | null> => {
       if (!sessionId || streamingRef.current) return null
+      // Always drop local messages from this user msg onward for immediate UI feedback.
+      setMessages((prev) => {
+        const idx = prev.findIndex((m) => m.id === msgId)
+        if (idx < 0) return prev.filter((m) => !m.reverted)
+        return prev.slice(0, idx)
+      })
       try {
         const r = await editFromMessageApi(sessionId, msgId)
-        // Drop local messages from this user msg onward immediately.
-        setMessages((prev) => {
-          const idx = prev.findIndex((m) => m.id === msgId)
-          if (idx < 0) return prev.filter((m) => !m.reverted)
-          return prev.slice(0, idx)
-        })
         // Sync from server (reverted msgs are filtered out).
         await load()
-        return r.content
+        const text =
+          typeof r.content === 'string' && r.content.length > 0
+            ? r.content
+            : (fallbackContent ?? '')
+        return text
       } catch (e: unknown) {
         console.warn('Edit failed:', e instanceof Error ? e.message : e)
-        return null
+        // Still return local text so the composer is never blank after Edit.
+        return fallbackContent ?? null
       }
     },
     [sessionId, load],
