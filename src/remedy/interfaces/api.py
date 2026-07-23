@@ -19,13 +19,15 @@ import aiohttp
 import yaml
 from fastapi import (
     FastAPI,
+    File,
     HTTPException,
     Query,
     Request,
     Response,
+    UploadFile,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from remedy import __version__ as _remedy_version
@@ -122,10 +124,22 @@ class UpdateSessionRequest(BaseModel):
     project_path: str | None = None
 
 
+class AttachmentRef(BaseModel):
+    """Client-side reference to a previously uploaded session attachment."""
+
+    path: str
+    name: str | None = None
+    mime: str | None = None
+    size: int | None = None
+    is_image: bool | None = None
+    is_text: bool | None = None
+
+
 class SendMessageRequest(BaseModel):
-    message: str = Field(..., description="User message text")
+    message: str = Field(default="", description="User message text")
     model: str | None = None
     agent: str | None = None
+    attachments: list[AttachmentRef] | None = None
 
 
 class CommandRequest(BaseModel):
@@ -843,6 +857,59 @@ def create_app(
             "processing_time_ms": round(elapsed, 1),
         }
 
+    # -- session attachments (drag-drop / paste / picker) --------------------
+    @app.post("/api/sessions/{session_id}/attachments")
+    async def upload_attachment(
+        session_id: str,
+        file: UploadFile = File(...),
+    ):
+        """Store a dropped/pasted file for this session and return a path ref."""
+        from remedy.interfaces.attachments import MAX_ATTACHMENT_BYTES, save_upload
+
+        raw = await file.read()
+        if not raw:
+            raise HTTPException(400, "Empty file")
+        if len(raw) > MAX_ATTACHMENT_BYTES:
+            raise HTTPException(
+                413,
+                f"File too large (max {MAX_ATTACHMENT_BYTES // (1024 * 1024)} MB)",
+            )
+        home = None
+        try:
+            home = load_config().get("home_dir")
+        except Exception:
+            pass
+        try:
+            meta = save_upload(
+                session_id=session_id,
+                filename=file.filename or "upload.bin",
+                data=raw,
+                content_type=file.content_type,
+                home_dir=home,
+            )
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        return meta
+
+    @app.get("/api/sessions/{session_id}/attachments/{filename}")
+    async def get_attachment(session_id: str, filename: str):
+        from remedy.interfaces.attachments import session_attachments_dir
+
+        home = None
+        try:
+            home = load_config().get("home_dir")
+        except Exception:
+            pass
+        directory = session_attachments_dir(session_id, home)
+        # Prevent path traversal
+        safe = Path(filename).name
+        path = (directory / safe).resolve()
+        if not str(path).startswith(str(directory.resolve())):
+            raise HTTPException(400, "Invalid path")
+        if not path.is_file():
+            raise HTTPException(404, "Attachment not found")
+        return FileResponse(path, filename=safe)
+
     # -- SSE streaming (structured events) -----------------------------------
     @app.post("/api/sessions/{session_id}/messages/stream")
     async def stream_message(session_id: str, req: SendMessageRequest):
@@ -850,15 +917,39 @@ def create_app(
             raise HTTPException(503, "Runtime not available")
 
         request_id = str(uuid4())
+        att_dicts = [a.model_dump() for a in (req.attachments or [])]
+        user_text = (req.message or "").strip()
+        if not user_text and not att_dicts:
+            raise HTTPException(400, "Message or attachment required")
+
+        # Expand display content for chat history (paths + text snippets).
+        from remedy.interfaces.attachments import (
+            build_attachment_prompt_block,
+            inject_text_file_snippets,
+        )
+
+        display_content = user_text
+        if att_dicts:
+            display_content = (
+                f"{user_text}{build_attachment_prompt_block(att_dicts)}"
+                if user_text
+                else build_attachment_prompt_block(att_dicts).lstrip()
+            )
+            # Keep history readable but not huge — skip full snippets for images-only.
+            if any(a.get("is_text") for a in att_dicts):
+                display_content = display_content + inject_text_file_snippets(att_dicts)
 
         if memory:
             from remedy.models import ChatMessage, ChatSession
             existing = await memory.get_chat_session(session_id)
             if existing is None:
                 default_proj = load_config().get("project_path")
+                title_src = user_text or (
+                    att_dicts[0].get("name") if att_dicts else "Attachments"
+                )
                 await memory.create_chat_session(ChatSession(
                     id=session_id,
-                    title=req.message[:60],
+                    title=str(title_src)[:60],
                     model=req.model,
                     agent=req.agent,
                     project_path=default_proj,
@@ -869,7 +960,7 @@ def create_app(
             await memory.add_chat_message(ChatMessage(
                 session_id=session_id,
                 role=ChatMessageRole.USER,
-                content=req.message,
+                content=display_content,
                 model=req.model,
                 agent=req.agent,
             ))
@@ -893,7 +984,10 @@ def create_app(
                     return
 
                 async for token in runtime.stream_response(
-                    req.message, session_id=session_id, model=req.model
+                    user_text or "(see attached files)",
+                    session_id=session_id,
+                    model=req.model,
+                    attachments=att_dicts,
                 ):
                     if token.startswith("@@tool_call:"):
                         tool_name = token[len("@@tool_call:"):]

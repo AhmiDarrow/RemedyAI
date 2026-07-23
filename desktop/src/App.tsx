@@ -181,12 +181,22 @@ export default function App() {
   )
 
   const handleSend = useCallback(
-    async (text: string) => {
-      if (text.startsWith('/')) {
+    async (
+      text: string,
+      attachments?: {
+        path: string
+        name?: string
+        mime?: string
+        size?: number
+        is_image?: boolean
+        is_text?: boolean
+      }[],
+    ) => {
+      if (text.startsWith('/') && !attachments?.length) {
         await handleCommand(text)
       } else {
         const sid = activeId || (await create())?.id
-        if (sid) send(text, model, sid)
+        if (sid) send(text, model, sid, attachments)
       }
     },
     [send, model, handleCommand, activeId, create],
@@ -418,6 +428,12 @@ export default function App() {
               agents={agentDefs}
               editDraft={editDraft}
               onEditDraftConsumed={() => setEditDraft(null)}
+              sessionId={activeId}
+              ensureSession={async () => {
+                if (activeId) return activeId
+                const s = await create()
+                return s?.id ?? null
+              }}
             />
           </div>
 

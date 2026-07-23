@@ -38,18 +38,41 @@ export function useMessages(sessionId: string | null) {
   }, [load])
 
   const send = useCallback(
-    async (text: string, model?: string, sid?: string) => {
+    async (
+      text: string,
+      model?: string,
+      sid?: string,
+      attachments?: {
+        path: string
+        name?: string
+        mime?: string
+        size?: number
+        is_image?: boolean
+        is_text?: boolean
+      }[],
+    ) => {
       const targetId = sid || sessionId
-      if (!targetId || !text.trim()) return
+      const hasAtt = Boolean(attachments?.length)
+      if (!targetId || (!text.trim() && !hasAtt)) return
       // Prevent double-submit (Enter + button, or rapid re-entry).
       if (sendLockRef.current || streamingRef.current) return
       sendLockRef.current = true
       streamingRef.current = true
 
+      let display = text.trim()
+      if (hasAtt) {
+        const lines = (attachments || []).map(
+          (a) => `- ${a.name || a.path}${a.mime ? ` (${a.mime})` : ''}`,
+        )
+        display = display
+          ? `${display}\n\n📎 Attachments:\n${lines.join('\n')}`
+          : `📎 Attachments:\n${lines.join('\n')}`
+      }
+
       const userMsg: ChatMessage = {
         id: crypto.randomUUID(),
         role: 'user',
-        content: text,
+        content: display,
         thinking: null,
         tool_calls: [],
         tool_results: [],
@@ -114,7 +137,7 @@ export function useMessages(sessionId: string | null) {
 
       const ctrl = streamMessage(
         targetId,
-        text,
+        text.trim() || '(see attached files)',
         (token) => setPartialText((prev) => prev + token),
         () => {
           void finishOk()
@@ -135,6 +158,7 @@ export function useMessages(sessionId: string | null) {
             prev.map((t) => (t.name === name ? { ...t, status: 'done' as const } : t)),
           )
         },
+        attachments,
       )
 
       setStreamCtrl(ctrl)

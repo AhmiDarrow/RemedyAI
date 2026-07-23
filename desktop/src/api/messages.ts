@@ -32,6 +32,15 @@ export type StreamHandlers = {
   onToolResult?: (name: string) => void
 }
 
+export type AttachmentPayload = {
+  path: string
+  name?: string
+  mime?: string
+  size?: number
+  is_image?: boolean
+  is_text?: boolean
+}
+
 export function streamMessage(
   sessionId: string,
   message: string,
@@ -42,6 +51,7 @@ export function streamMessage(
   onThinking?: (text: string) => void,
   onToolCall?: (name: string) => void,
   onToolResult?: (name: string) => void,
+  attachments?: AttachmentPayload[],
 ): AbortController {
   const controller = new AbortController()
 
@@ -50,7 +60,11 @@ export function streamMessage(
       const res = await fetch(`${getApiBase()}/sessions/${sessionId}/messages/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message, model }),
+        body: JSON.stringify({
+          message,
+          model,
+          attachments: attachments?.length ? attachments : undefined,
+        }),
         signal: controller.signal,
       })
 

@@ -693,6 +693,7 @@ class BasicRuntime(AgentRuntime):
         self,
         message: str,
         session_id: str | None = None,
+        attachments: list[dict[str, Any]] | None = None,
     ) -> AsyncIterator[str]:
         """Call the LLM with a smooth ReAct loop (OpenCode-grade).
 
@@ -701,6 +702,8 @@ class BasicRuntime(AgentRuntime):
         always forces a plain-text answer (or a short synthesis).
         """
         try:
+            from remedy.interfaces.attachments import build_multimodal_user_content
+
             context = await self._build_context()
             runtime_info = (
                 f"Connected provider: {self._llm_provider}\n"
@@ -711,6 +714,7 @@ class BasicRuntime(AgentRuntime):
                 "When asked which provider/model you use, answer from this block — do not call tools."
             )
             history = await self._load_session_history(session_id, message)
+            user_content = build_multimodal_user_content(message, attachments)
             messages: list[dict[str, Any]] = [
                 {
                     "role": "system",
@@ -723,10 +727,12 @@ class BasicRuntime(AgentRuntime):
                     ),
                 },
                 *history,
-                {"role": "user", "content": message},
+                {"role": "user", "content": user_content},
             ]
             all_tools = self._openai_tools()
-            tools_allowed = bool(all_tools) and _message_wants_tools(message)
+            tools_allowed = bool(all_tools) and (
+                _message_wants_tools(message) or bool(attachments)
+            )
             tools = all_tools if tools_allowed else []
 
             seen_fps: set[str] = set()
@@ -1144,6 +1150,7 @@ class BasicRuntime(AgentRuntime):
         message: str,
         session_id: str | None = None,
         model: str | None = None,
+        attachments: list[dict[str, Any]] | None = None,
     ) -> AsyncIterator[str]:
         """Stream tokens from the LLM for real-time SSE delivery.
 
@@ -1165,7 +1172,9 @@ class BasicRuntime(AgentRuntime):
                 )
                 return
 
-            async for chunk in self._call_llm_stream(message, session_id=session_id):
+            async for chunk in self._call_llm_stream(
+                message, session_id=session_id, attachments=attachments
+            ):
                 yield chunk
         finally:
             self._llm_model = prev_model
