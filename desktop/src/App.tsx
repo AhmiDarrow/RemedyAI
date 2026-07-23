@@ -407,11 +407,12 @@ export default function App() {
     )
   }
 
-  if (showUpdateScreen && desktopInfo?.update_available) {
+  if (showUpdateScreen && desktopInfo?.update_available && desktopInfo.download_url) {
     return (
       <AppShell>
         <UpdateScreen
           info={desktopInfo}
+          autoStart
           onClose={() => setShowUpdateScreen(false)}
         />
       </AppShell>

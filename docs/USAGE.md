@@ -651,13 +651,21 @@ The stream loop auto-continues when the provider returns `finish_reason=length` 
 `max_tokens` (up to a few continuations). If answers still stop early, check provider
 token limits and model `max_tokens` settings in `~/.remedy/config.toml`.
 
-### Check for Updates does nothing
+### Check for Updates / one-click install
 
 In Settings → About, **Check for Updates** should always show a result:
 
 - **Current / Latest** versions
 - **You’re up to date**, or **Update & Relaunch**
 - Or a red **error** (network, GitHub, permissions)
+
+**Update & Relaunch** (one click):
+
+1. Downloads the NSIS installer (progress UI)
+2. Installs silently (`/S`)
+3. App exits; installer finishes; **Remedy reopens** on the new version
+
+Windows may show a single UAC/elevation prompt — approve it, then the rest is automatic.
 
 The desktop shell checks GitHub Releases (`latest.json`, then the Releases API)
 from the Rust side with a 15s timeout. If that fails, it falls back to

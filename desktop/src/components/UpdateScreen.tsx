@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { DesktopUpdateInfo, UpdateProgress } from '../api/updates'
 import { startDesktopUpdate } from '../api/updates'
 import { tauriListen } from '../api/tauri'
@@ -6,20 +6,23 @@ import { tauriListen } from '../api/tauri'
 interface UpdateScreenProps {
   info: DesktopUpdateInfo
   onClose: () => void
+  /** When true (default), start download/install immediately — true one-click. */
+  autoStart?: boolean
 }
 
 type Phase = 'ready' | 'downloading' | 'installing' | 'relaunch' | 'error'
 
 /**
  * Full-screen update UI (Ollama-style):
- * confirm → download with progress → launch installer → app exits and relaunches.
+ * one click from Settings/status bar → download with progress → silent install → relaunch.
  */
-export function UpdateScreen({ info, onClose }: UpdateScreenProps) {
-  const [phase, setPhase] = useState<Phase>('ready')
+export function UpdateScreen({ info, onClose, autoStart = true }: UpdateScreenProps) {
+  const [phase, setPhase] = useState<Phase>(autoStart && info.download_url ? 'downloading' : 'ready')
   const [percent, setPercent] = useState(0)
-  const [message, setMessage] = useState('')
+  const [message, setMessage] = useState(autoStart ? 'Starting download…' : '')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const startedRef = useRef(false)
 
   useEffect(() => {
     let unlisten: (() => void) | undefined
@@ -41,6 +44,7 @@ export function UpdateScreen({ info, onClose }: UpdateScreenProps) {
         setPhase('error')
         setError(p.message || 'Update failed')
         setBusy(false)
+        startedRef.current = false
       }
     }).then((fn) => {
       unlisten = fn
@@ -50,12 +54,14 @@ export function UpdateScreen({ info, onClose }: UpdateScreenProps) {
     }
   }, [])
 
-  const begin = async () => {
+  const begin = useCallback(async () => {
     if (!info.download_url) {
       setError('No installer URL for this release.')
       setPhase('error')
       return
     }
+    if (startedRef.current) return
+    startedRef.current = true
     setBusy(true)
     setError('')
     setPhase('downloading')
@@ -63,13 +69,21 @@ export function UpdateScreen({ info, onClose }: UpdateScreenProps) {
     setPercent(0)
     try {
       await startDesktopUpdate(info.download_url)
-      // App should exit soon after installer launches.
+      // App should exit soon after the silent installer launches; POSTINSTALL relaunches.
     } catch (e: unknown) {
       setPhase('error')
       setError(e instanceof Error ? e.message : String(e))
       setBusy(false)
+      startedRef.current = false
     }
-  }
+  }, [info.download_url])
+
+  // One-click: open this screen → install starts immediately.
+  useEffect(() => {
+    if (autoStart && info.download_url) {
+      void begin()
+    }
+  }, [autoStart, info.download_url, begin])
 
   const from = info.current_version
   const to = info.latest_version
@@ -93,8 +107,8 @@ export function UpdateScreen({ info, onClose }: UpdateScreenProps) {
           <div className="text-sm" style={{ color: 'var(--text-muted)' }}>
             {phase === 'ready' && 'A new version is ready to install'}
             {phase === 'downloading' && 'Downloading update…'}
-            {phase === 'installing' && 'Installing…'}
-            {phase === 'relaunch' && 'Almost done — relaunching…'}
+            {phase === 'installing' && 'Installing silently…'}
+            {phase === 'relaunch' && 'Almost done — app will reopen…'}
             {phase === 'error' && 'Update failed'}
           </div>
         </div>
@@ -212,12 +226,15 @@ export function UpdateScreen({ info, onClose }: UpdateScreenProps) {
               style={{ color: 'var(--text-muted)' }}
             >
               Please wait — do not close the app
+              {phase === 'installing' || phase === 'relaunch'
+                ? '. Windows may ask for permission once.'
+                : ''}
             </div>
           )}
         </div>
 
         <div className="mt-4 text-[0.65rem] text-center" style={{ color: 'var(--text-muted)' }}>
-          Same idea as Ollama: download → install screen → app restarts updated.
+          One click: download → silent install → app restarts on the new version.
         </div>
       </div>
     </div>

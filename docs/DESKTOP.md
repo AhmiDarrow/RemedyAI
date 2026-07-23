@@ -181,6 +181,32 @@ assistant tool-call id still receives a tool result message before the next LLM
 request. Incomplete pairing is also sanitized by `ensure_tool_call_pairings`
 immediately before each provider call.
 
+## One-click auto-update pipeline
+
+User path (Ollama-style):
+
+1. Settings / status bar → **Update & Relaunch** (single click)
+2. UI opens full-screen progress and **starts download immediately** (`autoStart`)
+3. Rust downloads the NSIS installer from GitHub Releases (trusted hosts only)
+4. Validates PE `MZ` header + minimum size (rejects HTML error pages)
+5. Kills the Python sidecar so files can be replaced
+6. Launches installer with **`/S`** (silent NSIS — not MSI `/PASSIVE`)
+7. Detaches installer, exits the app
+8. NSIS **`NSIS_HOOK_POSTINSTALL`** runs `Exec "…\Remedy Desktop.exe"` so the app
+   relaunches on the new build
+
+Metadata: `https://github.com/AhmiDarrow/RemedyAI/releases/latest/download/latest.json`
+
+| Piece | File |
+|-------|------|
+| Check + download + silent install | `desktop/src-tauri/src/lib.rs` |
+| Kill old / relaunch new | `desktop/src-tauri/windows/hooks.nsh` |
+| Progress UI | `desktop/src/components/UpdateScreen.tsx` |
+| CI `latest.json` + signed assets | `.github/workflows/desktop-release.yml` |
+
+**UAC:** Windows may still show one elevation prompt for the installer; that is
+outside the app’s control. After approval, install + relaunch are automatic.
+
 ## Build Toolchain
 
 | Tool | Path | Notes |

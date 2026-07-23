@@ -380,18 +380,29 @@ fn fetch_latest_desktop() -> Result<(String, Option<String>, Option<String>), St
 fn desktop_update_result(current: String) -> DesktopUpdateInfo {
     match fetch_latest_desktop() {
         Ok((latest, download_url, notes)) => {
-            let available = is_newer(&latest, &current);
+            let latest_norm = latest
+                .trim()
+                .trim_start_matches('v')
+                .trim_start_matches('V')
+                .to_string();
+            let newer = is_newer(&latest_norm, &current);
+            // Never claim an update is available without an installer URL.
+            let available = newer && download_url.as_ref().is_some_and(|u| !u.is_empty());
+            let error = if newer && !available {
+                Some(
+                    "A newer version exists but no Windows installer URL was found on the release."
+                        .into(),
+                )
+            } else {
+                None
+            };
             DesktopUpdateInfo {
                 current_version: current,
-                latest_version: latest
-                    .trim()
-                    .trim_start_matches('v')
-                    .trim_start_matches('V')
-                    .to_string(),
+                latest_version: latest_norm,
                 update_available: available,
                 download_url,
                 release_notes: notes,
-                error: None,
+                error,
             }
         }
         Err(e) => DesktopUpdateInfo {
@@ -425,18 +436,52 @@ fn emit_progress(app: &AppHandle, phase: &str, percent: u8, message: &str) {
     );
 }
 
-/// Download the NSIS installer, launch it, then exit so files can be replaced.
+fn is_trusted_download_url(url: &str) -> bool {
+    url.starts_with("https://github.com/AhmiDarrow/RemedyAI/")
+        || url.starts_with("https://objects.githubusercontent.com/")
+        || url.starts_with("https://release-assets.githubusercontent.com/")
+        || (url.starts_with("https://github.com/") && url.contains("/releases/download/"))
+}
+
+/// Validate that the file looks like a Windows PE installer (not an HTML error page).
+fn validate_installer_exe(path: &Path, min_bytes: u64) -> Result<(), String> {
+    let meta = std::fs::metadata(path).map_err(|e| format!("Cannot stat installer: {e}"))?;
+    if meta.len() < min_bytes {
+        return Err(format!(
+            "Downloaded installer is too small ({} bytes) — likely not a real NSIS package",
+            meta.len()
+        ));
+    }
+    let mut f = std::fs::File::open(path).map_err(|e| format!("Cannot open installer: {e}"))?;
+    let mut magic = [0u8; 2];
+    f.read_exact(&mut magic)
+        .map_err(|e| format!("Cannot read installer header: {e}"))?;
+    if &magic != b"MZ" {
+        return Err(
+            "Downloaded file is not a Windows executable (missing MZ header). \
+             GitHub may have returned an HTML error page."
+                .into(),
+        );
+    }
+    Ok(())
+}
+
+// Guard against double-click / concurrent update starts.
+static UPDATE_IN_FLIGHT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Download the NSIS installer, run it silently (/S), exit so files can be replaced.
+/// NSIS POSTINSTALL hook relaunches Remedy Desktop.
 /// Progress is streamed to the UI via `update-progress` events.
 #[tauri::command]
 fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), String> {
     if download_url.is_empty() {
         return Err("No download URL for this release".into());
     }
-    if !(download_url.starts_with("https://github.com/")
-        || download_url.starts_with("https://objects.githubusercontent.com/")
-        || download_url.starts_with("https://release-assets.githubusercontent.com/"))
-    {
+    if !is_trusted_download_url(&download_url) {
         return Err("Download URL is not a trusted GitHub release host".into());
+    }
+    if UPDATE_IN_FLIGHT.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return Err("An update is already in progress".into());
     }
 
     let app_for_thread = app.clone();
@@ -444,14 +489,33 @@ fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), Stri
     let process_slot = app.state::<ServerState>().process.clone();
     thread::spawn(move || {
         let result = (|| -> Result<(), String> {
-            emit_progress(&app_for_thread, "downloading", 0, "Connecting to update server…");
+            emit_progress(
+                &app_for_thread,
+                "downloading",
+                0,
+                "Connecting to update server…",
+            );
 
+            // Large installers: allow up to 10 minutes; still fail if connection stalls.
             let resp = ureq::get(&download_url)
-                .set("User-Agent", "RemedyDesktop-Updater")
+                .set("User-Agent", "RemedyDesktop-Updater/0.10")
+                .set("Accept", "application/octet-stream,*/*")
+                .timeout(Duration::from_secs(600))
                 .call()
                 .map_err(|e| format!("Download failed: {e}"))?;
             if resp.status() != 200 {
                 return Err(format!("Download HTTP {}", resp.status()));
+            }
+
+            let content_type = resp
+                .header("Content-Type")
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            if content_type.contains("text/html") {
+                return Err(
+                    "Download returned HTML instead of an installer (check the release URL)."
+                        .into(),
+                );
             }
 
             let len = resp
@@ -461,8 +525,9 @@ fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), Stri
 
             let temp = env::temp_dir().join(format!(
                 "RemedyDesktop-Update-{}.exe",
-                Instant::now().elapsed().as_millis()
+                std::process::id()
             ));
+            let _ = std::fs::remove_file(&temp);
             let mut file = std::fs::File::create(&temp)
                 .map_err(|e| format!("Cannot create temp installer: {e}"))?;
 
@@ -482,7 +547,6 @@ fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), Stri
                 let pct = if len > 0 {
                     ((done * 100) / len).min(99) as u8
                 } else {
-                    // indeterminate-ish progress
                     ((done / (512 * 1024)) % 90) as u8
                 };
                 let mb = done as f64 / (1024.0 * 1024.0);
@@ -495,11 +559,14 @@ fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), Stri
             }
             drop(file);
 
+            // Reject HTML error pages / truncated downloads (NSIS packages are multi-MB).
+            validate_installer_exe(&temp, 512 * 1024)?;
+
             emit_progress(
                 &app_for_thread,
                 "installing",
                 100,
-                "Starting installer… Remedy will close and relaunch.",
+                "Installing update… Remedy will relaunch automatically.",
             );
 
             // Stop sidecar so installer can replace files.
@@ -511,16 +578,24 @@ fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), Stri
                 }
             }
 
-            // Launch NSIS installer. PassivePassive shows a simple progress UI;
-            // without it, /S is fully silent. Prefer visible progress for UX.
+            // NSIS (Tauri) silent install. /PASSIVE is MSI-only and was ignored,
+            // which left users in a multi-click wizard. /S + POSTINSTALL relaunch
+            // is the true one-click path after the download.
             #[cfg(target_os = "windows")]
             {
                 use std::os::windows::process::CommandExt;
+                // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP so installer survives our exit.
+                const DETACHED_PROCESS: u32 = 0x00000008;
+                const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
                 Command::new(&temp)
-                    .args(["/PASSIVE"])
-                    .creation_flags(0) // show installer window
+                    .args(["/S"])
+                    .creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
                     .spawn()
-                    .map_err(|e| format!("Failed to launch installer: {e}"))?;
+                    .map_err(|e| {
+                        format!(
+                            "Failed to launch installer (try running the .exe manually): {e}"
+                        )
+                    })?;
             }
             #[cfg(not(target_os = "windows"))]
             {
@@ -529,20 +604,22 @@ fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), Stri
                     .map_err(|e| format!("Failed to launch installer: {e}"))?;
             }
 
-            // Give the installer a moment to start, then exit.
-            thread::sleep(Duration::from_millis(800));
+            // Brief pause so the installer process is fully up (UAC may appear).
+            thread::sleep(Duration::from_millis(1200));
             emit_progress(
                 &app_for_thread,
                 "relaunch",
                 100,
-                "Installer running — closing Remedy…",
+                "Installer running — closing Remedy. App will reopen when done.",
             );
+            // Exit so NSIS can overwrite our files; POSTINSTALL starts us again.
             app_for_thread.exit(0);
             Ok(())
         })();
 
         if let Err(e) = result {
             log::error!("Update failed: {}", e);
+            UPDATE_IN_FLIGHT.store(false, std::sync::atomic::Ordering::SeqCst);
             emit_progress(&app_for_thread, "error", 0, &e);
         }
     });

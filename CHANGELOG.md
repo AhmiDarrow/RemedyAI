@@ -2,6 +2,21 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.10.7] — 2026-07-23
+
+### Fixed (one-click update pipeline)
+
+- **Silent install**: used MSI-style `/PASSIVE` which NSIS ignores → multi-step
+  wizard. Now launches the installer with **`/S`** (true silent NSIS).
+- **Relaunch**: NSIS hooks only killed processes; no POSTINSTALL launch. Added
+  `NSIS_HOOK_POSTINSTALL` to `Exec` `Remedy Desktop.exe` after install.
+- **One click**: Update screen required a second “Update & Relaunch” press. It
+  now **auto-starts** download/install when opened.
+- **Detached installer**: spawn with `DETACHED_PROCESS` so install survives app exit.
+- **Download hardening**: 10-minute timeout, reject HTML content-types, validate
+  PE `MZ` header + min size, refuse update-available without installer URL.
+- **Concurrency**: block double-start of in-flight updates.
+
 ## [0.10.6] — 2026-07-23
 
 ### Fixed
