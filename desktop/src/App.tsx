@@ -9,6 +9,7 @@ import { SettingsPanel } from './components/SettingsPanel'
 import { SplashScreen } from './components/SplashScreen'
 import { SetupWizard } from './components/SetupWizard'
 import { UpdateScreen } from './components/UpdateScreen'
+import { TitleBar } from './components/TitleBar'
 import { CommandPalette, type CommandItem } from './components/CommandPalette'
 import { useSessions } from './hooks/useSessions'
 import { useMessages } from './hooks/useMessages'
@@ -33,6 +34,16 @@ function isTauri(): boolean {
   if (typeof window === 'undefined') return false
   const w = window as any
   return !!(w.__TAURI__ || w.__TAURI_INTERNALS__ || w.isTauri)
+}
+
+/** Window shell: themed custom title bar + content (replaces white OS chrome). */
+function AppShell({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col h-full min-h-0" style={{ background: 'var(--bg-primary)' }}>
+      <TitleBar />
+      <div className="flex-1 min-h-0 flex flex-col">{children}</div>
+    </div>
+  )
 }
 
 export default function App() {
@@ -304,103 +315,112 @@ export default function App() {
 
   if (serverState === 'connecting') {
     return (
-      <SplashScreen
-        onReady={() => setServerState('ready')}
-        onError={(msg) => { setServerState('error'); setServerError(msg) }}
-      />
+      <AppShell>
+        <SplashScreen
+          onReady={() => setServerState('ready')}
+          onError={(msg) => { setServerState('error'); setServerError(msg) }}
+        />
+      </AppShell>
     )
   }
 
   if (serverState === 'error') {
     return (
-      <div className="flex items-center justify-center h-full flex-col gap-4" style={{ background: 'var(--bg-primary)', color: 'var(--text-primary)' }}>
-        <div style={{ color: 'var(--error)' }} className="text-lg font-medium">
-          {serverError || 'Server connection failed'}
-        </div>
-        <div className="text-sm" style={{ color: 'var(--text-muted)' }}>
-          The Remedy server could not start. Try restarting the app.
-        </div>
-        <div className="flex gap-3">
-          <button
-            onClick={() => {
-              setServerError('')
-              if (isTauri()) {
+      <AppShell>
+        <div className="flex items-center justify-center h-full flex-col gap-4" style={{ background: 'var(--bg-primary)', color: 'var(--text-primary)' }}>
+          <div style={{ color: 'var(--error)' }} className="text-lg font-medium">
+            {serverError || 'Server connection failed'}
+          </div>
+          <div className="text-sm" style={{ color: 'var(--text-muted)' }}>
+            The Remedy server could not start. Try restarting the app.
+          </div>
+          <div className="flex gap-3">
+            <button
+              onClick={() => {
+                setServerError('')
+                if (isTauri()) {
+                  const invoke = (window as any).__TAURI_INTERNALS__?.invoke
+                  if (invoke) {
+                    setServerState('connecting')
+                    invoke('restart_server')
+                      .then(() => {
+                        // server-ready event + SplashScreen also flip state
+                        setServerState('ready')
+                      })
+                      .catch((e: unknown) => {
+                        const msg = e instanceof Error ? e.message : String(e)
+                        setServerState('error')
+                        setServerError(msg || 'Failed to restart server')
+                      })
+                    return
+                  }
+                }
+                // Browser / no bridge: re-poll only
+                setServerState('connecting')
+              }}
+              className="px-5 py-2 rounded-md text-sm"
+              style={{ background: 'var(--accent)', color: '#fff' }}
+            >
+              Retry
+            </button>
+            <button
+              onClick={() => {
+                if (!isTauri()) return
                 const invoke = (window as any).__TAURI_INTERNALS__?.invoke
-                if (invoke) {
-                  setServerState('connecting')
-                  invoke('restart_server')
-                    .then(() => {
-                      // server-ready event + SplashScreen also flip state
-                      setServerState('ready')
-                    })
-                    .catch((e: unknown) => {
-                      const msg = e instanceof Error ? e.message : String(e)
-                      setServerState('error')
-                      setServerError(msg || 'Failed to restart server')
-                    })
+                if (!invoke) {
+                  setServerError((prev) => prev || 'Cannot open data folder (Tauri bridge unavailable)')
                   return
                 }
-              }
-              // Browser / no bridge: re-poll only
-              setServerState('connecting')
-            }}
-            className="px-5 py-2 rounded-md text-sm"
-            style={{ background: 'var(--accent)', color: '#fff' }}
-          >
-            Retry
-          </button>
-          <button
-            onClick={() => {
-              if (!isTauri()) return
-              const invoke = (window as any).__TAURI_INTERNALS__?.invoke
-              if (!invoke) {
-                setServerError((prev) => prev || 'Cannot open data folder (Tauri bridge unavailable)')
-                return
-              }
-              invoke('open_data_folder').catch((e: unknown) => {
-                const msg = e instanceof Error ? e.message : String(e)
-                console.warn('Open data folder failed:', msg)
-                setServerError((prev) => `${prev ? prev + ' — ' : ''}Could not open data folder: ${msg}`)
-              })
-            }}
-            className="px-5 py-2 rounded-md text-sm"
-            style={{ background: 'var(--bg-tertiary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
-          >
-            Open Data Folder
-          </button>
+                invoke('open_data_folder').catch((e: unknown) => {
+                  const msg = e instanceof Error ? e.message : String(e)
+                  console.warn('Open data folder failed:', msg)
+                  setServerError((prev) => `${prev ? prev + ' — ' : ''}Could not open data folder: ${msg}`)
+                })
+              }}
+              className="px-5 py-2 rounded-md text-sm"
+              style={{ background: 'var(--bg-tertiary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+            >
+              Open Data Folder
+            </button>
+          </div>
         </div>
-      </div>
+      </AppShell>
     )
   }
 
   if (showSetupWizard) {
     return (
-      <SetupWizard
-        open={showSetupWizard}
-        onComplete={() => {
-          setShowSetupWizard(false)
-          void getSettings()
-            .then((s) => {
-              if (s.llm_model) setModel(s.llm_model)
-              return refreshModels()
-            })
-            .catch(() => refreshModels())
-        }}
-      />
+      <AppShell>
+        <SetupWizard
+          open={showSetupWizard}
+          onComplete={() => {
+            setShowSetupWizard(false)
+            void getSettings()
+              .then((s) => {
+                if (s.llm_model) setModel(s.llm_model)
+                return refreshModels()
+              })
+              .catch(() => refreshModels())
+          }}
+        />
+      </AppShell>
     )
   }
 
   if (showUpdateScreen && desktopInfo?.update_available) {
     return (
-      <UpdateScreen
-        info={desktopInfo}
-        onClose={() => setShowUpdateScreen(false)}
-      />
+      <AppShell>
+        <UpdateScreen
+          info={desktopInfo}
+          onClose={() => setShowUpdateScreen(false)}
+        />
+      </AppShell>
     )
   }
 
   return (
-    <div className="flex h-full" style={{ background: 'var(--bg-primary)' }}>
+    <AppShell>
+    <div className="flex flex-1 min-h-0" style={{ background: 'var(--bg-primary)' }}>
       <CommandPalette
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}
@@ -418,7 +438,7 @@ export default function App() {
         }}
       />
 
-      <div className="flex-1 flex flex-col min-w-0 relative">
+      <div className="flex-1 flex flex-col min-w-0 relative min-h-0">
         <TabBar
           tabs={sessions.filter((s) => openTabs.has(s.id))}
           activeId={activeId}
@@ -534,5 +554,6 @@ export default function App() {
         />
       </div>
     </div>
+    </AppShell>
   )
 }

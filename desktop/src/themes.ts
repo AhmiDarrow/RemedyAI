@@ -149,4 +149,22 @@ export const THEME_LIST = Object.values(THEMES)
 export function applyTheme(theme: Theme): void {
   document.documentElement.setAttribute('data-theme', theme.id)
   document.documentElement.setAttribute('data-theme-kind', theme.kind)
+  // Keep OS/WebView chrome (and our custom titlebar contrast) in sync.
+  document.documentElement.style.colorScheme = theme.kind
+  void syncNativeWindowTheme(theme.kind)
+}
+
+async function syncNativeWindowTheme(kind: 'dark' | 'light'): Promise<void> {
+  try {
+    if (typeof window === 'undefined') return
+    const w = window as Window & {
+      __TAURI__?: unknown
+      __TAURI_INTERNALS__?: unknown
+    }
+    if (!w.__TAURI__ && !w.__TAURI_INTERNALS__) return
+    const { getCurrentWindow } = await import('@tauri-apps/api/window')
+    await getCurrentWindow().setTheme(kind)
+  } catch {
+    // Browser / older runtime — ignore
+  }
 }

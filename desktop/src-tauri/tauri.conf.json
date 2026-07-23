@@ -21,7 +21,9 @@
         "resizable": true,
         "fullscreen": false,
         "center": true,
-        "dragDropEnabled": true
+        "dragDropEnabled": true,
+        "decorations": false,
+        "shadow": true
       }
     ],
     "trayIcon": {

@@ -121,6 +121,45 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Custom themed window chrome (decorations: false) */
+.titlebar {
+  -webkit-user-select: none;
+  user-select: none;
+}
+.titlebar [data-tauri-drag-region] {
+  /* Windows pen/touch drag */
+  app-region: drag;
+  -webkit-app-region: drag;
+}
+.titlebar-btn {
+  appearance: none;
+  border: none;
+  margin: 0;
+  padding: 0;
+  width: 46px;
+  height: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: default;
+  app-region: no-drag;
+  -webkit-app-region: no-drag;
+}
+.titlebar-btn:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+.titlebar-btn-close:hover {
+  background: #e81123;
+  color: #fff;
+}
+.titlebar-controls {
+  app-region: no-drag;
+  -webkit-app-region: no-drag;
+}
+
 ::-webkit-scrollbar {
   width: 6px;
 }
