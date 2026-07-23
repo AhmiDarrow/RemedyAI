@@ -26,8 +26,11 @@ jobs:
       - name: Lint
         run: uv run ruff check .
 
-      - name: Type-check
-        run: uv run python -c "import remedy; print('import OK')"
+      - name: Type-check (core helpers)
+        run: uv run mypy
+
+      - name: Import smoke
+        run: uv run python -c "import remedy; from remedy.interfaces.api import create_app; create_app(); print('import OK')"
 
       - name: Test
         run: uv run pytest -q --tb=short

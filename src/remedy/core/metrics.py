@@ -115,12 +115,14 @@ class MetricsRegistry:
 
     def describe(self) -> list[str]:
         out: list[str] = []
-        for v in self._counters.values():
-            out.append(f"counter {v.name} = {v.value}")
-        for v in self._gauges.values():
-            out.append(f"gauge {v.name} = {v.value}")
-        for v in self._histograms.values():
-            out.append(f"histogram {v.name} count={sum(v._counts)} sum={v._sum:.2f}")
+        for counter in self._counters.values():
+            out.append(f"counter {counter.name} = {counter.value}")
+        for gauge in self._gauges.values():
+            out.append(f"gauge {gauge.name} = {gauge.value}")
+        for hist in self._histograms.values():
+            out.append(
+                f"histogram {hist.name} count={sum(hist._counts)} sum={hist._sum:.2f}"
+            )
         return out
 
 
@@ -166,3 +168,9 @@ class HealthChecker:
             "checks": results,
             "checked_at": datetime.now(UTC).isoformat(),
         }
+
+
+# Process-wide registry for agent / API instrumentation.
+default_registry = MetricsRegistry()
+default_health = HealthChecker()
+

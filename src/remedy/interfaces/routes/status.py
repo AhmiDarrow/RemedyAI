@@ -75,6 +75,19 @@ def register_status_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
     # Cache COUNT(*) results briefly — status is polled often from the desktop UI.
     _status_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
 
+    @app.get("/api/metrics")
+    async def get_metrics():
+        """In-process metrics snapshot (counters / gauges / histograms)."""
+        from remedy.core.metrics import default_health, default_registry
+
+        health = await default_health.check()
+        return {
+            "version": _remedy_version,
+            "metrics": default_registry.snapshot(),
+            "health": health,
+            "lines": default_registry.describe(),
+        }
+
     @app.get("/api/status", response_model=StatusResponse)
     async def get_status():
         now = time.time()

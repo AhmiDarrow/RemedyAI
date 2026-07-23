@@ -351,7 +351,7 @@ uv run remedy --help
 ```
 RemedyAI/
 ├── src/remedy/
-│   ├── core/           # Runtime, ReAct policy, providers, learning, security
+│   ├── core/           # Runtime, ReAct policy/stream helpers, providers, metrics
 │   ├── memory/         # SQLite+FTS5 store, handoff, profiles
 │   ├── skills/         # Loader, registry, executor, adapters
 │   ├── gateway/        # Event router, channels

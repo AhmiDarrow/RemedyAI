@@ -83,6 +83,7 @@ def popen_hidden(
 
 
 async def create_hidden_subprocess_exec(
+    program: str,
     *args: str,
     stdout: Any = None,
     stderr: Any = None,
@@ -93,6 +94,7 @@ async def create_hidden_subprocess_exec(
 ) -> asyncio.subprocess.Process:
     """asyncio.create_subprocess_exec that never shows a Windows console."""
     return await asyncio.create_subprocess_exec(
+        program,
         *args,
         stdout=stdout,
         stderr=stderr,

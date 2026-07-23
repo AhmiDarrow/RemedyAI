@@ -62,6 +62,15 @@ from remedy.core.react_policy import (
     parse_pseudo_tool_calls,
     tool_call_fingerprint,
 )
+from remedy.core.react_stream import (
+    StreamRoundState,
+    apply_openai_sse_chunk,
+    build_runtime_system_block,
+    filter_fresh_tool_calls,
+    finalize_round_text,
+    parse_sse_data_line,
+    should_enable_tools,
+)
 
 # Re-export for tests that import from remedy.core.agent
 __all__ = [
@@ -342,26 +351,33 @@ class BasicRuntime(AgentRuntime):
             yield response
 
     async def call_tool(self, tool_call: ToolCall) -> ToolResult:
+        from remedy.core.errors import format_tool_error
+        from remedy.core.metrics import default_registry
+
         name = tool_call.tool_name
+        default_registry.counter("remedy_tool_calls_total", tool=name).inc()
         try:
             result = await self.tool_registry.execute(name, **tool_call.arguments)
+            default_registry.counter("remedy_tool_success_total", tool=name).inc()
             return ToolResult(
                 call_id=tool_call.id,
                 success=True,
                 data=result,
             )
         except ValueError as e:
+            default_registry.counter("remedy_tool_errors_total", tool=name).inc()
             return ToolResult(
                 call_id=tool_call.id,
                 success=False,
-                error=str(e),
+                error=format_tool_error(str(e), code="TOOL_VALUE_ERROR", tool_name=name),
             )
         except Exception as e:
             logger.exception("Tool %s failed", name)
+            default_registry.counter("remedy_tool_errors_total", tool=name).inc()
             return ToolResult(
                 call_id=tool_call.id,
                 success=False,
-                error=str(e),
+                error=format_tool_error(str(e), code="TOOL_EXCEPTION", tool_name=name),
             )
 
     async def _generate_response(
@@ -563,35 +579,31 @@ class BasicRuntime(AgentRuntime):
             from remedy.interfaces.attachments import build_multimodal_user_content
 
             context = await self._build_context()
-            runtime_info = (
-                f"Connected provider: {self._llm_provider}\n"
-                f"Connected model: {self._llm_model}\n"
-                f"API base URL: {self._llm_base_url}\n"
-                f"Tool budget this turn: up to {self._max_react_steps} model steps "
-                f"(final step always answers without tools).\n"
-                "When asked which provider/model you use, answer from this block — do not call tools."
-            )
             history = await self._load_session_history(session_id, message)
             user_content = build_multimodal_user_content(message, attachments)
             messages: list[dict[str, Any]] = [
                 {
                     "role": "system",
-                    "content": (
-                        self._system_prompt
-                        + "\n\n"
-                        + runtime_info
-                        + "\n\n"
-                        + context
+                    "content": build_runtime_system_block(
+                        system_prompt=self._system_prompt,
+                        provider=self._llm_provider,
+                        model=self._llm_model,
+                        base_url=self._llm_base_url,
+                        max_steps=self._max_react_steps,
+                        context=context,
                     ),
                 },
                 *history,
                 {"role": "user", "content": user_content},
             ]
             all_tools = self._openai_tools()
-            tools_allowed = bool(all_tools) and (
-                _message_wants_tools(message) or bool(attachments)
+            tools = (
+                all_tools
+                if should_enable_tools(
+                    message, all_tools, has_attachments=bool(attachments)
+                )
+                else []
             )
-            tools = all_tools if tools_allowed else []
 
             seen_fps: set[str] = set()
             result_cache: dict[str, str] = {}
@@ -640,9 +652,7 @@ class BasicRuntime(AgentRuntime):
                     )
 
                     collected: dict[str, Any] = {"content": None, "tool_calls": None}
-                    tool_call_acc: dict[int, dict[str, Any]] = {}
-                    content_parts: list[str] = []
-                    reasoning_parts: list[str] = []
+                    round_state = StreamRoundState()
 
                     async with http.post(
                         endpoint, headers=headers, json=body
@@ -665,98 +675,46 @@ class BasicRuntime(AgentRuntime):
                         if self._provider.provider_name == "openai":
                             async for line in resp.content:
                                 line_text = line.decode("utf-8").strip()
-                                if not line_text or line_text.startswith(":"):
-                                    continue
                                 if line_text == "data: [DONE]":
                                     break
-                                if line_text.startswith("data: "):
-                                    line_text = line_text[6:]
-                                try:
-                                    chunk = json.loads(line_text)
-                                except json.JSONDecodeError:
+                                chunk = parse_sse_data_line(line_text)
+                                if chunk is None:
                                     continue
-                                choice = (chunk.get("choices") or [{}])[0]
-                                delta = choice.get("delta") or {}
-                                content_delta = delta.get("content")
-                                if content_delta:
-                                    content_parts.append(content_delta)
-                                    if stream_live:
-                                        produced_user_text = True
-                                        yield content_delta
-                                else:
-                                    reason_delta = (
-                                        delta.get("reasoning_content")
-                                        or delta.get("reasoning")
-                                    )
-                                    if reason_delta:
-                                        reasoning_parts.append(reason_delta)
-                                for tc in delta.get("tool_calls") or []:
-                                    idx = tc.get("index", 0)
-                                    if idx not in tool_call_acc:
-                                        tool_call_acc[idx] = {
-                                            "id": tc.get("id") or "",
-                                            "type": "function",
-                                            "function": {
-                                                "name": (
-                                                    (tc.get("function") or {}).get(
-                                                        "name"
-                                                    )
-                                                    or ""
-                                                ),
-                                                "arguments": (
-                                                    (tc.get("function") or {}).get(
-                                                        "arguments"
-                                                    )
-                                                    or ""
-                                                ),
-                                            },
-                                        }
-                                    else:
-                                        acc = tool_call_acc[idx]
-                                        fn_args = (
-                                            (tc.get("function") or {}).get(
-                                                "arguments"
-                                            )
-                                            or ""
-                                        )
-                                        if fn_args:
-                                            acc["function"]["arguments"] += fn_args
-                                        fn_name = (tc.get("function") or {}).get(
-                                            "name"
-                                        )
-                                        if fn_name:
-                                            acc["function"]["name"] = fn_name
-                                        tc_id = tc.get("id")
-                                        if tc_id:
-                                            acc["id"] = tc_id
+                                live = apply_openai_sse_chunk(
+                                    round_state, chunk, stream_live=stream_live
+                                )
+                                if live:
+                                    produced_user_text = True
+                                    yield live
                         else:
                             data = await resp.json()
                             parsed = self._provider.extract_response(data)
                             content = parsed.get("content")
                             if content:
-                                content_parts.append(content)
+                                round_state.content_parts.append(content)
                             raw_tcs = parsed.get("tool_calls")
                             if raw_tcs:
-                                tool_call_acc = dict(enumerate(raw_tcs))
+                                round_state.tool_call_acc = dict(enumerate(raw_tcs))
                             collected = {**collected, **parsed}
 
-                    tool_calls_list = [
-                        tc
-                        for tc in (
-                            list(tool_call_acc.values())
-                            if tool_call_acc
-                            else (collected.get("tool_calls") or [])
-                        )
-                        if ((tc.get("function") or {}).get("name") or "").strip()
-                    ]
+                        content_parts = round_state.content_parts
+                        reasoning_parts = round_state.reasoning_parts
+                        tool_call_acc = round_state.tool_call_acc
+
+                    tool_calls_list = round_state.tool_calls_list(collected)
 
                     # Finalize text. Live-stream already yielded tokens when tools off.
-                    text_out = "".join(content_parts).strip()
-                    if not text_out and reasoning_parts and not tool_calls_list:
-                        text_out = "".join(reasoning_parts).strip()
-                        if text_out and stream_live and not _looks_like_pseudo_tools(text_out):
-                            yield text_out
-                            produced_user_text = True
+                    text_out = finalize_round_text(round_state, tool_calls_list)
+                    if (
+                        text_out
+                        and stream_live
+                        and not content_parts
+                        and reasoning_parts
+                        and not tool_calls_list
+                        and not _looks_like_pseudo_tools(text_out)
+                    ):
+                        yield text_out
+                        produced_user_text = True
                     if text_out:
                         collected["content"] = text_out
 
@@ -860,11 +818,7 @@ class BasicRuntime(AgentRuntime):
                         return
 
                     # Filter out exact repeats of prior tool calls this turn.
-                    fresh_calls = [
-                        tc
-                        for tc in tool_calls_list
-                        if _tool_call_fingerprint(tc) not in seen_fps
-                    ]
+                    fresh_calls = filter_fresh_tool_calls(tool_calls_list, seen_fps)
                     if not fresh_calls:
                         # Model is looping the same tools — force a final answer next.
                         messages.append(

@@ -69,6 +69,7 @@ Same-name re-upload overwrites the prior file (no `_N` suffixes).
 | Method | Path | Purpose |
 |--------|------|---------|
 | `GET` | `/api/status` | Health / version / provider status |
+| `GET` | `/api/metrics` | In-process counters/gauges/histograms + health |
 | `GET` | `/api/models` | Available LLM models + default (auto-discovers from provider) |
 | `GET` | `/api/agents` | Available agent profiles |
 | `POST` | `/api/sessions/{id}/command` | Execute slash command |

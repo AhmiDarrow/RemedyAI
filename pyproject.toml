@@ -67,9 +67,24 @@ unsafe-fixes = false
 [tool.ruff.format]
 quote-style = "double"
 
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+warn_unused_ignores = true
+check_untyped_defs = true
+# Incremental: start with pure helpers; expand over time.
+files = [
+    "src/remedy/core/errors.py",
+    "src/remedy/core/metrics.py",
+    "src/remedy/core/react_policy.py",
+    "src/remedy/core/react_stream.py",
+    "src/remedy/execution/process.py",
+]
+
 [dependency-groups]
 dev = [
     "httpx>=0.28.1",
+    "mypy>=1.15.0",
     "pyinstaller>=6.21.0",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
