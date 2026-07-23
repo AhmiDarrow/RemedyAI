@@ -4,6 +4,9 @@ export interface ShortcutDef {
   key: string
   ctrl?: boolean
   shift?: boolean
+  alt?: boolean
+  /** When true, fire even if focus is in an input (e.g. Escape, F1). */
+  allowInInput?: boolean
   handler: () => void
 }
 
@@ -13,15 +16,23 @@ export function useKeyboardShortcuts(shortcuts: ShortcutDef[]) {
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      const isInput = ['INPUT', 'TEXTAREA', 'SELECT'].includes(
-        (e.target as HTMLElement)?.tagName || '',
-      )
+      const tag = (e.target as HTMLElement)?.tagName || ''
+      const isInput = ['INPUT', 'TEXTAREA', 'SELECT'].includes(tag)
 
       for (const s of ref.current) {
         const ctrl = s.ctrl ?? true
         const shift = s.shift ?? false
-        if (e.key.toLowerCase() === s.key.toLowerCase() && e.ctrlKey === ctrl && e.shiftKey === shift && !e.metaKey && !e.altKey) {
-          if (isInput && s.key !== 'Escape') continue
+        const alt = s.alt ?? false
+        const keyMatch =
+          e.key === s.key || e.key.toLowerCase() === s.key.toLowerCase()
+        if (
+          keyMatch &&
+          e.ctrlKey === ctrl &&
+          e.shiftKey === shift &&
+          e.altKey === alt &&
+          !e.metaKey
+        ) {
+          if (isInput && !s.allowInInput && s.key !== 'Escape') continue
           e.preventDefault()
           s.handler()
           return

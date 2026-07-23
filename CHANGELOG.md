@@ -2,7 +2,18 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
-## [0.10.13] — 2026-07-23
+## [0.10.14] — 2026-07-23
+
+### Desktop polish
+
+- Splash holds **at least 3 seconds** (and longer if server still starting); fade-out handoff
+- Kill white flash: themed HTML boot splash + early background
+- Theme default **System** (follow OS light/dark); improved reading contrast on all themes
+- Hotkey registry + **Settings → Help & shortcuts**; `/help` includes keyboard shortcuts
+- Empty chat and setup finish tip Shift+Enter / Ctrl+/
+
+## [0.10.13]
+ — 2026-07-23
 
 ### Fixed (remaining review backlog)
 

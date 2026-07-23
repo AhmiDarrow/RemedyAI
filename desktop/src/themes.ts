@@ -1,4 +1,4 @@
-export type ThemeId = 'dark' | 'light' | 'green' | 'purple' | 'orange' | 'cyan'
+export type ThemeId = 'system' | 'dark' | 'light' | 'green' | 'purple' | 'orange' | 'cyan'
 
 export interface ThemeColors {
   '--bg-primary': string
@@ -19,27 +19,29 @@ export interface Theme {
   id: ThemeId
   name: string
   kind: 'dark' | 'light'
+  /** Resolved palette themes only — system uses resolved dark/light */
   colors: ThemeColors
 }
 
-export const THEMES: Record<ThemeId, Theme> = {
+/** Concrete palettes tuned for long reading (strong body contrast, softer muted). */
+export const THEMES: Record<Exclude<ThemeId, 'system'>, Theme> = {
   dark: {
     id: 'dark',
     name: 'Dark',
     kind: 'dark',
     colors: {
-      '--bg-primary': '#0a0a1a',
-      '--bg-secondary': '#12122a',
-      '--bg-tertiary': '#1a1a35',
-      '--border': '#1e1e3e',
-      '--accent': '#7c3aed',
-      '--accent-hover': '#6d28d9',
-      '--text-primary': '#e0e0e0',
-      '--text-secondary': '#8888aa',
-      '--text-muted': '#555577',
-      '--success': '#22c55e',
-      '--error': '#ef4444',
-      '--warning': '#f59e0b',
+      '--bg-primary': '#0c0c14',
+      '--bg-secondary': '#14141f',
+      '--bg-tertiary': '#1c1c2a',
+      '--border': '#2a2a3d',
+      '--accent': '#8b5cf6',
+      '--accent-hover': '#7c3aed',
+      '--text-primary': '#f0f0f5',
+      '--text-secondary': '#a8a8c0',
+      '--text-muted': '#7a7a96',
+      '--success': '#34d399',
+      '--error': '#f87171',
+      '--warning': '#fbbf24',
     },
   },
 
@@ -48,18 +50,18 @@ export const THEMES: Record<ThemeId, Theme> = {
     name: 'Light',
     kind: 'light',
     colors: {
-      '--bg-primary': '#f5f5f9',
+      '--bg-primary': '#f4f4f8',
       '--bg-secondary': '#ffffff',
-      '--bg-tertiary': '#e8e8f0',
-      '--border': '#d0d0da',
+      '--bg-tertiary': '#eaeaef',
+      '--border': '#c8c8d4',
       '--accent': '#7c3aed',
       '--accent-hover': '#6d28d9',
-      '--text-primary': '#1a1a2e',
-      '--text-secondary': '#555566',
-      '--text-muted': '#9999aa',
-      '--success': '#16a34a',
-      '--error': '#dc2626',
-      '--warning': '#d97706',
+      '--text-primary': '#14141f',
+      '--text-secondary': '#3d3d52',
+      '--text-muted': '#5c5c72',
+      '--success': '#15803d',
+      '--error': '#b91c1c',
+      '--warning': '#b45309',
     },
   },
 
@@ -68,18 +70,18 @@ export const THEMES: Record<ThemeId, Theme> = {
     name: 'Emerald',
     kind: 'dark',
     colors: {
-      '--bg-primary': '#0a1a12',
-      '--bg-secondary': '#122c1e',
-      '--bg-tertiary': '#1a3d2a',
-      '--border': '#1e4e36',
-      '--accent': '#10b981',
-      '--accent-hover': '#059669',
-      '--text-primary': '#d1fae5',
-      '--text-secondary': '#6ee7b7',
-      '--text-muted': '#3b8268',
-      '--success': '#34d399',
-      '--error': '#f87171',
-      '--warning': '#fbbf24',
+      '--bg-primary': '#0a1410',
+      '--bg-secondary': '#0f1f18',
+      '--bg-tertiary': '#163026',
+      '--border': '#1f4a38',
+      '--accent': '#34d399',
+      '--accent-hover': '#10b981',
+      '--text-primary': '#ecfdf5',
+      '--text-secondary': '#a7f3d0',
+      '--text-muted': '#6bb89a',
+      '--success': '#6ee7b7',
+      '--error': '#fca5a5',
+      '--warning': '#fcd34d',
     },
   },
 
@@ -88,18 +90,18 @@ export const THEMES: Record<ThemeId, Theme> = {
     name: 'Amethyst',
     kind: 'dark',
     colors: {
-      '--bg-primary': '#120a1a',
-      '--bg-secondary': '#1e122a',
-      '--bg-tertiary': '#2a1a3d',
-      '--border': '#3e1e4e',
-      '--accent': '#a855f7',
-      '--accent-hover': '#9333ea',
-      '--text-primary': '#ede9fe',
-      '--text-secondary': '#a78bfa',
-      '--text-muted': '#6b4c9a',
-      '--success': '#34d399',
-      '--error': '#f87171',
-      '--warning': '#facc15',
+      '--bg-primary': '#100a16',
+      '--bg-secondary': '#1a1224',
+      '--bg-tertiary': '#261a36',
+      '--border': '#3d2a55',
+      '--accent': '#c084fc',
+      '--accent-hover': '#a855f7',
+      '--text-primary': '#f5f3ff',
+      '--text-secondary': '#d8b4fe',
+      '--text-muted': '#a78bfa',
+      '--success': '#6ee7b7',
+      '--error': '#fca5a5',
+      '--warning': '#fde68a',
     },
   },
 
@@ -108,18 +110,18 @@ export const THEMES: Record<ThemeId, Theme> = {
     name: 'Amber',
     kind: 'dark',
     colors: {
-      '--bg-primary': '#1a100a',
-      '--bg-secondary': '#2c1e12',
-      '--bg-tertiary': '#3d2a1a',
-      '--border': '#4e361e',
-      '--accent': '#f97316',
-      '--accent-hover': '#ea580c',
-      '--text-primary': '#ffedd5',
-      '--text-secondary': '#d6a574',
-      '--text-muted': '#8b6b4a',
-      '--success': '#34d399',
-      '--error': '#f87171',
-      '--warning': '#fbbf24',
+      '--bg-primary': '#14100a',
+      '--bg-secondary': '#1f1810',
+      '--bg-tertiary': '#2e2418',
+      '--border': '#4a3a24',
+      '--accent': '#fb923c',
+      '--accent-hover': '#f97316',
+      '--text-primary': '#fff7ed',
+      '--text-secondary': '#fdba74',
+      '--text-muted': '#c4a574',
+      '--success': '#6ee7b7',
+      '--error': '#fca5a5',
+      '--warning': '#fde68a',
     },
   },
 
@@ -128,29 +130,61 @@ export const THEMES: Record<ThemeId, Theme> = {
     name: 'Ocean',
     kind: 'dark',
     colors: {
-      '--bg-primary': '#0a1a1e',
-      '--bg-secondary': '#12262c',
-      '--bg-tertiary': '#1a353d',
-      '--border': '#1e464e',
-      '--accent': '#06b6d4',
-      '--accent-hover': '#0891b2',
-      '--text-primary': '#cffafe',
-      '--text-secondary': '#67e8f9',
-      '--text-muted': '#3b7f8b',
-      '--success': '#34d399',
-      '--error': '#f87171',
-      '--warning': '#facc15',
+      '--bg-primary': '#0a1216',
+      '--bg-secondary': '#0f1c22',
+      '--bg-tertiary': '#163038',
+      '--border': '#1e4a55',
+      '--accent': '#22d3ee',
+      '--accent-hover': '#06b6d4',
+      '--text-primary': '#ecfeff',
+      '--text-secondary': '#a5f3fc',
+      '--text-muted': '#67c4d4',
+      '--success': '#6ee7b7',
+      '--error': '#fca5a5',
+      '--warning': '#fde68a',
     },
   },
 } as const
 
-export const THEME_LIST = Object.values(THEMES)
+/** UI list: System first, then concrete themes. */
+export const THEME_LIST: { id: ThemeId; name: string; kind: 'dark' | 'light' | 'system'; colors: ThemeColors }[] = [
+  {
+    id: 'system',
+    name: 'System',
+    kind: 'system',
+    colors: THEMES.dark.colors,
+  },
+  ...Object.values(THEMES),
+]
+
+export function systemPrefersLight(): boolean {
+  try {
+    return window.matchMedia('(prefers-color-scheme: light)').matches
+  } catch {
+    return false
+  }
+}
+
+export function resolveThemeId(id: ThemeId): Exclude<ThemeId, 'system'> {
+  if (id === 'system') {
+    return systemPrefersLight() ? 'light' : 'dark'
+  }
+  return id
+}
+
+export function getResolvedTheme(id: ThemeId): Theme {
+  const resolved = resolveThemeId(id)
+  return THEMES[resolved]
+}
 
 export function applyTheme(theme: Theme): void {
   document.documentElement.setAttribute('data-theme', theme.id)
   document.documentElement.setAttribute('data-theme-kind', theme.kind)
-  // Keep OS/WebView chrome (and our custom titlebar contrast) in sync.
   document.documentElement.style.colorScheme = theme.kind
+  // Apply CSS variables for components that read inline from THEMES
+  for (const [k, v] of Object.entries(theme.colors)) {
+    document.documentElement.style.setProperty(k, v)
+  }
   void syncNativeWindowTheme(theme.kind)
 }
 

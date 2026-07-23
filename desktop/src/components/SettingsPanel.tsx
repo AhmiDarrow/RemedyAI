@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback } from 'react'
 import { getSettings, updateSettings, type Settings, type SettingsUpdate } from '../api/settings'
 import type { ThemeId } from '../themes'
 import type { UpdateInfo } from '../api/updates'
-import { THEME_LIST } from '../themes'
+import { THEME_LIST, getResolvedTheme } from '../themes'
+import { HOTKEYS } from '../hotkeys'
 import type { ModelInfo } from '../App'
 
 interface SettingsPanelProps {
@@ -238,28 +239,73 @@ export function SettingsPanel({
                 Theme
               </div>
               <div className="flex flex-col gap-1">
-                {THEME_LIST.map((t) => (
-                  <button
-                    key={t.id}
-                    onClick={() => onThemeChange(t.id)}
-                    className="flex items-center gap-2 px-2 py-1.5 rounded text-xs text-left transition-colors w-full"
+                {THEME_LIST.map((t) => {
+                  const swatch =
+                    t.id === 'system'
+                      ? getResolvedTheme('system').colors['--accent']
+                      : t.colors['--accent']
+                  return (
+                    <button
+                      key={t.id}
+                      onClick={() => onThemeChange(t.id)}
+                      className="flex items-center gap-2 px-2 py-1.5 rounded text-xs text-left transition-colors w-full"
+                      style={{
+                        background: t.id === themeId ? 'var(--bg-tertiary)' : 'transparent',
+                        color: 'var(--text-primary)',
+                      }}
+                    >
+                      <span
+                        className="inline-block w-3 h-3 rounded-full border"
+                        style={{ background: swatch, borderColor: 'var(--border)' }}
+                      />
+                      <span>
+                        {t.name}
+                        {t.id === 'system' ? (
+                          <span style={{ color: 'var(--text-muted)' }}> · match OS</span>
+                        ) : null}
+                      </span>
+                      {t.id === themeId && (
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="ml-auto">
+                          <path d="M2 6l3 3 5-5" stroke="var(--accent)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+            </section>
+
+            {/* Help / Keyboard */}
+            <section>
+              <div className="font-semibold mb-2" style={{ color: 'var(--text-primary)', fontSize: '0.75rem' }}>
+                Help &amp; shortcuts
+              </div>
+              <div className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>
+                Enter sends · Shift+Enter new line · type /help in chat for commands
+              </div>
+              <div
+                className="rounded-md overflow-hidden text-xs"
+                style={{ border: '1px solid var(--border)' }}
+              >
+                {HOTKEYS.map((h) => (
+                  <div
+                    key={`${h.keys}-${h.action}`}
+                    className="flex justify-between gap-2 px-2 py-1.5"
                     style={{
-                      background: t.id === themeId ? 'var(--bg-tertiary)' : 'transparent',
-                      color: 'var(--text-primary)',
+                      borderBottom: '1px solid var(--border)',
+                      color: 'var(--text-secondary)',
                     }}
                   >
-                    <span
-                      className="inline-block w-3 h-3 rounded-full border"
-                      style={{ background: t.colors['--accent'], borderColor: 'var(--border)' }}
-                    />
-                    <span>{t.name}</span>
-                    {t.id === themeId && (
-                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="ml-auto">
-                        <path d="M2 6l3 3 5-5" stroke="var(--accent)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    )}
-                  </button>
+                    <code style={{ color: 'var(--accent)', whiteSpace: 'nowrap' }}>{h.keys}</code>
+                    <span className="text-right" style={{ color: 'var(--text-primary)' }}>
+                      {h.action}
+                    </span>
+                  </div>
                 ))}
+              </div>
+              <div className="text-xs mt-2 leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+                Connect a provider above to chat. Plan mode explores without editing files;
+                Build mode can change your project. Data stays in ~/.remedy on this machine.
               </div>
             </section>
 

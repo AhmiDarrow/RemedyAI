@@ -244,12 +244,23 @@ export function MessageFeed({
       )}
 
       {!loading && messages.length === 0 && !streaming && (
-        <div className="flex flex-col items-center justify-center h-48 gap-3" style={{ color: 'var(--text-muted)' }}>
+        <div
+          className="flex flex-col items-center justify-center h-48 gap-2 px-6 text-center"
+          style={{ color: 'var(--text-muted)' }}
+        >
           <span style={{ color: 'var(--accent)', fontSize: '2rem' }}>{'\u2728'}</span>
-          <div className="text-lg font-medium" style={{ color: 'var(--text-secondary)' }}>Remedy Desktop</div>
-          <div className="text-xs">Type a message below to start, or use <code style={{ color: 'var(--accent)' }}>/help</code> for commands</div>
-          <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
-            Tip: type <code style={{ color: 'var(--accent)' }}>@</code> to reference files
+          <div className="text-lg font-medium" style={{ color: 'var(--text-secondary)' }}>
+            Remedy Desktop
+          </div>
+          <div className="text-xs max-w-sm leading-relaxed">
+            Type a message to start. <code style={{ color: 'var(--accent)' }}>/help</code> lists
+            commands and shortcuts.
+          </div>
+          <div className="text-xs max-w-sm leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+            <code style={{ color: 'var(--accent)' }}>Enter</code> send ·{' '}
+            <code style={{ color: 'var(--accent)' }}>Shift+Enter</code> new line ·{' '}
+            <code style={{ color: 'var(--accent)' }}>@</code> reference files ·{' '}
+            <code style={{ color: 'var(--accent)' }}>Ctrl+/</code> shortcuts
           </div>
         </div>
       )}

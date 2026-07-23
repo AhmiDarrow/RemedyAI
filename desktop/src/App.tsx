@@ -281,6 +281,17 @@ export default function App() {
       { id: 'memory', label: 'Memory Panel', description: 'Toggle memory panel', category: 'panel', action: () => setPanel((p) => (p === 'memory' ? null : 'memory')) },
       { id: 'skills', label: 'Skills Panel', description: 'Toggle skills panel', category: 'panel', action: () => setPanel((p) => (p === 'skills' ? null : 'skills')) },
       { id: 'settings', label: 'Settings Panel', description: 'Toggle settings panel', category: 'panel', action: () => setPanel((p) => (p === 'settings' ? null : 'settings')) },
+      {
+        id: 'help',
+        label: 'Keyboard Shortcuts',
+        description: 'Show help and hotkeys (Ctrl+/)',
+        category: 'general',
+        action: () => {
+          setPanel('settings')
+          // Help section is in settings; also inject /help into chat if possible
+          void handleCommand('/help')
+        },
+      },
       ...sessions.map((s) => ({
         id: `session-${s.id}`,
         label: s.title || 'Untitled',
@@ -304,13 +315,39 @@ export default function App() {
       })),
     ]
     return items
-  }, [sessions, agentDefs, models, handleNewSession, handleSelect])
+  }, [sessions, agentDefs, models, handleNewSession, handleSelect, handleCommand])
 
   useKeyboardShortcuts([
-    { key: 'n', handler: handleNewSession },
-    { key: 'p', handler: () => setPaletteOpen((o) => !o) },
-    { key: 'b', handler: () => setPlanMode((p) => !p) },
-    { key: 'Escape', ctrl: false, handler: () => { setPaletteOpen(false); setPanel(null) } },
+    { key: 'n', ctrl: true, handler: handleNewSession },
+    { key: 'p', ctrl: true, handler: () => setPaletteOpen((o) => !o) },
+    { key: 'k', ctrl: true, handler: () => setPaletteOpen((o) => !o) },
+    { key: 'b', ctrl: true, handler: () => setPlanMode((p) => !p) },
+    { key: ',', ctrl: true, handler: () => setPanel((p) => (p === 'settings' ? null : 'settings')) },
+    {
+      key: '/',
+      ctrl: true,
+      allowInInput: true,
+      handler: () => {
+        void handleCommand('/help')
+      },
+    },
+    {
+      key: 'F1',
+      ctrl: false,
+      allowInInput: true,
+      handler: () => {
+        void handleCommand('/help')
+      },
+    },
+    {
+      key: 'Escape',
+      ctrl: false,
+      allowInInput: true,
+      handler: () => {
+        setPaletteOpen(false)
+        setPanel(null)
+      },
+    },
   ])
 
   if (serverState === 'connecting') {
@@ -338,25 +375,18 @@ export default function App() {
             <button
               onClick={() => {
                 setServerError('')
+                // Always re-enter splash so min duration + health poll apply.
+                setServerState('connecting')
                 if (isTauri()) {
                   const invoke = (window as any).__TAURI_INTERNALS__?.invoke
                   if (invoke) {
-                    setServerState('connecting')
-                    invoke('restart_server')
-                      .then(() => {
-                        // server-ready event + SplashScreen also flip state
-                        setServerState('ready')
-                      })
-                      .catch((e: unknown) => {
-                        const msg = e instanceof Error ? e.message : String(e)
-                        setServerState('error')
-                        setServerError(msg || 'Failed to restart server')
-                      })
-                    return
+                    invoke('restart_server').catch((e: unknown) => {
+                      const msg = e instanceof Error ? e.message : String(e)
+                      setServerState('error')
+                      setServerError(msg || 'Failed to restart server')
+                    })
                   }
                 }
-                // Browser / no bridge: re-poll only
-                setServerState('connecting')
               }}
               className="px-5 py-2 rounded-md text-sm"
               style={{ background: 'var(--accent)', color: '#fff' }}

@@ -1,6 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { healthCheck } from '../api/client'
 import logoSrc from '/logo.png'
+
+const MIN_SPLASH_MS = 3000
+const FADE_MS = 350
 
 interface SplashScreenProps {
   onReady: () => void
@@ -8,36 +11,62 @@ interface SplashScreenProps {
 }
 
 export function SplashScreen({ onReady, onError }: SplashScreenProps) {
-  const [status, setStatus] = useState<'starting' | 'connecting' | 'ready' | 'error'>('starting')
+  const [status, setStatus] = useState<'starting' | 'connecting' | 'ready' | 'error'>(
+    'starting',
+  )
   const [dots, setDots] = useState('')
+  const [fading, setFading] = useState(false)
+  const startedAt = useRef(Date.now())
+  const finished = useRef(false)
+
+  useEffect(() => {
+    // Remove HTML boot splash once React splash is up
+    const boot = document.getElementById('boot-splash')
+    if (boot) {
+      boot.classList.add('boot-hidden')
+      window.setTimeout(() => boot.remove(), FADE_MS)
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
     let attempts = 0
 
+    async function finishReady() {
+      if (finished.current || cancelled) return
+      finished.current = true
+      setStatus('ready')
+      const elapsed = Date.now() - startedAt.current
+      const wait = Math.max(0, MIN_SPLASH_MS - elapsed)
+      await new Promise((r) => setTimeout(r, wait))
+      if (cancelled) return
+      setFading(true)
+      await new Promise((r) => setTimeout(r, FADE_MS))
+      if (cancelled) return
+      onReady()
+    }
+
     async function poll() {
-      while (!cancelled) {
+      while (!cancelled && !finished.current) {
         attempts++
-        setStatus('connecting')
+        setStatus(attempts <= 1 ? 'starting' : 'connecting')
         const ok = await healthCheck(2000)
         if (cancelled) return
         if (ok) {
-          setStatus('ready')
-          await new Promise((r) => setTimeout(r, 300))
-          onReady()
+          await finishReady()
           return
         }
-        if (attempts >= 15) {
+        if (attempts >= 20) {
           setStatus('error')
-          onError('Server failed to start after 30s')
+          onError('Server failed to start after ~40s')
           return
         }
-        const backoff = Math.min(250 * Math.pow(2, attempts <= 1 ? 0 : attempts - 1), 2000)
+        const backoff = Math.min(250 * Math.pow(2, Math.min(attempts - 1, 3)), 2000)
         await new Promise((r) => setTimeout(r, backoff))
       }
     }
 
-    poll()
+    void poll()
     return () => {
       cancelled = true
     }
@@ -53,20 +82,25 @@ export function SplashScreen({ onReady, onError }: SplashScreenProps) {
   return (
     <div
       className="flex flex-col items-center justify-center h-full gap-6"
-      style={{ background: 'var(--bg-primary)', color: 'var(--text-primary)' }}
+      style={{
+        background: 'var(--bg-primary)',
+        color: 'var(--text-primary)',
+        opacity: fading ? 0 : 1,
+        transition: `opacity ${FADE_MS}ms ease`,
+      }}
     >
       <img
         src={logoSrc}
         alt="Remedy"
         className="w-[256px] h-auto"
-        style={{ imageRendering: 'pixelated' }}
+        style={{
+          imageRendering: 'pixelated',
+          animation: 'splash-in 0.5s ease both',
+        }}
       />
-      <div
-        className="text-sm tracking-wide"
-        style={{ color: 'var(--text-secondary)' }}
-      >
-        {status === 'starting' && 'Starting server...'}
-        {status === 'connecting' && `Connecting${dots}`}
+      <div className="text-sm tracking-wide" style={{ color: 'var(--text-secondary)' }}>
+        {status === 'starting' && `Starting Remedy${dots}`}
+        {status === 'connecting' && `Connecting to local server${dots}`}
         {status === 'ready' && `Ready${dots}`}
         {status === 'error' && (
           <span style={{ color: 'var(--error)' }}>
@@ -89,6 +123,12 @@ export function SplashScreen({ onReady, onError }: SplashScreenProps) {
           ))}
         </div>
       )}
+      <style>{`
+        @keyframes splash-in {
+          from { opacity: 0; transform: scale(0.96); }
+          to { opacity: 1; transform: scale(1); }
+        }
+      `}</style>
     </div>
   )
 }

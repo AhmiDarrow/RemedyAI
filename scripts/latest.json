@@ -1,11 +1,11 @@
 {
-  "version": "v0.10.13",
-  "notes": "Remedy Desktop v0.10.13 \u2014 finish review backlog: metrics locks, FTS log, toml None, SSE idle timeout, sandbox paths.",
-  "pub_date": "2026-07-23T20:11:25Z",
+  "version": "v0.10.14",
+  "notes": "Remedy Desktop v0.10.14 \u2014 splash 3s + no white flash, system theme, keyboard help discoverability",
+  "pub_date": "2026-07-23T20:40:42Z",
   "platforms": {
     "windows-x86_64": {
       "signature": "",
-      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.10.13/Remedy_Desktop_0.10.13_x64-setup.exe"
+      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.10.14/Remedy_Desktop_0.10.14_x64-setup.exe"
     }
   }
 }

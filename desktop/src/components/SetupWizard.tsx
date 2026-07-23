@@ -428,10 +428,10 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                   You're ready!
                 </div>
                 <div className="text-xs space-y-2" style={mutedStyles}>
-                  <p><strong>/help</strong> — Show available commands</p>
+                  <p><strong>Enter</strong> send · <strong>Shift+Enter</strong> new line</p>
+                  <p><strong>/help</strong> — Commands and keyboard shortcuts</p>
                   <p><strong>/memory</strong> — Search what Remedy remembers</p>
-                  <p><strong>/skills</strong> — Browse loaded skills</p>
-                  <p><strong>/handoff</strong> — Generate a session summary</p>
+                  <p><strong>Ctrl+/</strong> — Open help anytime</p>
                 </div>
               </div>
               <button

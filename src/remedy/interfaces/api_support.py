@@ -82,7 +82,29 @@ async def handle_slash_command(
 
     if stripped in ("/help", "/h"):
         cmds = "\n".join(f"  {c['name']} — {c['description']}" for c in _BUILTIN_COMMANDS)
-        return {"text": f"Available commands:\n{cmds}"}
+        keys = (
+            "**Keyboard shortcuts**\n"
+            "  Enter — Send message (composer)\n"
+            "  Shift+Enter — New line (composer)\n"
+            "  Ctrl+N — New chat session\n"
+            "  Ctrl+P / Ctrl+K — Command palette\n"
+            "  Ctrl+B — Toggle plan mode\n"
+            "  Ctrl+, — Settings\n"
+            "  Ctrl+/ or F1 — This help / shortcuts\n"
+            "  Escape — Close panels and palette\n"
+        )
+        tips = (
+            "\n**Tips**\n"
+            "  · Connect a provider in Settings to chat with models.\n"
+            "  · Plan mode explores without changing files; Build mode can edit.\n"
+            "  · Type @ to reference project files.\n"
+            "  · Your data stays in your Remedy folder on this machine.\n"
+        )
+        return {
+            "text": (
+                f"**Slash commands**\n{cmds}\n\n{keys}{tips}"
+            )
+        }
 
     if stripped in ("/new", "/n"):
         return {"text": "Session marked for creation.", "action": "new_session"}

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { ThemeId, Theme } from '../themes'
-import { THEME_LIST } from '../themes'
+import { THEME_LIST, getResolvedTheme } from '../themes'
 
 interface ThemeSwitcherProps {
   currentId: ThemeId
@@ -10,6 +10,10 @@ interface ThemeSwitcherProps {
 
 export function ThemeSwitcher({ currentId, onChange }: ThemeSwitcherProps) {
   const [open, setOpen] = useState(false)
+  const accent =
+    currentId === 'system'
+      ? getResolvedTheme('system').colors['--accent']
+      : (THEME_LIST.find((t) => t.id === currentId)?.colors['--accent'] ?? '#888')
 
   return (
     <div className="relative">
@@ -19,7 +23,7 @@ export function ThemeSwitcher({ currentId, onChange }: ThemeSwitcherProps) {
         style={{ background: 'var(--bg-tertiary)', color: 'var(--text-secondary)' }}
         title="Change theme"
       >
-        <ColorDot color={THEME_LIST.find((t) => t.id === currentId)?.colors['--accent'] ?? '#888'} />
+        <ColorDot color={accent} />
         Theme
       </button>
 
@@ -27,27 +31,38 @@ export function ThemeSwitcher({ currentId, onChange }: ThemeSwitcherProps) {
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
           <div
-            className="absolute bottom-full mb-1 right-0 z-20 rounded-lg p-1.5 flex flex-col gap-0.5 min-w-[140px]"
+            className="absolute bottom-full mb-1 right-0 z-20 rounded-lg p-1.5 flex flex-col gap-0.5 min-w-[160px]"
             style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', boxShadow: '0 4px 24px rgba(0,0,0,0.4)' }}
           >
-            {THEME_LIST.map((t) => (
-              <button
-                key={t.id}
-                onClick={() => {
-                  onChange(t.id)
-                  setOpen(false)
-                }}
-                className="flex items-center gap-2 px-3 py-1.5 rounded text-xs text-left transition-colors"
-                style={{
-                  background: t.id === currentId ? 'var(--bg-tertiary)' : 'transparent',
-                  color: 'var(--text-primary)',
-                }}
-              >
-                <ColorDot color={t.colors['--accent']} />
-                <span className="flex-1">{t.name}</span>
-                {t.id === currentId && <Checkmark />}
-              </button>
-            ))}
+            {THEME_LIST.map((t) => {
+              const swatch =
+                t.id === 'system'
+                  ? getResolvedTheme('system').colors['--accent']
+                  : t.colors['--accent']
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => {
+                    onChange(t.id)
+                    setOpen(false)
+                  }}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded text-xs text-left transition-colors"
+                  style={{
+                    background: t.id === currentId ? 'var(--bg-tertiary)' : 'transparent',
+                    color: 'var(--text-primary)',
+                  }}
+                >
+                  <ColorDot color={swatch} />
+                  <span className="flex-1">
+                    {t.name}
+                    {t.id === 'system' ? (
+                      <span style={{ color: 'var(--text-muted)' }}> · OS</span>
+                    ) : null}
+                  </span>
+                  {t.id === currentId && <Checkmark />}
+                </button>
+              )
+            })}
           </div>
         </>
       )}
