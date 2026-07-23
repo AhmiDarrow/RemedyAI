@@ -29,8 +29,27 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
+      - name: Resolve and stamp release version
+        shell: bash
+        run: |
+          set -euo pipefail
+          INPUT="${{ inputs.version }}"
+          if [[ -n "${INPUT}" ]]; then
+            VER="${INPUT#v}"
+          elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            VER="${GITHUB_REF_NAME#v}"
+          else
+            echo "::error::Need a tag push (v*) or workflow_dispatch version input"
+            exit 1
+          fi
+          echo "Stamping version ${VER}"
+          python scripts/sync_version.py "${VER}"
+          echo "REMEDY_RELEASE_VERSION=${VER}" >> "$GITHUB_ENV"
+
       - name: Build sidecar
         run: python scripts/build_desktop.py --clean --ci
+        env:
+          REMEDY_RELEASE_VERSION: ${{ env.REMEDY_RELEASE_VERSION }}
 
       - name: Upload sidecar artifact
         uses: actions/upload-artifact@v4
@@ -63,6 +82,26 @@ jobs:
 
       - name: Install Tauri CLI
         run: npm install -g @tauri-apps/cli
+
+      - name: Setup Python
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.12'
+
+      - name: Stamp version (match sidecar job)
+        shell: bash
+        run: |
+          set -euo pipefail
+          INPUT="${{ inputs.version }}"
+          if [[ -n "${INPUT}" ]]; then
+            VER="${INPUT#v}"
+          elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            VER="${GITHUB_REF_NAME#v}"
+          else
+            echo "::error::Need a tag push (v*) or workflow_dispatch version input"
+            exit 1
+          fi
+          python scripts/sync_version.py "${VER}"
 
       - name: Install frontend deps
         run: npm ci

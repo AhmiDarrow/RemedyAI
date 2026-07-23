@@ -38,6 +38,7 @@ from remedy.interfaces.config import (
     load_config as _load_toml_config,
     normalize_llm_settings,
 )
+from remedy.interfaces.config import _is_local_url
 from remedy.models import (
     ChannelKind,
     ChatMessageRole,
@@ -303,7 +304,16 @@ def load_config() -> dict[str, Any]:
     return _load_toml_config(path)
 
 
-def _apply_llm_to_runtime(runtime: Any, *, provider: str, model: str, base_url: str, api_key: str | None = None) -> None:
+def _apply_llm_to_runtime(
+    runtime: Any,
+    *,
+    provider: str,
+    model: str,
+    base_url: str,
+    api_key: str | None = None,
+    persona: str | None = None,
+    name: str | None = None,
+) -> None:
     """Push LLM settings into the live runtime so chat uses the saved config."""
     if runtime is None:
         return
@@ -313,6 +323,8 @@ def _apply_llm_to_runtime(runtime: Any, *, provider: str, model: str, base_url: 
             model=model,
             base_url=base_url,
             api_key=api_key,
+            persona=persona,
+            name=name,
         )
         return
     # Fallback for older runtimes without reconfigure_llm
@@ -799,36 +811,19 @@ def create_app(
             or ""
         )
 
-        configured_provider, configured_id, base_url = normalize_llm_settings(
-            configured_provider, configured_id, base_url
-        )
-
-        # Keep runtime + disk aligned with normalized config (fixes bad disk state).
-        _apply_llm_to_runtime(
-            runtime,
-            provider=configured_provider,
-            model=configured_id,
-            base_url=base_url,
-        )
-        if (
-            cfg.get("llm_provider") != configured_provider
-            or cfg.get("llm_model") != configured_id
-            or cfg.get("llm_base_url") != base_url
-        ):
-            cfg["llm_provider"] = configured_provider
-            cfg["llm_model"] = configured_id
-            cfg["llm_base_url"] = base_url
-            path = _find_config_path() or _default_config_path()
-            try:
-                path.parent.mkdir(parents=True, exist_ok=True)
-                _write_config(path, cfg)
-                logger.info(
-                    "Self-healed LLM config → provider=%s model=%s",
-                    configured_provider,
-                    configured_id,
-                )
-            except Exception as exc:
-                logger.warning("Could not self-heal LLM config: %s", exc)
+        # Prefer live runtime / disk. Normalize is response-only (no GET writes).
+        configured_provider = str(configured_provider or "openai").lower()
+        configured_id = str(configured_id or "")
+        base_url = str(base_url or "")
+        # Soft-normalize for closed providers only when shaping default id display
+        # — never persist from GET.
+        _np, _nm, _nu = normalize_llm_settings(configured_provider, configured_id, base_url)
+        if configured_provider not in ("openrouter", "custom", "ollama"):
+            configured_provider, configured_id, base_url = _np, _nm, _nu
+        elif not base_url:
+            base_url = _nu
+        if not configured_id:
+            configured_id = _nm
 
         catalog = catalog_models_for_provider(configured_provider)
         api_key = ""
@@ -837,17 +832,32 @@ def create_app(
         if not api_key:
             api_key = str(cfg.get("llm_api_key") or os.environ.get("REMEDY_LLM_API_KEY") or "")
 
-        discovered: list[dict] = []
+        # Short-lived discovery cache (process-local) to avoid latency on every UI refresh.
+        cache_key = f"{configured_provider}|{base_url}|{bool(api_key)}"
+        cache = getattr(app.state, "_model_discovery_cache", None)
+        if cache is None:
+            app.state._model_discovery_cache = {}
+            cache = app.state._model_discovery_cache
+        now = time.time()
+        cached = cache.get(cache_key)
+        from_cache = bool(cached and (now - cached[0]) < 30)
+        if from_cache:
+            discovered = list(cached[1])
+        else:
+            discovered = []
+
+        verify_ssl = not _is_local_url(base_url)
+
         # OpenAI-compatible /models (DeepSeek, OpenAI, Ollama /v1, OpenRouter, …)
         # Skip Anthropic here — its Messages API is not OpenAI /models compatible.
-        if configured_provider != "anthropic" and base_url:
+        if not from_cache and configured_provider != "anthropic" and base_url:
             try:
                 async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=4)) as session:
                     models_url = base_url.rstrip("/") + "/models"
                     headers: dict[str, str] = {}
                     if api_key and api_key != "local":
                         headers["Authorization"] = f"Bearer {api_key}"
-                    async with session.get(models_url, headers=headers, ssl=False) as resp:
+                    async with session.get(models_url, headers=headers, ssl=verify_ssl) as resp:
                         if resp.ok:
                             body = await resp.json()
                             for m in body.get("data", []):
@@ -866,7 +876,7 @@ def create_app(
                 logger.debug("Model discovery failed for %s: %s", base_url, exc)
 
         # Ollama native tags API
-        if configured_provider == "ollama" or "11434" in (base_url or ""):
+        if not from_cache and (configured_provider == "ollama" or "11434" in (base_url or "")):
             try:
                 ollama_url = base_url.rstrip("/").removesuffix("/v1") + "/api/tags"
                 async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3)) as session:
@@ -889,6 +899,9 @@ def create_app(
                                     )
             except Exception as exc:
                 logger.debug("Ollama discovery failed: %s", exc)
+
+        if not from_cache:
+            cache[cache_key] = (now, list(discovered))
 
         # Merge: discovered first, then provider catalog only (never other providers).
         # For openrouter/custom keep full discovered set; for closed catalogs prefer
@@ -1267,25 +1280,19 @@ def create_app(
         else:
             setup_completed = config_path is not None
 
-        provider, model, base_url = normalize_llm_settings(
-            cfg.get("llm_provider", os.environ.get("REMEDY_LLM_PROVIDER", "openai")),
-            cfg.get("llm_model", os.environ.get("REMEDY_LLM_MODEL", "gpt-4o-mini")),
-            cfg.get("llm_base_url", os.environ.get("REMEDY_LLM_BASE_URL", "https://api.openai.com/v1")),
-        )
-
-        # Self-heal on-disk config when model/provider/url disagree.
-        if config_path is not None and (
-            cfg.get("llm_provider") != provider
-            or cfg.get("llm_model") != model
-            or cfg.get("llm_base_url") != base_url
-        ):
-            cfg["llm_provider"] = provider
-            cfg["llm_model"] = model
-            cfg["llm_base_url"] = base_url
-            try:
-                _write_config(config_path, cfg)
-            except Exception as exc:
-                logger.warning("Could not self-heal config: %s", exc)
+        # Return configured values; soft-normalize only for response display.
+        # Never write disk from GET (avoids races with PUT and Ollama false-heals).
+        raw_provider = cfg.get("llm_provider", os.environ.get("REMEDY_LLM_PROVIDER", "openai"))
+        raw_model = cfg.get("llm_model", os.environ.get("REMEDY_LLM_MODEL", "gpt-4o-mini"))
+        raw_url = cfg.get("llm_base_url", os.environ.get("REMEDY_LLM_BASE_URL", "https://api.openai.com/v1"))
+        provider, model, base_url = normalize_llm_settings(raw_provider, raw_model, raw_url)
+        # Preserve flexible-provider models (ollama/custom/openrouter) as stored.
+        if str(raw_provider or "").lower() in ("ollama", "custom", "openrouter"):
+            provider = str(raw_provider or provider).lower()
+            if raw_model:
+                model = str(raw_model)
+            if raw_url:
+                base_url = str(raw_url)
 
         return {
             "llm_provider": provider,
@@ -1329,7 +1336,12 @@ def create_app(
         cfg.update(updates)
         _write_config(config_path, cfg)
 
-        # Hot-reload live agent so the next chat uses the new endpoint/model.
+        # Invalidate model discovery cache after provider/url changes.
+        cache = getattr(app.state, "_model_discovery_cache", None)
+        if isinstance(cache, dict):
+            cache.clear()
+
+        # Hot-reload live agent so the next chat uses the new endpoint/model/persona.
         api_key_for_runtime = updates.get("llm_api_key")
         _apply_llm_to_runtime(
             runtime,
@@ -1337,17 +1349,9 @@ def create_app(
             model=model,
             base_url=base_url,
             api_key=api_key_for_runtime,
+            persona=updates.get("persona"),
+            name=updates.get("name"),
         )
-        if "persona" in updates and runtime is not None and hasattr(runtime, "config"):
-            try:
-                runtime.config.persona = updates["persona"]
-            except Exception:
-                pass
-        if "name" in updates and runtime is not None and hasattr(runtime, "config"):
-            try:
-                runtime.config.name = updates["name"]
-            except Exception:
-                pass
 
         changes = list(updates.keys())
         return {
@@ -1357,6 +1361,7 @@ def create_app(
             "llm_provider": provider,
             "llm_model": model,
             "llm_base_url": base_url,
+            "persona": cfg.get("persona"),
         }
 
     # -- updates ------------------------------------------------------------

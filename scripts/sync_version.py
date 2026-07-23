@@ -26,6 +26,7 @@ PATHS = {
     "pyproject": ROOT / "pyproject.toml",
     "package": ROOT / "desktop" / "package.json",
     "tauri": ROOT / "desktop" / "src-tauri" / "tauri.conf.json",
+    "cargo": ROOT / "desktop" / "src-tauri" / "Cargo.toml",
     "latest_json": ROOT / "scripts" / "latest.json",
 }
 
@@ -50,8 +51,22 @@ def _bump_package_json(ver: str) -> None:
 
 def _bump_tauri_conf(ver: str) -> None:
     text = PATHS["tauri"].read_text(encoding="utf-8")
-    text = re.sub(r'"version":\s*"[^"]*"', f'"version": "{ver}"', text)
+    text = re.sub(r'"version":\s*"[^"]*"', f'"version": "{ver}"', text, count=1)
     PATHS["tauri"].write_text(text, encoding="utf-8")
+
+
+def _bump_cargo_toml(ver: str) -> None:
+    if not PATHS["cargo"].exists():
+        return
+    text = PATHS["cargo"].read_text(encoding="utf-8")
+    # Only the package version line under [package]
+    text = re.sub(
+        r'(?m)^(version\s*=\s*)"[^"]*"',
+        rf'\1"{ver}"',
+        text,
+        count=1,
+    )
+    PATHS["cargo"].write_text(text, encoding="utf-8")
 
 
 def _bump_latest_json(ver: str) -> None:
@@ -114,6 +129,10 @@ def main():
         taur = PATHS["tauri"].read_text(encoding="utf-8")
         m = re.search(r'"version":\s*"([^"]*)"', taur)
         print(f"  tauri.conf.json  = {m.group(1) if m else '?'}")
+        if PATHS["cargo"].exists():
+            cargo = PATHS["cargo"].read_text(encoding="utf-8")
+            cm = re.search(r'(?m)^version\s*=\s*"([^"]*)"', cargo)
+            print(f"  Cargo.toml       = {cm.group(1) if cm else '?'}")
         return
 
     new_ver = _bump_version(current, sys.argv[1])
@@ -127,6 +146,9 @@ def main():
 
     _bump_tauri_conf(new_ver)
     print(f"  Updated tauri.conf.json")
+
+    _bump_cargo_toml(new_ver)
+    print(f"  Updated Cargo.toml")
 
     _bump_latest_json(new_ver)
     print(f"  Updated scripts/latest.json")

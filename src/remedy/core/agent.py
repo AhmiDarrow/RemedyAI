@@ -18,6 +18,7 @@ import aiohttp
 
 from remedy.core.providers import ProviderAdapter, get_provider
 from remedy.core.runtime import AgentRuntime
+from remedy.interfaces.config import persona_system_addendum
 from remedy.memory.store import MemoryStore
 from remedy.models import (
     AgentConfig,
@@ -40,6 +41,14 @@ _DEFAULT_SYSTEM_PROMPT = (
 _MAX_REACT_STEPS = 6
 
 
+def _build_system_prompt(persona: str | None = None) -> str:
+    base = _DEFAULT_SYSTEM_PROMPT
+    addendum = persona_system_addendum(persona)
+    if addendum:
+        return f"{base}\n\n{addendum}"
+    return base
+
+
 class BasicRuntime(AgentRuntime):
     """Default concrete agent runtime with LLM integration and tool support.
 
@@ -54,7 +63,7 @@ class BasicRuntime(AgentRuntime):
     def __init__(self, config: AgentConfig, memory: MemoryStore | None = None) -> None:
         super().__init__(config, memory=memory)
         self.tool_registry = ToolRegistry()
-        self._system_prompt = _DEFAULT_SYSTEM_PROMPT
+        self._system_prompt = _build_system_prompt(getattr(config, "persona", None))
         self._llm_api_key: str = config.llm_api_key
         self._llm_model: str = config.llm_model
         self._llm_base_url: str = config.llm_base_url or "https://api.openai.com/v1"
@@ -69,8 +78,10 @@ class BasicRuntime(AgentRuntime):
         model: str | None = None,
         base_url: str | None = None,
         api_key: str | None = None,
+        persona: str | None = None,
+        name: str | None = None,
     ) -> None:
-        """Hot-apply LLM settings so changes persist without restarting the server."""
+        """Hot-apply LLM / persona settings so changes persist without restarting."""
         if provider is not None and provider.strip():
             self._llm_provider = provider.strip().lower()
             self._provider = get_provider(self._llm_provider)
@@ -102,6 +113,20 @@ class BasicRuntime(AgentRuntime):
                         self.config.llm_api_key = self._llm_api_key
                     except Exception:
                         pass
+        if persona is not None:
+            p = persona.strip().lower() if persona.strip() else "default"
+            if hasattr(self, "config") and self.config is not None:
+                try:
+                    self.config.persona = p
+                except Exception:
+                    pass
+            self._system_prompt = _build_system_prompt(p)
+        if name is not None and name.strip():
+            if hasattr(self, "config") and self.config is not None:
+                try:
+                    self.config.name = name.strip()
+                except Exception:
+                    pass
 
     async def handle_event(self, event: GatewayEvent) -> AsyncIterator[Any]:
         kind = event.kind.value if hasattr(event.kind, "value") else str(event.kind)

@@ -42,6 +42,7 @@ export function SettingsPanel({
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [errorMessage, setErrorMessage] = useState('')
 
   const [provider, setProvider] = useState('openai')
   const [model, setModel] = useState('gpt-4o-mini')
@@ -77,12 +78,14 @@ export function SettingsPanel({
     if (open) {
       load()
       setSaved(false)
+      setErrorMessage('')
     }
   }, [open, load])
 
   const handleSave = async () => {
     setSaving(true)
     setSaved(false)
+    setErrorMessage('')
     const updates: SettingsUpdate = {
       llm_provider: provider,
       llm_model: model,
@@ -106,8 +109,11 @@ export function SettingsPanel({
       setApiKeySet(apiKey ? true : apiKeySet)
       await load()
       onSettingsSaved?.()
-    } catch {
-      // ignore
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e)
+      setSaved(false)
+      setErrorMessage(msg || 'Failed to save settings')
+      console.warn('Settings save failed:', msg)
     } finally {
       setSaving(false)
     }
@@ -314,25 +320,39 @@ export function SettingsPanel({
 
       {/* Save */}
       <div
-        className="px-3 py-2 border-t flex items-center gap-2"
+        className="px-3 py-2 border-t flex flex-col gap-2"
         style={{ borderColor: 'var(--border)' }}
       >
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="flex-1 py-1.5 rounded text-xs font-medium transition-colors"
-          style={{
-            background: saving ? 'var(--bg-tertiary)' : 'var(--accent)',
-            color: saving ? 'var(--text-muted)' : '#fff',
-          }}
-        >
-          {saving ? 'Saving...' : 'Save Settings'}
-        </button>
-        {saved && (
-          <span className="text-xs" style={{ color: 'var(--success)' }}>
-            Saved
-          </span>
+        {errorMessage && (
+          <div
+            className="px-2 py-1.5 rounded text-xs"
+            style={{
+              background: 'var(--error-bg, rgba(239,68,68,0.1))',
+              color: 'var(--error)',
+              border: '1px solid var(--error)',
+            }}
+          >
+            {errorMessage}
+          </div>
         )}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="flex-1 py-1.5 rounded text-xs font-medium transition-colors"
+            style={{
+              background: saving ? 'var(--bg-tertiary)' : 'var(--accent)',
+              color: saving ? 'var(--text-muted)' : '#fff',
+            }}
+          >
+            {saving ? 'Saving...' : 'Save Settings'}
+          </button>
+          {saved && !errorMessage && (
+            <span className="text-xs" style={{ color: 'var(--success)' }}>
+              Saved
+            </span>
+          )}
+        </div>
       </div>
     </div>
   )

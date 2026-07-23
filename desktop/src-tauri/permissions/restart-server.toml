@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "allow-restart-server"
+description = "Allow restarting the Remedy sidecar server process."
+commands.allow = ["restart_server"]

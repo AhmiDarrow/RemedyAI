@@ -11,14 +11,15 @@ const PROVIDERS = [
   { id: 'custom', name: 'Custom / OpenAI-compatible' },
 ] as const
 
+// Keep aligned with backend PROVIDER_CATALOG + SettingsPanel defaults.
 const PRESETS = [
-  { name: 'OpenAI', provider: 'openai', baseUrl: 'https://api.openai.com/v1', models: ['gpt-4o-mini', 'gpt-4o', 'gpt-3.5-turbo'] },
-  { name: 'Anthropic', provider: 'anthropic', baseUrl: 'https://api.anthropic.com/v1', models: ['claude-3.5-sonnet', 'claude-3-haiku'] },
-  { name: 'Google AI', provider: 'google', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', models: ['gemini-2.5-flash', 'gemini-2.0-flash'] },
+  { name: 'OpenAI', provider: 'openai', baseUrl: 'https://api.openai.com/v1', models: ['gpt-4o-mini', 'gpt-4o', 'gpt-4.1-mini', 'o4-mini'] },
+  { name: 'Anthropic', provider: 'anthropic', baseUrl: 'https://api.anthropic.com/v1', models: ['claude-3-5-sonnet-latest', 'claude-3-5-haiku-latest', 'claude-3-haiku-20240307'] },
+  { name: 'Google AI', provider: 'google', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', models: ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro'] },
   { name: 'DeepSeek', provider: 'deepseek', baseUrl: 'https://api.deepseek.com/v1', models: ['deepseek-chat', 'deepseek-reasoner'] },
-  { name: 'OpenRouter', provider: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', models: ['openrouter/auto', 'openai/gpt-4o-mini'] },
-  { name: 'Ollama', provider: 'ollama', baseUrl: 'http://localhost:11434/v1', models: ['llama3.2', 'qwen2.5', 'codellama'] },
-  { name: 'Custom', provider: 'custom', baseUrl: 'http://127.0.0.1:5001/api/v1', models: ['gpt-4o-mini'] },
+  { name: 'OpenRouter', provider: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', models: ['openrouter/auto', 'openai/gpt-4o-mini', 'anthropic/claude-3.5-sonnet'] },
+  { name: 'Ollama', provider: 'ollama', baseUrl: 'http://127.0.0.1:11434/v1', models: ['llama3.2', 'qwen2.5', 'codellama'] },
+  { name: 'Custom', provider: 'custom', baseUrl: 'http://127.0.0.1:5001/api/v1', models: ['default'] },
 ]
 
 const PERSONAS = [
@@ -66,9 +67,13 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
 
   const handleNext = useCallback(() => {
     if (step === 'provider') {
-      // Require an API key for cloud providers; Ollama/local can proceed without one.
-      if (provider !== 'ollama' && !apiKey.trim()) {
-        setError('Enter an API key, or choose Ollama for local models. Use Skip setup to configure later.')
+      // Local providers (Ollama, custom / localhost) need no key.
+      const isLocal =
+        provider === 'ollama' ||
+        provider === 'custom' ||
+        /^(https?:\/\/)?(127\.0\.0\.1|localhost|\[::1\])/i.test(baseUrl)
+      if (!isLocal && !apiKey.trim()) {
+        setError('Enter an API key, or choose Ollama / Custom for local models. Use Skip setup to configure later.')
         return
       }
     }
@@ -77,7 +82,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
       setStep(STEPS[idx + 1])
       setError('')
     }
-  }, [step, provider, apiKey])
+  }, [step, provider, apiKey, baseUrl])
 
   const handleBack = useCallback(() => {
     const idx = STEPS.indexOf(step)

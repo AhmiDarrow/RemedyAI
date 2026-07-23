@@ -48,7 +48,6 @@ export default function App() {
   const { notify } = useNotifications()
   const { updateInfo, checking: checkingUpdates, check: checkUpdates } = useUpdateChecker()
   const [showSetupWizard, setShowSetupWizard] = useState(false)
-  const [configChecked, setConfigChecked] = useState(false)
 
   useEffect(() => {
     if (isTauri()) {
@@ -66,12 +65,15 @@ export default function App() {
     }
   }, [])
 
-  const refreshModels = useCallback(async () => {
+  /** Refresh model list only — does not change the selected model unless asked. */
+  const refreshModels = useCallback(async (opts?: { selectDefault?: boolean }) => {
     try {
       const data = await apiFetch<{ models: ModelInfo[]; default: string; provider?: string }>('/models')
       setModels(data.models)
-      const def = data.models.find((m) => m.id === data.default) ?? data.models[0]
-      if (def) setModel(def.id)
+      if (opts?.selectDefault) {
+        const def = data.models.find((m) => m.id === data.default) ?? data.models[0]
+        if (def) setModel(def.id)
+      }
       return data
     } catch (e: unknown) {
       console.warn('Model refresh failed:', e instanceof Error ? e.message : e)
@@ -81,6 +83,7 @@ export default function App() {
 
   useEffect(() => {
     if (serverState !== 'ready') return
+    // Single settings fetch at startup (wizard gate + model selection + agents).
     Promise.all([
       refreshModels(),
       listAgents(),
@@ -88,9 +91,15 @@ export default function App() {
       getSettings().catch(() => null),
     ]).then(([modelsData, agents, _commandsData, settings]) => {
         setAgentDefs(Array.isArray(agents) ? agents : agents?.agents || [])
-        // Prefer persisted settings for model selection across sessions.
-        if (settings?.llm_model) {
-          setModel(settings.llm_model)
+        if (settings) {
+          if (!settings.config_exists || !settings.setup_completed) {
+            setShowSetupWizard(true)
+          }
+          if (settings.llm_model) {
+            setModel(settings.llm_model)
+          } else if (modelsData?.default) {
+            setModel(modelsData.default)
+          }
         } else if (modelsData?.default) {
           setModel(modelsData.default)
         }
@@ -100,20 +109,6 @@ export default function App() {
         setServerError(`Failed to load server config: ${e?.message || e}`)
       })
   }, [serverState, refreshModels])
-
-  useEffect(() => {
-    if (serverState !== 'ready' || configChecked) return
-    getSettings()
-      .then((s) => {
-        if (!s.config_exists || !s.setup_completed) {
-          setShowSetupWizard(true)
-        } else if (s.llm_model) {
-          setModel(s.llm_model)
-        }
-      })
-      .catch((e: any) => console.warn('Settings fetch failed:', e?.message || e))
-      .finally(() => setConfigChecked(true))
-  }, [serverState, configChecked])
 
   const handleNewSession = useCallback(async () => {
     const s = await create()
@@ -284,8 +279,26 @@ export default function App() {
         <div className="flex gap-3">
           <button
             onClick={() => {
-              setServerState('connecting')
               setServerError('')
+              if (isTauri()) {
+                const invoke = (window as any).__TAURI_INTERNALS__?.invoke
+                if (invoke) {
+                  setServerState('connecting')
+                  invoke('restart_server')
+                    .then(() => {
+                      // server-ready event + SplashScreen also flip state
+                      setServerState('ready')
+                    })
+                    .catch((e: unknown) => {
+                      const msg = e instanceof Error ? e.message : String(e)
+                      setServerState('error')
+                      setServerError(msg || 'Failed to restart server')
+                    })
+                  return
+                }
+              }
+              // Browser / no bridge: re-poll only
+              setServerState('connecting')
             }}
             className="px-5 py-2 rounded-md text-sm"
             style={{ background: 'var(--accent)', color: '#fff' }}
@@ -322,10 +335,12 @@ export default function App() {
         open={showSetupWizard}
         onComplete={() => {
           setShowSetupWizard(false)
-          // Reload provider-scoped models after setup writes config.
-          void refreshModels().then(() => getSettings().then((s) => {
-            if (s.llm_model) setModel(s.llm_model)
-          }).catch(() => {}))
+          void getSettings()
+            .then((s) => {
+              if (s.llm_model) setModel(s.llm_model)
+              return refreshModels()
+            })
+            .catch(() => refreshModels())
         }}
       />
     )
@@ -409,13 +424,12 @@ export default function App() {
             onCheckUpdates={checkUpdates}
             models={models}
             onSettingsSaved={() => {
-              void refreshModels().then(() =>
-                getSettings()
-                  .then((s) => {
-                    if (s.llm_model) setModel(s.llm_model)
-                  })
-                  .catch(() => {}),
-              )
+              void getSettings()
+                .then((s) => {
+                  if (s.llm_model) setModel(s.llm_model)
+                  return refreshModels()
+                })
+                .catch(() => refreshModels())
             }}
           />
         </div>

@@ -261,22 +261,17 @@ def normalize_llm_settings(
         if prov not in ("openrouter", "custom", "ollama"):
             url = default_url
 
-    # If model clearly belongs to another native provider (and user is not on
-    # openrouter/custom which can proxy anything), reset to provider default.
+    # Flexible providers can host any model id (Ollama pulls deepseek-*, etc.).
+    _FLEXIBLE = frozenset({"openrouter", "custom", "ollama"})
+
     model_owner = infer_provider_from_model(mid)
-    if (
-        model_owner
-        and model_owner != prov
-        and prov not in ("openrouter", "custom")
-    ):
+    if model_owner and model_owner != prov and prov not in _FLEXIBLE:
         mid = default_model
-    elif prov in PROVIDER_CATALOG and default_models:
+    elif prov in PROVIDER_CATALOG and default_models and prov not in _FLEXIBLE:
         known = {m["id"] for m in default_models}
-        # For closed catalogs (deepseek/anthropic/openai/google), if model isn't
-        # known and looks foreign, already handled; if empty, use default.
         if not mid:
             mid = default_model
-        # deepseek only has a tiny official list — force known ids when wrong
+        # Closed catalogs: reject foreign model ids.
         if prov == "deepseek" and mid not in known and model_owner not in (None, "deepseek"):
             mid = default_model
         if prov in ("openai", "anthropic", "google", "deepseek") and model_owner and model_owner != prov:
@@ -288,6 +283,48 @@ def normalize_llm_settings(
         mid = default_model
 
     return prov, mid, url
+
+
+# Canonical desktop personas (aligned with SetupWizard).
+PERSONA_PROMPTS: dict[str, str] = {
+    "default": "",
+    "balanced": (
+        "Communication style: balanced — helpful and adaptable to the task. "
+        "Match the user's depth; prefer clarity over verbosity."
+    ),
+    "efficient": (
+        "Communication style: efficient — concise, code-first, minimal explanation. "
+        "Prefer short answers and actionable output."
+    ),
+    "detailed": (
+        "Communication style: detailed — thorough explanations with context, "
+        "trade-offs, and clear structure."
+    ),
+    "playful": (
+        "Communication style: playful — casual tone with light humor while remaining accurate."
+    ),
+    # CLI wizard aliases
+    "concise": (
+        "Communication style: concise — short answers, minimal fluff."
+    ),
+    "verbose": (
+        "Communication style: verbose — thorough explanations with examples."
+    ),
+    "sarcastic": (
+        "Communication style: dry humor is allowed; stay helpful and accurate."
+    ),
+    "minimal": (
+        "Communication style: minimal — answer only what was asked."
+    ),
+}
+
+
+def persona_system_addendum(persona: str | None) -> str:
+    """Return system-prompt text for a persona id, or empty string."""
+    if not persona:
+        return ""
+    key = persona.strip().lower()
+    return PERSONA_PROMPTS.get(key, "")
 
 
 def catalog_models_for_provider(provider: str) -> list[dict[str, Any]]:

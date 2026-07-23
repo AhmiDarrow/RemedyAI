@@ -12,6 +12,7 @@
     "updater:default",
     "updater:allow-check",
     "updater:allow-download-and-install",
-    "allow-open-data-folder"
+    "allow-open-data-folder",
+    "allow-restart-server"
   ]
 }

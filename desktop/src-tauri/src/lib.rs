@@ -6,7 +6,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
-use tauri::{Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -29,6 +29,8 @@ fn status_addr() -> SocketAddr {
 
 struct ServerState {
     process: Mutex<Option<Child>>,
+    /// Path to the sidecar binary discovered at startup.
+    sidecar_cmd: Mutex<Option<String>>,
 }
 
 fn current_exe_dir() -> Option<std::path::PathBuf> {
@@ -60,6 +62,11 @@ fn find_remedy() -> (String, String) {
     if let Ok(cwd) = env::current_dir() {
         let dev_path = cwd.join("bin").join("remedy-desktop.exe");
         if let Some(path) = searched("dev", &dev_path) {
+            return (path, String::new());
+        }
+        // From desktop/ when running tauri dev (cwd may be desktop/)
+        let alt = cwd.join("desktop").join("bin").join("remedy-desktop.exe");
+        if let Some(path) = searched("dev-desktop", &alt) {
             return (path, String::new());
         }
     }
@@ -130,7 +137,6 @@ fn check_health(timeout: Duration) -> bool {
             if stream.write_all(req.as_bytes()).is_err() {
                 return false;
             }
-            // Read until EOF or buffer full so we see status line + body.
             let mut buf = Vec::with_capacity(1024);
             let mut chunk = [0u8; 512];
             loop {
@@ -149,18 +155,57 @@ fn check_health(timeout: Duration) -> bool {
                 return false;
             }
             let response = String::from_utf8_lossy(&buf);
-            // Prefer HTTP 200; also accept body {"status":"ok",...} from /api/status.
+            // Require both HTTP 200 and body status=ok (AND, not OR).
             let status_ok = response
                 .lines()
                 .next()
-                .map(|line| line.contains(" 200 "))
-                .unwrap_or(false)
-                || response.contains("200 OK");
-            let body_ok = response.contains("\"status\"") && response.contains("\"ok\"");
-            status_ok || body_ok
+                .map(|line| line.contains(" 200 ") || line.contains("200 OK"))
+                .unwrap_or(false);
+            // Prefer structured check for {"status":"ok"...}
+            let body_ok = response.contains("\"status\"")
+                && (response.contains("\"ok\"") || response.contains("'ok'"));
+            status_ok && body_ok
         }
         Err(_) => false,
     }
+}
+
+fn wait_for_health(max_wait: Duration) -> bool {
+    let started = Instant::now();
+    let mut backoff = Duration::from_millis(250);
+    while started.elapsed() < max_wait {
+        if check_health(Duration::from_millis(500)) {
+            return true;
+        }
+        thread::sleep(backoff);
+        backoff = (backoff * 2).min(Duration::from_secs(2));
+    }
+    false
+}
+
+fn kill_child(guard: &mut Option<Child>) {
+    if let Some(ref mut child) = *guard {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    *guard = None;
+}
+
+fn start_sidecar(process: &Mutex<Option<Child>>, cmd: &str) -> Result<(), String> {
+    let mut guard = process
+        .lock()
+        .map_err(|_| "server state lock poisoned".to_string())?;
+    kill_child(&mut guard);
+
+    let mut child = spawn_remedy(cmd).ok_or_else(|| format!("Failed to spawn: {cmd}"))?;
+    if let Some(stdout) = child.stdout.take() {
+        forward_output("out", BufReader::new(stdout));
+    }
+    if let Some(stderr) = child.stderr.take() {
+        forward_output("err", BufReader::new(stderr));
+    }
+    *guard = Some(child);
+    Ok(())
 }
 
 /// Open the Remedy user-data folder in the OS file manager.
@@ -195,13 +240,44 @@ fn open_data_folder() -> Result<String, String> {
     Ok(path_str)
 }
 
+/// Kill and respawn the sidecar, wait for health, emit server-ready / server-error.
+#[tauri::command]
+fn restart_server(app: AppHandle, state: State<'_, ServerState>) -> Result<String, String> {
+    let cmd = {
+        let guard = state
+            .sidecar_cmd
+            .lock()
+            .map_err(|_| "sidecar cmd lock poisoned".to_string())?;
+        guard
+            .clone()
+            .ok_or_else(|| "Sidecar path unknown — restart the app".to_string())?
+    };
+
+    log::info!("Restarting remedy sidecar: {}", cmd);
+    let _ = app.emit("server-starting", ());
+
+    start_sidecar(&state.process, &cmd)?;
+
+    if wait_for_health(Duration::from_secs(30)) {
+        log::info!("Remedy server ready after restart");
+        let _ = app.emit("server-ready", ());
+        Ok("ready".into())
+    } else {
+        log::error!("Server failed to become ready after restart");
+        let msg = "Server failed to start after 30s";
+        let _ = app.emit("server-error", msg);
+        Err(msg.into())
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .manage(ServerState {
             process: Mutex::new(None),
+            sidecar_cmd: Mutex::new(None),
         })
-        .invoke_handler(tauri::generate_handler![open_data_folder])
+        .invoke_handler(tauri::generate_handler![open_data_folder, restart_server])
         .setup(|app| {
             let _shell = app.handle().plugin(tauri_plugin_shell::init())?;
             let _updater = app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
@@ -217,43 +293,25 @@ pub fn run() {
             log::info!("Starting remedy: {}", remedy_cmd);
             let _ = app_handle.emit("server-starting", ());
 
-            let child = spawn_remedy(&remedy_cmd);
-
-            if let Some(mut c) = child {
-                if let Some(stdout) = c.stdout.take() {
-                    forward_output("out", BufReader::new(stdout));
-                }
-                if let Some(stderr) = c.stderr.take() {
-                    forward_output("err", BufReader::new(stderr));
-                }
-
+            {
                 let state = app.state::<ServerState>();
-                *state.process.lock().unwrap() = Some(c);
-
-                let started = Instant::now();
-                let max_wait = Duration::from_secs(30);
-                let mut backoff = Duration::from_millis(250);
-                let mut server_ready = false;
-
-                while started.elapsed() < max_wait {
-                    if check_health(Duration::from_millis(500)) {
-                        server_ready = true;
-                        break;
+                *state.sidecar_cmd.lock().unwrap() = Some(remedy_cmd.clone());
+                match start_sidecar(&state.process, &remedy_cmd) {
+                    Ok(()) => {
+                        if wait_for_health(Duration::from_secs(30)) {
+                            log::info!("Remedy server ready");
+                            let _ = app_handle.emit("server-ready", ());
+                        } else {
+                            log::error!("Server failed to start within 30s");
+                            let _ = app_handle
+                                .emit("server-error", "Server failed to start after 30s");
+                        }
                     }
-                    thread::sleep(backoff);
-                    backoff = (backoff * 2).min(Duration::from_secs(2));
+                    Err(e) => {
+                        log::error!("{}", e);
+                        let _ = app_handle.emit("server-error", &e);
+                    }
                 }
-
-                if server_ready {
-                    log::info!("Remedy server ready in {:.1}s", started.elapsed().as_secs_f32());
-                    let _ = app_handle.emit("server-ready", ());
-                } else {
-                    log::error!("Server failed to start within {}s", max_wait.as_secs());
-                    let _ = app_handle.emit("server-error", "Server failed to start after 30s");
-                }
-            } else {
-                log::error!("Failed to spawn remedy process: {}", remedy_cmd);
-                let _ = app_handle.emit("server-error", "Failed to start remedy process");
             }
 
             if cfg!(debug_assertions) {
@@ -268,13 +326,8 @@ pub fn run() {
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {
                 let state = window.state::<ServerState>();
-                let lock_result = state.process.lock();
-                if let Ok(mut guard) = lock_result {
-                    if let Some(ref mut child) = *guard {
-                        let _ = child.kill();
-                        let _ = child.wait();
-                    }
-                }
+                let mut guard = state.process.lock().unwrap();
+                kill_child(&mut guard);
             }
         })
         .run(tauri::generate_context!())

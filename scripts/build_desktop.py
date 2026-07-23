@@ -55,6 +55,15 @@ def sync_versions() -> str:
             tauri_conf.write_text(json.dumps(conf, indent=2) + "\n", encoding="utf-8")
             changes.append(f"tauri.conf.json: {conf.get('version')} -> {v}")
 
+    cargo_toml = ROOT / "desktop" / "src-tauri" / "Cargo.toml"
+    if cargo_toml.exists():
+        text = cargo_toml.read_text(encoding="utf-8")
+        m = re.search(r'(?m)^version\s*=\s*"([^"]*)"', text)
+        if m and m.group(1) != v:
+            text = re.sub(r'(?m)^(version\s*=\s*)"[^"]*"', rf'\1"{v}"', text, count=1)
+            cargo_toml.write_text(text, encoding="utf-8")
+            changes.append(f"Cargo.toml: {m.group(1)} -> {v}")
+
     if changes:
         print(f"Synced version to {v}:")
         for c in changes:
@@ -166,11 +175,20 @@ def build(cache_clean: bool = False, ci: bool = False):
     """Build the standalone remedy-desktop.exe via PyInstaller."""
     print(f"Building Remedy Desktop exe... (root={ROOT})")
 
+    # Always sync package.json / tauri.conf / Cargo.toml from pyproject so CI
+    # and local builds never embed mismatched versions.
+    v = sync_versions()
     if ci:
-        v = _get_root_version()
-        print(f"[CI] Version from pyproject.toml: {v} — skipping version sync")
-    else:
-        sync_versions()
+        print(f"[CI] Stamped version {v} across manifests before build")
+        # Optional: REMEDY_RELEASE_VERSION must match pyproject when set
+        # (used by release workflow to catch tag/input skew).
+        expected = os.environ.get("REMEDY_RELEASE_VERSION", "").lstrip("v").strip()
+        if expected and expected != v:
+            print(
+                f"ERROR: REMEDY_RELEASE_VERSION={expected} does not match "
+                f"pyproject.toml version={v}. Bump with scripts/sync_version.py first."
+            )
+            sys.exit(1)
 
     ensure_pyinstaller()
 
