@@ -37,7 +37,7 @@ The desktop app bundles the full Remedy server as a sidecar, so everything runs 
 | **Side panels** | Memory browser and Skills viewer accessible from the status bar |
 | **Slash commands** | `/help`, `/new`, `/sessions`, `/models`, `/memory`, `/skills`, `/handoff` |
 | **Tray icon** | Minimize to system tray |
-| **Auto-update** | Built-in Tauri updater (requires signed releases + configured pubkey) |
+| **Auto-update** | Built-in Tauri updater (minisign-signed releases; pubkey embedded in app) |
 
 ### Architecture
 
