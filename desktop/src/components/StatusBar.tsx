@@ -50,7 +50,7 @@ export function StatusBar({
         if (ok) {
           setStatus('connected')
           try {
-            const res = await fetch('http://127.0.0.1:8000/api/status')
+            const res = await fetch('http://127.0.0.1:7400/api/status')
             if (!cancelled && res.ok) {
               const data = await res.json()
               setVersion(data.version || '')

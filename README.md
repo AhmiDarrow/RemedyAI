@@ -33,9 +33,9 @@ remedy chat
 # Type /help for commands, /exit to quit
 
 # Start the API server
-remedy serve --host 127.0.0.1 --port 8000
-# Dashboard at http://127.0.0.1:8000/dashboard
-# OpenAPI docs at http://127.0.0.1:8000/docs
+remedy serve --host 127.0.0.1 --port 7400
+# Dashboard at http://127.0.0.1:7400/dashboard
+# OpenAPI docs at http://127.0.0.1:7400/docs
 
 # Run the desktop app
 remedy desktop install          # Install Node deps (one-time)

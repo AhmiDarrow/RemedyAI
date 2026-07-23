@@ -222,7 +222,7 @@ def build_parser() -> argparse.ArgumentParser:
     # remedy serve
     serve_cmd = sub.add_parser("serve", help="Start the full API server (with config)")
     serve_cmd.add_argument("--host", default="127.0.0.1")
-    serve_cmd.add_argument("--port", type=int, default=8000)
+    serve_cmd.add_argument("--port", type=int, default=7400)
     serve_cmd.add_argument("--config", dest="config_file", default=None)
 
     # remedy desktop

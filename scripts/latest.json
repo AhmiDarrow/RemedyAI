@@ -1,7 +1,7 @@
 {
-  "version": "0.9.1",
+  "version": "0.9.2",
   "notes": "Release notes here",
-  "pub_date": "0.9.1",
+  "pub_date": "0.9.2",
   "platforms": {
     "windows-x86_64": {
       "signature": "",

@@ -431,17 +431,17 @@ remedy gateway channels
 Start the full API server with configuration integration. This is the recommended way to run Remedy as a server.
 
 ```bash
-remedy serve                                    # Defaults: 127.0.0.1:8000
+remedy serve                                    # Defaults: 127.0.0.1:7400
 remedy serve --host 0.0.0.0 --port 3000        # Custom host/port
 remedy serve --config ./custom.toml             # Custom config file
 ```
 
 After starting, access:
-- **Dashboard**: http://127.0.0.1:8000/dashboard
-- **API Docs**: http://127.0.0.1:8000/docs
-- **Redoc**: http://127.0.0.1:8000/redoc
-- **OpenAPI JSON**: http://127.0.0.1:8000/api/openapi.json
-- **OpenAPI YAML**: http://127.0.0.1:8000/api/openapi.yaml
+- **Dashboard**: http://127.0.0.1:7400/dashboard
+- **API Docs**: http://127.0.0.1:7400/docs
+- **Redoc**: http://127.0.0.1:7400/redoc
+- **OpenAPI JSON**: http://127.0.0.1:7400/api/openapi.json
+- **OpenAPI YAML**: http://127.0.0.1:7400/api/openapi.yaml
 
 ---
 
@@ -527,7 +527,7 @@ Full API documentation is available at `/docs` when the server is running.
 ### Example: Chat
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/chat \
+curl -X POST http://127.0.0.1:7400/api/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "What skills are available?"}'
 ```
@@ -546,7 +546,7 @@ Response:
 ### Example: SSE Streaming
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/chat/stream \
+curl -X POST http://127.0.0.1:7400/api/chat/stream \
   -H "Content-Type: application/json" \
   -d '{"message": "Search memory for database"}'
 ```
@@ -554,13 +554,13 @@ curl -X POST http://127.0.0.1:8000/api/chat/stream \
 ### Example: Memory Search
 
 ```bash
-curl "http://127.0.0.1:8000/api/memory/search?query=database&limit=10"
+curl "http://127.0.0.1:7400/api/memory/search?query=database&limit=10"
 ```
 
 ### Example: Webhook
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/webhook/github \
+curl -X POST http://127.0.0.1:7400/api/webhook/github \
   -H "Content-Type: application/json" \
   -d '{"action": "push", "repository": "Remedy"}'
 ```

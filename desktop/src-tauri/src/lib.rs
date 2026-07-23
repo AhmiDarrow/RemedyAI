@@ -77,7 +77,7 @@ fn spawn_remedy(cmd: &str) -> Option<Child> {
                 "--host",
                 "127.0.0.1",
                 "--port",
-                "8000",
+                "7400",
             ])
             .creation_flags(CREATE_NO_WINDOW)
             .stdout(Stdio::piped())
@@ -95,7 +95,7 @@ fn spawn_remedy(cmd: &str) -> Option<Child> {
                 "--host",
                 "127.0.0.1",
                 "--port",
-                "8000",
+                "7400",
             ])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -159,7 +159,7 @@ pub fn run() {
 
                 while started.elapsed() < max_wait {
                     match TcpStream::connect_timeout(
-                        &"127.0.0.1:8000".parse().unwrap(),
+                        &"127.0.0.1:7400".parse().unwrap(),
                         Duration::from_millis(500),
                     ) {
                         Ok(_) => {

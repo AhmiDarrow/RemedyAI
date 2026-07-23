@@ -128,11 +128,30 @@ def _resolve_str(config_value: str | None, env_var: str, default: str) -> str:
     return default
 
 
+_LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
+
+
+def _is_local_url(url: str) -> bool:
+    """Check if a base URL points to a local/loopback server."""
+    from urllib.parse import urlparse
+
+    try:
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower()
+        return host in _LOCAL_HOSTS or host.endswith(".local")
+    except Exception:
+        return False
+
+
 def config_to_agent_config(config: dict[str, Any]) -> AgentConfig:
     """Convert a config dict to a validated AgentConfig model.
 
     API key resolution order:
         non-empty config value > REMEDY_LLM_API_KEY env var > empty (fallback).
+
+    When llm_base_url points to a local server (localhost, 127.0.0.1, etc.)
+    and no API key is configured, a dummy key is used automatically since
+    local servers (Ollama, Kobold.cpp, LM Studio, etc.) don't require one.
     """
     import logging
 
@@ -148,6 +167,25 @@ def config_to_agent_config(config: dict[str, Any]) -> AgentConfig:
             channels.append(ChannelKind(c))
         except ValueError:
             logger.warning("Ignoring unknown channel '%s' in config", c)
+
+    llm_base_url = _resolve_str(
+        config.get("llm_base_url"),
+        "REMEDY_LLM_BASE_URL",
+        "https://api.openai.com/v1",
+    )
+
+    llm_api_key = _resolve_str(
+        config.get("llm_api_key"),
+        "REMEDY_LLM_API_KEY",
+        "",
+    )
+
+    # Local servers (Ollama, Kobold.cpp, LM Studio, etc.) don't need a real
+    # API key.  Supply a dummy value so the agent doesn't fall back to echo
+    # mode when the user hasn't set one.
+    if not llm_api_key and _is_local_url(llm_base_url):
+        llm_api_key = "local"
+        logger.info("No API key set for local LLM at %s — using dummy key", llm_base_url)
 
     return AgentConfig(
         name=config.get("name", "Remedy"),
@@ -166,21 +204,13 @@ def config_to_agent_config(config: dict[str, Any]) -> AgentConfig:
             "REMEDY_LLM_PROVIDER",
             "openai",
         ),
-        llm_api_key=_resolve_str(
-            config.get("llm_api_key"),
-            "REMEDY_LLM_API_KEY",
-            "",
-        ),
+        llm_api_key=llm_api_key,
         llm_model=_resolve_str(
             config.get("llm_model"),
             "REMEDY_LLM_MODEL",
             "gpt-4o-mini",
         ),
-        llm_base_url=_resolve_str(
-            config.get("llm_base_url"),
-            "REMEDY_LLM_BASE_URL",
-            "https://api.openai.com/v1",
-        ),
+        llm_base_url=llm_base_url,
     )
 
 
