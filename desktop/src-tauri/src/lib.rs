@@ -195,11 +195,36 @@ fn wait_for_health(max_wait: Duration) -> bool {
 }
 
 fn kill_child(guard: &mut Option<Child>) {
-    if let Some(ref mut child) = *guard {
+    if let Some(mut child) = guard.take() {
+        let pid = child.id();
+        // On Windows, Child::kill / Drop do NOT kill the process tree. PyInstaller
+        // sidecars (and anything still holding :7400) must be tree-killed or they
+        // linger in Task Manager after the UI closes.
+        #[cfg(target_os = "windows")]
+        {
+            let _ = Command::new("taskkill")
+                .args(["/F", "/T", "/PID", &pid.to_string()])
+                .creation_flags(CREATE_NO_WINDOW)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+        }
         let _ = child.kill();
         let _ = child.wait();
     }
-    *guard = None;
+}
+
+/// Stop the managed sidecar and any leftover remedy-desktop processes / :7400 listeners.
+fn shutdown_sidecar(state: &ServerState) {
+    match state.process.lock() {
+        Ok(mut guard) => kill_child(&mut guard),
+        Err(poisoned) => {
+            let mut guard = poisoned.into_inner();
+            kill_child(&mut guard);
+        }
+    }
+    force_stop_remedy_processes();
+    log::info!("Sidecar shutdown complete");
 }
 
 /// Force-stop every process that can lock install-dir files (sidecar + stray copies).
@@ -878,10 +903,11 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             match event {
-                tauri::WindowEvent::Destroyed => {
+                // Close / destroy: always stop the sidecar. Without this (and Exit
+                // below), Windows leaves remedy-desktop.exe running as an orphan.
+                tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed => {
                     let state = window.state::<ServerState>();
-                    let mut guard = state.process.lock().unwrap();
-                    kill_child(&mut guard);
+                    shutdown_sidecar(&state);
                 }
                 // Native OS file drops (Explorer → app). WebView2 often won't
                 // deliver HTML5 DataTransfer.files for external drops.
@@ -937,6 +963,17 @@ pub fn run() {
                 _ => {}
             }
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            // App-level exit (tray quit, process teardown) — window Destroyed may
+            // not run if the process is exiting another way.
+            match event {
+                tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit => {
+                    let state = app_handle.state::<ServerState>();
+                    shutdown_sidecar(&state);
+                }
+                _ => {}
+            }
+        });
 }

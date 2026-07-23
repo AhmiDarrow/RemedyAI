@@ -1,11 +1,11 @@
 {
-  "version": "v0.10.10",
-  "notes": "Remedy Desktop v0.10.10 \u2014 fix DeepSeek stream (SSE was parsed as JSON).",
-  "pub_date": "2026-07-23T19:33:50Z",
+  "version": "v0.10.11",
+  "notes": "Remedy Desktop v0.10.11 \u2014 kill remedy-desktop.exe on app close (process tree + Exit handler).",
+  "pub_date": "2026-07-23T19:42:22Z",
   "platforms": {
     "windows-x86_64": {
       "signature": "",
-      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.10.10/Remedy_Desktop_0.10.10_x64-setup.exe"
+      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.10.11/Remedy_Desktop_0.10.11_x64-setup.exe"
     }
   }
 }

@@ -2,6 +2,16 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.10.11] — 2026-07-23
+
+### Fixed
+
+- **remedy-desktop.exe stays in Task Manager after close**: Windows does not kill
+  child processes when the UI exits, and cleanup only ran on window Destroyed.
+  Now tree-kills the sidecar PID (`taskkill /T`), force-stops leftover
+  remedy-desktop images / :7400 listeners, and runs shutdown on CloseRequested,
+  Destroyed, ExitRequested, and Exit.
+
 ## [0.10.10] — 2026-07-23
 
 ### Fixed
