@@ -125,6 +125,59 @@ class MetricsRegistry:
             )
         return out
 
+    def prometheus_text(self) -> str:
+        """Render metrics in Prometheus text exposition format (0.0.4)."""
+        lines: list[str] = []
+        seen_help: set[str] = set()
+
+        def _labels(labels: dict[str, str]) -> str:
+            if not labels:
+                return ""
+            inner = ",".join(
+                f'{k}="{_prom_escape(v)}"' for k, v in sorted(labels.items())
+            )
+            return "{" + inner + "}"
+
+        for counter in self._counters.values():
+            if counter.name not in seen_help:
+                lines.append(f"# HELP {counter.name} Remedy counter")
+                lines.append(f"# TYPE {counter.name} counter")
+                seen_help.add(counter.name)
+            lines.append(f"{counter.name}{_labels(counter.labels)} {counter.value}")
+
+        for gauge in self._gauges.values():
+            if gauge.name not in seen_help:
+                lines.append(f"# HELP {gauge.name} Remedy gauge")
+                lines.append(f"# TYPE {gauge.name} gauge")
+                seen_help.add(gauge.name)
+            lines.append(f"{gauge.name}{_labels(gauge.labels)} {gauge.value}")
+
+        for hist in self._histograms.values():
+            if hist.name not in seen_help:
+                lines.append(f"# HELP {hist.name} Remedy histogram")
+                lines.append(f"# TYPE {hist.name} histogram")
+                seen_help.add(hist.name)
+            base_labels = dict(hist.labels)
+            cumulative = 0
+            for le, count in zip(hist.buckets + [float("inf")], hist._counts, strict=False):
+                cumulative += count
+                le_s = "+Inf" if le == float("inf") else str(le)
+                lbl = {**base_labels, "le": le_s}
+                lines.append(f"{hist.name}_bucket{_labels(lbl)} {cumulative}")
+            lines.append(f"{hist.name}_sum{_labels(base_labels)} {hist._sum}")
+            lines.append(f"{hist.name}_count{_labels(base_labels)} {sum(hist._counts)}")
+
+        return "\n".join(lines) + ("\n" if lines else "")
+
+
+def _prom_escape(value: str) -> str:
+    return (
+        str(value)
+        .replace("\\", "\\\\")
+        .replace("\n", "\\n")
+        .replace('"', '\\"')
+    )
+
 
 def _key(name: str, labels: dict[str, str]) -> str:
     if not labels:

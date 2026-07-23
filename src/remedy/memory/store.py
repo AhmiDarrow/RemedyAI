@@ -272,6 +272,66 @@ class MemoryStore:
         db.commit()
         return entry
 
+    async def upsert_many(self, entries: list[MemoryEntry]) -> int:
+        """Batch upsert in a single transaction (faster under high write volume).
+
+        FTS triggers still fire per row, but one commit amortizes fsync cost.
+        Returns the number of entries written.
+        """
+        if not entries:
+            return 0
+        db = self._ensure_db()
+        now = datetime.now(UTC)
+        rows = []
+        for entry in entries:
+            entry.updated_at = now
+            rows.append(
+                (
+                    str(entry.id),
+                    entry.entry_type.value,
+                    entry.title,
+                    entry.content,
+                    json.dumps(entry.tags),
+                    json.dumps(entry.metadata),
+                    entry.created_at.isoformat(),
+                    entry.updated_at.isoformat(),
+                    entry.session_id,
+                    entry.importance,
+                )
+            )
+        db.executemany(
+            """
+            INSERT INTO memory_entries (id, entry_type, title, content, tags, metadata,
+                                        created_at, updated_at, session_id, importance)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                entry_type = excluded.entry_type,
+                title = excluded.title,
+                content = excluded.content,
+                tags = excluded.tags,
+                metadata = excluded.metadata,
+                updated_at = excluded.updated_at,
+                session_id = excluded.session_id,
+                importance = excluded.importance
+            """,
+            rows,
+        )
+        db.commit()
+        return len(rows)
+
+    async def rebuild_fts(self) -> int:
+        """Rebuild the FTS5 index from ``memory_entries`` (recovery / batch reindex).
+
+        Useful after bulk imports or if the external-content FTS index drifts.
+        Returns the number of rows re-indexed.
+        """
+        db = self._ensure_db()
+        # FTS5 external-content rebuild from the content table.
+        db.execute("INSERT INTO memory_fts(memory_fts) VALUES('rebuild')")
+        db.commit()
+        row = db.execute("SELECT COUNT(*) FROM memory_entries").fetchone()
+        return int(row[0]) if row else 0
+
     async def get(self, entry_id: str | UUID) -> MemoryEntry | None:
         db = self._ensure_db()
         row = db.execute(
@@ -332,8 +392,14 @@ class MemoryStore:
     async def search(
         self, query: str, limit: int = 20, entry_type: MemoryEntryType | None = None
     ) -> list[MemoryEntry]:
-        """Full-text search across title, content, and tags."""
+        """Full-text search across title, content, and tags.
+
+        Falls back to :meth:`search_simple` when FTS5 MATCH rejects the query
+        (e.g. special characters) so callers always get a safe result set.
+        """
         query = sanitize_search_query(query, max_length=500)
+        if not query.strip():
+            return []
         db = self._ensure_db()
         type_filter = ""
         params: list[Any] = []
@@ -344,36 +410,31 @@ class MemoryStore:
         else:
             params = [query, limit]
 
-        rows = db.execute(
-            f"""
-            SELECT memory_entries.* FROM memory_entries
-            JOIN memory_fts ON memory_entries.rowid = memory_fts.rowid
-            WHERE memory_fts MATCH ? {type_filter}
-            ORDER BY rank
-            LIMIT ?
-            """,
-            params,
-        ).fetchall()
-        return [self._row_to_entry(r) for r in rows]
+        try:
+            rows = db.execute(
+                f"""
+                SELECT memory_entries.* FROM memory_entries
+                JOIN memory_fts ON memory_entries.rowid = memory_fts.rowid
+                WHERE memory_fts MATCH ? {type_filter}
+                ORDER BY rank
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+            return [self._row_to_entry(r) for r in rows]
+        except sqlite3.OperationalError:
+            # Invalid MATCH syntax or missing FTS — degrade gracefully (no recursion).
+            hits = await self._search_like(query, limit=limit)
+            if entry_type is None:
+                return hits
+            return [h for h in hits if h.entry_type == entry_type]
 
-    async def search_simple(self, query: str, limit: int = 20) -> list[MemoryEntry]:
-        """Search with FTS5 first; parameterized LIKE fallback if MATCH fails.
-
-        Prefer :meth:`search` for new code. This remains for callers that need a
-        tolerant fallback when the query is not valid FTS5 MATCH syntax.
-        """
+    async def _search_like(self, query: str, limit: int = 20) -> list[MemoryEntry]:
+        """Parameterized LIKE fallback (escapes % and _). Never uses FTS."""
         q = (query or "").strip()
         if not q:
             return []
-        # Prefer full-text when possible (parameterized MATCH).
-        try:
-            hits = await self.search(q, limit=limit)
-            if hits:
-                return hits
-        except Exception:
-            pass
         db = self._ensure_db()
-        # Escape LIKE wildcards in user input; still parameterized (no SQL inject).
         safe = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         like_q = f"%{safe}%"
         rows = db.execute(
@@ -383,6 +444,23 @@ class MemoryStore:
             (like_q, like_q, limit),
         ).fetchall()
         return [self._row_to_entry(r) for r in rows]
+
+    async def search_simple(self, query: str, limit: int = 20) -> list[MemoryEntry]:
+        """Tolerant search: try FTS MATCH, then parameterized LIKE.
+
+        Prefer :meth:`search` when you want FTS ranking; this is the safe
+        fallback path used by older callers.
+        """
+        q = (query or "").strip()
+        if not q:
+            return []
+        try:
+            hits = await self.search(q, limit=limit)
+            if hits:
+                return hits
+        except Exception:
+            pass
+        return await self._search_like(q, limit=limit)
 
     # -- handoff notes -------------------------------------------------------
 

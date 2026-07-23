@@ -76,9 +76,24 @@ def register_status_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
     _status_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
 
     @app.get("/api/metrics")
-    async def get_metrics():
-        """In-process metrics snapshot (counters / gauges / histograms)."""
+    async def get_metrics(
+        request: Request,
+        format: str | None = Query(default=None, description="json (default) or prometheus"),
+    ):
+        """In-process metrics snapshot (JSON) or Prometheus text exposition.
+
+        Use ``?format=prometheus`` or ``Accept: text/plain`` for Prometheus scrape.
+        """
         from remedy.core.metrics import default_health, default_registry
+
+        want_prom = (format or "").lower() in ("prometheus", "prom", "text")
+        if not want_prom:
+            accept = (request.headers.get("accept") or "").lower()
+            want_prom = "text/plain" in accept and "application/json" not in accept
+
+        if want_prom:
+            body = default_registry.prometheus_text()
+            return Response(content=body, media_type="text/plain; version=0.0.4; charset=utf-8")
 
         health = await default_health.check()
         return {

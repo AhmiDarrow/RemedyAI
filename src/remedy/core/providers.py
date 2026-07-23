@@ -72,7 +72,10 @@ class ProviderAdapter(ABC):
 
         Default implementation yields no tokens (subclasses may override).
         """
-        yield  # pragma: no cover
+        # Empty async generator (no tokens).
+        if False:  # pragma: no cover
+            yield ""
+        return
 
 
 # ---------------------------------------------------------------------------

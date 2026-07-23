@@ -1033,6 +1033,16 @@ dependencies = [
     { name = "uvicorn" },
 ]
 
+[package.optional-dependencies]
+desktop-build = [
+    { name = "pyinstaller" },
+]
+server = [
+    { name = "fastapi" },
+    { name = "python-multipart" },
+    { name = "uvicorn" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "httpx" },
@@ -1047,13 +1057,18 @@ dev = [
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.14.2" },
     { name = "fastapi", specifier = ">=0.139.2" },
+    { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.139.2" },
     { name = "packaging", specifier = ">=24.0" },
     { name = "pydantic", specifier = ">=2.13.4" },
+    { name = "pyinstaller", marker = "extra == 'desktop-build'", specifier = ">=6.21.0" },
     { name = "python-multipart", specifier = ">=0.0.9" },
+    { name = "python-multipart", marker = "extra == 'server'", specifier = ">=0.0.9" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "rich", specifier = ">=15.0.0" },
     { name = "uvicorn", specifier = ">=0.51.0" },
+    { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.51.0" },
 ]
+provides-extras = ["server", "desktop-build"]
 
 [package.metadata.requires-dev]
 dev = [
