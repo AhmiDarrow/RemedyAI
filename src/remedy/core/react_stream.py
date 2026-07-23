@@ -19,6 +19,10 @@ from remedy.core.react_policy import (
 )
 
 
+# OpenAI-compatible finish reasons that mean "ran out of output budget".
+LENGTH_FINISH_REASONS = frozenset({"length", "max_tokens"})
+
+
 @dataclass
 class StreamRoundState:
     """Mutable state for one LLM streaming round."""
@@ -27,6 +31,7 @@ class StreamRoundState:
     reasoning_parts: list[str] = field(default_factory=list)
     tool_call_acc: dict[int, dict[str, Any]] = field(default_factory=dict)
     produced_user_text: bool = False
+    finish_reason: str | None = None
 
     @property
     def text_out(self) -> str:
@@ -35,6 +40,12 @@ class StreamRoundState:
     @property
     def reasoning_out(self) -> str:
         return "".join(self.reasoning_parts).strip()
+
+    @property
+    def hit_length_limit(self) -> bool:
+        """True when the model stopped because max_tokens / length was hit."""
+        fr = (self.finish_reason or "").lower()
+        return fr in LENGTH_FINISH_REASONS
 
     def tool_calls_list(self, collected: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         raw = (
@@ -85,6 +96,10 @@ def apply_openai_sse_chunk(
 ) -> str | None:
     """Apply one parsed OpenAI SSE JSON chunk. Returns content delta to yield live."""
     choice = (chunk.get("choices") or [{}])[0]
+    # Final chunk usually carries finish_reason (stop | length | tool_calls | …).
+    fr = choice.get("finish_reason")
+    if fr:
+        state.finish_reason = str(fr)
     delta = choice.get("delta") or {}
     content_delta = delta.get("content")
     live: str | None = None

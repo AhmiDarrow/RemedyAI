@@ -78,6 +78,7 @@ class TestOpenAIProvider:
         assert body["model"] == "gpt-4o-mini"
         assert body["stream"] is False
         assert body["temperature"] == 0.6  # chat / no-tools path
+        assert body["max_tokens"] >= 16000  # long reviews must not hit 4k wall
         assert "tools" not in body
 
     def test_build_body_with_tools(self):
@@ -91,6 +92,7 @@ class TestOpenAIProvider:
         assert body["tool_choice"] == "auto"
         assert body["stream"] is True
         assert body["temperature"] == 0.4  # tool path — more decisive
+        assert body["max_tokens"] >= 4096
 
     def test_extract_response_text(self):
         p = OpenAIProvider()

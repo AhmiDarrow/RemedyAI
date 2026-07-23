@@ -44,11 +44,14 @@ class ProviderAdapter(ABC):
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None,
         stream: bool,
+        *,
+        max_tokens: int | None = None,
     ) -> dict[str, Any]:
         """Build the JSON request body for a chat completion call.
 
         Receives messages in OpenAI format with roles: system, user, assistant, tool.
         Returns provider-native body dict.
+        ``max_tokens`` overrides the provider default when set.
         """
 
     @abstractmethod
@@ -99,20 +102,28 @@ class OpenAIProvider(ProviderAdapter):
     def chat_endpoint(self, base_url: str) -> str:
         return f"{base_url.rstrip('/')}/chat/completions"
 
+    # Tool rounds stay modest; final answers (reviews, long write-ups) need headroom.
+    MAX_TOKENS_TOOLS = 8192
+    MAX_TOKENS_ANSWER = 32768
+
     def build_body(
         self,
         model: str,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None,
         stream: bool,
+        *,
+        max_tokens: int | None = None,
     ) -> dict[str, Any]:
         # Slightly lower temp with tools → fewer rambling / fake tool-call transcripts.
         temperature = 0.4 if tools else 0.6
+        if max_tokens is None:
+            max_tokens = self.MAX_TOKENS_TOOLS if tools else self.MAX_TOKENS_ANSWER
         body: dict[str, Any] = {
             "model": model,
             "messages": messages,
             "temperature": temperature,
-            "max_tokens": 4096,
+            "max_tokens": max_tokens,
             "stream": stream,
         }
         if tools:
@@ -195,18 +206,25 @@ class AnthropicProvider(ProviderAdapter):
     def chat_endpoint(self, base_url: str) -> str:
         return f"{base_url.rstrip('/')}/v1/messages"
 
+    MAX_TOKENS_TOOLS = 8192
+    MAX_TOKENS_ANSWER = 32768
+
     def build_body(
         self,
         model: str,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None,
         stream: bool,
+        *,
+        max_tokens: int | None = None,
     ) -> dict[str, Any]:
         system_prompt, converted = self._convert_messages(messages)
+        if max_tokens is None:
+            max_tokens = self.MAX_TOKENS_TOOLS if tools else self.MAX_TOKENS_ANSWER
         body: dict[str, Any] = {
             "model": model,
             "messages": converted,
-            "max_tokens": 4096,
+            "max_tokens": max_tokens,
             "stream": stream,
         }
         if system_prompt:
@@ -382,8 +400,12 @@ class GoogleProvider(OpenAIProvider):
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None,
         stream: bool,
+        *,
+        max_tokens: int | None = None,
     ) -> dict[str, Any]:
-        body = super().build_body(model, messages, tools, stream)
+        body = super().build_body(
+            model, messages, tools, stream, max_tokens=max_tokens
+        )
         # Gemini OpenAI-compat is picky about some OpenAI-only knobs.
         for key in ("logit_bias", "logprobs", "top_logprobs", "n", "user"):
             body.pop(key, None)
@@ -406,8 +428,12 @@ class DeepSeekProvider(OpenAIProvider):
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None,
         stream: bool,
+        *,
+        max_tokens: int | None = None,
     ) -> dict[str, Any]:
-        body = super().build_body(model, messages, tools, stream)
+        body = super().build_body(
+            model, messages, tools, stream, max_tokens=max_tokens
+        )
         # Reasoner models work better with slightly lower temperature.
         if "reasoner" in (model or "").lower():
             body["temperature"] = min(float(body.get("temperature") or 0.6), 0.5)

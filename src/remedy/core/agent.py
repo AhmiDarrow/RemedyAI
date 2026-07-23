@@ -628,13 +628,17 @@ class BasicRuntime(AgentRuntime):
             headers = self._provider.auth_headers(self._llm_api_key)
             endpoint = self._provider.chat_endpoint(self._llm_base_url)
 
-            # total bounds the whole turn; sock_read prevents indefinite hangs mid-stream.
-            # Keep a small connector pool — one session for the whole ReAct turn.
-            timeout = aiohttp.ClientTimeout(total=180, sock_read=75, connect=20)
+            # Long project reviews need headroom: no short total wall that kills mid-stream.
+            # sock_read only trips when the provider goes silent (not while tokens keep flowing).
+            # total=None → no overall deadline; connect is still bounded.
+            timeout = aiohttp.ClientTimeout(total=None, sock_read=300, connect=30)
             connector = aiohttp.TCPConnector(
                 limit=12,
                 ttl_dns_cache=300,
             )
+            # How many times we auto-continue after finish_reason=length / max_tokens.
+            max_length_continuations = 4
+            length_continuations = 0
             async with aiohttp.ClientSession(
                 timeout=timeout, connector=connector
             ) as http:
@@ -648,13 +652,15 @@ class BasicRuntime(AgentRuntime):
                         force_answer = True
                     step_tools = None if force_answer else tools
 
-                    if force_answer and step > 0:
+                    if force_answer and step > 0 and length_continuations == 0:
+                        # Don't inject "be concise" when we're mid length-continuation.
                         messages.append(
                             {
                                 "role": "user",
                                 "content": (
                                     "Stop calling tools. Using the information above, "
-                                    "give your final answer to the user now. Be concise."
+                                    "give your complete final answer to the user now. "
+                                    "Do not cut off mid-section."
                                 ),
                             }
                         )
@@ -817,10 +823,59 @@ class BasicRuntime(AgentRuntime):
                                             if tool_msg:
                                                 messages.append(tool_msg)
                                         continue
+                            # Hit max_tokens mid-answer → seamless continuation.
+                            if (
+                                round_state.hit_length_limit
+                                and length_continuations < max_length_continuations
+                                and not tool_calls_list
+                            ):
+                                length_continuations += 1
+                                logger.info(
+                                    "Stream hit length limit (finish_reason=%s); "
+                                    "auto-continuing (%d/%d)",
+                                    round_state.finish_reason,
+                                    length_continuations,
+                                    max_length_continuations,
+                                )
+                                messages.append(
+                                    {"role": "assistant", "content": text_out}
+                                )
+                                messages.append(
+                                    {
+                                        "role": "user",
+                                        "content": (
+                                            "Your previous message was cut off by the output "
+                                            "token limit. Continue exactly where you stopped — "
+                                            "do not restart, renumber from scratch, or summarize "
+                                            "what you already wrote. Pick up mid-sentence if needed."
+                                        ),
+                                    }
+                                )
+                                tools = []  # keep producing prose
+                                continue
                             return
                         if not stream_live:
                             yield text_out
                             produced_user_text = True
+                            if (
+                                round_state.hit_length_limit
+                                and length_continuations < max_length_continuations
+                                and not tool_calls_list
+                            ):
+                                length_continuations += 1
+                                messages.append(
+                                    {"role": "assistant", "content": text_out}
+                                )
+                                messages.append(
+                                    {
+                                        "role": "user",
+                                        "content": (
+                                            "Continue exactly where you stopped — do not restart."
+                                        ),
+                                    }
+                                )
+                                tools = []
+                                continue
                         return
 
                     if not tool_calls_list or force_answer:

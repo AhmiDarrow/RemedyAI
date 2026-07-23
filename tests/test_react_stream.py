@@ -78,6 +78,17 @@ def test_apply_openai_sse_chunk_live_and_tools() -> None:
     assert tcs[0]["function"]["name"] == "list_dir"
 
 
+def test_finish_reason_length_detected() -> None:
+    state = StreamRoundState()
+    apply_openai_sse_chunk(
+        state,
+        {"choices": [{"delta": {"content": "…"}, "finish_reason": "length"}]},
+        stream_live=True,
+    )
+    assert state.finish_reason == "length"
+    assert state.hit_length_limit is True
+
+
 def test_finalize_prefers_reasoning_without_tools() -> None:
     state = StreamRoundState()
     state.reasoning_parts.append("think…")
