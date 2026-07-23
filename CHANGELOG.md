@@ -2,6 +2,19 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.10.6] — 2026-07-23
+
+### Fixed
+
+- **About showed Version v0.9.0** while the updater reported 0.10.x — `GET /api/settings`
+  crashed with `NameError: name 'version' is not defined` (should use
+  `_remedy_version`). Settings never loaded, so the UI fell back to the hard-coded
+  `0.9.0` placeholder.
+- Same bug on `/api/updates/check` (`current = version`).
+- urllib call used `_urllib.request.urlopen` after `import urllib.request as _urllib`
+  (AttributeError); corrected to `_urllib.urlopen`.
+- About panel prefers the desktop shell version from the update checker when present.
+
 ## [0.10.5] — 2026-07-23
 
 ### Fixed

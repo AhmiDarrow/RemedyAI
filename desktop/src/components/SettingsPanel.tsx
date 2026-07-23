@@ -271,7 +271,12 @@ export function SettingsPanel({
               <div className="space-y-1" style={{ color: 'var(--text-secondary)' }}>
                 <div className="flex justify-between">
                   <span style={{ color: 'var(--text-muted)' }}>Version</span>
-                  <span>v{settings?.version || '0.9.0'}</span>
+                  <span>
+                    v
+                    {updateInfo?.current_version
+                      || settings?.version
+                      || '—'}
+                  </span>
                 </div>
                 <div className="flex justify-between">
                   <span style={{ color: 'var(--text-muted)' }}>Config</span>

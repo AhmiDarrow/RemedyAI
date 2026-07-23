@@ -115,7 +115,7 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                 if runtime is not None and hasattr(runtime, "effective_project_path")
                 else os.getcwd()
             ),
-            "version": version,
+            "version": _remedy_version,
             "config_exists": config_path is not None,
             "setup_completed": setup_completed,
             "needs_setup": not setup_completed,

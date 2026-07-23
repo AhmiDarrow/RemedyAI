@@ -80,7 +80,7 @@ def register_misc_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
         endpoint is the browser/dev fallback and a secondary path when Rust
         GitHub fetch fails.
         """
-        current = version
+        current = _remedy_version
         latest_python = None
         latest_desktop = None
         release_url = None
@@ -95,7 +95,8 @@ def register_misc_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
                 "https://pypi.org/pypi/remedy-ai/json",
                 headers={"Accept": "application/json", "User-Agent": "Remedy-Updater"},
             )
-            with _urllib.request.urlopen(req, timeout=10) as resp:
+            # `_urllib` is already urllib.request (not the top-level package).
+            with _urllib.urlopen(req, timeout=10) as resp:
                 data = _json.loads(resp.read().decode())
                 latest_python = data["info"]["version"]
         except Exception as e:
@@ -117,7 +118,7 @@ def register_misc_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
                         "User-Agent": "Remedy-Updater",
                     },
                 )
-                with _urllib.request.urlopen(req, timeout=10) as resp:
+                with _urllib.urlopen(req, timeout=10) as resp:
                     data = _json.loads(resp.read().decode())
                 if "version" in data:
                     latest_desktop = str(data.get("version") or "").lstrip("v")
