@@ -44,7 +44,6 @@ class DockerSandbox(Sandbox):
         self.cpu_limit = cpu_limit
         self.read_only = read_only
         self.timeout = timeout
-        self._workdir: Path | None = None
         self._available: bool | None = None
 
     @property

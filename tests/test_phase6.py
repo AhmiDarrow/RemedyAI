@@ -213,8 +213,12 @@ class TestHookManager:
         hm = HookManager()
         calls = []
 
-        def a(): calls.append("a"); return True
-        def b(): calls.append("b"); return True
+        def a():
+            calls.append("a")
+            return True
+        def b():
+            calls.append("b")
+            return True
 
         hm.register("chain", a, priority=10)
         hm.register("chain", b, priority=5)
@@ -226,8 +230,12 @@ class TestHookManager:
         hm = HookManager()
         calls = []
 
-        def a(): calls.append("a"); return False
-        def b(): calls.append("b"); return True
+        def a():
+            calls.append("a")
+            return False
+        def b():
+            calls.append("b")
+            return True
 
         hm.register("chain", a, priority=10)
         hm.register("chain", b, priority=5)
@@ -307,7 +315,9 @@ class TestHookManager:
         results = []
 
         def bad(): raise ValueError("ouch")
-        def good(): results.append("ok"); return "ok"
+        def good():
+            results.append("ok")
+            return "ok"
 
         hm.register("test", bad, priority=10)
         hm.register("test", good, priority=5)

@@ -688,7 +688,7 @@ async def _cmd_migrate(args) -> None:
         )
 
     elif args.migrate_cmd == "openclaw":
-        from remedy.migrate.from_openclaw import migrate_from_openclaw as migrate_from_oc
+        from remedy.migrate.from_hermes import migrate_from_openclaw as migrate_from_oc
 
         result = migrate_from_oc(
             registry,

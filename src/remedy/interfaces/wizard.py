@@ -228,7 +228,7 @@ def _pick_channels() -> list[str]:
     table.add_column("Channel")
     table.add_column("Requires Token", style="dim")
     items = list(CHANNELS.items())
-    for i, (key, (label, enabled, token)) in enumerate(items, 1):
+    for i, (_, (label, _, token)) in enumerate(items, 1):
         table.add_row(str(i), label, token or "none")
     console.print(table)
     console.print(

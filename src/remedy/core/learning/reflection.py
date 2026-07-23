@@ -90,7 +90,6 @@ class GeneratedSkill:
 
 
 _MIN_TRACE_LENGTH = 3
-_MIN_REFLECTION_LENGTH = 200
 
 
 class ReflectionEngine:
@@ -225,7 +224,7 @@ class ReflectionEngine:
             description=description,
             instructions=instructions,
             tags=tags,
-            tools_used=list(set(s.tool_name for s in trace.steps)),
+            tools_used=list({s.tool_name for s in trace.steps}),
             estimated_success_rate=trace.success_rate,
             source_trace_id=trace.task_id,
             source_task_title=trace.title,
@@ -239,7 +238,7 @@ class ReflectionEngine:
 
     def _build_skill_description(self, trace: ExecutionTrace) -> str:
         steps_summary = ", ".join(
-            sorted(set(s.tool_name for s in trace.steps))
+            sorted({s.tool_name for s in trace.steps})
         )
         return (
             f"Automates the task: '{trace.title}'. "
@@ -278,7 +277,7 @@ class ReflectionEngine:
         lines.append("")
         lines.append("## Requirements")
         lines.append("")
-        for tool in sorted(set(s.tool_name for s in trace.steps)):
+        for tool in sorted({s.tool_name for s in trace.steps}):
             lines.append(f"- Tool: `{tool}`")
 
         return "\n".join(lines)

@@ -260,8 +260,8 @@ class TestToolRegistry:
 
     def test_register_duplicate_overwrites(self):
         registry = ToolRegistry()
-        t1 = registry.register_builtin("dupe", "First")
-        t2 = registry.register_builtin("dupe", "Second")
+        registry.register_builtin("dupe", "First")
+        registry.register_builtin("dupe", "Second")
         assert registry.tool_count == 1
         assert registry.get("dupe").description == "Second"
 

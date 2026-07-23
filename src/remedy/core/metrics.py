@@ -62,7 +62,7 @@ class Histogram:
             "count": sum(self._counts),
             "buckets": [
                 {"le": str(b), "count": c}
-                for b, c in zip(self.buckets + ["Inf"], self._counts)
+                for b, c in zip(self.buckets + ["Inf"], self._counts, strict=False)
             ],
             "labels": self.labels,
         }

@@ -7,7 +7,9 @@ Hermes and OpenClaw/MCP skill formats.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -144,6 +146,38 @@ def discover_skills(root: Path, recurse: bool = True) -> list[Skill]:
         try:
             skill = load_skill_from_dir(skill_md.parent)
             skills.append(skill)
+        except SkillLoadError:
+            continue
+
+    return skills
+
+
+def parse_yaml_file(path: Path) -> dict[str, Any]:
+    """Parse a YAML config or manifest file, returning empty dict on failure."""
+    if not path.is_file():
+        return {}
+    try:
+        raw = path.read_text(encoding="utf-8")
+        return yaml.safe_load(raw) or {}
+    except (yaml.YAMLError, OSError):
+        return {}
+
+
+def discover_skills_flat(base_dir: Path, loader_fn: Callable[[Path], Skill]) -> list[Skill]:
+    """Scan a directory for skill subdirs and load using the given loader function.
+
+    Non-recursive — scans only immediate subdirectories.
+    """
+    base = Path(base_dir).expanduser().resolve()
+    if not base.is_dir():
+        return []
+
+    skills: list[Skill] = []
+    for skill_dir in base.iterdir():
+        if not skill_dir.is_dir() or skill_dir.name.startswith("."):
+            continue
+        try:
+            skills.append(loader_fn(skill_dir))
         except SkillLoadError:
             continue
 

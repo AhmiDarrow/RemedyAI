@@ -1006,7 +1006,7 @@ def create_app(
         session = await memory.get_chat_session(session_id)
         if not session:
             raise HTTPException(404, "Session not found")
-        messages = await memory.list_chat_messages(session_id, limit=10000)
+        messages = await memory.get_chat_messages(session_id, limit=10000)
         session_title = getattr(session, "title", "Session") or "Session"
         lines = [f"# {session_title}", "", f"**Session ID:** `{session_id}`", f"**Messages:** {len(messages)}", ""]
         for m in messages:

@@ -90,9 +90,7 @@ class APIRetryPolicy:
         if self.condition == "rate_limit":
             msg = str(error).lower()
             return any(kw in msg for kw in ("rate limit", "too many requests", "429", "503"))
-        if self.condition == "all":
-            return True
-        return False
+        return self.condition == "all"
 
     def delay_for_attempt(self, attempt: int) -> float:
         delay = min(self.base_delay * (self.backoff_multiplier ** attempt), self.max_delay)

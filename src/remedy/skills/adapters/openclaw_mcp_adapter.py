@@ -15,6 +15,7 @@ from remedy.skills.loader import (
     _build_manifest,
     _discover_bundled_resources,
     _parse_skill_md,
+    discover_skills_flat,
 )
 
 
@@ -68,20 +69,7 @@ def load_openclaw_skill(skill_dir: str | Path) -> Skill:
 
 def discover_openclaw_skills(base_dir: str | Path) -> list[Skill]:
     """Scan a directory for OpenClaw-format skills."""
-    base = Path(base_dir).expanduser().resolve()
-    if not base.is_dir():
-        return []
-
-    skills: list[Skill] = []
-    for skill_dir in base.iterdir():
-        if not skill_dir.is_dir() or skill_dir.name.startswith("."):
-            continue
-        try:
-            skills.append(load_openclaw_skill(skill_dir))
-        except SkillLoadError:
-            continue
-
-    return skills
+    return discover_skills_flat(Path(base_dir), load_openclaw_skill)
 
 
 def load_mcp_skill(server_name: str, tool_names: list[str]) -> Skill:

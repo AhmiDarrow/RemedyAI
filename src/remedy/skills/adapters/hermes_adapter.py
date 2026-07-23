@@ -15,6 +15,7 @@ from remedy.skills.loader import (
     _build_manifest,
     _discover_bundled_resources,
     _parse_skill_md,
+    discover_skills_flat,
 )
 
 
@@ -69,17 +70,4 @@ def discover_hermes_skills(base_dir: str | Path) -> list[Skill]:
 
     Typical Hermes layout: ~/.hermes/skills/<skill-name>/SKILL.md
     """
-    base = Path(base_dir).expanduser().resolve()
-    if not base.is_dir():
-        return []
-
-    skills: list[Skill] = []
-    for skill_dir in base.iterdir():
-        if not skill_dir.is_dir() or skill_dir.name.startswith("."):
-            continue
-        try:
-            skills.append(load_hermes_skill(skill_dir))
-        except SkillLoadError:
-            continue
-
-    return skills
+    return discover_skills_flat(Path(base_dir), load_hermes_skill)

@@ -23,31 +23,6 @@ def get_home_dir() -> Path:
     return _HOME_DIR
 
 
-class _HomeDirProxy:
-    """Lazy Path-like proxy so existing ``HOME_DIR / x`` call sites keep working."""
-
-    def _path(self) -> Path:
-        return get_home_dir()
-
-    def __truediv__(self, other):
-        return self._path() / other
-
-    def __fspath__(self) -> str:
-        return str(self._path())
-
-    def __str__(self) -> str:
-        return str(self._path())
-
-    def __repr__(self) -> str:
-        return repr(self._path())
-
-    def __getattr__(self, name: str):
-        return getattr(self._path(), name)
-
-
-HOME_DIR = _HomeDirProxy()  # type: ignore[assignment]
-
-
 MAX_FILENAME_LENGTH = 255
 MAX_PATH_DEPTH = 32
 VALID_PATH_RE = re.compile(r"^[a-zA-Z0-9_\-./\\ ]+$")

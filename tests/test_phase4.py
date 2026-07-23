@@ -91,7 +91,7 @@ class TestGateway:
             source_id="test",
             payload={"text": "hello"},
         )
-        result = await gateway.emit(event)
+        await gateway.emit(event)
         assert len(responses) == 1
         assert responses[0] == ("received", EventKind.MESSAGE)
 
@@ -268,11 +268,9 @@ class TestGatewayRuntime:
     """Gateway CLI integration tests."""
 
     def test_gateway_status_no_db(self, tmp_path):
-        db = tmp_path / "memory.db"
-        assert not db.exists()
+        assert not (tmp_path / "memory.db").exists()
 
     def test_run_gateway_starts_and_stops(self, tmp_path, runtime):
-        db = tmp_path / "memory.db"
         gw = Gateway(runtime, heartbeat_interval=9999, rate_limit=9999)
 
         asyncio.run(gw.start())

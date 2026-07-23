@@ -12,22 +12,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 from remedy.models import Skill, SkillKind, SkillManifest, ToolDefinition, ToolSource
-from remedy.skills.loader import SkillLoadError
+from remedy.skills.loader import SkillLoadError, parse_yaml_file
 from remedy.skills.tool_registry import ToolRegistry
 
 
 def parse_clawhub_manifest(path: Path) -> dict[str, Any]:
     """Parse a ClawHub-style skill.yaml or claw.yaml manifest."""
-    if not path.is_file():
-        return {}
-    try:
-        raw = path.read_text(encoding="utf-8")
-        return yaml.safe_load(raw) or {}
-    except (yaml.YAMLError, OSError):
-        return {}
+    return parse_yaml_file(path)
 
 
 def extract_mcp_servers(manifest: dict) -> list[dict]:

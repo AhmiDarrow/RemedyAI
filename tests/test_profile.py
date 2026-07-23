@@ -31,7 +31,7 @@ class TestUserProfile:
     def test_add_fact(self):
         profile = UserProfile()
         f1 = profile.add_fact("Works at Acme Corp", category="work")
-        f2 = profile.add_fact("Likes sushi", category="personal")
+        profile.add_fact("Likes sushi", category="personal")
         assert len(profile.facts) == 2
         assert f1.fact == "Works at Acme Corp"
         assert f1.category == "work"

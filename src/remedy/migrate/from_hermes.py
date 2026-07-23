@@ -6,8 +6,10 @@ Helps users transition from either system into Remedy with minimal friction.
 from __future__ import annotations
 
 import shutil
+from collections.abc import Callable
 from pathlib import Path
 
+from remedy.models import Skill
 from remedy.skills.adapters.hermes_adapter import discover_hermes_skills
 from remedy.skills.adapters.openclaw_mcp_adapter import discover_openclaw_skills
 from remedy.skills.registry import SkillRegistry
@@ -33,35 +35,26 @@ class MigrationResult:
         }
 
 
-def migrate_from_hermes(
+def _migrate_from(
+    source_label: str,
     registry: SkillRegistry,
-    hermes_skills_dir: str | Path,
+    skills_dir: str | Path,
+    discover_fn: Callable[[Path], list[Skill]],
     copy_to_remedy: bool = True,
     remedy_skills_dir: str | Path | None = None,
 ) -> MigrationResult:
-    """Import skills from a Hermes Agent installation.
-
-    Args:
-        registry: Target Remedy SkillRegistry.
-        hermes_skills_dir: Path to ~/.hermes/skills/ (or equivalent).
-        copy_to_remedy: Whether to copy skill files into Remedy's skills dir.
-        remedy_skills_dir: Destination for copied skills.
-
-    Returns:
-        MigrationResult with counts and errors.
-    """
     result = MigrationResult()
-    hermes_path = Path(hermes_skills_dir).expanduser().resolve()
+    src_path = Path(skills_dir).expanduser().resolve()
 
-    if not hermes_path.is_dir():
-        result.errors.append(f"Hermes skills directory not found: {hermes_path}")
+    if not src_path.is_dir():
+        result.errors.append(f"{source_label} skills directory not found: {src_path}")
         return result
 
     dest = None
     if copy_to_remedy:
         dest = Path(remedy_skills_dir).expanduser().resolve() if remedy_skills_dir else None
 
-    for skill in discover_hermes_skills(hermes_path):
+    for skill in discover_fn(src_path):
         try:
             if dest and skill.source_skill_dir:
                 src = Path(skill.source_skill_dir)
@@ -77,6 +70,23 @@ def migrate_from_hermes(
             result.skills_skipped += 1
 
     return result
+
+
+def migrate_from_hermes(
+    registry: SkillRegistry,
+    hermes_skills_dir: str | Path,
+    copy_to_remedy: bool = True,
+    remedy_skills_dir: str | Path | None = None,
+) -> MigrationResult:
+    """Import skills from a Hermes Agent installation."""
+    return _migrate_from(
+        "Hermes",
+        registry,
+        hermes_skills_dir,
+        discover_hermes_skills,
+        copy_to_remedy,
+        remedy_skills_dir,
+    )
 
 
 def migrate_from_openclaw(
@@ -85,41 +95,12 @@ def migrate_from_openclaw(
     copy_to_remedy: bool = True,
     remedy_skills_dir: str | Path | None = None,
 ) -> MigrationResult:
-    """Import skills from an OpenClaw/ClawHub installation.
-
-    Args:
-        registry: Target Remedy SkillRegistry.
-        openclaw_skills_dir: Path to the OpenClaw skills directory.
-        copy_to_remedy: Whether to copy skill files.
-        remedy_skills_dir: Destination directory.
-
-    Returns:
-        MigrationResult with counts and errors.
-    """
-    result = MigrationResult()
-    oc_path = Path(openclaw_skills_dir).expanduser().resolve()
-
-    if not oc_path.is_dir():
-        result.errors.append(f"OpenClaw skills directory not found: {oc_path}")
-        return result
-
-    dest = None
-    if copy_to_remedy:
-        dest = Path(remedy_skills_dir).expanduser().resolve() if remedy_skills_dir else None
-
-    for skill in discover_openclaw_skills(oc_path):
-        try:
-            if dest and skill.source_skill_dir:
-                src = Path(skill.source_skill_dir)
-                dst = dest / src.name
-                if not dst.exists():
-                    shutil.copytree(str(src), str(dst))
-                    skill.source_skill_dir = str(dst)
-
-            registry.register(skill)
-            result.skills_imported += 1
-        except Exception as e:
-            result.errors.append(f"Failed to import {skill.manifest.name}: {e}")
-            result.skills_skipped += 1
-
-    return result
+    """Import skills from an OpenClaw/ClawHub installation."""
+    return _migrate_from(
+        "OpenClaw",
+        registry,
+        openclaw_skills_dir,
+        discover_openclaw_skills,
+        copy_to_remedy,
+        remedy_skills_dir,
+    )

@@ -12,11 +12,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 from remedy.models import Skill
 from remedy.skills.adapters.hermes_adapter import load_hermes_skill
-from remedy.skills.loader import SkillLoadError
+from remedy.skills.loader import SkillLoadError, parse_yaml_file
 
 _TOOL_MAP: dict[str, str] = {
     "memory_search": "remedy_memory_search",
@@ -40,17 +38,8 @@ def map_hermes_tools(tool_names: list[str]) -> list[str]:
 
 
 def parse_hermes_config(config_path: Path) -> dict[str, Any]:
-    """Parse a Hermes configuration file.
-
-    Handles hermes_config.yaml in the Hermes home directory.
-    """
-    if not config_path.is_file():
-        return {}
-    try:
-        raw = config_path.read_text(encoding="utf-8")
-        return yaml.safe_load(raw) or {}
-    except (yaml.YAMLError, OSError):
-        return {}
+    """Parse a Hermes configuration file."""
+    return parse_yaml_file(config_path)
 
 
 def extract_hermes_tools_from_config(config: dict) -> list[str]:
@@ -59,7 +48,7 @@ def extract_hermes_tools_from_config(config: dict) -> list[str]:
     tool_sections = config.get("tools", {}) or {}
 
     if isinstance(tool_sections, dict):
-        for section, items in tool_sections.items():
+        for _, items in tool_sections.items():
             if isinstance(items, list):
                 tools.extend(items)
     return tools
