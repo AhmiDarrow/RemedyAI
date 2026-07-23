@@ -112,9 +112,13 @@ class _FakeSession:
     def __init__(self, responses: list[_FakeResp]) -> None:
         self._responses = list(responses)
         self.posts = 0
+        self.bodies: list[dict] = []
 
     def post(self, *args, **kwargs):
         self.posts += 1
+        body = kwargs.get("json")
+        if isinstance(body, dict):
+            self.bodies.append(body)
         if not self._responses:
             raise RuntimeError("no more fake responses")
         return self._responses.pop(0)
@@ -271,3 +275,90 @@ async def test_react_loop_dedups_identical_tool_calls():
 
     assert calls["n"] == 1
     assert "done" in text
+
+
+@pytest.mark.asyncio
+async def test_react_loop_recovery_nudge_on_tool_error():
+    """Failing tool batch injects RECOVERY_NUDGE once before the next LLM turn."""
+    from remedy.core.react_policy import RECOVERY_NUDGE
+
+    rt = BasicRuntime(
+        AgentConfig(
+            llm_api_key="sk-test",
+            llm_model="gpt-test",
+            llm_base_url="http://llm/v1",
+            llm_provider="openai",
+        )
+    )
+
+    async def boom(**kwargs):
+        return (
+            "Error [NOT_FOUND:file_read]: file not found: missing.py\n"
+            "Suggestion: Call list_dir on parent."
+        )
+
+    rt.tool_registry.register_builtin_handler(
+        "file_read",
+        "read file",
+        boom,
+        parameters={
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+        },
+    )
+
+    tool_sse = _sse_bytes(
+        [
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "id": "call_fail",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "file_read",
+                                        "arguments": '{"path": "missing.py"}',
+                                    },
+                                }
+                            ]
+                        },
+                        "finish_reason": "tool_calls",
+                    }
+                ]
+            }
+        ]
+    )
+    final_sse = _sse_bytes(
+        [
+            {
+                "choices": [
+                    {
+                        "delta": {"content": "Recovered by listing the directory."},
+                        "finish_reason": "stop",
+                    }
+                ]
+            }
+        ]
+    )
+    session = _FakeSession([_FakeResp(tool_sse), _FakeResp(final_sse)])
+
+    with (
+        patch("remedy.core.agent.aiohttp.ClientSession", return_value=session),
+        patch("remedy.core.agent._message_wants_tools", return_value=True),
+    ):
+        text = await rt._call_llm("read missing.py")
+
+    assert "Recovered" in text
+    assert session.posts == 2
+    # Second request must include the recovery nudge user message.
+    assert len(session.bodies) >= 2
+    second_msgs = session.bodies[1].get("messages") or []
+    nudge_msgs = [
+        m
+        for m in second_msgs
+        if m.get("role") == "user" and RECOVERY_NUDGE in str(m.get("content") or "")
+    ]
+    assert len(nudge_msgs) == 1

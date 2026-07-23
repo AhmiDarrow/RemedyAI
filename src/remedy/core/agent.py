@@ -45,22 +45,27 @@ from remedy.skills.tool_registry import ToolRegistry
 logger = logging.getLogger(__name__)
 
 
+from remedy.core.errors import format_tool_error
 from remedy.core.react_policy import (
     HISTORY_CHAR_BUDGET as _HISTORY_CHAR_BUDGET,
     HISTORY_MSG_LIMIT as _HISTORY_MSG_LIMIT,
     MAX_PARALLEL_TOOLS as _MAX_PARALLEL_TOOLS,
     MAX_REACT_STEPS as _MAX_REACT_STEPS,
+    RECOVERY_NUDGE,
     _DEFAULT_SYSTEM_PROMPT,
     _build_system_prompt,
     _looks_like_pseudo_tools,
     _message_wants_tools,
     _parse_pseudo_tool_calls,
     _tool_call_fingerprint,
+    batch_has_tool_errors,
     build_system_prompt,
     looks_like_pseudo_tools,
     message_wants_tools,
     parse_pseudo_tool_calls,
+    recovery_nudge_message,
     tool_call_fingerprint,
+    tool_content_is_error,
 )
 from remedy.core.react_stream import (
     StreamRoundState,
@@ -138,17 +143,45 @@ class BasicRuntime(AgentRuntime):
     def _register_workspace_tools(self) -> None:
         """Register file/shell tools jailed to the project workspace."""
 
+        def _parent_hint(path: str) -> str:
+            p = (path or ".").strip() or "."
+            if p in (".", "./", ""):
+                return "."
+            parent = Path(p).parent.as_posix()
+            return parent if parent not in ("", ".") else "."
+
         async def file_read(path: str = ".") -> str:
             root = self.effective_project_path()
             target = jail_path(path, root)
             if not target.exists():
-                return f"Error: file not found: {path}"
+                parent = _parent_hint(path)
+                return format_tool_error(
+                    f"file not found: {path}",
+                    code="NOT_FOUND",
+                    tool_name="file_read",
+                    suggestion=(
+                        f"Call list_dir on '{parent}' or project root ('.') "
+                        "to discover the correct path, then retry file_read."
+                    ),
+                )
             if target.is_dir():
-                return f"Error: path is a directory (use list_dir): {path}"
+                return format_tool_error(
+                    f"path is a directory: {path}",
+                    code="IS_DIRECTORY",
+                    tool_name="file_read",
+                    suggestion=(
+                        f'Use list_dir("{path}") then file_read on a specific file inside it.'
+                    ),
+                )
             try:
                 data = target.read_text(encoding="utf-8", errors="replace")
             except OSError as e:
-                return f"Error reading {path}: {e}"
+                return format_tool_error(
+                    f"cannot read {path}: {e}",
+                    code="IO_ERROR",
+                    tool_name="file_read",
+                    suggestion="Check permissions or try list_dir on the parent path.",
+                )
             # Cap large files for context safety
             if len(data) > 200_000:
                 return data[:200_000] + f"\n\n... [truncated, {len(data)} bytes total]"
@@ -161,16 +194,39 @@ class BasicRuntime(AgentRuntime):
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(content, encoding="utf-8")
             except OSError as e:
-                return f"Error writing {path}: {e}"
+                parent = _parent_hint(path)
+                return format_tool_error(
+                    f"cannot write {path}: {e}",
+                    code="IO_ERROR",
+                    tool_name="file_write",
+                    suggestion=(
+                        f"Verify the parent path with list_dir('{parent}') "
+                        "and ensure the path is inside the project workspace."
+                    ),
+                )
             return f"Wrote {len(content)} bytes to {path}"
 
         async def list_dir(path: str = ".") -> str:
             root = self.effective_project_path()
             target = jail_path(path, root)
             if not target.exists():
-                return f"Error: path not found: {path}"
+                parent = _parent_hint(path)
+                return format_tool_error(
+                    f"path not found: {path}",
+                    code="NOT_FOUND",
+                    tool_name="list_dir",
+                    suggestion=(
+                        f"Call list_dir on '{parent}' or project root ('.') "
+                        "to find the correct directory name."
+                    ),
+                )
             if not target.is_dir():
-                return f"Error: not a directory: {path}"
+                return format_tool_error(
+                    f"not a directory: {path}",
+                    code="NOT_A_DIRECTORY",
+                    tool_name="list_dir",
+                    suggestion=f'Use file_read("{path}") for file contents instead.',
+                )
             lines: list[str] = []
             try:
                 for p in sorted(target.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
@@ -182,7 +238,12 @@ class BasicRuntime(AgentRuntime):
                         lines.append("... (truncated)")
                         break
             except OSError as e:
-                return f"Error listing {path}: {e}"
+                return format_tool_error(
+                    f"cannot list {path}: {e}",
+                    code="IO_ERROR",
+                    tool_name="list_dir",
+                    suggestion="Retry with project root '.' or a known subdirectory.",
+                )
             return "\n".join(lines) if lines else "(empty)"
 
         async def bash_exec(command: str = "") -> str:
@@ -191,10 +252,23 @@ class BasicRuntime(AgentRuntime):
             from remedy.execution.sandbox import SubprocessSandbox
 
             if not command or not str(command).strip():
-                return "Error: empty command"
+                return format_tool_error(
+                    "empty command",
+                    code="EMPTY_COMMAND",
+                    tool_name="bash_exec",
+                    suggestion="Pass a non-empty shell command string.",
+                )
             danger = check_dangerous_command(["bash", "-c", command])
             if danger:
-                return f"Blocked by security policy: {danger}"
+                return format_tool_error(
+                    f"blocked by security policy: {danger}",
+                    code="SECURITY_BLOCK",
+                    tool_name="bash_exec",
+                    suggestion=(
+                        "Use a safer equivalent (read files with file_read/list_dir; "
+                        "avoid destructive or network-restricted commands)."
+                    ),
+                )
             root = self.effective_project_path()
             argv = [*win_shell_prefix(), command]
             sandbox = SubprocessSandbox(allowed_paths=[root])
@@ -204,6 +278,11 @@ class BasicRuntime(AgentRuntime):
                 parts.append(result.stdout[:50_000])
             if result.stderr:
                 parts.append(f"stderr:\n{result.stderr[:20_000]}")
+            if result.exit_code != 0:
+                parts.append(
+                    "Suggestion: Read stderr, fix flags/paths/cwd, or try a different "
+                    "command; use list_dir/file_read if you only need file contents."
+                )
             return "\n".join(parts)
 
         self.tool_registry.register_builtin_handler(
@@ -353,7 +432,6 @@ class BasicRuntime(AgentRuntime):
     async def call_tool(self, tool_call: ToolCall) -> ToolResult:
         import time as _time
 
-        from remedy.core.errors import format_tool_error
         from remedy.core.metrics import default_registry
 
         name = tool_call.tool_name
@@ -361,7 +439,12 @@ class BasicRuntime(AgentRuntime):
         t0 = _time.perf_counter()
         try:
             result = await self.tool_registry.execute(name, **tool_call.arguments)
-            default_registry.counter("remedy_tool_success_total", tool=name).inc()
+            # Workspace tools often return Error-prefixed strings on soft failure;
+            # still count as handler success, but surface metrics for recovery telemetry.
+            if isinstance(result, str) and tool_content_is_error(result):
+                default_registry.counter("remedy_tool_soft_errors_total", tool=name).inc()
+            else:
+                default_registry.counter("remedy_tool_success_total", tool=name).inc()
             default_registry.histogram(
                 "remedy_tool_duration_seconds", tool=name
             ).observe(_time.perf_counter() - t0)
@@ -379,7 +462,12 @@ class BasicRuntime(AgentRuntime):
             return ToolResult(
                 call_id=tool_call.id,
                 success=False,
-                error=format_tool_error(str(e), code="TOOL_VALUE_ERROR", tool_name=name),
+                error=format_tool_error(
+                    str(e),
+                    code="TOOL_VALUE_ERROR",
+                    tool_name=name,
+                    suggestion="Check tool arguments (path/command) and retry with corrected values.",
+                ),
                 duration_ms=(_time.perf_counter() - t0) * 1000,
             )
         except Exception as e:
@@ -391,7 +479,15 @@ class BasicRuntime(AgentRuntime):
             return ToolResult(
                 call_id=tool_call.id,
                 success=False,
-                error=format_tool_error(str(e), code="TOOL_EXCEPTION", tool_name=name),
+                error=format_tool_error(
+                    str(e),
+                    code="TOOL_EXCEPTION",
+                    tool_name=name,
+                    suggestion=(
+                        "Try a different tool or args (list_dir / alternate path); "
+                        "do not invent results."
+                    ),
+                ),
                 duration_ms=(_time.perf_counter() - t0) * 1000,
             )
 
@@ -522,12 +618,21 @@ class BasicRuntime(AgentRuntime):
                 args = {}
 
             result = await self.call_tool(ToolCall(tool_name=name, arguments=args))
-            payload = (
-                result.data if result.success else {"error": result.error or "tool failed"}
-            )
-            content_str = (
-                payload if isinstance(payload, str) else json.dumps(payload, default=str)
-            )
+            if result.success:
+                payload = result.data
+                content_str = (
+                    payload
+                    if isinstance(payload, str)
+                    else json.dumps(payload, default=str)
+                )
+            else:
+                # Prefer already-formatted error strings (with Suggestion lines).
+                content_str = result.error or format_tool_error(
+                    "tool failed",
+                    code="TOOL_FAILED",
+                    tool_name=name or "unknown",
+                    suggestion="Retry with corrected arguments or a different tool.",
+                )
             # Cap tool payloads — keeps multi-step turns fast and under context limits.
             if len(content_str) > 48_000:
                 content_str = content_str[:48_000] + "\n…[tool output truncated]"
@@ -571,7 +676,15 @@ class BasicRuntime(AgentRuntime):
                 err_msg = {
                     "role": "tool",
                     "tool_call_id": str(uuid4()),
-                    "content": json.dumps({"error": str(item)}),
+                    "content": format_tool_error(
+                        str(item),
+                        code="TOOL_EXCEPTION",
+                        tool_name="unknown",
+                        suggestion=(
+                            "Retry with corrected arguments or a different tool "
+                            "(list_dir / file_read)."
+                        ),
+                    ),
                 }
                 yield "@@tool_result:error", err_msg
                 continue
@@ -625,6 +738,8 @@ class BasicRuntime(AgentRuntime):
             produced_user_text = False
             pseudo_recovery_done = False
             pseudo_nudge_count = 0
+            # One automatic recovery nudge per turn after a failing tool batch.
+            recovery_nudge_done = False
             headers = self._provider.auth_headers(self._llm_api_key)
             endpoint = self._provider.chat_endpoint(self._llm_base_url)
 
@@ -763,6 +878,7 @@ class BasicRuntime(AgentRuntime):
                                     "tool_calls": recovered,
                                 }
                             )
+                            batch_tool_msgs: list[dict[str, Any]] = []
                             async for event, tool_msg in self._execute_tool_calls(
                                 recovered,
                                 seen_fps=seen_fps,
@@ -772,6 +888,13 @@ class BasicRuntime(AgentRuntime):
                                     yield event
                                 if tool_msg:
                                     messages.append(tool_msg)
+                                    batch_tool_msgs.append(tool_msg)
+                            if (
+                                not recovery_nudge_done
+                                and batch_has_tool_errors(batch_tool_msgs)
+                            ):
+                                recovery_nudge_done = True
+                                messages.append(recovery_nudge_message())
                             continue
 
                     if text_out and (not tool_calls_list or force_answer):
@@ -920,6 +1043,7 @@ class BasicRuntime(AgentRuntime):
                         }
                     )
 
+                    batch_tool_msgs: list[dict[str, Any]] = []
                     async for event, tool_msg in self._execute_tool_calls(
                         fresh_calls,
                         seen_fps=seen_fps,
@@ -929,12 +1053,27 @@ class BasicRuntime(AgentRuntime):
                             yield event
                         if tool_msg:
                             messages.append(tool_msg)
+                            batch_tool_msgs.append(tool_msg)
 
                     logger.debug(
                         "ReAct step %d executed %d tool call(s)",
                         step + 1,
                         len(fresh_calls),
                     )
+
+                    # Soft recovery: if tools failed, nudge the model once to
+                    # try alternate paths/commands before answering.
+                    if (
+                        not recovery_nudge_done
+                        and not force_answer
+                        and batch_has_tool_errors(batch_tool_msgs)
+                    ):
+                        recovery_nudge_done = True
+                        messages.append(recovery_nudge_message())
+                        logger.info(
+                            "Injected tool recovery nudge after step %d (RECOVERY_NUDGE)",
+                            step + 1,
+                        )
 
             # Exhausted steps without a streamed answer — synthesize briefly.
             if not produced_user_text:

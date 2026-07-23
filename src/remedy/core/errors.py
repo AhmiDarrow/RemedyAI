@@ -69,6 +69,7 @@ def tool_error_payload(
     *,
     code: str = "TOOL_ERROR",
     tool_name: str | None = None,
+    suggestion: str | None = None,
     **details: Any,
 ) -> dict[str, Any]:
     """Standard structured error dict for tool / API boundaries.
@@ -83,6 +84,8 @@ def tool_error_payload(
     }
     if tool_name:
         payload["tool_name"] = tool_name
+    if suggestion:
+        payload["suggestion"] = suggestion
     if details:
         payload["details"] = details
     return payload
@@ -93,12 +96,20 @@ def format_tool_error(
     *,
     code: str = "TOOL_ERROR",
     tool_name: str | None = None,
+    suggestion: str | None = None,
 ) -> str:
-    """Human-readable tool error string (keeps chat transcript readable)."""
+    """Human-readable tool error string (keeps chat transcript readable).
+
+    When ``suggestion`` is set, append a recovery hint the model can act on
+    (e.g. list_dir on parent after NOT_FOUND).
+    """
     prefix = f"[{code}]"
     if tool_name:
         prefix = f"[{code}:{tool_name}]"
-    return f"Error {prefix}: {message}"
+    base = f"Error {prefix}: {message}"
+    if suggestion:
+        return f"{base}\nSuggestion: {suggestion}"
+    return base
 
 
 def as_remedy_error(exc: BaseException, *, default_code: str = "INTERNAL_ERROR") -> RemedyError:

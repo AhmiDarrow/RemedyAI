@@ -33,7 +33,24 @@ _DEFAULT_SYSTEM_PROMPT = (
     "That hangs the UI — always use native tool_calls.\n"
     "- Prefer parallel tool calls for independent reads; avoid repeating the same call.\n"
     "- After tool results, synthesize a clear final answer. Never stall or loop.\n"
-    "- If information is already in context (provider block, skills list, history), use it."
+    "- If information is already in context (provider block, skills list, history), use it.\n\n"
+    "Recovery (do not give up on the first failure):\n"
+    "- Tool errors include Error [CODE:tool] and often a Suggestion line — follow it.\n"
+    "- Path not found → list_dir on the parent or project root; try alternate spellings.\n"
+    "- Path is a directory → use list_dir, then file_read on specific files.\n"
+    "- Not a directory / wrong type → switch tool (file_read vs list_dir).\n"
+    "- Command failed (non-zero exit / stderr) → fix flags/cwd or try a safer equivalent.\n"
+    "- Prefer discovery (list_dir) over guessing paths; never invent file contents.\n"
+    "- Only report that you cannot finish after at least one recovery attempt "
+    "with different arguments or a different tool."
+)
+
+# Injected once per turn when a tool batch returns errors (runtime recovery nudge).
+RECOVERY_NUDGE = (
+    "One or more tools failed. Do not give a final answer yet. "
+    "Recover now: read the Error/Suggestion lines, then list_dir on the parent or "
+    "project root, try an alternate path, or adjust the shell command. "
+    "Finish the user's task with corrected tool calls."
 )
 
 # Real coding agents need headroom; simple turns never spend this budget.
@@ -186,3 +203,57 @@ def build_system_prompt(persona: str | None = None) -> str:
 
 
 _build_system_prompt = build_system_prompt
+
+
+def tool_content_is_error(content: str | None) -> bool:
+    """True when a tool result string represents a failure the model should recover from.
+
+    Matches workspace-tool strings (``Error …``), security blocks, structured
+    ``{"ok": false, …}`` payloads, and non-zero ``bash_exec`` exit codes.
+    """
+    if not content:
+        return False
+    s = content.strip()
+    if not s:
+        return False
+    if s.startswith("Error"):
+        return True
+    if s.startswith("Blocked by security"):
+        return True
+    if s.startswith("{"):
+        try:
+            data = json.loads(s)
+        except Exception:
+            data = None
+        if isinstance(data, dict) and (
+            data.get("ok") is False or (data.get("error") and not data.get("ok", True))
+        ):
+            return True
+    # bash_exec: first line is exit_code=N
+    if s.startswith("exit_code="):
+        first = s.split("\n", 1)[0]
+        try:
+            code_s = first.split("=", 1)[1].strip().split()[0]
+            if int(code_s) != 0:
+                return True
+        except (IndexError, ValueError):
+            pass
+    return False
+
+
+def batch_has_tool_errors(tool_messages: list[dict[str, Any]]) -> bool:
+    """True if any tool message in the batch looks like a failure."""
+    for msg in tool_messages:
+        if not isinstance(msg, dict):
+            continue
+        if msg.get("role") != "tool":
+            continue
+        content = msg.get("content")
+        if isinstance(content, str) and tool_content_is_error(content):
+            return True
+    return False
+
+
+def recovery_nudge_message() -> dict[str, str]:
+    """User-role message that triggers one automatic recovery attempt."""
+    return {"role": "user", "content": RECOVERY_NUDGE}
