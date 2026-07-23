@@ -18,7 +18,7 @@ from uuid import uuid4
 
 import aiohttp
 
-from remedy.core.errors import format_tool_error
+from remedy.core.errors import SecurityError, format_tool_error
 from remedy.core.providers import ProviderAdapter, get_provider
 from remedy.core.react_policy import (
     HISTORY_CHAR_BUDGET as _HISTORY_CHAR_BUDGET,
@@ -38,12 +38,14 @@ from remedy.core.react_policy import (
 from remedy.core.react_stream import (
     StreamRoundState,
     apply_openai_sse_chunk,
+    build_assistant_api_message,
     build_runtime_system_block,
     ensure_tool_call_pairings,
     filter_fresh_tool_calls,
     finalize_round_text,
     normalize_tool_calls,
     parse_sse_data_line,
+    repair_reasoning_content_in_messages,
     should_enable_tools,
 )
 from remedy.core.runtime import AgentRuntime
@@ -443,6 +445,25 @@ class BasicRuntime(AgentRuntime):
                 data=result,
                 duration_ms=(_time.perf_counter() - t0) * 1000,
             )
+        except SecurityError as e:
+            default_registry.counter("remedy_tool_errors_total", tool=name).inc()
+            default_registry.histogram(
+                "remedy_tool_duration_seconds", tool=name
+            ).observe(_time.perf_counter() - t0)
+            return ToolResult(
+                call_id=tool_call.id,
+                success=False,
+                error=format_tool_error(
+                    str(e),
+                    code="SECURITY_BLOCKED",
+                    tool_name=name,
+                    suggestion=(
+                        "Stay inside the project workspace; use list_dir on the "
+                        "project root and a relative path."
+                    ),
+                ),
+                duration_ms=(_time.perf_counter() - t0) * 1000,
+            )
         except ValueError as e:
             default_registry.counter("remedy_tool_errors_total", tool=name).inc()
             default_registry.histogram(
@@ -558,9 +579,9 @@ class BasicRuntime(AgentRuntime):
             if role == "assistant":
                 if content.startswith("@@") or "[LLM" in content[:40]:
                     continue
-                # Soft-trim huge prior answers
-                if len(content) > 4000:
-                    content = content[:4000] + "\n…[truncated]"
+                # Soft-trim huge prior answers (raised with HISTORY_CHAR_BUDGET)
+                if len(content) > 12_000:
+                    content = content[:12_000] + "\n…[truncated]"
             if len(content) > budget:
                 content = content[:budget] + "\n…[truncated]"
             budget -= len(content)
@@ -738,24 +759,32 @@ class BasicRuntime(AgentRuntime):
             headers = self._provider.auth_headers(self._llm_api_key)
             endpoint = self._provider.chat_endpoint(self._llm_base_url)
 
-            # Long project reviews need headroom: no short total wall that kills mid-stream.
-            # sock_read only trips when the provider goes silent (not while tokens keep flowing).
-            # total=None → no overall deadline; connect is still bounded.
-            timeout = aiohttp.ClientTimeout(total=None, sock_read=300, connect=30)
+            # Long project reviews need headroom; cap overall wall so a runaway
+            # stream cannot hang forever (sock_read still covers silence).
+            timeout = aiohttp.ClientTimeout(total=900, sock_read=300, connect=30)
             connector = aiohttp.TCPConnector(
                 limit=12,
                 ttl_dns_cache=300,
             )
             # How many times we auto-continue after finish_reason=length / max_tokens.
-            max_length_continuations = 4
+            max_length_continuations = 6
             length_continuations = 0
+            # Retry once after repairing DeepSeek reasoning_content on tool turns.
+            reasoning_repair_done = False
+            # Soft API errors: keep going when we already have tool context.
+            api_soft_failures = 0
+            max_api_soft_failures = 3
+            # Sticky force-answer after recoverable provider failures.
+            force_answer_sticky = False
             async with aiohttp.ClientSession(
                 timeout=timeout, connector=connector
             ) as http:
                 for step in range(self._max_react_steps):
                     is_final_step = step >= self._max_react_steps - 1
                     # Force answer before the hard wall (and whenever tools disabled).
-                    force_answer = is_final_step or not tools
+                    force_answer = (
+                        is_final_step or not tools or force_answer_sticky
+                    )
                     # Also force answer if we have already spent many tool steps
                     # and produced no visible text — keep UX snappy.
                     if step >= 8 and not produced_user_text:
@@ -800,11 +829,53 @@ class BasicRuntime(AgentRuntime):
                             logger.error(
                                 "LLM API error %d: %s", resp.status, text[:500]
                             )
+                            # DeepSeek thinking mode: tool turns require reasoning_content.
+                            if (
+                                resp.status == 400
+                                and "reasoning_content" in text.lower()
+                                and not reasoning_repair_done
+                            ):
+                                reasoning_repair_done = True
+                                if repair_reasoning_content_in_messages(messages):
+                                    logger.warning(
+                                        "Repaired missing reasoning_content on tool "
+                                        "turns; retrying request"
+                                    )
+                                    yield (
+                                        "\n[provider fix] Restored thinking-mode "
+                                        "reasoning for tool turns; continuing…\n"
+                                    )
+                                    continue
+                            api_soft_failures += 1
+                            # Do not hard-stop the whole turn if we can still answer.
+                            if api_soft_failures <= max_api_soft_failures:
+                                yield (
+                                    f"\n[LLM notice — HTTP {resp.status}; "
+                                    f"continuing]\n{text[:240]}\n"
+                                )
+                                tools = []
+                                force_answer_sticky = True
+                                messages.append(
+                                    {
+                                        "role": "user",
+                                        "content": (
+                                            "The model API returned an error. "
+                                            "Using any tool results already gathered, "
+                                            "give your best complete answer now. "
+                                            "Do not call tools."
+                                        ),
+                                    }
+                                )
+                                continue
                             yield (
                                 f"\n[LLM ERROR — HTTP {resp.status}]\n"
-                                f"{text[:500]}\n[END LLM ERROR]"
+                                f"{text[:500]}\n[END LLM ERROR]\n"
+                                "I hit repeated API errors but will try one last "
+                                "answer from context.\n"
                             )
-                            return
+                            tools = []
+                            force_answer_sticky = True
+                            continue
 
                         # Live-stream tokens when tools are off (simple Qs / final answer).
                         # When tools are on, buffer text so "Let me check…" never jitters the UI.
@@ -838,6 +909,14 @@ class BasicRuntime(AgentRuntime):
                             content = parsed.get("content")
                             if content:
                                 round_state.content_parts.append(content)
+                            # Capture provider reasoning for tool-turn replay.
+                            reason = (
+                                parsed.get("reasoning_content")
+                                or parsed.get("reasoning")
+                                or ""
+                            )
+                            if isinstance(reason, str) and reason.strip():
+                                round_state.reasoning_parts.append(reason.strip())
                             raw_tcs = parsed.get("tool_calls")
                             if raw_tcs:
                                 round_state.tool_call_acc = dict(enumerate(raw_tcs))
@@ -847,6 +926,7 @@ class BasicRuntime(AgentRuntime):
                         reasoning_parts = round_state.reasoning_parts
 
                     tool_calls_list = round_state.tool_calls_list(collected)
+                    reasoning_out = round_state.reasoning_out
 
                     # Finalize text. Live-stream already yielded tokens when tools off.
                     text_out = finalize_round_text(round_state, tool_calls_list)
@@ -879,14 +959,14 @@ class BasicRuntime(AgentRuntime):
                             recovered = normalize_tool_calls(recovered)
                             yield "@@tool_calls"
                             messages.append(
-                                {
-                                    "role": "assistant",
-                                    "content": (
+                                build_assistant_api_message(
+                                    content=(
                                         "I'll use tools to inspect the project "
                                         "(recovering from text-form tool calls)."
                                     ),
-                                    "tool_calls": recovered,
-                                }
+                                    tool_calls=recovered,
+                                    reasoning_content=reasoning_out or None,
+                                )
                             )
                             batch_tool_msgs: list[dict[str, Any]] = []
                             async for event, tool_msg in self._execute_tool_calls(
@@ -942,11 +1022,11 @@ class BasicRuntime(AgentRuntime):
                                         pseudo_recovery_done = True
                                         tools = all_tools
                                         messages.append(
-                                            {
-                                                "role": "assistant",
-                                                "content": text_out[:500],
-                                                "tool_calls": recovered,
-                                            }
+                                            build_assistant_api_message(
+                                                content=text_out[:500],
+                                                tool_calls=recovered,
+                                                reasoning_content=reasoning_out or None,
+                                            )
                                         )
                                         async for event, tool_msg in self._execute_tool_calls(
                                             recovered,
@@ -1030,11 +1110,11 @@ class BasicRuntime(AgentRuntime):
                         # Model is looping the same tools — force a final answer next.
                         looped = normalize_tool_calls(tool_calls_list)
                         messages.append(
-                            {
-                                "role": "assistant",
-                                "content": collected.get("content"),
-                                "tool_calls": looped,
-                            }
+                            build_assistant_api_message(
+                                content=collected.get("content"),
+                                tool_calls=looped,
+                                reasoning_content=reasoning_out or "",
+                            )
                         )
                         for tc in looped:
                             fp = _tool_call_fingerprint(tc)
@@ -1051,11 +1131,12 @@ class BasicRuntime(AgentRuntime):
                         continue
 
                     messages.append(
-                        {
-                            "role": "assistant",
-                            "content": collected.get("content"),
-                            "tool_calls": fresh_calls,
-                        }
+                        build_assistant_api_message(
+                            content=collected.get("content"),
+                            tool_calls=fresh_calls,
+                            # DeepSeek thinking mode: MUST pass reasoning back on tool turns.
+                            reasoning_content=reasoning_out or "",
+                        )
                     )
 
                     batch_tool_msgs: list[dict[str, Any]] = []
@@ -1160,7 +1241,13 @@ class BasicRuntime(AgentRuntime):
                 )
         except Exception as e:
             logger.exception("LLM stream failed")
-            yield f"\n[LLM STREAM EXCEPTION]\n{e}\n[END LLM STREAM EXCEPTION]"
+            # Never leave the user with only a stack-looking error — give a path forward.
+            yield (
+                f"\n[LLM STREAM EXCEPTION]\n{e}\n[END LLM STREAM EXCEPTION]\n\n"
+                "Something went wrong talking to the model mid-turn. "
+                "Try again, switch model, or ask a narrower question. "
+                "Your session history is intact."
+            )
 
     async def _post_chat(
         self, body: dict[str, Any]

@@ -600,15 +600,18 @@ def _print_exec_result(result) -> None:
 
 
 async def _cmd_tool(args) -> None:
-    registry = ToolRegistry()
+    """Tool CLI — uses BasicRuntime so file/shell tools stay workspace-jailed."""
+    from remedy.core.agent import BasicRuntime
 
-    registry.register_builtin("memory_search", "Search the memory store via FTS5")
-    registry.register_builtin("memory_add", "Add an entry to the memory store")
-    registry.register_builtin("skill_load", "Load a skill by name")
-    registry.register_builtin("skill_list", "List registered skills")
-    registry.register_builtin("file_read", "Read a file from disk")
-    registry.register_builtin("file_write", "Write content to a file")
-    registry.register_builtin("bash_exec", "Execute a shell command")
+    home = Path(getattr(args, "home", None) or "~/.remedy").expanduser()
+    cfg = config_to_agent_config(resolve_config(home_dir=str(home)))
+    if not getattr(cfg, "home_dir", None):
+        cfg.home_dir = str(home)
+    if not getattr(cfg, "memory_db_path", None):
+        cfg.memory_db_path = str(home / "memory.db")
+
+    rt = BasicRuntime(cfg)
+    registry = rt.tool_registry
 
     if args.tool_cmd == "list":
         table = Table(title="Registered Tools")
@@ -644,26 +647,22 @@ async def _cmd_tool(args) -> None:
         console.print(Panel(body, title="Tool Stats"))
 
     elif args.tool_cmd == "run":
-        sandbox = SubprocessSandbox()
-        runtime = ToolRuntime(sandbox=sandbox)
         tool_args = json.loads(args.tool_args)
-
         tool_call = ToolCall(
             tool_name=args.name,
             arguments=tool_args,
             source=ToolSource.BUILTIN,
         )
-
         console.print(f"[bold]Running:[/bold] {args.name}")
-        result = await runtime.execute(
-            tool_call,
-            timeout=args.timeout,
-        )
-
+        # Goes through BasicRuntime.call_tool → jailed workspace handlers.
+        result = await rt.call_tool(tool_call)
         if result.success:
             console.print("[green]Success[/green]")
-            if result.data:
-                console.print(json.dumps(result.data, indent=2))
+            if result.data is not None:
+                if isinstance(result.data, str):
+                    console.print(result.data)
+                else:
+                    console.print(json.dumps(result.data, indent=2, default=str))
         else:
             console.print(f"[red]Failed:[/red] {result.error}")
 

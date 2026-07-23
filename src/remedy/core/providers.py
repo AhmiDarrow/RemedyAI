@@ -112,8 +112,8 @@ class OpenAIProvider(ProviderAdapter):
         return f"{base_url.rstrip('/')}/chat/completions"
 
     # Tool rounds stay modest; final answers (reviews, long write-ups) need headroom.
-    MAX_TOKENS_TOOLS = 8192
-    MAX_TOKENS_ANSWER = 32768
+    MAX_TOKENS_TOOLS = 12_288
+    MAX_TOKENS_ANSWER = 65_536
 
     def build_body(
         self,
@@ -143,22 +143,20 @@ class OpenAIProvider(ProviderAdapter):
     def extract_response(self, response_json: dict[str, Any]) -> dict[str, Any]:
         choice = (response_json.get("choices") or [{}])[0]
         msg = choice.get("message") or choice.get("delta") or {}
-        # DeepSeek reasoner / v4-flash often put the answer in reasoning_content
-        # while content is empty — surface reasoning as content so chat works.
+        # Keep reasoning_content separately — DeepSeek thinking + tool_calls
+        # requires it to be passed back on subsequent requests.
+        reasoning_raw = msg.get("reasoning_content") or msg.get("reasoning") or ""
+        if not isinstance(reasoning_raw, str):
+            reasoning_raw = ""
+        reasoning = reasoning_raw.strip()
         content = (msg.get("content") or "").strip()
-        if not content:
-            content = (
-                msg.get("reasoning_content")
-                or msg.get("reasoning")
-                or ""
-            )
-            if isinstance(content, str):
-                content = content.strip()
-            else:
-                content = ""
+        # Final answers sometimes only appear in reasoning_content.
+        if not content and reasoning and not msg.get("tool_calls"):
+            content = reasoning
         return {
             "content": content or None,
             "tool_calls": msg.get("tool_calls"),
+            "reasoning_content": reasoning or None,
         }
 
     def extract_finish_reason(self, response_json: dict[str, Any]) -> str | None:
@@ -220,8 +218,8 @@ class AnthropicProvider(ProviderAdapter):
     def chat_endpoint(self, base_url: str) -> str:
         return f"{base_url.rstrip('/')}/v1/messages"
 
-    MAX_TOKENS_TOOLS = 8192
-    MAX_TOKENS_ANSWER = 32768
+    MAX_TOKENS_TOOLS = 12_288
+    MAX_TOKENS_ANSWER = 65_536
 
     def build_body(
         self,

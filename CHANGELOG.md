@@ -2,7 +2,24 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
-## [0.10.11] — 2026-07-23
+## [0.10.12] — 2026-07-23
+
+### Fixed (review + stop-the-agent failures)
+
+- **DeepSeek HTTP 400** `reasoning_content must be passed back`: assistant tool
+  turns now include `reasoning_content` from the stream; repair+retry if missing.
+- **API failures no longer abort the whole turn**: soft-recover up to 3 times,
+  force a final answer from tool context instead of stopping cold.
+- Stream exceptions end with a recoverable user message (session intact).
+- **CLI `remedy tool run`**: uses BasicRuntime workspace-jailed tools (no bypass).
+- **Security**: Windows dangerous commands (reg, takeown, icacls, …); Windows
+  recursive del/rmdir patterns; stop flagging bare `2>/dev/null`.
+- **SecurityError** tool results use SECURITY_BLOCKED (clearer than generic exception).
+- Larger history/context (48k char budget, more steps/tokens) for long project reviews.
+- Workspace jail unit tests + reasoning_content tests.
+
+## [0.10.11]
+ — 2026-07-23
 
 ### Fixed
 

@@ -203,7 +203,28 @@ def infer_provider_from_model(model_id: str) -> str | None:
         return "google"
     if mid.startswith("deepseek"):
         return "deepseek"
-    if mid.startswith("llama") or mid.startswith("qwen") or mid.startswith("codellama") or mid.startswith("mistral"):
+    # Common local / Ollama model family prefixes (not exhaustive).
+    if mid.startswith(
+        (
+            "llama",
+            "qwen",
+            "codellama",
+            "mistral",
+            "mixtral",
+            "phi",
+            "gemma",
+            "codegemma",
+            "tinyllama",
+            "wizard",
+            "nous",
+            "yi-",
+            "solar",
+            "orca",
+            "starcoder",
+            "deepseek-coder",
+            "deepseek-r1",
+        )
+    ):
         return "ollama"
     return None
 

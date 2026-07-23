@@ -273,7 +273,7 @@ class MemoryStore:
         return entry
 
     # Threshold: disable per-row FTS triggers and rebuild once after bulk write.
-    _BULK_FTS_THRESHOLD = 10
+    _BULK_FTS_THRESHOLD = 50
 
     _FTS_TRIGGER_SQL = (
         """

@@ -107,10 +107,11 @@ def apply_openai_sse_chunk(
         if stream_live:
             state.produced_user_text = True
             live = content_delta
-    else:
-        reason_delta = delta.get("reasoning_content") or delta.get("reasoning")
-        if reason_delta:
-            state.reasoning_parts.append(reason_delta)
+    # DeepSeek thinking mode streams reasoning_content alongside (or before) content.
+    # Must accumulate independently — not only in the no-content branch.
+    reason_delta = delta.get("reasoning_content") or delta.get("reasoning")
+    if reason_delta:
+        state.reasoning_parts.append(reason_delta)
     for tc in delta.get("tool_calls") or []:
         accumulate_tool_call_delta(state.tool_call_acc, tc)
     return live
@@ -307,12 +308,65 @@ def finalize_round_text(
     return text_out
 
 
+def build_assistant_api_message(
+    *,
+    content: str | None,
+    tool_calls: list[dict[str, Any]] | None = None,
+    reasoning_content: str | None = None,
+) -> dict[str, Any]:
+    """Build an assistant message for the next provider request.
+
+    DeepSeek thinking mode requires ``reasoning_content`` to be passed back
+    whenever the assistant turn included tool calls — otherwise HTTP 400:
+    "The reasoning_content in the thinking mode must be passed back to the API."
+    """
+    msg: dict[str, Any] = {
+        "role": "assistant",
+        "content": content if content is not None else None,
+    }
+    if tool_calls:
+        msg["tool_calls"] = tool_calls
+        # Always include the field on tool turns when we have any reasoning text
+        # (or empty string if the provider is in thinking mode but sent none —
+        # empty is safer than omitting for some DeepSeek variants).
+        if reasoning_content is not None:
+            msg["reasoning_content"] = reasoning_content
+        else:
+            msg["reasoning_content"] = ""
+    elif reasoning_content:
+        # Non-tool turns: optional; keep for continuity when present.
+        msg["reasoning_content"] = reasoning_content
+    return msg
+
+
+def repair_reasoning_content_in_messages(
+    messages: list[dict[str, Any]],
+) -> bool:
+    """Ensure every assistant tool_calls turn has reasoning_content.
+
+    Returns True if any message was modified (caller should retry the request).
+    """
+    changed = False
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        if msg.get("role") != "assistant":
+            continue
+        if not msg.get("tool_calls"):
+            continue
+        if "reasoning_content" not in msg:
+            msg["reasoning_content"] = ""
+            changed = True
+    return changed
+
+
 # Re-export policy helpers used by stream loop call sites.
 __all__ = [
     "StreamRoundState",
     "accumulate_tool_call_delta",
     "apply_openai_sse_chunk",
     "build_runtime_system_block",
+    "build_assistant_api_message",
     "ensure_tool_call_pairings",
     "filter_fresh_tool_calls",
     "finalize_round_text",
@@ -322,6 +376,7 @@ __all__ = [
     "normalize_tool_calls",
     "parse_pseudo_tool_calls",
     "parse_sse_data_line",
+    "repair_reasoning_content_in_messages",
     "should_enable_tools",
     "tool_call_fingerprint",
 ]

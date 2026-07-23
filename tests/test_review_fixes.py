@@ -118,6 +118,14 @@ class TestSecurity:
     def test_blocks_dangerous_rm(self):
         assert check_dangerous_command(["rm", "-rf", "/"]) is not None
 
+    def test_blocks_windows_system_tools(self):
+        assert check_dangerous_command(["reg", "add", "HKLM\\x"]) is not None
+        assert check_dangerous_command(["icacls", "C:\\Windows"]) is not None
+
+    def test_does_not_flag_stderr_redirect_alone(self):
+        warn = check_dangerous_command(["echo", "hi", "2>/dev/null"])
+        assert warn is None or "Error output suppression" not in warn
+
     def test_safe_path_blocks_traversal(self, tmp_path):
         with pytest.raises(SecurityError):
             safe_path("..", base_dir=tmp_path)

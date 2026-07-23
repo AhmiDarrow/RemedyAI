@@ -54,10 +54,11 @@ RECOVERY_NUDGE = (
 )
 
 # Real coding agents need headroom; simple turns never spend this budget.
-MAX_REACT_STEPS = 24
+MAX_REACT_STEPS = 32
 MAX_PARALLEL_TOOLS = 8
-HISTORY_MSG_LIMIT = 30
-HISTORY_CHAR_BUDGET = 14_000
+HISTORY_MSG_LIMIT = 48
+# Larger project reviews need headroom (was 14k — hit walls mid-review).
+HISTORY_CHAR_BUDGET = 48_000
 
 # Messages that look like they need filesystem / shell tools.
 _TOOL_HINT_RE = re.compile(
