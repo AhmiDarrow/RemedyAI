@@ -80,6 +80,14 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         # setup_completed True (including Skip) → never re-show automatically.
         setup_completed = not needs_first_run_setup(cfg, config_path=config_path)
 
+        # Env bootstrap (e.g. XAI_API_KEY → preselect xAI) for display only.
+        try:
+            from remedy.interfaces.config import apply_env_provider_bootstrap
+
+            cfg = apply_env_provider_bootstrap(cfg)
+        except Exception:
+            pass
+
         # Return configured values; soft-normalize only for response display.
         # Never write disk from GET (avoids races with PUT and Ollama false-heals).
         raw_provider = cfg.get("llm_provider", os.environ.get("REMEDY_LLM_PROVIDER", "openai"))
@@ -100,13 +108,29 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         key_set = bool(
             cfg.get("llm_api_key") or os.environ.get("REMEDY_LLM_API_KEY") or runtime_key
         )
+        xai_auth: dict | None = None
+        if provider == "xai":
+            try:
+                from remedy.interfaces.xai_auth import load_credentials
 
-        return {
+                home = cfg.get("home_dir")
+                from pathlib import Path
+
+                creds = load_credentials(Path(home).expanduser() if home else None)
+                xai_auth = creds.to_public_dict()
+                if creds.connected:
+                    key_set = True
+            except Exception:
+                xai_auth = None
+
+        out = {
             "llm_provider": provider,
             "llm_model": model,
             "llm_base_url": base_url,
             "llm_api_key_set": key_set,
-            "llm_ready": provider_credentials_ready(cfg) or bool(runtime_key),
+            "llm_ready": provider_credentials_ready(cfg) or bool(runtime_key) or bool(
+                xai_auth and xai_auth.get("connected")
+            ),
             "name": cfg.get("name", "Remedy"),
             "persona": cfg.get("persona", "default"),
             "project_path": cfg.get("project_path")
@@ -121,6 +145,9 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             "needs_setup": not setup_completed,
             "config_path": str(config_path) if config_path else str(_default_config_path()),
         }
+        if xai_auth is not None:
+            out["xai_auth"] = xai_auth
+        return out
 
     @app.put("/api/settings")
     async def update_settings(req: SettingsUpdateRequest):
@@ -173,6 +200,21 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
 
         # Hot-reload live agent so the next chat uses the new endpoint/model/persona/project.
         api_key_for_runtime = updates.get("llm_api_key")
+        # xAI: persist API key to auth store + resolve OAuth bearer when no key in request.
+        if provider == "xai":
+            try:
+                from pathlib import Path
+
+                from remedy.interfaces.xai_auth import resolve_bearer, save_api_key
+
+                home = cfg.get("home_dir")
+                home_path = Path(home).expanduser() if home else None
+                if api_key_for_runtime:
+                    save_api_key(str(api_key_for_runtime), home=home_path)
+                if not api_key_for_runtime:
+                    api_key_for_runtime = resolve_bearer(home_path)
+            except Exception as exc:
+                logger.debug("xAI settings key sync: %s", exc)
         _apply_llm_to_runtime(
             runtime,
             provider=provider,

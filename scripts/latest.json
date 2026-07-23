@@ -1,11 +1,11 @@
 {
-  "version": "v0.10.14",
-  "notes": "Remedy Desktop v0.10.14 \u2014 splash 3s + no white flash, system theme, keyboard help discoverability",
-  "pub_date": "2026-07-23T20:40:42Z",
+  "version": "v0.10.15",
+  "notes": "Remedy Desktop v0.10.15 — xAI OAuth + API key, Groq/Mistral, self-setup providers",
+  "pub_date": "2026-07-23T22:00:00Z",
   "platforms": {
     "windows-x86_64": {
       "signature": "",
-      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.10.14/Remedy_Desktop_0.10.14_x64-setup.exe"
+      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.10.15/Remedy_Desktop_0.10.15_x64-setup.exe"
     }
   }
 }

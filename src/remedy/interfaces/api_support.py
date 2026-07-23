@@ -337,6 +337,17 @@ def _sync_runtime_llm_from_config(
         or getattr(runtime, "_llm_api_key", "")
         or ""
     )
+    # xAI dual auth (OAuth token or stored console key).
+    if not api_key and provider.lower() == "xai":
+        try:
+            from remedy.interfaces.xai_auth import resolve_bearer
+
+            home = cfg.get("home_dir")
+            token = resolve_bearer(Path(home).expanduser() if home else None)
+            if token:
+                api_key = token
+        except Exception as exc:
+            logger.debug("xAI resolve_bearer failed: %s", exc)
     # Local providers: ensure a dummy key so stream path does not fall back.
     if not api_key and (
         provider.lower() == "ollama" or (base_url and _is_local_url(base_url))

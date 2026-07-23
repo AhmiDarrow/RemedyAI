@@ -76,3 +76,12 @@ class TestProviderCredentialsReady:
         assert provider_credentials_ready(
             {"llm_provider": "openai", "llm_base_url": "https://api.openai.com/v1"}
         ) is False
+
+    def test_xai_without_credentials(self):
+        assert provider_credentials_ready(
+            {
+                "llm_provider": "xai",
+                "llm_base_url": "https://api.x.ai/v1",
+                "llm_api_key": "",
+            }
+        ) is False

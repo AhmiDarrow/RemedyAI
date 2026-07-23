@@ -72,6 +72,13 @@ Same-name re-upload overwrites the prior file (no `_N` suffixes).
 | `GET` | `/api/metrics` | JSON metrics + health; `?format=prometheus` for scrape text |
 | | | Chat latency: `remedy_chat_duration_seconds{path=session_stream\|session_message\|chat}` |
 | `GET` | `/api/models` | Available LLM models + default (auto-discovers from provider) |
+| `GET` | `/api/providers` | Provider catalog (auth modes, models, advanced flag) |
+| `GET` | `/api/providers/ollama/detect` | Probe local Ollama for setup suggestions |
+| `GET` | `/api/auth/xai` | xAI connection status (OAuth / API key) |
+| `POST` | `/api/auth/xai/login` | Start xAI device-code OAuth |
+| `GET` | `/api/auth/xai/login/status` | Poll OAuth until connected |
+| `POST` | `/api/auth/xai/apikey` | Save xAI console API key |
+| `DELETE` | `/api/auth/xai` | Sign out / clear xAI tokens |
 | `GET` | `/api/agents` | Available agent profiles |
 | `POST` | `/api/sessions/{id}/command` | Execute slash command |
 | `GET` | `/api/skills` | List skills (including bundled defaults) |
@@ -102,9 +109,19 @@ event: error         → { message: "..." }
 │              │  │ Composer                  [model] ││
 │              │  │ [multiline input + send/stop]     ││
 │              │  └──────────────────────────────────┘│
-│              │  Status: ● Connected · remedy v0.10.4│
+│              │  Status: ● Connected · remedy v0.10.15│
 └──────────────┴──────────────────────────────────────┘
 ```
+
+## Provider setup (v0.10.15+)
+
+- **Known brands** (OpenAI, Anthropic, Google, DeepSeek, **xAI**, Groq, Mistral,
+  OpenRouter, Ollama): no Base URL field — catalog fills it.
+- **xAI**: primary **Sign in with xAI** (device-code OAuth); secondary API key.
+  Opens the system browser for verification; tokens in `~/.remedy/auth/xai.json`.
+- **Custom / OpenAI-compatible**: under **Show advanced** (Base URL editable).
+- **Ollama**: auto-detect when local server responds; no API key required.
+- Themes default to **System**; Settings → Help & shortcuts lists hotkeys.
 
 ## Slash Commands (v1)
 

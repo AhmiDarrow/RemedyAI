@@ -356,6 +356,21 @@ LLM_PROVIDERS: dict[str, dict[str, str]] = {
         "model": "deepseek-chat",
         "base_url": "https://api.deepseek.com/v1",
     },
+    "xai": {
+        "label": "xAI (Grok) — OAuth or API key",
+        "model": "grok-3-mini",
+        "base_url": "https://api.x.ai/v1",
+    },
+    "groq": {
+        "label": "Groq",
+        "model": "llama-3.3-70b-versatile",
+        "base_url": "https://api.groq.com/openai/v1",
+    },
+    "mistral": {
+        "label": "Mistral",
+        "model": "mistral-small-latest",
+        "base_url": "https://api.mistral.ai/v1",
+    },
     "openrouter": {
         "label": "OpenRouter",
         "model": "openrouter/auto",
@@ -367,7 +382,7 @@ LLM_PROVIDERS: dict[str, dict[str, str]] = {
         "base_url": "http://localhost:11434/v1",
     },
     "custom": {
-        "label": "Custom OpenAI-compatible",
+        "label": "Custom OpenAI-compatible (advanced)",
         "model": "",
         "base_url": "",
     },

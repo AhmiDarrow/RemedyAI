@@ -11,6 +11,13 @@ Prefer the prebuilt installer:
 
 No Python, Node, or Rust required. In-app updates are minisign-signed.
 
+### First-run / providers
+
+The Setup wizard and Settings load providers from `GET /api/providers`.
+**xAI (Grok)** supports **Sign in with xAI** (device-code OAuth) or a console API key.
+Custom OpenAI-compatible endpoints are under **Advanced**. Ollama is detected when
+running locally. See [docs/DESKTOP.md](../docs/DESKTOP.md) and [docs/USAGE.md](../docs/USAGE.md).
+
 ## Developers
 
 ### Prerequisites

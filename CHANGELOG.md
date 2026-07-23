@@ -2,6 +2,37 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.10.15] — 2026-07-23
+
+### xAI OAuth + API key (OpenCode-style dual auth)
+
+- First-class **xAI (Grok)** provider with `https://api.x.ai/v1`
+- **Sign in with xAI** device-code OAuth (desktop Settings + Setup wizard)
+- Secondary **console API key** path (`xai-…` / `XAI_API_KEY`)
+- Tokens stored in `~/.remedy/auth/xai.json`; refresh on expiry / HTTP 401
+- CLI: `remedy auth login|logout|status|apikey xai`
+- Env bootstrap: `XAI_API_KEY` preselects xAI on clean/default config
+
+### Providers & self-setup
+
+- Catalog: **Groq**, **Mistral**, plus OpenAI / Anthropic / Google / DeepSeek / OpenRouter / Ollama
+- `GET /api/providers` is the desktop source of truth (auth modes, models, advanced flag)
+- Known brands hide Base URL; **Custom** lives under Advanced
+- Ollama auto-detect (`GET /api/providers/ollama/detect`) with setup-wizard hint
+- Desktop opens OAuth verification via Tauri shell (fallback `window.open`)
+
+### API
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/api/providers` | Provider catalog |
+| `GET` | `/api/providers/ollama/detect` | Local Ollama probe |
+| `GET` | `/api/auth/xai` | xAI auth status |
+| `POST` | `/api/auth/xai/login` | Start device-code OAuth |
+| `GET` | `/api/auth/xai/login/status` | Poll OAuth session |
+| `POST` | `/api/auth/xai/apikey` | Save console API key |
+| `DELETE` | `/api/auth/xai` | Sign out / clear tokens |
+
 ## [0.10.14] — 2026-07-23
 
 ### Desktop polish

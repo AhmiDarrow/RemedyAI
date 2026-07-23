@@ -214,6 +214,39 @@ def build_parser() -> argparse.ArgumentParser:
     config_sub.add_parser("show", help="Show current configuration")
     config_sub.add_parser("path", help="Show config file path")
 
+    # remedy auth login|logout|status xai
+    auth_cmd = sub.add_parser("auth", help="Provider authentication (OAuth / API keys)")
+    auth_sub = auth_cmd.add_subparsers(dest="auth_cmd")
+    auth_login = auth_sub.add_parser("login", help="Sign in to a provider (device-code OAuth)")
+    auth_login.add_argument(
+        "provider",
+        nargs="?",
+        default="xai",
+        help="Provider id (default: xai)",
+    )
+    auth_logout = auth_sub.add_parser("logout", help="Sign out / clear stored credentials")
+    auth_logout.add_argument(
+        "provider",
+        nargs="?",
+        default="xai",
+        help="Provider id (default: xai)",
+    )
+    auth_status = auth_sub.add_parser("status", help="Show auth status for a provider")
+    auth_status.add_argument(
+        "provider",
+        nargs="?",
+        default="xai",
+        help="Provider id (default: xai)",
+    )
+    auth_key = auth_sub.add_parser("apikey", help="Store a console API key for a provider")
+    auth_key.add_argument(
+        "provider",
+        nargs="?",
+        default="xai",
+        help="Provider id (default: xai)",
+    )
+    auth_key.add_argument("api_key", nargs="?", default=None, help="API key (prompted if omitted)")
+
     # remedy chat
     chat_cmd = sub.add_parser("chat", help="Launch interactive chat with the Remedy agent")
     chat_cmd.add_argument("--config", dest="config_file", default=None)
@@ -862,6 +895,96 @@ async def _cmd_exec(args) -> None:
     console.print(f"[dim]Exit code: {result.exit_code} ({result.duration_ms:.0f}ms)[/dim]")
 
 
+def _cmd_auth(args) -> None:
+    """Provider auth: login / logout / status / apikey (xAI device-code OAuth)."""
+    import time
+    import webbrowser
+    from pathlib import Path as _Path
+
+    provider = str(getattr(args, "provider", None) or "xai").strip().lower()
+    home = _Path(args.home).expanduser()
+    cmd = getattr(args, "auth_cmd", None)
+
+    if provider != "xai":
+        console.print(
+            f"[yellow]Auth for '{provider}' is not implemented yet. "
+            "Currently supported: xai[/yellow]"
+        )
+        return
+
+    from remedy.interfaces import xai_auth
+
+    if cmd == "status":
+        creds = xai_auth.load_credentials(home=home)
+        pub = creds.to_public_dict()
+        table = Table(title="xAI auth")
+        table.add_column("Field")
+        table.add_column("Value")
+        for k, v in pub.items():
+            table.add_row(str(k), str(v))
+        console.print(table)
+        return
+
+    if cmd == "logout":
+        xai_auth.clear_credentials(home=home)
+        console.print("[green]Signed out of xAI (cleared ~/.remedy/auth/xai.json).[/green]")
+        return
+
+    if cmd == "apikey":
+        key = getattr(args, "api_key", None)
+        if not key:
+            from rich.prompt import Prompt
+
+            key = Prompt.ask("xAI API key", password=True, console=console)
+        try:
+            creds = xai_auth.save_api_key(str(key), home=home)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            return
+        console.print(
+            f"[green]Saved xAI API key.[/green] connected={creds.connected}"
+        )
+        return
+
+    if cmd == "login":
+        console.print("[bold]Sign in with xAI[/bold] (device-code OAuth)…")
+        try:
+            start = xai_auth.start_device_login(home=home)
+        except Exception as exc:
+            console.print(f"[red]Failed to start OAuth: {exc}[/red]")
+            return
+        uri = start.get("verification_uri_complete") or start.get("verification_uri")
+        code = start.get("user_code")
+        console.print(f"User code: [bold cyan]{code}[/bold cyan]")
+        console.print(f"Open: [link={uri}]{uri}[/link]")
+        if uri:
+            try:
+                webbrowser.open(str(uri))
+            except Exception:
+                pass
+        session_id = start.get("session_id") or code
+        deadline = time.time() + int(start.get("expires_in") or 900)
+        interval = max(3, int(start.get("interval") or 5))
+        with console.status("Waiting for approval…"):
+            while time.time() < deadline:
+                time.sleep(interval)
+                status = xai_auth.login_status(session_id=session_id, home=home)
+                sess = status.get("session") or {}
+                st = sess.get("status")
+                if st == "connected":
+                    console.print("[green]Connected via xAI OAuth.[/green]")
+                    return
+                if st == "error":
+                    console.print(
+                        f"[red]Login failed: {sess.get('error') or 'unknown'}[/red]"
+                    )
+                    return
+        console.print("[red]Login timed out. Run `remedy auth login xai` again.[/red]")
+        return
+
+    console.print("[dim]Usage: remedy auth login|logout|status|apikey xai[/dim]")
+
+
 async def _cmd_config(args) -> None:
     from pathlib import Path as _Path
     home = _Path(args.home).expanduser()
@@ -1347,6 +1470,8 @@ def main(args: list[str] | None = None) -> None:
         asyncio.run(_cmd_exec(parsed))
     elif parsed.command == "config":
         asyncio.run(_cmd_config(parsed))
+    elif parsed.command == "auth":
+        _cmd_auth(parsed)
     elif parsed.command == "chat":
         _cmd_chat(parsed)
     elif parsed.command == "serve":

@@ -1,5 +1,18 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { getSettings, updateSettings, type Settings, type SettingsUpdate } from '../api/settings'
+import {
+  getXaiAuthStatus,
+  startXaiLogin,
+  pollXaiLogin,
+  logoutXai,
+  openExternalUrl,
+  type XaiAuthStatus,
+} from '../api/auth'
+import {
+  listProviders,
+  FALLBACK_PROVIDERS,
+  type ProviderInfo,
+} from '../api/providers'
 import type { ThemeId } from '../themes'
 import type { UpdateInfo } from '../api/updates'
 import { THEME_LIST, getResolvedTheme } from '../themes'
@@ -19,16 +32,6 @@ interface SettingsPanelProps {
   models: ModelInfo[]
   onSettingsSaved?: () => void
 }
-
-const PROVIDERS = [
-  { id: 'openai', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', defaultModel: 'gpt-4o-mini' },
-  { id: 'anthropic', name: 'Anthropic', baseUrl: 'https://api.anthropic.com/v1', defaultModel: 'claude-3-5-sonnet-latest' },
-  { id: 'google', name: 'Google AI', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', defaultModel: 'gemini-2.5-flash' },
-  { id: 'deepseek', name: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', defaultModel: 'deepseek-chat' },
-  { id: 'openrouter', name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', defaultModel: 'openrouter/auto' },
-  { id: 'ollama', name: 'Ollama', baseUrl: 'http://127.0.0.1:11434/v1', defaultModel: 'llama3.2' },
-  { id: 'custom', name: 'Custom / KoboldCPP', baseUrl: 'http://127.0.0.1:5001/api/v1', defaultModel: 'default' },
-] as const
 
 export function SettingsPanel({
   open,
@@ -54,23 +57,78 @@ export function SettingsPanel({
   const [apiKey, setApiKey] = useState('')
   const [apiKeySet, setApiKeySet] = useState(false)
   const [projectPath, setProjectPath] = useState('.')
+  const [catalog, setCatalog] = useState<ProviderInfo[]>(FALLBACK_PROVIDERS)
+  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [xaiAuth, setXaiAuth] = useState<XaiAuthStatus | null>(null)
+  const [xaiLoginBusy, setXaiLoginBusy] = useState(false)
+  const [xaiUserCode, setXaiUserCode] = useState('')
+  const [xaiVerifyUrl, setXaiVerifyUrl] = useState('')
+  const [xaiLoginMsg, setXaiLoginMsg] = useState('')
+  const xaiPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  // Only show models for the selected provider (backend also filters).
-  const providerModels = models.filter(
-    (m) => !m.provider || m.provider === provider || provider === 'openrouter' || provider === 'custom',
+  const primaryProviders = useMemo(
+    () => catalog.filter((p) => !p.advanced),
+    [catalog],
   )
+  const advancedProviders = useMemo(
+    () => catalog.filter((p) => p.advanced),
+    [catalog],
+  )
+  const activeMeta = catalog.find((p) => p.id === provider) || FALLBACK_PROVIDERS[0]
+  const showBaseUrl = Boolean(activeMeta?.show_base_url || provider === 'custom')
+
+  // Prefer live discovered models; fall back to catalog models for this provider.
+  const providerModels = useMemo(() => {
+    const fromApi = models.filter(
+      (m) =>
+        !m.provider
+        || m.provider === provider
+        || provider === 'openrouter'
+        || provider === 'custom',
+    )
+    if (fromApi.length > 0) return fromApi
+    return (activeMeta?.models || []).map((m) => ({
+      id: m.id,
+      name: m.name,
+      provider,
+    }))
+  }, [models, provider, activeMeta])
+
+  const stopXaiPoll = useCallback(() => {
+    if (xaiPollRef.current) {
+      clearInterval(xaiPollRef.current)
+      xaiPollRef.current = null
+    }
+  }, [])
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const s = await getSettings()
+      const [s, providers] = await Promise.all([getSettings(), listProviders()])
+      setCatalog(providers)
       setSettings(s)
-      setProvider(s.llm_provider || 'openai')
+      const prov = s.llm_provider || 'openai'
+      setProvider(prov)
       setModel(s.llm_model || 'gpt-4o-mini')
       setBaseUrl(s.llm_base_url || 'https://api.openai.com/v1')
       setApiKeySet(s.llm_api_key_set)
       setProjectPath(s.project_path || '.')
       setApiKey('')
+      const isAdvanced = providers.some((p) => p.id === prov && p.advanced)
+      if (isAdvanced) setShowAdvanced(true)
+      if (prov === 'xai' || s.xai_auth) {
+        try {
+          const xa = s.xai_auth
+            ? (s.xai_auth as XaiAuthStatus)
+            : await getXaiAuthStatus()
+          setXaiAuth(xa)
+          if (xa.connected) setApiKeySet(true)
+        } catch {
+          setXaiAuth(null)
+        }
+      } else {
+        setXaiAuth(null)
+      }
     } catch {
       // server not ready
     } finally {
@@ -83,8 +141,73 @@ export function SettingsPanel({
       load()
       setSaved(false)
       setErrorMessage('')
+      setXaiLoginMsg('')
+      setXaiUserCode('')
+      setXaiVerifyUrl('')
+    } else {
+      stopXaiPoll()
+      setXaiLoginBusy(false)
     }
-  }, [open, load])
+    return () => stopXaiPoll()
+  }, [open, load, stopXaiPoll])
+
+  const handleXaiSignIn = async () => {
+    setXaiLoginBusy(true)
+    setXaiLoginMsg('')
+    setErrorMessage('')
+    stopXaiPoll()
+    try {
+      const start = await startXaiLogin()
+      setXaiUserCode(start.user_code)
+      setXaiVerifyUrl(start.verification_uri_complete || start.verification_uri)
+      setXaiLoginMsg(start.message || `Enter code ${start.user_code} at xAI`)
+      void openExternalUrl(start.verification_uri_complete || start.verification_uri)
+      const sessionId = start.session_id
+      const intervalMs = Math.max(3, start.interval || 5) * 1000
+      xaiPollRef.current = setInterval(async () => {
+        try {
+          const poll = await pollXaiLogin(sessionId)
+          const st = poll.session?.status
+          if (st === 'connected') {
+            stopXaiPoll()
+            setXaiLoginBusy(false)
+            setXaiAuth(poll.credentials)
+            setApiKeySet(true)
+            setXaiLoginMsg('Signed in with xAI')
+            setXaiUserCode('')
+            // Ensure provider is xAI after OAuth
+            setProvider('xai')
+            setBaseUrl('https://api.x.ai/v1')
+            if (!model.startsWith('grok')) setModel('grok-3-mini')
+            onSettingsSaved?.()
+          } else if (st === 'error') {
+            stopXaiPoll()
+            setXaiLoginBusy(false)
+            setXaiLoginMsg(poll.session?.error || 'Sign-in failed or expired')
+          }
+        } catch {
+          // keep polling
+        }
+      }, intervalMs)
+    } catch (e: unknown) {
+      setXaiLoginBusy(false)
+      const msg = e instanceof Error ? e.message : String(e)
+      setErrorMessage(msg || 'Could not start xAI sign-in')
+    }
+  }
+
+  const handleXaiLogout = async () => {
+    try {
+      await logoutXai()
+      setXaiAuth(null)
+      setApiKeySet(false)
+      setXaiLoginMsg('Signed out of xAI')
+      onSettingsSaved?.()
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e)
+      setErrorMessage(msg || 'Logout failed')
+    }
+  }
 
   const handleSave = async () => {
     setSaving(true)
@@ -125,10 +248,10 @@ export function SettingsPanel({
 
   const handleProviderChange = (p: string) => {
     setProvider(p)
-    const preset = PROVIDERS.find((x) => x.id === p)
+    const preset = catalog.find((x) => x.id === p)
     if (preset) {
-      setBaseUrl(preset.baseUrl)
-      setModel(preset.defaultModel)
+      setBaseUrl(preset.base_url)
+      setModel(preset.default_model)
     }
   }
 
@@ -179,12 +302,27 @@ export function SettingsPanel({
                   border: '1px solid var(--border)',
                 }}
               >
-                {PROVIDERS.map((p) => (
+                {primaryProviders.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+                {showAdvanced && advancedProviders.map((p) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
               </select>
+              {!showAdvanced && advancedProviders.length > 0 && (
+                <button
+                  type="button"
+                  className="mb-2 text-[10px] underline"
+                  style={{ color: 'var(--text-muted)' }}
+                  onClick={() => setShowAdvanced(true)}
+                >
+                  Show advanced (custom endpoint)…
+                </button>
+              )}
 
-              <Field label="Base URL" value={baseUrl} onChange={setBaseUrl} />
+              {showBaseUrl && (
+                <Field label="Base URL" value={baseUrl} onChange={setBaseUrl} />
+              )}
               <label className="block mb-0.5" style={{ color: 'var(--text-muted)' }}>Model</label>
               <select
                 value={model}
@@ -205,13 +343,96 @@ export function SettingsPanel({
                 ))}
               </select>
               <div className="mb-2 text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                Models are scoped to <strong>{provider}</strong>. Discovery uses the Base URL above.
+                Models for <strong>{activeMeta?.name || provider}</strong>
+                {showBaseUrl ? ' · custom base URL enabled' : ''}.
               </div>
+
+              {provider === 'xai' && (
+                <div
+                  className="mb-2 p-2 rounded space-y-2"
+                  style={{ border: '1px solid var(--border)', background: 'var(--bg-tertiary)' }}
+                >
+                  <div className="font-medium" style={{ color: 'var(--text-primary)' }}>
+                    Sign in with xAI
+                  </div>
+                  <div className="text-[10px] leading-snug" style={{ color: 'var(--text-muted)' }}>
+                    Use your SuperGrok / X Premium+ account (recommended), or a console API key below.
+                  </div>
+                  {xaiAuth?.connected ? (
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px]" style={{ color: 'var(--success)' }}>
+                        Connected ({xaiAuth.auth_method === 'oauth' ? 'OAuth' : 'API key'})
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => void handleXaiLogout()}
+                        className="px-2 py-1 rounded text-[11px]"
+                        style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
+                      >
+                        Sign out
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => void handleXaiSignIn()}
+                      disabled={xaiLoginBusy}
+                      className="w-full py-1.5 rounded text-xs font-semibold"
+                      style={{
+                        background: xaiLoginBusy ? 'var(--bg-secondary)' : 'var(--accent)',
+                        color: '#fff',
+                        cursor: xaiLoginBusy ? 'wait' : 'pointer',
+                      }}
+                    >
+                      {xaiLoginBusy ? 'Waiting for approval…' : 'Sign in with xAI'}
+                    </button>
+                  )}
+                  {xaiUserCode && (
+                    <div className="text-[11px] space-y-1" style={{ color: 'var(--text-secondary)' }}>
+                      <div>
+                        Code: <code style={{ color: 'var(--accent)' }}>{xaiUserCode}</code>
+                      </div>
+                      {xaiVerifyUrl && (
+                        <button
+                          type="button"
+                          className="underline text-left"
+                          style={{ color: 'var(--accent)' }}
+                          onClick={() => void openExternalUrl(xaiVerifyUrl)}
+                        >
+                          Open verification page
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {xaiLoginMsg && (
+                    <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                      {xaiLoginMsg}
+                    </div>
+                  )}
+                </div>
+              )}
+
               <Field
-                label={apiKeySet ? 'API Key (set - change?)' : 'API Key'}
+                label={
+                  provider === 'xai'
+                    ? apiKeySet
+                      ? 'API key (optional — change?)'
+                      : 'API key (optional)'
+                    : apiKeySet
+                      ? 'API Key (set - change?)'
+                      : 'API Key'
+                }
                 value={apiKey}
                 onChange={setApiKey}
-                placeholder={apiKeySet ? '(leave blank to keep current)' : 'sk-...'}
+                placeholder={
+                  provider === 'xai'
+                    ? apiKeySet
+                      ? '(leave blank to keep current)'
+                      : 'xai-… from console.x.ai'
+                    : apiKeySet
+                      ? '(leave blank to keep current)'
+                      : 'sk-...'
+                }
                 password
               />
             </section>

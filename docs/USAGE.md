@@ -25,7 +25,7 @@ uv sync
 ### Verify
 
 ```bash
-remedy --version   # remedy 0.10.4 (or current package version)
+remedy --version   # remedy 0.10.15 (or current package version)
 remedy --help      # Lists all commands
 ```
 
@@ -45,6 +45,34 @@ This creates `~/.remedy/config.toml` with sensible defaults. View it:
 remedy config show
 remedy config path
 ```
+
+### 1b. Connect a provider (xAI example)
+
+**Desktop:** Settings or first-run wizard → choose **xAI (Grok)** → **Sign in with xAI**
+(or paste a console API key). Known providers do not need a manual base URL.
+
+**CLI OAuth (device code):**
+
+```bash
+remedy auth login xai      # Opens browser / shows user code; polls until approved
+remedy auth status xai
+remedy auth logout xai
+```
+
+**CLI / env API key:**
+
+```bash
+remedy auth apikey xai xai-your-console-key
+# or:
+set XAI_API_KEY=xai-your-console-key   # Windows
+export XAI_API_KEY=xai-your-console-key  # Unix
+# Clean configs with XAI_API_KEY set preselect the xAI provider automatically.
+```
+
+Tokens live in `~/.remedy/auth/xai.json` (mode 600 when the OS allows).
+Other key-only brands: set `llm_provider` / `llm_api_key` in config, or use
+`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`, `GROQ_API_KEY`,
+`MISTRAL_API_KEY`, `OPENROUTER_API_KEY`, etc.
 
 ### 2. Discover skills
 
@@ -485,6 +513,12 @@ remedy migrate openclaw ~/openclaw/skills --no-copy
 | `allow_skill_creation` | bool | `true` | Permit learning-generated skills |
 | `auto_approve_threshold` | float | `0.8` | Confidence threshold for auto-approval |
 | `log_level` | string | `"INFO"` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+| `llm_provider` | string | `"openai"` | `openai`, `anthropic`, `google`, `deepseek`, `xai`, `groq`, `mistral`, `openrouter`, `ollama`, `custom` |
+| `llm_model` | string | provider default | Model id for the provider |
+| `llm_base_url` | string | provider default | Usually auto-filled; required mainly for `custom` |
+| `llm_api_key` | string | `""` | Cloud API key (xAI may use OAuth instead) |
+| `project_path` | string | `""` | Default workspace for tools / `@file` |
+| `setup_completed` | bool | `false` | First-run wizard gate |
 
 ### Gateway section `[gateway]`
 
@@ -516,7 +550,22 @@ Any config key can be overridden with `REMEDY_<key>`:
 REMEDY_LOG_LEVEL=DEBUG          # Simple key
 REMEDY_EXECUTION__MAX_RETRIES=5 # Nested key (double underscore)
 REMEDY_TELEGRAM__BOT_TOKEN=abc  # Channel config
+REMEDY_LLM_PROVIDER=xai
+REMEDY_LLM_MODEL=grok-3-mini
+XAI_API_KEY=xai-…               # Also accepted (preselects xAI)
+REMEDY_XAI_OAUTH_CLIENT_ID=…    # Optional override for device OAuth client
 ```
+
+---
+
+## Auth commands
+
+| Command | Description |
+|---------|-------------|
+| `remedy auth login xai` | Device-code OAuth (Sign in with xAI) |
+| `remedy auth status xai` | Show connected method / expiry |
+| `remedy auth apikey xai [key]` | Store console API key |
+| `remedy auth logout xai` | Clear `~/.remedy/auth/xai.json` |
 
 ---
 

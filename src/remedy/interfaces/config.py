@@ -120,6 +120,8 @@ def resolve_config(
     config = load_config(config_path)
     if env_overrides:
         config = load_env_overrides(config)
+        # XAI_API_KEY / other env keys preselect provider on clean defaults.
+        config = apply_env_provider_bootstrap(config)
     if home_dir:
         config["home_dir"] = home_dir
     return config
@@ -129,7 +131,11 @@ def resolve_config(
 
 PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
     "openai": {
+        "label": "OpenAI",
         "base_url": "https://api.openai.com/v1",
+        "auth": ["api_key"],
+        "env_keys": ["OPENAI_API_KEY", "REMEDY_LLM_API_KEY"],
+        "show_base_url": False,
         "models": [
             {"id": "gpt-4o-mini", "name": "GPT-4o Mini"},
             {"id": "gpt-4o", "name": "GPT-4o"},
@@ -138,7 +144,11 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
         ],
     },
     "anthropic": {
+        "label": "Anthropic",
         "base_url": "https://api.anthropic.com/v1",
+        "auth": ["api_key"],
+        "env_keys": ["ANTHROPIC_API_KEY"],
+        "show_base_url": False,
         "models": [
             {"id": "claude-3-5-sonnet-latest", "name": "Claude 3.5 Sonnet"},
             {"id": "claude-3-5-haiku-latest", "name": "Claude 3.5 Haiku"},
@@ -148,7 +158,11 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
         ],
     },
     "google": {
+        "label": "Google AI",
         "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "auth": ["api_key"],
+        "env_keys": ["GOOGLE_API_KEY", "GEMINI_API_KEY"],
+        "show_base_url": False,
         "models": [
             {"id": "gemini-2.5-flash", "name": "Gemini 2.5 Flash"},
             {"id": "gemini-2.0-flash", "name": "Gemini 2.0 Flash"},
@@ -156,14 +170,61 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
         ],
     },
     "deepseek": {
+        "label": "DeepSeek",
         "base_url": "https://api.deepseek.com/v1",
+        "auth": ["api_key"],
+        "env_keys": ["DEEPSEEK_API_KEY"],
+        "show_base_url": False,
         "models": [
             {"id": "deepseek-chat", "name": "DeepSeek Chat"},
             {"id": "deepseek-reasoner", "name": "DeepSeek Reasoner"},
         ],
     },
+    "xai": {
+        "label": "xAI (Grok)",
+        "base_url": "https://api.x.ai/v1",
+        "auth": ["oauth", "api_key"],  # Sign in with xAI primary; console API key secondary
+        "env_keys": ["XAI_API_KEY", "REMEDY_XAI_API_KEY"],
+        "show_base_url": False,
+        "key_docs_url": "https://console.x.ai/team/default/api-keys",
+        "models": [
+            {"id": "grok-4", "name": "Grok 4"},
+            {"id": "grok-3", "name": "Grok 3"},
+            {"id": "grok-3-mini", "name": "Grok 3 Mini"},
+            {"id": "grok-2", "name": "Grok 2"},
+            {"id": "grok-2-vision-1212", "name": "Grok 2 Vision"},
+        ],
+    },
+    "groq": {
+        "label": "Groq",
+        "base_url": "https://api.groq.com/openai/v1",
+        "auth": ["api_key"],
+        "env_keys": ["GROQ_API_KEY"],
+        "show_base_url": False,
+        "models": [
+            {"id": "llama-3.3-70b-versatile", "name": "Llama 3.3 70B"},
+            {"id": "llama-3.1-8b-instant", "name": "Llama 3.1 8B Instant"},
+            {"id": "mixtral-8x7b-32768", "name": "Mixtral 8x7B"},
+        ],
+    },
+    "mistral": {
+        "label": "Mistral",
+        "base_url": "https://api.mistral.ai/v1",
+        "auth": ["api_key"],
+        "env_keys": ["MISTRAL_API_KEY"],
+        "show_base_url": False,
+        "models": [
+            {"id": "mistral-small-latest", "name": "Mistral Small"},
+            {"id": "mistral-large-latest", "name": "Mistral Large"},
+            {"id": "codestral-latest", "name": "Codestral"},
+        ],
+    },
     "openrouter": {
+        "label": "OpenRouter",
         "base_url": "https://openrouter.ai/api/v1",
+        "auth": ["api_key"],
+        "env_keys": ["OPENROUTER_API_KEY"],
+        "show_base_url": False,
         "models": [
             {"id": "openrouter/auto", "name": "OpenRouter Auto"},
             {"id": "openai/gpt-4o-mini", "name": "GPT-4o Mini (via OpenRouter)"},
@@ -172,7 +233,11 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
         ],
     },
     "ollama": {
+        "label": "Ollama (local)",
         "base_url": "http://127.0.0.1:11434/v1",
+        "auth": ["none"],
+        "env_keys": [],
+        "show_base_url": False,
         "models": [
             {"id": "llama3.2", "name": "Llama 3.2"},
             {"id": "qwen2.5", "name": "Qwen 2.5"},
@@ -180,12 +245,22 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
         ],
     },
     "custom": {
+        "label": "Custom / OpenAI-compatible",
         "base_url": "http://127.0.0.1:5001/api/v1",
+        "auth": ["api_key"],
+        "env_keys": [],
+        "show_base_url": True,
+        "advanced": True,  # hide under Advanced in desktop UI
         "models": [
             {"id": "default", "name": "Default (custom endpoint)"},
         ],
     },
 }
+
+# Providers that keep a closed model catalog (foreign model ids are snapped).
+_CLOSED_PROVIDERS = frozenset(
+    {"openai", "anthropic", "google", "deepseek", "xai", "groq", "mistral"}
+)
 
 
 def infer_provider_from_model(model_id: str) -> str | None:
@@ -203,6 +278,13 @@ def infer_provider_from_model(model_id: str) -> str | None:
         return "google"
     if mid.startswith("deepseek"):
         return "deepseek"
+    if mid.startswith("grok") or mid.startswith("xai/"):
+        return "xai"
+    if mid.startswith("mistral") or mid.startswith("codestral") or mid.startswith("open-mistral"):
+        return "mistral"
+    # Groq hosts open models; only treat explicit groq/ prefix as owned.
+    if mid.startswith("groq/"):
+        return "groq"
     # Common local / Ollama model family prefixes (not exhaustive).
     if mid.startswith(
         (
@@ -240,6 +322,12 @@ def infer_provider_from_base_url(base_url: str) -> str | None:
         return "openai"
     if "deepseek.com" in u:
         return "deepseek"
+    if "api.x.ai" in u or "x.ai" in u:
+        return "xai"
+    if "api.groq.com" in u or "groq.com" in u:
+        return "groq"
+    if "mistral.ai" in u:
+        return "mistral"
     if "openrouter.ai" in u:
         return "openrouter"
     if "generativelanguage.googleapis.com" in u or "googleapis.com" in u:
@@ -295,7 +383,7 @@ def normalize_llm_settings(
         # Closed catalogs: reject foreign model ids.
         if prov == "deepseek" and mid not in known and model_owner not in (None, "deepseek"):
             mid = default_model
-        if prov in ("openai", "anthropic", "google", "deepseek") and model_owner and model_owner != prov:
+        if prov in _CLOSED_PROVIDERS and model_owner and model_owner != prov:
             mid = default_model
 
     if not url:
@@ -427,6 +515,25 @@ def config_to_agent_config(config: dict[str, Any]) -> AgentConfig:
         "",
     )
 
+    llm_provider = _resolve_str(
+        config.get("llm_provider"),
+        "REMEDY_LLM_PROVIDER",
+        "openai",
+    )
+
+    # xAI: prefer OAuth access token / stored key from ~/.remedy/auth/xai.json
+    # (OpenCode-style dual auth) over a missing config key.
+    if not llm_api_key and str(llm_provider).lower() == "xai":
+        try:
+            from remedy.interfaces.xai_auth import resolve_bearer
+
+            home = config.get("home_dir")
+            token = resolve_bearer(Path(home).expanduser() if home else None)
+            if token:
+                llm_api_key = token
+        except Exception as exc:
+            logger.debug("xAI credential resolve skipped: %s", exc)
+
     # Local servers (Ollama, Kobold.cpp, LM Studio, etc.) don't need a real
     # API key.  Supply a dummy value so the agent doesn't fall back to echo
     # mode when the user hasn't set one.
@@ -446,11 +553,7 @@ def config_to_agent_config(config: dict[str, Any]) -> AgentConfig:
         auto_approve_threshold=config.get("auto_approve_threshold", 0.8),
         log_level=config.get("log_level", "INFO"),
         sarcasm_mode=config.get("sarcasm_mode", False),
-        llm_provider=_resolve_str(
-            config.get("llm_provider"),
-            "REMEDY_LLM_PROVIDER",
-            "openai",
-        ),
+        llm_provider=llm_provider,
         llm_api_key=llm_api_key,
         llm_model=_resolve_str(
             config.get("llm_model"),
@@ -478,12 +581,14 @@ setup_completed = false
 # project_path = "C:/Users/You/Projects/MyApp"
 
 # --- LLM Provider ---
-# Supported providers: openai, anthropic, google, deepseek, openrouter, ollama, custom
+# Supported: openai, anthropic, google, deepseek, xai, groq, mistral, openrouter, ollama, custom
+# xAI also supports OAuth (Sign in with xAI) via desktop Settings / `remedy auth login xai`
 llm_provider = "openai"
 llm_model = "gpt-4o-mini"
 llm_base_url = "https://api.openai.com/v1"
 # llm_api_key - set via REMEDY_LLM_API_KEY env var or uncomment below:
 # llm_api_key = "sk-..."
+# XAI_API_KEY auto-selects xAI on first run when present
 
 # Search paths for bundled + user skills
 skills_dir = []
@@ -645,4 +750,156 @@ def provider_credentials_ready(config: dict[str, Any] | None = None) -> bool:
     if base and _is_local_url(base):
         return True
     provider = str(cfg.get("llm_provider") or os.environ.get("REMEDY_LLM_PROVIDER") or "").lower()
+    if provider == "xai":
+        try:
+            from remedy.interfaces.xai_auth import load_credentials, resolve_bearer
+
+            home = cfg.get("home_dir")
+            home_path = Path(home).expanduser() if home else None
+            if load_credentials(home_path).connected or resolve_bearer(home_path):
+                return True
+        except Exception:
+            pass
+        # Env-only keys still count
+        if (
+            os.environ.get("XAI_API_KEY", "").strip()
+            or os.environ.get("REMEDY_XAI_API_KEY", "").strip()
+        ):
+            return True
     return provider in ("ollama",)
+
+
+def public_provider_catalog() -> list[dict[str, Any]]:
+    """Catalog entries for GET /api/providers and desktop UI."""
+    items: list[dict[str, Any]] = []
+    for pid, meta in PROVIDER_CATALOG.items():
+        auth_modes = list(meta.get("auth") or ["api_key"])
+        if pid == "ollama":
+            auth_modes = ["none"]
+        models = list(meta.get("models") or [])
+        default_model = str(models[0]["id"]) if models else "default"
+        items.append(
+            {
+                "id": pid,
+                "name": meta.get("label") or pid,
+                "base_url": meta.get("base_url"),
+                "models": models,
+                "default_model": default_model,
+                "auth": auth_modes,
+                "oauth": "oauth" in auth_modes,
+                "env_keys": list(meta.get("env_keys") or []),
+                "show_base_url": bool(meta.get("show_base_url", pid in ("custom", "ollama"))),
+                "advanced": bool(meta.get("advanced", False)),
+                "key_docs_url": meta.get("key_docs_url"),
+            }
+        )
+    return items
+
+
+def detect_ollama(base_url: str | None = None, timeout: float = 1.5) -> dict[str, Any]:
+    """Probe local Ollama (tags API). Returns available flag + model names."""
+    import json
+    import urllib.error
+    import urllib.request
+
+    url = (base_url or PROVIDER_CATALOG["ollama"]["base_url"] or "").rstrip("/")
+    # Native tags endpoint (strip /v1 if present)
+    tags_url = url.removesuffix("/v1") + "/api/tags"
+    models: list[str] = []
+    try:
+        req = urllib.request.Request(
+            tags_url,
+            headers={"Accept": "application/json", "User-Agent": "Remedy/detect-ollama"},
+            method="GET",
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = json.loads(resp.read().decode("utf-8") or "{}")
+        for m in body.get("models") or []:
+            name = m.get("name") or m.get("model") or ""
+            if name:
+                # Prefer short name without :latest
+                short = name.rstrip(":latest") if name.endswith(":latest") else name
+                models.append(short)
+        return {
+            "available": True,
+            "base_url": PROVIDER_CATALOG["ollama"]["base_url"],
+            "models": models,
+            "tags_url": tags_url,
+        }
+    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError, ValueError):
+        return {
+            "available": False,
+            "base_url": PROVIDER_CATALOG["ollama"]["base_url"],
+            "models": [],
+            "tags_url": tags_url,
+        }
+
+
+def apply_env_provider_bootstrap(config: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Preselect provider from env keys on clean / default config.
+
+    Plan: if ``XAI_API_KEY`` is set and the config is still effectively default
+    (no explicit key, provider openai default or empty), switch to xAI.
+    Also honors provider-specific env keys when config has no API key yet.
+    Mutates a copy; does not write disk.
+    """
+    cfg = dict(config or {})
+    has_key = bool(str(cfg.get("llm_api_key") or "").strip())
+    if has_key:
+        return cfg
+
+    provider = str(cfg.get("llm_provider") or "").strip().lower()
+    # Only auto-switch when unset or still on the factory default openai.
+    allow_switch = provider in ("", "openai")
+
+    # Priority: xAI first (plan requirement), then other known env keys.
+    xai_key = (
+        os.environ.get("XAI_API_KEY", "").strip()
+        or os.environ.get("REMEDY_XAI_API_KEY", "").strip()
+    )
+    if xai_key and allow_switch:
+        prov, model, url = normalize_llm_settings("xai", cfg.get("llm_model"), cfg.get("llm_base_url"))
+        cfg["llm_provider"] = prov
+        cfg["llm_model"] = model
+        cfg["llm_base_url"] = url
+        # Do not persist raw key into config dict here; resolve_bearer/env handles auth.
+        return cfg
+
+    # Optional: if Ollama is running and no cloud keys, suggest ollama (detect only
+    # when still on default openai with empty key — non-blocking soft prefer).
+    if allow_switch and not os.environ.get("REMEDY_LLM_API_KEY", "").strip():
+        # Skip network probe unless explicitly requested via env (wizard/API call
+        # does active detect). Soft file-free bootstrap stays offline-safe.
+        if os.environ.get("REMEDY_PREFER_OLLAMA", "").strip() in ("1", "true", "yes"):
+            ollama = detect_ollama()
+            if ollama.get("available"):
+                models = ollama.get("models") or []
+                mid = models[0] if models else "llama3.2"
+                cfg["llm_provider"] = "ollama"
+                cfg["llm_model"] = mid
+                cfg["llm_base_url"] = PROVIDER_CATALOG["ollama"]["base_url"]
+                return cfg
+
+    # Map other env API keys → provider when still on default.
+    if allow_switch:
+        env_map = (
+            ("GROQ_API_KEY", "groq"),
+            ("MISTRAL_API_KEY", "mistral"),
+            ("DEEPSEEK_API_KEY", "deepseek"),
+            ("OPENROUTER_API_KEY", "openrouter"),
+            ("ANTHROPIC_API_KEY", "anthropic"),
+            ("OPENAI_API_KEY", "openai"),
+            ("GOOGLE_API_KEY", "google"),
+            ("GEMINI_API_KEY", "google"),
+        )
+        for env_name, pid in env_map:
+            if os.environ.get(env_name, "").strip():
+                prov, model, url = normalize_llm_settings(
+                    pid, cfg.get("llm_model"), cfg.get("llm_base_url")
+                )
+                cfg["llm_provider"] = prov
+                cfg["llm_model"] = model
+                cfg["llm_base_url"] = url
+                return cfg
+
+    return cfg

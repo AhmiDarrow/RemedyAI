@@ -452,9 +452,30 @@ class DeepSeekProvider(OpenAIProvider):
         return body
 
 
+class XaiProvider(OpenAIProvider):
+    """xAI Grok API (OpenAI-compatible). Auth: OAuth bearer or console API key."""
+
+    provider_name = "xai"
+    default_base_url = "https://api.x.ai/v1"
+
+
 # ---------------------------------------------------------------------------
 # Provider registry
 # ---------------------------------------------------------------------------
+
+
+class GroqProvider(OpenAIProvider):
+    """Groq OpenAI-compatible chat API."""
+
+    provider_name = "groq"
+    default_base_url = "https://api.groq.com/openai/v1"
+
+
+class MistralProvider(OpenAIProvider):
+    """Mistral OpenAI-compatible chat API."""
+
+    provider_name = "mistral"
+    default_base_url = "https://api.mistral.ai/v1"
 
 
 _PROVIDERS: dict[str, type[ProviderAdapter]] = {
@@ -462,6 +483,9 @@ _PROVIDERS: dict[str, type[ProviderAdapter]] = {
     "anthropic": AnthropicProvider,
     "google": GoogleProvider,
     "deepseek": DeepSeekProvider,
+    "xai": XaiProvider,
+    "groq": GroqProvider,
+    "mistral": MistralProvider,
     "openrouter": OpenAIProvider,     # OpenRouter is OpenAI-compatible
     "ollama": OpenAIProvider,         # Ollama is OpenAI-compatible
     "custom": OpenAIProvider,         # Unknown custom endpoints default to OpenAI-compatible
@@ -484,6 +508,12 @@ def get_provider_for_base_url(base_url: str) -> ProviderAdapter:
         return get_provider("anthropic")
     if "deepseek" in url_lower:
         return get_provider("deepseek")
+    if "api.x.ai" in url_lower or "x.ai/" in url_lower:
+        return get_provider("xai")
+    if "groq.com" in url_lower:
+        return get_provider("groq")
+    if "mistral.ai" in url_lower:
+        return get_provider("mistral")
     if "openrouter" in url_lower:
         return get_provider("openrouter")
     if "generativelanguage.googleapis.com" in url_lower or "googleapis.com" in url_lower:

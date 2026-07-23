@@ -33,10 +33,13 @@ The desktop app bundles the full Remedy server as a sidecar, so everything runs 
 | **Attachments** | Drag-and-drop or attach files/images into the session |
 | **Plan/Build mode** | Toggle between plan mode (no tools) and build mode |
 | **@file references** | Type `@` to search and autocomplete project files |
-| **First-run setup** | Setup wizard for provider/API key before chat |
+| **First-run setup** | Setup wizard for provider connect (OAuth or API key) before chat |
+| **xAI Sign-in** | Device-code OAuth for Grok (SuperGrok / X Premium+) plus console API key |
+| **Providers** | OpenAI, Anthropic, Google, DeepSeek, xAI, Groq, Mistral, OpenRouter, Ollama; Custom under Advanced |
 | **Bundled skills** | Default skills pack loads on start (not an empty skill list) |
 | **Undo** | Hover any assistant message to revert it |
-| **Themes** | 6 themes — Dark, Light, Emerald, Amethyst, Amber, Ocean |
+| **Themes** | System (follow OS) + Dark, Light, Emerald, Amethyst, Amber, Ocean |
+| **Keyboard help** | Settings → Help & shortcuts; `/help` lists hotkeys |
 | **Side panels** | Memory browser and Skills viewer accessible from the status bar |
 | **Slash commands** | `/help`, `/new`, `/sessions`, `/models`, `/memory`, `/skills`, `/handoff` |
 | **Tray icon** | Minimize to system tray |
@@ -90,6 +93,13 @@ remedy skill discover ./skills   # Load bundled & custom skills
 # Launch interactive chat with the agent
 remedy chat
 # Type /help for commands, /exit to quit
+
+# xAI auth (OAuth device-code or console API key)
+remedy auth login xai          # Sign in with xAI (opens browser / shows code)
+remedy auth status xai
+remedy auth apikey xai xai-…   # Or store a console key
+remedy auth logout xai
+# XAI_API_KEY=… also preselects xAI on a clean config
 
 # Start the API server
 remedy serve --host 127.0.0.1 --port 7400
@@ -161,6 +171,7 @@ cd desktop && npm run tauri:dev
 | `remedy user` | `show`, `facts` | User profile and traits |
 | `remedy gateway` | `start`, `status`, `serve`, `channels` | Multi-channel gateway |
 | `remedy config` | `init`, `show`, `path` | TOML/YAML configuration |
+| `remedy auth` | `login`, `logout`, `status`, `apikey` | Provider OAuth / API keys (xAI) |
 | `remedy serve` | | Full API server (config-aware) |
 | `remedy desktop` | `install`, `dev`, `build`, `launch`, `status` | Desktop app management |
 | `remedy migrate` | `hermes`, `openclaw` | Import from other frameworks |

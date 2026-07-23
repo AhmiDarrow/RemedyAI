@@ -1,5 +1,14 @@
 import { apiFetch } from './client'
 
+export interface XaiAuthInfo {
+  provider?: string
+  auth_method?: string
+  connected?: boolean
+  has_api_key?: boolean
+  has_oauth?: boolean
+  expires_at?: number | null
+}
+
 export interface Settings {
   llm_provider: string
   llm_model: string
@@ -13,6 +22,7 @@ export interface Settings {
   setup_completed: boolean
   needs_setup?: boolean
   llm_ready?: boolean
+  xai_auth?: XaiAuthInfo
 }
 
 export interface SettingsUpdate {

@@ -776,6 +776,8 @@ class BasicRuntime(AgentRuntime):
             max_api_soft_failures = 3
             # Sticky force-answer after recoverable provider failures.
             force_answer_sticky = False
+            # One OAuth/API re-auth attempt per turn (xAI 401 → refresh token).
+            auth_refresh_done = False
             async with aiohttp.ClientSession(
                 timeout=timeout, connector=connector
             ) as http:
@@ -829,6 +831,51 @@ class BasicRuntime(AgentRuntime):
                             logger.error(
                                 "LLM API error %d: %s", resp.status, text[:500]
                             )
+                            # xAI (and similar): expired OAuth → refresh once, retry.
+                            if (
+                                resp.status in (401, 403)
+                                and not auth_refresh_done
+                                and str(self._llm_provider or "").lower() == "xai"
+                            ):
+                                auth_refresh_done = True
+                                try:
+                                    from remedy.interfaces.xai_auth import (
+                                        refresh_if_needed,
+                                        resolve_bearer,
+                                    )
+
+                                    home = None
+                                    if getattr(self, "config", None) is not None:
+                                        hd = getattr(self.config, "home_dir", None)
+                                        if hd:
+                                            from pathlib import Path
+
+                                            home = Path(hd).expanduser()
+                                    refresh_if_needed(home)
+                                    new_token = resolve_bearer(home)
+                                    if new_token and new_token != self._llm_api_key:
+                                        self._llm_api_key = new_token
+                                        headers = self._provider.auth_headers(
+                                            self._llm_api_key
+                                        )
+                                        logger.warning(
+                                            "xAI credentials refreshed after HTTP %s; retrying",
+                                            resp.status,
+                                        )
+                                        yield (
+                                            "\n[auth] Refreshed xAI session; "
+                                            "retrying request…\n"
+                                        )
+                                        continue
+                                except Exception as auth_exc:
+                                    logger.debug("xAI re-auth failed: %s", auth_exc)
+                                # Refresh failed → clear soft-continue noise with guidance.
+                                yield (
+                                    "\n[auth required] xAI session expired or rejected. "
+                                    "Sign in again in Settings (Sign in with xAI) or "
+                                    "update your API key.\n"
+                                )
+                                return
                             # DeepSeek thinking mode: tool turns require reasoning_content.
                             if (
                                 resp.status == 400
@@ -1280,6 +1327,49 @@ class BasicRuntime(AgentRuntime):
         ):
             if resp.status != 200:
                 text = await resp.text()
+                # One refresh attempt for expired xAI OAuth tokens.
+                if (
+                    resp.status in (401, 403)
+                    and str(self._llm_provider or "").lower() == "xai"
+                ):
+                    try:
+                        from pathlib import Path
+
+                        from remedy.interfaces.xai_auth import (
+                            refresh_if_needed,
+                            resolve_bearer,
+                        )
+
+                        home = None
+                        if getattr(self, "config", None) is not None:
+                            hd = getattr(self.config, "home_dir", None)
+                            if hd:
+                                home = Path(hd).expanduser()
+                        refresh_if_needed(home)
+                        new_token = resolve_bearer(home)
+                        if new_token and new_token != self._llm_api_key:
+                            self._llm_api_key = new_token
+                            headers = self._provider.auth_headers(self._llm_api_key)
+                            async with session.post(
+                                endpoint,
+                                headers=headers,
+                                json=body,
+                                timeout=aiohttp.ClientTimeout(total=60),
+                            ) as resp2:
+                                if resp2.status == 200:
+                                    return await resp2.json()
+                                text = await resp2.text()
+                                logger.error(
+                                    "LLM API error %d after reauth: %s",
+                                    resp2.status,
+                                    text[:500],
+                                )
+                                return (
+                                    "\n[auth required] xAI session expired. "
+                                    "Sign in again (Settings or `remedy auth login xai`).\n"
+                                )
+                    except Exception as auth_exc:
+                        logger.debug("xAI re-auth in _post_chat failed: %s", auth_exc)
                 logger.error("LLM API error %d: %s", resp.status, text[:500])
                 return f"\n[LLM ERROR — HTTP {resp.status}]\n{text[:500]}\n[END LLM ERROR]"
             return await resp.json()
