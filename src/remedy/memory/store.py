@@ -357,11 +357,28 @@ class MemoryStore:
         return [self._row_to_entry(r) for r in rows]
 
     async def search_simple(self, query: str, limit: int = 20) -> list[MemoryEntry]:
-        """Simple LIKE-based search when FTS5 match syntax may fail."""
+        """Search with FTS5 first; parameterized LIKE fallback if MATCH fails.
+
+        Prefer :meth:`search` for new code. This remains for callers that need a
+        tolerant fallback when the query is not valid FTS5 MATCH syntax.
+        """
+        q = (query or "").strip()
+        if not q:
+            return []
+        # Prefer full-text when possible (parameterized MATCH).
+        try:
+            hits = await self.search(q, limit=limit)
+            if hits:
+                return hits
+        except Exception:
+            pass
         db = self._ensure_db()
-        like_q = f"%{query}%"
+        # Escape LIKE wildcards in user input; still parameterized (no SQL inject).
+        safe = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        like_q = f"%{safe}%"
         rows = db.execute(
-            "SELECT * FROM memory_entries WHERE title LIKE ? OR content LIKE ? "
+            "SELECT * FROM memory_entries WHERE title LIKE ? ESCAPE '\\' "
+            "OR content LIKE ? ESCAPE '\\' "
             "ORDER BY created_at DESC LIMIT ?",
             (like_q, like_q, limit),
         ).fetchall()
@@ -395,8 +412,10 @@ class MemoryStore:
         )
         db.commit()
 
+        # Stable memory id = handoff id so re-saving the same note does not
+        # duplicate rows in memory_entries.
         memory_entry = MemoryEntry(
-            id=uuid4(),
+            id=note.id if getattr(note, "id", None) is not None else uuid4(),
             entry_type=MemoryEntryType.HANDOFF,
             title=f"Handoff: {note.title}",
             content=note.content,

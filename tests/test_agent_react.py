@@ -204,3 +204,70 @@ async def test_react_loop_executes_tool_then_final_answer():
 def test_message_wants_tools_policy():
     assert _message_wants_tools("hi") is False
     assert _message_wants_tools("review project") is True
+
+
+@pytest.mark.asyncio
+async def test_react_loop_dedups_identical_tool_calls():
+    """Second identical tool call is skipped (fingerprint cache)."""
+    rt = BasicRuntime(
+        AgentConfig(
+            llm_api_key="sk-test",
+            llm_model="gpt-test",
+            llm_base_url="http://llm/v1",
+            llm_provider="openai",
+        )
+    )
+    calls = {"n": 0}
+
+    async def counter(**kwargs):
+        calls["n"] += 1
+        return {"n": calls["n"]}
+
+    rt.tool_registry.register_builtin_handler(
+        "counter",
+        "count",
+        counter,
+        parameters={"type": "object", "properties": {}},
+    )
+
+    def _tool_step() -> list[bytes]:
+        return _sse_bytes(
+            [
+                {
+                    "choices": [
+                        {
+                            "delta": {
+                                "tool_calls": [
+                                    {
+                                        "index": 0,
+                                        "id": "call_x",
+                                        "type": "function",
+                                        "function": {
+                                            "name": "counter",
+                                            "arguments": "{}",
+                                        },
+                                    }
+                                ]
+                            },
+                            "finish_reason": "tool_calls",
+                        }
+                    ]
+                }
+            ]
+        )
+
+    final_sse = _sse_bytes(
+        [{"choices": [{"delta": {"content": "done"}, "finish_reason": "stop"}]}]
+    )
+    session = _FakeSession(
+        [_FakeResp(_tool_step()), _FakeResp(_tool_step()), _FakeResp(final_sse)]
+    )
+
+    with (
+        patch("remedy.core.agent.aiohttp.ClientSession", return_value=session),
+        patch("remedy.core.agent._message_wants_tools", return_value=True),
+    ):
+        text = await rt._call_llm("run counter twice")
+
+    assert calls["n"] == 1
+    assert "done" in text

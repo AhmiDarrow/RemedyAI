@@ -360,6 +360,58 @@ class AnthropicProvider(ProviderAdapter):
 
 
 # ---------------------------------------------------------------------------
+# Lightweight OpenAI-compatible specializations
+# ---------------------------------------------------------------------------
+
+
+class GoogleProvider(OpenAIProvider):
+    """Google Gemini via the OpenAI-compatible endpoint.
+
+    Strips request fields Gemini's OpenAI bridge may reject or ignore.
+    """
+
+    provider_name = "google"
+    default_base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+
+    def build_body(
+        self,
+        model: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        stream: bool,
+    ) -> dict[str, Any]:
+        body = super().build_body(model, messages, tools, stream)
+        # Gemini OpenAI-compat is picky about some OpenAI-only knobs.
+        for key in ("logit_bias", "logprobs", "top_logprobs", "n", "user"):
+            body.pop(key, None)
+        # Empty tools list is invalid; omit instead.
+        if not body.get("tools"):
+            body.pop("tools", None)
+            body.pop("tool_choice", None)
+        return body
+
+
+class DeepSeekProvider(OpenAIProvider):
+    """DeepSeek chat/reasoner APIs (OpenAI-compatible + reasoning_content)."""
+
+    provider_name = "deepseek"
+    default_base_url = "https://api.deepseek.com"
+
+    def build_body(
+        self,
+        model: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        stream: bool,
+    ) -> dict[str, Any]:
+        body = super().build_body(model, messages, tools, stream)
+        # Reasoner models work better with slightly lower temperature.
+        if "reasoner" in (model or "").lower():
+            body["temperature"] = min(float(body.get("temperature") or 0.6), 0.5)
+        return body
+
+
+# ---------------------------------------------------------------------------
 # Provider registry
 # ---------------------------------------------------------------------------
 
@@ -367,8 +419,8 @@ class AnthropicProvider(ProviderAdapter):
 _PROVIDERS: dict[str, type[ProviderAdapter]] = {
     "openai": OpenAIProvider,
     "anthropic": AnthropicProvider,
-    "google": OpenAIProvider,         # Google via /v1beta/openai is OpenAI-compatible
-    "deepseek": OpenAIProvider,       # DeepSeek is OpenAI-compatible
+    "google": GoogleProvider,
+    "deepseek": DeepSeekProvider,
     "openrouter": OpenAIProvider,     # OpenRouter is OpenAI-compatible
     "ollama": OpenAIProvider,         # Ollama is OpenAI-compatible
     "custom": OpenAIProvider,         # Unknown custom endpoints default to OpenAI-compatible

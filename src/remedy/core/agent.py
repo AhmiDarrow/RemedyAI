@@ -44,166 +44,31 @@ from remedy.skills.tool_registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_SYSTEM_PROMPT = (
-    "You are Remedy — a fast, self-improving coding agent.\n\n"
-    "Style: concise, decisive, high-signal. Prefer action over narration.\n"
-    "Do not monologue about plans before tool calls; just call tools, then answer.\n\n"
-    "Skills vs tools:\n"
-    "- **Skills** are named procedure packs (how to review code, write tests, etc.). "
-    "When asked \"what skills do you have?\", list them from the Skills block in context "
-    "— do NOT shell out or invent names.\n"
-    "- **Tools** are executable actions: file_read, file_write, list_dir, bash_exec.\n\n"
-    "Tool policy (OpenCode-smooth):\n"
-    "- Simple chat (greetings, definitions, provider/model/skills questions): "
-    "answer immediately with NO tools.\n"
-    "- Project work (review, files, shell, debug, implement): use the function-calling API.\n"
-    "- NEVER write tool calls as plain text (e.g. file_read(\"x\") && list_dir(\"y\")). "
-    "That hangs the UI — always use native tool_calls.\n"
-    "- Prefer parallel tool calls for independent reads; avoid repeating the same call.\n"
-    "- After tool results, synthesize a clear final answer. Never stall or loop.\n"
-    "- If information is already in context (provider block, skills list, history), use it."
+
+from remedy.core.react_policy import (
+    HISTORY_CHAR_BUDGET as _HISTORY_CHAR_BUDGET,
+    HISTORY_MSG_LIMIT as _HISTORY_MSG_LIMIT,
+    MAX_PARALLEL_TOOLS as _MAX_PARALLEL_TOOLS,
+    MAX_REACT_STEPS as _MAX_REACT_STEPS,
+    _DEFAULT_SYSTEM_PROMPT,
+    _build_system_prompt,
+    _looks_like_pseudo_tools,
+    _message_wants_tools,
+    _parse_pseudo_tool_calls,
+    _tool_call_fingerprint,
+    build_system_prompt,
+    looks_like_pseudo_tools,
+    message_wants_tools,
+    parse_pseudo_tool_calls,
+    tool_call_fingerprint,
 )
 
-# Real coding agents need headroom; simple turns never spend this budget.
-_MAX_REACT_STEPS = 24
-_MAX_PARALLEL_TOOLS = 8
-_HISTORY_MSG_LIMIT = 30
-_HISTORY_CHAR_BUDGET = 14_000
-
-# Messages that look like they need filesystem / shell tools.
-_TOOL_HINT_RE = re.compile(
-    r"\b("
-    r"read|write|edit|create|delete|list|ls|cat|open|save|"
-    r"file|files|folder|directory|path|workspace|codebase|repo|repository|project|"
-    r"review|analyze|analyse|explore|overview|inspect|structure|architecture|"
-    r"run|execute|shell|bash|command|terminal|install|build|test|"
-    r"implement|refactor|debug|fix|bug|error|stack|trace|"
-    r"git|commit|diff|branch|src/|\\.[a-z]{1,5}\b"
-    r")\b|"
-    r"(?:[A-Za-z]:)?[\\/][\w.\\/ -]+",
-    re.IGNORECASE,
-)
-
-# Meta questions that must be answered from context (no shell / file thrash).
-_META_NO_TOOLS_RE = re.compile(
-    r"\b(what skills|which skills|list skills|your skills|"
-    r"what tools|which tools|list tools|your tools|"
-    r"what can you do|who are you|what are you)\b",
-    re.IGNORECASE,
-)
-
-# Models sometimes emit tool syntax as plain text instead of function-calls.
-_PSEUDO_TOOL_RE = re.compile(
-    r"\b(file_read|file_write|list_dir|bash_exec)\s*\(",
-    re.IGNORECASE,
-)
-
-
-def _message_wants_tools(message: str) -> bool:
-    """Return False for chit-chat / simple Qs so models answer in one shot."""
-    msg = (message or "").strip()
-    if not msg:
-        return False
-    # "what skills/tools do you have?" → answer from context, never bash_exec.
-    if _META_NO_TOOLS_RE.search(msg):
-        return False
-    if _TOOL_HINT_RE.search(msg):
-        return True
-    # Short prompts without tool hints → answer from knowledge only.
-    if len(msg) <= 160:
-        return False
-    return True
-
-
-def _looks_like_pseudo_tools(text: str) -> bool:
-    """True when the model faked tool calls in natural language."""
-    if not text:
-        return False
-    if _PSEUDO_TOOL_RE.search(text):
-        return True
-    # Shell-style chained faux calls: tool("a") && tool("b")
-    if "&&" in text and re.search(r"\w+\(\s*[\"']", text):
-        return True
-    return False
-
-
-def _parse_pseudo_tool_calls(text: str) -> list[dict[str, Any]]:
-    """Best-effort parse of text-faked tools into OpenAI-style tool_call dicts.
-
-    Models sometimes emit file_read("x") as plain text instead of native tool
-    calls. We recover them here and log aggressively so system prompts can be
-    tuned from real telemetry rather than growing more recovery heuristics.
-    """
-    if not text:
-        return []
-    # file_read("path") / list_dir('src') / bash_exec("ls")
-    pat = re.compile(
-        r"\b(file_read|file_write|list_dir|bash_exec)\s*\(\s*[\"']([^\"']+)[\"']"
-        r"(?:\s*,\s*[\"']([\s\S]*?)[\"'])?\s*\)",
-        re.IGNORECASE,
-    )
-    out: list[dict[str, Any]] = []
-    for i, m in enumerate(pat.finditer(text)):
-        name = m.group(1).lower()
-        arg0 = m.group(2)
-        arg1 = m.group(3)
-        if name == "file_read":
-            args: dict[str, Any] = {"path": arg0}
-        elif name == "list_dir":
-            args = {"path": arg0}
-        elif name == "bash_exec":
-            args = {"command": arg0}
-        elif name == "file_write":
-            args = {"path": arg0, "content": arg1 or ""}
-        else:
-            continue
-        out.append(
-            {
-                "id": f"pseudo_{i}_{uuid4().hex[:8]}",
-                "type": "function",
-                "function": {
-                    "name": name,
-                    "arguments": json.dumps(args),
-                },
-            }
-        )
-        if len(out) >= _MAX_PARALLEL_TOOLS:
-            break
-    if out:
-        import logging
-
-        logging.getLogger(__name__).warning(
-            "pseudo_tool_recovery count=%s names=%s preview=%r",
-            len(out),
-            [c["function"]["name"] for c in out],
-            (text or "")[:200],
-        )
-    return out
-
-
-def _tool_call_fingerprint(tc: dict[str, Any]) -> str:
-    fn = tc.get("function") or {}
-    name = (fn.get("name") or "").strip()
-    raw = fn.get("arguments") or "{}"
-    if not isinstance(raw, str):
-        try:
-            raw = json.dumps(raw, sort_keys=True, default=str)
-        except Exception:
-            raw = str(raw)
-    try:
-        parsed = json.loads(raw) if raw.strip() else {}
-        raw = json.dumps(parsed, sort_keys=True, default=str)
-    except Exception:
-        raw = raw.strip()
-    return f"{name}::{raw}"
-
-
-def _build_system_prompt(persona: str | None = None) -> str:
-    base = _DEFAULT_SYSTEM_PROMPT
-    addendum = persona_system_addendum(persona)
-    if addendum:
-        return f"{base}\n\n{addendum}"
-    return base
+# Re-export for tests that import from remedy.core.agent
+__all__ = [
+    "BasicRuntime",
+    "_message_wants_tools",
+    "message_wants_tools",
+]
 
 
 class BasicRuntime(AgentRuntime):
@@ -312,9 +177,9 @@ class BasicRuntime(AgentRuntime):
             return "\n".join(lines) if lines else "(empty)"
 
         async def bash_exec(command: str = "") -> str:
-            import asyncio
-
-            from remedy.execution.process import create_hidden_subprocess_exec, win_shell_prefix
+            """Run a shell command through SubprocessSandbox (hidden console on Windows)."""
+            from remedy.execution.process import win_shell_prefix
+            from remedy.execution.sandbox import SubprocessSandbox
 
             if not command or not str(command).strip():
                 return "Error: empty command"
@@ -323,27 +188,13 @@ class BasicRuntime(AgentRuntime):
                 return f"Blocked by security policy: {danger}"
             root = self.effective_project_path()
             argv = [*win_shell_prefix(), command]
-            try:
-                # CREATE_NO_WINDOW / -WindowStyle Hidden — never flash a console on Windows.
-                proc = await create_hidden_subprocess_exec(
-                    *argv,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    cwd=str(root),
-                )
-                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=60.0)
-            except TimeoutError:
-                return "Error: command timed out after 60s"
-            except OSError as e:
-                return f"Error running command: {e}"
-            out = (stdout or b"").decode("utf-8", errors="replace")
-            err = (stderr or b"").decode("utf-8", errors="replace")
-            code = proc.returncode if proc.returncode is not None else -1
-            parts = [f"exit_code={code}", f"cwd={root}"]
-            if out:
-                parts.append(out[:50_000])
-            if err:
-                parts.append(f"stderr:\n{err[:20_000]}")
+            sandbox = SubprocessSandbox(allowed_paths=[root])
+            result = await sandbox.execute(argv, workdir=root, timeout_seconds=60.0)
+            parts = [f"exit_code={result.exit_code}", f"cwd={root}"]
+            if result.stdout:
+                parts.append(result.stdout[:50_000])
+            if result.stderr:
+                parts.append(f"stderr:\n{result.stderr[:20_000]}")
             return "\n".join(parts)
 
         self.tool_registry.register_builtin_handler(

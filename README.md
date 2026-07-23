@@ -351,19 +351,20 @@ uv run remedy --help
 ```
 RemedyAI/
 ├── src/remedy/
-│   ├── core/           # Runtime, learning loop, security, metrics
+│   ├── core/           # Runtime, ReAct policy, providers, learning, security
 │   ├── memory/         # SQLite+FTS5 store, handoff, profiles
 │   ├── skills/         # Loader, registry, executor, adapters
 │   ├── gateway/        # Event router, channels
 │   ├── tools/          # MCP client
-│   ├── execution/      # Sandbox, policy
-│   ├── interfaces/     # CLI, API, plugin system
+│   ├── execution/      # Sandbox, hidden process helpers, Docker
+│   ├── interfaces/     # CLI, API (api_models + api_support + create_app), plugins
 │   ├── bundled_skills/ # Default skills shipped with the package
 │   └── migrate/        # Hermes/OpenClaw importers
 ├── desktop/
 │   ├── src/            # React + Vite frontend
 │   ├── src-tauri/      # Tauri 2 shell (Rust)
 │   └── package.json
+├── examples/           # demo_plugin and sample scripts
 ├── scripts/            # build_desktop, sync_version, signing helpers
 ├── tests/
 ├── skills/

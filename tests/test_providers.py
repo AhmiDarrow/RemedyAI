@@ -8,6 +8,8 @@ import pytest
 
 from remedy.core.providers import (
     AnthropicProvider,
+    DeepSeekProvider,
+    GoogleProvider,
     OpenAIProvider,
     get_provider,
     get_provider_for_base_url,
@@ -25,10 +27,19 @@ class TestProviderRegistry:
         assert isinstance(p, AnthropicProvider)
 
         p = get_provider("google")
+        assert isinstance(p, GoogleProvider)
         assert isinstance(p, OpenAIProvider)
+
+        p = get_provider("deepseek")
+        assert isinstance(p, DeepSeekProvider)
 
         p = get_provider("unknown")
         assert isinstance(p, OpenAIProvider)
+
+    def test_google_strips_empty_tools(self):
+        p = GoogleProvider()
+        body = p.build_body("gemini-2.0-flash", [{"role": "user", "content": "hi"}], tools=None, stream=False)
+        assert "tools" not in body
 
     def test_detect_provider_from_url(self):
         p = get_provider_for_base_url("https://api.anthropic.com")
