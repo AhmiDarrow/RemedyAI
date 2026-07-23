@@ -351,33 +351,48 @@ class BasicRuntime(AgentRuntime):
             yield response
 
     async def call_tool(self, tool_call: ToolCall) -> ToolResult:
+        import time as _time
+
         from remedy.core.errors import format_tool_error
         from remedy.core.metrics import default_registry
 
         name = tool_call.tool_name
         default_registry.counter("remedy_tool_calls_total", tool=name).inc()
+        t0 = _time.perf_counter()
         try:
             result = await self.tool_registry.execute(name, **tool_call.arguments)
             default_registry.counter("remedy_tool_success_total", tool=name).inc()
+            default_registry.histogram(
+                "remedy_tool_duration_seconds", tool=name
+            ).observe(_time.perf_counter() - t0)
             return ToolResult(
                 call_id=tool_call.id,
                 success=True,
                 data=result,
+                duration_ms=(_time.perf_counter() - t0) * 1000,
             )
         except ValueError as e:
             default_registry.counter("remedy_tool_errors_total", tool=name).inc()
+            default_registry.histogram(
+                "remedy_tool_duration_seconds", tool=name
+            ).observe(_time.perf_counter() - t0)
             return ToolResult(
                 call_id=tool_call.id,
                 success=False,
                 error=format_tool_error(str(e), code="TOOL_VALUE_ERROR", tool_name=name),
+                duration_ms=(_time.perf_counter() - t0) * 1000,
             )
         except Exception as e:
             logger.exception("Tool %s failed", name)
             default_registry.counter("remedy_tool_errors_total", tool=name).inc()
+            default_registry.histogram(
+                "remedy_tool_duration_seconds", tool=name
+            ).observe(_time.perf_counter() - t0)
             return ToolResult(
                 call_id=tool_call.id,
                 success=False,
                 error=format_tool_error(str(e), code="TOOL_EXCEPTION", tool_name=name),
+                duration_ms=(_time.perf_counter() - t0) * 1000,
             )
 
     async def _generate_response(
@@ -1028,7 +1043,8 @@ class BasicRuntime(AgentRuntime):
         # Skills registry — so "what skills do you have?" never needs a shell.
         with suppress(Exception):
             reg = getattr(self, "skills", None)
-            if reg is not None and getattr(reg, "count", 0):
+            count = int(getattr(reg, "count", 0) or 0) if reg is not None else 0
+            if reg is not None and count > 0:
                 skill_lines = reg.summary_lines(limit=40)
                 parts.append(
                     "Skills loaded (procedure packs — list these when asked):\n"

@@ -26,12 +26,15 @@ async def test_upsert_many_and_rebuild_fts(tmp_path) -> None:
     ]
     n = await store.upsert_many(entries)
     assert n == 25
+    # Bulk path drops/rebuilds FTS triggers once — search must still work.
     hits = await store.search("alpha", limit=10)
     assert len(hits) >= 1
-    rebuilt = await store.rebuild_fts()
-    assert rebuilt == 25
     hits2 = await store.search("unique3", limit=5)
     assert any("unique3" in h.content for h in hits2)
+    rebuilt = await store.rebuild_fts()
+    assert rebuilt == 25
+    hits3 = await store.search("unique7", limit=5)
+    assert any("unique7" in h.content for h in hits3)
     await store.close()
 
 

@@ -272,10 +272,46 @@ class MemoryStore:
         db.commit()
         return entry
 
+    # Threshold: disable per-row FTS triggers and rebuild once after bulk write.
+    _BULK_FTS_THRESHOLD = 10
+
+    _FTS_TRIGGER_SQL = (
+        """
+        CREATE TRIGGER IF NOT EXISTS memory_fts_insert AFTER INSERT ON memory_entries BEGIN
+            INSERT INTO memory_fts(rowid, title, content, tags)
+            VALUES (new.rowid, new.title, new.content, new.tags);
+        END;
+        """,
+        """
+        CREATE TRIGGER IF NOT EXISTS memory_fts_delete AFTER DELETE ON memory_entries BEGIN
+            INSERT INTO memory_fts(memory_fts, rowid, title, content, tags)
+            VALUES ('delete', old.rowid, old.title, old.content, old.tags);
+        END;
+        """,
+        """
+        CREATE TRIGGER IF NOT EXISTS memory_fts_update AFTER UPDATE ON memory_entries BEGIN
+            INSERT INTO memory_fts(memory_fts, rowid, title, content, tags)
+            VALUES ('delete', old.rowid, old.title, old.content, old.tags);
+            INSERT INTO memory_fts(rowid, title, content, tags)
+            VALUES (new.rowid, new.title, new.content, new.tags);
+        END;
+        """,
+    )
+
+    def _drop_fts_triggers(self, db: sqlite3.Connection) -> None:
+        for name in ("memory_fts_insert", "memory_fts_delete", "memory_fts_update"):
+            db.execute(f"DROP TRIGGER IF EXISTS {name}")
+
+    def _create_fts_triggers(self, db: sqlite3.Connection) -> None:
+        for sql in self._FTS_TRIGGER_SQL:
+            db.execute(sql)
+
     async def upsert_many(self, entries: list[MemoryEntry]) -> int:
         """Batch upsert in a single transaction (faster under high write volume).
 
-        FTS triggers still fire per row, but one commit amortizes fsync cost.
+        For batches larger than ``_BULK_FTS_THRESHOLD``, FTS triggers are dropped
+        for the write, then the FTS index is rebuilt once (avoids N trigger
+        updates). Smaller batches keep normal per-row triggers.
         Returns the number of entries written.
         """
         if not entries:
@@ -299,24 +335,41 @@ class MemoryStore:
                     entry.importance,
                 )
             )
-        db.executemany(
-            """
-            INSERT INTO memory_entries (id, entry_type, title, content, tags, metadata,
-                                        created_at, updated_at, session_id, importance)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                entry_type = excluded.entry_type,
-                title = excluded.title,
-                content = excluded.content,
-                tags = excluded.tags,
-                metadata = excluded.metadata,
-                updated_at = excluded.updated_at,
-                session_id = excluded.session_id,
-                importance = excluded.importance
-            """,
-            rows,
-        )
-        db.commit()
+        bulk = len(rows) >= self._BULK_FTS_THRESHOLD
+        try:
+            if bulk:
+                self._drop_fts_triggers(db)
+            db.executemany(
+                """
+                INSERT INTO memory_entries (id, entry_type, title, content, tags, metadata,
+                                            created_at, updated_at, session_id, importance)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    entry_type = excluded.entry_type,
+                    title = excluded.title,
+                    content = excluded.content,
+                    tags = excluded.tags,
+                    metadata = excluded.metadata,
+                    updated_at = excluded.updated_at,
+                    session_id = excluded.session_id,
+                    importance = excluded.importance
+                """,
+                rows,
+            )
+            if bulk:
+                db.execute("INSERT INTO memory_fts(memory_fts) VALUES('rebuild')")
+                self._create_fts_triggers(db)
+            db.commit()
+        except Exception:
+            db.rollback()
+            # Always try to restore triggers after a failed bulk path.
+            if bulk:
+                try:
+                    self._create_fts_triggers(db)
+                    db.commit()
+                except Exception:
+                    pass
+            raise
         return len(rows)
 
     async def rebuild_fts(self) -> int:

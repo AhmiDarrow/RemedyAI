@@ -97,7 +97,8 @@ class MCPClient:
         proc = self._processes.pop(server_name, None)
         if proc:
             try:
-                proc.stdin.close()
+                if proc.stdin is not None:
+                    proc.stdin.close()
                 proc.kill()
                 await proc.wait()
             except Exception:

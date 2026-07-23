@@ -40,3 +40,11 @@ def test_api_metrics_prometheus() -> None:
     assert r.status_code == 200
     assert "text/plain" in r.headers.get("content-type", "")
     assert "remedy_prom_probe" in r.text
+
+
+def test_tool_histogram_recorded() -> None:
+    """Tool latency histogram lines appear after a timed observe."""
+    default_registry.histogram("remedy_tool_duration_seconds", tool="echo").observe(0.01)
+    text = default_registry.prometheus_text()
+    assert "remedy_tool_duration_seconds_bucket" in text
+    assert 'tool="echo"' in text

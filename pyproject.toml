@@ -83,17 +83,16 @@ python_version = "3.12"
 ignore_missing_imports = true
 warn_unused_ignores = true
 check_untyped_defs = true
-# Incremental expansion of typed core modules.
+# Typed packages (expand as remaining modules are annotated).
 files = [
-    "src/remedy/core/errors.py",
-    "src/remedy/core/metrics.py",
-    "src/remedy/core/react_policy.py",
-    "src/remedy/core/react_stream.py",
-    "src/remedy/core/security.py",
-    "src/remedy/core/workspace.py",
-    "src/remedy/core/providers.py",
-    "src/remedy/execution/process.py",
-    "src/remedy/execution/sandbox.py",
+    "src/remedy/core",
+    "src/remedy/execution",
+    "src/remedy/tools",
+]
+exclude = [
+    "src/remedy/core/agent.py",  # large ReAct loop; type gradually
+    "src/remedy/core/learning_loop.py",
+    "src/remedy/core/learning",
 ]
 
 [dependency-groups]

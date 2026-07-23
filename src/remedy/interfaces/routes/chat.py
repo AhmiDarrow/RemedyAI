@@ -108,9 +108,16 @@ def register_chat_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
             session_id=session_id,
         )
 
-        start = time.time()
+        from remedy.core.metrics import default_registry
+
+        start = time.perf_counter()
         responses = await gateway.emit(event)
-        elapsed = (time.time() - start) * 1000
+        elapsed_s = time.perf_counter() - start
+        elapsed = elapsed_s * 1000
+        default_registry.counter("remedy_chat_requests_total", path="chat").inc()
+        default_registry.histogram("remedy_chat_duration_seconds", path="chat").observe(
+            elapsed_s
+        )
 
         response_text = ""
         for r in responses:
