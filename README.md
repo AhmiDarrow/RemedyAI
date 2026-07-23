@@ -30,14 +30,17 @@ The desktop app bundles the full Remedy server as a sidecar, so everything runs 
 |---------|-------------|
 | **Chat UI** | Streaming tokens, markdown rendering, syntax highlighting |
 | **Session tabs** | Multi-tab session management — open, switch, close tabs |
+| **Attachments** | Drag-and-drop or attach files/images into the session |
 | **Plan/Build mode** | Toggle between plan mode (no tools) and build mode |
 | **@file references** | Type `@` to search and autocomplete project files |
+| **First-run setup** | Setup wizard for provider/API key before chat |
+| **Bundled skills** | Default skills pack loads on start (not an empty skill list) |
 | **Undo** | Hover any assistant message to revert it |
 | **Themes** | 6 themes — Dark, Light, Emerald, Amethyst, Amber, Ocean |
 | **Side panels** | Memory browser and Skills viewer accessible from the status bar |
 | **Slash commands** | `/help`, `/new`, `/sessions`, `/models`, `/memory`, `/skills`, `/handoff` |
 | **Tray icon** | Minimize to system tray |
-| **Auto-update** | Built-in Tauri updater (minisign-signed releases; pubkey embedded in app) |
+| **Auto-update** | In-app check → download → install → relaunch (minisign-signed releases) |
 
 ### Architecture
 
@@ -330,10 +333,10 @@ def teardown_plugin():
 ## Development
 
 ```bash
-git clone https://github.com/AhmiDarrow/Remedy.git
-cd Remedy
+git clone https://github.com/AhmiDarrow/RemedyAI.git
+cd RemedyAI
 uv sync --group dev
-uv run pytest -q     # 307 tests
+uv run pytest -q     # 375 tests
 uv run remedy --help
 ```
 
@@ -346,7 +349,7 @@ uv run remedy --help
 ### Project structure
 
 ```
-Remedy/
+RemedyAI/
 ├── src/remedy/
 │   ├── core/           # Runtime, learning loop, security, metrics
 │   ├── memory/         # SQLite+FTS5 store, handoff, profiles
@@ -355,18 +358,60 @@ Remedy/
 │   ├── tools/          # MCP client
 │   ├── execution/      # Sandbox, policy
 │   ├── interfaces/     # CLI, API, plugin system
+│   ├── bundled_skills/ # Default skills shipped with the package
 │   └── migrate/        # Hermes/OpenClaw importers
 ├── desktop/
 │   ├── src/            # React + Vite frontend
 │   ├── src-tauri/      # Tauri 2 shell (Rust)
 │   └── package.json
+├── scripts/            # build_desktop, sync_version, signing helpers
 ├── tests/
 ├── skills/
 └── docs/
 ```
 
+### Desktop release (maintainers)
+
+Signed Windows installers are built by GitHub Actions on version tags (`v*`):
+
+```bash
+# bump version across pyproject / package.json / tauri / Cargo / latest.json
+python scripts/sync_version.py 0.10.4   # or: patch | minor | major
+
+git add -A && git commit -m "chore: release v0.10.4"
+git push origin desktop-primary
+git tag v0.10.4 && git push origin v0.10.4
+# → .github/workflows/desktop-release.yml builds sidecar + NSIS, signs, publishes
+```
+
+**Signing (required for in-app auto-update):**
+
+| Item | Where |
+|------|--------|
+| Public key | `desktop/src-tauri/tauri.conf.json` → `plugins.updater.pubkey` (committed) |
+| Private key | Local only: `~/.tauri/remedy.key` — **never commit** (see `.gitignore`) |
+| CI secrets | `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` |
+| Artifacts flag | `bundle.createUpdaterArtifacts: true` in `tauri.conf.json` |
+
+Re-upload secrets after rotating a key:
+
+```bash
+uv run python scripts/set_tauri_signing_secrets.py
+```
+
+Local signed build (optional):
+
+```powershell
+$env:TAURI_SIGNING_PRIVATE_KEY = (Get-Content "$env:USERPROFILE\.tauri\remedy.key" -Raw).Trim()
+$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = ""
+python scripts/build_desktop.py --clean
+cd desktop; npm run tauri build
+```
+
+See [docs/DESKTOP.md](docs/DESKTOP.md) for API contract and full desktop notes.
+
 ---
 
 ## License
 
-MIT — see [LICENSE](./LICENSE).
+Custom proprietary license — see [LICENSE](./LICENSE). Non-commercial personal use only; commercial use and redistribution require written permission.

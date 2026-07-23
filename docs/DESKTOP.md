@@ -7,7 +7,9 @@ server as a sidecar inside a native Tauri application, so users only need to
 download and run one installer — no Python, Node, or Rust toolchain required.
 
 The desktop app provides an OpenCode-like chat interface with streaming tokens,
-session management, slash commands, themes, and persistent memory.
+session management, file/image attachments (drag-and-drop), slash commands,
+themes, first-run setup, bundled skills, and persistent memory. Releases are
+minisign-signed for in-app auto-update.
 
 ## Goal
 
@@ -53,13 +55,24 @@ CLI and web UI remain available as power-user features.
 | `POST` | `/api/sessions/{id}/messages` | Sync send, returns full response |
 | `POST` | `/api/sessions/{id}/messages/stream` | SSE: `thinking`, `token`, `tool_call`, `tool_result`, `done`, `error` |
 
+### Attachments
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/api/sessions/{id}/attachments` | Upload file (JSON + base64 preferred in frozen sidecar) |
+| `GET` | `/api/sessions/{id}/attachments/{filename}` | Download stored attachment |
+
+Same-name re-upload overwrites the prior file (no `_N` suffixes).
+
 ### Management
 
 | Method | Path | Purpose |
 |--------|------|---------|
+| `GET` | `/api/status` | Health / version / provider status |
 | `GET` | `/api/models` | Available LLM models + default (auto-discovers from provider) |
 | `GET` | `/api/agents` | Available agent profiles |
 | `POST` | `/api/sessions/{id}/command` | Execute slash command |
+| `GET` | `/api/skills` | List skills (including bundled defaults) |
 
 ### Events (SSE)
 
@@ -87,7 +100,7 @@ event: error         → { message: "..." }
 │              │  │ Composer                  [model] ││
 │              │  │ [multiline input + send/stop]     ││
 │              │  └──────────────────────────────────┘│
-│              │  Status: ● Connected · remedy v0.9.3 │
+│              │  Status: ● Connected · remedy v0.10.3│
 └──────────────┴──────────────────────────────────────┘
 ```
 
@@ -148,19 +161,20 @@ event: error         → { message: "..." }
 
 ## Success Criteria (v1)
 
-- [ ] Windows `.exe` launches → auto-starts server → opens chat window
-- [ ] Create session → send message → tokens stream in real-time
-- [ ] Switch sessions without losing history
-- [ ] `/new`, `/help`, stop generation work via UI
-- [ ] Same backend usable via `remedy web` in browser
-- [ ] No Electron dependency
+- [x] Windows `.exe` launches → auto-starts server → opens chat window
+- [x] Create session → send message → tokens stream in real-time
+- [x] Switch sessions without losing history
+- [x] `/new`, `/help`, stop generation work via UI
+- [x] Attachments via picker and native drag-and-drop
+- [x] In-app signed auto-update (check → install → relaunch)
+- [x] No Electron dependency
 
 ## Build Toolchain
 
 | Tool | Path | Notes |
 |------|------|-------|
-| Cargo | `~\.cargo\bin\cargo.exe` | Rust 1.97.1 MSVC; not on default PATH — prepend `$env:USERPROFILE\.cargo\bin` before running |
-| Rust | Same as cargo | `rustc 1.97.1` |
+| Cargo | `~\.cargo\bin\cargo.exe` | Rust stable MSVC; prepend `$env:USERPROFILE\.cargo\bin` if not on PATH |
+| Rust | Same as cargo | `rustc` stable |
 | Tauri CLI | via `npm run tauri` in `desktop/` | Installed via npm, not globally |
 
 ### Build from scratch
@@ -177,4 +191,30 @@ cd desktop
 npm run tauri build
 ```
 
-The version is sourced from `pyproject.toml` only — `scripts/build_desktop.py` auto-syncs `desktop/package.json` and `tauri.conf.json` at build time. `src/remedy/__init__.py` reads it at runtime.
+Version is sourced from `pyproject.toml` — `scripts/sync_version.py` / `build_desktop.py` keep `package.json`, `tauri.conf.json`, and `Cargo.toml` in sync. `src/remedy/__init__.py` reads the package version at runtime.
+
+## Releases & auto-update
+
+CI workflow: [`.github/workflows/desktop-release.yml`](../.github/workflows/desktop-release.yml)
+
+1. Push a tag `vX.Y.Z` on the release branch (or use `workflow_dispatch` with a version).
+2. Jobs: build sidecar → build Tauri NSIS with `TAURI_SIGNING_*` secrets → publish GitHub Release + `latest.json`.
+3. Desktop checks `https://github.com/AhmiDarrow/RemedyAI/releases/latest/download/latest.json`.
+
+### Signing checklist
+
+| Item | Location | Commit? |
+|------|----------|---------|
+| Public key | `plugins.updater.pubkey` in `tauri.conf.json` | Yes |
+| `createUpdaterArtifacts` | `bundle.createUpdaterArtifacts: true` | Yes |
+| Private key | `~/.tauri/remedy.key` | **Never** (`.gitignore`) |
+| CI private key | GitHub secret `TAURI_SIGNING_PRIVATE_KEY` | Secret only |
+| Password | GitHub secret `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Secret only |
+
+Helper to set secrets from the local key file:
+
+```bash
+uv run python scripts/set_tauri_signing_secrets.py
+```
+
+Losing the private key breaks trust for already-installed clients until they manually install a build with a new pubkey.

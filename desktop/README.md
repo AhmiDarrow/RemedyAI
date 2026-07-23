@@ -1,32 +1,77 @@
-# React + TypeScript + Vite
+# Remedy Desktop
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+Native Windows desktop shell for Remedy AI: **Tauri 2 + React 19 + Vite**, with the Python
+`remedy serve` process bundled as a sidecar.
 
-Currently, two official plugins are available:
+## Users
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+Prefer the prebuilt installer:
 
-## React Compiler
+**[Download latest release](https://github.com/AhmiDarrow/RemedyAI/releases/latest)**
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+No Python, Node, or Rust required. In-app updates are minisign-signed.
 
-## Expanding the Oxlint configuration
+## Developers
 
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
+### Prerequisites
 
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+- Node 20+
+- Rust (stable) + MSVC toolchain on Windows
+- Python 3.12+ and [uv](https://docs.astral.sh/uv/) (repo root)
+
+### Dev loop
+
+```powershell
+# Terminal 1 — API server
+cd ..
+uv run remedy serve --host 127.0.0.1 --port 7400
+
+# Terminal 2 — Vite UI only
+cd desktop
+npm install
+npm run dev
+# http://localhost:5173
+
+# Or full Tauri shell (spawns sidecar when packaged):
+npm run tauri dev
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+### Production build (local)
+
+```powershell
+# From repo root — build PyInstaller sidecar into desktop/bin/
+python scripts/build_desktop.py --clean
+
+cd desktop
+npm run tauri build
+# Installer: src-tauri/target/release/bundle/nsis/
+```
+
+### Versioning
+
+Do not hand-edit versions. From repo root:
+
+```bash
+python scripts/sync_version.py patch   # or 0.10.4 / minor / major
+```
+
+This updates `pyproject.toml`, `package.json`, `tauri.conf.json`, `Cargo.toml`, and `scripts/latest.json`.
+
+### Auto-update signing
+
+- Public key: `src-tauri/tauri.conf.json` → `plugins.updater.pubkey`
+- Private key: **never commit** — store at `~/.tauri/remedy.key` (ignored by git)
+- CI secrets: `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
+- Requires `bundle.createUpdaterArtifacts: true` (already set)
+
+See root [README.md](../README.md#desktop-release-maintainers) and [docs/DESKTOP.md](../docs/DESKTOP.md).
+
+## Layout
+
+```
+desktop/
+├── src/                 # React UI (Composer, sessions, UpdateScreen, …)
+├── src-tauri/           # Tauri shell, DnD, updater commands
+├── bin/                 # Built sidecar binaries (gitignored)
+└── package.json
+```

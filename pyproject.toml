@@ -6,7 +6,7 @@ name = "remedy-ai"
 version = "0.10.3"
 description = "A self-improving, multi-channel AI agent framework with memory, learning, and extensibility"
 readme = "README.md"
-license = { text = "MIT" }
+license = { text = "LicenseRef-Proprietary" }
 authors = [
     { name = "Ahmi", email = "ahmitdarrow@gmail.com" }
 ]
@@ -14,7 +14,7 @@ keywords = ["ai", "agent", "framework", "skill", "memory", "learning", "llm", "t
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
+    "License :: Other/Proprietary License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
