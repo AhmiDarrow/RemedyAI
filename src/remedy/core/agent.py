@@ -624,7 +624,10 @@ class BasicRuntime(AgentRuntime):
             self._active_project_path = self._default_project_path
 
     async def stream_response(
-        self, message: str, session_id: str | None = None
+        self,
+        message: str,
+        session_id: str | None = None,
+        model: str | None = None,
     ) -> AsyncIterator[str]:
         """Stream tokens from the LLM for real-time SSE delivery.
 
@@ -634,23 +637,22 @@ class BasicRuntime(AgentRuntime):
         """
         await self._apply_session_workspace(session_id)
 
-        if not self._llm_api_key:
-            yield "[FALLBACK MODE — No API key configured. Set REMEDY_LLM_API_KEY or add llm_api_key to ~/.remedy/config.toml]\n\n"
-            full = self._fallback_response(
-                message,
-                GatewayEvent(
-                    kind=EventKind.MESSAGE,
-                    channel=ChannelKind.WEB,
-                    source_id="stream",
-                    payload={"message": message},
-                    session_id=session_id,
-                ),
-            )
-            yield full
-            return
+        prev_model = self._llm_model
+        if model and str(model).strip():
+            self._llm_model = str(model).strip()
 
-        async for chunk in self._call_llm_stream(message):
-            yield chunk
+        try:
+            if not self._llm_api_key:
+                yield (
+                    "[LLM not connected — no API key. "
+                    "Open Settings, enter your provider key, Save, then resend.]\n"
+                )
+                return
+
+            async for chunk in self._call_llm_stream(message):
+                yield chunk
+        finally:
+            self._llm_model = prev_model
 
     async def _build_context(self) -> str:
         parts = []

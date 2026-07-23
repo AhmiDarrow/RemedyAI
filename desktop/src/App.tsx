@@ -15,7 +15,7 @@ import { useTheme } from './hooks/useTheme'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import { useNotifications } from './hooks/useNotifications'
 import { useUpdateChecker } from './hooks/useUpdateChecker'
-import { revertMessageApi, listAgents, listCommands, exportSession } from './api/messages'
+import { listAgents, listCommands, exportSession } from './api/messages'
 import { apiFetch } from './api/client'
 import { getSettings, updateSettings } from './api/settings'
 
@@ -34,7 +34,18 @@ function isTauri(): boolean {
 
 export default function App() {
   const { sessions, activeId, setActiveId, create, remove, refresh: refreshSessions } = useSessions()
-  const { messages, loading: messagesLoading, streaming, partialText, send, stop, runCommand, load, addCommandMessage } = useMessages(activeId)
+  const {
+    messages,
+    loading: messagesLoading,
+    streaming,
+    partialText,
+    send,
+    stop,
+    runCommand,
+    addCommandMessage,
+    beginEdit,
+  } = useMessages(activeId)
+  const [editDraft, setEditDraft] = useState<string | null>(null)
   const { themeId, theme, set: setTheme } = useTheme()
   const [model, setModel] = useState('gpt-4o-mini')
   const [models, setModels] = useState<ModelInfo[]>([])
@@ -178,17 +189,15 @@ export default function App() {
     [send, model, handleCommand, activeId, create],
   )
 
-  const handleRevert = useCallback(
+  const handleEditUserMessage = useCallback(
     async (msgId: string) => {
-      if (!activeId) return
-      try {
-        await revertMessageApi(activeId, msgId)
-        await load()
-      } catch (e: unknown) {
-        console.warn('Revert failed:', e instanceof Error ? e.message : e)
+      if (!activeId || streaming) return
+      const text = await beginEdit(msgId)
+      if (text != null) {
+        setEditDraft(text)
       }
     },
-    [activeId, load],
+    [activeId, streaming, beginEdit],
   )
 
   const handleExport = useCallback(
@@ -392,7 +401,7 @@ export default function App() {
               streaming={streaming}
               loading={messagesLoading}
               planMode={planMode}
-              onRevert={handleRevert}
+              onEditUserMessage={handleEditUserMessage}
             />
 
             <Composer
@@ -400,9 +409,11 @@ export default function App() {
               onStop={stop}
               onCommand={handleCommand}
               streaming={streaming}
-              disabled={false}
+              disabled={streaming}
               planMode={planMode}
               agents={agentDefs}
+              editDraft={editDraft}
+              onEditDraftConsumed={() => setEditDraft(null)}
             />
           </div>
 

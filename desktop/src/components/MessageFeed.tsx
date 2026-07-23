@@ -9,17 +9,20 @@ interface MessageFeedProps {
   streaming: boolean
   loading: boolean
   planMode?: boolean
-  onRevert?: (msgId: string) => void
+  /** Edit+resend: only for user messages */
+  onEditUserMessage?: (msgId: string) => void
 }
 
 function MessageBubble({
   msg,
   partial,
-  onRevert,
+  onEditUserMessage,
+  streaming,
 }: {
   msg: ChatMessage
   partial?: string
-  onRevert?: (msgId: string) => void
+  onEditUserMessage?: (msgId: string) => void
+  streaming?: boolean
 }) {
   const isUser = msg.role === 'user'
   const isSystem = msg.role === 'system'
@@ -102,34 +105,25 @@ function MessageBubble({
           </div>
         )}
 
-        {msg.role === 'assistant' && !msg.reverted && onRevert && (
+        {msg.role === 'user' && !msg.reverted && onEditUserMessage && !streaming && (
           <button
-            onClick={() => onRevert(msg.id)}
+            onClick={() => onEditUserMessage(msg.id)}
             className="hidden group-hover:inline-block text-xs mt-1 px-1.5 py-0.5 rounded"
             style={{
               background: 'var(--bg-tertiary)',
               color: 'var(--text-muted)',
             }}
-            title="Undo this message"
+            title="Edit and resend this message (removes later replies)"
           >
-            Undo
+            Edit
           </button>
-        )}
-
-        {msg.reverted && (
-          <span
-            className="text-xs italic mt-1"
-            style={{ color: 'var(--text-muted)' }}
-          >
-            (reverted)
-          </span>
         )}
       </div>
     </div>
   )
 }
 
-export function MessageFeed({ messages, partialText, streaming, loading, planMode, onRevert }: MessageFeedProps) {
+export function MessageFeed({ messages, partialText, streaming, loading, planMode, onEditUserMessage }: MessageFeedProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -158,8 +152,13 @@ export function MessageFeed({ messages, partialText, streaming, loading, planMod
         </div>
       )}
 
-      {messages.map((msg) => (
-        <MessageBubble key={msg.id} msg={msg} onRevert={onRevert} />
+      {messages.filter((m) => !m.reverted).map((msg) => (
+        <MessageBubble
+          key={msg.id}
+          msg={msg}
+          onEditUserMessage={onEditUserMessage}
+          streaming={streaming}
+        />
       ))}
 
       {streaming && partialText && (

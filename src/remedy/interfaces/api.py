@@ -744,7 +744,31 @@ def create_app(
                 session_id=session_id,
                 role=ChatMessageRole.USER,
                 content=req.message,
+                model=req.model,
+                agent=req.agent,
             ))
+
+        # Ensure live runtime has credentials (settings may have been saved earlier).
+        if runtime is not None:
+            cfg_live = load_config()
+            key = getattr(runtime, "_llm_api_key", "") or ""
+            if not key or key == "local":
+                cfg_key = str(cfg_live.get("llm_api_key") or os.environ.get("REMEDY_LLM_API_KEY") or "")
+                if cfg_key:
+                    if hasattr(runtime, "reconfigure_llm"):
+                        runtime.reconfigure_llm(
+                            provider=cfg_live.get("llm_provider") or getattr(runtime, "_llm_provider", None),
+                            model=req.model or cfg_live.get("llm_model") or getattr(runtime, "_llm_model", None),
+                            base_url=cfg_live.get("llm_base_url") or getattr(runtime, "_llm_base_url", None),
+                            api_key=cfg_key,
+                        )
+                    else:
+                        runtime._llm_api_key = cfg_key
+            # Honor per-request model selection from the UI.
+            if req.model and hasattr(runtime, "reconfigure_llm"):
+                runtime.reconfigure_llm(model=req.model)
+            elif req.model:
+                runtime._llm_model = req.model
 
         async def event_stream():
             yield (
@@ -753,8 +777,18 @@ def create_app(
 
             try:
                 full_response = ""
+                api_key = getattr(runtime, "_llm_api_key", "") or ""
+                if not api_key:
+                    msg = (
+                        "No LLM API key configured. Open Settings, set your provider API key, "
+                        "and Save — then try again."
+                    )
+                    yield f"event: error\ndata: {json.dumps({'type': 'error', 'message': msg})}\n\n"
+                    return
 
-                async for token in runtime.stream_response(req.message, session_id=session_id):
+                async for token in runtime.stream_response(
+                    req.message, session_id=session_id, model=req.model
+                ):
                     if token.startswith("@@tool_call:"):
                         tool_name = token[len("@@tool_call:"):]
                         yield (
@@ -776,6 +810,7 @@ def create_app(
                         session_id=session_id,
                         role=ChatMessageRole.ASSISTANT,
                         content=full_response,
+                        model=req.model or getattr(runtime, "_llm_model", None),
                     ))
 
                 yield (
@@ -783,7 +818,7 @@ def create_app(
                 )
 
             except asyncio.CancelledError:
-                yield await _sse_stream_text("Request cancelled.", event="error")
+                yield f"event: error\ndata: {json.dumps({'type': 'error', 'message': 'Request cancelled.'})}\n\n"
             except Exception as e:
                 logger.exception("SSE stream error")
                 yield f"event: error\ndata: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
@@ -1368,15 +1403,37 @@ def create_app(
         except Exception:
             return {"query": query, "results": [], "root": str(base)}
 
-    # -- message revert ---------------------------------------------------------
-    @app.post("/api/sessions/{session_id}/messages/{msg_id}/revert")
-    async def revert_message(session_id: str, msg_id: str):
+    # -- message edit / undo (user messages only) -----------------------------
+    @app.post("/api/sessions/{session_id}/messages/{msg_id}/edit")
+    async def edit_from_message(session_id: str, msg_id: str):
+        """Begin edit-and-resend: soft-delete this user message and everything after.
+
+        Returns the original user text so the client can load it into the composer.
+        """
         if memory is None:
             raise HTTPException(503, "Memory store not available")
-        reverted = await memory.revert_message(msg_id)
-        if not reverted:
+        msg = await memory.get_chat_message(msg_id)
+        if msg is None or msg.session_id != session_id:
             raise HTTPException(404, "Message not found")
-        return {"status": "reverted", "msg_id": msg_id}
+        if msg.role != ChatMessageRole.USER:
+            raise HTTPException(
+                400,
+                "Only user messages can be edited. Use Edit on your message to revise and resend.",
+            )
+        if msg.reverted:
+            raise HTTPException(400, "Message already reverted")
+        count = await memory.revert_from(session_id, msg_id)
+        return {
+            "status": "ready_to_edit",
+            "msg_id": msg_id,
+            "content": msg.content,
+            "reverted_count": count,
+        }
+
+    @app.post("/api/sessions/{session_id}/messages/{msg_id}/revert")
+    async def revert_message(session_id: str, msg_id: str):
+        """Legacy alias → edit-from (user messages only, cascade to later msgs)."""
+        return await edit_from_message(session_id, msg_id)
 
     # -- session export -------------------------------------------------------
     @app.get("/api/sessions/{session_id}/export")

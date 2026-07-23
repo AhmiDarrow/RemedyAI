@@ -14,17 +14,45 @@ interface ComposerProps {
   disabled: boolean
   planMode?: boolean
   agents?: AgentDef[]
+  /** When set, loads text into the composer (edit-and-resend flow). */
+  editDraft?: string | null
+  onEditDraftConsumed?: () => void
 }
 
 type SuggestionItem = { label: string; value: string; icon: string; type: 'file' | 'agent' }
 
-export function Composer({ onSend, onStop, onCommand, streaming, disabled, planMode, agents = [] }: ComposerProps) {
+export function Composer({
+  onSend,
+  onStop,
+  onCommand,
+  streaming,
+  disabled,
+  planMode,
+  agents = [],
+  editDraft,
+  onEditDraftConsumed,
+}: ComposerProps) {
   const [input, setInput] = useState('')
   const [suggestions, setSuggestions] = useState<SuggestionItem[]>([])
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [suggestionIdx, setSuggestionIdx] = useState(0)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const suggestTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const submittingRef = useRef(false)
+
+  useEffect(() => {
+    if (editDraft != null && editDraft !== '') {
+      setInput(editDraft)
+      onEditDraftConsumed?.()
+      requestAnimationFrame(() => {
+        const el = textareaRef.current
+        if (el) {
+          el.focus()
+          el.selectionStart = el.selectionEnd = el.value.length
+        }
+      })
+    }
+  }, [editDraft, onEditDraftConsumed])
 
   const detectAtQuery = useCallback((text: string, cursorPos: number) => {
     const before = text.slice(0, cursorPos)
@@ -48,14 +76,24 @@ export function Composer({ onSend, onStop, onCommand, streaming, disabled, planM
 
   const handleSubmit = useCallback(() => {
     const text = input.trim()
-    if (!text) return
-    if (text.startsWith('/')) {
-      onCommand(text)
-    } else {
-      onSend(text)
+    if (!text || streaming || disabled) return
+    // Guard against Enter + click double-fire in the same tick.
+    if (submittingRef.current) return
+    submittingRef.current = true
+    try {
+      if (text.startsWith('/')) {
+        onCommand(text)
+      } else {
+        onSend(text)
+      }
+      setInput('')
+    } finally {
+      // Release on next frame so a second synthetic submit is ignored.
+      requestAnimationFrame(() => {
+        submittingRef.current = false
+      })
     }
-    setInput('')
-  }, [input, onSend, onCommand])
+  }, [input, onSend, onCommand, streaming, disabled])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {

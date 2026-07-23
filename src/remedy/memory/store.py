@@ -733,15 +733,36 @@ class MemoryStore:
         return msg
 
     async def get_chat_messages(
-        self, session_id: str, limit: int = 50, offset: int = 0
+        self,
+        session_id: str,
+        limit: int = 50,
+        offset: int = 0,
+        *,
+        include_reverted: bool = False,
     ) -> list[ChatMessage]:
         db = self._ensure_db()
-        rows = db.execute(
-            "SELECT * FROM chat_messages WHERE session_id = ? "
-            "ORDER BY created_at ASC LIMIT ? OFFSET ?",
-            (session_id, limit, offset),
-        ).fetchall()
+        if include_reverted:
+            rows = db.execute(
+                "SELECT * FROM chat_messages WHERE session_id = ? "
+                "ORDER BY created_at ASC LIMIT ? OFFSET ?",
+                (session_id, limit, offset),
+            ).fetchall()
+        else:
+            rows = db.execute(
+                "SELECT * FROM chat_messages WHERE session_id = ? AND reverted = 0 "
+                "ORDER BY created_at ASC LIMIT ? OFFSET ?",
+                (session_id, limit, offset),
+            ).fetchall()
         return [self._row_to_message(r) for r in rows]
+
+    async def get_chat_message(self, msg_id: str) -> ChatMessage | None:
+        db = self._ensure_db()
+        row = db.execute(
+            "SELECT * FROM chat_messages WHERE id = ?", (msg_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_message(row)
 
     async def revert_message(self, msg_id: str) -> bool:
         db = self._ensure_db()
@@ -752,15 +773,17 @@ class MemoryStore:
         return cursor.rowcount > 0
 
     async def revert_from(self, session_id: str, msg_id: str) -> int:
+        """Soft-delete this message and all later messages in the session."""
         db = self._ensure_db()
         target = db.execute(
-            "SELECT created_at FROM chat_messages WHERE id = ?", (msg_id,)
+            "SELECT created_at FROM chat_messages WHERE id = ? AND session_id = ?",
+            (msg_id, session_id),
         ).fetchone()
         if target is None:
             return 0
         cursor = db.execute(
             "UPDATE chat_messages SET reverted = 1 "
-            "WHERE session_id = ? AND created_at >= ?",
+            "WHERE session_id = ? AND created_at >= ? AND reverted = 0",
             (session_id, target["created_at"]),
         )
         db.commit()
