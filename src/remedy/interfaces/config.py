@@ -109,13 +109,202 @@ def resolve_config(
     """Load and resolve full configuration.
 
     Priority: env vars > config file > defaults.
+
+    When ``home_dir`` is set and no explicit ``config_path`` is given, prefer
+    ``{home_dir}/config.toml`` so desktop ``--home`` and CLI share one file.
     """
+    if config_path is None and home_dir:
+        home_cfg = Path(home_dir).expanduser() / "config.toml"
+        if home_cfg.exists():
+            config_path = home_cfg
     config = load_config(config_path)
     if env_overrides:
         config = load_env_overrides(config)
     if home_dir:
         config["home_dir"] = home_dir
     return config
+
+
+# -- Provider catalog (defaults + model ownership) ---------------------------
+
+PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
+    "openai": {
+        "base_url": "https://api.openai.com/v1",
+        "models": [
+            {"id": "gpt-4o-mini", "name": "GPT-4o Mini"},
+            {"id": "gpt-4o", "name": "GPT-4o"},
+            {"id": "gpt-4.1-mini", "name": "GPT-4.1 Mini"},
+            {"id": "o4-mini", "name": "o4-mini"},
+        ],
+    },
+    "anthropic": {
+        "base_url": "https://api.anthropic.com/v1",
+        "models": [
+            {"id": "claude-3-5-sonnet-latest", "name": "Claude 3.5 Sonnet"},
+            {"id": "claude-3-5-haiku-latest", "name": "Claude 3.5 Haiku"},
+            {"id": "claude-3-haiku-20240307", "name": "Claude 3 Haiku"},
+            {"id": "claude-3.5-sonnet", "name": "Claude 3.5 Sonnet (alias)"},
+            {"id": "claude-3-haiku", "name": "Claude 3 Haiku (alias)"},
+        ],
+    },
+    "google": {
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "models": [
+            {"id": "gemini-2.5-flash", "name": "Gemini 2.5 Flash"},
+            {"id": "gemini-2.0-flash", "name": "Gemini 2.0 Flash"},
+            {"id": "gemini-1.5-pro", "name": "Gemini 1.5 Pro"},
+        ],
+    },
+    "deepseek": {
+        "base_url": "https://api.deepseek.com/v1",
+        "models": [
+            {"id": "deepseek-chat", "name": "DeepSeek Chat"},
+            {"id": "deepseek-reasoner", "name": "DeepSeek Reasoner"},
+        ],
+    },
+    "openrouter": {
+        "base_url": "https://openrouter.ai/api/v1",
+        "models": [
+            {"id": "openrouter/auto", "name": "OpenRouter Auto"},
+            {"id": "openai/gpt-4o-mini", "name": "GPT-4o Mini (via OpenRouter)"},
+            {"id": "anthropic/claude-3.5-sonnet", "name": "Claude 3.5 Sonnet (via OpenRouter)"},
+            {"id": "google/gemini-2.0-flash-001", "name": "Gemini 2.0 Flash (via OpenRouter)"},
+        ],
+    },
+    "ollama": {
+        "base_url": "http://127.0.0.1:11434/v1",
+        "models": [
+            {"id": "llama3.2", "name": "Llama 3.2"},
+            {"id": "qwen2.5", "name": "Qwen 2.5"},
+            {"id": "codellama", "name": "Code Llama"},
+        ],
+    },
+    "custom": {
+        "base_url": "http://127.0.0.1:5001/api/v1",
+        "models": [
+            {"id": "default", "name": "Default (custom endpoint)"},
+        ],
+    },
+}
+
+
+def infer_provider_from_model(model_id: str) -> str | None:
+    """Guess which *native* provider owns a model id (not OpenRouter-prefixed)."""
+    mid = (model_id or "").strip().lower()
+    if not mid:
+        return None
+    # OpenRouter-style vendor/model is multi-provider; treat as openrouter only
+    # when the user already chose openrouter — do not force it here.
+    if mid.startswith("claude") or mid.startswith("anthropic/"):
+        return "anthropic"
+    if mid.startswith("gpt-") or mid.startswith("o1") or mid.startswith("o3") or mid.startswith("o4"):
+        return "openai"
+    if mid.startswith("gemini") or mid.startswith("models/gemini"):
+        return "google"
+    if mid.startswith("deepseek"):
+        return "deepseek"
+    if mid.startswith("llama") or mid.startswith("qwen") or mid.startswith("codellama") or mid.startswith("mistral"):
+        return "ollama"
+    return None
+
+
+def infer_provider_from_base_url(base_url: str) -> str | None:
+    """Map a known host to a provider id."""
+    u = (base_url or "").lower()
+    if not u:
+        return None
+    if "anthropic.com" in u:
+        return "anthropic"
+    if "openai.com" in u:
+        return "openai"
+    if "deepseek.com" in u:
+        return "deepseek"
+    if "openrouter.ai" in u:
+        return "openrouter"
+    if "generativelanguage.googleapis.com" in u or "googleapis.com" in u:
+        return "google"
+    if "11434" in u or "ollama" in u:
+        return "ollama"
+    return None
+
+
+def normalize_llm_settings(
+    provider: str | None,
+    model: str | None,
+    base_url: str | None,
+) -> tuple[str, str, str]:
+    """Align provider, model, and base_url so they don't cross-wire.
+
+    Examples of bad states we fix:
+    - provider=deepseek, model=claude-3-haiku  → model=deepseek-chat
+    - provider=deepseek, base_url=api.openai.com → base_url=api.deepseek.com
+    """
+    prov = (provider or "openai").strip().lower() or "openai"
+    if prov not in PROVIDER_CATALOG:
+        # Unknown label → treat as custom OpenAI-compatible
+        if prov not in ("custom",):
+            # keep name but use custom defaults for missing pieces
+            pass
+    catalog = PROVIDER_CATALOG.get(prov) or PROVIDER_CATALOG["custom"]
+    default_url = str(catalog.get("base_url") or "")
+    default_models = list(catalog.get("models") or [])
+    default_model = str(default_models[0]["id"]) if default_models else "gpt-4o-mini"
+
+    url = (base_url or "").strip() or default_url
+    mid = (model or "").strip() or default_model
+
+    # If URL clearly belongs to another known provider, snap to this provider's URL.
+    url_owner = infer_provider_from_base_url(url)
+    if url_owner and url_owner != prov and prov in PROVIDER_CATALOG:
+        # OpenRouter intentionally hosts many vendors — only snap when *this*
+        # provider is not openrouter/custom.
+        if prov not in ("openrouter", "custom", "ollama"):
+            url = default_url
+
+    # If model clearly belongs to another native provider (and user is not on
+    # openrouter/custom which can proxy anything), reset to provider default.
+    model_owner = infer_provider_from_model(mid)
+    if (
+        model_owner
+        and model_owner != prov
+        and prov not in ("openrouter", "custom")
+    ):
+        mid = default_model
+    elif prov in PROVIDER_CATALOG and default_models:
+        known = {m["id"] for m in default_models}
+        # For closed catalogs (deepseek/anthropic/openai/google), if model isn't
+        # known and looks foreign, already handled; if empty, use default.
+        if not mid:
+            mid = default_model
+        # deepseek only has a tiny official list — force known ids when wrong
+        if prov == "deepseek" and mid not in known and model_owner not in (None, "deepseek"):
+            mid = default_model
+        if prov in ("openai", "anthropic", "google", "deepseek") and model_owner and model_owner != prov:
+            mid = default_model
+
+    if not url:
+        url = default_url
+    if not mid:
+        mid = default_model
+
+    return prov, mid, url
+
+
+def catalog_models_for_provider(provider: str) -> list[dict[str, Any]]:
+    """Return built-in model entries tagged with provider."""
+    prov = (provider or "openai").lower()
+    cat = PROVIDER_CATALOG.get(prov) or PROVIDER_CATALOG.get("custom") or {}
+    out: list[dict[str, Any]] = []
+    for m in cat.get("models") or []:
+        out.append(
+            {
+                "id": m["id"],
+                "name": m.get("name", m["id"]),
+                "provider": prov,
+                "default": False,
+            }
+        )
+    return out
 
 
 def _resolve_str(config_value: str | None, env_var: str, default: str) -> str:

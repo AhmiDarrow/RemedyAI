@@ -373,4 +373,14 @@ def get_provider_for_base_url(base_url: str) -> ProviderAdapter:
     url_lower = base_url.lower()
     if "anthropic" in url_lower:
         return get_provider("anthropic")
+    if "deepseek" in url_lower:
+        return get_provider("deepseek")
+    if "openrouter" in url_lower:
+        return get_provider("openrouter")
+    if "generativelanguage.googleapis.com" in url_lower or "googleapis.com" in url_lower:
+        return get_provider("google")
+    if "11434" in url_lower or "ollama" in url_lower:
+        return get_provider("ollama")
+    if "openai.com" in url_lower:
+        return get_provider("openai")
     return get_provider("openai")

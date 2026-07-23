@@ -32,7 +32,12 @@ from remedy import __version__ as _remedy_version
 from remedy.core.errors import SecurityError
 from remedy.core.security import safe_path
 from remedy.interfaces.config import CONFIG_PATHS
-from remedy.interfaces.config import load_config as _load_toml_config
+from remedy.interfaces.config import (
+    PROVIDER_CATALOG,
+    catalog_models_for_provider,
+    load_config as _load_toml_config,
+    normalize_llm_settings,
+)
 from remedy.models import (
     ChannelKind,
     ChatMessageRole,
@@ -171,12 +176,19 @@ _BUILTIN_COMMANDS: list[dict] = [
     {"name": "/init", "description": "Scan the project and generate AGENTS.md", "aliases": [], "arguments": "path"},
 ]
 
-_BUILTIN_MODELS: list[dict] = [
-    {"id": "gpt-4o-mini", "name": "GPT-4o Mini", "provider": "openai", "default": False},
-    {"id": "gpt-4o", "name": "GPT-4o", "provider": "openai", "default": False},
-    {"id": "claude-3-haiku", "name": "Claude 3 Haiku", "provider": "anthropic", "default": False},
-    {"id": "claude-3.5-sonnet", "name": "Claude 3.5 Sonnet", "provider": "anthropic", "default": False},
-]
+# Legacy flat list kept for slash-command fallback only; list_models uses
+# PROVIDER_CATALOG and filters strictly by the configured provider.
+_BUILTIN_MODELS: list[dict] = []
+for _prov, _meta in PROVIDER_CATALOG.items():
+    for _m in _meta.get("models") or []:
+        _BUILTIN_MODELS.append(
+            {
+                "id": _m["id"],
+                "name": _m.get("name", _m["id"]),
+                "provider": _prov,
+                "default": False,
+            }
+        )
 
 _BUILTIN_AGENTS: list[dict] = [
     {"name": "default", "description": "Remedy — general-purpose agent", "build_mode": True},
@@ -216,11 +228,13 @@ async def handle_slash_command(
         return {"text": "Recent sessions:\n" + "\n".join(lines)}
 
     if stripped in ("/models", "/m"):
-        lines = []
-        for m in _BUILTIN_MODELS:
-            d = " [default]" if m["default"] else ""
-            lines.append(f"  {m['name']} ({m['id']}){d}")
-        return {"text": "Available models:\n" + "\n".join(lines)}
+        return {
+            "text": (
+                "Model list is filtered by your configured provider. "
+                "Use the model picker in the status bar, or GET /api/models."
+            ),
+            "action": "list_models",
+        }
 
     if stripped == "/thinking":
         return {"text": "Thinking visibility toggled."}
@@ -265,7 +279,16 @@ async def handle_slash_command(
     return {"text": f"Unknown command: {command}\nType /help for available commands."}
 
 
+def _default_config_path() -> Path:
+    """Canonical user config path (matches desktop sidecar --home)."""
+    return Path.home() / ".remedy" / "config.toml"
+
+
 def _find_config_path() -> Path | None:
+    # Prefer the home config so desktop and CLI always share one persistent file.
+    primary = _default_config_path()
+    if primary.exists():
+        return primary
     for p in CONFIG_PATHS:
         expanded = p.expanduser().resolve()
         if expanded.exists():
@@ -278,6 +301,29 @@ def load_config() -> dict[str, Any]:
     if path is None:
         return {}
     return _load_toml_config(path)
+
+
+def _apply_llm_to_runtime(runtime: Any, *, provider: str, model: str, base_url: str, api_key: str | None = None) -> None:
+    """Push LLM settings into the live runtime so chat uses the saved config."""
+    if runtime is None:
+        return
+    if hasattr(runtime, "reconfigure_llm"):
+        runtime.reconfigure_llm(
+            provider=provider,
+            model=model,
+            base_url=base_url,
+            api_key=api_key,
+        )
+        return
+    # Fallback for older runtimes without reconfigure_llm
+    if provider:
+        runtime._llm_provider = provider
+    if model:
+        runtime._llm_model = model
+    if base_url:
+        runtime._llm_base_url = base_url
+    if api_key is not None and api_key != "":
+        runtime._llm_api_key = api_key
 
 
 def _write_config(path: Path, cfg: dict[str, Any]) -> None:
@@ -728,69 +774,179 @@ def create_app(
     # -- models & agents -----------------------------------------------------
     @app.get("/api/models")
     async def list_models():
-        models = list(_BUILTIN_MODELS)
-        configured_id = None
-        configured_provider = "openai"
-        base_url = "https://api.openai.com/v1"
+        """List models for the *configured* provider only.
 
+        Built-in catalogs are filtered by provider. Live discovery hits the
+        configured base_url so DeepSeek never lists Claude, etc.
+        """
+        cfg = load_config()
+        configured_provider = (
+            (runtime._llm_provider if runtime is not None else None)
+            or cfg.get("llm_provider")
+            or os.environ.get("REMEDY_LLM_PROVIDER")
+            or "openai"
+        )
+        configured_id = (
+            (runtime._llm_model if runtime is not None else None)
+            or cfg.get("llm_model")
+            or os.environ.get("REMEDY_LLM_MODEL")
+            or ""
+        )
+        base_url = (
+            (runtime._llm_base_url if runtime is not None else None)
+            or cfg.get("llm_base_url")
+            or os.environ.get("REMEDY_LLM_BASE_URL")
+            or ""
+        )
+
+        configured_provider, configured_id, base_url = normalize_llm_settings(
+            configured_provider, configured_id, base_url
+        )
+
+        # Keep runtime + disk aligned with normalized config (fixes bad disk state).
+        _apply_llm_to_runtime(
+            runtime,
+            provider=configured_provider,
+            model=configured_id,
+            base_url=base_url,
+        )
+        if (
+            cfg.get("llm_provider") != configured_provider
+            or cfg.get("llm_model") != configured_id
+            or cfg.get("llm_base_url") != base_url
+        ):
+            cfg["llm_provider"] = configured_provider
+            cfg["llm_model"] = configured_id
+            cfg["llm_base_url"] = base_url
+            path = _find_config_path() or _default_config_path()
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                _write_config(path, cfg)
+                logger.info(
+                    "Self-healed LLM config → provider=%s model=%s",
+                    configured_provider,
+                    configured_id,
+                )
+            except Exception as exc:
+                logger.warning("Could not self-heal LLM config: %s", exc)
+
+        catalog = catalog_models_for_provider(configured_provider)
+        api_key = ""
         if runtime is not None:
-            configured_id = runtime._llm_model
-            configured_provider = runtime._llm_provider
-            base_url = runtime._llm_base_url
+            api_key = getattr(runtime, "_llm_api_key", "") or ""
+        if not api_key:
+            api_key = str(cfg.get("llm_api_key") or os.environ.get("REMEDY_LLM_API_KEY") or "")
 
         discovered: list[dict] = []
-        try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=4)) as session:
-                # Try OpenAI-compatible /v1/models endpoint
-                models_url = base_url.rstrip("/") + "/models"
-                auth = None
-                if runtime and runtime._llm_api_key and runtime._llm_api_key != "local":
-                    auth = f"Bearer {runtime._llm_api_key}"
-                headers = {"Authorization": auth} if auth else {}
-                async with session.get(models_url, headers=headers, ssl=False) as resp:
-                    if resp.ok:
-                        body = await resp.json()
-                        for m in body.get("data", []):
-                            mid = m.get("id", m.get("name", ""))
-                            if mid:
-                                discovered.append({"id": mid, "name": mid, "provider": configured_provider, "default": False})
-        except Exception:
-            pass
-
-        # Try Ollama native API if base URL contains localhost/127.0.0.1:11434
-        if "11434" in base_url:
+        # OpenAI-compatible /models (DeepSeek, OpenAI, Ollama /v1, OpenRouter, …)
+        # Skip Anthropic here — its Messages API is not OpenAI /models compatible.
+        if configured_provider != "anthropic" and base_url:
             try:
-                ollama_url = base_url.rstrip("/v1").rstrip("/") + "/api/tags"
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=4)) as session:
+                    models_url = base_url.rstrip("/") + "/models"
+                    headers: dict[str, str] = {}
+                    if api_key and api_key != "local":
+                        headers["Authorization"] = f"Bearer {api_key}"
+                    async with session.get(models_url, headers=headers, ssl=False) as resp:
+                        if resp.ok:
+                            body = await resp.json()
+                            for m in body.get("data", []):
+                                mid = m.get("id", m.get("name", ""))
+                                if not mid:
+                                    continue
+                                discovered.append(
+                                    {
+                                        "id": mid,
+                                        "name": mid,
+                                        "provider": configured_provider,
+                                        "default": False,
+                                    }
+                                )
+            except Exception as exc:
+                logger.debug("Model discovery failed for %s: %s", base_url, exc)
+
+        # Ollama native tags API
+        if configured_provider == "ollama" or "11434" in (base_url or ""):
+            try:
+                ollama_url = base_url.rstrip("/").removesuffix("/v1") + "/api/tags"
                 async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3)) as session:
                     async with session.get(ollama_url) as resp:
                         if resp.ok:
                             body = await resp.json()
                             for m in body.get("models", []):
                                 mid = m.get("name", "")
-                                if mid:
-                                    name = mid.rstrip(":latest")
-                                    if not any(d["id"] == name for d in discovered):
-                                        discovered.append({"id": name, "name": name, "provider": "ollama", "default": False})
-            except Exception:
-                pass
+                                if not mid:
+                                    continue
+                                name = mid.rstrip(":latest") if mid.endswith(":latest") else mid
+                                if not any(d["id"] == name for d in discovered):
+                                    discovered.append(
+                                        {
+                                            "id": name,
+                                            "name": name,
+                                            "provider": "ollama",
+                                            "default": False,
+                                        }
+                                    )
+            except Exception as exc:
+                logger.debug("Ollama discovery failed: %s", exc)
 
-        # Merge: discovered models first, then built-in (dedup by id)
-        seen = set()
-        merged = []
-        for m in discovered + models:
-            if m["id"] not in seen:
-                seen.add(m["id"])
-                merged.append(m)
+        # Merge: discovered first, then provider catalog only (never other providers).
+        # For openrouter/custom keep full discovered set; for closed catalogs prefer
+        # catalog + discovered but never inject foreign builtins.
+        seen: set[str] = set()
+        merged: list[dict] = []
+        for m in discovered + catalog:
+            mid = m["id"]
+            if mid in seen:
+                continue
+            # On closed providers, drop discovered ids that clearly belong elsewhere
+            if configured_provider not in ("openrouter", "custom", "ollama"):
+                from remedy.interfaces.config import infer_provider_from_model
 
-        # Ensure configured model is in the list and is default
+                owner = infer_provider_from_model(mid)
+                if owner and owner != configured_provider:
+                    continue
+            seen.add(mid)
+            merged.append(
+                {
+                    "id": mid,
+                    "name": m.get("name", mid),
+                    "provider": configured_provider,
+                    "default": False,
+                }
+            )
+
+        if not merged:
+            merged = catalog_models_for_provider(configured_provider) or [
+                {
+                    "id": configured_id or "default",
+                    "name": configured_id or "default",
+                    "provider": configured_provider,
+                    "default": True,
+                }
+            ]
+
         if configured_id and not any(m["id"] == configured_id for m in merged):
-            merged.insert(0, {"id": configured_id, "name": configured_id, "provider": configured_provider, "default": True})
+            merged.insert(
+                0,
+                {
+                    "id": configured_id,
+                    "name": configured_id,
+                    "provider": configured_provider,
+                    "default": True,
+                },
+            )
 
         default_id = configured_id or merged[0]["id"]
         for m in merged:
             m["default"] = m["id"] == default_id
 
-        return {"models": merged, "default": default_id}
+        return {
+            "models": merged,
+            "default": default_id,
+            "provider": configured_provider,
+            "base_url": base_url,
+        }
 
     @app.get("/api/agents")
     async def list_agents():
@@ -1110,10 +1266,31 @@ def create_app(
             setup_completed = bool(cfg["setup_completed"])
         else:
             setup_completed = config_path is not None
+
+        provider, model, base_url = normalize_llm_settings(
+            cfg.get("llm_provider", os.environ.get("REMEDY_LLM_PROVIDER", "openai")),
+            cfg.get("llm_model", os.environ.get("REMEDY_LLM_MODEL", "gpt-4o-mini")),
+            cfg.get("llm_base_url", os.environ.get("REMEDY_LLM_BASE_URL", "https://api.openai.com/v1")),
+        )
+
+        # Self-heal on-disk config when model/provider/url disagree.
+        if config_path is not None and (
+            cfg.get("llm_provider") != provider
+            or cfg.get("llm_model") != model
+            or cfg.get("llm_base_url") != base_url
+        ):
+            cfg["llm_provider"] = provider
+            cfg["llm_model"] = model
+            cfg["llm_base_url"] = base_url
+            try:
+                _write_config(config_path, cfg)
+            except Exception as exc:
+                logger.warning("Could not self-heal config: %s", exc)
+
         return {
-            "llm_provider": cfg.get("llm_provider", os.environ.get("REMEDY_LLM_PROVIDER", "openai")),
-            "llm_model": cfg.get("llm_model", os.environ.get("REMEDY_LLM_MODEL", "gpt-4o-mini")),
-            "llm_base_url": cfg.get("llm_base_url", os.environ.get("REMEDY_LLM_BASE_URL", "https://api.openai.com/v1")),
+            "llm_provider": provider,
+            "llm_model": model,
+            "llm_base_url": base_url,
             "llm_api_key_set": bool(cfg.get("llm_api_key") or os.environ.get("REMEDY_LLM_API_KEY")),
             "name": cfg.get("name", "Remedy"),
             "persona": cfg.get("persona", "default"),
@@ -1121,13 +1298,14 @@ def create_app(
             "version": version,
             "config_exists": config_path is not None,
             "setup_completed": setup_completed,
+            "config_path": str(config_path) if config_path else str(_default_config_path()),
         }
 
     @app.put("/api/settings")
     async def update_settings(req: SettingsUpdateRequest):
         config_path = _find_config_path()
         if config_path is None:
-            config_path = Path.home() / ".remedy" / "config.toml"
+            config_path = _default_config_path()
             config_path.parent.mkdir(parents=True, exist_ok=True)
 
         cfg = load_config()
@@ -1136,11 +1314,50 @@ def create_app(
         if "llm_api_key" in updates and not updates["llm_api_key"]:
             del updates["llm_api_key"]
 
+        # Merge then normalize provider/model/url so cross-provider combos
+        # (e.g. deepseek + claude-3-haiku) cannot be persisted.
+        merged = {**cfg, **updates}
+        provider, model, base_url = normalize_llm_settings(
+            merged.get("llm_provider"),
+            merged.get("llm_model"),
+            merged.get("llm_base_url"),
+        )
+        updates["llm_provider"] = provider
+        updates["llm_model"] = model
+        updates["llm_base_url"] = base_url
+
         cfg.update(updates)
         _write_config(config_path, cfg)
 
+        # Hot-reload live agent so the next chat uses the new endpoint/model.
+        api_key_for_runtime = updates.get("llm_api_key")
+        _apply_llm_to_runtime(
+            runtime,
+            provider=provider,
+            model=model,
+            base_url=base_url,
+            api_key=api_key_for_runtime,
+        )
+        if "persona" in updates and runtime is not None and hasattr(runtime, "config"):
+            try:
+                runtime.config.persona = updates["persona"]
+            except Exception:
+                pass
+        if "name" in updates and runtime is not None and hasattr(runtime, "config"):
+            try:
+                runtime.config.name = updates["name"]
+            except Exception:
+                pass
+
         changes = list(updates.keys())
-        return {"status": "saved", "changes": changes, "config_path": str(config_path)}
+        return {
+            "status": "saved",
+            "changes": changes,
+            "config_path": str(config_path),
+            "llm_provider": provider,
+            "llm_model": model,
+            "llm_base_url": base_url,
+        }
 
     # -- updates ------------------------------------------------------------
     @app.get("/api/updates/check")

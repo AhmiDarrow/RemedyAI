@@ -14,19 +14,30 @@ interface SettingsPanelProps {
   checkingUpdates: boolean
   onCheckUpdates: () => void
   models: ModelInfo[]
+  onSettingsSaved?: () => void
 }
 
 const PROVIDERS = [
-  { id: 'openai', name: 'OpenAI' },
-  { id: 'anthropic', name: 'Anthropic' },
-  { id: 'google', name: 'Google AI' },
-  { id: 'deepseek', name: 'DeepSeek' },
-  { id: 'openrouter', name: 'OpenRouter' },
-  { id: 'ollama', name: 'Ollama' },
-  { id: 'custom', name: 'Custom / KoboldCPP' },
-]
+  { id: 'openai', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', defaultModel: 'gpt-4o-mini' },
+  { id: 'anthropic', name: 'Anthropic', baseUrl: 'https://api.anthropic.com/v1', defaultModel: 'claude-3-5-sonnet-latest' },
+  { id: 'google', name: 'Google AI', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', defaultModel: 'gemini-2.5-flash' },
+  { id: 'deepseek', name: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', defaultModel: 'deepseek-chat' },
+  { id: 'openrouter', name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', defaultModel: 'openrouter/auto' },
+  { id: 'ollama', name: 'Ollama', baseUrl: 'http://127.0.0.1:11434/v1', defaultModel: 'llama3.2' },
+  { id: 'custom', name: 'Custom / KoboldCPP', baseUrl: 'http://127.0.0.1:5001/api/v1', defaultModel: 'default' },
+] as const
 
-export function SettingsPanel({ open, onClose, themeId, onThemeChange, updateInfo, checkingUpdates, onCheckUpdates, models }: SettingsPanelProps) {
+export function SettingsPanel({
+  open,
+  onClose,
+  themeId,
+  onThemeChange,
+  updateInfo,
+  checkingUpdates,
+  onCheckUpdates,
+  models,
+  onSettingsSaved,
+}: SettingsPanelProps) {
   const [settings, setSettings] = useState<Settings | null>(null)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -38,6 +49,11 @@ export function SettingsPanel({ open, onClose, themeId, onThemeChange, updateInf
   const [apiKey, setApiKey] = useState('')
   const [apiKeySet, setApiKeySet] = useState(false)
   const [projectPath, setProjectPath] = useState('.')
+
+  // Only show models for the selected provider (backend also filters).
+  const providerModels = models.filter(
+    (m) => !m.provider || m.provider === provider || provider === 'openrouter' || provider === 'custom',
+  )
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -77,11 +93,19 @@ export function SettingsPanel({ open, onClose, themeId, onThemeChange, updateInf
       updates.llm_api_key = apiKey
     }
     try {
-      await updateSettings(updates)
+      const result = await updateSettings(updates)
+      // Server may normalize provider/model/url — reflect that immediately.
+      if (result && typeof result === 'object') {
+        const r = result as SettingsUpdate & { llm_provider?: string; llm_model?: string; llm_base_url?: string }
+        if (r.llm_provider) setProvider(r.llm_provider)
+        if (r.llm_model) setModel(r.llm_model)
+        if (r.llm_base_url) setBaseUrl(r.llm_base_url)
+      }
       setSaved(true)
       setApiKey('')
       setApiKeySet(apiKey ? true : apiKeySet)
       await load()
+      onSettingsSaved?.()
     } catch {
       // ignore
     } finally {
@@ -91,13 +115,11 @@ export function SettingsPanel({ open, onClose, themeId, onThemeChange, updateInf
 
   const handleProviderChange = (p: string) => {
     setProvider(p)
-    if (p === 'ollama') setBaseUrl('http://127.0.0.1:11434/v1')
-    else if (p === 'custom') setBaseUrl('http://127.0.0.1:5001/api/v1')
-    else if (p === 'openai') setBaseUrl('https://api.openai.com/v1')
-    else if (p === 'anthropic') setBaseUrl('https://api.anthropic.com/v1')
-    else if (p === 'deepseek') setBaseUrl('https://api.deepseek.com/v1')
-    else if (p === 'openrouter') setBaseUrl('https://openrouter.ai/api/v1')
-    else if (p === 'google') setBaseUrl('https://generativelanguage.googleapis.com/v1beta/openai')
+    const preset = PROVIDERS.find((x) => x.id === p)
+    if (preset) {
+      setBaseUrl(preset.baseUrl)
+      setModel(preset.defaultModel)
+    }
   }
 
   if (!open) return null
@@ -164,11 +186,17 @@ export function SettingsPanel({ open, onClose, themeId, onThemeChange, updateInf
                   border: '1px solid var(--border)',
                 }}
               >
-                {models.length === 0 && <option value={model}>{model}</option>}
-                {models.map((m) => (
+                {providerModels.length === 0 && <option value={model}>{model}</option>}
+                {providerModels.every((m) => m.id !== model) && model && (
+                  <option value={model}>{model} (current)</option>
+                )}
+                {providerModels.map((m) => (
                   <option key={m.id} value={m.id}>{m.name}</option>
                 ))}
               </select>
+              <div className="mb-2 text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                Models are scoped to <strong>{provider}</strong>. Discovery uses the Base URL above.
+              </div>
               <Field
                 label={apiKeySet ? 'API Key (set - change?)' : 'API Key'}
                 value={apiKey}

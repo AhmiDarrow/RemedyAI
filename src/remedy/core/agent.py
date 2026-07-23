@@ -62,6 +62,47 @@ class BasicRuntime(AgentRuntime):
         self._provider: ProviderAdapter = get_provider(self._llm_provider)
         self._max_react_steps = _MAX_REACT_STEPS
 
+    def reconfigure_llm(
+        self,
+        *,
+        provider: str | None = None,
+        model: str | None = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
+    ) -> None:
+        """Hot-apply LLM settings so changes persist without restarting the server."""
+        if provider is not None and provider.strip():
+            self._llm_provider = provider.strip().lower()
+            self._provider = get_provider(self._llm_provider)
+            if hasattr(self, "config") and self.config is not None:
+                try:
+                    self.config.llm_provider = self._llm_provider
+                except Exception:
+                    pass
+        if model is not None and model.strip():
+            self._llm_model = model.strip()
+            if hasattr(self, "config") and self.config is not None:
+                try:
+                    self.config.llm_model = self._llm_model
+                except Exception:
+                    pass
+        if base_url is not None and base_url.strip():
+            self._llm_base_url = base_url.strip()
+            if hasattr(self, "config") and self.config is not None:
+                try:
+                    self.config.llm_base_url = self._llm_base_url
+                except Exception:
+                    pass
+        if api_key is not None:
+            # Empty string means leave unchanged (UI "keep current" path).
+            if api_key != "":
+                self._llm_api_key = api_key
+                if hasattr(self, "config") and self.config is not None:
+                    try:
+                        self.config.llm_api_key = self._llm_api_key
+                    except Exception:
+                        pass
+
     async def handle_event(self, event: GatewayEvent) -> AsyncIterator[Any]:
         kind = event.kind.value if hasattr(event.kind, "value") else str(event.kind)
 

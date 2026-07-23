@@ -30,7 +30,14 @@ export async function getSettings(): Promise<Settings> {
 
 export async function updateSettings(
   updates: SettingsUpdate,
-): Promise<{ status: string; changes: string[]; config_path: string }> {
+): Promise<{
+  status: string
+  changes: string[]
+  config_path: string
+  llm_provider?: string
+  llm_model?: string
+  llm_base_url?: string
+}> {
   return apiFetch('/settings', {
     method: 'PUT',
     body: JSON.stringify(updates),

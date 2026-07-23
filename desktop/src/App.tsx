@@ -66,23 +66,40 @@ export default function App() {
     }
   }, [])
 
+  const refreshModels = useCallback(async () => {
+    try {
+      const data = await apiFetch<{ models: ModelInfo[]; default: string; provider?: string }>('/models')
+      setModels(data.models)
+      const def = data.models.find((m) => m.id === data.default) ?? data.models[0]
+      if (def) setModel(def.id)
+      return data
+    } catch (e: unknown) {
+      console.warn('Model refresh failed:', e instanceof Error ? e.message : e)
+      return null
+    }
+  }, [])
+
   useEffect(() => {
     if (serverState !== 'ready') return
     Promise.all([
-      apiFetch<{ models: ModelInfo[]; default: string }>('/models'),
+      refreshModels(),
       listAgents(),
       listCommands(),
-    ]).then(([data, agents, _commandsData]) => {
-        setModels(data.models)
-        const def = data.models.find((m) => m.id === data.default) ?? data.models[0]
-        if (def) setModel(def.id)
+      getSettings().catch(() => null),
+    ]).then(([modelsData, agents, _commandsData, settings]) => {
         setAgentDefs(Array.isArray(agents) ? agents : agents?.agents || [])
+        // Prefer persisted settings for model selection across sessions.
+        if (settings?.llm_model) {
+          setModel(settings.llm_model)
+        } else if (modelsData?.default) {
+          setModel(modelsData.default)
+        }
       })
       .catch((e: any) => {
         setServerState('error')
         setServerError(`Failed to load server config: ${e?.message || e}`)
       })
-  }, [serverState])
+  }, [serverState, refreshModels])
 
   useEffect(() => {
     if (serverState !== 'ready' || configChecked) return
@@ -90,6 +107,8 @@ export default function App() {
       .then((s) => {
         if (!s.config_exists || !s.setup_completed) {
           setShowSetupWizard(true)
+        } else if (s.llm_model) {
+          setModel(s.llm_model)
         }
       })
       .catch((e: any) => console.warn('Settings fetch failed:', e?.message || e))
@@ -301,7 +320,13 @@ export default function App() {
     return (
       <SetupWizard
         open={showSetupWizard}
-        onComplete={() => setShowSetupWizard(false)}
+        onComplete={() => {
+          setShowSetupWizard(false)
+          // Reload provider-scoped models after setup writes config.
+          void refreshModels().then(() => getSettings().then((s) => {
+            if (s.llm_model) setModel(s.llm_model)
+          }).catch(() => {}))
+        }}
       />
     )
   }
@@ -383,6 +408,15 @@ export default function App() {
             checkingUpdates={checkingUpdates}
             onCheckUpdates={checkUpdates}
             models={models}
+            onSettingsSaved={() => {
+              void refreshModels().then(() =>
+                getSettings()
+                  .then((s) => {
+                    if (s.llm_model) setModel(s.llm_model)
+                  })
+                  .catch(() => {}),
+              )
+            }}
           />
         </div>
 
@@ -393,7 +427,12 @@ export default function App() {
           models={models}
           onModelChange={(id) => {
             setModel(id)
-            updateSettings({ llm_model: id }).catch(() => {})
+            // Persist + hot-apply on server so it survives restarts and chat uses it now.
+            updateSettings({ llm_model: id })
+              .then((r) => {
+                if (r.llm_model) setModel(r.llm_model)
+              })
+              .catch(() => {})
           }}
           themeId={themeId}
           theme={theme}
