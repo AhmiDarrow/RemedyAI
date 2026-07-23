@@ -202,6 +202,38 @@ fn kill_child(guard: &mut Option<Child>) {
     *guard = None;
 }
 
+/// Force-stop every process that can lock install-dir files (sidecar + stray copies).
+/// Used before launching the NSIS updater so "Can't write remedy-desktop.exe" is rare.
+#[cfg(target_os = "windows")]
+fn force_stop_remedy_processes() {
+    let images = [
+        "remedy-desktop.exe",
+        "remedy-desktop-x86_64-pc-windows-msvc.exe",
+        "remedy-desktop-amd64-pc-windows-msvc.exe",
+    ];
+    for image in images {
+        let _ = Command::new("taskkill")
+            .args(["/F", "/T", "/IM", image])
+            .creation_flags(CREATE_NO_WINDOW)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    // Kill whatever still owns the sidecar port.
+    let _ = Command::new("cmd")
+        .args([
+            "/C",
+            r#"for /f "tokens=5" %a in ('netstat -ano ^| findstr :7400 ^| findstr LISTENING') do taskkill /F /PID %a"#,
+        ])
+        .creation_flags(CREATE_NO_WINDOW)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
+#[cfg(not(target_os = "windows"))]
+fn force_stop_remedy_processes() {}
+
 fn start_sidecar(process: &Arc<Mutex<Option<Child>>>, cmd: &str) -> Result<(), String> {
     let mut guard = process
         .lock()
@@ -566,10 +598,10 @@ fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), Stri
                 &app_for_thread,
                 "installing",
                 100,
-                "Installing update… Remedy will relaunch automatically.",
+                "Stopping server and installing… app will relaunch.",
             );
 
-            // Stop sidecar so installer can replace files.
+            // 1) Drop our Child handle for the sidecar.
             match process_slot.lock() {
                 Ok(mut guard) => kill_child(&mut guard),
                 Err(poisoned) => {
@@ -577,23 +609,47 @@ fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), Stri
                     kill_child(&mut guard);
                 }
             }
+            // 2) Force-kill any leftover sidecar / port holders (file lock root cause).
+            force_stop_remedy_processes();
+            thread::sleep(Duration::from_millis(800));
+            force_stop_remedy_processes();
+            thread::sleep(Duration::from_millis(500));
 
-            // NSIS (Tauri) silent install. /PASSIVE is MSI-only and was ignored,
-            // which left users in a multi-click wizard. /S + POSTINSTALL relaunch
-            // is the true one-click path after the download.
+            // 3) Exit the UI process FIRST so app.exe / Remedy Desktop.exe unlock.
+            //    Then the detached installer can overwrite install-dir files.
+            //    (Launching NSIS while we still hold the main EXE caused
+            //    "Can't write …\remedy-desktop.exe" / partial aborts.)
+            emit_progress(
+                &app_for_thread,
+                "relaunch",
+                100,
+                "Closing Remedy and running installer…",
+            );
+
             #[cfg(target_os = "windows")]
             {
-                use std::os::windows::process::CommandExt;
-                // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP so installer survives our exit.
+                // Schedule silent install AFTER this process exits so Windows
+                // releases locks on app.exe / Remedy Desktop.exe / sidecar.
+                // ping -n 3 ≈ 2s delay, then NSIS /S (silent) + /NCRC.
+                // POSTINSTALL in hooks.nsh relaunches the app.
                 const DETACHED_PROCESS: u32 = 0x00000008;
                 const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
-                Command::new(&temp)
-                    .args(["/S"])
-                    .creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
+                let install_path = temp.to_string_lossy().replace('"', "");
+                let wrapper = format!(
+                    "ping 127.0.0.1 -n 3 >nul & start \"\" /B \"{install_path}\" /S /NCRC"
+                );
+                Command::new("cmd")
+                    .args(["/C", &wrapper])
+                    .creation_flags(
+                        DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW,
+                    )
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
                     .spawn()
                     .map_err(|e| {
                         format!(
-                            "Failed to launch installer (try running the .exe manually): {e}"
+                            "Failed to schedule installer (try running the .exe manually): {e}"
                         )
                     })?;
             }
@@ -604,15 +660,8 @@ fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), Stri
                     .map_err(|e| format!("Failed to launch installer: {e}"))?;
             }
 
-            // Brief pause so the installer process is fully up (UAC may appear).
-            thread::sleep(Duration::from_millis(1200));
-            emit_progress(
-                &app_for_thread,
-                "relaunch",
-                100,
-                "Installer running — closing Remedy. App will reopen when done.",
-            );
-            // Exit so NSIS can overwrite our files; POSTINSTALL starts us again.
+            // Exit immediately so file locks clear before the delayed installer runs.
+            thread::sleep(Duration::from_millis(150));
             app_for_thread.exit(0);
             Ok(())
         })();
