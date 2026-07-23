@@ -2,9 +2,12 @@
 
 ## Overview
 
-**Remedy Desktop** is the recommended way to use Remedy. It bundles the full Remedy
-server as a sidecar inside a native Tauri application, so users only need to
-download and run one installer — no Python, Node, or Rust toolchain required.
+**Remedy Desktop** is the recommended way to use Remedy — a **software coding
+agent** for engineering work, not a medical or clinical product.
+
+It bundles the full Remedy server as a sidecar inside a native Tauri application,
+so users only need to download and run one installer — no Python, Node, or Rust
+toolchain required.
 
 The desktop app provides an OpenCode-like chat interface with streaming tokens,
 session management, file/image attachments (drag-and-drop), slash commands,

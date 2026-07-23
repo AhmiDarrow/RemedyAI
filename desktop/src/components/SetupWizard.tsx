@@ -269,7 +269,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
             Remedy AI
           </div>
           <div className="text-xs" style={mutedStyles}>
-            Your self-improving AI companion
+            Self-improving software coding agent
           </div>
         </div>
 
@@ -312,13 +312,13 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
             <div className="space-y-4">
               <div className="text-center space-y-3">
                 <div className="text-sm" style={{ color: 'var(--text-primary)' }}>
-                  Welcome to <strong>Remedy AI</strong> — configure your LLM provider
-                  before chat starts so you're connected from the first message.
+                  Welcome to <strong>Remedy AI</strong> — a software coding agent for
+                  projects and tools. Configure your LLM provider before chat starts.
                 </div>
                 <div className="text-xs space-y-1" style={mutedStyles}>
-                  <p>Powered by skills, memory, and multi-model support</p>
-                  <p>Works with OpenAI, Anthropic, Google, DeepSeek, OpenRouter, and Ollama</p>
-                  <p>You can skip and set this later in Settings — we won't ask again.</p>
+                  <p>Skills, memory, and multi-model support for engineering work</p>
+                  <p>OpenAI, Anthropic, Google, DeepSeek, xAI, Groq, Mistral, OpenRouter, Ollama</p>
+                  <p>Not a medical or clinical product — you can skip and set this later in Settings.</p>
                 </div>
               </div>
               <button

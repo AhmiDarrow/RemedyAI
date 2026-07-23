@@ -2,6 +2,15 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.10.17] — 2026-07-23
+
+### Branding (not medical)
+
+- Clarify Remedy is a **software coding agent** for projects/code — not medical
+  or clinical software (README, pyproject, system prompt, desktop setup copy).
+- Replace caduceus / healing brand prompts and splash/logo assets with tech
+  wordmark + circuit monogram (no medical symbols).
+
 ## [0.10.16] — 2026-07-23
 
 ### Fixed

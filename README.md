@@ -2,7 +2,11 @@
 
 **The self-improving, multi-channel AI agent framework that grows with you.**
 
-Remedy is a standalone AI agent framework designed for autonomous, long-running projects. It combines:
+Remedy is a **software engineering agent** for code, tools, and long-running
+projects — not a medical, clinical, or healthcare product. The name refers to
+fixing software and workflow problems, not medicine.
+
+It combines:
 
 - **Depth** — A self-improving learning loop that distills task traces into reusable skills
 - **Memory** — Persistent SQLite+FTS5 knowledge store with structured handoff notes and session continuity
