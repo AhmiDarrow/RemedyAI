@@ -58,12 +58,27 @@ fn find_remedy() -> (String, String) {
 }
 
 fn spawn_remedy(cmd: &str) -> Option<Child> {
-    let args = ["serve", "--host", "127.0.0.1", "--port", "8000"];
+    let home_dir = if cfg!(target_os = "windows") {
+        std::env::var("USERPROFILE")
+    } else {
+        std::env::var("HOME")
+    }
+    .unwrap_or_else(|_| ".".to_string())
+    .to_owned()
+    + "\\.remedy";
 
     #[cfg(target_os = "windows")]
     {
         Command::new(cmd)
-            .args(&args)
+            .args([
+                "serve",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                "8000",
+                "--home",
+                &home_dir,
+            ])
             .creation_flags(CREATE_NO_WINDOW)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -73,7 +88,15 @@ fn spawn_remedy(cmd: &str) -> Option<Child> {
     #[cfg(not(target_os = "windows"))]
     {
         Command::new(cmd)
-            .args(&args)
+            .args([
+                "serve",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                "8000",
+                "--home",
+                &home_dir,
+            ])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()

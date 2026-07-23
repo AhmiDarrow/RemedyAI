@@ -48,12 +48,17 @@ def load_config(path: Path | None = None) -> dict[str, Any]:
 
     content = path.read_text(encoding="utf-8")
 
-    if path.suffix in (".toml", ".tml"):
-        return tomllib.loads(content)
-    elif path.suffix in (".yaml", ".yml") or "---" in content[:100] or path.suffix == ".yaml":
-        return yaml.safe_load(content) or {}
-    else:
-        return tomllib.loads(content)
+    try:
+        if path.suffix in (".toml", ".tml"):
+            return tomllib.loads(content)
+        elif path.suffix in (".yaml", ".yml") or "---" in content[:100] or path.suffix == ".yaml":
+            return yaml.safe_load(content) or {}
+        else:
+            return tomllib.loads(content)
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).error("Failed to parse config %s: %s", path, exc)
+        return {}
 
 
 def load_env_overrides(base: dict[str, Any]) -> dict[str, Any]:
@@ -129,13 +134,28 @@ def config_to_agent_config(config: dict[str, Any]) -> AgentConfig:
     API key resolution order:
         non-empty config value > REMEDY_LLM_API_KEY env var > empty (fallback).
     """
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    channels_raw = config.get("enabled_channels", [])
+    if not isinstance(channels_raw, list):
+        channels_raw = [channels_raw] if isinstance(channels_raw, str) else []
+
+    channels: list[ChannelKind] = []
+    for c in channels_raw:
+        try:
+            channels.append(ChannelKind(c))
+        except ValueError:
+            logger.warning("Ignoring unknown channel '%s' in config", c)
+
     return AgentConfig(
         name=config.get("name", "Remedy"),
         persona=config.get("persona", "default"),
         home_dir=config.get("home_dir", "~/.remedy"),
         skills_dir=config.get("skills_dir", []),
         memory_db_path=config.get("memory_db_path"),
-        enabled_channels=[ChannelKind(c) for c in config.get("enabled_channels", [])],
+        enabled_channels=channels,
         mcp_servers=config.get("mcp_servers", []),
         allow_skill_creation=config.get("allow_skill_creation", True),
         auto_approve_threshold=config.get("auto_approve_threshold", 0.8),

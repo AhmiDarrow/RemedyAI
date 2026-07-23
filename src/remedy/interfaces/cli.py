@@ -869,6 +869,7 @@ def _cmd_serve(args) -> None:
     home.mkdir(parents=True, exist_ok=True)
 
     config = resolve_config(
+        config_path=Path(args.config_file) if args.config_file else None,
         home_dir=str(home),
     )
     agent_config = config_to_agent_config(config)
