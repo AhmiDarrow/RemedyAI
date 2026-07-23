@@ -8,6 +8,7 @@ import { MemoryPanel, SkillsPanel } from './components/Panels'
 import { SettingsPanel } from './components/SettingsPanel'
 import { SplashScreen } from './components/SplashScreen'
 import { SetupWizard } from './components/SetupWizard'
+import { UpdateScreen } from './components/UpdateScreen'
 import { CommandPalette, type CommandItem } from './components/CommandPalette'
 import { useSessions } from './hooks/useSessions'
 import { useMessages } from './hooks/useMessages'
@@ -29,7 +30,9 @@ export interface ModelInfo {
 type ServerState = 'connecting' | 'ready' | 'error'
 
 function isTauri(): boolean {
-  return typeof window !== 'undefined' && (window as any).__TAURI__ !== undefined
+  if (typeof window === 'undefined') return false
+  const w = window as any
+  return !!(w.__TAURI__ || w.__TAURI_INTERNALS__ || w.isTauri)
 }
 
 export default function App() {
@@ -58,8 +61,15 @@ export default function App() {
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [agentDefs, setAgentDefs] = useState<{ name: string; description: string }[]>([])
   const { notify } = useNotifications()
-  const { updateInfo, checking: checkingUpdates, check: checkUpdates } = useUpdateChecker()
+  const {
+    updateInfo,
+    desktopInfo,
+    checking: checkingUpdates,
+    check: checkUpdates,
+    updateAvailable,
+  } = useUpdateChecker()
   const [showSetupWizard, setShowSetupWizard] = useState(false)
+  const [showUpdateScreen, setShowUpdateScreen] = useState(false)
 
   useEffect(() => {
     if (isTauri()) {
@@ -368,6 +378,15 @@ export default function App() {
     )
   }
 
+  if (showUpdateScreen && desktopInfo?.update_available) {
+    return (
+      <UpdateScreen
+        info={desktopInfo}
+        onClose={() => setShowUpdateScreen(false)}
+      />
+    )
+  }
+
   return (
     <div className="flex h-full" style={{ background: 'var(--bg-primary)' }}>
       <CommandPalette
@@ -407,7 +426,8 @@ export default function App() {
         )}
 
         <div className="flex-1 flex min-h-0">
-          <div className="flex-1 flex flex-col min-w-0">
+          {/* Full chat column is the drop target (not only the small composer bar). */}
+          <div className="flex-1 flex flex-col min-w-0 min-h-0">
             <MessageFeed
               messages={messages}
               partialText={partialText}
@@ -432,6 +452,10 @@ export default function App() {
               ensureSession={async () => {
                 if (activeId) return activeId
                 const s = await create()
+                if (s?.id) {
+                  setActiveId(s.id)
+                  setOpenTabs((prev) => new Set([...prev, s.id]))
+                }
                 return s?.id ?? null
               }}
             />
@@ -453,6 +477,10 @@ export default function App() {
             updateInfo={updateInfo}
             checkingUpdates={checkingUpdates}
             onCheckUpdates={checkUpdates}
+            onInstallUpdate={() => {
+              if (desktopInfo?.update_available) setShowUpdateScreen(true)
+              else void checkUpdates()
+            }}
             models={models}
             onSettingsSaved={() => {
               void getSettings()
@@ -486,8 +514,12 @@ export default function App() {
           onTogglePlanMode={() => setPlanMode((p) => !p)}
           panel={panel}
           onTogglePanel={(p) => setPanel((prev) => (prev === p ? null : p))}
-          updateAvailable={updateInfo?.update_available ?? false}
+          updateAvailable={updateAvailable}
           onCheckUpdates={checkUpdates}
+          onInstallUpdate={() => {
+            if (desktopInfo?.update_available) setShowUpdateScreen(true)
+            else void checkUpdates()
+          }}
         />
       </div>
     </div>

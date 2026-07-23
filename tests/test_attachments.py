@@ -66,3 +66,30 @@ def test_mime_helpers():
     assert is_probably_text("text/plain", "a.txt")
     assert is_probably_text("application/octet-stream", "main.py")
     assert is_image("image/png")
+
+
+def test_save_upload_keeps_original_name_on_reupload(tmp_path: Path):
+    """Re-drop of the same filename must not become notes_1.txt / notes_3.txt."""
+    home = tmp_path / "home"
+    home.mkdir()
+    m1 = save_upload(
+        session_id="sess-x",
+        filename="notes.txt",
+        data=b"first",
+        content_type="text/plain",
+        home_dir=home,
+    )
+    m2 = save_upload(
+        session_id="sess-x",
+        filename="notes.txt",
+        data=b"second",
+        content_type="text/plain",
+        home_dir=home,
+    )
+    assert m1["name"] == "notes.txt"
+    assert m2["name"] == "notes.txt"
+    assert m1["path"] == m2["path"]
+    assert Path(m2["path"]).read_bytes() == b"second"
+    assert "_3" not in m2["name"]
+    assert "_1" not in m2["name"]
+

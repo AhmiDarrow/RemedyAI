@@ -13,6 +13,8 @@ interface SettingsPanelProps {
   updateInfo: UpdateInfo | null
   checkingUpdates: boolean
   onCheckUpdates: () => void
+  /** Opens the Ollama-style download → install → relaunch screen. */
+  onInstallUpdate?: () => void
   models: ModelInfo[]
   onSettingsSaved?: () => void
 }
@@ -35,6 +37,7 @@ export function SettingsPanel({
   updateInfo,
   checkingUpdates,
   onCheckUpdates,
+  onInstallUpdate,
   models,
   onSettingsSaved,
 }: SettingsPanelProps) {
@@ -282,7 +285,7 @@ export function SettingsPanel({
                   disabled={checkingUpdates}
                   className="w-full py-1.5 rounded text-xs font-medium transition-colors"
                   style={{
-                    background: checkingUpdates ? 'var(--bg-tertiary)' : 'var(--bg-tertiary)',
+                    background: 'var(--bg-tertiary)',
                     color: checkingUpdates ? 'var(--text-muted)' : 'var(--text-primary)',
                     border: '1px solid var(--border)',
                   }}
@@ -295,28 +298,37 @@ export function SettingsPanel({
                       <span style={{ color: 'var(--text-muted)' }}>Current</span>
                       <span style={{ color: 'var(--text-primary)' }}>{updateInfo.current_version}</span>
                     </div>
-                    {updateInfo.latest_python && (
+                    {(updateInfo.latest_desktop || updateInfo.latest_python) && (
                       <div className="flex justify-between text-xs">
-                        <span style={{ color: 'var(--text-muted)' }}>Latest (PyPI)</span>
+                        <span style={{ color: 'var(--text-muted)' }}>Latest</span>
                         <span style={{ color: updateInfo.update_available ? 'var(--accent)' : 'var(--text-primary)' }}>
-                          {updateInfo.latest_python}
+                          {updateInfo.latest_desktop || updateInfo.latest_python}
                         </span>
                       </div>
                     )}
-                    {updateInfo.update_available && updateInfo.release_url && (
-                      <a
-                        href={updateInfo.release_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="block mt-1 text-xs font-medium"
-                        style={{ color: 'var(--accent)' }}
+                    {updateInfo.update_available && (
+                      <button
+                        type="button"
+                        onClick={() => onInstallUpdate?.()}
+                        className="w-full mt-2 py-2 rounded text-xs font-semibold"
+                        style={{ background: 'var(--accent)', color: '#fff' }}
                       >
-                        Download update
-                      </a>
+                        Update & Relaunch
+                      </button>
                     )}
-                    {updateInfo.update_available && !updateInfo.release_url && (
-                      <div className="mt-1 text-xs" style={{ color: 'var(--accent)' }}>
-                        Run <code style={{ background: 'var(--bg-tertiary)', padding: '1px 4px', borderRadius: 3 }}>remedy update</code> in terminal
+                    {updateInfo.update_available && (
+                      <div className="mt-1 text-[0.65rem]" style={{ color: 'var(--text-muted)' }}>
+                        Downloads the installer, updates Remedy, and restarts — like Ollama.
+                      </div>
+                    )}
+                    {!updateInfo.update_available && !updateInfo.error && (
+                      <div className="mt-1 text-xs" style={{ color: 'var(--success)' }}>
+                        You&apos;re up to date
+                      </div>
+                    )}
+                    {updateInfo.error && (
+                      <div className="mt-1 text-xs" style={{ color: 'var(--text-muted)' }}>
+                        {updateInfo.error}
                       </div>
                     )}
                   </div>

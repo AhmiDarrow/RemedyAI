@@ -1,0 +1,9 @@
+[[permission]]
+identifier = "allow-app-update"
+description = "Allow checking for and installing desktop updates (download installer + relaunch)."
+commands.allow = ["check_desktop_update", "start_desktop_update"]
+
+[[permission]]
+identifier = "allow-read-dropped-files"
+description = "Allow reading OS drag-dropped file paths into the chat composer."
+commands.allow = ["read_dropped_files", "take_pending_file_drops"]

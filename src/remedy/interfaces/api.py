@@ -19,12 +19,10 @@ import aiohttp
 import yaml
 from fastapi import (
     FastAPI,
-    File,
     HTTPException,
     Query,
     Request,
     Response,
-    UploadFile,
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -133,6 +131,14 @@ class AttachmentRef(BaseModel):
     size: int | None = None
     is_image: bool | None = None
     is_text: bool | None = None
+
+
+class AttachmentUploadRequest(BaseModel):
+    """JSON upload (preferred) — avoids python-multipart in frozen builds."""
+
+    filename: str = Field(..., description="Original filename")
+    content_type: str | None = Field(default=None, description="MIME type")
+    data_base64: str = Field(..., description="Base64-encoded file bytes")
 
 
 class SendMessageRequest(BaseModel):
@@ -859,14 +865,20 @@ def create_app(
 
     # -- session attachments (drag-drop / paste / picker) --------------------
     @app.post("/api/sessions/{session_id}/attachments")
-    async def upload_attachment(
-        session_id: str,
-        file: UploadFile = File(...),
-    ):
-        """Store a dropped/pasted file for this session and return a path ref."""
+    async def upload_attachment_json(session_id: str, req: AttachmentUploadRequest):
+        """Store a dropped/pasted file (JSON + base64) and return a path ref.
+
+        Prefer this over multipart so frozen desktop sidecars do not need
+        python-multipart.
+        """
+        import base64
+
         from remedy.interfaces.attachments import MAX_ATTACHMENT_BYTES, save_upload
 
-        raw = await file.read()
+        try:
+            raw = base64.b64decode(req.data_base64, validate=False)
+        except Exception as e:
+            raise HTTPException(400, f"Invalid base64 payload: {e}") from e
         if not raw:
             raise HTTPException(400, "Empty file")
         if len(raw) > MAX_ATTACHMENT_BYTES:
@@ -882,9 +894,9 @@ def create_app(
         try:
             meta = save_upload(
                 session_id=session_id,
-                filename=file.filename or "upload.bin",
+                filename=req.filename or "upload.bin",
                 data=raw,
-                content_type=file.content_type,
+                content_type=req.content_type,
                 home_dir=home,
             )
         except ValueError as e:
@@ -1803,6 +1815,7 @@ def create_app(
         latest_python = None
         latest_desktop = None
         release_url = None
+        installer_url = None
         error = None
 
         try:
@@ -1825,12 +1838,20 @@ def create_app(
 
             req = _urllib.Request(
                 "https://github.com/AhmiDarrow/RemedyAI/releases/latest/download/latest.json",
-                headers={"Accept": "application/json"},
+                headers={"Accept": "application/json", "User-Agent": "Remedy-Updater"},
             )
             with _urllib.request.urlopen(req, timeout=8) as resp:
                 data = _json.loads(resp.read().decode())
-                latest_desktop = data.get("version")
-                release_url = data.get("url")
+                latest_desktop = str(data.get("version") or "").lstrip("v")
+                release_url = data.get("url") or (
+                    "https://github.com/AhmiDarrow/RemedyAI/releases/latest"
+                )
+                # Tauri / NSIS installer (Ollama-style one-click update target)
+                installer_url = (
+                    (data.get("platforms") or {})
+                    .get("windows-x86_64", {})
+                    .get("url")
+                ) or data.get("url")
         except Exception:
             pass
 
@@ -1849,6 +1870,7 @@ def create_app(
             "latest_python": latest_python,
             "latest_desktop": latest_desktop,
             "release_url": release_url,
+            "installer_url": installer_url,
             "update_available": update_available,
             "error": error,
         }

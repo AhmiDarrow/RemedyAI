@@ -68,6 +68,7 @@ def sanitize_filename(name: str) -> str:
 
 
 def unique_path(directory: Path, filename: str) -> Path:
+    """Legacy helper: pick a free path with _1, _2… if needed."""
     name = sanitize_filename(filename)
     candidate = directory / name
     if not candidate.exists():
@@ -78,6 +79,16 @@ def unique_path(directory: Path, filename: str) -> Path:
         if not alt.exists():
             return alt
     return directory / f"{stem}_{uuid4().hex[:8]}{suf}"
+
+
+def storage_path(directory: Path, filename: str) -> tuple[Path, str]:
+    """Return (disk_path, display_name).
+
+    Always keeps the original sanitized filename for the UI. Re-uploads of the
+    same name in a session overwrite the previous file (no notes_1.txt / notes_3.txt).
+    """
+    name = sanitize_filename(filename)
+    return directory / name, name
 
 
 def guess_mime(filename: str, declared: str | None = None) -> str:
@@ -118,17 +129,17 @@ def save_upload(
             f"File too large ({len(data)} bytes). Max is {MAX_ATTACHMENT_BYTES // (1024*1024)} MB."
         )
     directory = session_attachments_dir(session_id, home_dir)
-    path = unique_path(directory, filename)
+    path, display_name = storage_path(directory, filename)
     path.write_bytes(data)
-    mime = guess_mime(filename, content_type)
+    mime = guess_mime(display_name, content_type)
     return {
-        "id": path.stem if False else uuid4().hex[:12],
-        "name": path.name,
+        "id": uuid4().hex[:12],
+        "name": display_name,  # original name — never notes_3.txt from unique_path
         "path": str(path.resolve()),
         "mime": mime,
         "size": len(data),
         "is_image": is_image(mime),
-        "is_text": is_probably_text(mime, path.name),
+        "is_text": is_probably_text(mime, display_name),
     }
 
 

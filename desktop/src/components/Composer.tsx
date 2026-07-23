@@ -2,9 +2,15 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 import { searchFiles } from '../api/messages'
 import {
   uploadAttachment,
+  uploadDroppedPayload,
+  listenNativeFileDrop,
+  takePendingFileDrops,
+  pendingMetaFromPayload,
   formatBytes,
   type AttachmentMeta,
+  type DroppedFilePayload,
 } from '../api/attachments'
+import { isTauri } from '../api/tauri'
 
 export interface AgentDef {
   name: string
@@ -61,11 +67,29 @@ export function Composer({
   const [dragOver, setDragOver] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState('')
+  const [attachNotice, setAttachNotice] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const attachRailRef = useRef<HTMLDivElement>(null)
   const suggestTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const submittingRef = useRef(false)
   const dragDepth = useRef(0)
+  const attachmentsRef = useRef<AttachmentMeta[]>([])
+  attachmentsRef.current = attachments
+  /** Dedupe keys for drop/event/poll triple-fire (same file was attaching 3×). */
+  const seenDropKeysRef = useRef<Set<string>>(new Set())
+
+  const dropKey = (p: DroppedFilePayload) =>
+    `${p.filename}|${p.size}|${(p.data_base64 || '').slice(0, 48)}`
+
+  const flashAttached = useCallback((n: number) => {
+    if (n <= 0) return
+    setAttachNotice(n === 1 ? '1 file attached to this message' : `${n} files attached to this message`)
+    window.setTimeout(() => setAttachNotice(''), 2500)
+    requestAnimationFrame(() => {
+      attachRailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    })
+  }, [])
 
   useEffect(() => {
     if (editDraft != null && editDraft !== '') {
@@ -81,14 +105,13 @@ export function Composer({
     }
   }, [editDraft, onEditDraftConsumed])
 
-  // Revoke preview URLs on unmount / clear
+  // Revoke blob preview URLs on unmount
   useEffect(() => {
     return () => {
-      for (const a of attachments) {
-        if (a.previewUrl) URL.revokeObjectURL(a.previewUrl)
+      for (const a of attachmentsRef.current) {
+        if (a.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(a.previewUrl)
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only on unmount
   }, [])
 
   const detectAtQuery = useCallback((text: string, cursorPos: number) => {
@@ -111,22 +134,26 @@ export function Composer({
     [input],
   )
 
+  const resolveSession = useCallback(async (): Promise<string | null> => {
+    if (sessionId) return sessionId
+    if (ensureSession) return ensureSession()
+    return null
+  }, [sessionId, ensureSession])
+
   const addFiles = useCallback(
     async (files: FileList | File[]) => {
       const list = Array.from(files).filter(Boolean)
       if (!list.length || disabled || streaming) return
 
       setUploadError('')
-      let sid = sessionId
-      if (!sid && ensureSession) {
-        sid = await ensureSession()
-      }
+      setAttachNotice('')
+      const sid = await resolveSession()
       if (!sid) {
-        setUploadError('Create a session first (or send a message).')
+        setUploadError('Could not create a session for the upload.')
         return
       }
 
-      const room = MAX_FILES - attachments.length
+      const room = MAX_FILES - attachmentsRef.current.length
       if (room <= 0) {
         setUploadError(`Max ${MAX_FILES} attachments per message.`)
         return
@@ -145,19 +172,163 @@ export function Composer({
         }
         if (next.length) {
           setAttachments((prev) => [...prev, ...next])
+          flashAttached(next.length)
         }
       } finally {
         setUploading(false)
       }
     },
-    [attachments.length, disabled, streaming, sessionId, ensureSession],
+    [disabled, streaming, resolveSession, flashAttached],
   )
+
+  /**
+   * Native drop payloads → chips + upload (same as 📎).
+   * Dedupes poll + event + path fallback so one drop ≠ three chips.
+   */
+  const addNativePayloads = useCallback(
+    async (payloads: DroppedFilePayload[]) => {
+      if (!payloads.length || disabled || streaming) return
+
+      // Drop anything already handled (or already attached by name+size).
+      const unique = payloads.filter((p) => {
+        const key = dropKey(p)
+        if (seenDropKeysRef.current.has(key)) return false
+        const already = attachmentsRef.current.some(
+          (a) => a.name === p.filename && a.size === p.size,
+        )
+        if (already) {
+          seenDropKeysRef.current.add(key)
+          return false
+        }
+        seenDropKeysRef.current.add(key)
+        return true
+      })
+      if (!unique.length) return
+
+      setUploadError('')
+      setAttachNotice('')
+      setDragOver(false)
+
+      const room = MAX_FILES - attachmentsRef.current.length
+      if (room <= 0) {
+        setUploadError(`Max ${MAX_FILES} attachments per message.`)
+        return
+      }
+      const batch = unique.slice(0, room)
+
+      // Instant UI chips (before server round-trip).
+      const optimistic = batch.map(pendingMetaFromPayload)
+      setAttachments((prev) => [...prev, ...optimistic])
+      flashAttached(batch.length)
+      setUploading(true)
+
+      const sid = await resolveSession()
+      if (!sid) {
+        setUploadError('Could not create a session for the upload.')
+        setUploading(false)
+        return
+      }
+
+      try {
+        const uploaded: AttachmentMeta[] = []
+        for (const p of batch) {
+          try {
+            uploaded.push(await uploadDroppedPayload(sid, p))
+          } catch (e: unknown) {
+            setUploadError(e instanceof Error ? e.message : 'Upload failed')
+          }
+        }
+        if (uploaded.length) {
+          setAttachments((prev) => {
+            // Remove only the optimistic chips for this batch, keep others.
+            const pendingNames = new Set(batch.map((b) => b.filename))
+            const withoutOptimistic = prev.filter(
+              (a) => !(a.id.startsWith('pending-') && pendingNames.has(a.name)),
+            )
+            // Also drop accidental duplicates of the same name+size from races.
+            const merged = [...withoutOptimistic, ...uploaded]
+            const seen = new Set<string>()
+            return merged.filter((a) => {
+              const k = `${a.name}|${a.size}`
+              if (seen.has(k)) return false
+              seen.add(k)
+              return true
+            })
+          })
+        } else {
+          setUploadError((prev) => prev || 'Upload failed — files not stored for the agent.')
+        }
+      } finally {
+        setUploading(false)
+      }
+    },
+    [disabled, streaming, resolveSession, flashAttached],
+  )
+
+  // Primary: poll Rust pending queue. Secondary: events only for drag highlight.
+  // (Previously poll + ready event + path fallback all added the same file → 3 chips.)
+  useEffect(() => {
+    let cancelled = false
+    let unlisten: (() => void) | undefined
+    let inFlight = false
+
+    const drainPending = async () => {
+      if (cancelled || disabled || streaming || inFlight) return
+      inFlight = true
+      try {
+        const pending = await takePendingFileDrops()
+        if (!cancelled && pending.length > 0) {
+          setDragOver(false)
+          await addNativePayloads(pending)
+        }
+      } catch (e: unknown) {
+        if (!cancelled && isTauri()) {
+          console.warn('[remedy] take_pending_file_drops failed', e)
+        }
+      } finally {
+        inFlight = false
+      }
+    }
+
+    const pollId = window.setInterval(() => {
+      void drainPending()
+    }, 200)
+
+    // Events: highlight only — content comes from the pending queue to avoid triple attach.
+    void listenNativeFileDrop(
+      () => {
+        // ready event: also drain once (queue may already be empty if poll won — that's ok)
+        void drainPending()
+      },
+      (phase) => {
+        if (phase === 'enter' || phase === 'over') setDragOver(true)
+        if (phase === 'leave') setDragOver(false)
+      },
+      (msg) => {
+        setUploadError(msg)
+        setDragOver(false)
+      },
+      // No path fallback — it re-read and triple-attached the same files.
+      undefined,
+    ).then((fn) => {
+      if (!cancelled) unlisten = fn
+      else fn()
+    })
+
+    void drainPending()
+
+    return () => {
+      cancelled = true
+      window.clearInterval(pollId)
+      unlisten?.()
+    }
+  }, [addNativePayloads, disabled, streaming])
 
   const removeAttachment = useCallback((idx: number) => {
     setAttachments((prev) => {
       const copy = [...prev]
       const [gone] = copy.splice(idx, 1)
-      if (gone?.previewUrl) URL.revokeObjectURL(gone.previewUrl)
+      if (gone?.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(gone.previewUrl)
       return copy
     })
   }, [])
@@ -183,10 +354,12 @@ export function Composer({
       }
       setInput('')
       for (const a of attachments) {
-        if (a.previewUrl) URL.revokeObjectURL(a.previewUrl)
+        if (a.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(a.previewUrl)
       }
       setAttachments([])
       setUploadError('')
+      setAttachNotice('')
+      seenDropKeysRef.current.clear()
     } finally {
       requestAnimationFrame(() => {
         submittingRef.current = false
@@ -309,9 +482,12 @@ export function Composer({
       e.stopPropagation()
       dragDepth.current = 0
       setDragOver(false)
+      // HTML5 FileList — works in browser; often empty in Tauri/WebView2 for OS drops.
       if (e.dataTransfer.files?.length) {
         void addFiles(e.dataTransfer.files)
+        return
       }
+      // Some WebViews put path-like items in items / types only — native handler covers OS.
     },
     [addFiles],
   )
@@ -397,52 +573,111 @@ export function Composer({
         </div>
       )}
 
-      {attachments.length > 0 && (
-        <div className="mb-2 flex flex-wrap gap-2">
-          {attachments.map((a, i) => (
-            <div
-              key={`${a.path}-${i}`}
-              className="flex items-center gap-2 rounded-md px-2 py-1 text-xs max-w-full"
-              style={{
-                background: 'var(--bg-primary)',
-                border: '1px solid var(--border)',
-                color: 'var(--text-secondary)',
-              }}
-            >
-              {a.previewUrl ? (
-                <img
-                  src={a.previewUrl}
-                  alt={a.name}
-                  className="w-8 h-8 rounded object-cover flex-shrink-0"
-                />
-              ) : (
-                <span className="flex-shrink-0 opacity-70">{a.is_text ? '📄' : '📎'}</span>
-              )}
-              <div className="min-w-0">
-                <div className="truncate font-medium" style={{ color: 'var(--text-primary)' }}>
-                  {a.name}
-                </div>
-                <div style={{ color: 'var(--text-muted)' }}>
-                  {formatBytes(a.size)}
-                  {a.mime ? ` · ${a.mime}` : ''}
-                </div>
-              </div>
+      {/* Same attachment rail for 📎 pick, paste, and drag-drop */}
+      {(attachments.length > 0 || uploading || attachNotice) && (
+        <div
+          ref={attachRailRef}
+          className="mb-2 rounded-lg px-3 py-2"
+          style={{
+            background: 'var(--bg-primary)',
+            border: `1px solid ${attachments.length ? 'var(--accent)' : 'var(--border)'}`,
+          }}
+        >
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <div className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>
+              {uploading && !attachments.length
+                ? 'Attaching…'
+                : `Attached to this message (${attachments.length})`}
+            </div>
+            {attachments.length > 0 && !streaming && (
               <button
                 type="button"
-                className="ml-1 px-1 rounded opacity-70 hover:opacity-100"
-                style={{ color: 'var(--error)' }}
-                title="Remove"
-                onClick={() => removeAttachment(i)}
+                className="text-[0.65rem] px-1.5 py-0.5 rounded"
+                style={{ color: 'var(--text-muted)' }}
+                onClick={() => {
+                  for (const a of attachments) {
+                    if (a.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(a.previewUrl)
+                  }
+                  setAttachments([])
+                  setAttachNotice('')
+                  seenDropKeysRef.current.clear()
+                }}
               >
-                ×
+                Clear all
               </button>
+            )}
+          </div>
+          {attachNotice && (
+            <div className="text-xs mb-2 font-medium" style={{ color: 'var(--accent)' }}>
+              {attachNotice}
             </div>
-          ))}
+          )}
+          {uploading && (
+            <div className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>
+              Uploading file(s)…
+            </div>
+          )}
+          <div className="flex flex-wrap gap-2">
+            {attachments.map((a, i) => (
+              <div
+                key={`${a.path}-${i}`}
+                className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs max-w-[240px]"
+                style={{
+                  background: 'var(--bg-secondary)',
+                  border: '1px solid var(--border)',
+                  color: 'var(--text-secondary)',
+                }}
+                title={a.path}
+              >
+                {a.previewUrl ? (
+                  <img
+                    src={a.previewUrl}
+                    alt={a.name}
+                    className="w-10 h-10 rounded object-cover flex-shrink-0"
+                  />
+                ) : (
+                  <span
+                    className="w-10 h-10 rounded flex items-center justify-center flex-shrink-0 text-base"
+                    style={{ background: 'var(--bg-tertiary)' }}
+                  >
+                    {a.is_text ? '📄' : '📎'}
+                  </span>
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-medium" style={{ color: 'var(--text-primary)' }}>
+                    {a.name}
+                  </div>
+                  <div className="truncate" style={{ color: 'var(--text-muted)' }}>
+                    {formatBytes(a.size)}
+                    {a.mime ? ` · ${a.mime.split('/').pop()}` : ''}
+                  </div>
+                </div>
+                {!streaming && (
+                  <button
+                    type="button"
+                    className="ml-0.5 px-1.5 py-0.5 rounded text-sm font-bold"
+                    style={{ color: 'var(--error)' }}
+                    title="Remove attachment"
+                    onClick={() => removeAttachment(i)}
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
       {uploadError && (
-        <div className="mb-1 text-xs" style={{ color: 'var(--error)' }}>
+        <div
+          className="mb-2 px-2 py-1.5 rounded text-xs"
+          style={{
+            color: 'var(--error)',
+            background: 'var(--error-bg, rgba(239,68,68,0.08))',
+            border: '1px solid var(--error)',
+          }}
+        >
           {uploadError}
         </div>
       )}
@@ -460,18 +695,26 @@ export function Composer({
         />
         <button
           type="button"
-          title="Attach files"
+          title="Attach files (same as drag & drop)"
           disabled={disabled || streaming || uploading}
           onClick={() => fileInputRef.current?.click()}
-          className="px-2.5 py-2 rounded-md text-sm flex-shrink-0"
+          className="relative px-2.5 py-2 rounded-md text-sm flex-shrink-0"
           style={{
-            background: 'var(--bg-tertiary)',
+            background: attachments.length ? 'var(--accent)' : 'var(--bg-tertiary)',
             border: '1px solid var(--border)',
-            color: 'var(--text-secondary)',
+            color: attachments.length ? '#fff' : 'var(--text-secondary)',
             opacity: disabled || streaming || uploading ? 0.5 : 1,
           }}
         >
           📎
+          {attachments.length > 0 && (
+            <span
+              className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full text-[0.65rem] font-bold flex items-center justify-center"
+              style={{ background: 'var(--bg-primary)', color: 'var(--accent)', border: '1px solid var(--accent)' }}
+            >
+              {attachments.length}
+            </span>
+          )}
         </button>
 
         <textarea
@@ -483,48 +726,58 @@ export function Composer({
           placeholder={
             planMode
               ? 'Plan mode — describe what to do (no tools executed)'
-              : 'Message, /command, @file…  ·  drop or paste files & images'
+              : attachments.length
+                ? 'Add a message (optional) and press Send…'
+                : 'Message, /command, @file…  ·  drop, paste, or 📎 to attach'
           }
           disabled={disabled}
           rows={1}
           className="flex-1 resize-none rounded-md px-3 py-2 text-sm outline-none transition-colors"
           style={{
             background: 'var(--bg-primary)',
-            border: `1px solid ${dragOver ? 'var(--accent)' : 'var(--border)'}`,
+            border: `1px solid ${dragOver || attachments.length ? 'var(--accent)' : 'var(--border)'}`,
             color: 'var(--text-primary)',
             maxHeight: 160,
           }}
           onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--accent)')}
           onBlur={(e) => {
-            if (!dragOver) e.currentTarget.style.borderColor = 'var(--border)'
+            if (!dragOver && !attachments.length) e.currentTarget.style.borderColor = 'var(--border)'
           }}
         />
 
-        {streaming ? (
-          <button
-            onClick={onStop}
-            className="px-4 py-2 rounded-md text-sm font-medium transition-colors"
-            style={{ background: 'var(--error)', color: '#fff' }}
-          >
-            Stop
-          </button>
-        ) : (
-          <button
-            onClick={handleSubmit}
-            disabled={!canSend}
-            className="px-4 py-2 rounded-md text-sm font-medium transition-colors"
-            style={{
-              background: !canSend ? 'var(--bg-tertiary)' : 'var(--accent)',
-              color: !canSend ? 'var(--text-muted)' : '#fff',
-              cursor: !canSend ? 'not-allowed' : 'pointer',
-            }}
-          >
-            {uploading ? '…' : 'Send'}
-          </button>
-        )}
+        {/* Send + Stop always side-by-side (Stop enabled only while streaming) */}
+        <button
+          type="button"
+          onClick={handleSubmit}
+          disabled={!canSend}
+          className="px-4 py-2 rounded-md text-sm font-medium transition-colors flex-shrink-0"
+          style={{
+            background: !canSend ? 'var(--bg-tertiary)' : 'var(--accent)',
+            color: !canSend ? 'var(--text-muted)' : '#fff',
+            cursor: !canSend ? 'not-allowed' : 'pointer',
+          }}
+        >
+          {uploading ? '…' : 'Send'}
+        </button>
+        <button
+          type="button"
+          onClick={onStop}
+          disabled={!streaming}
+          title={streaming ? 'Stop generation' : 'Stop (available while generating)'}
+          className="px-4 py-2 rounded-md text-sm font-medium transition-colors flex-shrink-0"
+          style={{
+            background: streaming ? 'var(--error)' : 'var(--bg-tertiary)',
+            color: streaming ? '#fff' : 'var(--text-muted)',
+            border: streaming ? 'none' : '1px solid var(--border)',
+            cursor: streaming ? 'pointer' : 'not-allowed',
+            opacity: streaming ? 1 : 0.7,
+          }}
+        >
+          Stop
+        </button>
       </div>
       <div className="mt-1 text-[0.65rem]" style={{ color: 'var(--text-muted)' }}>
-        Drag & drop or paste images/files · max {MAX_FILES} per message
+        Drag & drop, paste, or 📎 — files attach to this message · max {MAX_FILES}
       </div>
     </div>
   )

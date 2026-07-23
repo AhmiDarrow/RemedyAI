@@ -18,6 +18,7 @@ interface StatusBarProps {
   onTogglePanel: (panel: 'memory' | 'skills' | 'settings') => void
   updateAvailable: boolean
   onCheckUpdates: () => void
+  onInstallUpdate?: () => void
 }
 
 export function StatusBar({
@@ -35,6 +36,7 @@ export function StatusBar({
   onTogglePanel,
   updateAvailable,
   onCheckUpdates,
+  onInstallUpdate,
 }: StatusBarProps) {
   const [version, setVersion] = useState('')
   const [status, setStatus] = useState<'connected' | 'disconnected' | 'checking'>('checking')
@@ -148,15 +150,15 @@ export function StatusBar({
 
         {updateAvailable && (
           <button
-            onClick={onCheckUpdates}
+            onClick={() => (onInstallUpdate ? onInstallUpdate() : onCheckUpdates())}
             className="px-2 py-0.5 rounded text-xs font-medium animate-pulse"
-            title="Update available — click to view"
+            title="Update available — download, install, and relaunch"
             style={{
               background: 'var(--accent)',
               color: '#fff',
             }}
           >
-            Update Available
+            Update Now
           </button>
         )}
 

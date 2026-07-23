@@ -1,12 +1,12 @@
 use std::env;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, DragDropEvent, Emitter, Manager, State};
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -28,9 +28,12 @@ fn status_addr() -> SocketAddr {
 }
 
 struct ServerState {
-    process: Mutex<Option<Child>>,
+    process: Arc<Mutex<Option<Child>>>,
     /// Path to the sidecar binary discovered at startup.
-    sidecar_cmd: Mutex<Option<String>>,
+    sidecar_cmd: Arc<Mutex<Option<String>>>,
+    /// Files dropped from OS (Explorer). Frontend polls this because WebView
+    /// event delivery is unreliable for drag-drop on Windows.
+    pending_drops: Arc<Mutex<Vec<DroppedFilePayload>>>,
 }
 
 fn current_exe_dir() -> Option<std::path::PathBuf> {
@@ -199,7 +202,7 @@ fn kill_child(guard: &mut Option<Child>) {
     *guard = None;
 }
 
-fn start_sidecar(process: &Mutex<Option<Child>>, cmd: &str) -> Result<(), String> {
+fn start_sidecar(process: &Arc<Mutex<Option<Child>>>, cmd: &str) -> Result<(), String> {
     let mut guard = process
         .lock()
         .map_err(|_| "server state lock poisoned".to_string())?;
@@ -248,6 +251,378 @@ fn open_data_folder() -> Result<String, String> {
     Ok(path_str)
 }
 
+// ---------------------------------------------------------------------------
+// In-app update (Ollama-style): check → download progress UI → install → relaunch
+// ---------------------------------------------------------------------------
+
+#[derive(serde::Serialize, Clone)]
+struct DesktopUpdateInfo {
+    current_version: String,
+    latest_version: String,
+    update_available: bool,
+    download_url: Option<String>,
+    release_notes: Option<String>,
+    error: Option<String>,
+}
+
+#[derive(serde::Serialize, Clone)]
+struct UpdateProgress {
+    phase: String,
+    percent: u8,
+    message: String,
+}
+
+fn app_version(app: &AppHandle) -> String {
+    app.package_info().version.to_string()
+}
+
+fn parse_semver(raw: &str) -> (u64, u64, u64) {
+    let s = raw.trim().trim_start_matches('v').trim_start_matches('V');
+    let mut parts = s.split(|c| c == '.' || c == '-' || c == '+');
+    let major = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+    let minor = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+    let patch = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+    (major, minor, patch)
+}
+
+fn is_newer(latest: &str, current: &str) -> bool {
+    parse_semver(latest) > parse_semver(current)
+}
+
+fn fetch_latest_desktop() -> Result<(String, Option<String>, Option<String>), String> {
+    // Prefer Tauri latest.json (has platform installer URL).
+    let urls = [
+        "https://github.com/AhmiDarrow/RemedyAI/releases/latest/download/latest.json",
+        "https://api.github.com/repos/AhmiDarrow/RemedyAI/releases/latest",
+    ];
+    for url in urls {
+        let resp = ureq::get(url)
+            .set("User-Agent", "RemedyDesktop-Updater")
+            .set("Accept", "application/json")
+            .call()
+            .map_err(|e| format!("Update check failed: {e}"))?;
+        let status = resp.status();
+        if status != 200 {
+            continue;
+        }
+        let v: serde_json::Value = resp
+            .into_json()
+            .map_err(|e| format!("Invalid update metadata: {e}"))?;
+
+        // latest.json shape
+        if let Some(ver) = v.get("version").and_then(|x| x.as_str()) {
+            let download = v
+                .pointer("/platforms/windows-x86_64/url")
+                .and_then(|x| x.as_str())
+                .or_else(|| v.get("url").and_then(|x| x.as_str()))
+                .map(|s| s.to_string());
+            let notes = v
+                .get("notes")
+                .and_then(|x| x.as_str())
+                .map(|s| s.to_string());
+            return Ok((ver.to_string(), download, notes));
+        }
+
+        // GitHub API shape
+        if let Some(tag) = v.get("tag_name").and_then(|x| x.as_str()) {
+            let notes = v
+                .get("body")
+                .and_then(|x| x.as_str())
+                .map(|s| s.to_string());
+            let mut download = None;
+            if let Some(assets) = v.get("assets").and_then(|a| a.as_array()) {
+                for a in assets {
+                    let name = a.get("name").and_then(|n| n.as_str()).unwrap_or("");
+                    let url = a
+                        .get("browser_download_url")
+                        .and_then(|u| u.as_str())
+                        .unwrap_or("");
+                    if name.ends_with("-setup.exe")
+                        || name.ends_with("_x64-setup.exe")
+                        || (name.ends_with(".exe") && name.to_lowercase().contains("setup"))
+                    {
+                        download = Some(url.to_string());
+                        break;
+                    }
+                }
+            }
+            return Ok((tag.to_string(), download, notes));
+        }
+    }
+    Err("Could not reach GitHub releases for update metadata".into())
+}
+
+#[tauri::command]
+fn check_desktop_update(app: AppHandle) -> Result<DesktopUpdateInfo, String> {
+    let current = app_version(&app);
+    match fetch_latest_desktop() {
+        Ok((latest, download_url, notes)) => {
+            let available = is_newer(&latest, &current);
+            Ok(DesktopUpdateInfo {
+                current_version: current,
+                latest_version: latest.trim_start_matches('v').to_string(),
+                update_available: available,
+                download_url,
+                release_notes: notes,
+                error: None,
+            })
+        }
+        Err(e) => Ok(DesktopUpdateInfo {
+            current_version: current.clone(),
+            latest_version: current,
+            update_available: false,
+            download_url: None,
+            release_notes: None,
+            error: Some(e),
+        }),
+    }
+}
+
+fn emit_progress(app: &AppHandle, phase: &str, percent: u8, message: &str) {
+    let _ = app.emit(
+        "update-progress",
+        UpdateProgress {
+            phase: phase.to_string(),
+            percent,
+            message: message.to_string(),
+        },
+    );
+}
+
+/// Download the NSIS installer, launch it, then exit so files can be replaced.
+/// Progress is streamed to the UI via `update-progress` events.
+#[tauri::command]
+fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), String> {
+    if download_url.is_empty() {
+        return Err("No download URL for this release".into());
+    }
+    if !(download_url.starts_with("https://github.com/")
+        || download_url.starts_with("https://objects.githubusercontent.com/")
+        || download_url.starts_with("https://release-assets.githubusercontent.com/"))
+    {
+        return Err("Download URL is not a trusted GitHub release host".into());
+    }
+
+    let app_for_thread = app.clone();
+    // Clone Arc before spawn — State<'_, T> cannot be borrowed inside the worker.
+    let process_slot = app.state::<ServerState>().process.clone();
+    thread::spawn(move || {
+        let result = (|| -> Result<(), String> {
+            emit_progress(&app_for_thread, "downloading", 0, "Connecting to update server…");
+
+            let resp = ureq::get(&download_url)
+                .set("User-Agent", "RemedyDesktop-Updater")
+                .call()
+                .map_err(|e| format!("Download failed: {e}"))?;
+            if resp.status() != 200 {
+                return Err(format!("Download HTTP {}", resp.status()));
+            }
+
+            let len = resp
+                .header("Content-Length")
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(0);
+
+            let temp = env::temp_dir().join(format!(
+                "RemedyDesktop-Update-{}.exe",
+                Instant::now().elapsed().as_millis()
+            ));
+            let mut file = std::fs::File::create(&temp)
+                .map_err(|e| format!("Cannot create temp installer: {e}"))?;
+
+            let mut reader = resp.into_reader();
+            let mut buf = [0u8; 64 * 1024];
+            let mut done: u64 = 0;
+            loop {
+                let n = reader
+                    .read(&mut buf)
+                    .map_err(|e| format!("Download interrupted: {e}"))?;
+                if n == 0 {
+                    break;
+                }
+                file.write_all(&buf[..n])
+                    .map_err(|e| format!("Write failed: {e}"))?;
+                done += n as u64;
+                let pct = if len > 0 {
+                    ((done * 100) / len).min(99) as u8
+                } else {
+                    // indeterminate-ish progress
+                    ((done / (512 * 1024)) % 90) as u8
+                };
+                let mb = done as f64 / (1024.0 * 1024.0);
+                emit_progress(
+                    &app_for_thread,
+                    "downloading",
+                    pct,
+                    &format!("Downloading update… {mb:.1} MB"),
+                );
+            }
+            drop(file);
+
+            emit_progress(
+                &app_for_thread,
+                "installing",
+                100,
+                "Starting installer… Remedy will close and relaunch.",
+            );
+
+            // Stop sidecar so installer can replace files.
+            match process_slot.lock() {
+                Ok(mut guard) => kill_child(&mut guard),
+                Err(poisoned) => {
+                    let mut guard = poisoned.into_inner();
+                    kill_child(&mut guard);
+                }
+            }
+
+            // Launch NSIS installer. PassivePassive shows a simple progress UI;
+            // without it, /S is fully silent. Prefer visible progress for UX.
+            #[cfg(target_os = "windows")]
+            {
+                use std::os::windows::process::CommandExt;
+                Command::new(&temp)
+                    .args(["/PASSIVE"])
+                    .creation_flags(0) // show installer window
+                    .spawn()
+                    .map_err(|e| format!("Failed to launch installer: {e}"))?;
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                Command::new(&temp)
+                    .spawn()
+                    .map_err(|e| format!("Failed to launch installer: {e}"))?;
+            }
+
+            // Give the installer a moment to start, then exit.
+            thread::sleep(Duration::from_millis(800));
+            emit_progress(
+                &app_for_thread,
+                "relaunch",
+                100,
+                "Installer running — closing Remedy…",
+            );
+            app_for_thread.exit(0);
+            Ok(())
+        })();
+
+        if let Err(e) = result {
+            log::error!("Update failed: {}", e);
+            emit_progress(&app_for_thread, "error", 0, &e);
+        }
+    });
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Native file drag-drop (WebView2 often blocks HTML5 File drops from Explorer)
+// ---------------------------------------------------------------------------
+
+const MAX_DROP_FILE_BYTES: u64 = 15 * 1024 * 1024;
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+#[serde(rename_all = "snake_case")]
+struct DroppedFilePayload {
+    filename: String,
+    content_type: String,
+    data_base64: String,
+    size: u64,
+}
+
+fn guess_content_type(path: &Path) -> String {
+    match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "bmp" => "image/bmp",
+        "svg" => "image/svg+xml",
+        "txt" | "log" | "md" | "csv" => "text/plain",
+        "json" => "application/json",
+        "pdf" => "application/pdf",
+        "py" => "text/x-python",
+        "ts" | "tsx" => "text/typescript",
+        "js" | "jsx" => "text/javascript",
+        "html" | "htm" => "text/html",
+        "css" => "text/css",
+        "toml" | "yaml" | "yml" | "xml" => "text/plain",
+        _ => "application/octet-stream",
+    }
+    .to_string()
+}
+
+fn load_paths_as_payloads(paths: &[String]) -> Result<Vec<DroppedFilePayload>, String> {
+    use base64::Engine;
+
+    let mut out = Vec::new();
+    for raw in paths {
+        let path = PathBuf::from(raw);
+        if !path.is_file() {
+            continue;
+        }
+        let meta = std::fs::metadata(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        if meta.len() > MAX_DROP_FILE_BYTES {
+            return Err(format!(
+                "{} is too large (max {} MB)",
+                path.file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("file"),
+                MAX_DROP_FILE_BYTES / (1024 * 1024)
+            ));
+        }
+        let bytes = std::fs::read(&path).map_err(|e| format!("Read {}: {e}", path.display()))?;
+        let filename = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("file")
+            .to_string();
+        let content_type = guess_content_type(&path);
+        let data_base64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        out.push(DroppedFilePayload {
+            filename,
+            content_type,
+            data_base64,
+            size: bytes.len() as u64,
+        });
+        if out.len() >= 12 {
+            break;
+        }
+    }
+    if out.is_empty() {
+        return Err("No readable files in drop".into());
+    }
+    Ok(out)
+}
+
+/// Read OS-dropped file paths into base64 payloads for the web UI to upload.
+#[tauri::command]
+fn read_dropped_files(paths: Vec<String>) -> Result<Vec<DroppedFilePayload>, String> {
+    load_paths_as_payloads(&paths)
+}
+
+/// Drain files captured by the last native OS drop (reliable path for the UI).
+#[tauri::command]
+fn take_pending_file_drops(
+    state: State<'_, ServerState>,
+) -> Result<Vec<DroppedFilePayload>, String> {
+    let mut guard = state
+        .pending_drops
+        .lock()
+        .map_err(|_| "pending drops lock poisoned".to_string())?;
+    if guard.is_empty() {
+        return Ok(vec![]);
+    }
+    let items = std::mem::take(&mut *guard);
+    log::info!("UI took {} pending dropped file(s)", items.len());
+    Ok(items)
+}
+
 /// Kill and respawn the sidecar, wait for health, emit server-ready / server-error.
 #[tauri::command]
 fn restart_server(app: AppHandle, state: State<'_, ServerState>) -> Result<String, String> {
@@ -282,10 +657,18 @@ fn restart_server(app: AppHandle, state: State<'_, ServerState>) -> Result<Strin
 pub fn run() {
     tauri::Builder::default()
         .manage(ServerState {
-            process: Mutex::new(None),
-            sidecar_cmd: Mutex::new(None),
+            process: Arc::new(Mutex::new(None)),
+            sidecar_cmd: Arc::new(Mutex::new(None)),
+            pending_drops: Arc::new(Mutex::new(Vec::new())),
         })
-        .invoke_handler(tauri::generate_handler![open_data_folder, restart_server])
+        .invoke_handler(tauri::generate_handler![
+            open_data_folder,
+            restart_server,
+            check_desktop_update,
+            start_desktop_update,
+            read_dropped_files,
+            take_pending_file_drops
+        ])
         .setup(|app| {
             let _shell = app.handle().plugin(tauri_plugin_shell::init())?;
             let _updater = app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
@@ -332,10 +715,64 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::Destroyed = event {
-                let state = window.state::<ServerState>();
-                let mut guard = state.process.lock().unwrap();
-                kill_child(&mut guard);
+            match event {
+                tauri::WindowEvent::Destroyed => {
+                    let state = window.state::<ServerState>();
+                    let mut guard = state.process.lock().unwrap();
+                    kill_child(&mut guard);
+                }
+                // Native OS file drops (Explorer → app). WebView2 often won't
+                // deliver HTML5 DataTransfer.files for external drops.
+                tauri::WindowEvent::DragDrop(DragDropEvent::Enter { paths, .. }) => {
+                    let paths: Vec<String> = paths
+                        .iter()
+                        .map(|p| p.to_string_lossy().into_owned())
+                        .collect();
+                    let _ = window.emit("file-drag", serde_json::json!({ "phase": "enter", "paths": paths }));
+                }
+                tauri::WindowEvent::DragDrop(DragDropEvent::Over { .. }) => {
+                    let _ = window.emit("file-drag", serde_json::json!({ "phase": "over" }));
+                }
+                tauri::WindowEvent::DragDrop(DragDropEvent::Leave) => {
+                    let _ = window.emit("file-drag", serde_json::json!({ "phase": "leave" }));
+                }
+                tauri::WindowEvent::DragDrop(DragDropEvent::Drop { paths, .. }) => {
+                    let path_strs: Vec<String> = paths
+                        .iter()
+                        .map(|p| p.to_string_lossy().into_owned())
+                        .collect();
+                    log::info!("Native file drop: {} path(s)", path_strs.len());
+                    match load_paths_as_payloads(&path_strs) {
+                        Ok(payloads) => {
+                            log::info!(
+                                "Read {} dropped file(s) for composer",
+                                payloads.len()
+                            );
+                            // Queue for polling (primary — WebView event delivery is flaky).
+                            {
+                                let pending = window.state::<ServerState>().pending_drops.clone();
+                                let mut q = pending.lock().unwrap_or_else(|e| e.into_inner());
+                                q.extend(payloads.clone());
+                                drop(q);
+                            }
+                            // Also emit for listeners that work.
+                            let _ = window.emit("file-drop-ready", &payloads);
+                            let _ = window.app_handle().emit("file-drop-ready", &payloads);
+                        }
+                        Err(e) => {
+                            log::error!("Failed to read dropped files: {}", e);
+                            let _ = window.emit(
+                                "file-drop-error",
+                                serde_json::json!({ "message": e }),
+                            );
+                            let _ = window.app_handle().emit(
+                                "file-drop-error",
+                                serde_json::json!({ "message": e }),
+                            );
+                        }
+                    }
+                }
+                _ => {}
             }
         })
         .run(tauri::generate_context!())

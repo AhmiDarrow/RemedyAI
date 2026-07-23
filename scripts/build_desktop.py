@@ -100,6 +100,11 @@ def get_hidden_imports() -> list[str]:
         "aiohttp.resolver",
         "fastapi",
         "fastapi.middleware",
+        # Optional multipart (dev); frozen builds use JSON+base64 uploads
+        "multipart",
+        "multipart.multipart",
+        "multipart.decoders",
+        "multipart.exceptions",
         "uvicorn",
         "uvicorn.loops",
         "uvicorn.loops.auto",
@@ -121,7 +126,9 @@ def get_hidden_imports() -> list[str]:
         "remedy.interfaces",
         "remedy.interfaces.cli",
         "remedy.interfaces.api",
+        "remedy.interfaces.attachments",
         "remedy.interfaces.config",
+        "remedy.bundled_skills",
         "remedy.core",
         "remedy.core.agent",
         "remedy.core.runtime",
@@ -230,6 +237,8 @@ def build(cache_clean: bool = False, ci: bool = False):
     cmd.extend([
         "--collect-all",
         "remedy",
+        "--collect-all",
+        "multipart",
         str(ROOT / "src" / "remedy" / "interfaces" / "cli.py"),
     ])
 

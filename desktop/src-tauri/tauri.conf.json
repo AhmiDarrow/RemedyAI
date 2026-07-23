@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Remedy Desktop",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "identifier": "com.remedy.desktop",
   "build": {
     "frontendDist": "../dist",
@@ -10,6 +10,7 @@
     "beforeBuildCommand": "npm run build"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
         "title": "Remedy Desktop",
@@ -19,7 +20,8 @@
         "minHeight": 500,
         "resizable": true,
         "fullscreen": false,
-        "center": true
+        "center": true,
+        "dragDropEnabled": true
       }
     ],
     "trayIcon": {

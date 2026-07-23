@@ -13,6 +13,8 @@
     "updater:allow-check",
     "updater:allow-download-and-install",
     "allow-open-data-folder",
-    "allow-restart-server"
+    "allow-restart-server",
+    "allow-app-update",
+    "allow-read-dropped-files"
   ]
 }

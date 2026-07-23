@@ -1,13 +1,20 @@
 declare global {
   interface Window {
     __TAURI__?: unknown
+    __TAURI_INTERNALS__?: unknown
   }
 }
 
 const SERVER_URL = 'http://127.0.0.1:7400'
 
+function inTauriShell(): boolean {
+  if (typeof window === 'undefined') return false
+  return !!(window.__TAURI__ || window.__TAURI_INTERNALS__)
+}
+
 function getApiBase(): string {
-  if (typeof window !== 'undefined' && window.__TAURI__ !== undefined) {
+  // Desktop shell always talks to the local sidecar (not Vite's relative /api).
+  if (inTauriShell()) {
     return `${SERVER_URL}/api`
   }
   return '/api'
