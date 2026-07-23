@@ -88,6 +88,10 @@ files = [
     "src/remedy/core",
     "src/remedy/execution",
     "src/remedy/tools",
+    "src/remedy/models.py",
+    "src/remedy/interfaces/api_models.py",
+    "src/remedy/interfaces/api_support.py",
+    "src/remedy/interfaces/attachments.py",
 ]
 exclude = [
     "src/remedy/core/agent.py",  # large ReAct loop; type gradually

@@ -136,7 +136,8 @@ async def handle_slash_command(
         # Callers that pass runtime through a side channel aren't available here, so we
         # re-read from a module-level hook set by create_app when possible.
         registry = getattr(handle_slash_command, "_skills_registry", None)
-        if registry is not None and getattr(registry, "count", 0):
+        count = int(getattr(registry, "count", 0) or 0) if registry is not None else 0
+        if registry is not None and count > 0:
             lines = registry.summary_lines()
             tools_hint = (
                 "\n\n**Built-in tools** (always available): "
@@ -144,7 +145,7 @@ async def handle_slash_command(
                 "Skills are procedure packs the agent follows; tools are executable actions."
             )
             return {
-                "text": f"**{registry.count} skills loaded:**\n" + "\n".join(lines) + tools_hint
+                "text": f"**{count} skills loaded:**\n" + "\n".join(lines) + tools_hint
             }
         return {
             "text": (

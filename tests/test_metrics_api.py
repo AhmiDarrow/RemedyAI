@@ -48,3 +48,20 @@ def test_tool_histogram_recorded() -> None:
     text = default_registry.prometheus_text()
     assert "remedy_tool_duration_seconds_bucket" in text
     assert 'tool="echo"' in text
+
+
+def test_chat_path_labels_recorded() -> None:
+    """Chat path labels used by API routes appear in Prometheus text."""
+    default_registry.counter(
+        "remedy_chat_requests_total", path="session_stream", status="ok"
+    ).inc()
+    default_registry.histogram(
+        "remedy_chat_duration_seconds", path="session_stream"
+    ).observe(0.05)
+    default_registry.counter(
+        "remedy_chat_requests_total", path="session_message"
+    ).inc()
+    text = default_registry.prometheus_text()
+    assert 'path="session_stream"' in text
+    assert 'path="session_message"' in text
+    assert "remedy_chat_duration_seconds_bucket" in text

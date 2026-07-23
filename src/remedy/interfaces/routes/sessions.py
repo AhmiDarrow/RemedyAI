@@ -246,7 +246,9 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         # Always re-sync credentials from disk (wizard/settings may have just saved).
         _sync_runtime_llm_from_config(runtime, model_override=req.model)
 
-        start = time.time()
+        from remedy.core.metrics import default_registry
+
+        start = time.perf_counter()
         response_text = ""
         async for token in runtime.stream_response(
             req.message, session_id=session_id, model=req.model
@@ -255,7 +257,14 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             if isinstance(token, str) and token.startswith("@@"):
                 continue
             response_text += token
-        elapsed = (time.time() - start) * 1000
+        elapsed_s = time.perf_counter() - start
+        elapsed = elapsed_s * 1000
+        default_registry.counter(
+            "remedy_chat_requests_total", path="session_message"
+        ).inc()
+        default_registry.histogram(
+            "remedy_chat_duration_seconds", path="session_message"
+        ).observe(elapsed_s)
 
         if memory and response_text:
             await memory.add_chat_message(ChatMessage(
@@ -389,6 +398,10 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         api_key = _sync_runtime_llm_from_config(runtime, model_override=req.model)
 
         async def event_stream():
+            from remedy.core.metrics import default_registry
+
+            t0 = time.perf_counter()
+            status = "ok"
             yield (
                 f"event: start\ndata: {json.dumps({'type': 'start', 'request_id': request_id, 'session_id': session_id})}\n\n"
             )
@@ -396,6 +409,7 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             try:
                 full_response = ""
                 if not api_key:
+                    status = "no_key"
                     msg = (
                         "No LLM API key configured. Complete first-run setup or open Settings, "
                         "set your provider API key, and Save — then try again."
@@ -438,10 +452,19 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                 )
 
             except asyncio.CancelledError:
+                status = "cancelled"
                 yield f"event: error\ndata: {json.dumps({'type': 'error', 'message': 'Request cancelled.'})}\n\n"
             except Exception as e:
+                status = "error"
                 logger.exception("SSE stream error")
                 yield f"event: error\ndata: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            finally:
+                default_registry.counter(
+                    "remedy_chat_requests_total", path="session_stream", status=status
+                ).inc()
+                default_registry.histogram(
+                    "remedy_chat_duration_seconds", path="session_stream"
+                ).observe(time.perf_counter() - t0)
 
         return StreamingResponse(
             event_stream(),
@@ -459,6 +482,10 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         session_id = req.session_id or str(uuid4())
 
         async def event_stream():
+            from remedy.core.metrics import default_registry
+
+            t0 = time.perf_counter()
+            status = "ok"
             yield (
                 f"event: start\ndata: {json.dumps({'type': 'start', 'request_id': request_id, 'session_id': session_id})}\n\n"
             )
@@ -467,9 +494,16 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                 async for token in runtime.stream_response(req.message, session_id=session_id):
                     yield await _sse_stream_text(token, event="token")
             except Exception as e:
+                status = "error"
                 yield f"event: error\ndata: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
 
             yield f"event: done\ndata: {json.dumps({'type': 'done', 'request_id': request_id})}\n\n"
+            default_registry.counter(
+                "remedy_chat_requests_total", path="chat_stream", status=status
+            ).inc()
+            default_registry.histogram(
+                "remedy_chat_duration_seconds", path="chat_stream"
+            ).observe(time.perf_counter() - t0)
 
         return StreamingResponse(
             event_stream(),
