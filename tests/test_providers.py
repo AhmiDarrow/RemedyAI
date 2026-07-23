@@ -66,7 +66,7 @@ class TestOpenAIProvider:
         )
         assert body["model"] == "gpt-4o-mini"
         assert body["stream"] is False
-        assert body["temperature"] == 0.7
+        assert body["temperature"] == 0.6  # chat / no-tools path
         assert "tools" not in body
 
     def test_build_body_with_tools(self):
@@ -79,6 +79,7 @@ class TestOpenAIProvider:
         assert body["tools"] == tools
         assert body["tool_choice"] == "auto"
         assert body["stream"] is True
+        assert body["temperature"] == 0.4  # tool path — more decisive
 
     def test_extract_response_text(self):
         p = OpenAIProvider()

@@ -39,6 +39,7 @@ export default function App() {
     loading: messagesLoading,
     streaming,
     partialText,
+    activeTools,
     send,
     stop,
     runCommand,
@@ -103,7 +104,9 @@ export default function App() {
     ]).then(([modelsData, agents, _commandsData, settings]) => {
         setAgentDefs(Array.isArray(agents) ? agents : agents?.agents || [])
         if (settings) {
-          if (!settings.config_exists || !settings.setup_completed) {
+          // First-run gate: block chat UI until setup completes or is skipped.
+          // Skip / finish both set setup_completed so this does not reappear.
+          if (settings.needs_setup || !settings.setup_completed) {
             setShowSetupWizard(true)
           }
           if (settings.llm_model) {
@@ -401,6 +404,7 @@ export default function App() {
               streaming={streaming}
               loading={messagesLoading}
               planMode={planMode}
+              activeTools={activeTools}
               onEditUserMessage={handleEditUserMessage}
             />
 

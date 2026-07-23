@@ -36,7 +36,9 @@ from remedy.interfaces.config import (
     PROVIDER_CATALOG,
     catalog_models_for_provider,
     load_config as _load_toml_config,
+    needs_first_run_setup,
     normalize_llm_settings,
+    provider_credentials_ready,
 )
 from remedy.interfaces.config import _is_local_url
 from remedy.models import (
@@ -345,6 +347,61 @@ def _apply_llm_to_runtime(
         runtime.set_project_path(project_path, as_default=True)
 
 
+def _sync_runtime_llm_from_config(
+    runtime: Any,
+    *,
+    model_override: str | None = None,
+) -> str:
+    """Reload provider/model/url/key from disk into the live runtime.
+
+    Returns the effective API key (may be empty). Always re-reads config so
+    settings saved after server start (or first-run wizard) are used on the
+    next chat message without a restart.
+    """
+    if runtime is None:
+        return ""
+    cfg = load_config()
+    provider = str(
+        cfg.get("llm_provider")
+        or getattr(runtime, "_llm_provider", None)
+        or os.environ.get("REMEDY_LLM_PROVIDER")
+        or "openai"
+    )
+    model = str(
+        model_override
+        or cfg.get("llm_model")
+        or getattr(runtime, "_llm_model", None)
+        or os.environ.get("REMEDY_LLM_MODEL")
+        or ""
+    )
+    base_url = str(
+        cfg.get("llm_base_url")
+        or getattr(runtime, "_llm_base_url", None)
+        or os.environ.get("REMEDY_LLM_BASE_URL")
+        or ""
+    )
+    api_key = str(
+        cfg.get("llm_api_key")
+        or os.environ.get("REMEDY_LLM_API_KEY")
+        or getattr(runtime, "_llm_api_key", "")
+        or ""
+    )
+    # Local providers: ensure a dummy key so stream path does not fall back.
+    if not api_key and (
+        provider.lower() == "ollama" or (base_url and _is_local_url(base_url))
+    ):
+        api_key = "local"
+
+    _apply_llm_to_runtime(
+        runtime,
+        provider=provider,
+        model=model,
+        base_url=base_url,
+        api_key=api_key if api_key else None,
+    )
+    return str(getattr(runtime, "_llm_api_key", "") or api_key or "")
+
+
 def _write_config(path: Path, cfg: dict[str, Any]) -> None:
     lines = []
     lines.append("# Remedy AI Configuration\n\n")
@@ -426,14 +483,39 @@ def create_app(
         start = time.time()
         response = await call_next(request)
         duration = (time.time() - start) * 1000
-        logger.info("%s %s -> %d (%.0fms)",
-                     request.method, request.url.path,
-                     response.status_code, duration)
+        # Health polls are high-frequency — don't spam the desktop console.
+        path = request.url.path
+        if path in ("/api/status",) or path.endswith("/api/status"):
+            logger.debug("%s %s -> %d (%.0fms)", request.method, path, response.status_code, duration)
+        else:
+            logger.info(
+                "%s %s -> %d (%.0fms)",
+                request.method,
+                path,
+                response.status_code,
+                duration,
+            )
         return response
 
     # -- health / status -----------------------------------------------------
+    # Cache COUNT(*) results briefly — status is polled often from the desktop UI.
+    _status_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
+
     @app.get("/api/status", response_model=StatusResponse)
     async def get_status():
+        now = time.time()
+        cached = _status_cache.get("payload")
+        if cached is not None and (now - float(_status_cache.get("ts") or 0)) < 2.0:
+            # Refresh only volatile uptime fields.
+            gw_stats = gateway.stats() if gateway else {"running": False}
+            return StatusResponse(
+                **{
+                    **cached,
+                    "uptime": gw_stats.get("uptime", cached.get("uptime", "N/A")),
+                    "gateway": gw_stats,
+                }
+            )
+
         gw_stats = gateway.stats() if gateway else {"running": False}
         mem_count = 0
         skills_count = 0
@@ -454,15 +536,25 @@ def create_app(
             except Exception:
                 pass
 
-        return StatusResponse(
-            version=version,
-            uptime=gw_stats.get("uptime", "N/A"),
-            gateway=gw_stats,
-            memory_entries=mem_count,
-            skills_count=skills_count,
-            sessions_count=summary_sessions,
-            chat_sessions_count=chat_sessions,
-        )
+        payload = {
+            "version": version,
+            "uptime": gw_stats.get("uptime", "N/A"),
+            "gateway": gw_stats,
+            "memory_entries": mem_count,
+            "skills_count": skills_count,
+            "sessions_count": summary_sessions,
+            "chat_sessions_count": chat_sessions,
+        }
+        _status_cache["ts"] = now
+        _status_cache["payload"] = {
+            "version": version,
+            "uptime": payload["uptime"],
+            "memory_entries": mem_count,
+            "skills_count": skills_count,
+            "sessions_count": summary_sessions,
+            "chat_sessions_count": chat_sessions,
+        }
+        return StatusResponse(**payload)
 
     # -- chat (legacy) -------------------------------------------------------
     @app.post("/api/chat", response_model=ChatResponse)
@@ -697,9 +789,17 @@ def create_app(
                 content=req.message,
             ))
 
+        # Always re-sync credentials from disk (wizard/settings may have just saved).
+        _sync_runtime_llm_from_config(runtime, model_override=req.model)
+
         start = time.time()
         response_text = ""
-        async for token in runtime.stream_response(req.message, session_id=session_id):
+        async for token in runtime.stream_response(
+            req.message, session_id=session_id, model=req.model
+        ):
+            # Keep user-visible text only (tool lifecycle events are @@-prefixed).
+            if isinstance(token, str) and token.startswith("@@"):
+                continue
             response_text += token
         elapsed = (time.time() - start) * 1000
 
@@ -748,27 +848,8 @@ def create_app(
                 agent=req.agent,
             ))
 
-        # Ensure live runtime has credentials (settings may have been saved earlier).
-        if runtime is not None:
-            cfg_live = load_config()
-            key = getattr(runtime, "_llm_api_key", "") or ""
-            if not key or key == "local":
-                cfg_key = str(cfg_live.get("llm_api_key") or os.environ.get("REMEDY_LLM_API_KEY") or "")
-                if cfg_key:
-                    if hasattr(runtime, "reconfigure_llm"):
-                        runtime.reconfigure_llm(
-                            provider=cfg_live.get("llm_provider") or getattr(runtime, "_llm_provider", None),
-                            model=req.model or cfg_live.get("llm_model") or getattr(runtime, "_llm_model", None),
-                            base_url=cfg_live.get("llm_base_url") or getattr(runtime, "_llm_base_url", None),
-                            api_key=cfg_key,
-                        )
-                    else:
-                        runtime._llm_api_key = cfg_key
-            # Honor per-request model selection from the UI.
-            if req.model and hasattr(runtime, "reconfigure_llm"):
-                runtime.reconfigure_llm(model=req.model)
-            elif req.model:
-                runtime._llm_model = req.model
+        # Always re-sync credentials from disk (first-run wizard / settings).
+        api_key = _sync_runtime_llm_from_config(runtime, model_override=req.model)
 
         async def event_stream():
             yield (
@@ -777,11 +858,10 @@ def create_app(
 
             try:
                 full_response = ""
-                api_key = getattr(runtime, "_llm_api_key", "") or ""
                 if not api_key:
                     msg = (
-                        "No LLM API key configured. Open Settings, set your provider API key, "
-                        "and Save — then try again."
+                        "No LLM API key configured. Complete first-run setup or open Settings, "
+                        "set your provider API key, and Save — then try again."
                     )
                     yield f"event: error\ndata: {json.dumps({'type': 'error', 'message': msg})}\n\n"
                     return
@@ -1476,12 +1556,9 @@ def create_app(
     async def get_settings():
         cfg = load_config()
         config_path = _find_config_path()
-        # Pre-0.10 configs lack setup_completed; treat existing installs as done
-        # so upgrades do not force the multi-step wizard again.
-        if "setup_completed" in cfg:
-            setup_completed = bool(cfg["setup_completed"])
-        else:
-            setup_completed = config_path is not None
+        # First-run: show wizard when needs_first_run_setup says so.
+        # setup_completed True (including Skip) → never re-show automatically.
+        setup_completed = not needs_first_run_setup(cfg, config_path=config_path)
 
         # Return configured values; soft-normalize only for response display.
         # Never write disk from GET (avoids races with PUT and Ollama false-heals).
@@ -1497,11 +1574,19 @@ def create_app(
             if raw_url:
                 base_url = str(raw_url)
 
+        runtime_key = ""
+        if runtime is not None:
+            runtime_key = str(getattr(runtime, "_llm_api_key", "") or "")
+        key_set = bool(
+            cfg.get("llm_api_key") or os.environ.get("REMEDY_LLM_API_KEY") or runtime_key
+        )
+
         return {
             "llm_provider": provider,
             "llm_model": model,
             "llm_base_url": base_url,
-            "llm_api_key_set": bool(cfg.get("llm_api_key") or os.environ.get("REMEDY_LLM_API_KEY")),
+            "llm_api_key_set": key_set,
+            "llm_ready": provider_credentials_ready(cfg) or bool(runtime_key),
             "name": cfg.get("name", "Remedy"),
             "persona": cfg.get("persona", "default"),
             "project_path": cfg.get("project_path")
@@ -1513,6 +1598,7 @@ def create_app(
             "version": version,
             "config_exists": config_path is not None,
             "setup_completed": setup_completed,
+            "needs_setup": not setup_completed,
             "config_path": str(config_path) if config_path else str(_default_config_path()),
         }
 

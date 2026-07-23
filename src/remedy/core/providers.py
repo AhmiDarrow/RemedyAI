@@ -103,10 +103,12 @@ class OpenAIProvider(ProviderAdapter):
         tools: list[dict[str, Any]] | None,
         stream: bool,
     ) -> dict[str, Any]:
+        # Slightly lower temp with tools → fewer rambling / fake tool-call transcripts.
+        temperature = 0.4 if tools else 0.6
         body: dict[str, Any] = {
             "model": model,
             "messages": messages,
-            "temperature": 0.7,
+            "temperature": temperature,
             "max_tokens": 4096,
             "stream": stream,
         }
@@ -118,8 +120,21 @@ class OpenAIProvider(ProviderAdapter):
     def extract_response(self, response_json: dict[str, Any]) -> dict[str, Any]:
         choice = (response_json.get("choices") or [{}])[0]
         msg = choice.get("message") or choice.get("delta") or {}
+        # DeepSeek reasoner / v4-flash often put the answer in reasoning_content
+        # while content is empty — surface reasoning as content so chat works.
+        content = (msg.get("content") or "").strip()
+        if not content:
+            content = (
+                msg.get("reasoning_content")
+                or msg.get("reasoning")
+                or ""
+            )
+            if isinstance(content, str):
+                content = content.strip()
+            else:
+                content = ""
         return {
-            "content": (msg.get("content") or "").strip() or None,
+            "content": content or None,
             "tool_calls": msg.get("tool_calls"),
         }
 
@@ -145,6 +160,7 @@ class OpenAIProvider(ProviderAdapter):
                 continue
             choice = (chunk.get("choices") or [{}])[0]
             delta = choice.get("delta") or {}
+            # Only yield final content here; reasoning is handled by the agent loop.
             content = delta.get("content")
             if content:
                 yield content

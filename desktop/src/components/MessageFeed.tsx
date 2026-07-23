@@ -3,12 +3,16 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { ChatMessage } from '../types'
 
+export type ActiveTool = { name: string; status: 'running' | 'done' }
+
 interface MessageFeedProps {
   messages: ChatMessage[]
   partialText: string
   streaming: boolean
   loading: boolean
   planMode?: boolean
+  /** Live tool activity while streaming (OpenCode-style cards). */
+  activeTools?: ActiveTool[]
   /** Edit+resend: only for user messages */
   onEditUserMessage?: (msgId: string) => void
 }
@@ -27,10 +31,12 @@ function MessageBubble({
   const isUser = msg.role === 'user'
   const isSystem = msg.role === 'system'
   const text = msg.content + (partial || '')
+  const showEdit =
+    msg.role === 'user' && !msg.reverted && !!onEditUserMessage && !streaming
 
   return (
     <div
-      className="group flex gap-3 px-4 py-3"
+      className="group flex gap-3 px-4 py-3 relative"
       style={{
         background: isUser ? 'transparent' : 'var(--bg-secondary)',
       }}
@@ -49,8 +55,9 @@ function MessageBubble({
         {isUser ? 'U' : isSystem ? '!' : 'R'}
       </div>
 
-      <div className="flex-1 min-w-0">
-        <div className="prose prose-invert max-w-none text-sm">
+      {/* min-w-0 + pr for absolute Edit — never grow/shrink on hover */}
+      <div className="flex-1 min-w-0 pr-14">
+        <div className="prose prose-invert max-w-none text-sm message-body">
           {text ? (
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
@@ -104,34 +111,65 @@ function MessageBubble({
             ))}
           </div>
         )}
-
-        {msg.role === 'user' && !msg.reverted && onEditUserMessage && !streaming && (
-          <button
-            onClick={() => onEditUserMessage(msg.id)}
-            className="hidden group-hover:inline-block text-xs mt-1 px-1.5 py-0.5 rounded"
-            style={{
-              background: 'var(--bg-tertiary)',
-              color: 'var(--text-muted)',
-            }}
-            title="Edit and resend this message (removes later replies)"
-          >
-            Edit
-          </button>
-        )}
       </div>
+
+      {/* Absolute Edit — opacity only, never toggles layout (fixes hover jitter) */}
+      {showEdit && (
+        <button
+          type="button"
+          onClick={() => onEditUserMessage?.(msg.id)}
+          className="absolute top-3 right-3 text-xs px-1.5 py-0.5 rounded opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus:opacity-100 focus:pointer-events-auto"
+          style={{
+            background: 'var(--bg-tertiary)',
+            color: 'var(--text-muted)',
+            border: '1px solid var(--border)',
+            transition: 'opacity 0.12s ease',
+          }}
+          title="Edit and resend this message (removes later replies)"
+        >
+          Edit
+        </button>
+      )}
     </div>
   )
 }
 
-export function MessageFeed({ messages, partialText, streaming, loading, planMode, onEditUserMessage }: MessageFeedProps) {
+export function MessageFeed({
+  messages,
+  partialText,
+  streaming,
+  loading,
+  planMode,
+  activeTools = [],
+  onEditUserMessage,
+}: MessageFeedProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
+  const scrollerRef = useRef<HTMLDivElement>(null)
+  const stickToBottomRef = useRef(true)
+
+  // Only auto-scroll when the user is already near the bottom (avoids fight/jitter).
+  useEffect(() => {
+    const el = scrollerRef.current
+    if (!el) return
+    const onScroll = () => {
+      const distance = el.scrollHeight - el.scrollTop - el.clientHeight
+      stickToBottomRef.current = distance < 80
+    }
+    el.addEventListener('scroll', onScroll, { passive: true })
+    return () => el.removeEventListener('scroll', onScroll)
+  }, [])
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, partialText])
+    if (!stickToBottomRef.current) return
+    // Instant while streaming tokens; smooth only when a full message lands.
+    bottomRef.current?.scrollIntoView({
+      behavior: streaming ? 'auto' : 'smooth',
+      block: 'end',
+    })
+  }, [messages, partialText, streaming, activeTools])
 
   return (
-    <div className="flex-1 overflow-y-auto">
+    <div ref={scrollerRef} className="flex-1 overflow-y-auto message-feed">
       {planMode && (
         <div
           className="mx-4 mt-2 px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-2"
@@ -161,6 +199,25 @@ export function MessageFeed({ messages, partialText, streaming, loading, planMod
         />
       ))}
 
+      {streaming && activeTools.length > 0 && (
+        <div className="px-4 py-2 flex flex-wrap gap-1.5">
+          {activeTools.map((t, i) => (
+            <span
+              key={`${t.name}-${i}`}
+              className="text-xs px-2 py-1 rounded font-mono"
+              style={{
+                background: 'var(--bg-tertiary)',
+                border: `1px solid ${t.status === 'running' ? 'var(--accent)' : 'var(--border)'}`,
+                color: t.status === 'running' ? 'var(--accent)' : 'var(--text-secondary)',
+              }}
+            >
+              {t.status === 'running' ? '⏳ ' : '✓ '}
+              {t.name}
+            </span>
+          ))}
+        </div>
+      )}
+
       {streaming && partialText && (
         <MessageBubble
           msg={{
@@ -180,7 +237,7 @@ export function MessageFeed({ messages, partialText, streaming, loading, planMod
         />
       )}
 
-      {streaming && !partialText && (
+      {streaming && !partialText && activeTools.length === 0 && (
         <div className="px-4 py-3" style={{ color: 'var(--text-muted)' }}>
           Thinking...
         </div>

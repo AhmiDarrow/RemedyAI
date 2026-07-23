@@ -152,3 +152,27 @@ pre code {
   background: none;
   padding: 0;
 }
+
+/* Chat feed: stable layout under hover (no reflow from action buttons / prose) */
+.message-feed .message-body {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.message-feed .message-body p {
+  margin: 0.35em 0;
+}
+.message-feed .message-body p:first-child {
+  margin-top: 0;
+}
+.message-feed .message-body p:last-child {
+  margin-bottom: 0;
+}
+/* Disable link underline reflow jitter on hover */
+.message-feed .message-body a {
+  text-decoration: none;
+  color: var(--accent);
+}
+.message-feed .message-body a:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}

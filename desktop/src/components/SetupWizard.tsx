@@ -114,12 +114,15 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
   }, [apiKey, provider, model, baseUrl, projectPath, persona, onComplete])
 
   const handleSkip = useCallback(async () => {
+    // Mark setup done so the wizard never blocks launch again.
+    // User can configure the provider later in Settings.
     setSaving(true)
     setError('')
     try {
       await updateSettings({ setup_completed: true })
       onComplete()
     } catch {
+      // Still enter the app if the server briefly fails — avoid lockout.
       onComplete()
     } finally {
       setSaving(false)
@@ -206,16 +209,18 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
             <div className="space-y-4">
               <div className="text-center space-y-3">
                 <div className="text-sm" style={{ color: 'var(--text-primary)' }}>
-                  Welcome to <strong>Remedy AI</strong> — a self-improving AI assistant that
-                  learns, remembers context, and adapts to the way you work.
+                  Welcome to <strong>Remedy AI</strong> — configure your LLM provider
+                  before chat starts so you're connected from the first message.
                 </div>
                 <div className="text-xs space-y-1" style={mutedStyles}>
                   <p>Powered by skills, memory, and multi-model support</p>
                   <p>Works with OpenAI, Anthropic, Google, DeepSeek, OpenRouter, and Ollama</p>
+                  <p>You can skip and set this later in Settings — we won't ask again.</p>
                 </div>
               </div>
               <button
                 onClick={handleNext}
+                disabled={saving}
                 className="w-full py-2.5 rounded text-sm font-medium transition-colors"
                 style={{ background: 'var(--accent)', color: '#fff' }}
               >
@@ -223,17 +228,22 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
               </button>
               <button
                 onClick={handleSkip}
+                disabled={saving}
                 className="w-full py-2 rounded text-xs transition-colors"
                 style={{ background: 'transparent', color: 'var(--text-muted)' }}
-                title="Skip setup and use defaults"
+                title="Skip setup for now — won't show again on next launch"
               >
-                Skip setup
+                {saving ? 'Saving…' : 'Skip setup (configure later)'}
               </button>
             </div>
           )}
 
           {step === 'provider' && (
             <>
+              <div className="text-xs" style={mutedStyles}>
+                Connect a provider now so chat is not stuck in fallback mode.
+                Ollama / local endpoints do not need an API key.
+              </div>
               <div>
                 <label
                   className="block mb-1 text-xs font-medium"
@@ -453,22 +463,35 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
           )}
 
           {step !== 'welcome' && step !== 'finish' && (
-            <div className="flex gap-2 pt-2">
+            <div className="space-y-2 pt-2">
+              <div className="flex gap-2">
+                <button
+                  onClick={handleBack}
+                  disabled={saving}
+                  className="flex-1 py-2 rounded text-sm font-medium transition-colors"
+                  style={{ background: 'var(--bg-tertiary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-primary)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = 'var(--bg-tertiary)')}
+                >
+                  Back
+                </button>
+                <button
+                  onClick={handleNext}
+                  disabled={saving}
+                  className="flex-1 py-2 rounded text-sm font-medium transition-colors"
+                  style={{ background: 'var(--accent)', color: '#fff' }}
+                >
+                  Next
+                </button>
+              </div>
               <button
-                onClick={handleBack}
-                className="flex-1 py-2 rounded text-sm font-medium transition-colors"
-                style={{ background: 'var(--bg-tertiary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-primary)')}
-                onMouseLeave={(e) => (e.currentTarget.style.background = 'var(--bg-tertiary)')}
+                onClick={handleSkip}
+                disabled={saving}
+                className="w-full py-1.5 rounded text-xs transition-colors"
+                style={{ background: 'transparent', color: 'var(--text-muted)' }}
+                title="Skip remaining setup — won't show again on next launch"
               >
-                Back
-              </button>
-              <button
-                onClick={handleNext}
-                className="flex-1 py-2 rounded text-sm font-medium transition-colors"
-                style={{ background: 'var(--accent)', color: '#fff' }}
-              >
-                Next
+                {saving ? 'Saving…' : 'Skip remaining setup (won\'t ask again)'}
               </button>
             </div>
           )}

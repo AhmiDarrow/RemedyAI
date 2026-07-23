@@ -11,6 +11,8 @@ export interface Settings {
   version: string
   config_exists: boolean
   setup_completed: boolean
+  needs_setup?: boolean
+  llm_ready?: boolean
 }
 
 export interface SettingsUpdate {

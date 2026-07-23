@@ -450,6 +450,9 @@ name = "Remedy"
 persona = "default"
 home_dir = "{home_dir.as_posix()}"
 
+# First-run setup: false until `remedy setup` / desktop wizard / --skip-setup
+setup_completed = false
+
 # Default project/workspace folder for the agent (file tools, shell cwd, @file UI)
 # project_path = "C:/Users/You/Projects/MyApp"
 
@@ -510,3 +513,109 @@ def create_default_config(home_dir: Path | None = None) -> Path:
     if not config_path.exists():
         config_path.write_text(generate_default_config(hd), encoding="utf-8")
     return config_path
+
+
+def config_path_for_home(home_dir: str | Path | None = None) -> Path:
+    """Return the canonical config.toml path for a home directory."""
+    hd = Path(home_dir or Path.home() / ".remedy").expanduser()
+    return hd / "config.toml"
+
+
+def needs_first_run_setup(
+    config: dict[str, Any] | None = None,
+    *,
+    home_dir: str | Path | None = None,
+    config_path: Path | None = None,
+) -> bool:
+    """Return True when first-run setup should run before launch.
+
+    Rules:
+    - No config file → need setup
+    - ``setup_completed`` present → honor it (True skips, False forces)
+    - Legacy config without the flag → treat as already set up (do not re-wizard upgrades)
+
+    Skipping setup (desktop Skip, CLI --skip-setup) writes ``setup_completed = true``
+    so subsequent launches ignore the wizard.
+    """
+    path = config_path
+    if path is None and home_dir is not None:
+        path = config_path_for_home(home_dir)
+    if path is None:
+        path = config_path_for_home()
+
+    path = Path(path).expanduser()
+    if not path.exists():
+        return True
+
+    cfg = config if config is not None else load_config(path)
+    if "setup_completed" in cfg:
+        return not bool(cfg["setup_completed"])
+    # Pre-flag installs: config already exists → do not force wizard again.
+    return False
+
+
+def mark_setup_completed(
+    *,
+    home_dir: str | Path | None = None,
+    config_path: Path | None = None,
+    extra: dict[str, Any] | None = None,
+) -> Path:
+    """Persist ``setup_completed = true`` (optionally merging extra keys).
+
+    Creates a minimal config when none exists so first-launch skip is remembered.
+    """
+    path = config_path or config_path_for_home(home_dir)
+    path = Path(path).expanduser()
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    cfg: dict[str, Any] = load_config(path) if path.exists() else {}
+    if extra:
+        cfg.update(extra)
+    cfg["setup_completed"] = True
+    if "home_dir" not in cfg:
+        cfg["home_dir"] = path.parent.as_posix()
+
+    # Minimal TOML writer (top-level scalars only + nested dicts as sections).
+    lines = ["# Remedy AI Configuration", ""]
+    for key, value in cfg.items():
+        if isinstance(value, dict):
+            lines.append(f"[{key}]")
+            for k, v in value.items():
+                lines.append(f"{k} = {_toml_scalar(v)}")
+            lines.append("")
+        else:
+            lines.append(f"{key} = {_toml_scalar(value)}")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
+
+
+def _toml_scalar(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return str(value)
+    if isinstance(value, list):
+        items = ", ".join(_toml_scalar(v) for v in value)
+        return f"[{items}]"
+    if value is None:
+        return '""'
+    # Escape backslashes and quotes for TOML strings
+    text = str(value).replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{text}"'
+
+
+def provider_credentials_ready(config: dict[str, Any] | None = None) -> bool:
+    """True when an LLM key is configured (or local URL which needs none)."""
+    cfg = config if config is not None else load_config()
+    key = str(cfg.get("llm_api_key") or os.environ.get("REMEDY_LLM_API_KEY") or "").strip()
+    if key:
+        return True
+    base = str(
+        cfg.get("llm_base_url")
+        or os.environ.get("REMEDY_LLM_BASE_URL")
+        or ""
+    ).strip()
+    if base and _is_local_url(base):
+        return True
+    provider = str(cfg.get("llm_provider") or os.environ.get("REMEDY_LLM_PROVIDER") or "").lower()
+    return provider in ("ollama",)

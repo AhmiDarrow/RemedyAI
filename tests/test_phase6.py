@@ -416,16 +416,30 @@ class TestPluginManager:
 def test_client():
     from unittest import mock
 
+    async def _stream(message, session_id=None, model=None):
+        yield f"echo: {message}"
+
     runtime = mock.MagicMock()
     runtime.config = AgentConfig(name="test", home_dir="~/.remedy")
     runtime.memory = None
     runtime.skills = None
+    runtime.stream_response = _stream
+    runtime._llm_api_key = "test-key"
+    runtime._llm_provider = "openai"
+    runtime._llm_model = "test"
+    runtime._llm_base_url = "http://localhost"
+    runtime.effective_project_path = mock.MagicMock(return_value=Path("."))
 
     gateway = mock.MagicMock()
     gateway.emit = mock.AsyncMock(return_value=["echo: hello from test"])
     gateway.stats.return_value = {"running": True, "uptime": "0s"}
 
-    app = create_app(gateway=gateway, title="Test Remedy", version="0.1.0-test")
+    app = create_app(
+        runtime=runtime,
+        gateway=gateway,
+        title="Test Remedy",
+        version="0.1.0-test",
+    )
     return TestClient(app)
 
 

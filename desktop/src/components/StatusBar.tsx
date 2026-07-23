@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react'
 import { ThemeSwitcher } from './ThemeSwitcher'
-import { healthCheck } from '../api/client'
 import type { ThemeId, Theme } from '../themes'
 import type { ModelInfo } from '../App'
 
@@ -43,20 +42,20 @@ export function StatusBar({
   useEffect(() => {
     let cancelled = false
     async function check() {
-      setStatus('checking')
+      // Don't flash "checking" on routine polls — only first paint.
       try {
-        const ok = await healthCheck(3000)
+        // One request for health + version (was healthCheck + status = double spam).
+        const res = await fetch('http://127.0.0.1:7400/api/status', {
+          signal: AbortSignal.timeout(3000),
+        })
         if (cancelled) return
-        if (ok) {
+        if (res.ok) {
           setStatus('connected')
           try {
-            const res = await fetch('http://127.0.0.1:7400/api/status')
-            if (!cancelled && res.ok) {
-              const data = await res.json()
-              setVersion(data.version || '')
-            }
+            const data = await res.json()
+            if (data?.version) setVersion(String(data.version))
           } catch {
-            // version fetch is optional
+            // body optional
           }
         } else {
           setStatus('disconnected')
@@ -67,7 +66,8 @@ export function StatusBar({
     }
 
     check()
-    const interval = setInterval(check, 15000)
+    // 30s is enough for a local sidecar; cuts access-log / CPU noise in half.
+    const interval = setInterval(check, 30000)
     return () => {
       cancelled = true
       clearInterval(interval)

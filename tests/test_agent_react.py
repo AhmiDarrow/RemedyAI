@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+import json
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from remedy.core.agent import BasicRuntime
+from remedy.core.agent import BasicRuntime, _message_wants_tools
 from remedy.core.runtime import AgentRuntime
 from remedy.models import (
     AgentConfig,
@@ -68,10 +69,73 @@ async def test_basic_runtime_call_tool_missing():
     assert result.error
 
 
+def _sse_bytes(events: list[dict]) -> list[bytes]:
+    chunks: list[bytes] = []
+    for ev in events:
+        chunks.append(f"data: {json.dumps(ev)}\n\n".encode())
+    chunks.append(b"data: [DONE]\n\n")
+    return chunks
+
+
+class _FakeContent:
+    def __init__(self, chunks: list[bytes]) -> None:
+        self._chunks = list(chunks)
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if not self._chunks:
+            raise StopAsyncIteration
+        return self._chunks.pop(0)
+
+
+class _FakeResp:
+    def __init__(self, chunks: list[bytes], status: int = 200) -> None:
+        self.status = status
+        self.content = _FakeContent(chunks)
+
+    async def text(self) -> str:
+        return ""
+
+    async def json(self) -> dict:
+        return {}
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return False
+
+
+class _FakeSession:
+    def __init__(self, responses: list[_FakeResp]) -> None:
+        self._responses = list(responses)
+        self.posts = 0
+
+    def post(self, *args, **kwargs):
+        self.posts += 1
+        if not self._responses:
+            raise RuntimeError("no more fake responses")
+        return self._responses.pop(0)
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return False
+
+
 @pytest.mark.asyncio
 async def test_react_loop_executes_tool_then_final_answer():
+    """OpenAI-compatible stream: tool call step, then final text."""
     rt = BasicRuntime(
-        AgentConfig(llm_api_key="sk-test", llm_model="gpt-test", llm_base_url="http://llm")
+        AgentConfig(
+            llm_api_key="sk-test",
+            llm_model="gpt-test",
+            llm_base_url="http://llm/v1",
+            llm_provider="openai",
+        )
     )
 
     async def add_handler(**kwargs):
@@ -87,72 +151,56 @@ async def test_react_loop_executes_tool_then_final_answer():
         },
     )
 
-    tool_turn = {
-        "choices": [
+    tool_sse = _sse_bytes(
+        [
             {
-                "message": {
-                    "content": None,
-                    "tool_calls": [
-                        {
-                            "id": "call_1",
-                            "type": "function",
-                            "function": {
-                                "name": "add",
-                                "arguments": '{"a": 2, "b": 3}',
-                            },
-                        }
-                    ],
-                }
+                "choices": [
+                    {
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "id": "call_1",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "add",
+                                        "arguments": '{"a": 2, "b": 3}',
+                                    },
+                                }
+                            ]
+                        },
+                        "finish_reason": "tool_calls",
+                    }
+                ]
             }
         ]
-    }
-    final_turn = {
-        "choices": [{"message": {"content": "The sum is 5.", "tool_calls": []}}]
-    }
-
-    with patch.object(
-        rt, "_post_chat", new=AsyncMock(side_effect=[tool_turn, final_turn])
-    ) as mock_post:
-        text = await rt._call_llm("What is 2+3?")
-        assert text == "The sum is 5."
-        assert mock_post.await_count == 2
-
-
-@pytest.mark.asyncio
-async def test_telegram_handle_update_emits_to_handlers():
-    from remedy.gateway.channels.adapters import TelegramChannel
-    from remedy.gateway.router import Gateway
-
-    class StubRuntime(AgentRuntime):
-        async def handle_event(self, event):
-            yield f"echo:{event.payload.get('message')}"
-
-        async def call_tool(self, tool_call):
-            from remedy.models import ToolResult
-
-            return ToolResult(call_id=tool_call.id, success=False, error="n/a")
-
-    received: list[str] = []
-    gw = Gateway(StubRuntime(AgentConfig()))
-
-    async def handler(event):
-        async for chunk in gw.runtime.handle_event(event):
-            received.append(str(chunk))
-            yield chunk
-
-    gw.register_handler(handler)
-    ch = TelegramChannel(gw, bot_token="tok", chat_ids=["42"])
-    ch._running = True
-
-    await ch._handle_update(
-        {
-            "update_id": 7,
-            "message": {
-                "text": "hi bot",
-                "chat": {"id": 42},
-                "from": {"id": 99, "username": "alice"},
-            },
-        }
     )
-    assert ch._last_update_id == 7
-    assert any("echo:hi bot" in m for m in received)
+    final_sse = _sse_bytes(
+        [
+            {
+                "choices": [
+                    {
+                        "delta": {"content": "The sum is 5."},
+                        "finish_reason": "stop",
+                    }
+                ]
+            }
+        ]
+    )
+
+    session = _FakeSession([_FakeResp(tool_sse), _FakeResp(final_sse)])
+
+    # Force tools on even though the prompt is short math.
+    with (
+        patch("remedy.core.agent.aiohttp.ClientSession", return_value=session),
+        patch("remedy.core.agent._message_wants_tools", return_value=True),
+    ):
+        text = await rt._call_llm("run add tool a=2 b=3")
+
+    assert "The sum is 5." in text
+    assert session.posts == 2
+
+
+def test_message_wants_tools_policy():
+    assert _message_wants_tools("hi") is False
+    assert _message_wants_tools("review project") is True

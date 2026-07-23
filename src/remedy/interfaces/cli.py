@@ -29,7 +29,7 @@ from remedy.interfaces.config import (
 )
 from remedy.interfaces.uninstaller import run_uninstall
 from remedy.interfaces.updater import run_update
-from remedy.interfaces.wizard import run_wizard
+from remedy.interfaces.wizard import ensure_setup_before_launch, run_wizard
 from remedy.memory.consolidator import MemoryConsolidator
 from remedy.memory.repair import MemoryRepair
 from remedy.memory.store import MemoryStore
@@ -221,12 +221,32 @@ def build_parser() -> argparse.ArgumentParser:
                           help="Resume an existing session")
     chat_cmd.add_argument("--no-memory", action="store_true",
                           help="Don't persist conversation to memory")
+    chat_cmd.add_argument(
+        "--skip-setup",
+        action="store_true",
+        help="Skip first-run setup wizard and remember choice (won't ask again)",
+    )
+    chat_cmd.add_argument(
+        "--force-setup",
+        action="store_true",
+        help="Force the setup wizard even if setup was completed",
+    )
 
     # remedy serve
     serve_cmd = sub.add_parser("serve", help="Start the full API server (with config)")
     serve_cmd.add_argument("--host", default="127.0.0.1")
     serve_cmd.add_argument("--port", type=int, default=7400)
     serve_cmd.add_argument("--config", dest="config_file", default=None)
+    serve_cmd.add_argument(
+        "--skip-setup",
+        action="store_true",
+        help="Skip first-run setup wizard and remember choice (won't ask again)",
+    )
+    serve_cmd.add_argument(
+        "--force-setup",
+        action="store_true",
+        help="Force the setup wizard even if setup was completed",
+    )
 
     # remedy desktop
     desktop_cmd = sub.add_parser("desktop", help="Desktop app management")
@@ -866,6 +886,7 @@ async def _cmd_config(args) -> None:
 
 
 def _cmd_serve(args) -> None:
+    import sys
     import uvicorn
 
     from remedy.core.agent import BasicRuntime
@@ -875,6 +896,22 @@ def _cmd_serve(args) -> None:
 
     home = Path(args.home).expanduser()
     home.mkdir(parents=True, exist_ok=True)
+
+    # First-run setup before launch (TTY only). Desktop sidecar is non-TTY —
+    # its UI SetupWizard handles first run; do not block the server process.
+    # Packaged sidecars often have sys.stdin is None (no console).
+    skip = bool(getattr(args, "skip_setup", False))
+    force = bool(getattr(args, "force_setup", False))
+    is_tty = bool(sys.stdin is not None and sys.stdin.isatty())
+    if skip or force or is_tty:
+        ok = ensure_setup_before_launch(
+            home_dir=home,
+            skip_setup=skip,
+            force=force,
+            non_interactive=not is_tty,
+        )
+        if not ok:
+            return
 
     config = resolve_config(
         config_path=Path(args.config_file) if args.config_file else None,
@@ -926,6 +963,12 @@ def _cmd_serve(args) -> None:
     console.print("[dim]Docs:[/dim]       /docs  /redoc")
 
     log_level = config.get("log_level", "INFO").upper()
+    # Access logs spam the desktop console (status polls every few seconds).
+    # Opt in with access_log=true in config or REMEDY_ACCESS_LOG=1.
+    access_log_enabled = bool(
+        config.get("access_log")
+        or str(os.environ.get("REMEDY_ACCESS_LOG", "")).lower() in ("1", "true", "yes")
+    )
     uvicorn_log_config = {
         "version": 1,
         "disable_existing_loggers": False,
@@ -941,13 +984,26 @@ def _cmd_serve(args) -> None:
             },
         },
         "handlers": {
-            "default": {"class": "logging.StreamHandler", "formatter": "default", "stream": "ext://sys.stdout"},
-            "access": {"class": "logging.StreamHandler", "formatter": "access", "stream": "ext://sys.stdout"},
+            "default": {
+                "class": "logging.StreamHandler",
+                "formatter": "default",
+                "stream": "ext://sys.stdout",
+            },
+            "access": {
+                "class": "logging.StreamHandler",
+                "formatter": "access",
+                "stream": "ext://sys.stdout",
+            },
         },
         "loggers": {
             "uvicorn": {"handlers": ["default"], "level": log_level},
-            "uvicorn.error": {"level": log_level},
-            "uvicorn.access": {"handlers": ["access"], "level": log_level, "propagate": False},
+            "uvicorn.error": {"handlers": ["default"], "level": log_level, "propagate": False},
+            # Keep access logger quiet unless explicitly enabled.
+            "uvicorn.access": {
+                "handlers": ["access"] if access_log_enabled else [],
+                "level": "INFO" if access_log_enabled else "WARNING",
+                "propagate": False,
+            },
         },
     }
     uvicorn.run(
@@ -955,6 +1011,7 @@ def _cmd_serve(args) -> None:
         host=args.host,
         port=args.port,
         log_config=uvicorn_log_config,
+        access_log=access_log_enabled,
     )
 
 
@@ -968,6 +1025,15 @@ def _cmd_chat(args) -> None:
 
     home = Path(args.home).expanduser()
     home.mkdir(parents=True, exist_ok=True)
+
+    # Always gate interactive chat on first-run setup (or --skip-setup).
+    ok = ensure_setup_before_launch(
+        home_dir=home,
+        skip_setup=bool(getattr(args, "skip_setup", False)),
+        force=bool(getattr(args, "force_setup", False)),
+    )
+    if not ok:
+        return
 
     config = resolve_config(
         config_path=Path(args.config_file) if args.config_file else None,

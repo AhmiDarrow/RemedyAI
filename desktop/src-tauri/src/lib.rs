@@ -119,6 +119,14 @@ fn forward_output(label: &str, reader: impl BufRead + Send + 'static) {
         for line in reader.lines() {
             match line {
                 Ok(text) if !text.is_empty() => {
+                    // Drop noisy uvicorn access lines (status polls / routine 200s).
+                    let lower = text.to_ascii_lowercase();
+                    if lower.contains("\"get /api/status")
+                        || lower.contains("http/1.1\" 200")
+                        || (lower.contains(" - \"get /api/") && lower.contains(" 200 "))
+                    {
+                        continue;
+                    }
                     log::info!("[remedy {}] {}", label, text);
                 }
                 _ => {}

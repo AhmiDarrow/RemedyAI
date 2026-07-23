@@ -23,6 +23,15 @@ export async function sendMessage(
   })
 }
 
+export type StreamHandlers = {
+  onToken: (text: string) => void
+  onDone: (data: { request_id: string }) => void
+  onError: (message: string) => void
+  onThinking?: (text: string) => void
+  onToolCall?: (name: string) => void
+  onToolResult?: (name: string) => void
+}
+
 export function streamMessage(
   sessionId: string,
   message: string,
@@ -31,6 +40,8 @@ export function streamMessage(
   onError: (message: string) => void,
   model?: string,
   onThinking?: (text: string) => void,
+  onToolCall?: (name: string) => void,
+  onToolResult?: (name: string) => void,
 ): AbortController {
   const controller = new AbortController()
 
@@ -74,6 +85,12 @@ export function streamMessage(
             break
           case 'thinking':
             if (typeof payload.text === 'string' && payload.text) onThinking?.(payload.text)
+            break
+          case 'tool_call':
+            if (typeof payload.name === 'string' && payload.name) onToolCall?.(payload.name)
+            break
+          case 'tool_result':
+            if (typeof payload.name === 'string' && payload.name) onToolResult?.(payload.name)
             break
           case 'done':
             finished = true

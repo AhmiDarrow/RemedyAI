@@ -299,7 +299,7 @@ def run_update(check_only: bool = False) -> None:
         return
 
     console.print()
-    if not sys.stdin.isatty():
+    if not (sys.stdin is not None and sys.stdin.isatty()):
         console.print("[yellow]Non-interactive terminal; use --check first, then re-run to apply.[/yellow]")
         return
     if not Confirm.ask("Apply update now?"):

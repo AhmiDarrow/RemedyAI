@@ -7,8 +7,10 @@ through the ToolRegistry.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import re
 from collections.abc import AsyncIterator
 from contextlib import suppress
 from typing import Any
@@ -32,6 +34,7 @@ from remedy.memory.store import MemoryStore
 from remedy.models import (
     AgentConfig,
     ChannelKind,
+    ChatMessageRole,
     EventKind,
     GatewayEvent,
     ToolCall,
@@ -42,12 +45,127 @@ from remedy.skills.tool_registry import ToolRegistry
 logger = logging.getLogger(__name__)
 
 _DEFAULT_SYSTEM_PROMPT = (
-    "You are Remedy, a helpful AI agent assistant. You have access to tools and memory.\n\n"
-    "Use the conversation history and tools to help the user accomplish their tasks.\n"
-    "Be concise and direct in your responses."
+    "You are Remedy — a fast, self-improving coding agent.\n\n"
+    "Style: concise, decisive, high-signal. Prefer action over narration.\n"
+    "Do not monologue about plans before tool calls; just call tools, then answer.\n\n"
+    "Tool policy (OpenCode-smooth):\n"
+    "- Simple chat (greetings, definitions, provider/model questions, general knowledge): "
+    "answer immediately with NO tools.\n"
+    "- Project work (review, files, shell, debug, implement): use the function-calling API.\n"
+    "- NEVER write tool calls as plain text (e.g. file_read(\"x\") && list_dir(\"y\")). "
+    "That hangs the UI — always use native tool_calls.\n"
+    "- Prefer parallel tool calls for independent reads; avoid repeating the same call.\n"
+    "- After tool results, synthesize a clear final answer. Never stall or loop.\n"
+    "- If information is already in context (provider block, history, tool results), use it."
 )
 
-_MAX_REACT_STEPS = 6
+# Real coding agents need headroom; simple turns never spend this budget.
+_MAX_REACT_STEPS = 24
+_MAX_PARALLEL_TOOLS = 8
+_HISTORY_MSG_LIMIT = 30
+_HISTORY_CHAR_BUDGET = 14_000
+
+# Messages that look like they need filesystem / shell tools.
+_TOOL_HINT_RE = re.compile(
+    r"\b("
+    r"read|write|edit|create|delete|list|ls|cat|open|save|"
+    r"file|files|folder|directory|path|workspace|codebase|repo|repository|project|"
+    r"review|analyze|analyse|explore|overview|inspect|structure|architecture|"
+    r"run|execute|shell|bash|command|terminal|install|build|test|"
+    r"implement|refactor|debug|fix|bug|error|stack|trace|"
+    r"git|commit|diff|branch|src/|\\.[a-z]{1,5}\b"
+    r")\b|"
+    r"(?:[A-Za-z]:)?[\\/][\w.\\/ -]+",
+    re.IGNORECASE,
+)
+
+# Models sometimes emit tool syntax as plain text instead of function-calls.
+_PSEUDO_TOOL_RE = re.compile(
+    r"\b(file_read|file_write|list_dir|bash_exec)\s*\(",
+    re.IGNORECASE,
+)
+
+
+def _message_wants_tools(message: str) -> bool:
+    """Return False for chit-chat / simple Qs so models answer in one shot."""
+    msg = (message or "").strip()
+    if not msg:
+        return False
+    if _TOOL_HINT_RE.search(msg):
+        return True
+    # Short prompts without tool hints → answer from knowledge only.
+    if len(msg) <= 160:
+        return False
+    return True
+
+
+def _looks_like_pseudo_tools(text: str) -> bool:
+    """True when the model faked tool calls in natural language."""
+    if not text:
+        return False
+    if _PSEUDO_TOOL_RE.search(text):
+        return True
+    # Shell-style chained faux calls: tool("a") && tool("b")
+    if "&&" in text and re.search(r"\w+\(\s*[\"']", text):
+        return True
+    return False
+
+
+def _parse_pseudo_tool_calls(text: str) -> list[dict[str, Any]]:
+    """Best-effort parse of text-faked tools into OpenAI-style tool_call dicts."""
+    if not text:
+        return []
+    # file_read("path") / list_dir('src') / bash_exec("ls")
+    pat = re.compile(
+        r"\b(file_read|file_write|list_dir|bash_exec)\s*\(\s*[\"']([^\"']+)[\"']"
+        r"(?:\s*,\s*[\"']([\s\S]*?)[\"'])?\s*\)",
+        re.IGNORECASE,
+    )
+    out: list[dict[str, Any]] = []
+    for i, m in enumerate(pat.finditer(text)):
+        name = m.group(1).lower()
+        arg0 = m.group(2)
+        arg1 = m.group(3)
+        if name == "file_read":
+            args: dict[str, Any] = {"path": arg0}
+        elif name == "list_dir":
+            args = {"path": arg0}
+        elif name == "bash_exec":
+            args = {"command": arg0}
+        elif name == "file_write":
+            args = {"path": arg0, "content": arg1 or ""}
+        else:
+            continue
+        out.append(
+            {
+                "id": f"pseudo_{i}_{uuid4().hex[:8]}",
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "arguments": json.dumps(args),
+                },
+            }
+        )
+        if len(out) >= _MAX_PARALLEL_TOOLS:
+            break
+    return out
+
+
+def _tool_call_fingerprint(tc: dict[str, Any]) -> str:
+    fn = tc.get("function") or {}
+    name = (fn.get("name") or "").strip()
+    raw = fn.get("arguments") or "{}"
+    if not isinstance(raw, str):
+        try:
+            raw = json.dumps(raw, sort_keys=True, default=str)
+        except Exception:
+            raw = str(raw)
+    try:
+        parsed = json.loads(raw) if raw.strip() else {}
+        raw = json.dumps(parsed, sort_keys=True, default=str)
+    except Exception:
+        raw = raw.strip()
+    return f"{name}::{raw}"
 
 
 def _build_system_prompt(persona: str | None = None) -> str:
@@ -406,183 +524,565 @@ class BasicRuntime(AgentRuntime):
         """Call the LLM with ReAct tool-use loop (non-streaming)."""
         full = ""
         try:
-            async for chunk in self._call_llm_stream(message):
-                full += chunk
+            async for chunk in self._call_llm_stream(message, session_id=self._session_id):
+                if not str(chunk).startswith("@@"):
+                    full += chunk
             return full
         except Exception as e:
             logger.exception("LLM call failed")
             return f"\n[LLM EXCEPTION]\n{e}\n[END LLM EXCEPTION]"
 
+    async def _load_session_history(
+        self,
+        session_id: str | None,
+        current_user: str,
+    ) -> list[dict[str, Any]]:
+        """Load recent user/assistant turns for multi-turn continuity (OpenCode-style)."""
+        if not session_id or self.memory is None:
+            return []
+        try:
+            rows = await self.memory.get_chat_messages(
+                session_id, limit=_HISTORY_MSG_LIMIT
+            )
+        except Exception:
+            logger.debug("session history load failed", exc_info=True)
+            return []
+
+        out: list[dict[str, Any]] = []
+        # Drop trailing user message if API already persisted the current turn.
+        if rows and rows[-1].role == ChatMessageRole.USER:
+            last = (rows[-1].content or "").strip()
+            if last == (current_user or "").strip():
+                rows = rows[:-1]
+
+        budget = _HISTORY_CHAR_BUDGET
+        # Walk newest→oldest then reverse so we keep the most recent context.
+        selected: list[dict[str, Any]] = []
+        for msg in reversed(rows):
+            role = msg.role.value if hasattr(msg.role, "value") else str(msg.role)
+            if role not in ("user", "assistant"):
+                continue
+            content = (msg.content or "").strip()
+            if not content:
+                continue
+            # Strip internal tool markers from prior assistant bubbles.
+            if role == "assistant":
+                if content.startswith("@@") or "[LLM" in content[:40]:
+                    continue
+                # Soft-trim huge prior answers
+                if len(content) > 4000:
+                    content = content[:4000] + "\n…[truncated]"
+            if len(content) > budget:
+                content = content[:budget] + "\n…[truncated]"
+            budget -= len(content)
+            selected.append({"role": role, "content": content})
+            if budget <= 0:
+                break
+        selected.reverse()
+        return selected
+
+    async def _execute_tool_calls(
+        self,
+        tool_calls_list: list[dict[str, Any]],
+        *,
+        seen_fps: set[str],
+        result_cache: dict[str, str],
+    ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
+        """Run tools in parallel (capped), dedupe repeats, yield (event, tool_msg)."""
+
+        async def _one(tc: dict[str, Any]) -> tuple[str, str, dict[str, Any]]:
+            fn = tc.get("function") or {}
+            name = (fn.get("name") or "").strip()
+            raw_args = fn.get("arguments") or "{}"
+            fp = _tool_call_fingerprint(tc)
+            call_id = tc.get("id") or str(uuid4())
+
+            if fp in result_cache:
+                content_str = result_cache[fp]
+                return name, content_str, {
+                    "role": "tool",
+                    "tool_call_id": call_id,
+                    "content": content_str,
+                }
+
+            try:
+                args = (
+                    json.loads(raw_args)
+                    if isinstance(raw_args, str)
+                    else dict(raw_args)
+                )
+            except json.JSONDecodeError:
+                args = {}
+            if not isinstance(args, dict):
+                args = {}
+
+            result = await self.call_tool(ToolCall(tool_name=name, arguments=args))
+            payload = (
+                result.data if result.success else {"error": result.error or "tool failed"}
+            )
+            content_str = (
+                payload if isinstance(payload, str) else json.dumps(payload, default=str)
+            )
+            # Cap tool payloads — keeps multi-step turns fast and under context limits.
+            if len(content_str) > 48_000:
+                content_str = content_str[:48_000] + "\n…[tool output truncated]"
+            result_cache[fp] = content_str
+            seen_fps.add(fp)
+            return name, content_str, {
+                "role": "tool",
+                "tool_call_id": call_id,
+                "content": content_str,
+            }
+
+        # Deduplicate within this batch (keep first of each fingerprint).
+        unique: list[dict[str, Any]] = []
+        batch_seen: set[str] = set()
+        for tc in tool_calls_list:
+            name = ((tc.get("function") or {}).get("name") or "").strip()
+            if not name:
+                continue
+            fp = _tool_call_fingerprint(tc)
+            if fp in batch_seen:
+                continue
+            batch_seen.add(fp)
+            unique.append(tc)
+            if len(unique) >= _MAX_PARALLEL_TOOLS:
+                break
+
+        if not unique:
+            return
+
+        # Notify UI of starts, then run in parallel for speed.
+        for tc in unique:
+            name = ((tc.get("function") or {}).get("name") or "").strip()
+            yield f"@@tool_call:{name}", {}
+
+        results = await asyncio.gather(
+            *[_one(tc) for tc in unique], return_exceptions=True
+        )
+        for item in results:
+            if isinstance(item, BaseException):
+                logger.exception("parallel tool failed: %s", item)
+                err_msg = {
+                    "role": "tool",
+                    "tool_call_id": str(uuid4()),
+                    "content": json.dumps({"error": str(item)}),
+                }
+                yield "@@tool_result:error", err_msg
+                continue
+            name, _content, tool_msg = item
+            yield f"@@tool_result:{name}", tool_msg
+
     async def _call_llm_stream(
-        self, message: str
+        self,
+        message: str,
+        session_id: str | None = None,
     ) -> AsyncIterator[str]:
-        """Call the LLM with ReAct tool-use loop, yielding tokens as they arrive.
+        """Call the LLM with a smooth ReAct loop (OpenCode-grade).
 
         Yields status tokens prefixed with '@@' for tool-call lifecycle events.
+        Never leaves the user with a bare "tool limit" dead-end — final step
+        always forces a plain-text answer (or a short synthesis).
         """
         try:
             context = await self._build_context()
+            runtime_info = (
+                f"Connected provider: {self._llm_provider}\n"
+                f"Connected model: {self._llm_model}\n"
+                f"API base URL: {self._llm_base_url}\n"
+                f"Tool budget this turn: up to {self._max_react_steps} model steps "
+                f"(final step always answers without tools).\n"
+                "When asked which provider/model you use, answer from this block — do not call tools."
+            )
+            history = await self._load_session_history(session_id, message)
             messages: list[dict[str, Any]] = [
-                {"role": "system", "content": self._system_prompt + "\n\n" + context},
+                {
+                    "role": "system",
+                    "content": (
+                        self._system_prompt
+                        + "\n\n"
+                        + runtime_info
+                        + "\n\n"
+                        + context
+                    ),
+                },
+                *history,
                 {"role": "user", "content": message},
             ]
-            tools = self._openai_tools()
+            all_tools = self._openai_tools()
+            tools_allowed = bool(all_tools) and _message_wants_tools(message)
+            tools = all_tools if tools_allowed else []
 
-            for step in range(self._max_react_steps):
+            seen_fps: set[str] = set()
+            result_cache: dict[str, str] = {}
+            produced_user_text = False
+            pseudo_recovery_done = False
+            pseudo_nudge_count = 0
+            headers = self._provider.auth_headers(self._llm_api_key)
+            endpoint = self._provider.chat_endpoint(self._llm_base_url)
+
+            # total bounds the whole turn; sock_read prevents indefinite hangs mid-stream.
+            # Keep a small connector pool — one session for the whole ReAct turn.
+            timeout = aiohttp.ClientTimeout(total=180, sock_read=75, connect=20)
+            connector = aiohttp.TCPConnector(
+                limit=12,
+                ttl_dns_cache=300,
+            )
+            async with aiohttp.ClientSession(
+                timeout=timeout, connector=connector
+            ) as http:
+                for step in range(self._max_react_steps):
+                    is_final_step = step >= self._max_react_steps - 1
+                    # Force answer before the hard wall (and whenever tools disabled).
+                    force_answer = is_final_step or not tools
+                    # Also force answer if we have already spent many tool steps
+                    # and produced no visible text — keep UX snappy.
+                    if step >= 8 and not produced_user_text:
+                        force_answer = True
+                    step_tools = None if force_answer else tools
+
+                    if force_answer and step > 0:
+                        messages.append(
+                            {
+                                "role": "user",
+                                "content": (
+                                    "Stop calling tools. Using the information above, "
+                                    "give your final answer to the user now. Be concise."
+                                ),
+                            }
+                        )
+
+                    body = self._provider.build_body(
+                        model=self._llm_model,
+                        messages=messages,
+                        tools=step_tools,
+                        stream=True,
+                    )
+
+                    collected: dict[str, Any] = {"content": None, "tool_calls": None}
+                    tool_call_acc: dict[int, dict[str, Any]] = {}
+                    content_parts: list[str] = []
+                    reasoning_parts: list[str] = []
+
+                    async with http.post(
+                        endpoint, headers=headers, json=body
+                    ) as resp:
+                        if resp.status != 200:
+                            text = await resp.text()
+                            logger.error(
+                                "LLM API error %d: %s", resp.status, text[:500]
+                            )
+                            yield (
+                                f"\n[LLM ERROR — HTTP {resp.status}]\n"
+                                f"{text[:500]}\n[END LLM ERROR]"
+                            )
+                            return
+
+                        # Live-stream tokens when tools are off (simple Qs / final answer).
+                        # When tools are on, buffer text so "Let me check…" never jitters the UI.
+                        stream_live = step_tools is None
+
+                        if self._provider.provider_name == "openai":
+                            async for line in resp.content:
+                                line_text = line.decode("utf-8").strip()
+                                if not line_text or line_text.startswith(":"):
+                                    continue
+                                if line_text == "data: [DONE]":
+                                    break
+                                if line_text.startswith("data: "):
+                                    line_text = line_text[6:]
+                                try:
+                                    chunk = json.loads(line_text)
+                                except json.JSONDecodeError:
+                                    continue
+                                choice = (chunk.get("choices") or [{}])[0]
+                                delta = choice.get("delta") or {}
+                                content_delta = delta.get("content")
+                                if content_delta:
+                                    content_parts.append(content_delta)
+                                    if stream_live:
+                                        produced_user_text = True
+                                        yield content_delta
+                                else:
+                                    reason_delta = (
+                                        delta.get("reasoning_content")
+                                        or delta.get("reasoning")
+                                    )
+                                    if reason_delta:
+                                        reasoning_parts.append(reason_delta)
+                                for tc in delta.get("tool_calls") or []:
+                                    idx = tc.get("index", 0)
+                                    if idx not in tool_call_acc:
+                                        tool_call_acc[idx] = {
+                                            "id": tc.get("id") or "",
+                                            "type": "function",
+                                            "function": {
+                                                "name": (
+                                                    (tc.get("function") or {}).get(
+                                                        "name"
+                                                    )
+                                                    or ""
+                                                ),
+                                                "arguments": (
+                                                    (tc.get("function") or {}).get(
+                                                        "arguments"
+                                                    )
+                                                    or ""
+                                                ),
+                                            },
+                                        }
+                                    else:
+                                        acc = tool_call_acc[idx]
+                                        fn_args = (
+                                            (tc.get("function") or {}).get(
+                                                "arguments"
+                                            )
+                                            or ""
+                                        )
+                                        if fn_args:
+                                            acc["function"]["arguments"] += fn_args
+                                        fn_name = (tc.get("function") or {}).get(
+                                            "name"
+                                        )
+                                        if fn_name:
+                                            acc["function"]["name"] = fn_name
+                                        tc_id = tc.get("id")
+                                        if tc_id:
+                                            acc["id"] = tc_id
+                        else:
+                            data = await resp.json()
+                            parsed = self._provider.extract_response(data)
+                            content = parsed.get("content")
+                            if content:
+                                content_parts.append(content)
+                            raw_tcs = parsed.get("tool_calls")
+                            if raw_tcs:
+                                tool_call_acc = dict(enumerate(raw_tcs))
+                            collected = {**collected, **parsed}
+
+                    tool_calls_list = [
+                        tc
+                        for tc in (
+                            list(tool_call_acc.values())
+                            if tool_call_acc
+                            else (collected.get("tool_calls") or [])
+                        )
+                        if ((tc.get("function") or {}).get("name") or "").strip()
+                    ]
+
+                    # Finalize text. Live-stream already yielded tokens when tools off.
+                    text_out = "".join(content_parts).strip()
+                    if not text_out and reasoning_parts and not tool_calls_list:
+                        text_out = "".join(reasoning_parts).strip()
+                        if text_out and stream_live and not _looks_like_pseudo_tools(text_out):
+                            yield text_out
+                            produced_user_text = True
+                    if text_out:
+                        collected["content"] = text_out
+
+                    # Recovery: model wrote tool calls as plain text → run them for real.
+                    if (
+                        not tool_calls_list
+                        and text_out
+                        and _looks_like_pseudo_tools(text_out)
+                        and all_tools
+                        and not pseudo_recovery_done
+                        and not force_answer
+                    ):
+                        recovered = _parse_pseudo_tool_calls(text_out)
+                        if recovered:
+                            pseudo_recovery_done = True
+                            tools = all_tools  # ensure schemas stay available
+                            yield "@@tool_calls"
+                            messages.append(
+                                {
+                                    "role": "assistant",
+                                    "content": (
+                                        "I'll use tools to inspect the project "
+                                        "(recovering from text-form tool calls)."
+                                    ),
+                                    "tool_calls": recovered,
+                                }
+                            )
+                            async for event, tool_msg in self._execute_tool_calls(
+                                recovered,
+                                seen_fps=seen_fps,
+                                result_cache=result_cache,
+                            ):
+                                if event.startswith("@@"):
+                                    yield event
+                                if tool_msg:
+                                    messages.append(tool_msg)
+                            continue
+
+                    if text_out and (not tool_calls_list or force_answer):
+                        # Don't ship faux tool syntax as the final answer.
+                        if (
+                            _looks_like_pseudo_tools(text_out)
+                            and all_tools
+                            and not force_answer
+                            and pseudo_nudge_count < 1
+                            and not pseudo_recovery_done
+                        ):
+                            pseudo_nudge_count += 1
+                            tools = all_tools
+                            messages.append(
+                                {
+                                    "role": "user",
+                                    "content": (
+                                        "Do not write tool calls as text. "
+                                        "Use the function-calling API now "
+                                        "(file_read / list_dir / bash_exec), "
+                                        "or answer from context."
+                                    ),
+                                }
+                            )
+                            continue
+                        if stream_live and produced_user_text:
+                            # Already streamed live; if it was pseudo-tool junk, apologize once.
+                            if _looks_like_pseudo_tools(text_out):
+                                # Tools were off during live stream — re-enable and recover.
+                                if all_tools and not pseudo_recovery_done:
+                                    recovered = _parse_pseudo_tool_calls(text_out)
+                                    if recovered:
+                                        pseudo_recovery_done = True
+                                        tools = all_tools
+                                        messages.append(
+                                            {
+                                                "role": "assistant",
+                                                "content": text_out[:500],
+                                                "tool_calls": recovered,
+                                            }
+                                        )
+                                        async for event, tool_msg in self._execute_tool_calls(
+                                            recovered,
+                                            seen_fps=seen_fps,
+                                            result_cache=result_cache,
+                                        ):
+                                            if event.startswith("@@"):
+                                                yield event
+                                            if tool_msg:
+                                                messages.append(tool_msg)
+                                        continue
+                            return
+                        if not stream_live:
+                            yield text_out
+                            produced_user_text = True
+                        return
+
+                    if not tool_calls_list or force_answer:
+                        # Nothing useful produced — soft empty, not a tool-limit scare.
+                        if not produced_user_text:
+                            yield (
+                                "I couldn't produce a complete answer from the available "
+                                "context. Try a more specific request or point me at a file."
+                            )
+                        return
+
+                    # Filter out exact repeats of prior tool calls this turn.
+                    fresh_calls = [
+                        tc
+                        for tc in tool_calls_list
+                        if _tool_call_fingerprint(tc) not in seen_fps
+                    ]
+                    if not fresh_calls:
+                        # Model is looping the same tools — force a final answer next.
+                        messages.append(
+                            {
+                                "role": "assistant",
+                                "content": collected.get("content"),
+                                "tool_calls": tool_calls_list,
+                            }
+                        )
+                        for tc in tool_calls_list:
+                            fp = _tool_call_fingerprint(tc)
+                            cached = result_cache.get(fp, "(already retrieved)")
+                            messages.append(
+                                {
+                                    "role": "tool",
+                                    "tool_call_id": tc.get("id") or str(uuid4()),
+                                    "content": cached,
+                                }
+                            )
+                        # Jump toward final answer on next iteration.
+                        tools = []  # disable further tool schemas
+                        continue
+
+                    messages.append(
+                        {
+                            "role": "assistant",
+                            "content": collected.get("content"),
+                            "tool_calls": fresh_calls,
+                        }
+                    )
+
+                    async for event, tool_msg in self._execute_tool_calls(
+                        fresh_calls,
+                        seen_fps=seen_fps,
+                        result_cache=result_cache,
+                    ):
+                        if event.startswith("@@"):
+                            yield event
+                        if tool_msg:
+                            messages.append(tool_msg)
+
+                    logger.debug(
+                        "ReAct step %d executed %d tool call(s)",
+                        step + 1,
+                        len(fresh_calls),
+                    )
+
+            # Exhausted steps without a streamed answer — synthesize briefly.
+            if not produced_user_text:
+                # One last non-tool call with whatever tool results we have.
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "Give a short final answer now based on the tool results above."
+                        ),
+                    }
+                )
                 body = self._provider.build_body(
                     model=self._llm_model,
                     messages=messages,
-                    tools=tools or None,
+                    tools=None,
                     stream=True,
                 )
-                headers = self._provider.auth_headers(self._llm_api_key)
-                endpoint = self._provider.chat_endpoint(self._llm_base_url)
-
-                collected: dict[str, Any] = {"content": None, "tool_calls": None}
-                tool_call_acc: dict[int, dict[str, Any]] = {}
-
-                async with (
-                    aiohttp.ClientSession() as session,
-                    session.post(
-                        endpoint,
-                        headers=headers,
-                        json=body,
-                        timeout=aiohttp.ClientTimeout(total=120),
-                    ) as resp,
-                ):
-                    if resp.status != 200:
-                        text = await resp.text()
-                        logger.error("LLM API error %d: %s", resp.status, text[:500])
-                        yield f"\n[LLM ERROR — HTTP {resp.status}]\n{text[:500]}\n[END LLM ERROR]"
-                        return
-
-                    if self._provider.provider_name == "openai":
-                        has_tool_calls = False
-                        async for line in resp.content:
-                            line_text = line.decode("utf-8").strip()
-                            if not line_text or line_text.startswith(":"):
-                                continue
-                            if line_text == "data: [DONE]":
-                                break
-                            if line_text.startswith("data: "):
-                                line_text = line_text[6:]
-                            try:
-                                chunk = json.loads(line_text)
-                            except json.JSONDecodeError:
-                                continue
-                            choice = (chunk.get("choices") or [{}])[0]
-                            delta = choice.get("delta") or {}
-                            content_delta = delta.get("content")
-                            if content_delta:
-                                yield content_delta
-                            tc_deltas = delta.get("tool_calls") or []
-                            for tc in tc_deltas:
-                                idx = tc.get("index", 0)
-                                if idx not in tool_call_acc:
-                                    tool_call_acc[idx] = {
-                                        "id": tc.get("id") or "",
-                                        "type": "function",
-                                        "function": {
-                                            "name": (
-                                                tc.get("function", {}).get("name")
-                                                or ""
-                                            ),
-                                            "arguments": (
-                                                tc.get("function", {}).get(
-                                                    "arguments"
-                                                )
-                                                or ""
-                                            ),
-                                        },
-                                    }
-                                else:
-                                    acc = tool_call_acc[idx]
-                                    fn_args = (
-                                        tc.get("function", {}).get("arguments")
-                                        or ""
-                                    )
-                                    if fn_args:
-                                        acc["function"]["arguments"] += fn_args
-                            finish = choice.get("finish_reason")
-                            if finish == "tool_calls":
-                                has_tool_calls = True
-                                yield "@@tool_calls"
-                        if has_tool_calls:
-                            yield "@@tool_calls"
-                    else:
-                        data = await resp.json()
-                        parsed = self._provider.extract_response(data)
-                        content = parsed.get("content")
-                        tool_calls_list_raw = parsed.get("tool_calls")
-                        if content:
-                            yield content
-                        if tool_calls_list_raw:
-                            tool_call_acc = dict(enumerate(tool_calls_list_raw))
-                            yield "@@tool_calls"
-                        collected = parsed
-
-                tool_calls_list = (
-                    list(tool_call_acc.values())
-                    if tool_call_acc
-                    else collected.get("tool_calls")
+                try:
+                    async with aiohttp.ClientSession(
+                        timeout=aiohttp.ClientTimeout(total=60)
+                    ) as http2:
+                        async with http2.post(
+                            endpoint, headers=headers, json=body
+                        ) as resp:
+                            if resp.status == 200 and self._provider.provider_name == "openai":
+                                async for line in resp.content:
+                                    line_text = line.decode("utf-8").strip()
+                                    if not line_text or line_text.startswith(":"):
+                                        continue
+                                    if line_text == "data: [DONE]":
+                                        break
+                                    if line_text.startswith("data: "):
+                                        line_text = line_text[6:]
+                                    try:
+                                        chunk = json.loads(line_text)
+                                    except json.JSONDecodeError:
+                                        continue
+                                    delta = (chunk.get("choices") or [{}])[0].get(
+                                        "delta"
+                                    ) or {}
+                                    piece = delta.get("content")
+                                    if piece:
+                                        produced_user_text = True
+                                        yield piece
+                except Exception:
+                    logger.debug("final synthesis failed", exc_info=True)
+            if not produced_user_text:
+                yield (
+                    "Done exploring — I don't have enough signal for a confident answer. "
+                    "Point me at a specific file or error and I'll dig in."
                 )
-
-                if not tool_calls_list:
-                    return
-
-                messages.append(
-                    {
-                        "role": "assistant",
-                        "content": collected.get("content"),
-                        "tool_calls": tool_calls_list,
-                    }
-                )
-                for tc in tool_calls_list:
-                    fn = tc.get("function") or {}
-                    name = fn.get("name") or ""
-                    raw_args = fn.get("arguments") or "{}"
-                    try:
-                        args = (
-                            json.loads(raw_args)
-                            if isinstance(raw_args, str)
-                            else dict(raw_args)
-                        )
-                    except json.JSONDecodeError:
-                        args = {}
-                    if not isinstance(args, dict):
-                        args = {}
-
-                    yield f"@@tool_call:{name}"
-
-                    result = await self.call_tool(
-                        ToolCall(tool_name=name, arguments=args)
-                    )
-                    payload = (
-                        result.data
-                        if result.success
-                        else {"error": result.error or "tool failed"}
-                    )
-                    content_str = (
-                        payload
-                        if isinstance(payload, str)
-                        else json.dumps(payload, default=str)
-                    )
-                    messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tc.get("id") or str(uuid4()),
-                            "content": content_str,
-                        }
-                    )
-                    yield f"@@tool_result:{name}"
-
-                logger.debug(
-                    "ReAct step %d executed %d tool call(s)",
-                    step + 1,
-                    len(tool_calls_list),
-                )
-
-            yield "[Reached maximum tool-use steps without a final answer]"
         except Exception as e:
             logger.exception("LLM stream failed")
             yield f"\n[LLM STREAM EXCEPTION]\n{e}\n[END LLM STREAM EXCEPTION]"
@@ -649,7 +1149,7 @@ class BasicRuntime(AgentRuntime):
                 )
                 return
 
-            async for chunk in self._call_llm_stream(message):
+            async for chunk in self._call_llm_stream(message, session_id=session_id):
                 yield chunk
         finally:
             self._llm_model = prev_model
@@ -662,18 +1162,31 @@ class BasicRuntime(AgentRuntime):
 
         recent: list[Any] = []
         with suppress(Exception):
-            recent = await self.memory.list_recent(limit=20)
+            # Keep short — large memory dumps push weak models into pointless tool loops.
+            recent = await self.memory.list_recent(limit=6)
         if recent:
             lines = []
             for e in recent:
+                content = (e.content or "").strip()
+                # Skip noisy fallback/self-chat noise that poisons simple answers.
+                if "fallback mode" in content.lower() or content.startswith("Received:"):
+                    continue
+                if content.startswith("User (") or content.startswith("Remedy:"):
+                    # Gateway echo memories — skip; session history covers chat.
+                    continue
                 ts = e.created_at.isoformat()[:19] if e.created_at else "?"
-                lines.append(f"[{ts}] {e.content[:200]}")
-            parts.append("Recent memory:\n" + "\n".join(lines))
+                lines.append(f"[{ts}] {content[:140]}")
+            if lines:
+                parts.append(
+                    "Recent memory (optional):\n" + "\n".join(lines[-4:])
+                )
 
         tools = self.tool_registry.tools
         if tools:
             names = ", ".join(t.name for t in tools)
-            parts.append(f"Available tools: {names}")
+            parts.append(
+                f"Tools (use only when needed): {names}."
+            )
 
         return "\n\n".join(parts)
 

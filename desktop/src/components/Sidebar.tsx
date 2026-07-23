@@ -51,15 +51,16 @@ export function Sidebar({ sessions, activeId, onSelect, onNew, onDelete }: Sideb
               if (s.id !== activeId) e.currentTarget.style.background = 'transparent'
             }}
           >
-            <span className="truncate flex-1">{s.title || 'New Session'}</span>
+            <span className="truncate flex-1 min-w-0">{s.title || 'New Session'}</span>
             <span
-              className="text-xs opacity-50 group-hover:opacity-100"
+              className="text-xs flex-shrink-0 w-6 text-right opacity-50 group-hover:opacity-100"
               style={{ color: 'var(--text-muted)' }}
             >
               {s.message_count}
             </span>
+            {/* Always reserve width so hover does not shift the row */}
             <button
-              className="hidden group-hover:block text-xs px-1 rounded opacity-60 hover:opacity-100"
+              className="flex-shrink-0 w-5 text-xs rounded opacity-0 pointer-events-none group-hover:opacity-60 group-hover:pointer-events-auto hover:!opacity-100"
               style={{ color: 'var(--error)' }}
               onClick={(e) => {
                 e.stopPropagation()

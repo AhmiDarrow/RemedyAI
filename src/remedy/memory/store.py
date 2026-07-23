@@ -193,6 +193,13 @@ class MemoryStore:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(str(self._db_path), check_same_thread=False)
         self._db.row_factory = sqlite3.Row
+        # Speed-oriented pragmas (safe for single-writer desktop agent use).
+        self._db.execute("PRAGMA journal_mode=WAL")
+        self._db.execute("PRAGMA synchronous=NORMAL")
+        self._db.execute("PRAGMA temp_store=MEMORY")
+        self._db.execute("PRAGMA cache_size=-65536")  # ~64 MiB page cache
+        self._db.execute("PRAGMA mmap_size=268435456")  # 256 MiB mmap when OS allows
+        self._db.execute("PRAGMA busy_timeout=5000")
         self._db.executescript(_SCHEMA)
         self._db.commit()
 

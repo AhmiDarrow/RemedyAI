@@ -2,11 +2,14 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { listMessages, streamMessage, executeCommand, editFromMessageApi } from '../api/messages'
 import type { ChatMessage } from '../types'
 
+export type ActiveTool = { name: string; status: 'running' | 'done' }
+
 export function useMessages(sessionId: string | null) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [loading, setLoading] = useState(false)
   const [streaming, setStreaming] = useState(false)
   const [partialText, setPartialText] = useState('')
+  const [activeTools, setActiveTools] = useState<ActiveTool[]>([])
   const [streamCtrl, setStreamCtrl] = useState<AbortController | null>(null)
   /** Blocks load() from wiping in-flight optimistic state during session create race. */
   const streamingRef = useRef(false)
@@ -60,6 +63,7 @@ export function useMessages(sessionId: string | null) {
 
       setStreaming(true)
       setPartialText('')
+      setActiveTools([])
 
       let doneReceived = false
 
@@ -69,6 +73,7 @@ export function useMessages(sessionId: string | null) {
         setStreaming(false)
         setStreamCtrl(null)
         setPartialText('')
+        setActiveTools([])
         streamingRef.current = false
         sendLockRef.current = false
         // Single source of truth: reload from server (avoids duplicate client+server rows).
@@ -86,6 +91,7 @@ export function useMessages(sessionId: string | null) {
         setStreaming(false)
         setStreamCtrl(null)
         setPartialText('')
+        setActiveTools([])
         streamingRef.current = false
         sendLockRef.current = false
         setMessages((prev) => [
@@ -117,6 +123,18 @@ export function useMessages(sessionId: string | null) {
           void finishErr(errMsg)
         },
         model,
+        undefined,
+        (name) => {
+          setActiveTools((prev) => {
+            if (prev.some((t) => t.name === name && t.status === 'running')) return prev
+            return [...prev, { name, status: 'running' }]
+          })
+        },
+        (name) => {
+          setActiveTools((prev) =>
+            prev.map((t) => (t.name === name ? { ...t, status: 'done' as const } : t)),
+          )
+        },
       )
 
       setStreamCtrl(ctrl)
@@ -226,6 +244,7 @@ export function useMessages(sessionId: string | null) {
     loading,
     streaming,
     partialText,
+    activeTools,
     send,
     stop,
     runCommand,
