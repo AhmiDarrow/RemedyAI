@@ -123,7 +123,10 @@ class BasicRuntime(AgentRuntime):
     ) -> str:
         if self._llm_api_key:
             return await self._call_llm(message)
-        return self._fallback_response(message, event)
+        return (
+            f"[FALLBACK MODE — No API key configured]\n\n"
+            f"{self._fallback_response(message, event)}"
+        )
 
     def _openai_tools(self) -> list[dict[str, Any]]:
         tools: list[dict[str, Any]] = []
@@ -152,7 +155,7 @@ class BasicRuntime(AgentRuntime):
             return full
         except Exception as e:
             logger.exception("LLM call failed")
-            return f"[LLM error: {e}]"
+            return f"\n[LLM EXCEPTION]\n{e}\n[END LLM EXCEPTION]"
 
     async def _call_llm_stream(
         self, message: str
@@ -193,8 +196,8 @@ class BasicRuntime(AgentRuntime):
                 ):
                     if resp.status != 200:
                         text = await resp.text()
-                        logger.error("LLM API error %d: %s", resp.status, text[:200])
-                        yield f"[LLM error: {resp.status}]"
+                        logger.error("LLM API error %d: %s", resp.status, text[:500])
+                        yield f"\n[LLM ERROR — HTTP {resp.status}]\n{text[:500]}\n[END LLM ERROR]"
                         return
 
                     if self._provider.provider_name == "openai":
@@ -326,7 +329,7 @@ class BasicRuntime(AgentRuntime):
             yield "[Reached maximum tool-use steps without a final answer]"
         except Exception as e:
             logger.exception("LLM stream failed")
-            yield f"[LLM error: {e}]"
+            yield f"\n[LLM STREAM EXCEPTION]\n{e}\n[END LLM STREAM EXCEPTION]"
 
     async def _post_chat(
         self, body: dict[str, Any]
@@ -345,8 +348,8 @@ class BasicRuntime(AgentRuntime):
         ):
             if resp.status != 200:
                 text = await resp.text()
-                logger.error("LLM API error %d: %s", resp.status, text[:200])
-                return f"[LLM error: {resp.status}]"
+                logger.error("LLM API error %d: %s", resp.status, text[:500])
+                return f"\n[LLM ERROR — HTTP {resp.status}]\n{text[:500]}\n[END LLM ERROR]"
             return await resp.json()
 
     async def stream_response(
@@ -359,6 +362,7 @@ class BasicRuntime(AgentRuntime):
         Falls back to the echo-style fallback when no API key is configured.
         """
         if not self._llm_api_key:
+            yield "[FALLBACK MODE — No API key configured. Set REMEDY_LLM_API_KEY or add llm_api_key to ~/.remedy/config.toml]\n\n"
             full = self._fallback_response(
                 message,
                 GatewayEvent(

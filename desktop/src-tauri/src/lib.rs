@@ -71,13 +71,13 @@ fn spawn_remedy(cmd: &str) -> Option<Child> {
     {
         Command::new(cmd)
             .args([
+                "--home",
+                &home_dir,
                 "serve",
                 "--host",
                 "127.0.0.1",
                 "--port",
                 "8000",
-                "--home",
-                &home_dir,
             ])
             .creation_flags(CREATE_NO_WINDOW)
             .stdout(Stdio::piped())
@@ -89,13 +89,13 @@ fn spawn_remedy(cmd: &str) -> Option<Child> {
     {
         Command::new(cmd)
             .args([
+                "--home",
+                &home_dir,
                 "serve",
                 "--host",
                 "127.0.0.1",
                 "--port",
                 "8000",
-                "--home",
-                &home_dir,
             ])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

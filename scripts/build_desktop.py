@@ -223,8 +223,13 @@ def build(cache_clean: bool = False):
         target_triple = os.environ.get("TAURI_ENV_TARGET_TRIPLE", "")
         if not target_triple:
             machine = platform.machine().lower()
+            # Normalize common machine names to Rust target triples
+            norm = {"amd64": "x86_64", "x86_64": "x86_64", "x64": "x86_64",
+                    "arm64": "aarch64", "aarch64": "aarch64",
+                    "i386": "i686", "i686": "i686", "x86": "i686"}
+            arch = norm.get(machine, machine)
             sys_name = platform.system().lower()
-            target_triple = f"{machine}-pc-{sys_name}-msvc" if sys_name == "windows" else f"{machine}-unknown-{sys_name}-gnu"
+            target_triple = f"{arch}-pc-{sys_name}-msvc" if sys_name == "windows" else f"{arch}-unknown-{sys_name}-gnu"
         sidecar_path = DESKTOP_BIN / f"remedy-desktop-{target_triple}.exe"
         shutil.copy2(exe_path, sidecar_path)
         print(f"Sidecar: {sidecar_path}")
