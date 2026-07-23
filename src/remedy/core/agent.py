@@ -890,7 +890,21 @@ class BasicRuntime(AgentRuntime):
                         # Prefer real response type; DeepSeek/OpenRouter return event-stream.
                         is_event_stream = "event-stream" in content_type
                         if use_openai_sse or is_event_stream:
-                            async for line in resp.content:
+                            content_iter = resp.content.__aiter__()
+                            while True:
+                                try:
+                                    # Reap keep-alive-only streams that never end.
+                                    line = await asyncio.wait_for(
+                                        content_iter.__anext__(),
+                                        timeout=120.0,
+                                    )
+                                except StopAsyncIteration:
+                                    break
+                                except TimeoutError:
+                                    logger.warning(
+                                        "SSE stream idle >120s; ending this model round"
+                                    )
+                                    break
                                 line_text = line.decode("utf-8").strip()
                                 if line_text == "data: [DONE]":
                                     break

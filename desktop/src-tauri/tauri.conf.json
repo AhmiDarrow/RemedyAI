@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Remedy Desktop",
-  "version": "0.10.12",
+  "version": "0.10.13",
   "identifier": "com.remedy.desktop",
   "build": {
     "frontendDist": "../dist",

@@ -79,13 +79,25 @@ class SubprocessSandbox(Sandbox):
                 duration_ms=0.0,
             )
 
-        # Enforce allowed_paths jail: verify workdir is within allowed paths
+        # Enforce allowed_paths jail: verify workdir is within allowed paths.
+        # Resolve both sides the same way so symlinks / mixed path forms compare equal.
         if self.allowed_paths and workdir:
-            resolved = workdir.resolve()
-            allowed = any(
-                resolved == p.resolve() or resolved.is_relative_to(p.resolve())
-                for p in self.allowed_paths
-            )
+            try:
+                resolved = workdir.expanduser().resolve(strict=False)
+            except OSError:
+                resolved = workdir.expanduser().absolute()
+            allowed = False
+            for p in self.allowed_paths:
+                try:
+                    root = p.expanduser().resolve(strict=False)
+                except OSError:
+                    root = p.expanduser().absolute()
+                try:
+                    if resolved == root or resolved.is_relative_to(root):
+                        allowed = True
+                        break
+                except (ValueError, TypeError, OSError):
+                    continue
             if not allowed:
                 return ExecutionResult(
                     exit_code=-1,

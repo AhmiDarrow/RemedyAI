@@ -2,7 +2,19 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
-## [0.10.12] — 2026-07-23
+## [0.10.13] — 2026-07-23
+
+### Fixed (remaining review backlog)
+
+- Metrics registry/counters/histograms are actually thread-safe (locks).
+- FTS MATCH failures log at debug before LIKE fallback.
+- TOML writer omits `None` keys instead of writing empty strings.
+- SSE stream idle timeout (120s) ends stuck keep-alive rounds.
+- Sandbox workdir/allowed_paths compare after consistent resolve.
+- Learning trace dict builder validates/aliases tool keys more safely.
+
+## [0.10.12]
+ — 2026-07-23
 
 ### Fixed (review + stop-the-agent failures)
 

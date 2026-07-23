@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -12,13 +13,16 @@ class Counter:
     name: str
     value: int = 0
     labels: dict[str, str] = field(default_factory=dict)
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
     def inc(self, amount: int = 1) -> int:
-        self.value += amount
-        return self.value
+        with self._lock:
+            self.value += amount
+            return self.value
 
     def snapshot(self) -> dict:
-        return {"name": self.name, "value": self.value, "labels": self.labels}
+        with self._lock:
+            return {"name": self.name, "value": self.value, "labels": dict(self.labels)}
 
 
 @dataclass
@@ -26,13 +30,16 @@ class Gauge:
     name: str
     value: float = 0.0
     labels: dict[str, str] = field(default_factory=dict)
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
     def set(self, value: float) -> float:
-        self.value = value
-        return self.value
+        with self._lock:
+            self.value = value
+            return self.value
 
     def snapshot(self) -> dict:
-        return {"name": self.name, "value": self.value, "labels": self.labels}
+        with self._lock:
+            return {"name": self.name, "value": self.value, "labels": dict(self.labels)}
 
 
 @dataclass
@@ -42,86 +49,101 @@ class Histogram:
     _counts: list[int] = field(default_factory=list)
     _sum: float = 0.0
     labels: dict[str, str] = field(default_factory=dict)
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if not self._counts:
             self._counts = [0] * (len(self.buckets) + 1)
 
     def observe(self, value: float) -> None:
-        self._sum += value
-        for i, b in enumerate(self.buckets):
-            if value <= b:
-                self._counts[i] += 1
-                return
-        self._counts[-1] += 1
+        with self._lock:
+            self._sum += value
+            for i, b in enumerate(self.buckets):
+                if value <= b:
+                    self._counts[i] += 1
+                    return
+            self._counts[-1] += 1
 
     def snapshot(self) -> dict:
-        return {
-            "name": self.name,
-            "sum": self._sum,
-            "count": sum(self._counts),
-            "buckets": [
-                {"le": str(b), "count": c}
-                for b, c in zip(self.buckets + ["Inf"], self._counts, strict=False)
-            ],
-            "labels": self.labels,
-        }
+        with self._lock:
+            return {
+                "name": self.name,
+                "sum": self._sum,
+                "count": sum(self._counts),
+                "buckets": [
+                    {"le": str(b), "count": c}
+                    for b, c in zip(self.buckets + ["Inf"], list(self._counts), strict=False)
+                ],
+                "labels": dict(self.labels),
+            }
 
 
 class MetricsRegistry:
-    """Thread-safe metrics registry."""
+    """Thread-safe metrics registry (map mutation + metric updates are locked)."""
 
     def __init__(self) -> None:
         self._counters: dict[str, Counter] = {}
         self._gauges: dict[str, Gauge] = {}
         self._histograms: dict[str, Histogram] = {}
+        self._lock = threading.Lock()
 
     def counter(self, name: str, **labels: str) -> Counter:
         key = _key(name, labels)
-        if key not in self._counters:
-            self._counters[key] = Counter(name=name, labels=labels)
-        return self._counters[key]
+        with self._lock:
+            if key not in self._counters:
+                self._counters[key] = Counter(name=name, labels=labels)
+            return self._counters[key]
 
     def gauge(self, name: str, **labels: str) -> Gauge:
         key = _key(name, labels)
-        if key not in self._gauges:
-            self._gauges[key] = Gauge(name=name, labels=labels)
-        return self._gauges[key]
+        with self._lock:
+            if key not in self._gauges:
+                self._gauges[key] = Gauge(name=name, labels=labels)
+            return self._gauges[key]
 
     def histogram(self, name: str, **labels: str) -> Histogram:
         key = _key(name, labels)
-        if key not in self._histograms:
-            self._histograms[key] = Histogram(name=name, labels=labels)
-        return self._histograms[key]
+        with self._lock:
+            if key not in self._histograms:
+                self._histograms[key] = Histogram(name=name, labels=labels)
+            return self._histograms[key]
 
     def snapshot(self) -> dict:
+        with self._lock:
+            counters = list(self._counters.values())
+            gauges = list(self._gauges.values())
+            histograms = list(self._histograms.values())
         return {
-            "counters": [c.snapshot() for c in self._counters.values()],
-            "gauges": [g.snapshot() for g in self._gauges.values()],
-            "histograms": [h.snapshot() for h in self._histograms.values()],
+            "counters": [c.snapshot() for c in counters],
+            "gauges": [g.snapshot() for g in gauges],
+            "histograms": [h.snapshot() for h in histograms],
         }
 
     @property
     def num_counters(self) -> int:
-        return len(self._counters)
+        with self._lock:
+            return len(self._counters)
 
     @property
     def num_gauges(self) -> int:
-        return len(self._gauges)
+        with self._lock:
+            return len(self._gauges)
 
     @property
     def num_histograms(self) -> int:
-        return len(self._histograms)
+        with self._lock:
+            return len(self._histograms)
 
     def describe(self) -> list[str]:
+        snap = self.snapshot()
         out: list[str] = []
-        for counter in self._counters.values():
-            out.append(f"counter {counter.name} = {counter.value}")
-        for gauge in self._gauges.values():
-            out.append(f"gauge {gauge.name} = {gauge.value}")
-        for hist in self._histograms.values():
+        for counter in snap["counters"]:
+            out.append(f"counter {counter['name']} = {counter['value']}")
+        for gauge in snap["gauges"]:
+            out.append(f"gauge {gauge['name']} = {gauge['value']}")
+        for hist in snap["histograms"]:
             out.append(
-                f"histogram {hist.name} count={sum(hist._counts)} sum={hist._sum:.2f}"
+                f"histogram {hist['name']} count={hist['count']} sum={hist['sum']:.2f}"
             )
         return out
 
@@ -138,34 +160,46 @@ class MetricsRegistry:
             )
             return "{" + inner + "}"
 
-        for counter in self._counters.values():
+        with self._lock:
+            counters = list(self._counters.values())
+            gauges = list(self._gauges.values())
+            histograms = list(self._histograms.values())
+
+        for counter in counters:
+            snap = counter.snapshot()
             if counter.name not in seen_help:
                 lines.append(f"# HELP {counter.name} Remedy counter")
                 lines.append(f"# TYPE {counter.name} counter")
                 seen_help.add(counter.name)
-            lines.append(f"{counter.name}{_labels(counter.labels)} {counter.value}")
+            lines.append(f"{counter.name}{_labels(snap['labels'])} {snap['value']}")
 
-        for gauge in self._gauges.values():
+        for gauge in gauges:
+            snap = gauge.snapshot()
             if gauge.name not in seen_help:
                 lines.append(f"# HELP {gauge.name} Remedy gauge")
                 lines.append(f"# TYPE {gauge.name} gauge")
                 seen_help.add(gauge.name)
-            lines.append(f"{gauge.name}{_labels(gauge.labels)} {gauge.value}")
+            lines.append(f"{gauge.name}{_labels(snap['labels'])} {snap['value']}")
 
-        for hist in self._histograms.values():
-            if hist.name not in seen_help:
-                lines.append(f"# HELP {hist.name} Remedy histogram")
-                lines.append(f"# TYPE {hist.name} histogram")
-                seen_help.add(hist.name)
-            base_labels = dict(hist.labels)
-            cumulative = 0
-            for le, count in zip(hist.buckets + [float("inf")], hist._counts, strict=False):
-                cumulative += count
-                le_s = "+Inf" if le == float("inf") else str(le)
-                lbl = {**base_labels, "le": le_s}
-                lines.append(f"{hist.name}_bucket{_labels(lbl)} {cumulative}")
-            lines.append(f"{hist.name}_sum{_labels(base_labels)} {hist._sum}")
-            lines.append(f"{hist.name}_count{_labels(base_labels)} {sum(hist._counts)}")
+        for hist in histograms:
+            with hist._lock:
+                if hist.name not in seen_help:
+                    lines.append(f"# HELP {hist.name} Remedy histogram")
+                    lines.append(f"# TYPE {hist.name} histogram")
+                    seen_help.add(hist.name)
+                base_labels = dict(hist.labels)
+                cumulative = 0
+                for le, count in zip(
+                    hist.buckets + [float("inf")], hist._counts, strict=False
+                ):
+                    cumulative += count
+                    le_s = "+Inf" if le == float("inf") else str(le)
+                    lbl = {**base_labels, "le": le_s}
+                    lines.append(f"{hist.name}_bucket{_labels(lbl)} {cumulative}")
+                lines.append(f"{hist.name}_sum{_labels(base_labels)} {hist._sum}")
+                lines.append(
+                    f"{hist.name}_count{_labels(base_labels)} {sum(hist._counts)}"
+                )
 
         return "\n".join(lines) + ("\n" if lines else "")
 

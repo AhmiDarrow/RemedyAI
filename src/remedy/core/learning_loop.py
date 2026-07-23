@@ -67,16 +67,34 @@ class LearningLoop:
         steps: list[dict],
         session_id: str | None = None,
     ) -> ExecutionTrace:
-        """Build an ExecutionTrace from a task and raw step dicts."""
+        """Build an ExecutionTrace from a task and raw step dicts.
+
+        Accepts common key aliases (``tool`` / ``tool_name``, ``args`` /
+        ``arguments``, ``summary`` / ``result``). Unknown keys are ignored;
+        missing tool names fall back to ``step_N`` (logged at debug).
+        """
+        import logging
+
+        log = logging.getLogger(__name__)
         trace_steps = []
-        for i, s in enumerate(steps):
+        for i, s in enumerate(steps or []):
+            if not isinstance(s, dict):
+                log.debug("trace step %s is not a dict; coercing to empty", i)
+                s = {}
+            tool_name = s.get("tool_name") or s.get("tool") or s.get("name")
+            if not tool_name:
+                tool_name = f"step_{i}"
+                log.debug("trace step %s missing tool name; using %s", i, tool_name)
+            args = s.get("arguments", s.get("args", {}))
+            if not isinstance(args, dict):
+                args = {"value": args}
             trace_steps.append(TraceStep(
                 index=i,
-                tool_name=s.get("tool", s.get("tool_name", f"step_{i}")),
-                arguments=s.get("arguments", s.get("args", {})),
+                tool_name=str(tool_name),
+                arguments=args,
                 result_summary=str(s.get("result", s.get("summary", "")))[:200],
-                success=s.get("success", True),
-                duration_ms=s.get("duration_ms", 0.0),
+                success=bool(s.get("success", True)),
+                duration_ms=float(s.get("duration_ms", 0.0) or 0.0),
                 error=s.get("error"),
             ))
 

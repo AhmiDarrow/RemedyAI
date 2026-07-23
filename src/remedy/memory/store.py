@@ -475,8 +475,14 @@ class MemoryStore:
                 params,
             ).fetchall()
             return [self._row_to_entry(r) for r in rows]
-        except sqlite3.OperationalError:
+        except sqlite3.OperationalError as exc:
             # Invalid MATCH syntax or missing FTS — degrade gracefully (no recursion).
+            logger = __import__("logging").getLogger(__name__)
+            logger.debug(
+                "FTS MATCH failed (%s); falling back to LIKE for query=%r",
+                exc,
+                query[:80],
+            )
             hits = await self._search_like(query, limit=limit)
             if entry_type is None:
                 return hits

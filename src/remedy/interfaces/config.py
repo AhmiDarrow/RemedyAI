@@ -599,9 +599,14 @@ def mark_setup_completed(
     # Minimal TOML writer (top-level scalars only + nested dicts as sections).
     lines = ["# Remedy AI Configuration", ""]
     for key, value in cfg.items():
+        if value is None:
+            # Omit null keys instead of writing misleading empty strings.
+            continue
         if isinstance(value, dict):
             lines.append(f"[{key}]")
             for k, v in value.items():
+                if v is None:
+                    continue
                 lines.append(f"{k} = {_toml_scalar(v)}")
             lines.append("")
         else:
@@ -611,15 +616,16 @@ def mark_setup_completed(
 
 
 def _toml_scalar(value: Any) -> str:
+    if value is None:
+        # Callers should skip None; keep a defined encoding for list elements.
+        return '""'
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         return str(value)
     if isinstance(value, list):
-        items = ", ".join(_toml_scalar(v) for v in value)
+        items = ", ".join(_toml_scalar(v) for v in value if v is not None)
         return f"[{items}]"
-    if value is None:
-        return '""'
     # Escape backslashes and quotes for TOML strings
     text = str(value).replace("\\", "\\\\").replace('"', '\\"')
     return f'"{text}"'
