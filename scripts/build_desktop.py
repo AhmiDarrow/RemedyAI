@@ -74,9 +74,9 @@ def ensure_pyinstaller():
             check=True,
         )
     except (subprocess.CalledProcessError, FileNotFoundError):
-        print("Installing pyinstaller...")
+        print("Installing pyinstaller via uv...")
         subprocess.check_call(
-            [sys.executable, "-m", "pip", "install", "pyinstaller"]
+            ["uv", "add", "--dev", "pyinstaller"], cwd=str(ROOT)
         )
 
 
@@ -196,6 +196,8 @@ def build(cache_clean: bool = False):
         "--noconsole",
         "--add-data",
         f"{ROOT / 'src' / 'remedy'}{os.pathsep}remedy",
+        "--add-data",
+        f"{ROOT / 'pyproject.toml'}{os.pathsep}.",
     ]
 
     for hi in hidden_imports:
@@ -215,6 +217,17 @@ def build(cache_clean: bool = False):
     if exe_path.exists():
         size_mb = exe_path.stat().st_size / (1024 * 1024)
         print(f"\nBuild complete: {exe_path} ({size_mb:.1f} MB)")
+
+        import platform
+
+        target_triple = os.environ.get("TAURI_ENV_TARGET_TRIPLE", "")
+        if not target_triple:
+            machine = platform.machine().lower()
+            sys_name = platform.system().lower()
+            target_triple = f"{machine}-pc-{sys_name}-msvc" if sys_name == "windows" else f"{machine}-unknown-{sys_name}-gnu"
+        sidecar_path = DESKTOP_BIN / f"remedy-desktop-{target_triple}.exe"
+        shutil.copy2(exe_path, sidecar_path)
+        print(f"Sidecar: {sidecar_path}")
     else:
         print("\nERROR: Build failed - no .exe produced")
         sys.exit(1)

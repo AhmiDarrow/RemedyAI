@@ -27,9 +27,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from remedy import __version__ as _remedy_version
 from remedy.core.errors import SecurityError
 from remedy.core.security import safe_path
-from remedy import __version__ as _remedy_version
+from remedy.interfaces.config import CONFIG_PATHS
+from remedy.interfaces.config import load_config as _load_toml_config
 from remedy.models import (
     ChannelKind,
     ChatMessageRole,
@@ -37,8 +39,6 @@ from remedy.models import (
     GatewayEvent,
     MemoryEntryType,
 )
-
-from remedy.interfaces.config import load_config as _load_toml_config, CONFIG_PATHS
 
 logger = logging.getLogger(__name__)
 

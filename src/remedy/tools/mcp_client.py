@@ -8,11 +8,10 @@ from __future__ import annotations
 
 import asyncio
 import json
-
-from remedy import __version__
 import logging
 from typing import Any
 
+from remedy import __version__
 from remedy.models import ToolCall, ToolDefinition, ToolResult, ToolSource
 
 logger = logging.getLogger(__name__)

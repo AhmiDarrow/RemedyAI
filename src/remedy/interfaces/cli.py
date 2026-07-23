@@ -1068,7 +1068,7 @@ def _cmd_desktop(parsed: argparse.Namespace) -> None:
     subcommand = parsed.desktop_cmd or "install"
 
     if subcommand == "install":
-        console.print(f"[bold]Installing desktop dependencies...[/bold]")
+        console.print("[bold]Installing desktop dependencies...[/bold]")
         import subprocess
         result = subprocess.run(
             [npm, "install"],
@@ -1077,14 +1077,14 @@ def _cmd_desktop(parsed: argparse.Namespace) -> None:
         )
         if result.returncode == 0:
             console.print("[green]Desktop dependencies installed.[/green]")
-            console.print(f"[dim]Run 'remedy desktop dev' to start, then open http://localhost:5173[/dim]")
+            console.print("[dim]Run 'remedy desktop dev' to start, then open http://localhost:5173[/dim]")
         else:
             console.print("[red]npm install failed. Is Node.js installed?[/red]")
 
     elif subcommand == "dev":
-        console.print(f"[bold]Starting desktop dev server...[/bold]")
-        console.print(f"[dim]Make sure 'remedy serve' is running in another terminal.[/dim]")
-        console.print(f"[dim]Open http://localhost:5173 in your browser.[/dim]")
+        console.print("[bold]Starting desktop dev server...[/bold]")
+        console.print("[dim]Make sure 'remedy serve' is running in another terminal.[/dim]")
+        console.print("[dim]Open http://localhost:5173 in your browser.[/dim]")
         console.print()
         import subprocess
         subprocess.run(
@@ -1094,7 +1094,7 @@ def _cmd_desktop(parsed: argparse.Namespace) -> None:
         )
 
     elif subcommand == "build":
-        console.print(f"[bold]Building desktop for production...[/bold]")
+        console.print("[bold]Building desktop for production...[/bold]")
         import subprocess
         result = subprocess.run(
             [npm, "run", "build"],
