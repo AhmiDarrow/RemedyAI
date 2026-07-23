@@ -5,8 +5,13 @@ declare global {
 }
 
 const SERVER_URL = 'http://127.0.0.1:8000'
-const isTauri = typeof window !== 'undefined' && window.__TAURI__ !== undefined
-const API_BASE = isTauri ? `${SERVER_URL}/api` : '/api'
+
+function getApiBase(): string {
+  if (typeof window !== 'undefined' && window.__TAURI__ !== undefined) {
+    return `${SERVER_URL}/api`
+  }
+  return '/api'
+}
 
 interface FetchOptions extends RequestInit {
   timeout?: number
@@ -22,7 +27,7 @@ export class ApiError extends Error {
   }
 }
 
-export { API_BASE, SERVER_URL }
+export { getApiBase, SERVER_URL }
 
 export async function apiFetch<T = unknown>(
   path: string,
@@ -34,7 +39,7 @@ export async function apiFetch<T = unknown>(
   const timeoutId = setTimeout(() => controller.abort(), timeout)
 
   try {
-    const res = await fetch(`${API_BASE}${path}`, {
+    const res = await fetch(`${getApiBase()}${path}`, {
       ...fetchOpts,
       signal: controller.signal,
       headers: {
