@@ -36,6 +36,13 @@ class TestProviderRegistry:
         p = get_provider("unknown")
         assert isinstance(p, OpenAIProvider)
 
+    def test_openai_compatible_providers_use_sse_stream(self):
+        """DeepSeek etc. return text/event-stream — must not be read via resp.json()."""
+        for name in ("openai", "deepseek", "google", "openrouter", "ollama", "custom"):
+            p = get_provider(name)
+            assert p.uses_openai_sse is True, name
+        assert get_provider("anthropic").uses_openai_sse is False
+
     def test_google_strips_empty_tools(self):
         p = GoogleProvider()
         body = p.build_body("gemini-2.0-flash", [{"role": "user", "content": "hi"}], tools=None, stream=False)

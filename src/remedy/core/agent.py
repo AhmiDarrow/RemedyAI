@@ -777,11 +777,16 @@ class BasicRuntime(AgentRuntime):
 
                     # Never send incomplete tool_calls/tool pairings (HTTP 400).
                     messages[:] = ensure_tool_call_pairings(messages)
+                    # OpenAI-compatible providers (openai, deepseek, ollama, …) stream SSE.
+                    # Anthropic currently uses a single JSON response (stream=False).
+                    use_openai_sse = bool(
+                        getattr(self._provider, "uses_openai_sse", True)
+                    )
                     body = self._provider.build_body(
                         model=self._llm_model,
                         messages=messages,
                         tools=step_tools,
-                        stream=True,
+                        stream=use_openai_sse,
                     )
 
                     collected: dict[str, Any] = {"content": None, "tool_calls": None}
@@ -805,7 +810,15 @@ class BasicRuntime(AgentRuntime):
                         # When tools are on, buffer text so "Let me check…" never jitters the UI.
                         stream_live = step_tools is None
 
-                        if self._provider.provider_name == "openai":
+                        headers_map = getattr(resp, "headers", None) or {}
+                        content_type = str(
+                            headers_map.get("Content-Type")
+                            or headers_map.get("content-type")
+                            or ""
+                        ).lower()
+                        # Prefer real response type; DeepSeek/OpenRouter return event-stream.
+                        is_event_stream = "event-stream" in content_type
+                        if use_openai_sse or is_event_stream:
                             async for line in resp.content:
                                 line_text = line.decode("utf-8").strip()
                                 if line_text == "data: [DONE]":
@@ -1089,11 +1102,14 @@ class BasicRuntime(AgentRuntime):
                     }
                 )
                 messages[:] = ensure_tool_call_pairings(messages)
+                use_openai_sse = bool(
+                    getattr(self._provider, "uses_openai_sse", True)
+                )
                 body = self._provider.build_body(
                     model=self._llm_model,
                     messages=messages,
                     tools=None,
-                    stream=True,
+                    stream=use_openai_sse,
                 )
                 try:
                     async with aiohttp.ClientSession(
@@ -1101,26 +1117,40 @@ class BasicRuntime(AgentRuntime):
                     ) as http2, http2.post(
                         endpoint, headers=headers, json=body
                     ) as resp:
-                        if resp.status == 200 and self._provider.provider_name == "openai":
-                            async for line in resp.content:
-                                line_text = line.decode("utf-8").strip()
-                                if not line_text or line_text.startswith(":"):
-                                    continue
-                                if line_text == "data: [DONE]":
-                                    break
-                                if line_text.startswith("data: "):
-                                    line_text = line_text[6:]
-                                try:
-                                    chunk = json.loads(line_text)
-                                except json.JSONDecodeError:
-                                    continue
-                                delta = (chunk.get("choices") or [{}])[0].get(
-                                    "delta"
-                                ) or {}
-                                piece = delta.get("content")
+                        if resp.status == 200:
+                            headers_map = getattr(resp, "headers", None) or {}
+                            content_type = str(
+                                headers_map.get("Content-Type")
+                                or headers_map.get("content-type")
+                                or ""
+                            ).lower()
+                            if use_openai_sse or "event-stream" in content_type:
+                                async for line in resp.content:
+                                    line_text = line.decode("utf-8").strip()
+                                    if not line_text or line_text.startswith(":"):
+                                        continue
+                                    if line_text == "data: [DONE]":
+                                        break
+                                    if line_text.startswith("data: "):
+                                        line_text = line_text[6:]
+                                    try:
+                                        chunk = json.loads(line_text)
+                                    except json.JSONDecodeError:
+                                        continue
+                                    delta = (chunk.get("choices") or [{}])[0].get(
+                                        "delta"
+                                    ) or {}
+                                    piece = delta.get("content")
+                                    if piece:
+                                        produced_user_text = True
+                                        yield piece
+                            else:
+                                data = await resp.json()
+                                parsed = self._provider.extract_response(data)
+                                piece = parsed.get("content")
                                 if piece:
                                     produced_user_text = True
-                                    yield piece
+                                    yield str(piece)
                 except Exception:
                     logger.debug("final synthesis failed", exc_info=True)
             if not produced_user_text:

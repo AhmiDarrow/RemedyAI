@@ -3,7 +3,7 @@
 # unrelated package (remedy 0.0.6) that pulls ancient Jinja2/begins.
 # Import package and CLI entry point remain `remedy`.
 name = "remedy-ai"
-version = "0.10.9"
+version = "0.10.10"
 description = "A self-improving, multi-channel AI agent framework with memory, learning, and extensibility"
 readme = "README.md"
 license = { text = "LicenseRef-Proprietary" }

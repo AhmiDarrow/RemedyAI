@@ -2,6 +2,15 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.10.10] — 2026-07-23
+
+### Fixed
+
+- **DeepSeek (and other OpenAI-compatible providers) stream crash**: agent only
+  treated `provider_name == openai` as SSE, so DeepSeek responses
+  (`text/event-stream`) were read with `resp.json()` and failed with
+  unexpected mimetype. Now all OpenAI-compatible adapters use SSE streaming.
+
 ## [0.10.9] — 2026-07-23
 
 ### Fixed

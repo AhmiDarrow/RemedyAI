@@ -25,6 +25,15 @@ class ProviderAdapter(ABC):
         """Human-readable provider identifier (e.g. 'openai', 'anthropic')."""
 
     @property
+    def uses_openai_sse(self) -> bool:
+        """True when ``stream=True`` returns OpenAI-style ``text/event-stream`` SSE.
+
+        DeepSeek, OpenRouter, Ollama, Google OpenAI-compat, etc. all use this.
+        Anthropic uses a different stream protocol (or non-stream JSON in our loop).
+        """
+        return True
+
+    @property
     @abstractmethod
     def default_base_url(self) -> str:
         """Fallback base URL when none is configured."""
@@ -195,6 +204,11 @@ class AnthropicProvider(ProviderAdapter):
 
     provider_name = "anthropic"
     default_base_url = "https://api.anthropic.com"
+
+    @property
+    def uses_openai_sse(self) -> bool:
+        # Agent loop reads a single JSON body for Anthropic (no Anthropic SSE parser yet).
+        return False
 
     def auth_headers(self, api_key: str) -> dict[str, str]:
         return {
