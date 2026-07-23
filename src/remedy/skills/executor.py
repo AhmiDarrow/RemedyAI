@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import re
-import shutil
 import sys
 import tempfile
 from dataclasses import dataclass, field
