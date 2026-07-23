@@ -26,25 +26,67 @@ class SkillRegistry:
         elif auto_discover:
             self.discover(auto_discover)
 
-    def discover_defaults(self) -> int:
-        """Discover skills from standard Remedy locations.
+    def discover_defaults(self, home_dir: str | Path | None = None) -> int:
+        """Discover skills from bundled + user locations.
 
-        Paths (in order): ``$REMEDY_HOME/skills``, ``~/.remedy/skills``,
-        and ``./skills`` if present.
+        Order (later names win on collision):
+        1. Package bundled defaults (``remedy/bundled_skills``)
+        2. Repo ``./skills`` if present (dev tree)
+        3. ``$REMEDY_HOME/skills`` or ``~/.remedy/skills`` (user overrides)
         """
         import os
+        import shutil
 
-        paths: list[Path] = []
-        env_home = os.environ.get("REMEDY_HOME")
-        if env_home:
-            paths.append(Path(env_home).expanduser() / "skills")
-        paths.append(Path("~/.remedy/skills").expanduser())
-        paths.append(Path.cwd() / "skills")
-        total = 0
-        for p in paths:
-            if p.is_dir():
-                total += self.discover(p)
-        return total
+        from remedy.bundled_skills import bundled_skills_dir
+
+        # 1) Always load shipped defaults so a fresh install is useful.
+        bundled = bundled_skills_dir()
+        if bundled.is_dir():
+            self.discover(bundled, recurse=True)
+
+        # 2) Dev tree skills/
+        cwd_skills = Path.cwd() / "skills"
+        if cwd_skills.is_dir():
+            self.discover(cwd_skills, recurse=True)
+
+        # 3) User home skills (custom + seeded)
+        if home_dir is not None:
+            user_skills = Path(home_dir).expanduser() / "skills"
+        else:
+            env_home = os.environ.get("REMEDY_HOME")
+            user_skills = (
+                Path(env_home).expanduser() / "skills"
+                if env_home
+                else Path("~/.remedy/skills").expanduser()
+            )
+        user_skills.mkdir(parents=True, exist_ok=True)
+        # Seed missing bundled skills into user dir (never overwrite customizations).
+        if bundled.is_dir():
+            for child in bundled.iterdir():
+                if not child.is_dir() or not (child / "SKILL.md").is_file():
+                    continue
+                dest = user_skills / child.name
+                if not dest.exists():
+                    try:
+                        shutil.copytree(child, dest)
+                    except OSError:
+                        pass
+        if user_skills.is_dir():
+            self.discover(user_skills, recurse=True)
+
+        # Activate everything discovered so they show as ready.
+        for skill in self.skills:
+            if skill.manifest.status.value in ("discovered", "validated", "active"):
+                skill.manifest.status = SkillStatus.ACTIVE
+        return self.count
+
+    def summary_lines(self, *, limit: int = 50) -> list[str]:
+        """Human-readable skill list for prompts and slash commands."""
+        lines: list[str] = []
+        for skill in sorted(self.skills, key=lambda s: s.manifest.name.lower())[:limit]:
+            m = skill.manifest
+            lines.append(f"- **{m.name}**: {m.description}")
+        return lines
 
     # -- properties ----------------------------------------------------------
 

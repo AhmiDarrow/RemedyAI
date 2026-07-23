@@ -929,18 +929,21 @@ def _cmd_serve(args) -> None:
         runtime = BasicRuntime(agent_config, memory=memory)
         await runtime.start()
 
-        # Discover skills
-        skills_dir = Path(agent_config.home_dir).expanduser() / "skills"
-        if skills_dir.is_dir():
-            runtime.skills.discover(str(skills_dir), recurse=True)
+        # Bundled defaults + ~/.remedy/skills (seeded on first run)
+        n_skills = runtime.skills.discover_defaults(home_dir=agent_config.home_dir)
+        # Extra paths from config
+        for extra in agent_config.skills_dir or []:
+            p = Path(str(extra)).expanduser()
+            if p.is_dir():
+                n_skills += runtime.skills.discover(str(p), recurse=True)
 
         gateway = Gateway(runtime=runtime, memory_store=memory)
         gateway.register_handler(runtime.handle_event)
         await gateway.start()
 
-        return runtime, gateway, memory
+        return runtime, gateway, memory, n_skills
 
-    runtime, gateway, memory = asyncio.run(_start())
+    runtime, gateway, memory, n_skills = asyncio.run(_start())
 
     api_key = os.environ.get("REMEDY_API_KEY", config.get("api_key", ""))
     app = create_app(
@@ -958,6 +961,7 @@ def _cmd_serve(args) -> None:
         console.print("  The server will run in [bold]fallback (echo)[/bold] mode without a real LLM.\n")
 
     console.print(f"[green]Starting Remedy API on http://{args.host}:{args.port}[/green]")
+    console.print(f"[dim]Skills:[/dim]    {n_skills} loaded (bundled + user)")
     console.print("[dim]Dashboard:[/dim] /dashboard")
     console.print("[dim]OpenAPI:[/dim]   /api/openapi.json  /api/openapi.yaml")
     console.print("[dim]Docs:[/dim]       /docs  /redoc")
@@ -1049,10 +1053,7 @@ def _cmd_chat(args) -> None:
 
         runtime = BasicRuntime(agent_config, memory=memory)
         await runtime.start()
-
-        skills_dir = home / "skills"
-        if skills_dir.is_dir():
-            runtime.skills.discover(str(skills_dir), recurse=True)
+        n_skills = runtime.skills.discover_defaults(home_dir=home)
 
         gateway = Gateway(runtime=runtime, memory_store=memory)
         gateway.register_handler(runtime.handle_event)
@@ -1068,7 +1069,7 @@ def _cmd_chat(args) -> None:
             f"[bold green]{agent_config.name}[/bold green] is ready.\n\n"
             f"Session: [dim]{sid}[/dim]\n"
             f"LLM:     [{'green' if llm_ready else 'red'}]{model}[/{'green' if llm_ready else 'red'}]\n"
-            f"Skills:  {len(runtime.skills.skills)} loaded\n"
+            f"Skills:  {n_skills} loaded\n"
             f"Memory:  {'enabled' if not args.no_memory else 'disabled'}\n\n"
             f"[dim]Type /help for commands, /exit to quit[/dim]",
             title="Remedy Chat",

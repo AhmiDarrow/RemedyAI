@@ -258,8 +258,29 @@ async def handle_slash_command(
     if stripped in ("/memory", "/mem"):
         return {"text": "Usage: /memory <query>"}
 
-    if stripped in ("/skills", "/sk"):
-        return {"text": "Use GET /api/skills for the skill listing."}
+    if stripped in ("/skills", "/sk") or stripped.startswith("/skills "):
+        # Prefer live runtime registry; fall back to empty guidance.
+        # Note: handle_slash_command doesn't receive runtime — use memory path via app state.
+        # Callers that pass runtime through a side channel aren't available here, so we
+        # re-read from a module-level hook set by create_app when possible.
+        registry = getattr(handle_slash_command, "_skills_registry", None)
+        if registry is not None and getattr(registry, "count", 0):
+            lines = registry.summary_lines()
+            tools_hint = (
+                "\n\n**Built-in tools** (always available): "
+                "`file_read`, `file_write`, `list_dir`, `bash_exec`.\n"
+                "Skills are procedure packs the agent follows; tools are executable actions."
+            )
+            return {
+                "text": f"**{registry.count} skills loaded:**\n" + "\n".join(lines) + tools_hint
+            }
+        return {
+            "text": (
+                "No skills loaded yet. Default skills ship with Remedy — restart the server "
+                "to discover bundled skills, or drop SKILL.md packages into `~/.remedy/skills/`.\n\n"
+                "**Built-in tools:** `file_read`, `file_write`, `list_dir`, `bash_exec`."
+            )
+        }
 
     if stripped in ("/handoff", "/ho"):
         if memory is None:
@@ -437,6 +458,11 @@ def create_app(
     *,
     api_key: str = "",
 ) -> FastAPI:
+    # Let slash commands list skills without threading runtime everywhere.
+    handle_slash_command._skills_registry = (  # type: ignore[attr-defined]
+        getattr(runtime, "skills", None) if runtime is not None else None
+    )
+
     app = FastAPI(
         title=title,
         version=version,

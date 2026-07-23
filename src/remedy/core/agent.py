@@ -48,15 +48,20 @@ _DEFAULT_SYSTEM_PROMPT = (
     "You are Remedy — a fast, self-improving coding agent.\n\n"
     "Style: concise, decisive, high-signal. Prefer action over narration.\n"
     "Do not monologue about plans before tool calls; just call tools, then answer.\n\n"
+    "Skills vs tools:\n"
+    "- **Skills** are named procedure packs (how to review code, write tests, etc.). "
+    "When asked \"what skills do you have?\", list them from the Skills block in context "
+    "— do NOT shell out or invent names.\n"
+    "- **Tools** are executable actions: file_read, file_write, list_dir, bash_exec.\n\n"
     "Tool policy (OpenCode-smooth):\n"
-    "- Simple chat (greetings, definitions, provider/model questions, general knowledge): "
+    "- Simple chat (greetings, definitions, provider/model/skills questions): "
     "answer immediately with NO tools.\n"
     "- Project work (review, files, shell, debug, implement): use the function-calling API.\n"
     "- NEVER write tool calls as plain text (e.g. file_read(\"x\") && list_dir(\"y\")). "
     "That hangs the UI — always use native tool_calls.\n"
     "- Prefer parallel tool calls for independent reads; avoid repeating the same call.\n"
     "- After tool results, synthesize a clear final answer. Never stall or loop.\n"
-    "- If information is already in context (provider block, history, tool results), use it."
+    "- If information is already in context (provider block, skills list, history), use it."
 )
 
 # Real coding agents need headroom; simple turns never spend this budget.
@@ -79,6 +84,14 @@ _TOOL_HINT_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Meta questions that must be answered from context (no shell / file thrash).
+_META_NO_TOOLS_RE = re.compile(
+    r"\b(what skills|which skills|list skills|your skills|"
+    r"what tools|which tools|list tools|your tools|"
+    r"what can you do|who are you|what are you)\b",
+    re.IGNORECASE,
+)
+
 # Models sometimes emit tool syntax as plain text instead of function-calls.
 _PSEUDO_TOOL_RE = re.compile(
     r"\b(file_read|file_write|list_dir|bash_exec)\s*\(",
@@ -90,6 +103,9 @@ def _message_wants_tools(message: str) -> bool:
     """Return False for chit-chat / simple Qs so models answer in one shot."""
     msg = (message or "").strip()
     if not msg:
+        return False
+    # "what skills/tools do you have?" → answer from context, never bash_exec.
+    if _META_NO_TOOLS_RE.search(msg):
         return False
     if _TOOL_HINT_RE.search(msg):
         return True
@@ -1185,8 +1201,22 @@ class BasicRuntime(AgentRuntime):
         if tools:
             names = ", ".join(t.name for t in tools)
             parts.append(
-                f"Tools (use only when needed): {names}."
+                f"Built-in tools (executable): {names}."
             )
+
+        # Skills registry — so "what skills do you have?" never needs a shell.
+        with suppress(Exception):
+            reg = getattr(self, "skills", None)
+            if reg is not None and getattr(reg, "count", 0):
+                skill_lines = reg.summary_lines(limit=40)
+                parts.append(
+                    "Skills loaded (procedure packs — list these when asked):\n"
+                    + "\n".join(skill_lines)
+                )
+            else:
+                parts.append(
+                    "Skills loaded: (none yet — bundled defaults load on server start)."
+                )
 
         return "\n\n".join(parts)
 
