@@ -52,11 +52,15 @@ export function useMessages(sessionId: string | null) {
       setStreaming(true)
       setPartialText('')
 
+      let doneReceived = false
+
       const ctrl = streamMessage(
         targetId,
         text,
         (token) => setPartialText((prev) => prev + token),
         (data) => {
+          if (doneReceived) return
+          doneReceived = true
           setStreaming(false)
           setStreamCtrl(null)
           setPartialText((t) => {
@@ -80,6 +84,8 @@ export function useMessages(sessionId: string | null) {
           })
         },
         (errMsg) => {
+          if (doneReceived) return
+          doneReceived = true
           setStreaming(false)
           setStreamCtrl(null)
           setMessages((prev) => [

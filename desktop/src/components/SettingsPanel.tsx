@@ -3,6 +3,7 @@ import { getSettings, updateSettings, type Settings, type SettingsUpdate } from 
 import type { ThemeId } from '../themes'
 import type { UpdateInfo } from '../api/updates'
 import { THEME_LIST } from '../themes'
+import type { ModelInfo } from '../App'
 
 interface SettingsPanelProps {
   open: boolean
@@ -12,6 +13,7 @@ interface SettingsPanelProps {
   updateInfo: UpdateInfo | null
   checkingUpdates: boolean
   onCheckUpdates: () => void
+  models: ModelInfo[]
 }
 
 const PROVIDERS = [
@@ -24,7 +26,7 @@ const PROVIDERS = [
   { id: 'custom', name: 'Custom / KoboldCPP' },
 ]
 
-export function SettingsPanel({ open, onClose, themeId, onThemeChange, updateInfo, checkingUpdates, onCheckUpdates }: SettingsPanelProps) {
+export function SettingsPanel({ open, onClose, themeId, onThemeChange, updateInfo, checkingUpdates, onCheckUpdates, models }: SettingsPanelProps) {
   const [settings, setSettings] = useState<Settings | null>(null)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -79,6 +81,7 @@ export function SettingsPanel({ open, onClose, themeId, onThemeChange, updateInf
       setSaved(true)
       setApiKey('')
       setApiKeySet(apiKey ? true : apiKeySet)
+      await load()
     } catch {
       // ignore
     } finally {
@@ -150,7 +153,22 @@ export function SettingsPanel({ open, onClose, themeId, onThemeChange, updateInf
               </select>
 
               <Field label="Base URL" value={baseUrl} onChange={setBaseUrl} />
-              <Field label="Model" value={model} onChange={setModel} />
+              <label className="block mb-0.5" style={{ color: 'var(--text-muted)' }}>Model</label>
+              <select
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                className="w-full rounded px-2 py-1 text-xs mb-2 outline-none"
+                style={{
+                  background: 'var(--bg-tertiary)',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--border)',
+                }}
+              >
+                {models.length === 0 && <option value={model}>{model}</option>}
+                {models.map((m) => (
+                  <option key={m.id} value={m.id}>{m.name}</option>
+                ))}
+              </select>
               <Field
                 label={apiKeySet ? 'API Key (set - change?)' : 'API Key'}
                 value={apiKey}

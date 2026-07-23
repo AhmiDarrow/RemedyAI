@@ -17,7 +17,7 @@ import { useNotifications } from './hooks/useNotifications'
 import { useUpdateChecker } from './hooks/useUpdateChecker'
 import { revertMessageApi, listAgents, listCommands, exportSession } from './api/messages'
 import { apiFetch } from './api/client'
-import { getSettings } from './api/settings'
+import { getSettings, updateSettings } from './api/settings'
 
 export interface ModelInfo {
   id: string
@@ -355,6 +355,7 @@ export default function App() {
             updateInfo={updateInfo}
             checkingUpdates={checkingUpdates}
             onCheckUpdates={checkUpdates}
+            models={models}
           />
         </div>
 
@@ -363,7 +364,10 @@ export default function App() {
           streaming={streaming}
           model={model}
           models={models}
-          onModelChange={setModel}
+          onModelChange={(id) => {
+            setModel(id)
+            updateSettings({ llm_model: id }).catch(() => {})
+          }}
           themeId={themeId}
           theme={theme}
           onThemeChange={setTheme}

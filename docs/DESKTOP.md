@@ -47,7 +47,7 @@ backed by an **extended Remedy FastAPI** server. v1 = chat core parity.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| `GET` | `/api/models` | Available LLM models + default |
+| `GET` | `/api/models` | Available LLM models + default (auto-discovers from provider) |
 | `GET` | `/api/agents` | Available agent profiles |
 | `POST` | `/api/sessions/{id}/command` | Execute slash command |
 
@@ -77,7 +77,7 @@ event: error         → { message: "..." }
 │              │  │ Composer                  [model] ││
 │              │  │ [multiline input + send/stop]     ││
 │              │  └──────────────────────────────────┘│
-│              │  Status: ● Connected · remedy v0.9.0 │
+│              │  Status: ● Connected · remedy v0.9.3 │
 └──────────────┴──────────────────────────────────────┘
 ```
 

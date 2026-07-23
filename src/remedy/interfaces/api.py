@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+import aiohttp
+
 import yaml
 from fastapi import (
     FastAPI,
@@ -169,7 +171,7 @@ _BUILTIN_COMMANDS: list[dict] = [
 ]
 
 _BUILTIN_MODELS: list[dict] = [
-    {"id": "gpt-4o-mini", "name": "GPT-4o Mini", "provider": "openai", "default": True},
+    {"id": "gpt-4o-mini", "name": "GPT-4o Mini", "provider": "openai", "default": False},
     {"id": "gpt-4o", "name": "GPT-4o", "provider": "openai", "default": False},
     {"id": "claude-3-haiku", "name": "Claude 3 Haiku", "provider": "anthropic", "default": False},
     {"id": "claude-3.5-sonnet", "name": "Claude 3.5 Sonnet", "provider": "anthropic", "default": False},
@@ -725,7 +727,69 @@ def create_app(
     # -- models & agents -----------------------------------------------------
     @app.get("/api/models")
     async def list_models():
-        return {"models": _BUILTIN_MODELS, "default": "gpt-4o-mini"}
+        models = list(_BUILTIN_MODELS)
+        configured_id = None
+        configured_provider = "openai"
+        base_url = "https://api.openai.com/v1"
+
+        if runtime is not None:
+            configured_id = runtime._llm_model
+            configured_provider = runtime._llm_provider
+            base_url = runtime._llm_base_url
+
+        discovered: list[dict] = []
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=4)) as session:
+                # Try OpenAI-compatible /v1/models endpoint
+                models_url = base_url.rstrip("/") + "/models"
+                auth = None
+                if runtime and runtime._llm_api_key and runtime._llm_api_key != "local":
+                    auth = f"Bearer {runtime._llm_api_key}"
+                headers = {"Authorization": auth} if auth else {}
+                async with session.get(models_url, headers=headers, ssl=False) as resp:
+                    if resp.ok:
+                        body = await resp.json()
+                        for m in body.get("data", []):
+                            mid = m.get("id", m.get("name", ""))
+                            if mid:
+                                discovered.append({"id": mid, "name": mid, "provider": configured_provider, "default": False})
+        except Exception:
+            pass
+
+        # Try Ollama native API if base URL contains localhost/127.0.0.1:11434
+        if "11434" in base_url:
+            try:
+                ollama_url = base_url.rstrip("/v1").rstrip("/") + "/api/tags"
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3)) as session:
+                    async with session.get(ollama_url) as resp:
+                        if resp.ok:
+                            body = await resp.json()
+                            for m in body.get("models", []):
+                                mid = m.get("name", "")
+                                if mid:
+                                    name = mid.rstrip(":latest")
+                                    if not any(d["id"] == name for d in discovered):
+                                        discovered.append({"id": name, "name": name, "provider": "ollama", "default": False})
+            except Exception:
+                pass
+
+        # Merge: discovered models first, then built-in (dedup by id)
+        seen = set()
+        merged = []
+        for m in discovered + models:
+            if m["id"] not in seen:
+                seen.add(m["id"])
+                merged.append(m)
+
+        # Ensure configured model is in the list and is default
+        if configured_id and not any(m["id"] == configured_id for m in merged):
+            merged.insert(0, {"id": configured_id, "name": configured_id, "provider": configured_provider, "default": True})
+
+        default_id = configured_id or merged[0]["id"]
+        for m in merged:
+            m["default"] = m["id"] == default_id
+
+        return {"models": merged, "default": default_id}
 
     @app.get("/api/agents")
     async def list_agents():

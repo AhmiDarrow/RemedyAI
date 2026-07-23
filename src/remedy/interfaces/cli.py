@@ -917,21 +917,29 @@ def _cmd_serve(args) -> None:
     console.print("[dim]OpenAPI:[/dim]   /api/openapi.json  /api/openapi.yaml")
     console.print("[dim]Docs:[/dim]       /docs  /redoc")
 
+    log_level = config.get("log_level", "INFO").upper()
     uvicorn_log_config = {
         "version": 1,
         "disable_existing_loggers": False,
         "formatters": {
-            "default": {"format": "%(asctime)s %(levelprefix)s %(message)s"},
-            "access": {"format": '%(asctime)s %(levelprefix)s %(client_addr)s - "%(request_line)s" %(status_code)s'},
+            "default": {
+                "()": "uvicorn.logging.DefaultFormatter",
+                "fmt": "%(asctime)s %(levelprefix)s %(message)s",
+                "use_colors": None,
+            },
+            "access": {
+                "()": "uvicorn.logging.AccessFormatter",
+                "fmt": '%(asctime)s %(levelprefix)s %(client_addr)s - "%(request_line)s" %(status_code)s',
+            },
         },
         "handlers": {
             "default": {"class": "logging.StreamHandler", "formatter": "default", "stream": "ext://sys.stdout"},
             "access": {"class": "logging.StreamHandler", "formatter": "access", "stream": "ext://sys.stdout"},
         },
         "loggers": {
-            "uvicorn": {"handlers": ["default"], "level": config.get("log_level", "INFO").upper()},
-            "uvicorn.error": {"level": config.get("log_level", "INFO").upper()},
-            "uvicorn.access": {"handlers": ["access"], "level": config.get("log_level", "INFO").upper(), "propagate": False},
+            "uvicorn": {"handlers": ["default"], "level": log_level},
+            "uvicorn.error": {"level": log_level},
+            "uvicorn.access": {"handlers": ["access"], "level": log_level, "propagate": False},
         },
     }
     uvicorn.run(
@@ -1067,16 +1075,28 @@ def _cmd_chat(args) -> None:
 
 def _cmd_desktop(parsed: argparse.Namespace) -> None:
     """Handle the `remedy desktop` subcommand."""
-    # Try package-relative path first (editable install), then working dir
-    repo_root = Path(__file__).resolve().parent.parent.parent.parent
-    desktop_dir = repo_root / "desktop"
+    # Try to find repo root: check __file__ first, then cwd upward
+    repo_root = None
+    for candidate in [
+        Path(__file__).resolve().parent.parent.parent.parent,
+        Path.cwd(),
+    ]:
+        for _ in range(6):
+            if (candidate / "pyproject.toml").exists():
+                repo_root = candidate
+                break
+            candidate = candidate.parent
+        if repo_root:
+            break
 
-    if not desktop_dir.exists():
-        # Fall back to searching from cwd upward
+    desktop_dir = (repo_root / "desktop") if repo_root else None
+
+    if not desktop_dir or not desktop_dir.exists():
+        # Fall back to searching from cwd upward for desktop/package.json
         cur = Path.cwd()
         for _ in range(5):
             candidate = cur / "desktop"
-            if candidate.exists():
+            if (candidate / "package.json").exists():
                 desktop_dir = candidate
                 break
             if (cur / ".git").exists():
