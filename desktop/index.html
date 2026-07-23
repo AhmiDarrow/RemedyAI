@@ -7,6 +7,7 @@
     <title>Remedy Desktop</title>
     <script>
       (function () {
+        // Theme for post-splash UI (system/light/dark). Boot splash is always dark.
         var t = 'system';
         try {
           var s = localStorage.getItem('remedy-theme');
@@ -29,9 +30,8 @@
         );
         document.documentElement.style.colorScheme =
           resolved === 'light' ? 'light' : 'dark';
-        // Avoid white flash before CSS loads
-        var bg = resolved === 'light' ? '#f4f4f8' : '#0a0a1a';
-        document.documentElement.style.background = bg;
+        // Always dark first paint — never flash white during boot/splash.
+        document.documentElement.style.background = '#0a0a1a';
       })();
     </script>
     <style>
@@ -45,13 +45,14 @@
         color: #e8e8f0;
         font-family: system-ui, -apple-system, sans-serif;
       }
-      html[data-theme='light'],
-      html[data-theme='light'] body,
-      html[data-theme='light'] #root {
+      /* After app leaves splash, light theme can take over via CSS vars */
+      html.app-ready[data-theme='light'],
+      html.app-ready[data-theme='light'] body,
+      html.app-ready[data-theme='light'] #root {
         background: #f4f4f8;
         color: #1a1a2e;
       }
-      /* Static splash until React mounts */
+      /* Static splash until React mounts — always dark */
       #boot-splash {
         position: fixed;
         inset: 0;
@@ -60,8 +61,8 @@
         align-items: center;
         justify-content: center;
         gap: 1.25rem;
-        background: inherit;
-        color: inherit;
+        background: #0a0a1a;
+        color: #e8e8f0;
         z-index: 9999;
       }
       #boot-splash img {

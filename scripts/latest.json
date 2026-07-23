@@ -1,11 +1,11 @@
 {
-  "version": "v0.10.15",
-  "notes": "Remedy Desktop v0.10.15 — xAI OAuth + API key, Groq/Mistral, self-setup providers",
-  "pub_date": "2026-07-23T22:00:00Z",
+  "version": "v0.10.16",
+  "notes": "Remedy Desktop v0.10.16 \u2014 Windows installer",
+  "pub_date": "2026-07-23T22:07:42Z",
   "platforms": {
     "windows-x86_64": {
       "signature": "",
-      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.10.15/Remedy_Desktop_0.10.15_x64-setup.exe"
+      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.10.16/Remedy_Desktop_0.10.16_x64-setup.exe"
     }
   }
 }

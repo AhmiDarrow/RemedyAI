@@ -72,7 +72,13 @@ export function UpdateScreen({ info, onClose, autoStart = true }: UpdateScreenPr
       // App should exit soon after the silent installer launches; POSTINSTALL relaunches.
     } catch (e: unknown) {
       setPhase('error')
-      setError(e instanceof Error ? e.message : String(e))
+      const msg = e instanceof Error ? e.message : String(e)
+      setError(
+        msg
+          + (info.download_url
+            ? `\n\nYou can install manually from:\n${info.download_url}`
+            : '\n\nDownload the latest installer from GitHub Releases.'),
+      )
       setBusy(false)
       startedRef.current = false
     }

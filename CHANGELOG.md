@@ -2,6 +2,20 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.10.16] — 2026-07-23
+
+### Fixed
+
+- **Splash hang on "Ready"**: parent re-renders with inline `onReady` restarted the
+  health-poll effect mid-handoff; handoff now uses stable callback refs and a
+  single mount lifecycle.
+- **White splash flash**: boot splash and React splash force a dark background
+  (`#0a0a1a`) regardless of system light theme.
+- **Auto-update reliability**: longer unlock delay, PowerShell-scheduled silent
+  NSIS (`/S /NCRC`) with post-install relaunch fallback; clearer manual URL on
+  failure. Release workflow renames installers to space-free asset names so
+  `latest.json` URLs match GitHub assets.
+
 ## [0.10.15] — 2026-07-23
 
 ### xAI OAuth + API key (OpenCode-style dual auth)

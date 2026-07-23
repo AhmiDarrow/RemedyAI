@@ -636,9 +636,9 @@ fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), Stri
             }
             // 2) Force-kill any leftover sidecar / port holders (file lock root cause).
             force_stop_remedy_processes();
-            thread::sleep(Duration::from_millis(800));
+            thread::sleep(Duration::from_millis(1000));
             force_stop_remedy_processes();
-            thread::sleep(Duration::from_millis(500));
+            thread::sleep(Duration::from_millis(800));
 
             // 3) Exit the UI process FIRST so app.exe / Remedy Desktop.exe unlock.
             //    Then the detached installer can overwrite install-dir files.
@@ -655,16 +655,61 @@ fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), Stri
             {
                 // Schedule silent install AFTER this process exits so Windows
                 // releases locks on app.exe / Remedy Desktop.exe / sidecar.
-                // ping -n 3 ≈ 2s delay, then NSIS /S (silent) + /NCRC.
-                // POSTINSTALL in hooks.nsh relaunches the app.
+                // PowerShell: wait longer, kill again, run NSIS /S, relaunch if
+                // POSTINSTALL did not (belt-and-suspenders for failed hooks).
+                // DETACHED_PROCESS keeps the scheduler alive after we exit.
                 const DETACHED_PROCESS: u32 = 0x00000008;
                 const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
-                let install_path = temp.to_string_lossy().replace('"', "");
-                let wrapper = format!(
-                    "ping 127.0.0.1 -n 3 >nul & start \"\" /B \"{install_path}\" /S /NCRC"
+                let install_path = temp.to_string_lossy().replace('\'', "''");
+                // Prefer LocalAppData\Programs install path used by Tauri NSIS.
+                let ps = format!(
+                    r#"
+$ErrorActionPreference = 'SilentlyContinue'
+Start-Sleep -Seconds 4
+Get-Process -ErrorAction SilentlyContinue | Where-Object {{
+  $_.ProcessName -match '^(app|remedy-desktop|Remedy Desktop)$' -or
+  ($_.Path -and $_.Path -like '*Remedy Desktop*')
+}} | Stop-Process -Force -ErrorAction SilentlyContinue
+Start-Sleep -Seconds 2
+$installer = '{install_path}'
+if (-not (Test-Path -LiteralPath $installer)) {{
+  exit 2
+}}
+$p = Start-Process -FilePath $installer -ArgumentList '/S','/NCRC' -PassThru -WindowStyle Hidden
+if ($p) {{ Wait-Process -Id $p.Id -Timeout 300 -ErrorAction SilentlyContinue }}
+Start-Sleep -Seconds 2
+$candidates = @(
+  (Join-Path $env:LOCALAPPDATA 'Programs\Remedy Desktop\Remedy Desktop.exe'),
+  (Join-Path $env:LOCALAPPDATA 'Programs\Remedy Desktop\app.exe'),
+  (Join-Path $env:LOCALAPPDATA 'Programs\remedy-desktop\Remedy Desktop.exe')
+)
+foreach ($c in $candidates) {{
+  if (Test-Path -LiteralPath $c) {{
+    Start-Process -FilePath $c
+    break
+  }}
+}}
+"#
                 );
-                Command::new("cmd")
-                    .args(["/C", &wrapper])
+                // Write a temp .ps1 so quoting of the installer path is reliable.
+                let ps1 = env::temp_dir().join(format!(
+                    "RemedyDesktop-Update-Run-{}.ps1",
+                    std::process::id()
+                ));
+                std::fs::write(&ps1, ps.trim()).map_err(|e| {
+                    format!("Cannot write update script: {e}")
+                })?;
+                let ps1_path = ps1.to_string_lossy().replace('"', "");
+                Command::new("powershell")
+                    .args([
+                        "-NoProfile",
+                        "-ExecutionPolicy",
+                        "Bypass",
+                        "-WindowStyle",
+                        "Hidden",
+                        "-File",
+                        &ps1_path,
+                    ])
                     .creation_flags(
                         DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW,
                     )
@@ -674,7 +719,7 @@ fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), Stri
                     .spawn()
                     .map_err(|e| {
                         format!(
-                            "Failed to schedule installer (try running the .exe manually): {e}"
+                            "Failed to schedule installer (try running the .exe from the release page): {e}"
                         )
                     })?;
             }
@@ -686,7 +731,7 @@ fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), Stri
             }
 
             // Exit immediately so file locks clear before the delayed installer runs.
-            thread::sleep(Duration::from_millis(150));
+            thread::sleep(Duration::from_millis(250));
             app_for_thread.exit(0);
             Ok(())
         })();

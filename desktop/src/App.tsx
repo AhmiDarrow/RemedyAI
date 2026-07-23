@@ -354,8 +354,19 @@ export default function App() {
     return (
       <AppShell>
         <SplashScreen
-          onReady={() => setServerState('ready')}
-          onError={(msg) => { setServerState('error'); setServerError(msg) }}
+          onReady={() => {
+            // Mark document ready so light theme CSS (if any) can apply after splash.
+            try {
+              document.documentElement.classList.add('app-ready')
+            } catch {
+              // ignore
+            }
+            setServerState('ready')
+          }}
+          onError={(msg) => {
+            setServerState('error')
+            setServerError(msg)
+          }}
         />
       </AppShell>
     )

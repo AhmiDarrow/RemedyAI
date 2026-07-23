@@ -123,6 +123,18 @@ jobs:
         run: |
           set -euo pipefail
           INSTALLER=$(ls desktop/src-tauri/target/release/bundle/nsis/*.exe | head -1)
+          # softprops/action-gh-release rewrites spaces to dots in asset names.
+          # Rename before upload so GitHub asset name matches what we put in latest.json
+          # (older clients failed when URL and local signed name diverged).
+          BASE_DIR=$(dirname "${INSTALLER}")
+          SAFE_NAME=$(basename "${INSTALLER}" | tr ' ' '.')
+          if [[ "$(basename "${INSTALLER}")" != "${SAFE_NAME}" ]]; then
+            mv -f "${INSTALLER}" "${BASE_DIR}/${SAFE_NAME}"
+            if [[ -f "${INSTALLER}.sig" ]]; then
+              mv -f "${INSTALLER}.sig" "${BASE_DIR}/${SAFE_NAME}.sig"
+            fi
+            INSTALLER="${BASE_DIR}/${SAFE_NAME}"
+          fi
           echo "installer_path=${INSTALLER}" >> $GITHUB_OUTPUT
           echo "installer_name=$(basename "${INSTALLER}")" >> $GITHUB_OUTPUT
           # Tauri emits a .sig next to the installer when createUpdaterArtifacts + signing key are set.
