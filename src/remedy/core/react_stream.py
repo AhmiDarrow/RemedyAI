@@ -7,7 +7,7 @@ stream-processing logic that can be unit-tested without an HTTP session.
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator, Callable, Awaitable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -17,7 +17,6 @@ from remedy.core.react_policy import (
     parse_pseudo_tool_calls,
     tool_call_fingerprint,
 )
-
 
 # OpenAI-compatible finish reasons that mean "ran out of output budget".
 LENGTH_FINISH_REASONS = frozenset({"length", "max_tokens"})
@@ -192,6 +191,111 @@ def filter_fresh_tool_calls(
     ]
 
 
+def normalize_tool_calls(tool_calls_list: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return OpenAI-shaped tool_calls with stable non-empty ids and names.
+
+    Streaming providers sometimes omit ``id`` on early deltas; empty ids break
+    tool-result pairing on the next request (HTTP 400).
+    """
+    from uuid import uuid4
+
+    out: list[dict[str, Any]] = []
+    for tc in tool_calls_list or []:
+        if not isinstance(tc, dict):
+            continue
+        fn = tc.get("function") or {}
+        name = (fn.get("name") or "").strip()
+        if not name:
+            continue
+        args = fn.get("arguments")
+        if args is None:
+            args_s = "{}"
+        elif isinstance(args, str):
+            args_s = args
+        else:
+            try:
+                args_s = json.dumps(args, default=str)
+            except Exception:
+                args_s = "{}"
+        call_id = (tc.get("id") or "").strip() or f"call_{uuid4().hex[:24]}"
+        out.append(
+            {
+                "id": call_id,
+                "type": tc.get("type") or "function",
+                "function": {"name": name, "arguments": args_s},
+            }
+        )
+    return out
+
+
+def ensure_tool_call_pairings(
+    messages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Ensure every assistant ``tool_calls`` entry has a following tool result.
+
+    OpenAI-compatible APIs reject incomplete pairings with HTTP 400:
+    \"An assistant message with 'tool_calls' must be followed by tool messages…\".
+    """
+    if not messages:
+        return messages
+
+    out: list[dict[str, Any]] = []
+    i = 0
+    n = len(messages)
+    while i < n:
+        msg = messages[i]
+        if not isinstance(msg, dict):
+            out.append(msg)
+            i += 1
+            continue
+
+        role = msg.get("role")
+        tcs = msg.get("tool_calls") if role == "assistant" else None
+        if not tcs:
+            # Drop orphan tool messages (no preceding assistant tool_calls).
+            if role == "tool":
+                i += 1
+                continue
+            out.append(msg)
+            i += 1
+            continue
+
+        # Normalize ids on a shallow copy of the assistant message.
+        normalized = normalize_tool_calls(list(tcs))
+        assistant_msg = {**msg, "tool_calls": normalized}
+        out.append(assistant_msg)
+
+        needed: dict[str, dict[str, Any]] = {
+            tc["id"]: tc for tc in normalized if tc.get("id")
+        }
+        found: set[str] = set()
+        j = i + 1
+        while j < n and isinstance(messages[j], dict) and messages[j].get("role") == "tool":
+            tid = (messages[j].get("tool_call_id") or "").strip()
+            if tid and tid in needed and tid not in found:
+                out.append(messages[j])
+                found.add(tid)
+            j += 1
+
+        for cid, tc in needed.items():
+            if cid in found:
+                continue
+            name = ((tc.get("function") or {}).get("name") or "unknown").strip()
+            out.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": cid,
+                    "content": (
+                        f"(missing tool result for {name}; "
+                        "treated as empty so the conversation can continue)"
+                    ),
+                }
+            )
+        i = j
+
+    return out
+
+
 def finalize_round_text(
     state: StreamRoundState,
     tool_calls_list: list[dict[str, Any]],
@@ -209,11 +313,13 @@ __all__ = [
     "accumulate_tool_call_delta",
     "apply_openai_sse_chunk",
     "build_runtime_system_block",
+    "ensure_tool_call_pairings",
     "filter_fresh_tool_calls",
     "finalize_round_text",
     "iter_openai_sse_content",
     "looks_like_pseudo_tools",
     "message_wants_tools",
+    "normalize_tool_calls",
     "parse_pseudo_tool_calls",
     "parse_sse_data_line",
     "should_enable_tools",

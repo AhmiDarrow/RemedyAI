@@ -377,13 +377,16 @@ Signed Windows installers are built by GitHub Actions on version tags (`v*`):
 
 ```bash
 # bump version across pyproject / package.json / tauri / Cargo / latest.json
-python scripts/sync_version.py 0.10.4   # or: patch | minor | major
+python scripts/sync_version.py patch   # or: 0.10.5 | minor | major
 
-git add -A && git commit -m "chore: release v0.10.4"
+git add -A && git commit -m "chore: release vX.Y.Z"
 git push origin desktop-primary
-git tag v0.10.4 && git push origin v0.10.4
+git tag vX.Y.Z && git push origin vX.Y.Z
 # → .github/workflows/desktop-release.yml builds sidecar + NSIS, signs, publishes
+# Optional: publish Python package — uv build && uv publish
 ```
+
+See [CHANGELOG.md](CHANGELOG.md) for release notes.
 
 **Signing (required for in-app auto-update):**
 

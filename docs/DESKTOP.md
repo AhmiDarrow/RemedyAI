@@ -102,7 +102,7 @@ event: error         → { message: "..." }
 │              │  │ Composer                  [model] ││
 │              │  │ [multiline input + send/stop]     ││
 │              │  └──────────────────────────────────┘│
-│              │  Status: ● Connected · remedy v0.10.3│
+│              │  Status: ● Connected · remedy v0.10.4│
 └──────────────┴──────────────────────────────────────┘
 ```
 
@@ -170,6 +170,16 @@ event: error         → { message: "..." }
 - [x] Attachments via picker and native drag-and-drop
 - [x] In-app signed auto-update (check → install → relaunch)
 - [x] No Electron dependency
+- [x] Multi-tool ReAct turns keep complete `tool_calls` / tool-result pairing
+  (avoids provider HTTP 400 on large reviews)
+
+## Sidecar agent notes
+
+The desktop chat path is `React UI → FastAPI → BasicRuntime` ReAct loop. Tool
+batches are executed in parallel waves (`MAX_PARALLEL_TOOLS`) but **every**
+assistant tool-call id still receives a tool result message before the next LLM
+request. Incomplete pairing is also sanitized by `ensure_tool_call_pairings`
+immediately before each provider call.
 
 ## Build Toolchain
 

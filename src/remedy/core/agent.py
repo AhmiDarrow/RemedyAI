@@ -10,17 +10,42 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
 from collections.abc import AsyncIterator
 from contextlib import suppress
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 import aiohttp
 
-from pathlib import Path
-
+from remedy.core.errors import format_tool_error
 from remedy.core.providers import ProviderAdapter, get_provider
+from remedy.core.react_policy import (
+    HISTORY_CHAR_BUDGET as _HISTORY_CHAR_BUDGET,
+    HISTORY_MSG_LIMIT as _HISTORY_MSG_LIMIT,
+    MAX_PARALLEL_TOOLS as _MAX_PARALLEL_TOOLS,
+    MAX_REACT_STEPS as _MAX_REACT_STEPS,
+    _build_system_prompt,
+    _looks_like_pseudo_tools,
+    _message_wants_tools,
+    _parse_pseudo_tool_calls,
+    _tool_call_fingerprint,
+    batch_has_tool_errors,
+    message_wants_tools,
+    recovery_nudge_message,
+    tool_content_is_error,
+)
+from remedy.core.react_stream import (
+    StreamRoundState,
+    apply_openai_sse_chunk,
+    build_runtime_system_block,
+    ensure_tool_call_pairings,
+    filter_fresh_tool_calls,
+    finalize_round_text,
+    normalize_tool_calls,
+    parse_sse_data_line,
+    should_enable_tools,
+)
 from remedy.core.runtime import AgentRuntime
 from remedy.core.security import check_dangerous_command
 from remedy.core.workspace import (
@@ -29,13 +54,10 @@ from remedy.core.workspace import (
     resolve_project_path,
     workspace_context_block,
 )
-from remedy.interfaces.config import persona_system_addendum
 from remedy.memory.store import MemoryStore
 from remedy.models import (
     AgentConfig,
-    ChannelKind,
     ChatMessageRole,
-    EventKind,
     GatewayEvent,
     ToolCall,
     ToolResult,
@@ -43,39 +65,6 @@ from remedy.models import (
 from remedy.skills.tool_registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
-
-
-from remedy.core.errors import format_tool_error
-from remedy.core.react_policy import (
-    HISTORY_CHAR_BUDGET as _HISTORY_CHAR_BUDGET,
-    HISTORY_MSG_LIMIT as _HISTORY_MSG_LIMIT,
-    MAX_PARALLEL_TOOLS as _MAX_PARALLEL_TOOLS,
-    MAX_REACT_STEPS as _MAX_REACT_STEPS,
-    RECOVERY_NUDGE,
-    _DEFAULT_SYSTEM_PROMPT,
-    _build_system_prompt,
-    _looks_like_pseudo_tools,
-    _message_wants_tools,
-    _parse_pseudo_tool_calls,
-    _tool_call_fingerprint,
-    batch_has_tool_errors,
-    build_system_prompt,
-    looks_like_pseudo_tools,
-    message_wants_tools,
-    parse_pseudo_tool_calls,
-    recovery_nudge_message,
-    tool_call_fingerprint,
-    tool_content_is_error,
-)
-from remedy.core.react_stream import (
-    StreamRoundState,
-    apply_openai_sse_chunk,
-    build_runtime_system_block,
-    filter_fresh_tool_calls,
-    finalize_round_text,
-    parse_sse_data_line,
-    should_enable_tools,
-)
 
 # Re-export for tests that import from remedy.core.agent
 __all__ = [
@@ -549,7 +538,6 @@ class BasicRuntime(AgentRuntime):
             logger.debug("session history load failed", exc_info=True)
             return []
 
-        out: list[dict[str, Any]] = []
         # Drop trailing user message if API already persisted the current turn.
         if rows and rows[-1].role == ChatMessageRole.USER:
             last = (rows[-1].content or "").strip()
@@ -589,22 +577,33 @@ class BasicRuntime(AgentRuntime):
         seen_fps: set[str],
         result_cache: dict[str, str],
     ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
-        """Run tools in parallel (capped), dedupe repeats, yield (event, tool_msg)."""
+        """Run tools in parallel (capped waves); always yield one tool msg per call id.
 
-        async def _one(tc: dict[str, Any]) -> tuple[str, str, dict[str, Any]]:
+        Critical API contract: every ``tool_calls[].id`` on the preceding assistant
+        message must receive a matching ``role=tool`` message. Cap and fingerprint
+        dedupe may reduce *executions*, but never reduce *results*.
+        """
+        pending = normalize_tool_calls(tool_calls_list)
+        if not pending:
+            return
+
+        # First occurrence of each fingerprint is the execution representative.
+        fp_order: list[str] = []
+        fp_to_tc: dict[str, dict[str, Any]] = {}
+        for tc in pending:
+            fp = _tool_call_fingerprint(tc)
+            if fp not in fp_to_tc:
+                fp_to_tc[fp] = tc
+                fp_order.append(fp)
+
+        async def _run_one(tc: dict[str, Any]) -> str:
             fn = tc.get("function") or {}
             name = (fn.get("name") or "").strip()
             raw_args = fn.get("arguments") or "{}"
             fp = _tool_call_fingerprint(tc)
-            call_id = tc.get("id") or str(uuid4())
 
             if fp in result_cache:
-                content_str = result_cache[fp]
-                return name, content_str, {
-                    "role": "tool",
-                    "tool_call_id": call_id,
-                    "content": content_str,
-                }
+                return result_cache[fp]
 
             try:
                 args = (
@@ -626,70 +625,66 @@ class BasicRuntime(AgentRuntime):
                     else json.dumps(payload, default=str)
                 )
             else:
-                # Prefer already-formatted error strings (with Suggestion lines).
                 content_str = result.error or format_tool_error(
                     "tool failed",
                     code="TOOL_FAILED",
                     tool_name=name or "unknown",
                     suggestion="Retry with corrected arguments or a different tool.",
                 )
-            # Cap tool payloads — keeps multi-step turns fast and under context limits.
             if len(content_str) > 48_000:
                 content_str = content_str[:48_000] + "\n…[tool output truncated]"
             result_cache[fp] = content_str
             seen_fps.add(fp)
-            return name, content_str, {
-                "role": "tool",
-                "tool_call_id": call_id,
-                "content": content_str,
-            }
+            return content_str
 
-        # Deduplicate within this batch (keep first of each fingerprint).
-        unique: list[dict[str, Any]] = []
-        batch_seen: set[str] = set()
-        for tc in tool_calls_list:
-            name = ((tc.get("function") or {}).get("name") or "").strip()
-            if not name:
-                continue
-            fp = _tool_call_fingerprint(tc)
-            if fp in batch_seen:
-                continue
-            batch_seen.add(fp)
-            unique.append(tc)
-            if len(unique) >= _MAX_PARALLEL_TOOLS:
-                break
+        # Execute only fingerprints not already cached; never drop remainder past cap.
+        to_run = [fp for fp in fp_order if fp not in result_cache]
+        for wave_start in range(0, len(to_run), _MAX_PARALLEL_TOOLS):
+            wave = to_run[wave_start : wave_start + _MAX_PARALLEL_TOOLS]
+            for fp in wave:
+                name = ((fp_to_tc[fp].get("function") or {}).get("name") or "").strip()
+                yield f"@@tool_call:{name}", {}
 
-        if not unique:
-            return
-
-        # Notify UI of starts, then run in parallel for speed.
-        for tc in unique:
-            name = ((tc.get("function") or {}).get("name") or "").strip()
-            yield f"@@tool_call:{name}", {}
-
-        results = await asyncio.gather(
-            *[_one(tc) for tc in unique], return_exceptions=True
-        )
-        for item in results:
-            if isinstance(item, BaseException):
-                logger.exception("parallel tool failed: %s", item)
-                err_msg = {
-                    "role": "tool",
-                    "tool_call_id": str(uuid4()),
-                    "content": format_tool_error(
+            results = await asyncio.gather(
+                *[_run_one(fp_to_tc[fp]) for fp in wave],
+                return_exceptions=True,
+            )
+            for fp, item in zip(wave, results, strict=True):
+                name = ((fp_to_tc[fp].get("function") or {}).get("name") or "").strip()
+                if isinstance(item, BaseException):
+                    logger.exception("parallel tool failed: %s", item)
+                    content_str = format_tool_error(
                         str(item),
                         code="TOOL_EXCEPTION",
-                        tool_name="unknown",
+                        tool_name=name or "unknown",
                         suggestion=(
                             "Retry with corrected arguments or a different tool "
                             "(list_dir / file_read)."
                         ),
-                    ),
-                }
-                yield "@@tool_result:error", err_msg
-                continue
-            name, _content, tool_msg = item
-            yield f"@@tool_result:{name}", tool_msg
+                    )
+                    result_cache[fp] = content_str
+                    seen_fps.add(fp)
+                # Success path already wrote result_cache inside _run_one.
+
+        # Always emit one tool result per original tool_call id (API contract).
+        for tc in pending:
+            fp = _tool_call_fingerprint(tc)
+            name = ((tc.get("function") or {}).get("name") or "").strip()
+            content_str = result_cache.get(
+                fp,
+                format_tool_error(
+                    "tool produced no result",
+                    code="TOOL_EMPTY",
+                    tool_name=name or "unknown",
+                    suggestion="Retry the tool or answer from context.",
+                ),
+            )
+            call_id = tc.get("id") or str(uuid4())
+            yield f"@@tool_result:{name or 'unknown'}", {
+                "role": "tool",
+                "tool_call_id": call_id,
+                "content": content_str,
+            }
 
     async def _call_llm_stream(
         self,
@@ -780,6 +775,8 @@ class BasicRuntime(AgentRuntime):
                             }
                         )
 
+                    # Never send incomplete tool_calls/tool pairings (HTTP 400).
+                    messages[:] = ensure_tool_call_pairings(messages)
                     body = self._provider.build_body(
                         model=self._llm_model,
                         messages=messages,
@@ -835,7 +832,6 @@ class BasicRuntime(AgentRuntime):
 
                         content_parts = round_state.content_parts
                         reasoning_parts = round_state.reasoning_parts
-                        tool_call_acc = round_state.tool_call_acc
 
                     tool_calls_list = round_state.tool_calls_list(collected)
 
@@ -867,6 +863,7 @@ class BasicRuntime(AgentRuntime):
                         if recovered:
                             pseudo_recovery_done = True
                             tools = all_tools  # ensure schemas stay available
+                            recovered = normalize_tool_calls(recovered)
                             yield "@@tool_calls"
                             messages.append(
                                 {
@@ -925,7 +922,9 @@ class BasicRuntime(AgentRuntime):
                             if _looks_like_pseudo_tools(text_out):
                                 # Tools were off during live stream — re-enable and recover.
                                 if all_tools and not pseudo_recovery_done:
-                                    recovered = _parse_pseudo_tool_calls(text_out)
+                                    recovered = normalize_tool_calls(
+                                        _parse_pseudo_tool_calls(text_out)
+                                    )
                                     if recovered:
                                         pseudo_recovery_done = True
                                         tools = all_tools
@@ -1011,23 +1010,26 @@ class BasicRuntime(AgentRuntime):
                         return
 
                     # Filter out exact repeats of prior tool calls this turn.
-                    fresh_calls = filter_fresh_tool_calls(tool_calls_list, seen_fps)
+                    fresh_calls = normalize_tool_calls(
+                        filter_fresh_tool_calls(tool_calls_list, seen_fps)
+                    )
                     if not fresh_calls:
                         # Model is looping the same tools — force a final answer next.
+                        looped = normalize_tool_calls(tool_calls_list)
                         messages.append(
                             {
                                 "role": "assistant",
                                 "content": collected.get("content"),
-                                "tool_calls": tool_calls_list,
+                                "tool_calls": looped,
                             }
                         )
-                        for tc in tool_calls_list:
+                        for tc in looped:
                             fp = _tool_call_fingerprint(tc)
                             cached = result_cache.get(fp, "(already retrieved)")
                             messages.append(
                                 {
                                     "role": "tool",
-                                    "tool_call_id": tc.get("id") or str(uuid4()),
+                                    "tool_call_id": tc["id"],
                                     "content": cached,
                                 }
                             )
@@ -1086,6 +1088,7 @@ class BasicRuntime(AgentRuntime):
                         ),
                     }
                 )
+                messages[:] = ensure_tool_call_pairings(messages)
                 body = self._provider.build_body(
                     model=self._llm_model,
                     messages=messages,
@@ -1095,30 +1098,29 @@ class BasicRuntime(AgentRuntime):
                 try:
                     async with aiohttp.ClientSession(
                         timeout=aiohttp.ClientTimeout(total=60)
-                    ) as http2:
-                        async with http2.post(
-                            endpoint, headers=headers, json=body
-                        ) as resp:
-                            if resp.status == 200 and self._provider.provider_name == "openai":
-                                async for line in resp.content:
-                                    line_text = line.decode("utf-8").strip()
-                                    if not line_text or line_text.startswith(":"):
-                                        continue
-                                    if line_text == "data: [DONE]":
-                                        break
-                                    if line_text.startswith("data: "):
-                                        line_text = line_text[6:]
-                                    try:
-                                        chunk = json.loads(line_text)
-                                    except json.JSONDecodeError:
-                                        continue
-                                    delta = (chunk.get("choices") or [{}])[0].get(
-                                        "delta"
-                                    ) or {}
-                                    piece = delta.get("content")
-                                    if piece:
-                                        produced_user_text = True
-                                        yield piece
+                    ) as http2, http2.post(
+                        endpoint, headers=headers, json=body
+                    ) as resp:
+                        if resp.status == 200 and self._provider.provider_name == "openai":
+                            async for line in resp.content:
+                                line_text = line.decode("utf-8").strip()
+                                if not line_text or line_text.startswith(":"):
+                                    continue
+                                if line_text == "data: [DONE]":
+                                    break
+                                if line_text.startswith("data: "):
+                                    line_text = line_text[6:]
+                                try:
+                                    chunk = json.loads(line_text)
+                                except json.JSONDecodeError:
+                                    continue
+                                delta = (chunk.get("choices") or [{}])[0].get(
+                                    "delta"
+                                ) or {}
+                                piece = delta.get("content")
+                                if piece:
+                                    produced_user_text = True
+                                    yield piece
                 except Exception:
                     logger.debug("final synthesis failed", exc_info=True)
             if not produced_user_text:

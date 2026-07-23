@@ -25,7 +25,7 @@ uv sync
 ### Verify
 
 ```bash
-remedy --version   # remedy 0.10.3 (or current package version)
+remedy --version   # remedy 0.10.4 (or current package version)
 remedy --help      # Lists all commands
 ```
 
@@ -625,3 +625,28 @@ def teardown_plugin():
 ```
 
 Available hooks: `on_startup`, `on_shutdown`, `pre_tool_exec`, `post_tool_exec`, `on_event`, `on_memory_save`, `on_skill_loaded`.
+
+---
+
+## Troubleshooting
+
+### `[LLM ERROR — HTTP 400] … tool_calls must be followed by tool messages`
+
+OpenAI-compatible providers require every assistant `tool_calls` entry to have a matching
+`role: tool` message with the same `tool_call_id` before the next model request.
+
+Remedy’s ReAct loop (v0.10.4+) always pairs results for every call id, even when:
+
+- many tools run in parallel (over the concurrency cap),
+- identical calls are fingerprint-deduped,
+- a tool raises an exception mid-batch.
+
+If you still see this on an older install, upgrade (`pip install -U remedy-ai` or install
+the latest desktop release), restart the app/server, and prefer a new chat session for
+large multi-tool turns such as “review project”.
+
+### Long answers cut off mid-stream
+
+The stream loop auto-continues when the provider returns `finish_reason=length` /
+`max_tokens` (up to a few continuations). If answers still stop early, check provider
+token limits and model `max_tokens` settings in `~/.remedy/config.toml`.

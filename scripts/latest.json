@@ -1,11 +1,11 @@
 {
-  "version": "v0.10.3",
-  "notes": "Remedy Desktop v0.10.3 \u2014 Windows installer",
-  "pub_date": "2026-07-23T16:38:41Z",
+  "version": "v0.10.4",
+  "notes": "Remedy Desktop v0.10.4 \u2014 fix multi-tool ReAct HTTP 400 (incomplete tool_calls pairing on large turns like review project); normalize tool-call ids; sanitize message history before each LLM request.",
+  "pub_date": "2026-07-23T18:33:31Z",
   "platforms": {
     "windows-x86_64": {
       "signature": "",
-      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.10.3/Remedy_Desktop_0.10.3_x64-setup.exe"
+      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.10.4/Remedy_Desktop_0.10.4_x64-setup.exe"
     }
   }
 }
