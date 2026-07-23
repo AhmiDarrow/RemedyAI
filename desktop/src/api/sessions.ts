@@ -12,6 +12,7 @@ export async function createSession(params: {
   title?: string
   model?: string
   agent?: string
+  project_path?: string
 }): Promise<ChatSession> {
   return apiFetch<ChatSession>('/sessions', {
     method: 'POST',
@@ -25,7 +26,7 @@ export async function getSession(sessionId: string): Promise<ChatSession> {
 
 export async function updateSession(
   sessionId: string,
-  updates: { title?: string; model?: string; agent?: string },
+  updates: { title?: string; model?: string; agent?: string; project_path?: string },
 ): Promise<ChatSession> {
   return apiFetch<ChatSession>(`/sessions/${sessionId}`, {
     method: 'PATCH',

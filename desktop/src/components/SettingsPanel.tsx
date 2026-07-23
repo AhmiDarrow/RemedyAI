@@ -215,9 +215,18 @@ export function SettingsPanel({
             {/* Project */}
             <section>
               <div className="font-semibold mb-2" style={{ color: 'var(--text-primary)', fontSize: '0.75rem' }}>
-                Project
+                Project workspace
               </div>
-              <Field label="Project path" value={projectPath} onChange={setProjectPath} placeholder="." />
+              <Field
+                label="Default project folder"
+                value={projectPath}
+                onChange={setProjectPath}
+                placeholder="e.g. C:\Users\You\Projects\MyApp"
+              />
+              <div className="text-[10px] leading-snug" style={{ color: 'var(--text-muted)' }}>
+                New chat sessions use this as the agent working directory (file tools, shell cwd, and @file search),
+                like opening a folder in OpenCode.
+              </div>
             </section>
 
             {/* Theme */}

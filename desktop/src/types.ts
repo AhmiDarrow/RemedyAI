@@ -3,6 +3,7 @@ export interface ChatSession {
   title: string
   model: string | null
   agent: string | null
+  project_path?: string | null
   message_count: number
   created_at: string
   updated_at: string

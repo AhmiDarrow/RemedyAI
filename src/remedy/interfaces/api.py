@@ -117,6 +117,7 @@ class UpdateSessionRequest(BaseModel):
     title: str | None = None
     model: str | None = None
     agent: str | None = None
+    project_path: str | None = None
 
 
 class SendMessageRequest(BaseModel):
@@ -313,19 +314,23 @@ def _apply_llm_to_runtime(
     api_key: str | None = None,
     persona: str | None = None,
     name: str | None = None,
+    project_path: str | None = None,
 ) -> None:
     """Push LLM settings into the live runtime so chat uses the saved config."""
     if runtime is None:
         return
     if hasattr(runtime, "reconfigure_llm"):
-        runtime.reconfigure_llm(
-            provider=provider,
-            model=model,
-            base_url=base_url,
-            api_key=api_key,
-            persona=persona,
-            name=name,
-        )
+        kwargs: dict[str, Any] = {
+            "provider": provider,
+            "model": model,
+            "base_url": base_url,
+            "api_key": api_key,
+            "persona": persona,
+            "name": name,
+        }
+        if project_path is not None:
+            kwargs["project_path"] = project_path
+        runtime.reconfigure_llm(**kwargs)
         return
     # Fallback for older runtimes without reconfigure_llm
     if provider:
@@ -336,6 +341,8 @@ def _apply_llm_to_runtime(
         runtime._llm_base_url = base_url
     if api_key is not None and api_key != "":
         runtime._llm_api_key = api_key
+    if project_path is not None and hasattr(runtime, "set_project_path"):
+        runtime.set_project_path(project_path, as_default=True)
 
 
 def _write_config(path: Path, cfg: dict[str, Any]) -> None:
@@ -529,24 +536,51 @@ def create_app(
         sessions = await memory.list_chat_sessions(limit=limit, offset=offset)
         return {"sessions": sessions}
 
+    def _default_project_path() -> str | None:
+        """Resolved default workspace from config / runtime."""
+        from remedy.core.workspace import default_project_from_config, resolve_project_path
+
+        cfg = load_config()
+        if runtime is not None and hasattr(runtime, "effective_project_path"):
+            try:
+                return str(runtime.effective_project_path())
+            except Exception:
+                pass
+        return str(default_project_from_config(cfg))
+
     @app.post("/api/sessions")
     async def create_chat_session(req: CreateSessionRequest):
         if memory is None:
             raise HTTPException(503, "Memory store not available")
 
+        from remedy.core.workspace import ensure_project_dir, resolve_project_path
         from remedy.models import ChatSession as CS
+
+        # Inherit global project_path when the client does not pass one.
+        raw_project = req.project_path or load_config().get("project_path")
+        project_path = None
+        if raw_project and str(raw_project).strip() and str(raw_project).strip() not in (".", "./"):
+            try:
+                project_path = str(ensure_project_dir(resolve_project_path(str(raw_project))))
+            except Exception:
+                project_path = str(resolve_project_path(str(raw_project)))
+
         session = CS(
             title=req.title,
             model=req.model,
             agent=req.agent,
-            project_path=req.project_path,
+            project_path=project_path,
         )
         saved = await memory.create_chat_session(session)
         return {
             "id": saved.id,
             "title": saved.title,
             "model": saved.model,
+            "agent": saved.agent,
+            "project_path": saved.project_path,
+            "message_count": saved.message_count,
             "created_at": saved.created_at.isoformat() if saved.created_at else None,
+            "updated_at": saved.updated_at.isoformat() if saved.updated_at else None,
         }
 
     @app.get("/api/sessions/{session_id}")
@@ -561,6 +595,7 @@ def create_app(
             "title": session.title,
             "model": session.model,
             "agent": session.agent,
+            "project_path": session.project_path,
             "message_count": session.message_count,
             "created_at": session.created_at.isoformat() if session.created_at else None,
             "updated_at": session.updated_at.isoformat() if session.updated_at else None,
@@ -571,6 +606,15 @@ def create_app(
         if memory is None:
             raise HTTPException(503, "Memory store not available")
         fields = {k: v for k, v in req.model_dump().items() if v is not None}
+        if "project_path" in fields and fields["project_path"]:
+            from remedy.core.workspace import ensure_project_dir, resolve_project_path
+
+            try:
+                fields["project_path"] = str(
+                    ensure_project_dir(resolve_project_path(str(fields["project_path"])))
+                )
+            except Exception:
+                fields["project_path"] = str(resolve_project_path(str(fields["project_path"])))
         session = await memory.update_chat_session(session_id, **fields)
         if session is None:
             raise HTTPException(404, "Session not found")
@@ -579,6 +623,7 @@ def create_app(
             "title": session.title,
             "model": session.model,
             "agent": session.agent,
+            "project_path": session.project_path,
             "updated_at": session.updated_at.isoformat() if session.updated_at else None,
         }
 
@@ -635,11 +680,13 @@ def create_app(
             from remedy.models import ChatMessage, ChatSession
             existing = await memory.get_chat_session(session_id)
             if existing is None:
+                default_proj = load_config().get("project_path")
                 await memory.create_chat_session(ChatSession(
                     id=session_id,
                     title=req.message[:60],
                     model=req.model,
                     agent=req.agent,
+                    project_path=default_proj,
                 ))
             elif req.model and req.model != existing.model:
                 await memory.update_chat_session(session_id, model=req.model)
@@ -682,11 +729,13 @@ def create_app(
             from remedy.models import ChatMessage, ChatSession
             existing = await memory.get_chat_session(session_id)
             if existing is None:
+                default_proj = load_config().get("project_path")
                 await memory.create_chat_session(ChatSession(
                     id=session_id,
                     title=req.message[:60],
                     model=req.model,
                     agent=req.agent,
+                    project_path=default_proj,
                 ))
             elif req.model and req.model != existing.model:
                 await memory.update_chat_session(session_id, model=req.model)
@@ -1147,34 +1196,108 @@ def create_app(
             ]
         }
 
-    # -- file search (cwd-jailed) ---------------------------------------------
-    def _files_base() -> Path:
-        override = os.environ.get("REMEDY_FILES_ROOT", "").strip()
-        return Path(override).expanduser().resolve() if override else Path.cwd().resolve()
+    # -- file search (project-jailed) ----------------------------------------
+    def _files_base(session_id: str | None = None) -> Path:
+        """Workspace root: session project_path > config project_path > env > cwd."""
+        from remedy.core.workspace import (
+            default_project_from_config,
+            ensure_project_dir,
+            resolve_project_path,
+        )
+
+        cfg = load_config()
+        raw: str | None = None
+        # Session override (async path sets this via query — sync helpers use config only
+        # unless caller passes session path).
+        if session_id and memory is not None:
+            # Best-effort: memory methods are async; use config/runtime for sync helper.
+            pass
+        if runtime is not None and hasattr(runtime, "effective_project_path"):
+            try:
+                return ensure_project_dir(runtime.effective_project_path())
+            except Exception:
+                pass
+        raw = (
+            cfg.get("project_path")
+            or os.environ.get("REMEDY_PROJECT_PATH")
+            or os.environ.get("REMEDY_FILES_ROOT")
+            or None
+        )
+        try:
+            return ensure_project_dir(resolve_project_path(raw))
+        except Exception:
+            return default_project_from_config(cfg)
 
     def _resolve_jailed(path: str, base: Path) -> Path:
         """Resolve path under base; reject traversal."""
+        from remedy.core.workspace import jail_path
+
         if path in (".", "", None):
             return base
         try:
-            return safe_path(path, base_dir=base)
+            return jail_path(path, base)
         except SecurityError:
-            # Also allow absolute paths that still stay under base
             candidate = Path(path).expanduser().resolve()
             candidate.relative_to(base)
             return candidate
 
+    @app.get("/api/workspace")
+    async def get_workspace(session_id: str | None = Query(default=None)):
+        """Return the active project/workspace root for UI and tools."""
+        from remedy.core.workspace import ensure_project_dir, list_workspace_entries, resolve_project_path
+
+        root: Path | None = None
+        source = "cwd"
+        if session_id and memory is not None:
+            sess = await memory.get_chat_session(session_id)
+            if sess and sess.project_path:
+                root = resolve_project_path(sess.project_path)
+                source = "session"
+        if root is None and runtime is not None and hasattr(runtime, "effective_project_path"):
+            try:
+                root = runtime.effective_project_path()
+                source = "runtime"
+            except Exception:
+                root = None
+        if root is None:
+            root = _files_base()
+            source = "config"
+        try:
+            root = ensure_project_dir(root)
+        except Exception:
+            pass
+        return {
+            "project_path": str(root),
+            "source": source,
+            "entries": list_workspace_entries(root),
+        }
+
     @app.get("/api/files")
-    async def list_files(path: str = Query(default=".")):
-        """List files in a directory for @file autocompletion (jailed to cwd)."""
-        base = _files_base()
+    async def list_files(
+        path: str = Query(default="."),
+        session_id: str | None = Query(default=None),
+    ):
+        """List files in a directory for @file autocompletion (jailed to project)."""
+        if session_id and memory is not None:
+            sess = await memory.get_chat_session(session_id)
+            if sess and sess.project_path:
+                from remedy.core.workspace import ensure_project_dir, resolve_project_path
+
+                try:
+                    base = ensure_project_dir(resolve_project_path(sess.project_path))
+                except Exception:
+                    base = _files_base()
+            else:
+                base = _files_base()
+        else:
+            base = _files_base()
         try:
             root = _resolve_jailed(path, base)
         except (SecurityError, ValueError):
-            return {"files": [], "path": path, "error": "path outside allowed directory"}
+            return {"files": [], "path": path, "error": "path outside allowed directory", "root": str(base)}
         try:
             if not root.exists():
-                return {"files": [], "path": path}
+                return {"files": [], "path": path, "root": str(base)}
             entries = []
             for p in sorted(root.iterdir()):
                 if p.name.startswith(".") and p.name != ".":
@@ -1188,18 +1311,37 @@ def create_app(
                     "path": rel,
                     "is_dir": p.is_dir(),
                 })
-            return {"files": entries[:200], "path": str(root.relative_to(base) if root != base else ".")}
+            return {
+                "files": entries[:200],
+                "path": str(root.relative_to(base) if root != base else "."),
+                "root": str(base),
+            }
         except Exception:
-            return {"files": [], "path": path}
+            return {"files": [], "path": path, "root": str(base)}
 
     @app.get("/api/files/search")
-    async def search_files(query: str = Query(..., min_length=1)):
-        """Search the jailed directory tree for matching files."""
-        base = _files_base()
+    async def search_files(
+        query: str = Query(..., min_length=1),
+        session_id: str | None = Query(default=None),
+    ):
+        """Search the project directory tree for matching files."""
+        if session_id and memory is not None:
+            sess = await memory.get_chat_session(session_id)
+            if sess and sess.project_path:
+                from remedy.core.workspace import ensure_project_dir, resolve_project_path
+
+                try:
+                    base = ensure_project_dir(resolve_project_path(sess.project_path))
+                except Exception:
+                    base = _files_base()
+            else:
+                base = _files_base()
+        else:
+            base = _files_base()
         # Prevent glob injection / path escapes via query
         safe_query = query.replace("/", "").replace("\\", "").replace("..", "")
         if not safe_query:
-            return {"query": query, "results": []}
+            return {"query": query, "results": [], "root": str(base)}
         try:
             results = []
             for p in base.rglob(f"*{safe_query}*"):
@@ -1218,9 +1360,13 @@ def create_app(
                 })
                 if len(results) >= 50:
                     break
-            return {"query": query, "results": sorted(results, key=lambda r: len(r["path"]))}
+            return {
+                "query": query,
+                "results": sorted(results, key=lambda r: len(r["path"])),
+                "root": str(base),
+            }
         except Exception:
-            return {"query": query, "results": []}
+            return {"query": query, "results": [], "root": str(base)}
 
     # -- message revert ---------------------------------------------------------
     @app.post("/api/sessions/{session_id}/messages/{msg_id}/revert")
@@ -1301,7 +1447,12 @@ def create_app(
             "llm_api_key_set": bool(cfg.get("llm_api_key") or os.environ.get("REMEDY_LLM_API_KEY")),
             "name": cfg.get("name", "Remedy"),
             "persona": cfg.get("persona", "default"),
-            "project_path": cfg.get("project_path", os.getcwd()),
+            "project_path": cfg.get("project_path")
+            or (
+                str(runtime.effective_project_path())
+                if runtime is not None and hasattr(runtime, "effective_project_path")
+                else os.getcwd()
+            ),
             "version": version,
             "config_exists": config_path is not None,
             "setup_completed": setup_completed,
@@ -1333,6 +1484,22 @@ def create_app(
         updates["llm_model"] = model
         updates["llm_base_url"] = base_url
 
+        # Normalize project_path to an absolute directory when provided.
+        if "project_path" in updates and updates["project_path"] is not None:
+            from remedy.core.workspace import ensure_project_dir, resolve_project_path
+
+            raw_pp = str(updates["project_path"]).strip()
+            if raw_pp and raw_pp not in (".", "./"):
+                try:
+                    updates["project_path"] = str(
+                        ensure_project_dir(resolve_project_path(raw_pp))
+                    )
+                except Exception:
+                    updates["project_path"] = str(resolve_project_path(raw_pp))
+            else:
+                # Explicit clear → store empty so sessions fall back to cwd
+                updates["project_path"] = ""
+
         cfg.update(updates)
         _write_config(config_path, cfg)
 
@@ -1341,7 +1508,7 @@ def create_app(
         if isinstance(cache, dict):
             cache.clear()
 
-        # Hot-reload live agent so the next chat uses the new endpoint/model/persona.
+        # Hot-reload live agent so the next chat uses the new endpoint/model/persona/project.
         api_key_for_runtime = updates.get("llm_api_key")
         _apply_llm_to_runtime(
             runtime,
@@ -1351,6 +1518,7 @@ def create_app(
             api_key=api_key_for_runtime,
             persona=updates.get("persona"),
             name=updates.get("name"),
+            project_path=updates.get("project_path", cfg.get("project_path")),
         )
 
         changes = list(updates.keys())
@@ -1362,6 +1530,7 @@ def create_app(
             "llm_model": model,
             "llm_base_url": base_url,
             "persona": cfg.get("persona"),
+            "project_path": cfg.get("project_path"),
         }
 
     # -- updates ------------------------------------------------------------

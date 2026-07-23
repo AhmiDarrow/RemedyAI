@@ -351,3 +351,7 @@ class AgentConfig(BaseModel):
     llm_api_key: str = Field(default="", description="API key for LLM calls")
     llm_model: str = Field(default="gpt-4o-mini", description="LLM model name")
     llm_base_url: str = Field(default="https://api.openai.com/v1", description="LLM API base URL")
+    project_path: str | None = Field(
+        default=None,
+        description="Default project/workspace directory for agent file tools and shell cwd",
+    )

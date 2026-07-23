@@ -339,7 +339,10 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
           {step === 'workspace' && (
             <div className="space-y-3">
               <div className="text-sm" style={{ color: 'var(--text-primary)' }}>
-                <p>Remedy can reference files from a project folder with <code style={mutedStyles}>@file</code> and <code style={mutedStyles}>@folder</code> commands in chat.</p>
+                <p>
+                  Set a default project folder. The agent uses it as the working directory for tools and
+                  shell commands, and for <code style={mutedStyles}>@file</code> / <code style={mutedStyles}>@folder</code> search.
+                </p>
               </div>
               <div>
                 <label

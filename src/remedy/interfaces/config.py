@@ -437,6 +437,7 @@ def config_to_agent_config(config: dict[str, Any]) -> AgentConfig:
             "gpt-4o-mini",
         ),
         llm_base_url=llm_base_url,
+        project_path=config.get("project_path") or os.environ.get("REMEDY_PROJECT_PATH") or None,
     )
 
 
@@ -448,6 +449,9 @@ def generate_default_config(home_dir: Path) -> str:
 name = "Remedy"
 persona = "default"
 home_dir = "{home_dir.as_posix()}"
+
+# Default project/workspace folder for the agent (file tools, shell cwd, @file UI)
+# project_path = "C:/Users/You/Projects/MyApp"
 
 # --- LLM Provider ---
 # Supported providers: openai, anthropic, google, deepseek, openrouter, ollama, custom
