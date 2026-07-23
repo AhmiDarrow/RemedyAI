@@ -2,6 +2,20 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.10.5] — 2026-07-23
+
+### Fixed
+
+- **Check for Updates no longer looks like a no-op** — errors were swallowed and
+  the Settings panel only rendered status when `updateInfo` was set, so failed
+  checks left a blank area after the button.
+- Desktop update fetch tries **all** metadata sources (no longer aborts after the
+  first URL error), uses a **15s timeout**, and runs off the UI thread.
+- Frontend always surfaces current/latest/up-to-date/error after a check; falls
+  back to `/api/updates/check` when the Tauri path reports an error.
+- Python `/api/updates/check` also tries GitHub API when `latest.json` fails and
+  returns combined error strings instead of silent desktop failures.
+
 ## [0.10.4] — 2026-07-23
 
 ### Fixed

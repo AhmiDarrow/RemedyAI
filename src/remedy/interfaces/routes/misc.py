@@ -74,12 +74,18 @@ def register_misc_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
     # -- updates ------------------------------------------------------------
     @app.get("/api/updates/check")
     async def check_updates():
+        """Report package + desktop release versions.
+
+        Desktop UI prefers the Tauri ``check_desktop_update`` command; this
+        endpoint is the browser/dev fallback and a secondary path when Rust
+        GitHub fetch fails.
+        """
         current = version
         latest_python = None
         latest_desktop = None
         release_url = None
         installer_url = None
-        error = None
+        errors: list[str] = []
 
         try:
             import json as _json
@@ -87,46 +93,73 @@ def register_misc_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
 
             req = _urllib.Request(
                 "https://pypi.org/pypi/remedy-ai/json",
-                headers={"Accept": "application/json"},
+                headers={"Accept": "application/json", "User-Agent": "Remedy-Updater"},
             )
-            with _urllib.request.urlopen(req, timeout=8) as resp:
+            with _urllib.request.urlopen(req, timeout=10) as resp:
                 data = _json.loads(resp.read().decode())
                 latest_python = data["info"]["version"]
         except Exception as e:
-            error = f"PyPI check failed: {e}"
+            errors.append(f"PyPI: {e}")
 
-        try:
-            import json as _json
-            import urllib.request as _urllib
+        # Prefer latest.json, then GitHub Releases API.
+        for url in (
+            "https://github.com/AhmiDarrow/RemedyAI/releases/latest/download/latest.json",
+            "https://api.github.com/repos/AhmiDarrow/RemedyAI/releases/latest",
+        ):
+            try:
+                import json as _json
+                import urllib.request as _urllib
 
-            req = _urllib.Request(
-                "https://github.com/AhmiDarrow/RemedyAI/releases/latest/download/latest.json",
-                headers={"Accept": "application/json", "User-Agent": "Remedy-Updater"},
-            )
-            with _urllib.request.urlopen(req, timeout=8) as resp:
-                data = _json.loads(resp.read().decode())
-                latest_desktop = str(data.get("version") or "").lstrip("v")
-                release_url = data.get("url") or (
-                    "https://github.com/AhmiDarrow/RemedyAI/releases/latest"
+                req = _urllib.Request(
+                    url,
+                    headers={
+                        "Accept": "application/json",
+                        "User-Agent": "Remedy-Updater",
+                    },
                 )
-                # Tauri / NSIS installer (Ollama-style one-click update target)
-                installer_url = (
-                    (data.get("platforms") or {})
-                    .get("windows-x86_64", {})
-                    .get("url")
-                ) or data.get("url")
-        except Exception:
-            pass
+                with _urllib.request.urlopen(req, timeout=10) as resp:
+                    data = _json.loads(resp.read().decode())
+                if "version" in data:
+                    latest_desktop = str(data.get("version") or "").lstrip("v")
+                    release_url = data.get("url") or (
+                        "https://github.com/AhmiDarrow/RemedyAI/releases/latest"
+                    )
+                    installer_url = (
+                        (data.get("platforms") or {})
+                        .get("windows-x86_64", {})
+                        .get("url")
+                    ) or data.get("url")
+                    break
+                if "tag_name" in data:
+                    latest_desktop = str(data.get("tag_name") or "").lstrip("v")
+                    release_url = data.get("html_url") or (
+                        "https://github.com/AhmiDarrow/RemedyAI/releases/latest"
+                    )
+                    for asset in data.get("assets") or []:
+                        name = str(asset.get("name") or "")
+                        lower = name.lower()
+                        if name.endswith(("-setup.exe", "_x64-setup.exe")) or (
+                            name.endswith(".exe")
+                            and ("setup" in lower or "remedy" in lower)
+                        ):
+                            installer_url = asset.get("browser_download_url")
+                            break
+                    break
+            except Exception as e:
+                errors.append(f"GitHub ({url.split('/')[-1]}): {e}")
 
         update_available = False
-        if latest_python:
-            from remedy.interfaces.updater import _parse_version
-            if _parse_version(latest_python) > _parse_version(current):
-                update_available = True
-        if latest_desktop:
-            from remedy.interfaces.updater import _parse_version
-            if _parse_version(latest_desktop) > _parse_version(current):
-                update_available = True
+        from remedy.interfaces.updater import _parse_version
+
+        # Desktop installer is the product of record for the app.
+        if latest_desktop and _parse_version(latest_desktop) > _parse_version(current):
+            update_available = True
+        elif (
+            latest_python
+            and not latest_desktop
+            and _parse_version(latest_python) > _parse_version(current)
+        ):
+            update_available = True
 
         return {
             "current_version": current,
@@ -135,7 +168,7 @@ def register_misc_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
             "release_url": release_url,
             "installer_url": installer_url,
             "update_available": update_available,
-            "error": error,
+            "error": " · ".join(errors) if errors else None,
         }
 
     def _yaml_schema() -> str:

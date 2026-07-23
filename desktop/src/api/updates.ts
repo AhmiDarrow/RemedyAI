@@ -30,13 +30,33 @@ export async function checkUpdates(): Promise<UpdateInfo> {
   return apiFetch<UpdateInfo>('/updates/check')
 }
 
-/** Preferred path in the desktop shell — talks to Rust for GitHub installer URL. */
-export async function checkDesktopUpdate(): Promise<DesktopUpdateInfo | null> {
-  if (!isTauri()) return null
+/**
+ * Preferred path in the desktop shell — talks to Rust for GitHub installer URL.
+ * Always returns a result object (never null) so the UI can show status/errors.
+ */
+export async function checkDesktopUpdate(): Promise<DesktopUpdateInfo> {
+  if (!isTauri()) {
+    return {
+      current_version: 'unknown',
+      latest_version: 'unknown',
+      update_available: false,
+      download_url: null,
+      release_notes: null,
+      error: 'Not running inside the desktop shell',
+    }
+  }
   try {
     return await tauriInvoke<DesktopUpdateInfo>('check_desktop_update')
-  } catch {
-    return null
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return {
+      current_version: 'unknown',
+      latest_version: 'unknown',
+      update_available: false,
+      download_url: null,
+      release_notes: null,
+      error: `Desktop update check failed: ${msg}`,
+    }
   }
 }
 

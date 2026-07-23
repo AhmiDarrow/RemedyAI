@@ -281,58 +281,82 @@ export function SettingsPanel({
 
               <div className="mt-3 pt-3 border-t" style={{ borderColor: 'var(--border)' }}>
                 <button
-                  onClick={onCheckUpdates}
+                  type="button"
+                  onClick={() => {
+                    void onCheckUpdates()
+                  }}
                   disabled={checkingUpdates}
                   className="w-full py-1.5 rounded text-xs font-medium transition-colors"
                   style={{
-                    background: 'var(--bg-tertiary)',
+                    background: checkingUpdates ? 'var(--bg-secondary)' : 'var(--bg-tertiary)',
                     color: checkingUpdates ? 'var(--text-muted)' : 'var(--text-primary)',
                     border: '1px solid var(--border)',
+                    cursor: checkingUpdates ? 'wait' : 'pointer',
                   }}
                 >
-                  {checkingUpdates ? 'Checking...' : 'Check for Updates'}
+                  {checkingUpdates ? 'Checking for updates…' : 'Check for Updates'}
                 </button>
-                {updateInfo && (
-                  <div className="mt-2 space-y-1">
-                    <div className="flex justify-between text-xs">
-                      <span style={{ color: 'var(--text-muted)' }}>Current</span>
-                      <span style={{ color: 'var(--text-primary)' }}>{updateInfo.current_version}</span>
+                {/* Always reserve status area so a check never looks like a no-op */}
+                <div className="mt-2 space-y-1 min-h-[2.5rem]">
+                  {checkingUpdates && !updateInfo && (
+                    <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                      Contacting GitHub releases…
                     </div>
-                    {(updateInfo.latest_desktop || updateInfo.latest_python) && (
+                  )}
+                  {updateInfo && (
+                    <>
                       <div className="flex justify-between text-xs">
-                        <span style={{ color: 'var(--text-muted)' }}>Latest</span>
-                        <span style={{ color: updateInfo.update_available ? 'var(--accent)' : 'var(--text-primary)' }}>
-                          {updateInfo.latest_desktop || updateInfo.latest_python}
+                        <span style={{ color: 'var(--text-muted)' }}>Current</span>
+                        <span style={{ color: 'var(--text-primary)' }}>
+                          {updateInfo.current_version}
                         </span>
                       </div>
-                    )}
-                    {updateInfo.update_available && (
-                      <button
-                        type="button"
-                        onClick={() => onInstallUpdate?.()}
-                        className="w-full mt-2 py-2 rounded text-xs font-semibold"
-                        style={{ background: 'var(--accent)', color: '#fff' }}
-                      >
-                        Update & Relaunch
-                      </button>
-                    )}
-                    {updateInfo.update_available && (
-                      <div className="mt-1 text-[0.65rem]" style={{ color: 'var(--text-muted)' }}>
-                        Downloads the installer, updates Remedy, and restarts — like Ollama.
-                      </div>
-                    )}
-                    {!updateInfo.update_available && !updateInfo.error && (
-                      <div className="mt-1 text-xs" style={{ color: 'var(--success)' }}>
-                        You&apos;re up to date
-                      </div>
-                    )}
-                    {updateInfo.error && (
-                      <div className="mt-1 text-xs" style={{ color: 'var(--text-muted)' }}>
-                        {updateInfo.error}
-                      </div>
-                    )}
-                  </div>
-                )}
+                      {(updateInfo.latest_desktop || updateInfo.latest_python) && (
+                        <div className="flex justify-between text-xs">
+                          <span style={{ color: 'var(--text-muted)' }}>Latest</span>
+                          <span
+                            style={{
+                              color: updateInfo.update_available
+                                ? 'var(--accent)'
+                                : 'var(--text-primary)',
+                            }}
+                          >
+                            {updateInfo.latest_desktop || updateInfo.latest_python}
+                          </span>
+                        </div>
+                      )}
+                      {updateInfo.update_available && (
+                        <button
+                          type="button"
+                          onClick={() => onInstallUpdate?.()}
+                          className="w-full mt-2 py-2 rounded text-xs font-semibold"
+                          style={{ background: 'var(--accent)', color: '#fff' }}
+                        >
+                          Update & Relaunch
+                        </button>
+                      )}
+                      {updateInfo.update_available && (
+                        <div className="mt-1 text-[0.65rem]" style={{ color: 'var(--text-muted)' }}>
+                          Downloads the installer, updates Remedy, and restarts — like Ollama.
+                        </div>
+                      )}
+                      {!updateInfo.update_available && !updateInfo.error && (
+                        <div className="mt-1 text-xs" style={{ color: 'var(--success)' }}>
+                          You&apos;re up to date
+                        </div>
+                      )}
+                      {updateInfo.error && (
+                        <div
+                          className="mt-1 text-xs break-words"
+                          style={{ color: 'var(--error, #ef4444)' }}
+                          title={updateInfo.error}
+                        >
+                          {updateInfo.error}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
               </div>
             </section>
           </>

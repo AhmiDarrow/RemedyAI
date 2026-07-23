@@ -289,25 +289,41 @@ fn is_newer(latest: &str, current: &str) -> bool {
     parse_semver(latest) > parse_semver(current)
 }
 
+/// Fetch latest desktop release metadata. Tries multiple sources; never fails
+/// the whole check because the first URL errored (common with redirects / rate limits).
 fn fetch_latest_desktop() -> Result<(String, Option<String>, Option<String>), String> {
-    // Prefer Tauri latest.json (has platform installer URL).
+    // Prefer Tauri latest.json (has platform installer URL + signature).
     let urls = [
         "https://github.com/AhmiDarrow/RemedyAI/releases/latest/download/latest.json",
         "https://api.github.com/repos/AhmiDarrow/RemedyAI/releases/latest",
     ];
+    let mut errors: Vec<String> = Vec::new();
+
     for url in urls {
-        let resp = ureq::get(url)
-            .set("User-Agent", "RemedyDesktop-Updater")
+        let resp = match ureq::get(url)
+            .set("User-Agent", "RemedyDesktop-Updater/0.10")
             .set("Accept", "application/json")
+            .timeout(Duration::from_secs(15))
             .call()
-            .map_err(|e| format!("Update check failed: {e}"))?;
+        {
+            Ok(r) => r,
+            Err(e) => {
+                errors.push(format!("{url}: {e}"));
+                continue;
+            }
+        };
         let status = resp.status();
         if status != 200 {
+            errors.push(format!("{url}: HTTP {status}"));
             continue;
         }
-        let v: serde_json::Value = resp
-            .into_json()
-            .map_err(|e| format!("Invalid update metadata: {e}"))?;
+        let v: serde_json::Value = match resp.into_json() {
+            Ok(v) => v,
+            Err(e) => {
+                errors.push(format!("{url}: invalid JSON ({e})"));
+                continue;
+            }
+        };
 
         // latest.json shape
         if let Some(ver) = v.get("version").and_then(|x| x.as_str()) {
@@ -333,49 +349,69 @@ fn fetch_latest_desktop() -> Result<(String, Option<String>, Option<String>), St
             if let Some(assets) = v.get("assets").and_then(|a| a.as_array()) {
                 for a in assets {
                     let name = a.get("name").and_then(|n| n.as_str()).unwrap_or("");
-                    let url = a
+                    let asset_url = a
                         .get("browser_download_url")
                         .and_then(|u| u.as_str())
                         .unwrap_or("");
+                    let lower = name.to_lowercase();
                     if name.ends_with("-setup.exe")
                         || name.ends_with("_x64-setup.exe")
-                        || (name.ends_with(".exe") && name.to_lowercase().contains("setup"))
+                        || (name.ends_with(".exe")
+                            && (lower.contains("setup") || lower.contains("remedy")))
                     {
-                        download = Some(url.to_string());
+                        download = Some(asset_url.to_string());
                         break;
                     }
                 }
             }
             return Ok((tag.to_string(), download, notes));
         }
+
+        errors.push(format!("{url}: unrecognized update metadata shape"));
     }
-    Err("Could not reach GitHub releases for update metadata".into())
+
+    Err(if errors.is_empty() {
+        "Could not reach GitHub releases for update metadata".into()
+    } else {
+        format!("Update check failed: {}", errors.join(" | "))
+    })
 }
 
-#[tauri::command]
-fn check_desktop_update(app: AppHandle) -> Result<DesktopUpdateInfo, String> {
-    let current = app_version(&app);
+fn desktop_update_result(current: String) -> DesktopUpdateInfo {
     match fetch_latest_desktop() {
         Ok((latest, download_url, notes)) => {
             let available = is_newer(&latest, &current);
-            Ok(DesktopUpdateInfo {
+            DesktopUpdateInfo {
                 current_version: current,
-                latest_version: latest.trim_start_matches('v').to_string(),
+                latest_version: latest
+                    .trim()
+                    .trim_start_matches('v')
+                    .trim_start_matches('V')
+                    .to_string(),
                 update_available: available,
                 download_url,
                 release_notes: notes,
                 error: None,
-            })
+            }
         }
-        Err(e) => Ok(DesktopUpdateInfo {
+        Err(e) => DesktopUpdateInfo {
             current_version: current.clone(),
             latest_version: current,
             update_available: false,
             download_url: None,
             release_notes: None,
             error: Some(e),
-        }),
+        },
     }
+}
+
+/// Non-blocking update check (network I/O off the UI thread).
+#[tauri::command]
+async fn check_desktop_update(app: AppHandle) -> Result<DesktopUpdateInfo, String> {
+    let current = app_version(&app);
+    tauri::async_runtime::spawn_blocking(move || desktop_update_result(current))
+        .await
+        .map_err(|e| format!("Update check task failed: {e}"))
 }
 
 fn emit_progress(app: &AppHandle, phase: &str, percent: u8, message: &str) {

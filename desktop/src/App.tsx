@@ -507,7 +507,9 @@ export default function App() {
             onThemeChange={setTheme}
             updateInfo={updateInfo}
             checkingUpdates={checkingUpdates}
-            onCheckUpdates={checkUpdates}
+            onCheckUpdates={() => {
+              void checkUpdates()
+            }}
             onInstallUpdate={() => {
               if (desktopInfo?.update_available) setShowUpdateScreen(true)
               else void checkUpdates()
