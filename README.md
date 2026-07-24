@@ -46,17 +46,22 @@ The desktop app bundles the full Remedy server as a sidecar, so everything runs 
 | **@file / /** | `@` file search; `/` slash-command menu while typing |
 | **First-run setup** | Provider, workspace, persona, optional always-ready |
 | **Providers** | OpenAI, Anthropic, Google, DeepSeek, xAI, Groq, Mistral, OpenRouter, Ollama; Custom under Advanced. **OAuth** (device code) and/or API keys where supported; keys in the secure store (not plaintext config) |
+| **Help wiki** | Offline owner’s manual (**F1** / **Ctrl+/**) — install, security, tools, troubleshooting |
+| **Web UI** | **Switch to Web UI** hides desktop to tray and opens `http://127.0.0.1:7400/` (same local API + chat) |
 | **Settings** | Logo menu + panel: You & Agent, project, scope, harness, tool process, themes, density, accent |
-| **Access scope** | Project only / home / full user machine (opt-in) |
+| **Access scope** | Project only / home / full user machine (opt-in); Desktop/Documents/Downloads always allowed |
 | **Always ready** | Startup folder (not registry Run); tray Show / **Settings** / Updates / About / Quit; close-to-tray |
+| **Quit safety** | Full quit warns that the local server (and browser Web UI) will stop; “don’t warn again” option |
 | **Memory Harness** | Context prune + Session Brief + `/compact` |
-| **Approvals** | High-impact shell: Approve/Deny |
+| **Approvals** | High-impact shell / write / skill scripts: Approve/Deny (auto mode remains an owner choice) |
+| **Diff view** | Unified diffs and `file_write` process dumps: red removals / green additions |
 | **Goals** | `/goal`, `/goals`, goal tools |
 | **ComfyUI skill** | Portable local discovery + image generation into chat |
 | **Themes** | System, Dark, **Neutral Dark**, Light, Emerald, Amethyst, Amber, Ocean |
 | **Side panels** | Memory · Skills · Settings (status bar) |
 | **Tray** | Circuit-R icon; right-click Settings and more |
-| **Auto-update** | Check → download → install → relaunch (signed releases) |
+| **Auto-update** | Check → download → install → relaunch (signed `latest.json` releases) |
+| **Local-first security** | Loopback API + Bearer auth by default; power for the owner, not a LAN doorway |
 
 ### Slash commands (desktop & API)
 

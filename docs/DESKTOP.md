@@ -14,6 +14,14 @@ discovered / disabled), **hard-won** badges, search, Activate/Disable/Trust
 [SKILL_LIFECYCLE.md](SKILL_LIFECYCLE.md).
 
 Agent tools: `skill_activate`, `skill_search`, `skill_run` (progressive disclosure).
+Quarantined packs cannot load instructions or run scripts until **Trust**.
+
+### Help wiki + Web UI (0.10.37)
+
+- Offline owner’s manual: **F1** / status bar **Help** (`docs/manual/` + in-app wiki).
+- **Switch to Web UI**: hide to tray + open `http://127.0.0.1:7400/` (API serves `desktop/dist`).
+- Full quit warns that the local server stops (Web UI dies); hide-to-tray does not.
+- Sync wiki copies: `python scripts/sync_help_manual.py`
 
 ### Partner features (0.10.18–0.10.25)
 

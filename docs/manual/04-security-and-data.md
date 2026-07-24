@@ -22,11 +22,25 @@ On Windows, `~` is your user profile (`C:\Users\<you>`).
 - **Update checks** contact GitHub Releases (version metadata / installer download).  
 - There is **no** Remedy cloud account required for core chat.
 
+## Design goal
+
+**Maximum power for you on this PC** — shell, files, skills, full scope when you enable them.  
+**Not a doorway for others** — no open LAN API by default, no website token theft, no untrusted skill packs until you Trust them.
+
 ## Local API protection
 
 - Default: API requires Bearer token (see [Providers & auth](03-providers-and-auth)).  
 - Bound to **127.0.0.1** — not exposed to your LAN by default.  
 - Token file is ACL-hardened (no “Everyone” write).  
+- Desktop prefers OS/IPC token; browser Web UI uses loopback bootstrap only.  
+- Optional: `REMEDY_HTTP_BOOTSTRAP=0` disables HTTP bootstrap (desktop IPC only).  
+- CORS `*` is **refused** while auth is on.  
+- Auth-off + non-loopback bind requires `REMEDY_ALLOW_INSECURE_BIND=1` (owner escape hatch).  
+
+## Web UI vs quit
+
+- **Switch to Web UI** / hide-to-tray keeps the local server running.  
+- **Quit** stops the API — browser Web UI disconnects. You get a warning (can disable in Settings).  
 
 ## Access scope
 
@@ -34,8 +48,8 @@ Settings → **Access scope** limits where tools may operate:
 
 | Scope | Meaning |
 |-------|---------|
-| **Project** (default) | Prefer the configured project folder |
-| **Home** | Your user home directory |
+| **Project** (default) | Project folder **plus** Desktop / Documents / Downloads |
+| **Home** | Full user home profile |
 | **Full** | Broader user-machine access (opt-in) |
 
 Always prefer the narrowest scope that still works for your task.
