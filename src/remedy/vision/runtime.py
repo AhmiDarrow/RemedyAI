@@ -164,23 +164,162 @@ def start_server(
     return {"ok": False, "error": f"llama-server did not become healthy within {wait_s}s"}
 
 
+def _kill_pid_tree(pid: int, *, force: bool = True) -> bool:
+    """Terminate a process (and its children on Windows). Returns True if we tried."""
+    if pid <= 0:
+        return False
+    try:
+        if os.name == "nt":
+            # /T = process tree (llama-server children / helpers)
+            args = ["taskkill", "/PID", str(pid), "/T"]
+            if force:
+                args.insert(1, "/F")
+            creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            subprocess.run(
+                args,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=15,
+                check=False,
+                creationflags=creationflags,
+            )
+            return True
+        # POSIX: terminate process group when possible
+        with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+            os.kill(pid, 15)  # SIGTERM
+            time.sleep(0.3)
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(pid, 0)  # still alive?
+                if force:
+                    os.kill(pid, 9)  # SIGKILL
+            return True
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        logger.debug("kill_pid_tree failed for %s", pid, exc_info=True)
+    return False
+
+
+def _pid_is_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        # tasklist is slow; use OpenProcess via ctypes is heavy — poll with kill 0 pattern
+        try:
+            # Windows: os.kill exists in 3.x and raises OSError if gone
+            os.kill(pid, 0)
+            return True
+        except (OSError, SystemError):
+            return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def _looks_like_llama_server(pid: int) -> bool:
+    """Best-effort check that *pid* is our vision binary (avoid killing strangers)."""
+    if pid <= 0:
+        return False
+    if os.name != "nt":
+        # /proc available on Linux
+        try:
+            cmdline = Path(f"/proc/{pid}/cmdline").read_bytes()
+            text = cmdline.replace(b"\x00", b" ").decode("utf-8", errors="ignore").lower()
+            return "llama-server" in text or "llama_server" in text
+        except OSError:
+            return True  # still allow terminate if we recorded the pid ourselves
+    try:
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        out = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                f"(Get-Process -Id {int(pid)} -ErrorAction SilentlyContinue).ProcessName",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            creationflags=creationflags,
+            check=False,
+        )
+        name = (out.stdout or "").strip().lower()
+        return "llama-server" in name or name in ("llama-server", "llama_server")
+    except (OSError, subprocess.TimeoutExpired):
+        return True
+
+
 def stop_server(home_dir: str | Path | None = None) -> dict[str, Any]:
+    """Stop the vision llama-server managed by this process and any recorded PID.
+
+    On desktop quit / API shutdown this is the deliberate cleanup path so
+    llama-server does not keep using RAM/GPU after Remedy exits.
+    """
     global _proc
     killed = False
-    if _proc is not None and _proc.poll() is None:
-        _proc.terminate()
-        try:
-            _proc.wait(timeout=8)
-        except subprocess.TimeoutExpired:
-            _proc.kill()
-        killed = True
-    _proc = None
+    pids: list[int] = []
+
+    if _proc is not None:
+        with contextlib.suppress(Exception):
+            if _proc.poll() is None and _proc.pid:
+                pids.append(int(_proc.pid))
+        # Prefer graceful terminate via Popen handle first
+        if _proc.poll() is None:
+            with contextlib.suppress(Exception):
+                _proc.terminate()
+                try:
+                    _proc.wait(timeout=5)
+                    killed = True
+                except subprocess.TimeoutExpired:
+                    with contextlib.suppress(Exception):
+                        _proc.kill()
+                        _proc.wait(timeout=3)
+                    killed = True
+        _proc = None
+
     state = load_vision_json(home_dir)
-    if state.get("pid"):
+    recorded = state.get("pid")
+    if recorded is not None:
+        with contextlib.suppress(TypeError, ValueError):
+            pids.append(int(recorded))
+
+    # Unique PIDs; kill trees for anything still alive
+    seen: set[int] = set()
+    for pid in pids:
+        if pid in seen:
+            continue
+        seen.add(pid)
+        if not _pid_is_alive(pid):
+            continue
+        # Only force-kill if it looks like llama-server (or we own the Popen handle pid)
+        if pid == recorded and not _looks_like_llama_server(pid):
+            logger.warning(
+                "Vision pid %s in vision.json does not look like llama-server; skipping kill",
+                pid,
+            )
+            continue
+        if _kill_pid_tree(pid, force=True):
+            killed = True
+            logger.info("Stopped vision decoder process pid=%s", pid)
+
+    # Clear pid from side state
+    if state.get("pid") is not None:
         state.pop("pid", None)
         with contextlib.suppress(Exception):
             save_vision_json(state, home_dir)
-    return {"ok": True, "stopped": killed}
+
+    return {"ok": True, "stopped": killed, "pids": list(seen)}
+
+
+def shutdown_vision_for_exit(home_dir: str | Path | None = None) -> dict[str, Any]:
+    """Best-effort stop for process exit (API lifespan, atexit, desktop tree-kill)."""
+    try:
+        result = stop_server(home_dir=home_dir)
+        logger.info("Vision decoder shutdown for exit: %s", result)
+        return result
+    except Exception as e:
+        logger.warning("Vision decoder shutdown for exit failed: %s", e)
+        return {"ok": False, "error": str(e), "stopped": False}
 
 
 def _pid() -> int | None:

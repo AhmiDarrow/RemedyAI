@@ -8,11 +8,14 @@ Models: api_models.py  |  Helpers: api_support.py  |  Routes: create_app() below
 
 from __future__ import annotations
 
+import atexit
 import hmac
 import logging
 import os
 import sys
 import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 import yaml
@@ -51,6 +54,21 @@ __all__ = [
     "sse_headers",
 ]
 
+_vision_atexit_registered = False
+
+
+def _shutdown_vision_decoder() -> None:
+    """Stop local llama-server on process exit (API / sidecar)."""
+    with suppress(Exception):
+        from remedy.vision.runtime import shutdown_vision_for_exit
+
+        home = None
+        with suppress(Exception):
+            cfg = load_config()
+            if isinstance(cfg, dict) and cfg.get("home_dir"):
+                home = cfg.get("home_dir")
+        shutdown_vision_for_exit(home_dir=home)
+
 
 def create_app(
     runtime=None,
@@ -66,10 +84,24 @@ def create_app(
         getattr(runtime, "skills", None) if runtime is not None else None
     )
 
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        # Register once: covers hard kill of uvicorn after lifespan teardown too.
+        global _vision_atexit_registered
+        if not _vision_atexit_registered:
+            atexit.register(_shutdown_vision_decoder)
+            _vision_atexit_registered = True
+        try:
+            yield
+        finally:
+            logger.info("API shutdown: stopping vision decoder if running")
+            _shutdown_vision_decoder()
+
     app = FastAPI(
         title=title,
         version=version,
         description="Remedy AI Agent Framework — Desktop & Web API",
+        lifespan=lifespan,
     )
 
     # CORS: REMEDY_CORS_ORIGINS env wins, then config.toml `cors_origins`, else safe defaults.

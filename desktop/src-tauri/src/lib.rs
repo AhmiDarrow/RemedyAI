@@ -399,6 +399,54 @@ fn kill_child(guard: &mut Option<Child>) {
 
 /// Stop the managed sidecar and any leftover remedy-desktop processes / :7400 listeners.
 fn shutdown_sidecar(state: &ServerState) {
+    // Ask the API to stop vision (llama-server) cleanly before tree-killing the sidecar.
+    // Best-effort: short timeout so quit never hangs if the server is already dead.
+    #[cfg(target_os = "windows")]
+    {
+        let _ = Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-Command",
+                // Prefer local-bootstrap token when present; ignore failures.
+                r#"
+$ErrorActionPreference='SilentlyContinue'
+$base='http://127.0.0.1:7400'
+$token=$null
+try {
+  $r=Invoke-WebRequest -UseBasicParsing -TimeoutSec 1 -Uri "$base/api/auth/local-bootstrap"
+  if ($r.StatusCode -ge 200 -and $r.StatusCode -lt 300) {
+    $j=$r.Content | ConvertFrom-Json
+    $token=$j.token
+  }
+} catch {}
+$headers=@{}
+if ($token) { $headers['Authorization']="Bearer $token" }
+try {
+  Invoke-WebRequest -UseBasicParsing -Method POST -TimeoutSec 2 -Headers $headers -Uri "$base/api/vision/stop" | Out-Null
+} catch {}
+"#,
+            ])
+            .creation_flags(CREATE_NO_WINDOW)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = Command::new("curl")
+            .args([
+                "-sS",
+                "-m",
+                "2",
+                "-X",
+                "POST",
+                "http://127.0.0.1:7400/api/vision/stop",
+            ])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+
     match state.process.lock() {
         Ok(mut guard) => kill_child(&mut guard),
         Err(poisoned) => {
@@ -407,7 +455,31 @@ fn shutdown_sidecar(state: &ServerState) {
         }
     }
     force_stop_remedy_processes();
+    // Belt-and-suspenders: kill orphaned vision decoder processes by image name.
+    force_stop_vision_processes();
     log::info!("Sidecar shutdown complete");
+}
+
+/// Kill leftover llama-server (vision decoder) if the API stop path did not run.
+#[cfg(target_os = "windows")]
+fn force_stop_vision_processes() {
+    for image in ["llama-server.exe", "llama_server.exe"] {
+        let _ = Command::new("taskkill")
+            .args(["/F", "/T", "/IM", image])
+            .creation_flags(CREATE_NO_WINDOW)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn force_stop_vision_processes() {
+    let _ = Command::new("pkill")
+        .args(["-f", "llama-server"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
 }
 
 /// Force-stop every process that can lock install-dir files (sidecar + stray copies).

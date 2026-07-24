@@ -10,6 +10,13 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 - **MCP packaging**: console script **`remedy-mcp`** (`remedy.tools.mcp_server:main`) in addition to `remedy mcp serve`.
 - Desktop Settings → MCP host copies config using `remedy-mcp`.
 
+### Fix: stop vision decoder (llama-server) on Remedy shutdown
+
+- API FastAPI **lifespan** + `atexit` call `stop_server` so the local VL process does not outlive the sidecar.
+- `stop_server` kills the in-process handle **and** any PID in `vision.json` (Windows process tree via `taskkill /T`).
+- Desktop full quit: POST `/api/vision/stop`, tree-kill sidecar, then best-effort `taskkill` of `llama-server.exe`.
+- Hide-to-tray / WebUI still keeps the decoder if the server stays up.
+
 ### Plan mode, plans, checkpoints, learning (personal partner roadmap)
 
 - **Plan mode is real**: desktop sends `plan_mode`; server allowlists plan/goal tools and blocks shell/file at `call_tool`.

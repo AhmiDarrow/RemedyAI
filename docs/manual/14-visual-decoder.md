@@ -41,6 +41,19 @@ The composer shows a banner when images use the local path.
 - Images stay under `~/.remedy/attachments/` and are read locally.
 - No Remedy cloud vision service.
 
+## Shutdown
+
+When Remedy **fully quits** (desktop Quit, or the local API process exits):
+
+1. The API lifespan / process exit handler calls **stop vision** (`stop_server`).
+2. Desktop also POSTs `/api/vision/stop`, then tree-kills the sidecar, then
+   best-effort kills any leftover `llama-server` process.
+
+**Hide to tray** / Switch to WebUI does **not** stop the decoder (server stays up).
+
+You can still stop it anytime: **Settings → Visual decoder → Stop**, or
+`POST /api/vision/stop`.
+
 ## Uninstall
 
 Settings → Visual decoder → **Uninstall** removes managed files under `~/.remedy/vision/`. You can reinstall later.
