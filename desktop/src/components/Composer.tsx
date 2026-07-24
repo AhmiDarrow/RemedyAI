@@ -74,6 +74,22 @@ const FALLBACK_COMMANDS: CommandDefinition[] = [
 const MAX_FILES = 12
 const PROMPT_HISTORY_KEY = 'remedy.composer.promptHistory'
 const PROMPT_HISTORY_MAX = 80
+/** Grow with content until this height, then scroll (px). */
+const COMPOSER_MAX_HEIGHT = 280
+const COMPOSER_MIN_HEIGHT = 44
+
+function resizeComposerTextarea(el: HTMLTextAreaElement | null) {
+  if (!el) return
+  // Reset so scrollHeight reflects content (not the previous fixed height).
+  el.style.height = 'auto'
+  el.style.overflowY = 'hidden'
+  const next = Math.min(
+    Math.max(el.scrollHeight, COMPOSER_MIN_HEIGHT),
+    COMPOSER_MAX_HEIGHT,
+  )
+  el.style.height = `${next}px`
+  el.style.overflowY = el.scrollHeight > COMPOSER_MAX_HEIGHT ? 'auto' : 'hidden'
+}
 
 function loadPromptHistory(): string[] {
   try {
@@ -441,13 +457,17 @@ export function Composer({
     requestAnimationFrame(() => {
       const el = textareaRef.current
       if (!el) return
-      el.style.height = 'auto'
-      el.style.height = `${Math.min(el.scrollHeight, 200)}px`
+      resizeComposerTextarea(el)
       // Cursor at end so user can edit / send immediately
       const len = el.value.length
       el.selectionStart = el.selectionEnd = len
     })
   }, [])
+
+  // Auto-grow (wrap) then scroll once max height is hit.
+  useEffect(() => {
+    resizeComposerTextarea(textareaRef.current)
+  }, [input])
 
   const pushPromptHistory = useCallback((text: string) => {
     const t = text.trim()
@@ -965,7 +985,12 @@ export function Composer({
             background: 'var(--bg-primary)',
             border: `1px solid ${dragOver || attachments.length ? 'var(--accent)' : 'var(--border)'}`,
             color: 'var(--text-primary)',
-            maxHeight: 160,
+            minHeight: COMPOSER_MIN_HEIGHT,
+            maxHeight: COMPOSER_MAX_HEIGHT,
+            lineHeight: '1.45',
+            overflowY: 'hidden',
+            wordBreak: 'break-word',
+            whiteSpace: 'pre-wrap',
           }}
         />
 

@@ -65,6 +65,29 @@ async def test_skill_activate_returns_body(runtime):
 
 
 @pytest.mark.asyncio
+async def test_skill_activate_name_alias_no_double_name_crash(runtime):
+    """Regression: ToolRegistry.execute(name=…) + args name= → TypeError.
+
+    Models often pass both skill= and name=; must not raise.
+    """
+    _reg_skill(runtime, "demo-activate")
+    res = await runtime.call_tool(
+        ToolCall(
+            tool_name="skill_activate",
+            arguments={
+                "skill": "demo-activate",
+                "name": "tool-test-desktop-txt",  # free-form alias from model
+                "include_references": False,
+            },
+        )
+    )
+    assert res.success, res.error
+    text = str(res.data or "")
+    assert "multiple values" not in text.lower()
+    assert "Do the thing" in text or "demo-activate" in text.lower() or "#" in text
+
+
+@pytest.mark.asyncio
 async def test_skill_activate_missing(runtime):
     res = await runtime.call_tool(
         ToolCall(tool_name="skill_activate", arguments={"skill": "nope-xyz"})

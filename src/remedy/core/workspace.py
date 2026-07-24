@@ -83,6 +83,29 @@ def normalize_access_scope(raw: str | None) -> str:
     return "project"
 
 
+def user_profile_work_folders(*, home: Path | None = None) -> list[Path]:
+    """Desktop / Documents / Downloads — common targets for partner tasks.
+
+    Included even under ``project`` scope so ``file_write`` to the Desktop works
+    without forcing full home access or shell workarounds.
+    """
+    h = (home or Path.home()).expanduser()
+    try:
+        h = h.resolve()
+    except OSError:
+        h = h.absolute()
+    out: list[Path] = []
+    for name in ("Desktop", "Documents", "Downloads"):
+        p = h / name
+        try:
+            if p.is_dir():
+                out.append(p.resolve())
+        except OSError:
+            if p.exists():
+                out.append(p.absolute())
+    return out
+
+
 def allowed_roots_for_scope(
     scope: str,
     project_root: Path,
@@ -96,6 +119,10 @@ def allowed_roots_for_scope(
     except Exception:
         roots.append(resolve_project_path(str(project_root)))
     scope = normalize_access_scope(scope)
+    # Always allow standard user work folders (Desktop/Documents/Downloads).
+    for folder in user_profile_work_folders(home=home):
+        if folder not in roots:
+            roots.append(folder)
     if scope in ("home", "full"):
         h = (home or Path.home()).expanduser()
         try:

@@ -414,13 +414,22 @@ class BasicRuntime(AgentRuntime):
         )
         self.tool_registry.register_builtin_handler(
             "file_write",
-            "Write a text file under allowed roots (see access scope).",
+            "Create or overwrite a text file (UTF-8). Preferred for all simple "
+            "create/edit of .txt/.md/.json — do NOT use bash/powershell Set-Content. "
+            "Allowed: project, Desktop, Documents, Downloads (plus home when access "
+            "scope is home/full). Absolute Desktop paths are fine.",
             file_write,
             {
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string"},
-                    "content": {"type": "string"},
+                    "path": {
+                        "type": "string",
+                        "description": "Absolute or project-relative path",
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Full file contents to write",
+                    },
                 },
                 "required": ["path", "content"],
             },
@@ -441,7 +450,8 @@ class BasicRuntime(AgentRuntime):
         )
         self.tool_registry.register_builtin_handler(
             "bash_exec",
-            "Run a shell command with cwd set to the project working directory.",
+            "Run a shell command (cwd = project). Do NOT use for simple text file "
+            "create/edit — use file_write instead (avoids PowerShell quoting failures).",
             bash_exec,
             {
                 "type": "object",
@@ -1382,7 +1392,13 @@ class BasicRuntime(AgentRuntime):
         default_registry.counter("remedy_tool_calls_total", tool=name).inc()
         t0 = _time.perf_counter()
         try:
-            result = await self.tool_registry.execute(name, **tool_call.arguments)
+            # First positional must NOT be called "name" — many tools take a
+            # `name` argument (skill_activate, skill_run) and would raise
+            # TypeError: multiple values for argument 'name'.
+            result = await self.tool_registry.execute(
+                tool_name=name,
+                **(tool_call.arguments or {}),
+            )
             # Workspace tools often return Error-prefixed strings on soft failure;
             # still count as handler success, but surface metrics for recovery telemetry.
             if isinstance(result, str) and tool_content_is_error(result):

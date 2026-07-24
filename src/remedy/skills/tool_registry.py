@@ -67,11 +67,21 @@ class ToolRegistry:
         self._handlers[name] = handler
         return self.register_builtin(name, description, parameters)
 
-    async def execute(self, name: str, **arguments: Any) -> Any:
-        """Invoke a tool by name with its registered handler."""
-        handler = self._handlers.get(name)
+    async def execute(self, tool_name: str, **arguments: Any) -> Any:
+        """Invoke a tool by id with its registered handler.
+
+        Parameter is ``tool_name`` (not ``name``) so handlers like
+        ``skill_activate(skill=…, name=…)`` can accept a ``name`` alias in
+        ``**arguments`` without ``TypeError: multiple values for argument 'name'``.
+        """
+        handler = self._handlers.get(tool_name)
         if handler is None:
-            raise ValueError(f"No handler registered for tool: {name}")
+            # Back-compat if anyone still passes the first arg positionally as name=
+            raise ValueError(f"No handler registered for tool: {tool_name}")
+        # Never forward a conflicting kwargs key that equals the tool id itself
+        # when the model mirrored the tool name into arguments.
+        if "name" in arguments and arguments.get("name") == tool_name:
+            arguments = {k: v for k, v in arguments.items() if k != "name"}
         if inspect.iscoroutinefunction(handler):
             return await handler(**arguments)
         return handler(**arguments)
