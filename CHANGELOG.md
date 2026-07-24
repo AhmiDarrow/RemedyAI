@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.10.24] — 2026-07-24
+
+### xAI OAuth in frozen desktop (hard fix)
+
+- Device OAuth **must** use \https://auth.x.ai\ (never \ccounts.x.ai\ → 307 \/sign-in\).
+- Refuse wrong host; no redirect following for device/token POSTs.
+- PyInstaller builds force \--paths src\ + PYTHONPATH so site-packages cannot pin old OAuth.
+- Sidecar start kills anything on :7400 (prevents dual stale servers).
+- Diagnostics: \GET /api/auth/xai/oauth-meta\ shows \oauth_build\ / device URL.
+
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [0.10.23] — 2026-07-24

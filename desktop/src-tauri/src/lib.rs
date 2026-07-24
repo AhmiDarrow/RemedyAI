@@ -311,6 +311,23 @@ fn start_sidecar(process: &Arc<Mutex<Option<Child>>>, cmd: &str) -> Result<(), S
         .lock()
         .map_err(|_| "server state lock poisoned".to_string())?;
     kill_child(&mut guard);
+    // Prevent dual sidecars (old process keeps :7400 and serves stale OAuth).
+    force_stop_remedy_processes();
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        let _ = Command::new("cmd")
+            .args([
+                "/C",
+                r#"for /f "tokens=5" %a in ('netstat -ano ^| findstr :7400 ^| findstr LISTENING') do taskkill /F /PID %a"#,
+            ])
+            .creation_flags(CREATE_NO_WINDOW)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+        // Brief pause so the port is free before re-bind.
+        std::thread::sleep(Duration::from_millis(400));
+    }
 
     let mut child = spawn_remedy(cmd).ok_or_else(|| format!("Failed to spawn: {cmd}"))?;
     if let Some(stdout) = child.stdout.take() {

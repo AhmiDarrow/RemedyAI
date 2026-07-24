@@ -86,6 +86,18 @@ def register_auth_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
         creds = load_credentials(_home_from_config())
         return creds.to_public_dict()
 
+    @app.get("/api/auth/xai/oauth-meta")
+    async def xai_oauth_meta():
+        """Diagnostics: which OAuth host this server build uses."""
+        from remedy.interfaces import xai_auth
+
+        return {
+            "oauth_build": getattr(xai_auth, "OAUTH_BUILD_ID", "unknown"),
+            "device_code_url": getattr(xai_auth, "DEVICE_CODE_URL", ""),
+            "token_url": getattr(xai_auth, "TOKEN_URL", ""),
+            "accounts_server": getattr(xai_auth, "ACCOUNTS_SERVER", ""),
+        }
+
     @app.post("/api/auth/xai/login")
     async def xai_auth_login():
         """Start OAuth device-code flow (Sign in with xAI)."""

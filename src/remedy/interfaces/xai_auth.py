@@ -26,13 +26,21 @@ logger = logging.getLogger(__name__)
 
 # User-facing account UI (verification pages, sign-in).
 ACCOUNTS_SERVER = "https://accounts.x.ai"
-# OAuth device + token endpoints live on auth.x.ai (accounts.x.ai returns 307 to /sign-in).
+# OAuth device + token endpoints live on auth.x.ai.
+# DO NOT use accounts.x.ai for POST device/token — it 307s to /sign-in and breaks OAuth.
 OAUTH_SERVER = "https://auth.x.ai"
 API_BASE = "https://api.x.ai/v1"
 DEVICE_CODE_URL = f"{OAUTH_SERVER}/oauth2/device/code"
 TOKEN_URL = f"{OAUTH_SERVER}/oauth2/token"
-# Back-compat alias used in older docs/tests
+# Marker embedded in frozen builds so we can verify the sidecar is up to date.
+OAUTH_BUILD_ID = "auth.x.ai-device-v3"
+# Back-compat alias
 AUTH_SERVER = OAUTH_SERVER
+# Prefer auth.x.ai; never accounts.x.ai for API POSTs.
+_DEVICE_CODE_CANDIDATES = (
+    DEVICE_CODE_URL,
+    "https://auth.x.ai/oauth2/device/code",
+)
 # Public client id used by Grok Build / OpenClaw-class agents for device OAuth.
 # https://github.com/openclaw/openclaw/issues/84504
 DEFAULT_CLIENT_ID = "b1a00492-073a-47ea-816f-4c329264a828"
@@ -159,7 +167,26 @@ def save_api_key(api_key: str, home: Path | None = None) -> XaiCredentials:
     return creds
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Never follow OAuth redirects (accounts.x.ai 307 → /sign-in is not the API)."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[no-untyped-def]
+        return None
+
+
 def _http_form(url: str, data: dict[str, str], timeout: float = 30.0) -> dict[str, Any]:
+    """POST application/x-www-form-urlencoded; do not follow redirects."""
+    if "accounts.x.ai" in url and ("/oauth2/device/code" in url or "/oauth2/token" in url):
+        raise RuntimeError(
+            json.dumps(
+                {
+                    "error": "refusing accounts.x.ai for device/token API",
+                    "url": url,
+                    "hint": "Use https://auth.x.ai — accounts.x.ai returns 307 to /sign-in",
+                    "oauth_build": OAUTH_BUILD_ID,
+                }
+            )
+        )
     body = urllib.parse.urlencode(data).encode("utf-8")
     req = urllib.request.Request(
         url,
@@ -168,11 +195,12 @@ def _http_form(url: str, data: dict[str, str], timeout: float = 30.0) -> dict[st
         headers={
             "Content-Type": "application/x-www-form-urlencoded",
             "Accept": "application/json",
-            "User-Agent": "RemedyDesktop-xAI-Auth/1.0",
+            "User-Agent": f"RemedyDesktop-xAI-Auth/1.0 ({OAUTH_BUILD_ID})",
         },
     )
+    opener = urllib.request.build_opener(_NoRedirect)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with opener.open(req, timeout=timeout) as resp:
             raw = resp.read().decode("utf-8")
             return json.loads(raw) if raw else {}
     except urllib.error.HTTPError as e:
@@ -183,12 +211,15 @@ def _http_form(url: str, data: dict[str, str], timeout: float = 30.0) -> dict[st
         except json.JSONDecodeError:
             parsed = {"error": err_body or str(e), "status": e.code}
         parsed.setdefault("status", e.code)
-        if e.code in (301, 302, 303, 307, 308) and loc:
+        parsed["request_url"] = url
+        parsed["oauth_build"] = OAUTH_BUILD_ID
+        if e.code in (301, 302, 303, 307, 308) or "sign-in" in (err_body or "").lower():
             parsed["location"] = loc
             parsed["hint"] = (
-                "xAI OAuth endpoint redirected (often wrong host). "
-                "Device/token requests must use https://auth.x.ai — "
-                "not accounts.x.ai (which redirects to /sign-in)."
+                "xAI OAuth API redirected to a web sign-in page. "
+                "This usually means a stale Remedy Desktop sidecar is still calling "
+                "accounts.x.ai. Install 0.10.23+ or copy a rebuilt remedy-desktop.exe. "
+                f"Expected host: auth.x.ai (build {OAUTH_BUILD_ID})."
             )
         raise RuntimeError(json.dumps(parsed)) from e
 
@@ -196,13 +227,33 @@ def _http_form(url: str, data: dict[str, str], timeout: float = 30.0) -> dict[st
 def start_device_login(home: Path | None = None) -> dict[str, Any]:
     """Begin OAuth device-code flow. Returns user_code + verification URLs."""
     client_id = _client_id()
-    data = _http_form(
-        DEVICE_CODE_URL,
-        {
-            "client_id": client_id,
-            "scope": "openid profile email offline_access",
-        },
-    )
+    form = {
+        "client_id": client_id,
+        "scope": "openid profile email offline_access",
+    }
+    data: dict[str, Any] | None = None
+    last_err: Exception | None = None
+    used_url = DEVICE_CODE_URL
+    for url in _DEVICE_CODE_CANDIDATES:
+        try:
+            data = _http_form(url, form)
+            used_url = url
+            break
+        except Exception as exc:
+            last_err = exc
+            logger.warning("xAI device-code attempt failed url=%s err=%s", url, exc)
+            continue
+    if data is None:
+        raise RuntimeError(
+            str(last_err)
+            if last_err
+            else json.dumps(
+                {
+                    "error": "all device-code endpoints failed",
+                    "oauth_build": OAUTH_BUILD_ID,
+                }
+            )
+        )
     device_code = data.get("device_code")
     user_code = data.get("user_code")
     if not device_code or not user_code:
@@ -248,6 +299,8 @@ def start_device_login(home: Path | None = None) -> dict[str, Any]:
         "interval": interval,
         "expires_in": expires_in,
         "status": "pending",
+        "oauth_host": urllib.parse.urlparse(used_url).netloc,
+        "oauth_build": OAUTH_BUILD_ID,
         "message": (
             f"Open {verification_uri_complete} and approve access, "
             f"or go to {verification_uri} and enter code {user_code}."

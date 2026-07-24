@@ -209,6 +209,7 @@ def build(cache_clean: bool = False, ci: bool = False):
 
     hidden_imports = get_hidden_imports()
 
+    src_path = str(ROOT / "src")
     cmd = [
         sys.executable,
         "-m",
@@ -224,6 +225,9 @@ def build(cache_clean: bool = False, ci: bool = False):
         str(ROOT / "build" / "pyinstaller"),
         "--noupx",
         "--noconsole",
+        # Prefer repo src/ over any older site-packages remedy-ai install
+        "--paths",
+        src_path,
         "--add-data",
         f"{ROOT / 'src' / 'remedy'}{os.pathsep}remedy",
         "--add-data",
@@ -239,11 +243,16 @@ def build(cache_clean: bool = False, ci: bool = False):
         "remedy",
         "--collect-all",
         "multipart",
+        "--hidden-import",
+        "remedy.interfaces.xai_auth",
         str(ROOT / "src" / "remedy" / "interfaces" / "cli.py"),
     ])
 
     print(f"Running: {' '.join(cmd)}")
-    subprocess.check_call(cmd, cwd=str(ROOT))
+    env = os.environ.copy()
+    # Force analysis/import from this checkout (editable installs can lag).
+    env["PYTHONPATH"] = src_path + os.pathsep + env.get("PYTHONPATH", "")
+    subprocess.check_call(cmd, cwd=str(ROOT), env=env)
 
     exe_path = DESKTOP_BIN / "remedy-desktop.exe"
     if exe_path.exists():
