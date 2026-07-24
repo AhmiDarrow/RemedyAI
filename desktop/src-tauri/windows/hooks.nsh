@@ -3,7 +3,13 @@
 ; (some builds still ship as app.exe). Sidecar is remedy-desktop.exe.
 ;
 ; Uninstall UI: config / skills / full wipe checkboxes via PowerShell dialog
-; (scripts bundled as resources and run from %TEMP% during uninstall).
+; (scripts bundled as resources under $INSTDIR\windows\ and run from %TEMP%).
+;
+; CRITICAL: options-dialog failures must NEVER abort uninstall of the app.
+; Exit codes from uninstall_options.ps1:
+;   0 = continue (choices written)
+;   1 = user cancelled → Abort uninstall
+;   2+= dialog/script error → keep user data and continue uninstalling the app
 
 !macro _REMEDY_KILL_ALL
   DetailPrint "Closing running Remedy processes so files can be replaced..."
@@ -28,6 +34,11 @@
   Delete /REBOOTOK "$INSTDIR\remedy-desktop-x86_64-pc-windows-msvc.exe"
   Delete /REBOOTOK "$INSTDIR\app.exe"
   Sleep 500
+!macroend
+
+!macro _REMEDY_WRITE_KEEP_CHOICES
+  ; Always leave a valid choices file so POSTUNINSTALL never errors.
+  nsExec::ExecToLog 'powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $p=Join-Path $env:TEMP ''RemedyDesktop-UninstallChoices.txt''; @(''config=0'',''skills=0'',''full=0'') | Set-Content -LiteralPath $p -Encoding ASCII } catch {}"'
 !macroend
 
 !macro NSIS_HOOK_PREINSTALL
@@ -58,66 +69,91 @@
   Delete "$APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\Remedy Desktop.lnk"
   nsExec::ExecToLog 'powershell -NoProfile -ExecutionPolicy Bypass -Command "foreach ($n in @(''RemedyDesktop'',''Remedy Desktop'',''remedy-desktop'')) { Remove-ItemProperty -Path ''HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'' -Name $n -ErrorAction SilentlyContinue }"'
 
+  ; Default: keep user data unless the options dialog successfully says otherwise.
+  !insertmacro _REMEDY_WRITE_KEEP_CHOICES
+
   ; --- Uninstall data options (config / skills / full) ---
   ; Skip UI during silent / auto-update uninstalls so updates keep user data.
+  ClearErrors
   ${GetOptions} $CMDLINE "/UPDATE" $R9
   ${IfNot} ${Errors}
     DetailPrint "Update-mode uninstall: keeping user data (config/skills)."
-    nsExec::ExecToLog 'powershell -NoProfile -ExecutionPolicy Bypass -Command "Set-Content -LiteralPath (Join-Path $env:TEMP ''RemedyDesktop-UninstallChoices.txt'') -Value @(''config=0'',''skills=0'',''full=0'')"'
-    Goto uninstall_options_done
-  ${EndIf}
-  ${If} ${Silent}
-    DetailPrint "Silent uninstall: keeping user data (use interactive uninstall for wipe options)."
-    nsExec::ExecToLog 'powershell -NoProfile -ExecutionPolicy Bypass -Command "Set-Content -LiteralPath (Join-Path $env:TEMP ''RemedyDesktop-UninstallChoices.txt'') -Value @(''config=0'',''skills=0'',''full=0'')"'
     Goto uninstall_options_done
   ${EndIf}
 
-  ; Copy bundled scripts to TEMP (still available before $INSTDIR is wiped).
+  ; Silent (/S) or passive — no UI; keep data.
+  IfSilent 0 not_silent_uninstall
+    DetailPrint "Silent uninstall: keeping user data (use interactive uninstall for wipe options)."
+    Goto uninstall_options_done
+  not_silent_uninstall:
+
+  ; Copy bundled scripts to TEMP *before* $INSTDIR is wiped by the Uninstall section.
   CreateDirectory "$TEMP\RemedyDesktop-Uninstall"
-  ; Resources may be at $INSTDIR\windows\ or $INSTDIR\resources\windows\
+  StrCpy $R8 ""
   IfFileExists "$INSTDIR\windows\uninstall_options.ps1" 0 try_res_opt
     CopyFiles /SILENT "$INSTDIR\windows\uninstall_options.ps1" "$TEMP\RemedyDesktop-Uninstall\uninstall_options.ps1"
     CopyFiles /SILENT "$INSTDIR\windows\uninstall_wipe.ps1" "$TEMP\RemedyDesktop-Uninstall\uninstall_wipe.ps1"
+    StrCpy $R8 "$TEMP\RemedyDesktop-Uninstall\uninstall_options.ps1"
     Goto run_options_dialog
   try_res_opt:
   IfFileExists "$INSTDIR\resources\windows\uninstall_options.ps1" 0 try_hooks_dir
     CopyFiles /SILENT "$INSTDIR\resources\windows\uninstall_options.ps1" "$TEMP\RemedyDesktop-Uninstall\uninstall_options.ps1"
     CopyFiles /SILENT "$INSTDIR\resources\windows\uninstall_wipe.ps1" "$TEMP\RemedyDesktop-Uninstall\uninstall_wipe.ps1"
+    StrCpy $R8 "$TEMP\RemedyDesktop-Uninstall\uninstall_options.ps1"
     Goto run_options_dialog
   try_hooks_dir:
-  ; Fallback: scripts may live next to uninstall.exe if resources map failed
   IfFileExists "$INSTDIR\uninstall_options.ps1" 0 skip_options_missing
     CopyFiles /SILENT "$INSTDIR\uninstall_options.ps1" "$TEMP\RemedyDesktop-Uninstall\uninstall_options.ps1"
     CopyFiles /SILENT "$INSTDIR\uninstall_wipe.ps1" "$TEMP\RemedyDesktop-Uninstall\uninstall_wipe.ps1"
+    StrCpy $R8 "$TEMP\RemedyDesktop-Uninstall\uninstall_options.ps1"
     Goto run_options_dialog
   skip_options_missing:
-    DetailPrint "Uninstall options scripts not found — keeping user data."
-    nsExec::ExecToLog 'powershell -NoProfile -ExecutionPolicy Bypass -Command "Set-Content -LiteralPath (Join-Path $env:TEMP ''RemedyDesktop-UninstallChoices.txt'') -Value @(''config=0'',''skills=0'',''full=0'')"'
+    DetailPrint "Uninstall options scripts not found — keeping user data and continuing uninstall."
     Goto uninstall_options_done
 
   run_options_dialog:
     DetailPrint "Asking which user data to remove (config / skills / full)..."
-    ; Interactive dialog. Exit code 1 = user cancelled → abort uninstall.
-    ; -STA required for WinForms.
-    ExecWait 'powershell -NoProfile -ExecutionPolicy Bypass -STA -File "$TEMP\RemedyDesktop-Uninstall\uninstall_options.ps1"' $0
-    ${If} $0 <> 0
-      DetailPrint "Uninstall cancelled by user (or options dialog failed)."
+    ; -STA required for WinForms. Quote path for spaces in TEMP.
+    ; Exit 0 = ok, 1 = user cancelled, other = soft-fail (keep data, still uninstall app).
+    ClearErrors
+    ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Normal -File "$R8"' $0
+    DetailPrint "Uninstall options dialog exit code: $0"
+    ; LogicLib: only Abort on intentional cancel (1). Any other non-zero soft-fails.
+    StrCmp $0 "1" 0 options_not_cancel
+      DetailPrint "Uninstall cancelled by user."
       Abort
-    ${EndIf}
+    options_not_cancel:
+    StrCmp $0 "0" options_ok options_soft_fail
+    options_soft_fail:
+      DetailPrint "Options dialog failed (exit $0) - keeping user data and continuing uninstall."
+      !insertmacro _REMEDY_WRITE_KEEP_CHOICES
+      Goto options_handled
+    options_ok:
+      DetailPrint "Uninstall options recorded."
+    options_handled:
+    ; Exit 0: choices file already written by the script.
 
   uninstall_options_done:
+  ; Ensure wipe script is in TEMP even if options dialog was skipped.
+  IfFileExists "$TEMP\RemedyDesktop-Uninstall\uninstall_wipe.ps1" 0 ensure_wipe_from_inst
+    Goto wipe_script_ready
+  ensure_wipe_from_inst:
+  IfFileExists "$INSTDIR\windows\uninstall_wipe.ps1" 0 wipe_script_ready
+    CreateDirectory "$TEMP\RemedyDesktop-Uninstall"
+    CopyFiles /SILENT "$INSTDIR\windows\uninstall_wipe.ps1" "$TEMP\RemedyDesktop-Uninstall\uninstall_wipe.ps1"
+  wipe_script_ready:
 !macroend
 
 !macro NSIS_HOOK_POSTUNINSTALL
   ; Apply data wipe after app files are gone (so full wipe is clean).
+  ; Never fail the uninstaller if wipe has issues.
   DetailPrint "Applying uninstall data options..."
   IfFileExists "$TEMP\RemedyDesktop-Uninstall\uninstall_wipe.ps1" 0 try_wipe_inline
-    nsExec::ExecToLog 'powershell -NoProfile -ExecutionPolicy Bypass -File "$TEMP\RemedyDesktop-Uninstall\uninstall_wipe.ps1"'
+    nsExec::ExecToLog 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$TEMP\RemedyDesktop-Uninstall\uninstall_wipe.ps1"'
     Goto wipe_done
   try_wipe_inline:
-    ; If wipe script missing, still honor a choices file if present
     IfFileExists "$TEMP\RemedyDesktop-UninstallChoices.txt" 0 wipe_done
-      nsExec::ExecToLog 'powershell -NoProfile -ExecutionPolicy Bypass -Command "& { $c=0;$s=0;$f=0; Get-Content (Join-Path $env:TEMP ''RemedyDesktop-UninstallChoices.txt'') | %% { if ($_ -match ''^config=(\d)''){$c=[int]$Matches[1]}; if ($_ -match ''^skills=(\d)''){$s=[int]$Matches[1]}; if ($_ -match ''^full=(\d)''){$f=[int]$Matches[1]} }; $h=Join-Path $env:USERPROFILE ''.remedy''; if ($f -eq 1) { Remove-Item -LiteralPath $h -Recurse -Force -EA SilentlyContinue; Remove-Item -LiteralPath (Join-Path $env:APPDATA ''com.remedy.desktop'') -Recurse -Force -EA SilentlyContinue; Remove-Item -LiteralPath (Join-Path $env:LOCALAPPDATA ''com.remedy.desktop'') -Recurse -Force -EA SilentlyContinue } else { if ($c -eq 1) { @(''config.toml'',''desktop.json'') | %% { Remove-Item (Join-Path $h $_) -Force -EA SilentlyContinue }; Remove-Item (Join-Path $h ''auth'') -Recurse -Force -EA SilentlyContinue }; if ($s -eq 1) { Remove-Item (Join-Path $h ''skills'') -Recurse -Force -EA SilentlyContinue } } }"'
+      nsExec::ExecToLog 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "try { $c=0;$s=0;$f=0; $cf=Join-Path $env:TEMP ''RemedyDesktop-UninstallChoices.txt''; if (Test-Path -LiteralPath $cf) { Get-Content -LiteralPath $cf | ForEach-Object { if ($_ -match ''^config=(\d)''){$c=[int]$Matches[1]}; if ($_ -match ''^skills=(\d)''){$s=[int]$Matches[1]}; if ($_ -match ''^full=(\d)''){$f=[int]$Matches[1]} } }; $h=Join-Path $env:USERPROFILE ''.remedy''; if ($f -eq 1) { if (Test-Path -LiteralPath $h) { Remove-Item -LiteralPath $h -Recurse -Force -EA SilentlyContinue }; Remove-Item -LiteralPath (Join-Path $env:APPDATA ''com.remedy.desktop'') -Recurse -Force -EA SilentlyContinue; Remove-Item -LiteralPath (Join-Path $env:LOCALAPPDATA ''com.remedy.desktop'') -Recurse -Force -EA SilentlyContinue } else { if ($c -eq 1 -and (Test-Path -LiteralPath $h)) { @(''config.toml'',''desktop.json'') | ForEach-Object { Remove-Item (Join-Path $h $_) -Force -EA SilentlyContinue }; Remove-Item (Join-Path $h ''auth'') -Recurse -Force -EA SilentlyContinue }; if ($s -eq 1) { Remove-Item (Join-Path $h ''skills'') -Recurse -Force -EA SilentlyContinue } } } catch {}"'
   wipe_done:
   ; Cleanup temp uninstall helpers (keep wipe log for support)
   RMDir /r "$TEMP\RemedyDesktop-Uninstall"

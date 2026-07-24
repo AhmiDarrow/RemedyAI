@@ -49,23 +49,24 @@ function Remove-PathSafe([string]$p) {
 
 if ($full -eq 1) {
   # Full wipe: nothing left for a fresh install.
+  # Do NOT delete the live install directory from this process — NSIS already
+  # removed app files; wiping Programs\Remedy Desktop while uninstall.exe still
+  # runs can fail or leave a half-deleted folder. Best-effort only after a delay.
   Remove-PathSafe $homeRem
-  # Tauri / app leftovers
+  # Tauri / app leftovers (user data dirs — safe)
   Remove-PathSafe (Join-Path $env:APPDATA 'com.remedy.desktop')
   Remove-PathSafe (Join-Path $env:LOCALAPPDATA 'com.remedy.desktop')
-  Remove-PathSafe (Join-Path $env:LOCALAPPDATA 'Remedy Desktop')
-  Remove-PathSafe (Join-Path $env:LOCALAPPDATA 'Programs\Remedy Desktop')
   # Startup shortcut
   Remove-PathSafe (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\Remedy Desktop.lnk')
   # Start Menu / Desktop shortcuts (best-effort)
   Remove-PathSafe (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Remedy Desktop')
   Remove-PathSafe (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Remedy Desktop.lnk')
-  Remove-PathSafe (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Remedy Desktop.lnk')
-  # Temp update / uninstall artifacts
+  try {
+    Remove-PathSafe (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Remedy Desktop.lnk')
+  } catch {}
+  # Temp update artifacts (not the active UninstallChoices / this script folder mid-run)
   Remove-PathSafe (Join-Path $env:TEMP 'RemedyDesktop-Update.log')
   Get-ChildItem -Path $env:TEMP -Filter 'RemedyDesktop-Update*' -ErrorAction SilentlyContinue |
-    ForEach-Object { Remove-PathSafe $_.FullName }
-  Get-ChildItem -Path $env:TEMP -Filter 'RemedyDesktop-Uninstall*' -ErrorAction SilentlyContinue |
     ForEach-Object { Remove-PathSafe $_.FullName }
   # Legacy Run keys
   foreach ($n in @('RemedyDesktop', 'Remedy Desktop', 'remedy-desktop')) {
@@ -74,6 +75,28 @@ if ($full -eq 1) {
   # Manufacturer key leftovers
   Remove-Item -Path 'HKCU:\Software\com.remedy.desktop' -Recurse -Force -ErrorAction SilentlyContinue
   Remove-Item -Path 'HKCU:\Software\Remedy' -Recurse -Force -ErrorAction SilentlyContinue
+  # Optional: schedule install-dir cleanup after uninstaller exits (no hard fail)
+  $installCandidates = @(
+    (Join-Path $env:LOCALAPPDATA 'Programs\Remedy Desktop'),
+    (Join-Path $env:LOCALAPPDATA 'Remedy Desktop')
+  )
+  foreach ($dir in $installCandidates) {
+    if (-not (Test-Path -LiteralPath $dir)) { continue }
+    # Skip if our own process is running from that tree
+    $myPath = $PSCommandPath
+    if ($myPath -and $myPath.StartsWith($dir, [StringComparison]::OrdinalIgnoreCase)) {
+      Log "Skip live install dir (self): $dir"
+      continue
+    }
+    try {
+      # Best-effort delayed delete via cmd so NSIS uninstaller can exit first
+      $cmd = "ping -n 3 127.0.0.1 >nul & rmdir /s /q `"$dir`""
+      Start-Process -FilePath 'cmd.exe' -ArgumentList @('/c', $cmd) -WindowStyle Hidden -ErrorAction SilentlyContinue
+      Log "Scheduled delayed rmdir: $dir"
+    } catch {
+      Log "WARN schedule rmdir $dir :: $($_.Exception.Message)"
+    }
+  }
   Log 'Full wipe complete'
   exit 0
 }

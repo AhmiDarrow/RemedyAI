@@ -2,6 +2,16 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.10.31] — 2026-07-24
+
+### Fix: uninstall no longer aborts when options dialog fails
+
+- NSIS PREUNINSTALL only **Abort**s on intentional Cancel (exit code 1).
+- PowerShell/WinForms errors (exit 2+) keep user data and **still remove the app**.
+- Default choices file written before the dialog so wipe never hard-fails.
+- Pure-ASCII options script; safer full-wipe (no live install-dir delete mid-run).
+- Logs: `%TEMP%\RemedyDesktop-UninstallOptions.log`, `…UninstallWipe.log`.
+
 ## [0.10.30] — 2026-07-24
 
 ### Skills system (unique strength)
