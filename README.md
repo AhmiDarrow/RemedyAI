@@ -139,10 +139,11 @@ remedy auth apikey xai xai-…   # Or store a console key
 remedy auth logout xai
 # XAI_API_KEY=… also preselects xAI on a clean config
 
-# Start the API server
-remedy serve --host 127.0.0.1 --port 7400
-# Dashboard at http://127.0.0.1:7400/dashboard
-# OpenAPI docs at http://127.0.0.1:7400/docs
+# Start the API server (loopback + auth on by default)
+remedy serve --host 127.0.0.1 --port 7400 --skip-setup
+# Web UI (chat SPA, when desktop/dist is built): http://127.0.0.1:7400/
+# API dashboard:  http://127.0.0.1:7400/dashboard
+# OpenAPI docs:   http://127.0.0.1:7400/docs
 
 # Desktop app management (for devs)
 remedy desktop launch            # Launch the installed desktop app
@@ -310,12 +311,17 @@ remedy learn changelog my-skill
 See [docs/SKILL_LIFECYCLE.md](docs/SKILL_LIFECYCLE.md) for gates, ranking, API,
 quarantine import, and the desktop Skills panel.
 
-### Local API auth (0.10.33+)
+### Local API auth & security (0.10.33+)
 
 The agent HTTP API enables a **Bearer token by default** (file:
-`~/.remedy/auth/local_api_token`). The desktop shell loads it automatically.
-Set `REMEDY_API_AUTH=0` only for local tests. High-impact tools (`bash_exec`,
-`file_write`, `skill_run`) require approval in **ask** mode (status bar).
+`~/.remedy/auth/local_api_token`). The desktop shell prefers Tauri IPC for the
+token; the browser Web UI uses loopback bootstrap. Set `REMEDY_API_AUTH=0` only
+for local tests. High-impact tools (`bash_exec`, `file_write`, `skill_run`)
+require approval in **ask** mode (status bar); **auto** remains an owner choice.
+
+Defaults aim at **owner power, not a network doorway**: loopback bind, no CORS
+`*`, quarantined skills cannot load until Trust. Advanced open-bind needs
+`REMEDY_ALLOW_INSECURE_BIND=1`. See [docs/manual/04-security-and-data.md](docs/manual/04-security-and-data.md).
 
 ---
 
@@ -350,23 +356,28 @@ REMEDY_EXECUTION__MAX_RETRIES=5 remedy exec python --version
 
 ## API Server
 
-`remedy serve` launches a FastAPI server with:
+`remedy serve` launches a FastAPI server (default **127.0.0.1:7400**, auth on).
 
 | Endpoint | Description |
 |----------|-------------|
+| `GET /` | Browser Web UI (chat SPA when `desktop/dist` is present) |
 | `GET /api/status` | System status and health |
+| `GET /api/auth/local-bootstrap` | Loopback-only token bootstrap (desktop/browser) |
 | `POST /api/chat` | Send message, get response |
 | `POST /api/chat/stream` | SSE streaming chat |
+| `GET /api/sessions` | List chat sessions |
+| `POST /api/sessions/{id}/messages/stream` | Desktop SSE chat |
 | `GET /api/memory/search` | Full-text memory search |
 | `POST /api/memory/add` | Add memory entry |
 | `GET /api/skills` | List available skills |
+| `GET/PUT /api/settings` | Settings (desktop) |
 | `POST /api/webhook/{source}` | Receive external webhooks |
-| `GET /api/sessions` | List session history |
 | `GET /api/handoffs` | List handoff notes |
 | `GET /api/openapi.json` | OpenAPI schema |
-| `GET /dashboard` | HTML dashboard |
+| `GET /dashboard` | Lightweight HTML endpoint map |
+| `GET /docs` | Swagger UI |
 
-Full session management, streaming SSE events, file search, and command execution — see the [desktop API docs](docs/DESKTOP.md).
+Full session management, streaming SSE, file search, and tools — see [docs/DESKTOP.md](docs/DESKTOP.md) and the offline Help wiki (`docs/manual/`).
 
 ---
 
@@ -403,7 +414,8 @@ def teardown_plugin():
 git clone https://github.com/AhmiDarrow/RemedyAI.git
 cd RemedyAI
 uv sync --group dev
-uv run pytest -q     # 375 tests
+uv run pytest -q          # full suite (560+ tests; currently ~561)
+cd desktop && npm test    # frontend unit tests (vitest)
 uv run remedy --help
 ```
 
@@ -422,20 +434,24 @@ RemedyAI/
 │   ├── memory/         # SQLite+FTS5 store, handoff, profiles
 │   ├── skills/         # Loader, registry, executor, adapters
 │   ├── gateway/        # Event router, channels
-│   ├── tools/          # MCP client
-│   ├── execution/      # Sandbox, hidden process helpers, Docker
-│   ├── interfaces/     # CLI, API (models/support/routes/*), plugins
+│   ├── tools/          # MCP client, ComfyUI helpers
+│   ├── execution/      # Sandbox, env scrub, hidden process, Docker
+│   ├── interfaces/     # CLI, FastAPI (models/support/routes/*), plugins, auth
 │   ├── bundled_skills/ # Default skills shipped with the package
 │   └── migrate/        # Hermes/OpenClaw importers
 ├── desktop/
-│   ├── src/            # React + Vite frontend
-│   ├── src-tauri/      # Tauri 2 shell (Rust)
+│   ├── src/            # React + Vite frontend (Help wiki, chat, settings)
+│   ├── src-tauri/      # Tauri 2 shell (Rust) — tray, sidecar, updates
 │   └── package.json
+├── docs/
+│   ├── manual/         # Owner’s manual (also bundled into desktop Help wiki)
+│   ├── DESKTOP.md      # Desktop architecture / API contract
+│   ├── USAGE.md        # CLI / operator guide
+│   └── SKILL_LIFECYCLE.md
 ├── examples/           # demo_plugin and sample scripts
-├── scripts/            # build_desktop, sync_version, signing helpers
-├── tests/
-├── skills/
-└── docs/
+├── scripts/            # build_desktop, sync_version, sync_help_manual, signing
+├── tests/              # pytest suite
+└── skills/             # Extra / example skill packs
 ```
 
 ### Desktop release (maintainers)
@@ -443,17 +459,18 @@ RemedyAI/
 Signed Windows installers are built by GitHub Actions on version tags (`v*`):
 
 ```bash
-# bump version across pyproject / package.json / tauri / Cargo / latest.json
-python scripts/sync_version.py patch   # or: 0.10.5 | minor | major
+# bump version across pyproject / package.json / tauri / Cargo.lock / latest.json
+python scripts/sync_version.py patch   # or: 0.10.37 | minor | major
+python scripts/sync_help_manual.py     # keep docs/manual ↔ desktop help articles in sync
 
 git add -A && git commit -m "chore: release vX.Y.Z"
-git push origin desktop-primary
+git push origin master
 git tag vX.Y.Z && git push origin vX.Y.Z
 # → .github/workflows/desktop-release.yml builds sidecar + NSIS, signs, publishes
 # Optional: publish Python package — uv build && uv publish
 ```
 
-See [CHANGELOG.md](CHANGELOG.md) for release notes.
+See [CHANGELOG.md](CHANGELOG.md) for release notes. Current desktop series: **0.10.x**.
 
 **Signing (required for in-app auto-update):**
 
