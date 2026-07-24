@@ -6,6 +6,15 @@
 partner for knowledge, design, code, and get-it-done work (not a medical or
 clinical product). Current package series: **0.10.x** (see root `CHANGELOG.md`).
 
+### Skills panel (0.10.30+)
+
+The desktop **Skills** side panel lists packs with status chips (active / validated /
+discovered / disabled), **hard-won** badges, search, Activate/Disable/Trust
+(quarantine imports), and success/fail feedback. Full skill lifecycle docs:
+[SKILL_LIFECYCLE.md](SKILL_LIFECYCLE.md).
+
+Agent tools: `skill_activate`, `skill_search`, `skill_run` (progressive disclosure).
+
 ### Partner features (0.10.18–0.10.25)
 
 - Chat bubbles: user right / Remedy left (theme tokens); sleek shrink-wrap; user name/initials
@@ -340,3 +349,24 @@ uv run python scripts/set_tauri_signing_secrets.py
 ```
 
 Losing the private key breaks trust for already-installed clients until they manually install a build with a new pubkey.
+
+### Authenticode / SmartScreen (first install)
+
+minisign only covers **in-app updates**. The first browser download still needs
+**Authenticode** code signing to avoid “Unknown publisher” / SmartScreen.
+
+See **[WINDOWS_SIGNING.md](./WINDOWS_SIGNING.md)** for certificate types (OV/EV),
+`signtool` examples, and where to plug signing into CI.
+
+### Uninstall data options
+
+Interactive uninstall shows checkboxes:
+
+| Option | Removes |
+|--------|---------|
+| **Configuration** | `~\.remedy\config.toml`, `desktop.json`, `auth\`, … |
+| **Skills** | `~\.remedy\skills` |
+| **Full wipe** | Entire `~\.remedy` + app leftovers (reinstall is clean) |
+
+Leave all unchecked to keep user data. Silent auto-update uninstalls (`/UPDATE`)
+**never** wipe user data.

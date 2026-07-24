@@ -48,15 +48,26 @@ class LearningHistory:
         skill: Skill,
         source_trace_id: UUID | None = None,
         source_session_id: str | None = None,
+        confidence: float | None = None,
     ) -> LearningEvent:
+        # Prefer explicit confidence, then lifecycle_confidence in metadata, never invent 1.0
+        meta = skill.manifest.metadata or {}
+        conf = confidence
+        if conf is None:
+            conf = meta.get("lifecycle_confidence")
+        if conf is None:
+            conf = meta.get("reflection_confidence")
+        if conf is None:
+            conf = 0.5
+        conf = max(0.0, min(1.0, float(conf)))
         event = LearningEvent(
             event_type="created",
             skill_name=skill.manifest.name,
             skill_version=skill.manifest.version,
             source_trace_id=source_trace_id,
             source_session_id=source_session_id,
-            confidence_at_creation=1.0,
-            description=f"Created skill '{skill.manifest.name}'",
+            confidence_at_creation=conf,
+            description=f"Created skill '{skill.manifest.name}' (confidence={conf:.2f})",
         )
         self.events.append(event)
         self.total_skills_created += 1

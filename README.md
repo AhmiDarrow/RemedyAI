@@ -27,6 +27,8 @@ The recommended way to use Remedy is the native desktop application — no Pytho
 3. Launch from the Start Menu — the SetupWizard guides you through provider and model configuration
 4. Start chatting with `/help` to see available commands
 
+> **Windows SmartScreen?** Solo builds are not Authenticode-signed yet (costly for indie). If Windows says “Unknown publisher”, click **More info → Run anyway**. The download is from this GitHub repo only. In-app updates are still **minisign**-verified.
+
 The desktop app bundles the full Remedy server as a sidecar, so everything runs locally on your machine.
 
 ### Desktop Features
@@ -272,23 +274,27 @@ Partner APIs (when `remedy serve` is running): `GET /api/partner/status`,
 
 ---
 
-## Learning Loop
+## Learning Loop & Skills
 
-Remedy self-improves by distilling task traces into reusable skills:
+**Skills are a core strength of Remedy.** Unlike static skill packs, Remedy
+*earns* procedures from real work, protects hard-won multi-attempt solutions, and
+loads them with [agentskills.io progressive disclosure](https://agentskills.io)
+(catalog → `skill_activate` → optional `skill_run`).
 
 ```
-Task completes
-  -> ExecutionTrace extracted (steps, tools, errors)
-  -> ReflectionEngine analyzes patterns
-  -> GeneratedSkill proposed (auto-named, auto-tagged)
-  -> SKILL.md saved to skills directory
-  -> LearningHistory records event
+Multi-step turn succeeds
+  -> Tool steps recorded (auto-learn hook)
+  -> Lifecycle gates (no lucky one-off ACTIVE)
+  -> Effort score (hard-won protected from prune)
+  -> ReflectionEngine: trigger-oriented description + failure protocol
+  -> Probation SKILL.md (merge if name exists)
+  -> Durable stats (~/.remedy/skill_stats.json)
+  -> Multi-session promote / demote / prune
 
-Skill refines:
-  -> SkillRefiner tracks success/failure
-  -> Auto-promote: 3+ successes at >=80% -> ACTIVE
-  -> Auto-demote: 5+ failures <50% -> DISABLED
-  -> Changelog tracked across versions
+At chat time:
+  -> Ranked catalog in system prompt (status, effort badges)
+  -> skill_search / skill_activate / skill_run tools
+  -> Feedback closes the loop on activation
 ```
 
 ```bash
@@ -296,6 +302,9 @@ remedy learn reflect "My Task" --steps_json '[...]'
 remedy learn stats --skill my-skill
 remedy learn changelog my-skill
 ```
+
+See [docs/SKILL_LIFECYCLE.md](docs/SKILL_LIFECYCLE.md) for gates, ranking, API,
+quarantine import, and the desktop Skills panel.
 
 ---
 

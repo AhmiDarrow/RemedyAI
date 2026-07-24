@@ -16,6 +16,8 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
+# EffortScore typed loosely to avoid circular import at module load
+
 
 @dataclass
 class TraceStep:
@@ -214,17 +216,50 @@ class ReflectionEngine:
         if trace.step_count < self.min_steps:
             return None
 
+        # Quality gate: overall task must succeed. Step cleanliness is
+        # effort-aware — hard-won multi-attempt traces may have many failures.
+        from remedy.core.learning.lifecycle import (
+            MIN_STEP_SUCCESS_RATE,
+            MIN_STEP_SUCCESS_RATE_HARD,
+            compute_effort_score,
+        )
+
+        successful = sum(1 for s in trace.steps if s.success)
+        if not trace.overall_success:
+            return None
+        if successful < self.min_steps:
+            return None
+        effort = compute_effort_score(
+            steps=trace.steps, total_duration_ms=trace.total_duration_ms
+        )
+        min_rate = (
+            MIN_STEP_SUCCESS_RATE_HARD
+            if effort.is_hard_won
+            else MIN_STEP_SUCCESS_RATE
+        )
+        if trace.success_rate < min_rate:
+            return None
+
         name = self._propose_skill_name(trace)
         description = self._build_skill_description(trace)
-        instructions = self._build_skill_instructions(trace, patterns)
-        tags = self._suggest_tags(trace)
+        instructions = self._build_skill_instructions(trace, patterns, effort=effort)
+        tags = self._suggest_tags(trace, effort=effort)
+        # Always mark probation — never "proven" from one trace
+        if "probation" not in tags:
+            tags.append("probation")
+        if "auto-generated" not in tags:
+            tags.append("auto-generated")
+        if effort.is_hard_won and "hard-won" not in tags:
+            tags.append("hard-won")
+        if effort.score >= 0.5 and "high-effort" not in tags:
+            tags.append("high-effort")
 
         return GeneratedSkill(
             proposed_name=name,
             description=description,
             instructions=instructions,
             tags=tags,
-            tools_used=list({s.tool_name for s in trace.steps}),
+            tools_used=list({s.tool_name for s in trace.steps if s.success}),
             estimated_success_rate=trace.success_rate,
             source_trace_id=trace.task_id,
             source_task_title=trace.title,
@@ -237,55 +272,127 @@ class ReflectionEngine:
         return f"{tool_prefix}-{title_slug}"[:64]
 
     def _build_skill_description(self, trace: ExecutionTrace) -> str:
-        steps_summary = ", ".join(
-            sorted({s.tool_name for s in trace.steps})
-        )
-        return (
-            f"Automates the task: '{trace.title}'. "
-            f"Uses tools: {steps_summary}. "
-            f"Learned from session {trace.session_id or 'unknown'}."
-        )
+        """Trigger-oriented description for progressive disclosure matching.
+
+        agentskills.io: the description carries the burden of when to activate.
+        Prefer *when to use* language over session IDs.
+        """
+        tools = sorted({s.tool_name for s in trace.steps if s.success})
+        tools_txt = ", ".join(tools[:8]) if tools else "general tools"
+        title = (trace.title or "multi-step task").strip()
+        # Lead with applicability, then how
+        parts = [
+            f"Use when the user needs help with: {title}.",
+            f"Procedure uses: {tools_txt}.",
+        ]
+        fails = [s for s in trace.steps if not s.success]
+        if fails:
+            parts.append(
+                "Includes recovery steps after failed tool attempts "
+                "(hard-won path — prefer over naive retries)."
+            )
+        if trace.description:
+            desc = trace.description.strip()
+            if len(desc) > 120:
+                desc = desc[:117] + "…"
+            parts.append(f"Context: {desc}")
+        return " ".join(parts)
 
     def _build_skill_instructions(
         self,
         trace: ExecutionTrace,
         patterns: list[ToolSequence],
+        *,
+        effort: Any = None,
     ) -> str:
         lines = [
             f"# {trace.title}",
             "",
             "This skill was automatically generated from a successful execution.",
             "",
-            "## Steps",
+            "## Lifecycle (read before trusting)",
+            "",
+            "- Status starts as **probation** (discovered/validated), not fully active.",
+            "- Only promote after repeated successes across **multiple sessions**.",
+            "- If steps fail, recover or stop — do not invent success.",
+            "- Prefer re-checking paths and tool results over blind replay.",
             "",
         ]
-        for i, step in enumerate(trace.steps):
-            status = "SUCCESS" if step.success else "FAILED"
-            lines.append(
-                f"{i + 1}. **{step.tool_name}** [{status}]"
+        if effort is not None and getattr(effort, "score", 0) >= 0.5:
+            lines.extend(
+                [
+                    "## Effort / why this matters",
+                    "",
+                    f"- **Effort weight:** {effort.score:.2f} ({effort.band})",
+                    f"- **Why hard-won:** {', '.join(effort.reasons)}",
+                    "- Preserve recovery paths below — they cost real work to discover.",
+                    "",
+                ]
             )
+        lines.extend(
+            [
+                "## Steps",
+                "",
+            ]
+        )
+        for i, step in enumerate(trace.steps):
+            if not step.success:
+                # Document failures as recovery notes, not as the happy path
+                lines.append(
+                    f"{i + 1}. **{step.tool_name}** [FAILED — do not treat as required success]"
+                )
+                if step.error:
+                    lines.append(f"   - Error seen: {step.error}")
+                    lines.append("   - Recover: adjust arguments or try an alternate tool, then continue.")
+                lines.append("")
+                continue
+            lines.append(f"{i + 1}. **{step.tool_name}** [SUCCESS]")
+            if step.arguments:
+                # Keep arg keys only — avoid baking session-specific values as gospel
+                keys = ", ".join(sorted(str(k) for k in step.arguments.keys())[:12])
+                if keys:
+                    lines.append(f"   - Argument keys: `{keys}`")
             if step.result_summary:
-                lines.append(f"   - Result: {step.result_summary}")
+                summary = step.result_summary
+                if len(summary) > 240:
+                    summary = summary[:240] + "…"
+                lines.append(f"   - Result sketch: {summary}")
             lines.append("")
 
         if patterns:
             lines.append("## Reusable Patterns")
             lines.append("")
             for p in patterns[:3]:
-                lines.append(f"- `{p.description}` ({p.frequency}x, {p.success_rate:.0%} success)")
+                if p.success_rate < 0.8:
+                    continue
+                lines.append(
+                    f"- `{p.description}` ({p.frequency}x, {p.success_rate:.0%} success)"
+                )
 
+        lines.append("")
+        lines.append("## Failure protocol")
+        lines.append("")
+        lines.append("- If a step fails twice with different args, stop and report — do not loop.")
+        lines.append("- Never mark the overall skill successful when critical tools failed.")
+        lines.append("- After failure, prefer discovery (list_dir / status) before retry.")
         lines.append("")
         lines.append("## Requirements")
         lines.append("")
-        for tool in sorted({s.tool_name for s in trace.steps}):
+        for tool in sorted({s.tool_name for s in trace.steps if s.success}):
             lines.append(f"- Tool: `{tool}`")
 
         return "\n".join(lines)
 
-    def _suggest_tags(self, trace: ExecutionTrace) -> list[str]:
+    def _suggest_tags(self, trace: ExecutionTrace, *, effort: Any = None) -> list[str]:
         tags = list(trace.tags or [])
         tags.append("auto-generated")
         tags.append("learned")
+
+        if effort is not None and getattr(effort, "is_hard_won", False):
+            tags.append("hard-won")
+            tags.append("high-effort")
+        elif effort is not None and getattr(effort, "score", 0) >= 0.5:
+            tags.append("high-effort")
 
         if trace.success_rate >= 0.9:
             tags.append("high-confidence")

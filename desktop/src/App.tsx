@@ -338,11 +338,14 @@ export default function App() {
           : `${filename}.txt`
         a.click()
         URL.revokeObjectURL(url)
+        notify('Exported session', { body: a.download, silent: true })
       } catch (e: unknown) {
-        console.warn('Export failed:', e instanceof Error ? e.message : e)
+        const msg = e instanceof Error ? e.message : String(e)
+        console.warn('Export failed:', msg)
+        notify('Export failed', { body: msg })
       }
     },
-    [],
+    [notify],
   )
 
   const handleImport = useCallback(async () => {
@@ -363,7 +366,7 @@ export default function App() {
       if (!file) return
       const text = await file.text()
       if (!text.trim()) {
-        console.warn('Import failed: empty file')
+        notify('Import failed', { body: 'File is empty' })
         return
       }
       const stem = file.name.replace(/\.(txt|md)$/i, '').trim()
@@ -374,11 +377,17 @@ export default function App() {
       if (created?.id) {
         setActiveId(created.id)
         setOpenTabs((prev) => new Set([...prev, created.id]))
+        notify('Session imported', {
+          body: created.title || `${created.imported_messages ?? ''} messages`,
+          silent: true,
+        })
       }
     } catch (e: unknown) {
-      console.warn('Import failed:', e instanceof Error ? e.message : e)
+      const msg = e instanceof Error ? e.message : String(e)
+      console.warn('Import failed:', msg)
+      notify('Import failed', { body: msg })
     }
-  }, [refreshSessions, setActiveId])
+  }, [refreshSessions, setActiveId, notify])
 
   const handleCommand = useCallback(
     async (command: string) => {

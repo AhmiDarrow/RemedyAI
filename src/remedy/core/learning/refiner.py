@@ -9,8 +9,11 @@ Monitors skill execution success/failure signals and:
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
 from uuid import UUID, uuid4
 
 from packaging.version import Version
@@ -43,6 +46,7 @@ class SkillStats:
     last_executed: datetime | None = None
     execution_by_session: dict[str, int] = field(default_factory=dict)
     common_errors: dict[str, int] = field(default_factory=dict)
+    consecutive_failures: int = 0
 
     @property
     def success_rate(self) -> float:
@@ -52,7 +56,13 @@ class SkillStats:
 
     @property
     def is_reliable(self) -> bool:
-        return self.total_executions >= 3 and self.success_rate >= 0.8
+        # Align with lifecycle: volume + rate + multi-session (not one lucky streak)
+        sessions = len(self.execution_by_session)
+        return (
+            self.total_executions >= 5
+            and self.success_rate >= 0.8
+            and sessions >= 2
+        )
 
     @property
     def is_unreliable(self) -> bool:
@@ -60,11 +70,118 @@ class SkillStats:
 
 
 class SkillRefiner:
-    """Refines skills based on execution feedback and statistics."""
+    """Refines skills based on execution feedback and statistics.
 
-    def __init__(self) -> None:
+    Stats can be persisted to JSON so promote/demote survives restarts.
+    """
+
+    def __init__(self, stats_path: Path | str | None = None) -> None:
         self._stats: dict[str, SkillStats] = {}
         self._history: list[RefinementRecord] = []
+        # Track consecutive failure streaks per skill
+        self._failure_streak: dict[str, int] = {}
+        self._last_success_at: dict[str, datetime] = {}
+        self._last_failure_at: dict[str, datetime] = {}
+        self._stats_path: Path | None = (
+            Path(stats_path).expanduser() if stats_path else None
+        )
+        if self._stats_path is not None:
+            self.load_stats(self._stats_path)
+
+    def set_stats_path(self, path: Path | str | None) -> None:
+        self._stats_path = Path(path).expanduser() if path else None
+        if self._stats_path is not None and self._stats_path.is_file():
+            self.load_stats(self._stats_path)
+
+    def load_stats(self, path: Path | str | None = None) -> int:
+        """Load durable stats from JSON. Returns number of skills loaded."""
+        p = Path(path).expanduser() if path else self._stats_path
+        if p is None or not p.is_file():
+            return 0
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return 0
+        skills = data.get("skills") if isinstance(data, dict) else None
+        if not isinstance(skills, dict):
+            return 0
+        n = 0
+        for name, raw in skills.items():
+            if not isinstance(raw, dict):
+                continue
+            stats = SkillStats(
+                skill_name=str(name),
+                total_executions=int(raw.get("total_executions") or 0),
+                successes=int(raw.get("successes") or 0),
+                failures=int(raw.get("failures") or 0),
+                avg_duration_ms=float(raw.get("avg_duration_ms") or 0.0),
+                execution_by_session={
+                    str(k): int(v)
+                    for k, v in (raw.get("execution_by_session") or {}).items()
+                },
+                common_errors={
+                    str(k): int(v) for k, v in (raw.get("common_errors") or {}).items()
+                },
+                consecutive_failures=int(raw.get("consecutive_failures") or 0),
+            )
+            le = raw.get("last_executed")
+            if le:
+                try:
+                    stats.last_executed = datetime.fromisoformat(str(le))
+                except ValueError:
+                    pass
+            self._stats[str(name)] = stats
+            self._failure_streak[str(name)] = stats.consecutive_failures
+            ls = raw.get("last_success_at")
+            lf = raw.get("last_failure_at")
+            if ls:
+                try:
+                    self._last_success_at[str(name)] = datetime.fromisoformat(str(ls))
+                except ValueError:
+                    pass
+            if lf:
+                try:
+                    self._last_failure_at[str(name)] = datetime.fromisoformat(str(lf))
+                except ValueError:
+                    pass
+            n += 1
+        return n
+
+    def save_stats(self, path: Path | str | None = None) -> bool:
+        """Persist stats to JSON. Returns True on success."""
+        p = Path(path).expanduser() if path else self._stats_path
+        if p is None:
+            return False
+        try:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            payload: dict[str, Any] = {"version": 1, "skills": {}}
+            for name, stats in self._stats.items():
+                payload["skills"][name] = {
+                    "total_executions": stats.total_executions,
+                    "successes": stats.successes,
+                    "failures": stats.failures,
+                    "avg_duration_ms": stats.avg_duration_ms,
+                    "last_executed": (
+                        stats.last_executed.isoformat() if stats.last_executed else None
+                    ),
+                    "execution_by_session": dict(stats.execution_by_session),
+                    "common_errors": dict(stats.common_errors),
+                    "consecutive_failures": stats.consecutive_failures,
+                    "last_success_at": (
+                        self._last_success_at[name].isoformat()
+                        if name in self._last_success_at
+                        else None
+                    ),
+                    "last_failure_at": (
+                        self._last_failure_at[name].isoformat()
+                        if name in self._last_failure_at
+                        else None
+                    ),
+                }
+            p.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            return True
+        except OSError:
+            return False
 
     def record_execution(
         self,
@@ -76,10 +193,17 @@ class SkillRefiner:
     ) -> None:
         stats = self._get_or_create_stats(skill_name)
         stats.total_executions += 1
+        now = datetime.now(UTC)
         if success:
             stats.successes += 1
+            self._failure_streak[skill_name] = 0
+            self._last_success_at[skill_name] = now
         else:
             stats.failures += 1
+            self._failure_streak[skill_name] = self._failure_streak.get(skill_name, 0) + 1
+            self._last_failure_at[skill_name] = now
+
+        stats.consecutive_failures = self._failure_streak.get(skill_name, 0)
 
         if stats.total_executions == 1:
             stats.avg_duration_ms = duration_ms
@@ -88,13 +212,16 @@ class SkillRefiner:
                 stats.avg_duration_ms * (stats.total_executions - 1) + duration_ms
             ) / stats.total_executions
 
-        stats.last_executed = datetime.now(UTC)
+        stats.last_executed = now
         if session_id:
             stats.execution_by_session[session_id] = stats.execution_by_session.get(session_id, 0) + 1
 
         if error and not success:
             error_key = error[:80]
             stats.common_errors[error_key] = stats.common_errors.get(error_key, 0) + 1
+
+        # Durable write (best-effort)
+        self.save_stats()
 
     def get_stats(self, skill_name: str) -> SkillStats:
         return self._get_or_create_stats(skill_name)
@@ -104,11 +231,25 @@ class SkillRefiner:
 
     def should_promote(self, skill_name: str) -> bool:
         stats = self._get_or_create_stats(skill_name)
-        return stats.is_reliable
+        return stats.is_reliable and self._failure_streak.get(skill_name, 0) == 0
 
     def should_demote(self, skill_name: str) -> bool:
         stats = self._get_or_create_stats(skill_name)
+        if self._failure_streak.get(skill_name, 0) >= 3:
+            return True
         return stats.is_unreliable
+
+    def failure_streak(self, skill_name: str) -> int:
+        return self._failure_streak.get(skill_name, 0)
+
+    def session_count(self, skill_name: str) -> int:
+        return len(self._get_or_create_stats(skill_name).execution_by_session)
+
+    def last_success_at(self, skill_name: str) -> datetime | None:
+        return self._last_success_at.get(skill_name)
+
+    def last_failure_at(self, skill_name: str) -> datetime | None:
+        return self._last_failure_at.get(skill_name)
 
     def refine_instructions(
         self,

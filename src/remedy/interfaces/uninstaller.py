@@ -75,13 +75,45 @@ def _pip_uninstall() -> bool:
     return ok
 
 
-def run_uninstall(purge: bool = False, dry_run: bool = False) -> None:
+def _wipe_config() -> None:
+    """Remove config/auth/desktop prefs; leave skills and memory."""
+    for name in ("config.toml", "config.yaml", "config.yml", "desktop.json", "comfyui.json"):
+        p = REMEDY_HOME / name
+        if p.exists():
+            p.unlink(missing_ok=True)
+            console.print(f"  removed [dim]{p}[/dim]")
+    auth = REMEDY_HOME / "auth"
+    if auth.exists():
+        shutil.rmtree(auth, ignore_errors=True)
+        console.print(f"  removed [dim]{auth}[/dim]")
+
+
+def _wipe_skills() -> None:
+    skills = REMEDY_HOME / "skills"
+    if skills.exists():
+        shutil.rmtree(skills, ignore_errors=True)
+        console.print(f"  removed [dim]{skills}[/dim]")
+
+
+def run_uninstall(
+    purge: bool = False,
+    dry_run: bool = False,
+    *,
+    config: bool = False,
+    skills: bool = False,
+) -> None:
     """Run the uninstaller.
 
     Args:
-        purge: Also remove ~/.remedy/ user data directory.
+        purge: Full wipe of ~/.remedy (and implies config + skills).
         dry_run: Show what would be removed without touching anything.
+        config: Remove configuration / auth only.
+        skills: Remove ~/.remedy/skills only.
     """
+    if purge:
+        config = True
+        skills = True
+
     console.print(
         Panel.fit(
             "Preparing to uninstall Remedy...",
@@ -103,7 +135,19 @@ def run_uninstall(purge: bool = False, dry_run: bool = False) -> None:
         if path.is_file():
             console.print(f"  {desc}: [dim]{path}[/dim]")
 
-    console.print(f"\n[bold]Home dir:[/bold] [dim]{REMEDY_HOME}[/dim] {'[yellow](will be kept)[/yellow]' if not purge else '[red](will be removed)[/red]'}")
+    keep = not (purge or config or skills)
+    console.print(
+        f"\n[bold]Home dir:[/bold] [dim]{REMEDY_HOME}[/dim] "
+        + (
+            "[yellow](kept)[/yellow]"
+            if keep
+            else (
+                "[red](full wipe)[/red]"
+                if purge
+                else f"[yellow](partial: config={config} skills={skills})[/yellow]"
+            )
+        )
+    )
 
     if dry_run:
         console.print("\n[bold cyan]Dry run complete. No changes made.[/bold cyan]")
@@ -113,10 +157,18 @@ def run_uninstall(purge: bool = False, dry_run: bool = False) -> None:
     # Confirm
     console.print()
     if purge:
-        action = "Uninstall package AND delete all Remedy data?"
+        action = "Uninstall package AND full-wipe all Remedy data?"
         suffix = "\n[red]This cannot be undone![/red]"
+    elif config or skills:
+        bits = []
+        if config:
+            bits.append("config")
+        if skills:
+            bits.append("skills")
+        action = f"Uninstall package and remove {', '.join(bits)}?"
+        suffix = ""
     else:
-        action = "Uninstall the remedy package?"
+        action = "Uninstall the remedy package (keep user data)?"
         suffix = ""
 
     if not Confirm.ask(f"{action}{suffix}", default=False, console=console):
@@ -127,14 +179,21 @@ def run_uninstall(purge: bool = False, dry_run: bool = False) -> None:
     console.print("\n[bold]Uninstalling package...[/bold]")
     _pip_uninstall()
 
-    # Purge data
+    # Data wipe
     if purge and REMEDY_HOME.exists():
-        console.print(f"\n[bold]Removing {REMEDY_HOME}...[/bold]")
+        console.print(f"\n[bold]Full wipe {REMEDY_HOME}...[/bold]")
         try:
             shutil.rmtree(REMEDY_HOME)
             console.print("[green]Remedy data removed.[/green]")
         except Exception as e:
             console.print(f"[red]Failed to remove data: {e}[/red]")
+    else:
+        if config or skills:
+            console.print("\n[bold]Removing selected user data...[/bold]")
+        if config:
+            _wipe_config()
+        if skills:
+            _wipe_skills()
 
     console.print()
     console.print("[green]Uninstall complete.[/green]")

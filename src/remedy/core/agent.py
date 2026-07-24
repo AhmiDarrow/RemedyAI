@@ -421,6 +421,251 @@ class BasicRuntime(AgentRuntime):
         )
         self._register_comfyui_tools()
         self._register_local_discover_tools()
+        self._register_skill_tools()
+        # Per-turn tool trace for auto-learn (reset each stream_response)
+        self._turn_tool_steps: list[dict[str, Any]] = []
+        self._learning_loop = None  # lazy LearningLoop
+
+    def _get_learning_loop(self):
+        """Lazy LearningLoop bound to home skills dir + this registry."""
+        if self._learning_loop is not None:
+            return self._learning_loop
+        try:
+            from remedy.core.learning_loop import LearningLoop
+
+            home = Path(
+                getattr(self.config, "home_dir", None) or "~/.remedy"
+            ).expanduser()
+            skills_dir = home / "skills"
+            self._learning_loop = LearningLoop(
+                skills_dir=skills_dir,
+                memory=self.memory,
+                registry=getattr(self, "skills", None),
+            )
+        except Exception:
+            logger.debug("LearningLoop init failed", exc_info=True)
+            return None
+        return self._learning_loop
+
+    def _register_skill_tools(self) -> None:
+        """Progressive disclosure: activate full SKILL.md / run skill scripts."""
+
+        async def skill_activate(
+            name: str = "",
+            include_references: bool = False,
+        ) -> str:
+            """Load full skill instructions into this turn (stage 2 disclosure)."""
+            reg = getattr(self, "skills", None)
+            if reg is None:
+                return format_tool_error(
+                    "No skill registry",
+                    code="NO_SKILLS",
+                    tool_name="skill_activate",
+                    suggestion="Restart the server so bundled skills can load.",
+                )
+            nm = (name or "").strip()
+            if not nm:
+                # Rank against empty → top trusted catalog
+                ranked = reg.match_skills("", limit=10)
+                names = ", ".join(s.manifest.name for s, _ in ranked) or "(none)"
+                return f"Pass name=. Available (top): {names}"
+            body = reg.skill_body(nm, include_references=bool(include_references))
+            if body is None:
+                # fuzzy match
+                hits = reg.match_skills(nm, limit=5)
+                hint = ", ".join(s.manifest.name for s, _ in hits) or "none"
+                return format_tool_error(
+                    f"Skill not found: {nm}",
+                    code="SKILL_NOT_FOUND",
+                    tool_name="skill_activate",
+                    suggestion=f"Closest: {hint}",
+                )
+            reg.mark_activated(nm)
+            related = reg.related_skills(nm)
+            footer = ""
+            if related:
+                footer = (
+                    "\n\n_Related skills (composition): "
+                    + ", ".join(related)
+                    + " — activate if needed._"
+                )
+            # Feedback: activation counts as a soft "use" (success until proven otherwise)
+            with suppress(Exception):
+                loop = self._get_learning_loop()
+                if loop is not None:
+                    loop.record_skill_feedback(
+                        nm,
+                        success=True,
+                        session_id=str(getattr(self, "_session_id", "") or ""),
+                    )
+                    skill = reg.get(nm)
+                    if skill is not None:
+                        loop.auto_refine_skill(skill)
+            return body + footer
+
+        async def skill_run(
+            name: str = "",
+            script: str = "",
+            args: str = "",
+        ) -> str:
+            """Execute a script bundled under a skill's scripts/ directory."""
+            reg = getattr(self, "skills", None)
+            if reg is None:
+                return format_tool_error(
+                    "No skill registry",
+                    code="NO_SKILLS",
+                    tool_name="skill_run",
+                    suggestion="Restart the server.",
+                )
+            nm = (name or "").strip()
+            skill = reg.get(nm) if nm else None
+            if skill is None:
+                return format_tool_error(
+                    f"Skill not found: {nm}",
+                    code="SKILL_NOT_FOUND",
+                    tool_name="skill_run",
+                    suggestion="skill_activate first, or check /skills.",
+                )
+            scripts = list(skill.scripts or [])
+            if not scripts:
+                return format_tool_error(
+                    f"Skill '{nm}' has no scripts/",
+                    code="NO_SCRIPTS",
+                    tool_name="skill_run",
+                    suggestion="Use skill_activate and follow instructions instead.",
+                )
+            chosen = (script or "").strip() or scripts[0]
+            # Normalize relative path
+            if chosen not in scripts:
+                # allow bare filename
+                matches = [s for s in scripts if s.endswith(chosen) or Path(s).name == chosen]
+                if matches:
+                    chosen = matches[0]
+                else:
+                    return format_tool_error(
+                        f"Script not in skill: {chosen}",
+                        code="SCRIPT_NOT_FOUND",
+                        tool_name="skill_run",
+                        suggestion=f"Available: {', '.join(scripts)}",
+                    )
+            base = Path(skill.source_skill_dir or skill.manifest.path or "")
+            script_path = (base / chosen).resolve()
+            # Jail: must stay under skill dir
+            try:
+                script_path.relative_to(base.resolve())
+            except Exception:
+                return format_tool_error(
+                    "Script path escapes skill directory",
+                    code="PATH_JAIL",
+                    tool_name="skill_run",
+                    suggestion="Use a relative scripts/ path only.",
+                )
+            arg_list = [a for a in (args or "").split() if a]
+            try:
+                from remedy.skills.executor import SkillExecutor
+
+                ex = SkillExecutor()
+                result = await ex.run_script(script_path, args=arg_list)
+                ok = bool(result.success)
+                with suppress(Exception):
+                    loop = self._get_learning_loop()
+                    if loop is not None:
+                        loop.record_skill_feedback(
+                            nm,
+                            success=ok,
+                            duration_ms=float(result.duration_ms or 0),
+                            session_id=str(getattr(self, "_session_id", "") or ""),
+                            error=result.error,
+                        )
+                        loop.auto_refine_skill(skill)
+                if ok:
+                    out = (result.stdout or "")[:12000]
+                    return out or f"Script {chosen} exited 0 (no stdout)."
+                return format_tool_error(
+                    result.error or result.stderr or "script failed",
+                    code="SCRIPT_FAILED",
+                    tool_name="skill_run",
+                    suggestion="Check script args or skill_activate for manual steps.",
+                )
+            except Exception as e:
+                return format_tool_error(
+                    str(e),
+                    code="SCRIPT_ERROR",
+                    tool_name="skill_run",
+                    suggestion="See logs; try skill_activate instead.",
+                )
+
+        async def skill_search(query: str = "", limit: int = 8) -> str:
+            """Rank skills for the current task (name/description/tags/effort/status)."""
+            reg = getattr(self, "skills", None)
+            if reg is None:
+                return "[]"
+            ranked = reg.match_skills(
+                query or "",
+                limit=max(1, min(int(limit or 8), 20)),
+                workspace_hint=str(self.effective_project_path()),
+            )
+            lines = []
+            for skill, score in ranked:
+                m = skill.manifest
+                lines.append(
+                    f"- {m.name} (score={score:.2f}, {m.status.value}): {m.description[:140]}"
+                )
+            return "\n".join(lines) if lines else "(no matching skills)"
+
+        self.tool_registry.register_builtin_handler(
+            "skill_activate",
+            "Load full instructions for a skill pack (progressive disclosure). "
+            "Use when a catalog skill matches the task. Pass name= exact skill id.",
+            skill_activate,
+            {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Skill name (from catalog)",
+                    },
+                    "include_references": {
+                        "type": "boolean",
+                        "description": "Also load references/ files (default false)",
+                    },
+                },
+                "required": ["name"],
+            },
+        )
+        self.tool_registry.register_builtin_handler(
+            "skill_run",
+            "Run a script from a skill's scripts/ directory in a sandbox. "
+            "Prefer skill_activate for procedure-only skills.",
+            skill_run,
+            {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Skill name"},
+                    "script": {
+                        "type": "string",
+                        "description": "Relative script path (default first script)",
+                    },
+                    "args": {
+                        "type": "string",
+                        "description": "Space-separated CLI args",
+                    },
+                },
+                "required": ["name"],
+            },
+        )
+        self.tool_registry.register_builtin_handler(
+            "skill_search",
+            "Rank available skills for a query (status, description, effort, tags).",
+            skill_search,
+            {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Task keywords"},
+                    "limit": {"type": "integer", "description": "Max results (default 8)"},
+                },
+            },
+        )
 
     def _register_local_discover_tools(self) -> None:
         """Portable discovery for *any* skill/service local deps — no disk thrash."""
@@ -1309,6 +1554,23 @@ class BasicRuntime(AgentRuntime):
                 )
             result_cache[fp] = content_str
             seen_fps.add(fp)
+            # Trace step for post-turn auto-learn
+            with suppress(Exception):
+                steps = getattr(self, "_turn_tool_steps", None)
+                if isinstance(steps, list):
+                    steps.append(
+                        {
+                            "tool": name or "unknown",
+                            "args": {
+                                k: (str(v)[:80] if not isinstance(v, (int, float, bool)) else v)
+                                for k, v in list(args.items())[:12]
+                            },
+                            "success": bool(result.success),
+                            "result": (content_str or "")[:200],
+                            "error": None if result.success else (result.error or "failed"),
+                            "duration_ms": float(getattr(result, "duration_ms", 0) or 0),
+                        }
+                    )
             return content_str
 
         def _progress_marker(
@@ -2286,6 +2548,11 @@ class BasicRuntime(AgentRuntime):
         if model and str(model).strip():
             self._llm_model = str(model).strip()
 
+        # Fresh per-turn tool trace for auto-learn
+        self._turn_tool_steps = []
+        if session_id:
+            self._session_id = session_id
+
         try:
             if not self._llm_api_key:
                 yield (
@@ -2300,6 +2567,53 @@ class BasicRuntime(AgentRuntime):
                 yield chunk
         finally:
             self._llm_model = prev_model
+            # Post-turn: distill multi-step successes into probation skills
+            with suppress(Exception):
+                self._maybe_auto_learn_from_turn(message, session_id)
+
+    def _maybe_auto_learn_from_turn(
+        self,
+        message: str,
+        session_id: str | None,
+    ) -> None:
+        """If this turn used enough successful tools, learn a probation skill."""
+        steps = list(getattr(self, "_turn_tool_steps", None) or [])
+        if len(steps) < 3:
+            return
+        # Skip pure skill meta tools alone
+        real = [
+            s
+            for s in steps
+            if s.get("tool")
+            not in ("skill_search", "skill_activate", "local_discover")
+        ]
+        if len(real) < 3 and len(steps) < 4:
+            # still allow hard multi-tool including discover
+            if len(steps) < 4:
+                return
+        successes = sum(1 for s in steps if s.get("success"))
+        if successes < 3:
+            return
+        overall = successes >= max(2, int(0.5 * len(steps)))
+        if not overall:
+            return
+        loop = self._get_learning_loop()
+        if loop is None:
+            return
+        title = (message or "session-task").strip().split("\n")[0][:80]
+        skill = loop.learn_from_tool_steps(
+            title=title or "multi-tool-task",
+            steps=steps,
+            session_id=session_id,
+            description=(message or "")[:400],
+            overall_success=True,
+        )
+        if skill is not None:
+            logger.info(
+                "Auto-learned skill '%s' status=%s",
+                skill.manifest.name,
+                skill.manifest.status.value,
+            )
 
     async def _build_context(self) -> str:
         parts = []
@@ -2389,15 +2703,23 @@ class BasicRuntime(AgentRuntime):
                 f"Built-in tools (executable): {names}."
             )
 
-        # Skills registry — so "what skills do you have?" never needs a shell.
+        # Skills catalog (progressive disclosure stage 1) — ranked, not full bodies.
         with suppress(Exception):
             reg = getattr(self, "skills", None)
             count = int(getattr(reg, "count", 0) or 0) if reg is not None else 0
             if reg is not None and count > 0:
-                skill_lines = reg.summary_lines(limit=40)
+                # Prefer skills relevant to workspace path tokens
+                ws = str(self.effective_project_path())
+                ranked_lines = reg.summary_lines(limit=28, query="")
+                # Re-rank with workspace when possible
+                if hasattr(reg, "match_skills"):
+                    top = reg.match_skills("", limit=28, workspace_hint=ws)
+                    if top:
+                        ranked_lines = reg.summary_lines(limit=28)
                 parts.append(
-                    "Skills loaded (procedure packs — list these when asked):\n"
-                    + "\n".join(skill_lines)
+                    "Skills catalog (name+status only — call skill_activate to load "
+                    "full procedure; skill_search to rank by task):\n"
+                    + "\n".join(ranked_lines)
                 )
             else:
                 parts.append(

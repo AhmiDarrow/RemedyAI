@@ -15,6 +15,8 @@ import yaml
 
 from remedy.models import Skill, SkillKind, SkillManifest, SkillStatus
 
+# SkillStatus used by _parse_status
+
 
 class SkillLoadError(Exception):
     """Raised when a skill cannot be loaded or validated."""
@@ -40,6 +42,17 @@ def _parse_skill_md(path: Path) -> tuple[dict, str]:
     return frontmatter, body
 
 
+def _parse_status(raw: Any) -> SkillStatus:
+    """Parse frontmatter status; default DISCOVERED (never invent ACTIVE)."""
+    if raw is None:
+        return SkillStatus.DISCOVERED
+    text = str(raw).strip().lower()
+    for st in SkillStatus:
+        if st.value == text:
+            return st
+    return SkillStatus.DISCOVERED
+
+
 def _build_manifest(frontmatter: dict, kind: SkillKind, path: Path) -> SkillManifest:
     """Build a SkillManifest from parsed frontmatter, filling defaults."""
     if "name" not in frontmatter:
@@ -51,6 +64,25 @@ def _build_manifest(frontmatter: dict, kind: SkillKind, path: Path) -> SkillMani
             f"SKILL.md at {path} is missing required 'description' field in frontmatter"
         )
 
+    meta = frontmatter.get("metadata") or {}
+    if not isinstance(meta, dict):
+        meta = {}
+    # Promote common top-level keys into metadata for ranking / lifecycle
+    for key in (
+        "auto_generated",
+        "effort_weight",
+        "effort_band",
+        "effort_reasons",
+        "lifecycle",
+        "source_trace_id",
+        "source_trace_ids",
+        "parent_skill",
+        "quarantine",
+        "trust",
+    ):
+        if key in frontmatter and key not in meta:
+            meta[key] = frontmatter[key]
+
     return SkillManifest(
         name=frontmatter["name"],
         description=frontmatter["description"],
@@ -59,13 +91,14 @@ def _build_manifest(frontmatter: dict, kind: SkillKind, path: Path) -> SkillMani
         license=frontmatter.get("license"),
         tags=frontmatter.get("tags", []) or [],
         kind=kind,
-        status=SkillStatus.DISCOVERED,
+        status=_parse_status(frontmatter.get("status")),
         homepage=frontmatter.get("homepage"),
         repository=frontmatter.get("repository"),
         requires=frontmatter.get("requires", []) or [],
         tools=frontmatter.get("tools", []) or [],
         raw_frontmatter=frontmatter,
         path=str(path.parent),
+        metadata=meta,
     )
 
 

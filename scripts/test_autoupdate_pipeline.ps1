@@ -62,7 +62,7 @@ $app = Join-Path $dest "Remedy Desktop.cmd"
 $ver = Join-Path $dest "VERSION.txt"
 $stub = "@echo off`r`necho relaunched>%~dp0RELAUNCHED.marker`r`necho NEW`r`n"
 [System.IO.File]::WriteAllText($app, $stub)
-[System.IO.File]::WriteAllText($ver, "0.10.29")
+[System.IO.File]::WriteAllText($ver, "0.10.30")
 Start-Sleep -Milliseconds 80
 (Get-Item -LiteralPath $app).LastWriteTimeUtc = (Get-Date).ToUniversalTime().AddMinutes(5)
 exit 0
@@ -148,7 +148,7 @@ while ((Get-Date) -lt $deadline) {
     $t = Get-Content -LiteralPath $logPath -Raw -ErrorAction SilentlyContinue
     if ($t -match 'Relaunch issued') { $okLog = $true }
   }
-  if ((Test-Path -LiteralPath $versionFile) -and ((Get-Content $versionFile -Raw).Trim() -eq '0.10.29')) {
+  if ((Test-Path -LiteralPath $versionFile) -and ((Get-Content $versionFile -Raw).Trim() -eq '0.10.30')) {
     $okVer = $true
   }
   if (Test-Path -LiteralPath $relaunchMarker) { $okRelaunch = $true }
@@ -159,7 +159,7 @@ while ((Get-Date) -lt $deadline) {
 Write-Host ''
 Write-Host '--- results ---' -ForegroundColor Cyan
 Write-Host "Log has 'Relaunch issued': $okLog"
-Write-Host "VERSION.txt is 0.10.29:     $okVer"
+Write-Host "VERSION.txt is 0.10.30:     $okVer"
 Write-Host "RELAUNCHED.marker present:  $okRelaunch"
 if (Test-Path -LiteralPath $logPath) {
   Write-Host '--- update log ---' -ForegroundColor Yellow

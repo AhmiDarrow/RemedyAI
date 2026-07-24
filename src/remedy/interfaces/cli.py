@@ -297,7 +297,19 @@ def build_parser() -> argparse.ArgumentParser:
     # remedy uninstall
     uninstall_cmd = sub.add_parser("uninstall", help="Uninstall Remedy")
     uninstall_cmd.add_argument(
-        "--purge", action="store_true", help="Also delete ~/.remedy/ user data"
+        "--purge",
+        action="store_true",
+        help="Full wipe: delete entire ~/.remedy/ (config + skills + memory)",
+    )
+    uninstall_cmd.add_argument(
+        "--config",
+        action="store_true",
+        help="Remove configuration / auth (config.toml, desktop.json, auth/)",
+    )
+    uninstall_cmd.add_argument(
+        "--skills",
+        action="store_true",
+        help="Remove ~/.remedy/skills",
     )
     uninstall_cmd.add_argument(
         "--dry-run", action="store_true", help="Show what would be removed"
@@ -1488,7 +1500,12 @@ def main(args: list[str] | None = None) -> None:
     elif parsed.command == "update":
         run_update(check_only=parsed.check)
     elif parsed.command == "uninstall":
-        run_uninstall(purge=parsed.purge, dry_run=parsed.dry_run)
+        run_uninstall(
+            purge=parsed.purge,
+            dry_run=parsed.dry_run,
+            config=getattr(parsed, "config", False),
+            skills=getattr(parsed, "skills", False),
+        )
     else:
         parser.print_help()
 

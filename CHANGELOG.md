@@ -2,6 +2,31 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.10.30] — 2026-07-24
+
+### Skills system (unique strength)
+
+Progressive disclosure, closed-loop learning, ranking, and governance for the
+skill library — see `docs/SKILL_LIFECYCLE.md`.
+
+- **No force-ACTIVE on discover**: curated bundled skills stay ready; auto-generated
+  and quarantined skills keep probation status from frontmatter.
+- **Progressive disclosure**: ranked catalog in context; tools `skill_activate`,
+  `skill_run`, `skill_search` load full bodies / scripts on demand.
+- **Post-turn auto-learn**: multi-step successful tool runs distill into probation
+  skills; activations and script runs feed `record_skill_feedback` + promote/demote.
+- **Durable stats**: `~/.remedy/skill_stats.json` so lifecycle survives restarts.
+- **Ranking**: `match_skills` by status, description, tags, effort, success rate,
+  workspace hints.
+- **Merge + lineage**: same-name traces merge recovery notes instead of duplicating;
+  honest `lifecycle_confidence` in learning history.
+- **Trigger-oriented descriptions** + failure protocol on generated skills.
+- **Pack export/import**: ZIP packs; imports land in **quarantine** until trusted.
+- **API**: richer `SkillInfo`, `GET/POST /api/skills…` status, feedback, export, import.
+- **Desktop Skills panel v2**: status chips, hard-won badge, search, activate/disable/
+  trust, success/fail feedback.
+- **Effort-weighted lifecycle** (from 0.10.29 tree): hard-won skills resist demote/prune.
+
 ## [0.10.29] — 2026-07-24
 
 ### Fix: auto-update install + relaunch

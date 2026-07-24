@@ -675,7 +675,7 @@ export function MessageFeed({
         >
           <RemedyLogo size={36} framed />
           <div className="text-lg font-medium" style={{ color: 'var(--text-primary)' }}>
-            Ready when you are
+            Your partner is ready
           </div>
           <div className="text-xs max-w-sm leading-relaxed">
             Ask anything, plan, research, or open a project to build.{' '}

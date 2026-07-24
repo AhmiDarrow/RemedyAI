@@ -40,6 +40,15 @@ class SkillInfo(BaseModel):
     kind: str
     status: str
     tags: list[str] = []
+    effort_weight: float = 0.0
+    effort_band: str | None = None
+    auto_generated: bool = False
+    quarantine: bool = False
+    success_rate: float | None = None
+    path: str | None = None
+    related: list[str] = []
+    activations_session: int = 0
+    lifecycle: str | None = None
 
 
 class StatusResponse(BaseModel):

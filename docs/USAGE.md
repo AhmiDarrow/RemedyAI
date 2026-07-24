@@ -286,6 +286,13 @@ remedy skill export my-skill ./exports --format zip
 ## Learning Commands
 
 The learning loop observes task execution and distills patterns into reusable skills.
+Learned skills start on **probation** (never ACTIVE from one lucky run); multi-session
+proof promotes them. Hard-won multi-attempt traces get effort weight so they are
+protected from casual demote/prune. At chat time the agent sees a ranked catalog and
+loads full procedures via `skill_activate` (see [SKILL_LIFECYCLE.md](SKILL_LIFECYCLE.md)).
+
+Desktop **Skills** panel: status, hard-won badge, search, activate/disable/trust,
+feedback. HTTP: `GET/POST /api/skills…` (status, feedback, export/import packs).
 
 ### `remedy learn reflect <title> --steps_json <json>`
 

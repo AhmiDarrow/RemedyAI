@@ -106,7 +106,7 @@ class SkillExporter:
                 shutil.copy2(str(src), str(target))
 
     def _build_frontmatter(self, skill: Skill) -> dict:
-        return {
+        fm = {
             "name": skill.manifest.name,
             "description": skill.manifest.description,
             "version": skill.manifest.version,
@@ -115,6 +115,15 @@ class SkillExporter:
             "requires": skill.manifest.requires,
             "tools": skill.manifest.tools,
         }
+        if skill.manifest.status:
+            fm["status"] = (
+                skill.manifest.status.value
+                if hasattr(skill.manifest.status, "value")
+                else str(skill.manifest.status)
+            )
+        if skill.manifest.metadata:
+            fm["metadata"] = dict(skill.manifest.metadata)
+        return fm
 
     def _write_skill_md_to_zip(self, zf: zipfile.ZipFile, skill: Skill, format: str) -> None:
         if format == "hermes":
@@ -148,3 +157,91 @@ class SkillExporter:
             src = base / resource
             if src.is_file():
                 zf.write(str(src), f"{skill.manifest.name}/{resource}")
+
+    def export_pack(self, skills: list[Skill]) -> Path:
+        """Export multiple skills into one portable ZIP (native agentskills format)."""
+        stamp = datetime.now(UTC).strftime("%Y%m%d")
+        zip_path = self.output_dir / f"remedy-skills-pack-{stamp}.zip"
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr(
+                "PACK.json",
+                yaml.dump(
+                    {
+                        "format": "remedy-skill-pack",
+                        "version": 1,
+                        "exported_at": datetime.now(UTC).isoformat(),
+                        "skills": [s.manifest.name for s in skills],
+                    },
+                    default_flow_style=False,
+                ),
+            )
+            for skill in skills:
+                self._write_skill_md_to_zip(zf, skill, "native")
+                self._add_resources_to_zip(zf, skill)
+        return zip_path
+
+    def import_pack_quarantine(
+        self,
+        zip_path: Path,
+        dest_skills_dir: Path,
+    ) -> list[Skill]:
+        """Import skills from a pack ZIP into dest with quarantine metadata.
+
+        Imported skills start DISCOVERED + quarantine=true until the user
+        promotes them via the Skills panel / API.
+        """
+        from remedy.models import SkillKind, SkillManifest, SkillStatus
+        from remedy.skills.loader import load_skill_from_dir
+
+        dest_skills_dir = Path(dest_skills_dir).expanduser()
+        dest_skills_dir.mkdir(parents=True, exist_ok=True)
+        extract_root = self.output_dir / "_import_extract"
+        if extract_root.exists():
+            shutil.rmtree(extract_root, ignore_errors=True)
+        extract_root.mkdir(parents=True, exist_ok=True)
+
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            zf.extractall(extract_root)
+
+        imported: list[Skill] = []
+        # Find SKILL.md files under extract root
+        for skill_md in extract_root.rglob("SKILL.md"):
+            try:
+                skill = load_skill_from_dir(skill_md.parent)
+            except Exception:
+                continue
+            name = skill.manifest.name or skill_md.parent.name
+            target = dest_skills_dir / name
+            if target.exists():
+                # Do not clobber; place alongside as name-imported
+                target = dest_skills_dir / f"{name}-imported"
+                skill.manifest.name = target.name
+            shutil.copytree(skill_md.parent, target, dirs_exist_ok=True)
+            # Mark quarantine on disk frontmatter
+            meta = dict(skill.manifest.metadata or {})
+            meta["quarantine"] = True
+            meta["trust"] = "imported"
+            meta["imported_at"] = datetime.now(UTC).isoformat()
+            skill.manifest.metadata = meta
+            skill.manifest.status = SkillStatus.DISCOVERED
+            skill.manifest.kind = SkillKind.NATIVE
+            skill.source_skill_dir = str(target.resolve())
+            skill.manifest.path = str(target.resolve())
+            # Rewrite SKILL.md with quarantine flags
+            fm = self._build_frontmatter(skill)
+            fm["status"] = SkillStatus.DISCOVERED.value
+            fm["metadata"] = meta
+            body = skill.instructions or ""
+            content = (
+                "---\n"
+                + yaml.dump(fm, default_flow_style=False, sort_keys=False).strip()
+                + "\n---\n\n"
+                + body
+            )
+            (target / "SKILL.md").write_text(content, encoding="utf-8")
+            try:
+                skill = load_skill_from_dir(target)
+            except Exception:
+                pass
+            imported.append(skill)
+        return imported

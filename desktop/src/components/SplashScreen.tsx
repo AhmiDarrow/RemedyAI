@@ -2,8 +2,9 @@ import { useState, useEffect, useRef } from 'react'
 import { healthCheck } from '../api/client'
 import logoSrc from '/logo.png'
 
-const MIN_SPLASH_MS = 3000
-const FADE_MS = 350
+/** Keep splash short — server health is the real gate, not a marketing delay. */
+const MIN_SPLASH_MS = 900
+const FADE_MS = 280
 
 /** Always-dark splash palette (never follow light system theme). */
 const SPLASH_BG = '#0a0a1a'
