@@ -19,7 +19,7 @@ from uuid import UUID, uuid4
 
 from packaging.version import Version
 
-from remedy.models import Skill, SkillStatus
+from remedy.models import Skill
 
 
 @dataclass
@@ -48,12 +48,23 @@ class SkillStats:
     execution_by_session: dict[str, int] = field(default_factory=dict)
     common_errors: dict[str, int] = field(default_factory=dict)
     consecutive_failures: int = 0
+    # Phase B3: closed-loop re-use (skill_activate after learn)
+    activations: int = 0
+    activation_sessions: dict[str, int] = field(default_factory=dict)
+    last_activated: datetime | None = None
 
     @property
     def success_rate(self) -> float:
         if self.total_executions == 0:
             return 0.5
         return self.successes / self.total_executions
+
+    @property
+    def reuse_rate(self) -> float:
+        """Activations relative to first-touch executions (0 if never executed)."""
+        if self.total_executions <= 0:
+            return float(self.activations) if self.activations else 0.0
+        return self.activations / max(1, self.total_executions)
 
     @property
     def is_reliable(self) -> bool:
@@ -124,11 +135,20 @@ class SkillRefiner:
                     str(k): int(v) for k, v in (raw.get("common_errors") or {}).items()
                 },
                 consecutive_failures=int(raw.get("consecutive_failures") or 0),
+                activations=int(raw.get("activations") or 0),
+                activation_sessions={
+                    str(k): int(v)
+                    for k, v in (raw.get("activation_sessions") or {}).items()
+                },
             )
             le = raw.get("last_executed")
             if le:
                 with contextlib.suppress(ValueError):
                     stats.last_executed = datetime.fromisoformat(str(le))
+            la = raw.get("last_activated")
+            if la:
+                with contextlib.suppress(ValueError):
+                    stats.last_activated = datetime.fromisoformat(str(la))
             self._stats[str(name)] = stats
             self._failure_streak[str(name)] = stats.consecutive_failures
             ls = raw.get("last_success_at")
@@ -143,10 +163,15 @@ class SkillRefiner:
         return n
 
     def save_stats(self, path: Path | str | None = None) -> bool:
-        """Persist stats to JSON. Returns True on success."""
+        """Persist stats to JSON atomically. Returns True on success.
+
+        Writes to a temp file then replaces the target so a crash mid-write
+        cannot leave ``skill_stats.json`` empty/corrupt.
+        """
         p = Path(path).expanduser() if path else self._stats_path
         if p is None:
             return False
+        tmp: Path | None = None
         try:
             p.parent.mkdir(parents=True, exist_ok=True)
             payload: dict[str, Any] = {"version": 1, "skills": {}}
@@ -162,6 +187,13 @@ class SkillRefiner:
                     "execution_by_session": dict(stats.execution_by_session),
                     "common_errors": dict(stats.common_errors),
                     "consecutive_failures": stats.consecutive_failures,
+                    "activations": stats.activations,
+                    "activation_sessions": dict(stats.activation_sessions),
+                    "last_activated": (
+                        stats.last_activated.isoformat()
+                        if stats.last_activated
+                        else None
+                    ),
                     "last_success_at": (
                         self._last_success_at[name].isoformat()
                         if name in self._last_success_at
@@ -173,9 +205,15 @@ class SkillRefiner:
                         else None
                     ),
                 }
-            p.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            text = json.dumps(payload, indent=2)
+            tmp = p.with_name(f"{p.name}.{uuid4().hex[:8]}.tmp")
+            tmp.write_text(text, encoding="utf-8")
+            tmp.replace(p)
             return True
         except OSError:
+            if tmp is not None:
+                with contextlib.suppress(OSError):
+                    tmp.unlink(missing_ok=True)
             return False
 
     def record_execution(
@@ -217,6 +255,58 @@ class SkillRefiner:
 
         # Durable write (best-effort)
         self.save_stats()
+
+    def record_activation(
+        self,
+        skill_name: str,
+        session_id: str = "",
+    ) -> None:
+        """Record skill_activate (progressive disclosure re-use), not full execution."""
+        stats = self._get_or_create_stats(skill_name)
+        stats.activations += 1
+        now = datetime.now(UTC)
+        stats.last_activated = now
+        if session_id:
+            stats.activation_sessions[session_id] = (
+                stats.activation_sessions.get(session_id, 0) + 1
+            )
+        self.save_stats()
+
+    def get_reuse_metrics(self) -> dict[str, Any]:
+        """Closed-loop skill re-use snapshot for API / desktop."""
+        skills_out: list[dict[str, Any]] = []
+        total_act = 0
+        reused = 0  # activations >= 1
+        multi_session_act = 0
+        for name, stats in sorted(self._stats.items()):
+            total_act += stats.activations
+            if stats.activations > 0:
+                reused += 1
+            if len(stats.activation_sessions) >= 2:
+                multi_session_act += 1
+            skills_out.append(
+                {
+                    "name": name,
+                    "activations": stats.activations,
+                    "activation_sessions": len(stats.activation_sessions),
+                    "total_executions": stats.total_executions,
+                    "success_rate": round(stats.success_rate, 3),
+                    "reuse_rate": round(stats.reuse_rate, 3),
+                    "last_activated": (
+                        stats.last_activated.isoformat()
+                        if stats.last_activated
+                        else None
+                    ),
+                }
+            )
+        skills_out.sort(key=lambda r: r["activations"], reverse=True)
+        return {
+            "skills_tracked": len(self._stats),
+            "skills_with_activation": reused,
+            "total_activations": total_act,
+            "multi_session_reactivations": multi_session_act,
+            "skills": skills_out[:100],
+        }
 
     def get_stats(self, skill_name: str) -> SkillStats:
         return self._get_or_create_stats(skill_name)
@@ -282,27 +372,18 @@ class SkillRefiner:
         skill: Skill,
         skill_name: str,
     ) -> RefinementRecord | None:
-        """Adjust skill status based on execution feedback."""
+        """Mirror execution stats onto skill metadata.
+
+        **Does not change status.** Promote/demote/prune belong exclusively to
+        ``SkillLifecyclePolicy`` via ``LearningLoop.auto_refine_skill`` so a
+        historically high success rate cannot resurrect a demoted skill.
+        """
         stats = self._get_or_create_stats(skill_name)
-        old_status = skill.manifest.status
-
-        if stats.is_reliable and skill.manifest.status != SkillStatus.ACTIVE:
-            skill.manifest.status = SkillStatus.ACTIVE
-        elif stats.is_unreliable and skill.manifest.status == SkillStatus.ACTIVE:
-            skill.manifest.status = SkillStatus.DISABLED
-
-        if skill.manifest.status != old_status:
-            record = RefinementRecord(
-                skill_name=skill_name,
-                from_version=skill.manifest.version,
-                to_version=skill.manifest.version,
-                change_type="status",
-                change_description=f"Status changed from {old_status.value} to {skill.manifest.status.value} "
-                                   f"(success_rate={stats.success_rate:.0%}, n={stats.total_executions})",
-                triggered_by="feedback",
-            )
-            self._history.append(record)
-            return record
+        meta = dict(skill.manifest.metadata or {})
+        meta["success_rate"] = stats.success_rate
+        meta["total_executions"] = stats.total_executions
+        meta["stats_sessions"] = len(stats.execution_by_session)
+        skill.manifest.metadata = meta
         return None
 
     def suggest_fixes(

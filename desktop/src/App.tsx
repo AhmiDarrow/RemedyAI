@@ -690,14 +690,14 @@ export default function App() {
           )
           void rename(sid, title)
         }
-        send(text, model, sid, attachments)
+        send(text, model, sid, attachments, planMode)
         // Pull titles/message counts after the turn starts (server may have renamed).
         window.setTimeout(() => {
           void refreshSessions()
         }, 1200)
       }
     },
-    [send, model, handleCommand, activeId, create, sessions, rename, refreshSessions],
+    [send, model, handleCommand, activeId, create, sessions, rename, refreshSessions, planMode],
   )
 
   const handleEditUserMessage = useCallback(
@@ -1133,6 +1133,7 @@ export default function App() {
           <MemoryPanel
             open={panel === 'memory'}
             onClose={() => setPanel(null)}
+            sessionId={activeId}
           />
           <SkillsPanel
             open={panel === 'skills'}

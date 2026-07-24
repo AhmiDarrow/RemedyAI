@@ -108,6 +108,93 @@ def register_memory_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
             skills = list(reg.skills)[:limit]
         return [_skill_info(s) for s in skills]
 
+    @app.get("/api/skills/metrics/reuse")
+    async def skills_reuse_metrics():
+        """Closed-loop skill re-use: activations vs executions (Phase B3)."""
+        from pathlib import Path
+
+        from remedy.core.learning_loop import LearningLoop
+
+        home = Path(
+            getattr(getattr(runtime, "config", None), "home_dir", None)
+            or "~/.remedy"
+        ).expanduser()
+        loop = LearningLoop(
+            skills_dir=home / "skills",
+            memory=None,
+            stats_path=home / "skill_stats.json",
+            registry=getattr(runtime, "skills", None) if runtime else None,
+        )
+        return loop.get_reuse_metrics()
+
+    @app.get("/api/skills/learning/summary")
+    async def skills_learning_summary(limit: int = Query(default=12, le=50)):
+        """What did I learn? — probation/auto-generated skills + last lifecycle note.
+
+        Personal-partner observability: surface the learning loop without making
+        users dig through ~/.remedy.
+        """
+        if runtime is None or not hasattr(runtime, "skills"):
+            return {
+                "recent": [],
+                "probation_count": 0,
+                "learned_count": 0,
+                "active_learned_count": 0,
+                "note": "Skills not available",
+            }
+        reg = runtime.skills
+        all_skills = list(getattr(reg, "skills", []) or [])
+        learned: list[dict] = []
+        probation = 0
+        active_learned = 0
+        for s in all_skills:
+            meta = s.manifest.metadata or {}
+            auto = bool(meta.get("auto_generated"))
+            status_val = (
+                s.manifest.status.value
+                if hasattr(s.manifest.status, "value")
+                else str(s.manifest.status)
+            )
+            if status_val in ("discovered", "validated"):
+                probation += 1
+            if not auto:
+                continue
+            if status_val == "active":
+                active_learned += 1
+            mtime = 0.0
+            path = s.manifest.path or meta.get("skill_path") or ""
+            if path:
+                with suppress(OSError):
+                    p = Path(path)
+                    target = p if p.is_file() else (p / "SKILL.md" if p.is_dir() else p)
+                    if target.exists():
+                        mtime = target.stat().st_mtime
+            info = _skill_info(s)
+            learned.append(
+                {
+                    **info.model_dump(),
+                    "lifecycle_last": meta.get("lifecycle_last")
+                    or meta.get("creation_gate")
+                    or meta.get("lifecycle"),
+                    "mtime": mtime,
+                }
+            )
+        learned.sort(key=lambda r: float(r.get("mtime") or 0), reverse=True)
+        recent = learned[:limit]
+        for row in recent:
+            row.pop("mtime", None)
+        return {
+            "recent": recent,
+            "probation_count": probation,
+            "learned_count": len(learned),
+            "active_learned_count": active_learned,
+            "note": (
+                "Learned skills start on probation and promote only after multi-session success."
+                if learned
+                else "No auto-learned skills yet — multi-step successful work can create them."
+            ),
+        }
+
     @app.get("/api/skills/{name}")
     async def get_skill_detail(name: str):
         if runtime is None or not hasattr(runtime, "skills"):

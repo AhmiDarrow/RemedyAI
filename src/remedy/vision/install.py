@@ -5,13 +5,15 @@ Supports cancel, HTTP Range resume of .partial files, and skip of verified asset
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import logging
 import shutil
 import threading
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -39,7 +41,7 @@ _install_thread: threading.Thread | None = None
 _cancel = threading.Event()
 
 
-class InstallCancelled(Exception):
+class InstallCancelled(Exception):  # noqa: N818 — public cancel signal name
     """Raised when the user cancels an in-flight install."""
 
 
@@ -383,10 +385,8 @@ def uninstall(
         _cancel.set()
 
     prog.update(phase="uninstalling", message="Stopping server…", cancellable=False)
-    try:
+    with contextlib.suppress(Exception):
         stop_server(home_dir=home_dir)
-    except Exception:
-        pass
     root = vision_root(home_dir)
     if not root.exists():
         prog.reset()
@@ -423,10 +423,8 @@ def reinstall_runtime(
 
     if is_installing():
         return {"ok": False, "error": "Install already in progress", **prog.snapshot()}
-    try:
+    with contextlib.suppress(Exception):
         stop_server(home_dir=home_dir)
-    except Exception:
-        pass
     rdir = runtime_dir(home_dir)
     if rdir.exists():
         shutil.rmtree(rdir, ignore_errors=True)

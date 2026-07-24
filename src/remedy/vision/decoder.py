@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import json
 import logging
 import mimetypes
@@ -93,10 +94,8 @@ def decode_image(
             payload = json.loads(resp.read().decode("utf-8"))
     except HTTPError as e:
         err_body = ""
-        try:
+        with contextlib.suppress(Exception):
             err_body = e.read().decode("utf-8", errors="replace")[:500]
-        except Exception:
-            pass
         _record_decode_metric(ok=False, seconds=_time.perf_counter() - t0)
         return {
             "ok": False,

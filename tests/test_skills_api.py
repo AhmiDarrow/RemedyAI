@@ -57,3 +57,31 @@ def test_skill_detail_404(tmp_path: Path):
     client = TestClient(app)
     r = client.get("/api/skills/missing-skill")
     assert r.status_code == 404
+
+
+def test_skills_learning_summary(tmp_path: Path):
+    rt = _FakeRuntime(tmp_path)
+    learned = Skill(
+        manifest=SkillManifest(
+            name="auto-from-trace",
+            description="Learned on the job",
+            status=SkillStatus.DISCOVERED,
+            metadata={
+                "auto_generated": True,
+                "lifecycle": "probation",
+                "creation_gate": "Trace accepted; skill enters probation",
+            },
+        ),
+        instructions="# how\n" + ("step\n" * 8),
+    )
+    rt.skills.register(learned)
+    app = create_app(runtime=rt, api_key="")
+    client = TestClient(app)
+    r = client.get("/api/skills/learning/summary")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["learned_count"] >= 1
+    assert data["probation_count"] >= 1
+    assert any(s["name"] == "auto-from-trace" for s in data["recent"])
+    # Must not be captured as /api/skills/{name}
+    assert "note" in data

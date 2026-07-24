@@ -6,8 +6,8 @@ structured text so the main agent can reason without native multimodal.
 
 from __future__ import annotations
 
-from remedy.vision.catalog import DEFAULT_MODEL_ID, VISION_MODELS, get_model_spec
 from remedy.vision.capabilities import supports_vision
+from remedy.vision.catalog import DEFAULT_MODEL_ID, VISION_MODELS, get_model_spec
 from remedy.vision.service import (
     cancel_install,
     decode_for_turn,

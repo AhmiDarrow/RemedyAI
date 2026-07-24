@@ -10,6 +10,7 @@ Usage:
 
 from __future__ import annotations
 
+import contextlib
 import shutil
 import sys
 from pathlib import Path
@@ -112,6 +113,11 @@ def _wipe_skills() -> None:
     if skills.exists():
         shutil.rmtree(skills, ignore_errors=True)
         console.print(f"  removed [dim]{skills}[/dim]")
+    # Durable skill execution stats live next to the skills tree
+    stats = REMEDY_HOME / "skill_stats.json"
+    if stats.exists():
+        stats.unlink(missing_ok=True)
+        console.print(f"  removed [dim]{stats}[/dim]")
 
 
 def run_uninstall(
@@ -202,10 +208,8 @@ def run_uninstall(
     if purge and REMEDY_HOME.exists():
         console.print(f"\n[bold]Full wipe {REMEDY_HOME}...[/bold]")
         # Stop vision server before deleting weights/runtime
-        try:
+        with contextlib.suppress(Exception):
             _wipe_vision()
-        except Exception:
-            pass
         try:
             shutil.rmtree(REMEDY_HOME)
             console.print("[green]Remedy data removed.[/green]")

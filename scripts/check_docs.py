@@ -238,9 +238,7 @@ def check_hotkeys() -> CheckResult:
         if f"**{k}**" in doc:
             return True
         # Ctrl+P / Ctrl+K style combined cells
-        if k.replace("+", r"\+") and k in doc.replace("**", ""):
-            return True
-        return False
+        return bool(k.replace("+", r"\+") and k in doc.replace("**", ""))
 
     bad = 0
     for k in keys:

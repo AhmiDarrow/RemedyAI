@@ -2,7 +2,14 @@
 
 High-level product notes for owners. Full detail lives in repo `CHANGELOG.md`.
 
-Ship **one** installer/tag for the current series (**v0.10.41**).
+Ship **one** installer/tag for the current series (**v0.10.42**).
+
+## 0.10.42 — GitHub skill, MCP host, Plan mode, checkpoints
+
+- Bundled **github** skill (`gh` PRs/issues/CI) ships with the package.
+- **`remedy-mcp`** / `remedy mcp serve` — export skills & plans to Cursor / Claude Desktop.
+- **Plan mode** actually blocks shell/file tools; structured plans + mid-task checkpoints in the Memory panel.
+- Learning loop observability (What I learned, re-use metrics) and thinner agent core modules.
 
 ## 0.10.41 — Setup UX, free try, WebUI, status dock
 

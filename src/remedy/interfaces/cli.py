@@ -280,6 +280,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Force the setup wizard even if setup was completed",
     )
 
+    # remedy mcp serve — expose skills to Cursor / Claude Desktop (stdio)
+    mcp_cmd = sub.add_parser(
+        "mcp",
+        help="MCP host: expose local skills to external apps (stdio)",
+    )
+    mcp_sub = mcp_cmd.add_subparsers(dest="mcp_cmd")
+    mcp_sub.add_parser(
+        "serve",
+        help="Run MCP server on stdio (for Cursor / Claude Desktop config)",
+    )
+
     # remedy desktop
     desktop_cmd = sub.add_parser("desktop", help="Desktop app management")
     desktop_sub = desktop_cmd.add_subparsers(dest="desktop_cmd")
@@ -1541,6 +1552,12 @@ def main(args: list[str] | None = None) -> None:
         _cmd_chat(parsed)
     elif parsed.command == "serve":
         _cmd_serve(parsed)
+    elif parsed.command == "mcp":
+        if getattr(parsed, "mcp_cmd", None) == "serve":
+            from remedy.tools.mcp_server import run_stdio_server
+
+            raise SystemExit(run_stdio_server())
+        console.print("[dim]Usage: remedy mcp serve[/dim]")
     elif parsed.command == "desktop":
         _cmd_desktop(parsed)
     elif parsed.command == "setup":

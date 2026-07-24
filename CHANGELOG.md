@@ -2,6 +2,23 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.10.42] — 2026-07-24
+
+### Feature: Bundled **github** skill + packaged MCP host
+
+- New bundled skill **`github`**: PRs, issues, CI, releases via `gh` + git (safe defaults; no force-push unless asked). Seeded to `~/.remedy/skills/github` on discover.
+- **MCP packaging**: console script **`remedy-mcp`** (`remedy.tools.mcp_server:main`) in addition to `remedy mcp serve`.
+- Desktop Settings → MCP host copies config using `remedy-mcp`.
+
+### Plan mode, plans, checkpoints, learning (personal partner roadmap)
+
+- **Plan mode is real**: desktop sends `plan_mode`; server allowlists plan/goal tools and blocks shell/file at `call_tool`.
+- **Structured plans** under `~/.remedy/plans/`; API + `/plan` slash commands; Memory panel Plan tab.
+- **Mid-task checkpoints** under `~/.remedy/checkpoints/`; auto-save on long Build; Memory · CP status chip.
+- **Learning loop**: hard probation tests; atomic `skill_stats.json`; lifecycle owns status; Skills “What I learned” + re-use metrics API.
+- **Agent decomposition**: `agent_learn`, `agent_goals`, `agent_workspace_tools`, `agent_skill_tools`, `agent_memory_tools`.
+- Skills wipe removes `skill_stats.json` (CLI + NSIS).
+
 ## [0.10.41] — 2026-07-24
 
 ### UX: Setup declutter, collapsible Settings, status dock, WebUI

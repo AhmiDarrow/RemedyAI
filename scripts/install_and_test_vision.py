@@ -17,11 +17,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from remedy.vision.catalog import DEFAULT_MODEL_ID  # noqa: E402
-from remedy.vision.install import is_installed, start_install  # noqa: E402
 from remedy.vision import progress as prog  # noqa: E402
-from remedy.vision.service import ensure_server, get_status  # noqa: E402
+from remedy.vision.catalog import DEFAULT_MODEL_ID  # noqa: E402
 from remedy.vision.decoder import decode_image  # noqa: E402
+from remedy.vision.install import is_installed, start_install  # noqa: E402
+from remedy.vision.service import ensure_server, get_status  # noqa: E402
 
 
 def wait_install(timeout_s: float = 7200.0) -> dict:

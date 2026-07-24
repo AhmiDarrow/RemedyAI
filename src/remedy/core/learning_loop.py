@@ -283,6 +283,15 @@ class LearningLoop:
         )
         return self.refiner.suggest_fixes(skill_name)
 
+    def record_skill_activation(
+        self, skill_name: str, session_id: str = ""
+    ) -> None:
+        """Record progressive-disclosure activate (re-use signal, not execution)."""
+        self.refiner.record_activation(skill_name, session_id=session_id)
+
+    def get_reuse_metrics(self) -> dict:
+        return self.refiner.get_reuse_metrics()
+
     def auto_refine_skill(self, skill: Skill) -> bool:
         """Promote / demote / deprecate using lifecycle policy (multi-run evidence)."""
         name = skill.manifest.name

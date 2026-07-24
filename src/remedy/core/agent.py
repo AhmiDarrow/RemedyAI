@@ -22,9 +22,6 @@ import aiohttp
 from remedy.core.errors import SecurityError, format_tool_error
 from remedy.core.providers import ProviderAdapter, get_provider
 from remedy.core.react_policy import (
-    FILE_READ_CHAR_CAP as _FILE_READ_CHAR_CAP,
-)
-from remedy.core.react_policy import (
     HARD_SAFETY_CHARS as _HARD_SAFETY_CHARS,
 )
 from remedy.core.react_policy import (
@@ -71,7 +68,6 @@ from remedy.core.react_stream import (
     should_enable_tools,
 )
 from remedy.core.runtime import AgentRuntime
-from remedy.core.security import check_dangerous_command
 from remedy.core.workspace import (
     allowed_roots_for_scope,
     ensure_project_dir,
@@ -196,278 +192,9 @@ class BasicRuntime(AgentRuntime):
 
     def _register_workspace_tools(self) -> None:
         """Register file/shell tools jailed to the project workspace."""
+        from remedy.core.agent_workspace_tools import register_workspace_tools
 
-        def _parent_hint(path: str) -> str:
-            p = (path or ".").strip() or "."
-            if p in (".", "./", ""):
-                return "."
-            parent = Path(p).parent.as_posix()
-            return parent if parent not in ("", ".") else "."
-
-        async def file_read(path: str = ".") -> str:
-            self.effective_project_path()
-            target = self.resolve_tool_path(path)
-            if not target.exists():
-                parent = _parent_hint(path)
-                return format_tool_error(
-                    f"file not found: {path}",
-                    code="NOT_FOUND",
-                    tool_name="file_read",
-                    suggestion=(
-                        f"Call list_dir on '{parent}' or project root ('.') "
-                        "to discover the correct path, then retry file_read."
-                    ),
-                )
-            if target.is_dir():
-                return format_tool_error(
-                    f"path is a directory: {path}",
-                    code="IS_DIRECTORY",
-                    tool_name="file_read",
-                    suggestion=(
-                        f'Use list_dir("{path}") then file_read on a specific file inside it.'
-                    ),
-                )
-            try:
-                data = target.read_text(encoding="utf-8", errors="replace")
-            except OSError as e:
-                return format_tool_error(
-                    f"cannot read {path}: {e}",
-                    code="IO_ERROR",
-                    tool_name="file_read",
-                    suggestion="Check permissions or try list_dir on the parent path.",
-                )
-            # Full file contents — only emergency OOM guard (not a quality limit).
-            cap = _FILE_READ_CHAR_CAP if _FILE_READ_CHAR_CAP > 0 else _HARD_SAFETY_CHARS
-            if len(data) > cap:
-                return (
-                    data[:cap]
-                    + f"\n\n... [safety cap {cap} chars of {len(data)} — "
-                    f"read a smaller path or a specific section if needed]"
-                )
-            self._track_artifact(str(target))
-            return data
-
-        async def file_write(path: str, content: str = "") -> str:
-            from remedy.core.approvals import APPROVALS
-
-            ask_reason = APPROVALS.needs_ask(f"write {path}", tool_name="file_write")
-            sid = getattr(self, "_session_id", None)
-            if ask_reason and not APPROVALS.is_approved(
-                "file_write", f"write {path}", session_id=sid
-            ):
-                item = APPROVALS.create(
-                    tool_name="file_write",
-                    command=f"write {path}",
-                    reason=ask_reason,
-                    session_id=sid,
-                )
-                return (
-                    f"APPROVAL_REQUIRED id={item.id}\n"
-                    f"reason={ask_reason}\n"
-                    f"path={path}\n"
-                    "Do not invent success. Tell the user this needs approval in the UI "
-                    f"(or /approve {item.id}). After they approve, retry file_write."
-                )
-            target = self.resolve_tool_path(path)
-            try:
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_text(content, encoding="utf-8")
-            except OSError as e:
-                parent = _parent_hint(path)
-                return format_tool_error(
-                    f"cannot write {path}: {e}",
-                    code="IO_ERROR",
-                    tool_name="file_write",
-                    suggestion=(
-                        f"Verify the parent path with list_dir('{parent}') "
-                        "and ensure the path is inside allowed roots "
-                        f"(access scope: {self.access_scope()})."
-                    ),
-                )
-            self._track_artifact(str(target))
-            return f"Wrote {len(content)} bytes to {path}"
-
-        async def list_dir(path: str = ".") -> str:
-            root = self.effective_project_path()
-            target = self.resolve_tool_path(path)
-            if not target.exists():
-                parent = _parent_hint(path)
-                return format_tool_error(
-                    f"path not found: {path}",
-                    code="NOT_FOUND",
-                    tool_name="list_dir",
-                    suggestion=(
-                        f"Call list_dir on '{parent}' or project root ('.') "
-                        "to find the correct directory name."
-                    ),
-                )
-            if not target.is_dir():
-                return format_tool_error(
-                    f"not a directory: {path}",
-                    code="NOT_A_DIRECTORY",
-                    tool_name="list_dir",
-                    suggestion=f'Use file_read("{path}") for file contents instead.',
-                )
-            lines: list[str] = []
-            try:
-                for p in sorted(target.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
-                    if p.name.startswith("."):
-                        continue
-                    try:
-                        rel = p.relative_to(root).as_posix()
-                    except ValueError:
-                        rel = str(p)
-                    lines.append(f"{'dir ' if p.is_dir() else 'file'} {rel}")
-                    # Generous listing (no short 200-entry wall).
-                    if len(lines) >= 50_000:
-                        lines.append(f"... ({len(lines)}+ entries; listing safety stop)")
-                        break
-            except OSError as e:
-                return format_tool_error(
-                    f"cannot list {path}: {e}",
-                    code="IO_ERROR",
-                    tool_name="list_dir",
-                    suggestion="Retry with project root '.' or a known subdirectory.",
-                )
-            return "\n".join(lines) if lines else "(empty)"
-
-        async def bash_exec(command: str = "") -> str:
-            """Run a shell command through SubprocessSandbox (hidden console on Windows)."""
-            from remedy.core.approvals import APPROVALS
-            from remedy.execution.process import win_shell_prefix
-            from remedy.execution.sandbox import SubprocessSandbox
-
-            if not command or not str(command).strip():
-                return format_tool_error(
-                    "empty command",
-                    code="EMPTY_COMMAND",
-                    tool_name="bash_exec",
-                    suggestion="Pass a non-empty shell command string.",
-                )
-            danger = check_dangerous_command(["bash", "-c", command])
-            if danger:
-                return format_tool_error(
-                    f"blocked by security policy: {danger}",
-                    code="SECURITY_BLOCK",
-                    tool_name="bash_exec",
-                    suggestion=(
-                        "Use a safer equivalent (read files with file_read/list_dir; "
-                        "avoid destructive or network-restricted commands)."
-                    ),
-                )
-            # Partner trust: bash_exec always asks in ask-mode (high-impact tool)
-            ask_reason = APPROVALS.needs_ask(command, tool_name="bash_exec")
-            sid = getattr(self, "_session_id", None)
-            if ask_reason and not APPROVALS.is_approved(
-                "bash_exec", command, session_id=sid
-            ):
-                item = APPROVALS.create(
-                    tool_name="bash_exec",
-                    command=command,
-                    reason=ask_reason,
-                    session_id=sid,
-                )
-                return (
-                    f"APPROVAL_REQUIRED id={item.id}\n"
-                    f"reason={ask_reason}\n"
-                    f"command={command[:400]}\n"
-                    "Do not invent success. Tell the user this needs approval in the UI "
-                    f"(or /approve {item.id}). After they approve, retry bash_exec with "
-                    "the same command."
-                )
-            root = self.effective_project_path()
-            roots = self.allowed_roots()
-            argv = [*win_shell_prefix(), command]
-            sandbox = SubprocessSandbox(allowed_paths=roots or [root])
-            result = await sandbox.execute(argv, workdir=root, timeout_seconds=60.0)
-            parts = [f"exit_code={result.exit_code}", f"cwd={root}"]
-            # Full stdout/stderr — no quality truncation for the model.
-            if result.stdout:
-                out = result.stdout
-                if len(out) > _HARD_SAFETY_CHARS:
-                    out = out[:_HARD_SAFETY_CHARS] + f"\n…[stdout safety cap {_HARD_SAFETY_CHARS}]"
-                parts.append(out)
-            if result.stderr:
-                err = result.stderr
-                if len(err) > _HARD_SAFETY_CHARS:
-                    err = err[:_HARD_SAFETY_CHARS] + f"\n…[stderr safety cap {_HARD_SAFETY_CHARS}]"
-                parts.append(f"stderr:\n{err}")
-            if result.exit_code != 0:
-                parts.append(
-                    "Suggestion: Read stderr, fix flags/paths/cwd, or try a different "
-                    "command; use list_dir/file_read if you only need file contents."
-                )
-            return "\n".join(parts)
-
-        self.tool_registry.register_builtin_handler(
-            "file_read",
-            "Read a text file under allowed roots (see access scope). "
-            "Prefer paths relative to the project root.",
-            file_read,
-            {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "Relative path within the project"},
-                },
-                "required": ["path"],
-            },
-        )
-        self.tool_registry.register_builtin_handler(
-            "file_write",
-            "Create or overwrite a text file (UTF-8). Preferred for all simple "
-            "create/edit of .txt/.md/.json — do NOT use bash/powershell Set-Content. "
-            "Allowed: project, Desktop, Documents, Downloads (plus home when access "
-            "scope is home/full). Absolute Desktop paths are fine.",
-            file_write,
-            {
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Absolute or project-relative path",
-                    },
-                    "content": {
-                        "type": "string",
-                        "description": "Full file contents to write",
-                    },
-                },
-                "required": ["path", "content"],
-            },
-        )
-        self.tool_registry.register_builtin_handler(
-            "list_dir",
-            "List files and directories under allowed roots (see access scope).",
-            list_dir,
-            {
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Relative directory (default: project root)",
-                    },
-                },
-            },
-        )
-        self.tool_registry.register_builtin_handler(
-            "bash_exec",
-            "Run a shell command (cwd = project). Do NOT use for simple text file "
-            "create/edit — use file_write instead (avoids PowerShell quoting failures).",
-            bash_exec,
-            {
-                "type": "object",
-                "properties": {
-                    "command": {"type": "string", "description": "Shell command to run"},
-                },
-                "required": ["command"],
-            },
-        )
-        self._register_comfyui_tools()
-        self._register_vision_tools()
-        self._register_local_discover_tools()
-        self._register_skill_tools()
-        # Per-turn tool trace for auto-learn (reset each stream_response)
-        self._turn_tool_steps: list[dict[str, Any]] = []
-        self._learning_loop = None  # lazy LearningLoop
+        register_workspace_tools(self)
 
     def _get_learning_loop(self):
         """Lazy LearningLoop bound to home skills dir + this registry."""
@@ -491,284 +218,10 @@ class BasicRuntime(AgentRuntime):
         return self._learning_loop
 
     def _register_skill_tools(self) -> None:
-        """Progressive disclosure: activate full SKILL.md / run skill scripts."""
+        """Progressive disclosure skill tools."""
+        from remedy.core.agent_skill_tools import register_skill_tools
 
-        async def skill_activate(
-            skill: str = "",
-            include_references: bool = False,
-            name: str = "",  # alias — avoid clashing with ToolRegistry.execute(name=)
-        ) -> str:
-            """Load full skill instructions into this turn (stage 2 disclosure)."""
-            reg = getattr(self, "skills", None)
-            if reg is None:
-                return format_tool_error(
-                    "No skill registry",
-                    code="NO_SKILLS",
-                    tool_name="skill_activate",
-                    suggestion="Restart the server so bundled skills can load.",
-                )
-            nm = (skill or name or "").strip()
-            if not nm:
-                # Rank against empty → top trusted catalog
-                ranked = reg.match_skills("", limit=10)
-                names = ", ".join(s.manifest.name for s, _ in ranked) or "(none)"
-                return f"Pass skill=. Available (top): {names}"
-            # Quarantine: do not inject untrusted SKILL.md into the model (prompt injection).
-            # Owner still has full power after Skills panel → Trust.
-            sk_obj = reg.get(nm)
-            if sk_obj is not None:
-                meta_q = sk_obj.manifest.metadata or {}
-                if meta_q.get("quarantine"):
-                    return format_tool_error(
-                        f"Skill '{nm}' is quarantined (imported pack)",
-                        code="QUARANTINE",
-                        tool_name="skill_activate",
-                        suggestion=(
-                            "Open Skills panel → Trust this skill first. "
-                            "Instruction load is blocked until then (scripts already blocked)."
-                        ),
-                    )
-            body = reg.skill_body(nm, include_references=bool(include_references))
-            if body is None:
-                # fuzzy match
-                hits = reg.match_skills(nm, limit=5)
-                hint = ", ".join(s.manifest.name for s, _ in hits) or "none"
-                return format_tool_error(
-                    f"Skill not found: {nm}",
-                    code="SKILL_NOT_FOUND",
-                    tool_name="skill_activate",
-                    suggestion=f"Closest: {hint}",
-                )
-            reg.mark_activated(nm)
-            related = reg.related_skills(nm)
-            footer = ""
-            if related:
-                footer = (
-                    "\n\n_Related skills (composition): "
-                    + ", ".join(related)
-                    + " — activate if needed._"
-                )
-            with suppress(Exception):
-                from remedy.core.metrics import default_registry
-
-                default_registry.counter(
-                    "remedy_skill_activate_total", status="ok"
-                ).inc()
-            # Feedback: activation counts as a soft "use" (success until proven otherwise)
-            with suppress(Exception):
-                loop = self._get_learning_loop()
-                if loop is not None:
-                    loop.record_skill_feedback(
-                        nm,
-                        success=True,
-                        session_id=str(getattr(self, "_session_id", "") or ""),
-                    )
-                    skill = reg.get(nm)
-                    if skill is not None:
-                        loop.auto_refine_skill(skill)
-            return body + footer
-
-        async def skill_run(
-            skill: str = "",
-            script: str = "",
-            args: str = "",
-            name: str = "",  # alias
-        ) -> str:
-            """Execute a script bundled under a skill's scripts/ directory."""
-            reg = getattr(self, "skills", None)
-            if reg is None:
-                return format_tool_error(
-                    "No skill registry",
-                    code="NO_SKILLS",
-                    tool_name="skill_run",
-                    suggestion="Restart the server.",
-                )
-            nm = (skill or name or "").strip()
-            sk = reg.get(nm) if nm else None
-            if sk is None:
-                return format_tool_error(
-                    f"Skill not found: {nm}",
-                    code="SKILL_NOT_FOUND",
-                    tool_name="skill_run",
-                    suggestion="skill_activate first, or check /skills.",
-                )
-            meta = sk.manifest.metadata or {}
-            if meta.get("quarantine"):
-                return format_tool_error(
-                    f"Skill '{nm}' is quarantined (imported pack)",
-                    code="QUARANTINE",
-                    tool_name="skill_run",
-                    suggestion=(
-                        "Open Skills panel → Trust / Activate after review. "
-                        "Script execution is blocked until quarantine is cleared."
-                    ),
-                )
-            from remedy.core.approvals import APPROVALS
-
-            run_cmd = f"skill_run {nm} {script or ''}".strip()
-            ask_reason = APPROVALS.needs_ask(run_cmd, tool_name="skill_run")
-            sid = getattr(self, "_session_id", None)
-            if ask_reason and not APPROVALS.is_approved(
-                "skill_run", run_cmd, session_id=sid
-            ):
-                item = APPROVALS.create(
-                    tool_name="skill_run",
-                    command=run_cmd,
-                    reason=ask_reason,
-                    session_id=sid,
-                )
-                return (
-                    f"APPROVAL_REQUIRED id={item.id}\n"
-                    f"reason={ask_reason}\n"
-                    f"skill={nm}\n"
-                    "Do not invent success. Tell the user this needs approval "
-                    f"(or /approve {item.id})."
-                )
-            scripts = list(sk.scripts or [])
-            if not scripts:
-                return format_tool_error(
-                    f"Skill '{nm}' has no scripts/",
-                    code="NO_SCRIPTS",
-                    tool_name="skill_run",
-                    suggestion="Use skill_activate and follow instructions instead.",
-                )
-            chosen = (script or "").strip() or scripts[0]
-            # Normalize relative path
-            if chosen not in scripts:
-                # allow bare filename
-                matches = [s for s in scripts if s.endswith(chosen) or Path(s).name == chosen]
-                if matches:
-                    chosen = matches[0]
-                else:
-                    return format_tool_error(
-                        f"Script not in skill: {chosen}",
-                        code="SCRIPT_NOT_FOUND",
-                        tool_name="skill_run",
-                        suggestion=f"Available: {', '.join(scripts)}",
-                    )
-            base = Path(sk.source_skill_dir or sk.manifest.path or "")
-            script_path = (base / chosen).resolve()
-            # Jail: must stay under skill dir
-            try:
-                script_path.relative_to(base.resolve())
-            except Exception:
-                return format_tool_error(
-                    "Script path escapes skill directory",
-                    code="PATH_JAIL",
-                    tool_name="skill_run",
-                    suggestion="Use a relative scripts/ path only.",
-                )
-            arg_list = [a for a in (args or "").split() if a]
-            try:
-                from remedy.skills.executor import SkillExecutor
-
-                ex = SkillExecutor()
-                result = await ex.run_script(script_path, args=arg_list)
-                ok = bool(result.success)
-                with suppress(Exception):
-                    loop = self._get_learning_loop()
-                    if loop is not None:
-                        loop.record_skill_feedback(
-                            nm,
-                            success=ok,
-                            duration_ms=float(result.duration_ms or 0),
-                            session_id=str(getattr(self, "_session_id", "") or ""),
-                            error=result.error,
-                        )
-                        loop.auto_refine_skill(sk)
-                if ok:
-                    out = (result.stdout or "")[:12000]
-                    return out or f"Script {chosen} exited 0 (no stdout)."
-                return format_tool_error(
-                    result.error or result.stderr or "script failed",
-                    code="SCRIPT_FAILED",
-                    tool_name="skill_run",
-                    suggestion="Check script args or skill_activate for manual steps.",
-                )
-            except Exception as e:
-                return format_tool_error(
-                    str(e),
-                    code="SCRIPT_ERROR",
-                    tool_name="skill_run",
-                    suggestion="See logs; try skill_activate instead.",
-                )
-
-        async def skill_search(query: str = "", limit: int = 8) -> str:
-            """Rank skills for the current task (name/description/tags/effort/status)."""
-            reg = getattr(self, "skills", None)
-            if reg is None:
-                return "[]"
-            ranked = reg.match_skills(
-                query or "",
-                limit=max(1, min(int(limit or 8), 20)),
-                workspace_hint=str(self.effective_project_path()),
-            )
-            lines = []
-            for skill, score in ranked:
-                m = skill.manifest
-                lines.append(
-                    f"- {m.name} (score={score:.2f}, {m.status.value}): {m.description[:140]}"
-                )
-            return "\n".join(lines) if lines else "(no matching skills)"
-
-        self.tool_registry.register_builtin_handler(
-            "skill_activate",
-            "Load full instructions for a skill pack (progressive disclosure). "
-            "Use when a catalog skill matches the task. Pass skill= exact skill id.",
-            skill_activate,
-            {
-                "type": "object",
-                "properties": {
-                    "skill": {
-                        "type": "string",
-                        "description": "Skill id (from catalog)",
-                    },
-                    "name": {
-                        "type": "string",
-                        "description": "Alias for skill=",
-                    },
-                    "include_references": {
-                        "type": "boolean",
-                        "description": "Also load references/ files (default false)",
-                    },
-                },
-                "required": ["skill"],
-            },
-        )
-        self.tool_registry.register_builtin_handler(
-            "skill_run",
-            "Run a script from a skill's scripts/ directory in a sandbox. "
-            "Prefer skill_activate for procedure-only skills.",
-            skill_run,
-            {
-                "type": "object",
-                "properties": {
-                    "skill": {"type": "string", "description": "Skill id"},
-                    "name": {"type": "string", "description": "Alias for skill="},
-                    "script": {
-                        "type": "string",
-                        "description": "Relative script path (default first script)",
-                    },
-                    "args": {
-                        "type": "string",
-                        "description": "Space-separated CLI args",
-                    },
-                },
-                "required": ["skill"],
-            },
-        )
-        self.tool_registry.register_builtin_handler(
-            "skill_search",
-            "Rank available skills for a query (status, description, effort, tags).",
-            skill_search,
-            {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "Task keywords"},
-                    "limit": {"type": "integer", "description": "Max results (default 8)"},
-                },
-            },
-        )
+        register_skill_tools(self)
 
     def _register_local_discover_tools(self) -> None:
         """Portable discovery for *any* skill/service local deps — no disk thrash."""
@@ -1026,12 +479,12 @@ class BasicRuntime(AgentRuntime):
             action=decode   → describe/OCR an image path into structured text
             """
             from remedy.vision import catalog as vision_catalog
+            from remedy.vision.decoder import decode_image
             from remedy.vision.service import (
                 ensure_server,
                 get_status,
                 start_install,
             )
-            from remedy.vision.decoder import decode_image
 
             cfg: dict[str, Any] = {}
             with suppress(Exception):
@@ -1156,282 +609,10 @@ class BasicRuntime(AgentRuntime):
         )
 
     def _register_memory_tools(self) -> None:
-        """Memory + Memory Harness tools (search, save, compress)."""
+        """Memory + harness + goals/plans/checkpoints."""
+        from remedy.core.agent_memory_tools import register_memory_tools
 
-        async def memory_search(query: str = "", limit: int = 8) -> str:
-            if self.memory is None:
-                return "Memory store not available."
-            q = (query or "").strip()
-            if not q:
-                return "Provide a search query."
-            try:
-                hits = await self.memory.search(q, limit=max(1, min(int(limit), 20)))
-            except Exception as e:
-                return f"Memory search failed: {e}"
-            if not hits:
-                return f"No memory matches for: {q}"
-            lines = []
-            for e in hits:
-                title = getattr(e, "title", "") or ""
-                content = (getattr(e, "content", None) or "")[:200]
-                lines.append(f"- {title}: {content}" if title else f"- {content}")
-            return "Memory hits:\n" + "\n".join(lines)
-
-        async def memory_save(
-            content: str = "",
-            title: str = "Remembered",
-            category: str = "general",
-        ) -> str:
-            if self.memory is None:
-                return "Memory store not available."
-            text = (content or "").strip()
-            if not text:
-                return "Nothing to save — provide content."
-            try:
-                from remedy.models import MemoryEntry, MemoryEntryType
-
-                await self.memory.upsert(
-                    MemoryEntry(
-                        title=(title or "Remembered")[:120],
-                        content=text,
-                        entry_type=MemoryEntryType.NOTE,
-                        importance=0.75,
-                    )
-                )
-                # Also surface as a user fact when short
-                if len(text) < 400:
-                    with suppress(Exception):
-                        profile = await self.memory.get_or_create_profile()
-                        profile.add_fact(
-                            text, category=category or "general", confidence=0.85
-                        )
-                        await self.memory.save_user_profile(profile)
-                return f"Saved to memory: {(title or 'Remembered')[:80]}"
-            except Exception as e:
-                return f"Memory save failed: {e}"
-
-        async def compress_context(focus: str = "") -> str:
-            """Memory Harness L1: merge history into Session Brief (send-view stays lean)."""
-            from remedy.memory.harness.brief import SessionBrief
-            from remedy.memory.harness.compressor import heuristic_merge_from_history
-
-            if self._session_brief is None:
-                self._session_brief = SessionBrief(
-                    session_id=getattr(self, "_session_id", None) or ""
-                )
-            history: list[dict[str, Any]] = []
-            sid = getattr(self, "_session_id", None)
-            if sid and self.memory is not None:
-                with suppress(Exception):
-                    history = await self._load_session_history(sid, "")
-            self._session_brief = heuristic_merge_from_history(
-                self._session_brief,
-                history,
-                intent_hint=(focus or None),
-            )
-            brief = self._session_brief
-            return (
-                f"Memory Harness compressed (pass #{brief.compress_count}). "
-                f"Intent: {brief.intent or '(set)'}. "
-                f"Artifacts: {len(brief.artifacts)}. "
-                f"Decisions: {len(brief.decisions)}."
-            )
-
-        self.tool_registry.register_builtin_handler(
-            "memory_search",
-            "Search durable Remedy memory for relevant notes and facts.",
-            memory_search,
-            {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string"},
-                    "limit": {"type": "integer", "description": "Max results (default 8)"},
-                },
-                "required": ["query"],
-            },
-        )
-        self.tool_registry.register_builtin_handler(
-            "memory_save",
-            "Save a durable note or fact about the user or project to memory.",
-            memory_save,
-            {
-                "type": "object",
-                "properties": {
-                    "content": {"type": "string"},
-                    "title": {"type": "string"},
-                    "category": {"type": "string", "description": "e.g. work, personal, preference"},
-                },
-                "required": ["content"],
-            },
-        )
-        self.tool_registry.register_builtin_handler(
-            "compress_context",
-            "Memory Harness: compress stale session detail into the Session Brief "
-            "(intent, files, decisions, next steps). Call when a subtask finishes or context is large.",
-            compress_context,
-            {
-                "type": "object",
-                "properties": {
-                    "focus": {
-                        "type": "string",
-                        "description": "Optional focus for what to keep in the brief",
-                    },
-                },
-            },
-        )
-
-        # --- Partner loop: goals ---
-        async def goal_add(title: str = "", description: str = "") -> str:
-            t = (title or "").strip()
-            if not t:
-                return "Provide a goal title."
-            task = self.create_task(t, description=description or "", tags=["goal"])
-            with suppress(Exception):
-                from remedy.memory.harness.brief import SessionBrief
-
-                if self._session_brief is None:
-                    self._session_brief = SessionBrief()
-                if t not in self._session_brief.open_tasks:
-                    self._session_brief.open_tasks.append(t)
-                    self._session_brief.open_tasks = self._session_brief.open_tasks[-20:]
-                    self._session_brief.touch()
-            return f"Goal added id={task.id} title={t}"
-
-        async def goal_list(status: str = "") -> str:
-            from remedy.models import TaskStatus
-
-            st = (status or "").strip().lower()
-            tasks = self.list_tasks()
-            if st:
-                try:
-                    enum_st = TaskStatus(st)
-                    tasks = [t for t in tasks if t.status == enum_st]
-                except Exception:
-                    tasks = [t for t in tasks if t.status.value == st]
-            tagged = [t for t in tasks if "goal" in (t.tags or [])]
-            use = tagged if tagged else list(tasks)
-            if not use:
-                return "No goals yet. Use goal_add to create one."
-            lines = []
-            for t in use[:30]:
-                lines.append(
-                    f"- [{t.status.value}] {t.title}"
-                    + (f" — {t.result_summary}" if t.result_summary else "")
-                    + f"  (id={t.id})"
-                )
-            return "Goals:\n" + "\n".join(lines)
-
-        async def goal_complete(title: str = "", evidence: str = "") -> str:
-            from datetime import UTC, datetime
-
-            from remedy.models import TaskStatus
-
-            needle = (title or "").strip().lower()
-            if not needle:
-                return "Provide goal title (or partial) to complete."
-            matches = [
-                t
-                for t in self.list_tasks()
-                if needle in t.title.lower() and t.status != TaskStatus.COMPLETED
-            ]
-            if not matches:
-                return f"No open goal matching: {title}"
-            task = matches[0]
-            task.status = TaskStatus.COMPLETED
-            task.result_summary = (evidence or "done").strip()[:500]
-            task.completed_at = datetime.now(UTC)
-            task.updated_at = datetime.now(UTC)
-            with suppress(Exception):
-                if self._session_brief is not None:
-                    self._session_brief.open_tasks = [
-                        x
-                        for x in self._session_brief.open_tasks
-                        if x.lower() != task.title.lower()
-                    ]
-                    if evidence:
-                        self._session_brief.decisions.append(
-                            f"Completed goal: {task.title} — {evidence[:120]}"
-                        )
-                        self._session_brief.decisions = self._session_brief.decisions[-20:]
-                    self._session_brief.touch()
-            # Learn: store short success note
-            if self.memory is not None and evidence:
-                with suppress(Exception):
-                    from remedy.models import MemoryEntry, MemoryEntryType
-
-                    await self.memory.upsert(
-                        MemoryEntry(
-                            title=f"Goal done: {task.title}",
-                            content=evidence[:2000],
-                            entry_type=MemoryEntryType.NOTE,
-                            tags=["goal", "verified"],
-                            importance=0.7,
-                        )
-                    )
-            return f"Goal completed: {task.title}" + (
-                f" evidence={evidence[:200]}" if evidence else ""
-            )
-
-        async def goal_verify(title: str = "", evidence: str = "") -> str:
-            """Record verification evidence for a goal (partner verify loop)."""
-            if not (evidence or "").strip():
-                return "Provide evidence of completion (command output, file path, result)."
-            # Completing with evidence is the verify path
-            return await goal_complete(title=title, evidence=evidence)
-
-        self.tool_registry.register_builtin_handler(
-            "goal_add",
-            "Add a user goal / checklist item for this session (partner loop).",
-            goal_add,
-            {
-                "type": "object",
-                "properties": {
-                    "title": {"type": "string"},
-                    "description": {"type": "string"},
-                },
-                "required": ["title"],
-            },
-        )
-        self.tool_registry.register_builtin_handler(
-            "goal_list",
-            "List tracked goals and their status.",
-            goal_list,
-            {
-                "type": "object",
-                "properties": {
-                    "status": {
-                        "type": "string",
-                        "description": "Optional filter: created, in_progress, completed",
-                    },
-                },
-            },
-        )
-        self.tool_registry.register_builtin_handler(
-            "goal_complete",
-            "Mark a goal complete; optionally store evidence for the verify/learn loop.",
-            goal_complete,
-            {
-                "type": "object",
-                "properties": {
-                    "title": {"type": "string"},
-                    "evidence": {"type": "string"},
-                },
-                "required": ["title"],
-            },
-        )
-        self.tool_registry.register_builtin_handler(
-            "goal_verify",
-            "Verify a goal with evidence (path, test output, screenshot note) and mark done.",
-            goal_verify,
-            {
-                "type": "object",
-                "properties": {
-                    "title": {"type": "string"},
-                    "evidence": {"type": "string"},
-                },
-                "required": ["title", "evidence"],
-            },
-        )
+        register_memory_tools(self)
 
     def _track_artifact(self, path: str) -> None:
         """Record a path in the Session Brief (Memory Harness L2)."""
@@ -1555,6 +736,21 @@ class BasicRuntime(AgentRuntime):
         from remedy.core.metrics import default_registry
 
         name = tool_call.tool_name
+        # Plan mode: refuse mutating tools even if they slipped into the schema
+        if getattr(self, "_plan_mode", False):
+            from remedy.core.plan_store import PLAN_MODE_TOOL_NAMES
+
+            if name not in PLAN_MODE_TOOL_NAMES:
+                return ToolResult(
+                    call_id=tool_call.id,
+                    success=False,
+                    error=format_tool_error(
+                        f"Tool '{name}' blocked in Plan mode",
+                        code="PLAN_MODE_BLOCKED",
+                        tool_name=name,
+                        suggestion="Switch to Build mode (Ctrl+B) to run shell/file tools.",
+                    ),
+                )
         default_registry.counter("remedy_tool_calls_total", tool=name).inc()
         t0 = _time.perf_counter()
         try:
@@ -1986,17 +1182,45 @@ class BasicRuntime(AgentRuntime):
         message: str,
         session_id: str | None = None,
         attachments: list[dict[str, Any]] | None = None,
+        *,
+        plan_mode: bool = False,
     ) -> AsyncIterator[str]:
         """Call the LLM with a smooth ReAct loop (OpenCode-grade).
 
         Yields status tokens prefixed with '@@' for tool-call lifecycle events.
         Never leaves the user with a bare "tool limit" dead-end — final step
         always forces a plain-text answer (or a short synthesis).
+
+        When *plan_mode* is True, only planning tools run (no shell/file writes).
         """
         try:
             from remedy.interfaces.attachments import build_multimodal_user_content
 
             context = await self._build_context()
+            # Surface active plan + plan-mode instructions
+            with suppress(Exception):
+                from pathlib import Path
+
+                from remedy.core.plan_store import PlanStore
+
+                home = getattr(self.config, "home_dir", None) or (Path.home() / ".remedy")
+                store = PlanStore(home)
+                plan = store.latest_for_session(session_id)
+                if plan is not None:
+                    context = (
+                        (context or "")
+                        + "\n\n## Active task plan\n"
+                        + plan.summary_markdown()
+                    )
+                if plan_mode:
+                    context = (
+                        (context or "")
+                        + "\n\n## Plan mode (active)\n"
+                        "You are exploring and planning — do **not** edit files, run shell, "
+                        "or mutate the system. Use plan_save to store a structured plan with "
+                        "clear steps and risks, then summarize for the user. "
+                        "They will switch to Build mode to execute."
+                    )
             history = await self._load_session_history(session_id, message)
             # Memory Harness L0: prune send-view only (stored transcript untouched)
             with suppress(Exception):
@@ -2111,21 +1335,30 @@ class BasicRuntime(AgentRuntime):
                             float(est)
                         )
             all_tools = self._openai_tools()
-            # Creative image prompts ("make something cool/spacey") must keep tools on.
-            tools = (
-                all_tools
-                if should_enable_tools(
-                    message, all_tools, has_attachments=bool(attachments)
-                )
-                or bool(
-                    re.search(
-                        r"\b(comfy|image|picture|nebula|spacey|generate|draw|illustrat)\b",
-                        message or "",
-                        re.I,
+            if plan_mode:
+                from remedy.core.plan_store import PLAN_MODE_TOOL_NAMES
+
+                tools = [
+                    t
+                    for t in all_tools
+                    if ((t.get("function") or {}).get("name") or "") in PLAN_MODE_TOOL_NAMES
+                ]
+            else:
+                # Creative image prompts ("make something cool/spacey") must keep tools on.
+                tools = (
+                    all_tools
+                    if should_enable_tools(
+                        message, all_tools, has_attachments=bool(attachments)
                     )
+                    or bool(
+                        re.search(
+                            r"\b(comfy|image|picture|nebula|spacey|generate|draw|illustrat)\b",
+                            message or "",
+                            re.I,
+                        )
+                    )
+                    else []
                 )
-                else []
-            )
 
             seen_fps: set[str] = set()
             result_cache: dict[str, str] = {}
@@ -2445,6 +1678,16 @@ class BasicRuntime(AgentRuntime):
                             ):
                                 recovery_nudge_done = True
                                 messages.append(recovery_nudge_message())
+                                with suppress(Exception):
+                                    md = self._maybe_auto_checkpoint(
+                                        reason="recovery",
+                                        title="After tool failure",
+                                        force=True,
+                                    )
+                                    if md:
+                                        yield "@@checkpoint"
+                            with suppress(Exception):
+                                self._maybe_auto_checkpoint(reason="auto")
                             continue
 
                     if text_out and (not tool_calls_list or force_answer):
@@ -2669,6 +1912,23 @@ class BasicRuntime(AgentRuntime):
                             "Injected tool recovery nudge after step %d (RECOVERY_NUDGE)",
                             step + 1,
                         )
+                        with suppress(Exception):
+                            self._maybe_auto_checkpoint(
+                                reason="recovery",
+                                title="After tool failure",
+                                force=True,
+                            )
+                    with suppress(Exception):
+                        self._maybe_auto_checkpoint(reason="auto")
+                    if is_final_step:
+                        with suppress(Exception):
+                            md = self._maybe_auto_checkpoint(
+                                reason="step_wall",
+                                title="Approaching step limit",
+                                force=True,
+                            )
+                            if md:
+                                yield "@@checkpoint"
 
             # Exhausted steps without a streamed answer — full synthesis, not a stub.
             if not produced_user_text:
@@ -2851,12 +2111,16 @@ class BasicRuntime(AgentRuntime):
         session_id: str | None = None,
         model: str | None = None,
         attachments: list[dict[str, Any]] | None = None,
+        *,
+        plan_mode: bool = False,
     ) -> AsyncIterator[str]:
         """Stream tokens from the LLM for real-time SSE delivery.
 
         Yields individual tokens as they arrive from the provider.
         Tool-call lifecycle events are prefixed with '@@'.
         Falls back to the echo-style fallback when no API key is configured.
+
+        *plan_mode*: restrict tools to planning helpers (plan_save, goals, memory search).
         """
         await self._apply_session_workspace(session_id)
 
@@ -2864,8 +2128,10 @@ class BasicRuntime(AgentRuntime):
         if model and str(model).strip():
             self._llm_model = str(model).strip()
 
-        # Fresh per-turn tool trace for auto-learn
+        # Fresh per-turn tool trace for auto-learn + checkpoints
         self._turn_tool_steps = []
+        self._last_auto_checkpoint_n = 0
+        self._plan_mode = bool(plan_mode)
         if session_id:
             self._session_id = session_id
 
@@ -2878,14 +2144,28 @@ class BasicRuntime(AgentRuntime):
                 return
 
             async for chunk in self._call_llm_stream(
-                message, session_id=session_id, attachments=attachments
+                message,
+                session_id=session_id,
+                attachments=attachments,
+                plan_mode=bool(plan_mode),
             ):
                 yield chunk
         finally:
             self._llm_model = prev_model
-            # Post-turn: distill multi-step successes into probation skills
-            with suppress(Exception):
-                self._maybe_auto_learn_from_turn(message, session_id)
+            self._plan_mode = False
+            # Soft end-of-turn checkpoint if substantial tool work happened
+            if not plan_mode:
+                with suppress(Exception):
+                    steps = list(getattr(self, "_turn_tool_steps", None) or [])
+                    if len(steps) >= 4:
+                        self._maybe_auto_checkpoint(
+                            reason="turn_end",
+                            title=(message or "Task")[:80],
+                            force=True,
+                        )
+                # Post-turn: distill multi-step successes into probation skills
+                with suppress(Exception):
+                    self._maybe_auto_learn_from_turn(message, session_id)
 
     def _maybe_auto_learn_from_turn(
         self,
@@ -2893,43 +2173,65 @@ class BasicRuntime(AgentRuntime):
         session_id: str | None,
     ) -> None:
         """If this turn used enough successful tools, learn a probation skill."""
-        steps = list(getattr(self, "_turn_tool_steps", None) or [])
-        if len(steps) < 3:
-            return
-        # Skip pure skill meta tools alone
-        real = [
-            s
-            for s in steps
-            if s.get("tool")
-            not in ("skill_search", "skill_activate", "local_discover")
-        ]
-        if len(real) < 3 and len(steps) < 4:
-            # still allow hard multi-tool including discover
-            if len(steps) < 4:
-                return
-        successes = sum(1 for s in steps if s.get("success"))
-        if successes < 3:
-            return
-        overall = successes >= max(2, int(0.5 * len(steps)))
-        if not overall:
-            return
-        loop = self._get_learning_loop()
-        if loop is None:
-            return
-        title = (message or "session-task").strip().split("\n")[0][:80]
-        skill = loop.learn_from_tool_steps(
-            title=title or "multi-tool-task",
-            steps=steps,
+        from remedy.core.agent_learn import auto_learn_from_turn
+
+        auto_learn_from_turn(
+            learning_loop=self._get_learning_loop(),
+            message=message,
             session_id=session_id,
-            description=(message or "")[:400],
-            overall_success=True,
+            steps=list(getattr(self, "_turn_tool_steps", None) or []),
         )
-        if skill is not None:
-            logger.info(
-                "Auto-learned skill '%s' status=%s",
-                skill.manifest.name,
-                skill.manifest.status.value,
+
+    def _maybe_auto_checkpoint(
+        self,
+        *,
+        reason: str,
+        title: str = "",
+        force: bool = False,
+    ) -> str | None:
+        """Snapshot mid-turn progress for long Build runs. Returns markdown or None."""
+        if getattr(self, "_plan_mode", False):
+            return None
+        steps = list(getattr(self, "_turn_tool_steps", None) or [])
+        if len(steps) < 2 and not force:
+            return None
+        from remedy.core.checkpoint import (
+            AUTO_CHECKPOINT_EVERY_N_STEPS,
+            CheckpointStore,
+            build_checkpoint_from_tool_steps,
+        )
+
+        n = len(steps)
+        last_n = int(getattr(self, "_last_auto_checkpoint_n", 0) or 0)
+        if not force:
+            if n < AUTO_CHECKPOINT_EVERY_N_STEPS:
+                return None
+            if n - last_n < AUTO_CHECKPOINT_EVERY_N_STEPS:
+                return None
+        cp = build_checkpoint_from_tool_steps(
+            steps,
+            session_id=str(getattr(self, "_session_id", "") or "") or None,
+            title=title or f"Auto checkpoint ({reason})",
+            reason=reason,
+        )
+        store = CheckpointStore(getattr(self.config, "home_dir", None))
+        store.save(cp)
+        self._last_auto_checkpoint_n = n
+        with suppress(Exception):
+            from remedy.memory.harness.brief import SessionBrief
+
+            if self._session_brief is None:
+                self._session_brief = SessionBrief()
+            self._session_brief.decisions.append(
+                f"Checkpoint [{reason}]: {cp.done[-1] if cp.done else n} tools"
             )
+            self._session_brief.decisions = self._session_brief.decisions[-20:]
+            for nxt in cp.next_steps[:3]:
+                if nxt not in self._session_brief.open_tasks:
+                    self._session_brief.open_tasks.append(nxt)
+            self._session_brief.open_tasks = self._session_brief.open_tasks[-20:]
+            self._session_brief.touch()
+        return cp.summary_markdown()
 
     async def _build_context(self) -> str:
         parts = []

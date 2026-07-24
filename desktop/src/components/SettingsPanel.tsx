@@ -1577,6 +1577,83 @@ export function SettingsPanel({
               </div>
             </SettingsSection>
 
+            {/* MCP host — export skills to Cursor / Claude Desktop */}
+            <SettingsSection
+              id="mcp"
+              title="MCP host"
+              summary="Expose skills to other apps"
+            >
+              <div className="text-xs space-y-2" style={{ color: 'var(--text-secondary)' }}>
+                <p style={{ margin: 0, fontSize: '0.75rem' }}>
+                  Run Remedy as an MCP <strong>server</strong> so Cursor, Claude Desktop, or other
+                  tools can use skills and plans on <em>this machine</em> (same-owner, local only).
+                </p>
+                <div
+                  className="p-2 rounded font-mono text-[11px] break-all"
+                  style={{
+                    background: 'var(--bg-primary)',
+                    border: '1px solid var(--border)',
+                    color: 'var(--text-primary)',
+                  }}
+                >
+                  remedy mcp serve
+                  <br />
+                  # or: remedy-mcp
+                </div>
+                <button
+                  type="button"
+                  className="w-full py-1.5 rounded text-xs font-medium"
+                  style={{
+                    background: 'var(--bg-tertiary)',
+                    border: '1px solid var(--border)',
+                    color: 'var(--text-primary)',
+                  }}
+                  onClick={() => {
+                    const snippet = JSON.stringify(
+                      {
+                        mcpServers: {
+                          remedy: {
+                            command: 'remedy-mcp',
+                            args: [],
+                          },
+                        },
+                      },
+                      null,
+                      2,
+                    )
+                    void navigator.clipboard.writeText(snippet).catch(() => {
+                      /* ignore */
+                    })
+                  }}
+                >
+                  Copy Cursor / Claude Desktop JSON
+                </button>
+                <ul
+                  className="m-0 pl-4 space-y-1"
+                  style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}
+                >
+                  <li>
+                    Tools: skill list/search/get, plan list/show; script run opt-in only.
+                  </li>
+                  <li>Quarantined skills stay blocked until you Trust them in Skills.</li>
+                  <li>
+                    Script execution: set env <code>REMEDY_MCP_ALLOW_RUN=1</code> (owner choice).
+                  </li>
+                  <li>Logs go to stderr so the MCP JSON stream stays clean.</li>
+                </ul>
+                {onOpenHelp && (
+                  <button
+                    type="button"
+                    className="text-xs underline"
+                    style={{ color: 'var(--accent)', background: 'none', border: 0, padding: 0 }}
+                    onClick={() => onOpenHelp('10-cli-and-api')}
+                  >
+                    Open CLI &amp; API help →
+                  </button>
+                )}
+              </div>
+            </SettingsSection>
+
             {/* About */}
             <SettingsSection
               id="about"

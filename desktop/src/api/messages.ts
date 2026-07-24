@@ -61,6 +61,7 @@ export function streamMessage(
   onToolResult?: (name: string, preview?: string, ok?: boolean) => void,
   attachments?: AttachmentPayload[],
   onProgress?: (info: StreamProgress) => void,
+  planMode?: boolean,
 ): AbortController {
   const controller = new AbortController()
 
@@ -77,6 +78,7 @@ export function streamMessage(
           message,
           model,
           attachments: attachments?.length ? attachments : undefined,
+          plan_mode: Boolean(planMode),
         }),
         signal: controller.signal,
       })

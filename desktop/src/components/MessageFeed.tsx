@@ -597,7 +597,7 @@ export function MessageFeed({
           }}
         >
           <span>{'\u{1F9E0}'}</span>
-          Plan mode active — describing approach; no tools will be executed
+          Plan mode active — explore and save a structured plan; shell/file tools blocked until Build (Ctrl+B)
         </div>
       )}
 

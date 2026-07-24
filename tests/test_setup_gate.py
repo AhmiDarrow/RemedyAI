@@ -134,7 +134,7 @@ class TestApiWriteConfigOrder:
         assert isinstance(data.get("slack"), dict)
 
         # Multiple update cycles (scalars added after nested load) stay valid
-        for i in range(3):
+        for _i in range(3):
             data["close_to_tray"] = False
             data["start_in_tray"] = False
             data["secrets_store"] = "auth/provider_keys.json"

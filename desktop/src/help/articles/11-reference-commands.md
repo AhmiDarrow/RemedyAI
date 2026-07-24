@@ -15,6 +15,8 @@ Type `/` in the composer for autocomplete. Commands also work via
 | `/whoami` | | Profile / known facts |
 | `/goals` | | List open goals |
 | `/goal` | `title` | Add a goal |
+| `/plans` | | List structured task plans |
+| `/plan` | `approve` · `new <title>` · (empty = show latest) | Show / create / approve a plan |
 | `/compact` | `focus?` | Memory Harness compress → Session Brief |
 | `/harness` | | Show Session Brief / stats |
 | `/approve` | `id?` | Approve pending high-impact action |

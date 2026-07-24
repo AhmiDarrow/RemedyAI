@@ -115,6 +115,8 @@ if ($config -eq 1 -and (Test-Path -LiteralPath $homeRem)) {
 
 if ($skills -eq 1) {
   Remove-PathSafe (Join-Path $homeRem 'skills')
+  # Durable skill execution stats live next to skills, not inside the tree
+  Remove-PathSafe (Join-Path $homeRem 'skill_stats.json')
   Log 'Skills wipe done'
 }
 

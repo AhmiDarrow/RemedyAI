@@ -40,10 +40,27 @@
 
 | Mode | Use when |
 |------|----------|
-| **Plan** | Read-only exploration, design, Q&A without edits |
-| **Build** | Implement changes, run tools, write files |
+| **Plan** | Explore and design; **shell/file tools blocked**. Remedy can save a structured plan (`plan_save`) with steps + risks. |
+| **Build** | Implement changes, run tools, write files — follows the latest plan when present. |
 
-Status bar toggle or **Ctrl+B**.
+Status bar toggle or **Ctrl+B**. Desktop sends `plan_mode` to the local API so the server enforces the allowlist.
+
+**Structured plans** live under `~/.remedy/plans/`. Slash commands:
+
+| Command | Action |
+|---------|--------|
+| `/plans` | List plans |
+| `/plan` | Show latest plan |
+| `/plan new <title>` | Create an empty draft |
+| `/plan approve` | Mark latest plan approved before Build |
+
+API: `GET/POST /api/plans`, `GET /api/plans/latest`, `POST /api/plans/{id}/status`.
+
+## Mid-task checkpoints (Build)
+
+On long tool runs, Remedy auto-saves **checkpoints** under `~/.remedy/checkpoints/` (every few tool steps, after recovery, and at turn end). Tools: `checkpoint_save`, `checkpoint_show`. API: `GET /api/checkpoints`, `GET /api/checkpoints/latest`.
+
+If a long task soft-fails, open the latest checkpoint (or ask “show last checkpoint”) to resume without losing done/next context.
 
 ## Tool process (Proc)
 

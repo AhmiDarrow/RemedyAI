@@ -343,8 +343,8 @@ def test_system_health_has_warnings_structure():
 
 
 def test_cancel_install_when_idle():
-    from remedy.vision.install import cancel_install
     from remedy.vision import progress as prog
+    from remedy.vision.install import cancel_install
 
     prog.reset()
     r = cancel_install()
@@ -390,8 +390,8 @@ def test_cancel_sets_flag_during_fake_install(tmp_path: Path, monkeypatch):
 
 def test_download_asset_resumes_partial(tmp_path: Path, monkeypatch):
     """Partial file + Range resume completes to dest with correct size."""
-    from remedy.vision.catalog import DownloadAsset
     from remedy.vision import install as inst
+    from remedy.vision.catalog import DownloadAsset
 
     payload = b"ABCDEFGHIJ" * 100  # 1000 bytes
     asset = DownloadAsset(
@@ -432,9 +432,7 @@ def test_download_asset_resumes_partial(tmp_path: Path, monkeypatch):
             return False
 
     def fake_urlopen(req, timeout=120):
-        # Expect Range header
-        headers = dict(req.header_items()) if hasattr(req, "header_items") else {}
-        # urllib Request uses .headers
+        # Expect Range header (urllib Request uses .headers)
         rng = req.headers.get("Range") or req.headers.get("range")
         assert rng == "bytes=500-"
         return _Resp(payload[500:], status=206)
@@ -448,8 +446,8 @@ def test_download_asset_resumes_partial(tmp_path: Path, monkeypatch):
 
 
 def test_wipe_vision_data(tmp_path: Path):
-    from remedy.vision.install import wipe_vision_data
     from remedy.vision.config import vision_root
+    from remedy.vision.install import wipe_vision_data
 
     root = vision_root(tmp_path / "home")
     root.mkdir(parents=True)

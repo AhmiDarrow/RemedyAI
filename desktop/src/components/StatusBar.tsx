@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { getPartnerStatus } from '../api/partner'
+import { getLatestCheckpoint, getPartnerStatus } from '../api/partner'
 import { getVisionStatus, type VisionStatus } from '../api/vision'
 import { ThemeSwitcher } from './ThemeSwitcher'
 import type { ThemeId, Theme } from '../themes'
@@ -102,6 +102,7 @@ function visionLine(vs: VisionStatus | null): string {
 }
 
 export function StatusBar({
+  sessionId,
   streaming,
   model,
   models = [],
@@ -128,6 +129,7 @@ export function StatusBar({
   const [status, setStatus] = useState<'connected' | 'disconnected' | 'checking'>('checking')
   const [alerts, setAlerts] = useState('')
   const [vision, setVision] = useState<VisionStatus | null>(null)
+  const [hasCheckpoint, setHasCheckpoint] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -170,6 +172,25 @@ export function StatusBar({
       clearInterval(interval)
     }
   }, [])
+
+  // Latest mid-task checkpoint (opens Memory panel → Checkpoint tab via Memory button)
+  useEffect(() => {
+    let cancelled = false
+    async function tick() {
+      try {
+        const d = await getLatestCheckpoint(sessionId)
+        if (!cancelled) setHasCheckpoint(Boolean(d.checkpoint))
+      } catch {
+        if (!cancelled) setHasCheckpoint(false)
+      }
+    }
+    void tick()
+    const interval = setInterval(() => void tick(), streaming ? 4000 : 15000)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [sessionId, streaming])
 
   // Poll visual decoder so setup opt-in progress is visible in the dock (faster while busy).
   useEffect(() => {
@@ -347,9 +368,13 @@ export function StatusBar({
           <SegButton
             active={panel === 'memory'}
             onClick={() => onTogglePanel('memory')}
-            title="Memory panel"
+            title={
+              hasCheckpoint
+                ? 'Memory, checkpoints & plans (checkpoint available)'
+                : 'Memory, checkpoints & plans'
+            }
           >
-            Memory
+            Memory{hasCheckpoint ? ' · CP' : ''}
           </SegButton>
           <SegButton
             active={panel === 'skills'}

@@ -14,9 +14,14 @@ Remedy keeps durable knowledge so it can remember facts, goals, and session cont
 
 ## In the desktop app
 
-- **Memory** panel (status bar) — browse / search stored items  
+- **Memory** panel (status bar) — three tabs:
+  - **Memory** — browse / search stored items  
+  - **Checkpoint** — latest mid-task progress (auto-saved on long Build runs)  
+  - **Plan** — latest structured plan; **Approve** before Build  
+- Status bar shows **Memory · CP** when a checkpoint exists  
 - Slash commands in chat (see below)  
 - Settings → **Your name** syncs into profile  
+- Settings → **MCP host** — export skills to Cursor / Claude Desktop
 
 ## Essential commands
 

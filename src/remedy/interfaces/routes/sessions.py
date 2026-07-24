@@ -214,7 +214,10 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         start = time.perf_counter()
         response_text = ""
         async for token in runtime.stream_response(
-            req.message, session_id=session_id, model=req.model
+            req.message,
+            session_id=session_id,
+            model=req.model,
+            plan_mode=bool(getattr(req, "plan_mode", False)),
         ):
             # Keep user-visible text only (tool lifecycle events are @@-prefixed).
             if isinstance(token, str) and token.startswith("@@"):
@@ -414,6 +417,7 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                     session_id=session_id,
                     model=req.model,
                     attachments=att_dicts,
+                    plan_mode=bool(getattr(req, "plan_mode", False)),
                 ):
                     if token.startswith("@@tool_call:"):
                         raw = token[len("@@tool_call:") :]

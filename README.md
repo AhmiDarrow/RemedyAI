@@ -83,7 +83,7 @@ The desktop app bundles the full Remedy server as a sidecar, so everything runs 
 | **Memory Harness** | Context prune + Session Brief + `/compact` |
 | **Approvals** | High-impact shell / write / skill scripts: Approve/Deny (auto mode remains an owner choice) |
 | **Diff view** | Unified diffs and `file_write` process dumps: red removals / green additions |
-| **Goals** | `/goal`, `/goals`, goal tools |
+| **Goals & plans** | `/goal`, `/goals`, `/plan`, `/plans`, goal/plan tools |
 | **ComfyUI skill** | From-scratch install guide + portable discovery + generate images into chat (Flux.2 Klein) |
 | **Visual decoder** | Opt-in local image→text (llama.cpp + Qwen2.5-VL 3B) so text-only chat models can use screenshots/OCR; prefer-local to save provider vision tokens |
 | **Themes** | System, Dark, **Neutral Dark**, Light, Emerald, Amethyst, Amber, Ocean |
@@ -105,6 +105,7 @@ The desktop app bundles the full Remedy server as a sidecar, so everything runs 
 | `/remember <fact>` | Store a fact in memory/profile |
 | `/whoami` | What Remedy knows about you |
 | `/goals` · `/goal <title>` | List / add goals |
+| `/plans` · `/plan` · `/plan new <title>` · `/plan approve` | Structured task plans (Plan mode) |
 | `/compact` · `/harness` | Memory Harness compress / show Session Brief |
 | `/approve` · `/deny` | High-impact command approvals |
 | `/import <folder>` | Import `.md`/`.txt` knowledge pack into memory |
@@ -219,7 +220,7 @@ cd desktop && npm run tauri:dev
 | `remedy-core` | Agent runtime, learning engine, hook/plugin system, metrics, logging |
 | `remedy-memory` | Persistent SQLite+FTS5 store with handoff notes, session summaries, user profiles |
 | `remedy-skills` | agentskills.io loader + Hermes/OpenClaw adapters, executor, validator, exporter |
-| `remedy-tools` | MCP client (JSON-RPC stdio), tool registry with invocation stats |
+| `remedy-tools` | MCP client + MCP host (`remedy mcp serve`), tool registry with invocation stats |
 | `remedy-execution` | Sandboxed runners (async subprocess, Docker), execution policy engine |
 | `remedy-interfaces` | CLI (rich), FastAPI server, config system, plugin manager |
 | `remedy-migrate` | Import tools from Hermes and OpenClaw setups |
@@ -242,6 +243,7 @@ cd desktop && npm run tauri:dev
 | `remedy config` | `init`, `show`, `path` | TOML/YAML configuration |
 | `remedy auth` | `login`, `logout`, `status`, `apikey` | Provider OAuth / API keys (xAI) |
 | `remedy serve` | | Full API server (config-aware) |
+| `remedy mcp serve` · `remedy-mcp` | | MCP stdio host (skills/plans for external apps) |
 | `remedy desktop` | `install`, `dev`, `build`, `launch`, `status` | Desktop app management |
 | `remedy migrate` | `hermes`, `openclaw` | Import from other frameworks |
 | `remedy exec` | | Execute commands in sandbox |
@@ -434,7 +436,7 @@ def teardown_plugin():
 | **agentskills.io** | Native, full compliance |
 | **Hermes Agent** | Deep adapter — `hermes_config.yaml` parsing, tool mapping, batch migration |
 | **OpenClaw / ClawHub** | Deep adapter — SKILL.md, skill.yaml, claw.yaml, MCP extraction, channel config |
-| **MCP (Model Context Protocol)** | Native JSON-RPC stdio client — connect, discover tools, call tools |
+| **MCP (Model Context Protocol)** | Client (use external tools) + host (`remedy mcp serve` exports skills to Cursor/Claude) |
 
 ---
 
@@ -444,7 +446,7 @@ def teardown_plugin():
 git clone https://github.com/AhmiDarrow/RemedyAI.git
 cd RemedyAI
 uv sync --group dev
-uv run pytest -q          # full suite (560+ tests; currently ~594)
+uv run pytest -q          # full suite (560+ tests; currently ~642)
 cd desktop && npm test    # frontend unit tests (vitest)
 python scripts/check_docs.py  # docs stay synced with code (help, cmds, versions)
 uv run remedy --help

@@ -122,6 +122,10 @@ class SendMessageRequest(BaseModel):
     model: str | None = None
     agent: str | None = None
     attachments: list[AttachmentRef] | None = None
+    plan_mode: bool = Field(
+        default=False,
+        description="When true, only planning tools run (no shell/file mutation)",
+    )
 
 
 class CommandRequest(BaseModel):

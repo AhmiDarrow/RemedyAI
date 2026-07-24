@@ -59,6 +59,7 @@ export function useMessages(sessionId: string | null) {
         is_image?: boolean
         is_text?: boolean
       }[],
+      planMode?: boolean,
     ) => {
       const targetId = sid || sessionId
       const hasAtt = Boolean(attachments?.length)
@@ -249,6 +250,7 @@ export function useMessages(sessionId: string | null) {
         (info) => {
           setTaskProgress(info)
         },
+        planMode,
       )
 
       setStreamCtrl(ctrl)

@@ -22,6 +22,19 @@ class GoalCreateRequest(BaseModel):
     description: str = ""
 
 
+class PlanCreateRequest(BaseModel):
+    title: str
+    goal: str = ""
+    steps: list[str | dict] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
+    session_id: str | None = None
+    status: str = "draft"
+
+
+class PlanStatusRequest(BaseModel):
+    status: str = Field(..., description="draft | approved | active | done | cancelled")
+
+
 def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=None) -> None:
     _ = gateway
 
@@ -89,6 +102,111 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
             "title": task.title,
             "status": task.status.value,
         }
+
+    def _plan_store():
+        from pathlib import Path
+
+        from remedy.core.plan_store import PlanStore
+
+        home = None
+        if runtime is not None:
+            home = getattr(getattr(runtime, "config", None), "home_dir", None)
+        if not home:
+            try:
+                from remedy.interfaces.config import load_config
+
+                home = load_config().get("home_dir")
+            except Exception:
+                home = None
+        return PlanStore(home or Path.home() / ".remedy")
+
+    @app.get("/api/plans")
+    async def list_plans(session_id: str | None = None, limit: int = 30):
+        store = _plan_store()
+        plans = store.list_plans(session_id=session_id, limit=min(max(limit, 1), 100))
+        return {"plans": [p.to_dict() for p in plans]}
+
+    @app.get("/api/plans/latest")
+    async def latest_plan(session_id: str | None = None):
+        store = _plan_store()
+        plan = store.latest_for_session(session_id)
+        if plan is None:
+            plans = store.list_plans(limit=1)
+            plan = plans[0] if plans else None
+        if plan is None:
+            return {"plan": None}
+        return {"plan": plan.to_dict(), "markdown": plan.summary_markdown()}
+
+    @app.get("/api/plans/{plan_id}")
+    async def get_plan(plan_id: str):
+        store = _plan_store()
+        plan = store.get(plan_id)
+        if plan is None:
+            raise HTTPException(404, "Plan not found")
+        return {"plan": plan.to_dict(), "markdown": plan.summary_markdown()}
+
+    @app.post("/api/plans")
+    async def create_plan(req: PlanCreateRequest):
+        store = _plan_store()
+        plan = store.create(
+            req.title.strip(),
+            goal=req.goal or req.title,
+            steps=list(req.steps or []),
+            risks=list(req.risks or []),
+            session_id=req.session_id,
+            status=req.status or "draft",
+        )
+        return {"plan": plan.to_dict(), "markdown": plan.summary_markdown()}
+
+    @app.post("/api/plans/{plan_id}/status")
+    async def set_plan_status(plan_id: str, req: PlanStatusRequest):
+        store = _plan_store()
+        plan = store.set_status(plan_id, req.status.strip().lower())
+        if plan is None:
+            raise HTTPException(404, "Plan not found or invalid status")
+        return {"plan": plan.to_dict(), "markdown": plan.summary_markdown()}
+
+    @app.get("/api/checkpoints")
+    async def list_checkpoints(session_id: str | None = None, limit: int = 20):
+        from pathlib import Path
+
+        from remedy.core.checkpoint import CheckpointStore
+
+        home = None
+        if runtime is not None:
+            home = getattr(getattr(runtime, "config", None), "home_dir", None)
+        if not home:
+            try:
+                from remedy.interfaces.config import load_config
+
+                home = load_config().get("home_dir")
+            except Exception:
+                home = None
+        store = CheckpointStore(home or Path.home() / ".remedy")
+        items = store.list_for_session(session_id, limit=min(max(limit, 1), 50))
+        return {"checkpoints": [c.to_dict() for c in items]}
+
+    @app.get("/api/checkpoints/latest")
+    async def latest_checkpoint(session_id: str | None = None):
+        from pathlib import Path
+
+        from remedy.core.checkpoint import CheckpointStore
+
+        home = None
+        if runtime is not None:
+            home = getattr(getattr(runtime, "config", None), "home_dir", None)
+        if not home:
+            try:
+                from remedy.interfaces.config import load_config
+
+                home = load_config().get("home_dir")
+            except Exception:
+                home = None
+        store = CheckpointStore(home or Path.home() / ".remedy")
+        cp = store.latest(session_id)
+        if cp is None:
+            return {"checkpoint": None}
+        return {"checkpoint": cp.to_dict(), "markdown": cp.summary_markdown()}
 
     @app.post("/api/memory/import")
     async def import_knowledge(req: KnowledgeImportRequest):

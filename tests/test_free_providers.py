@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-
 from remedy.interfaces.config import (
     DEMO_DUMMY_API_KEY,
     PROVIDER_CATALOG,

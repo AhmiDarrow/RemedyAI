@@ -12,7 +12,6 @@ from remedy.vision.capabilities import resolve_supports_vision
 from remedy.vision.catalog import DEFAULT_MODEL_ID, catalog_public, get_model_spec
 from remedy.vision.config import (
     load_vision_json,
-    remedy_home,
     vision_section_from_config,
 )
 from remedy.vision.decoder import decode_images

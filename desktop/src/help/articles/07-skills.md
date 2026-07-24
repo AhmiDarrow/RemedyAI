@@ -8,12 +8,15 @@ Open **Skills** on the status bar:
 
 | UI | Meaning |
 |----|---------|
+| **What I learned** | Counts + recent auto-learned skills (probation reasons) |
 | Status chips | active / validated / discovered / disabled / quarantined |
 | **Hard-won** badge | Skill earned high effort / recovery value |
 | Search | Filter by name / description |
 | Activate / Disable | Lifecycle controls |
 | Trust | Allow a quarantined import to run |
 | Feedback | Success / fail signals for ranking |
+
+API: `GET /api/skills/learning/summary` returns the same “what I learned” snapshot.
 
 ## Lifecycle (simplified)
 
@@ -31,6 +34,15 @@ disabled / deprecated
 - When a bundled skill’s frontmatter **version** is newer than your seeded copy under
   `~/.remedy/skills/`, Remedy refreshes that pack on next discover (add `.user_locked` in
   the skill folder to keep a hand-edited copy).
+
+## Bundled highlights
+
+| Skill | Use for |
+|-------|---------|
+| **github** | PRs, issues, CI, releases via `gh` + git (safe defaults; no force-push unless you ask) |
+| **git-status** / **commit-message** | Local branch hygiene and commit text |
+| **comfyui** | Local image gen bootstrap + generate into chat |
+| **code-review** / **write-tests** | Engineering loops |
 
 ## ComfyUI (bundled)
 

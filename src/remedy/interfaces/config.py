@@ -1077,13 +1077,11 @@ def provider_credentials_ready(config: dict[str, Any] | None = None) -> bool:
         return True
     if provider == "demo":
         # Air-gapped / enterprise builds can disable guest demo.
-        if os.environ.get("REMEDY_DEMO_DISABLED", "").strip().lower() in (
+        return os.environ.get("REMEDY_DEMO_DISABLED", "").strip().lower() not in (
             "1",
             "true",
             "yes",
-        ):
-            return False
-        return True
+        )
     plain = str(raw.get("llm_api_key") or "").strip()
     if not plain and config is None:
         plain = str(os.environ.get("REMEDY_LLM_API_KEY") or "").strip()

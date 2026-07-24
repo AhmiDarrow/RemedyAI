@@ -54,6 +54,13 @@ _BUILTIN_COMMANDS: list[dict] = [
     {"name": "/whoami", "description": "Show what Remedy knows about you", "aliases": [], "arguments": None},
     {"name": "/goals", "description": "List open goals", "aliases": [], "arguments": None},
     {"name": "/goal", "description": "Add a goal: /goal <title>", "aliases": [], "arguments": "title"},
+    {"name": "/plans", "description": "List structured task plans", "aliases": [], "arguments": None},
+    {
+        "name": "/plan",
+        "description": "Show latest plan, or /plan approve|new <title>",
+        "aliases": [],
+        "arguments": "approve|new <title>",
+    },
     {"name": "/approve", "description": "Approve a pending high-impact action", "aliases": [], "arguments": "id"},
     {"name": "/deny", "description": "Deny a pending high-impact action", "aliases": [], "arguments": "id"},
     {"name": "/import", "description": "Import a folder of notes into memory", "aliases": [], "arguments": "path"},
@@ -322,6 +329,65 @@ async def handle_slash_command(
             ]
             return {"text": "**Goals**\n" + "\n".join(lines)}
         return {"text": "Runtime not available."}
+
+    if stripped in ("/plans", "/plan") or stripped.startswith("/plan "):
+        from pathlib import Path
+
+        from remedy.core.plan_store import PlanStore
+
+        home = None
+        if runtime is not None:
+            home = getattr(getattr(runtime, "config", None), "home_dir", None)
+        if not home:
+            try:
+                from remedy.interfaces.config import load_config
+
+                home = load_config().get("home_dir")
+            except Exception:
+                home = None
+        store = PlanStore(home or Path.home() / ".remedy")
+        rest = raw[len("/plan") :].strip() if stripped.startswith("/plan") else ""
+        if stripped == "/plans" or rest.lower() in ("", "list"):
+            plans = store.list_plans(limit=20)
+            if not plans:
+                return {
+                    "text": "No structured plans yet. Use **Plan** mode (Ctrl+B) and ask "
+                    "Remedy to save a plan, or `/plan new <title>`."
+                }
+            lines = [
+                f"- [{p.status}] **{p.title}** (`{p.id}`, {len(p.steps)} steps)"
+                for p in plans
+            ]
+            return {"text": "**Plans**\n" + "\n".join(lines)}
+        if rest.lower().startswith("approve"):
+            pid = rest[7:].strip()
+            plan = store.get(pid) if pid else store.list_plans(limit=1)
+            if isinstance(plan, list):
+                plan = plan[0] if plan else None
+            if plan is None:
+                return {"text": "No plan to approve. Save one first."}
+            plan = store.set_status(plan.id, "approved")
+            return {
+                "text": f"Plan **approved**: {plan.title} (`{plan.id}`)\n\n"
+                "Switch to **Build** mode to execute."
+            }
+        if rest.lower().startswith("new "):
+            title = rest[4:].strip()
+            if not title:
+                return {"text": "Usage: /plan new <title>"}
+            plan = store.create(title, goal=title, steps=[], status="draft")
+            return {
+                "text": f"Draft plan created: **{plan.title}** (`{plan.id}`). "
+                "In Plan mode, ask Remedy to fill steps with `plan_save`."
+            }
+        # Show latest or by id
+        plan = store.get(rest) if rest and not rest.lower().startswith("new") else None
+        if plan is None:
+            plans = store.list_plans(limit=1)
+            plan = plans[0] if plans else None
+        if plan is None:
+            return {"text": "No plans yet. `/plan new <title>` or use Plan mode."}
+        return {"text": plan.summary_markdown()}
 
     if stripped.startswith("/approve"):
         aid = raw[len("/approve") :].strip()

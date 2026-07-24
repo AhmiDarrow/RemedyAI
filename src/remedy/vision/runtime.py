@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import socket
@@ -9,7 +10,6 @@ import subprocess
 import time
 from pathlib import Path
 from typing import Any
-from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 from remedy.vision.catalog import DEFAULT_HOST, DEFAULT_PORT
@@ -178,10 +178,8 @@ def stop_server(home_dir: str | Path | None = None) -> dict[str, Any]:
     state = load_vision_json(home_dir)
     if state.get("pid"):
         state.pop("pid", None)
-        try:
+        with contextlib.suppress(Exception):
             save_vision_json(state, home_dir)
-        except Exception:
-            pass
     return {"ok": True, "stopped": killed}
 
 

@@ -87,51 +87,270 @@ export function Panel({ open, onClose, title, children }: PanelProps) {
 export function MemoryPanel({
   open,
   onClose,
+  sessionId,
 }: {
   open: boolean
   onClose: () => void
+  /** Active chat session — filters checkpoints/plans when possible */
+  sessionId?: string | null
 }) {
+  const [tab, setTab] = useState<'memory' | 'checkpoint' | 'plan'>('memory')
   const [entries, setEntries] = useState<{ id: string; title: string; content: string; type: string }[]>([])
+  const [checkpointMd, setCheckpointMd] = useState<string | null>(null)
+  const [checkpoint, setCheckpoint] = useState<{
+    id: string
+    title: string
+    reason?: string
+    tool_step_count?: number
+    done?: string[]
+    next_steps?: string[]
+    failures?: string[]
+  } | null>(null)
+  const [plan, setPlan] = useState<{
+    id: string
+    title: string
+    status?: string
+    steps?: { title: string; status?: string }[]
+    markdown?: string
+  } | null>(null)
   const [loading, setLoading] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  const load = () => {
+    setLoading(true)
+    void Promise.all([
+      import('../api/client').then(({ apiFetch }) =>
+        apiFetch<{ results?: { id: string; title: string; content: string; type: string }[] }>(
+          '/memory/search?query=&limit=20',
+        )
+          .then((d) => setEntries(d.results || []))
+          .catch(() => setEntries([])),
+      ),
+      import('../api/partner').then(({ getLatestCheckpoint, getLatestPlan }) =>
+        Promise.all([
+          getLatestCheckpoint(sessionId)
+            .then((d) => {
+              setCheckpoint(d.checkpoint)
+              setCheckpointMd(d.markdown || null)
+            })
+            .catch(() => {
+              setCheckpoint(null)
+              setCheckpointMd(null)
+            }),
+          getLatestPlan(sessionId)
+            .then((d) => {
+              setPlan(
+                d.plan
+                  ? {
+                      id: d.plan.id,
+                      title: d.plan.title,
+                      status: d.plan.status,
+                      steps: d.plan.steps,
+                      markdown: d.markdown,
+                    }
+                  : null,
+              )
+            })
+            .catch(() => setPlan(null)),
+        ]),
+      ),
+    ]).finally(() => setLoading(false))
+  }
 
   useEffect(() => {
     if (!open) return
-    setLoading(true)
-    void import('../api/client')
-      .then(({ apiFetch }) =>
-        apiFetch<{ results?: { id: string; title: string; content: string; type: string }[] }>(
-          '/memory/search?query=&limit=20',
-        ),
-      )
-      .then((d) => setEntries(d.results || []))
-      .catch(() => setEntries([]))
-      .finally(() => setLoading(false))
-  }, [open])
+    load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, sessionId])
+
+  const approve = async () => {
+    if (!plan?.id) return
+    setBusy(true)
+    try {
+      const { approvePlan } = await import('../api/partner')
+      const p = await approvePlan(plan.id)
+      if (p) setPlan({ ...plan, status: p.status, title: p.title })
+    } catch {
+      /* ignore */
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const tabBtn = (id: typeof tab, label: string) => (
+    <button
+      type="button"
+      onClick={() => setTab(id)}
+      className="flex-1 text-[10px] py-1 rounded"
+      style={{
+        background: tab === id ? 'var(--bg-tertiary)' : 'transparent',
+        color: tab === id ? 'var(--accent)' : 'var(--text-muted)',
+        border: tab === id ? '1px solid var(--border)' : '1px solid transparent',
+      }}
+    >
+      {label}
+    </button>
+  )
 
   return (
-    <Panel open={open} onClose={onClose} title="Memory">
+    <Panel open={open} onClose={onClose} title="Memory & progress">
+      <div className="mb-2 flex gap-1">
+        {tabBtn('memory', 'Memory')}
+        {tabBtn('checkpoint', 'Checkpoint')}
+        {tabBtn('plan', 'Plan')}
+      </div>
+
       {loading ? (
         <div style={{ color: 'var(--text-muted)' }}>Loading...</div>
-      ) : entries.length === 0 ? (
-        <div style={{ color: 'var(--text-muted)' }}>No entries</div>
+      ) : tab === 'memory' ? (
+        entries.length === 0 ? (
+          <div style={{ color: 'var(--text-muted)' }}>No entries</div>
+        ) : (
+          entries.map((e) => (
+            <div
+              key={e.id}
+              className="mb-2 p-2 rounded"
+              style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}
+            >
+              <div className="font-medium truncate" style={{ color: 'var(--text-primary)' }}>
+                {e.title}
+              </div>
+              <div className="mt-0.5" style={{ color: 'var(--text-secondary)' }}>
+                {e.content.slice(0, 120)}
+              </div>
+              <div className="mt-1" style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>
+                {e.type}
+              </div>
+            </div>
+          ))
+        )
+      ) : tab === 'checkpoint' ? (
+        !checkpoint ? (
+          <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+            No mid-task checkpoints yet. Long Build runs auto-save progress under
+            ~/.remedy/checkpoints/.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <div
+              className="p-2 rounded"
+              style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}
+            >
+              <div className="font-medium" style={{ color: 'var(--accent)' }}>
+                {checkpoint.title}
+              </div>
+              <div style={{ color: 'var(--text-muted)', fontSize: '0.65rem' }}>
+                {checkpoint.reason || 'checkpoint'}
+                {checkpoint.tool_step_count != null
+                  ? ` · ${checkpoint.tool_step_count} tools`
+                  : ''}
+              </div>
+              {(checkpoint.done?.length || 0) > 0 && (
+                <div className="mt-1.5">
+                  <div style={{ color: 'var(--text-secondary)', fontSize: '0.7rem' }}>Done</div>
+                  <ul className="m-0 pl-3" style={{ color: 'var(--text-primary)', fontSize: '0.7rem' }}>
+                    {checkpoint.done!.slice(0, 8).map((d, i) => (
+                      <li key={i}>{d}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {(checkpoint.next_steps?.length || 0) > 0 && (
+                <div className="mt-1.5">
+                  <div style={{ color: 'var(--text-secondary)', fontSize: '0.7rem' }}>Next</div>
+                  <ul className="m-0 pl-3" style={{ color: 'var(--text-primary)', fontSize: '0.7rem' }}>
+                    {checkpoint.next_steps!.slice(0, 6).map((d, i) => (
+                      <li key={i}>{d}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {(checkpoint.failures?.length || 0) > 0 && (
+                <div className="mt-1.5">
+                  <div style={{ color: 'var(--danger, #f66)', fontSize: '0.7rem' }}>Failures</div>
+                  <ul className="m-0 pl-3" style={{ color: 'var(--text-secondary)', fontSize: '0.7rem' }}>
+                    {checkpoint.failures!.slice(0, 4).map((d, i) => (
+                      <li key={i}>{d}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+            {checkpointMd && (
+              <pre
+                className="p-2 rounded overflow-x-auto whitespace-pre-wrap"
+                style={{
+                  fontSize: '0.65rem',
+                  color: 'var(--text-muted)',
+                  background: 'var(--bg-primary)',
+                  border: '1px solid var(--border)',
+                  maxHeight: 160,
+                }}
+              >
+                {checkpointMd.slice(0, 1200)}
+              </pre>
+            )}
+            <button
+              type="button"
+              onClick={load}
+              className="text-xs px-2 py-1 rounded w-full"
+              style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
+            >
+              Refresh
+            </button>
+          </div>
+        )
+      ) : !plan ? (
+        <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+          No structured plan yet. Use Plan mode (Ctrl+B) and ask Remedy to save steps, or{' '}
+          <code>/plan new …</code>.
+        </div>
       ) : (
-        entries.map((e) => (
+        <div className="space-y-2">
           <div
-            key={e.id}
-            className="mb-2 p-2 rounded"
+            className="p-2 rounded"
             style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}
           >
-            <div className="font-medium truncate" style={{ color: 'var(--text-primary)' }}>
-              {e.title}
+            <div className="font-medium" style={{ color: 'var(--accent)' }}>
+              {plan.title}
             </div>
-            <div className="mt-0.5" style={{ color: 'var(--text-secondary)' }}>
-              {e.content.slice(0, 120)}
+            <div style={{ color: 'var(--text-muted)', fontSize: '0.65rem' }}>
+              status: {plan.status || 'draft'} · {plan.steps?.length || 0} steps
             </div>
-            <div className="mt-1" style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>
-              {e.type}
-            </div>
+            {(plan.steps?.length || 0) > 0 && (
+              <ol className="mt-1.5 m-0 pl-4" style={{ fontSize: '0.7rem', color: 'var(--text-primary)' }}>
+                {plan.steps!.slice(0, 12).map((s, i) => (
+                  <li key={i}>
+                    {s.title}
+                    {s.status && s.status !== 'pending' ? ` (${s.status})` : ''}
+                  </li>
+                ))}
+              </ol>
+            )}
           </div>
-        ))
+          <div className="flex gap-1">
+            <button
+              type="button"
+              disabled={busy || plan.status === 'approved'}
+              onClick={() => void approve()}
+              className="flex-1 text-xs px-2 py-1 rounded"
+              style={{
+                border: '1px solid var(--border)',
+                color: plan.status === 'approved' ? 'var(--success, #3ecf8e)' : 'var(--text-secondary)',
+              }}
+            >
+              {plan.status === 'approved' ? 'Approved' : 'Approve plan'}
+            </button>
+            <button
+              type="button"
+              onClick={load}
+              className="text-xs px-2 py-1 rounded"
+              style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
+            >
+              Refresh
+            </button>
+          </div>
+        </div>
       )}
     </Panel>
   )
@@ -150,6 +369,8 @@ type SkillRow = {
   success_rate?: number | null
   related?: string[]
   lifecycle?: string | null
+  /** Last lifecycle / creation gate reason from the learning loop */
+  lifecycle_last?: string | null
 }
 
 function statusColor(status?: string): string {
@@ -168,6 +389,14 @@ function statusColor(status?: string): string {
   }
 }
 
+type LearningSummary = {
+  recent: SkillRow[]
+  probation_count: number
+  learned_count: number
+  active_learned_count: number
+  note?: string
+}
+
 export function SkillsPanel({
   open,
   onClose,
@@ -179,20 +408,47 @@ export function SkillsPanel({
   onOpenHelp?: (articleId?: string) => void
 }) {
   const [skills, setSkills] = useState<SkillRow[]>([])
+  const [learning, setLearning] = useState<LearningSummary | null>(null)
   const [loading, setLoading] = useState(false)
   const [filter, setFilter] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  const [reuse, setReuse] = useState<{
+    total_activations: number
+    skills_with_activation: number
+    multi_session_reactivations: number
+  } | null>(null)
 
   const load = () => {
     setLoading(true)
     setError(null)
     const q = filter.trim() ? `?q=${encodeURIComponent(filter.trim())}` : ''
     void import('../api/client')
-      .then(({ apiFetch }) => apiFetch<SkillRow[]>(`/skills${q}`))
-      .then((d) => setSkills(Array.isArray(d) ? d : []))
+      .then(async ({ apiFetch }) => {
+        const [list, summary, metrics] = await Promise.all([
+          apiFetch<SkillRow[]>(`/skills${q}`),
+          apiFetch<LearningSummary>('/skills/learning/summary').catch(() => null),
+          import('../api/partner')
+            .then(({ getSkillReuseMetrics }) => getSkillReuseMetrics())
+            .catch(() => null),
+        ])
+        setSkills(Array.isArray(list) ? list : [])
+        setLearning(summary)
+        setReuse(
+          metrics
+            ? {
+                total_activations: metrics.total_activations,
+                skills_with_activation: metrics.skills_with_activation,
+                multi_session_reactivations: metrics.multi_session_reactivations,
+              }
+            : null,
+        )
+      })
       .catch(() => {
         setSkills([])
+        setLearning(null)
+        setReuse(null)
         setError('Failed to load skills')
       })
       .finally(() => setLoading(false))
@@ -279,6 +535,58 @@ export function SkillsPanel({
         Learned skills start on probation; hard-won ones are protected. Activate full
         instructions in chat with the skill_activate tool.
       </p>
+      {learning && (
+        <div
+          className="mb-3 p-2 rounded"
+          style={{
+            background: 'var(--bg-primary)',
+            border: '1px solid var(--border)',
+          }}
+        >
+          <div
+            className="font-medium mb-1"
+            style={{ color: 'var(--text-primary)', fontSize: '0.75rem' }}
+          >
+            What I learned
+          </div>
+          <div
+            className="mb-1.5 flex flex-wrap gap-2"
+            style={{ color: 'var(--text-muted)', fontSize: '0.65rem' }}
+          >
+            <span>{learning.learned_count} learned</span>
+            <span>{learning.probation_count} on probation</span>
+            <span>{learning.active_learned_count} promoted</span>
+            {reuse && (
+              <>
+                <span>{reuse.total_activations} activations</span>
+                <span>{reuse.multi_session_reactivations} multi-session re-use</span>
+              </>
+            )}
+          </div>
+          {learning.recent.length === 0 ? (
+            <div style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>
+              {learning.note || 'No auto-learned skills yet.'}
+            </div>
+          ) : (
+            <ul className="m-0 p-0 list-none space-y-1">
+              {learning.recent.slice(0, 5).map((s) => (
+                <li
+                  key={`learned-${s.name}`}
+                  style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}
+                >
+                  <span style={{ color: 'var(--accent)' }}>{s.name}</span>
+                  <span style={{ color: statusColor(s.status) }}> · {s.status || '?'}</span>
+                  {s.lifecycle_last && (
+                    <div style={{ color: 'var(--text-muted)', fontSize: '0.65rem' }}>
+                      {s.lifecycle_last}
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
       {error && (
         <div className="mb-2 text-xs" style={{ color: 'var(--danger, #f66)' }}>
           {error}
