@@ -680,7 +680,13 @@ def _sync_runtime_llm_from_config(
 
 
 def _write_config(path: Path, cfg: dict[str, Any]) -> None:
-    """Persist non-secret settings only. API keys never land in config.toml."""
+    """Persist non-secret settings only. API keys never land in config.toml.
+
+    TOML rule: all root keys must appear *before* any ``[table]`` section.
+    Writing scalars after tables makes them part of the last table and can
+    duplicate keys (``Cannot overwrite a value``) — which made load_config
+    return {{}} and setup/save look broken on first run.
+    """
     try:
         from remedy.interfaces.secret_store import scrub_config_secrets
 
@@ -698,17 +704,30 @@ def _write_config(path: Path, cfg: dict[str, Any]) -> None:
         "# API keys are stored in ~/.remedy/auth/ (DPAPI-encrypted on Windows),\n"
         "# not in this file.\n\n"
     )
+    scalars: list[tuple[str, Any]] = []
+    tables: list[tuple[str, dict[str, Any]]] = []
     for key, value in safe.items():
         if key in ("provider_keys", "llm_api_key"):
             continue  # hard block — never write secrets here
+        if value is None:
+            continue
         if isinstance(value, dict):
-            lines.append(f"[{key}]\n")
-            for k, v in value.items():
-                lines.append(f"{k} = {_serialize_toml(v)}\n")
-            lines.append("\n")
+            tables.append((key, value))
         else:
-            lines.append(f"{key} = {_serialize_toml(value)}\n")
+            scalars.append((key, value))
+    for key, value in scalars:
+        lines.append(f"{key} = {_serialize_toml(value)}\n")
+    if scalars and tables:
+        lines.append("\n")
+    for key, value in tables:
+        lines.append(f"[{key}]\n")
+        for k, v in value.items():
+            if v is None:
+                continue
+            lines.append(f"{k} = {_serialize_toml(v)}\n")
+        lines.append("\n")
     content = "".join(lines)
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
     with contextlib.suppress(OSError):
         path.chmod(0o600)

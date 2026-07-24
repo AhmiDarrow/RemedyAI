@@ -2,6 +2,20 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.10.36] — 2026-07-24
+
+### Fix: first-run setup save + xAI OAuth + corrupt config.toml
+
+- **Root cause**: settings writer put root keys *after* TOML `[table]` sections.
+  Those keys became part of the last table and could duplicate (`Cannot overwrite a value`),
+  so `load_config` returned `{}`, setup looked incomplete, and finish save failed.
+- Config writer now always emits **all root scalars first, then tables** (API + `mark_setup_completed`).
+- Corrupt / unreadable `config.toml` forces first-run wizard again.
+- Setup finish and xAI sign-in re-bootstrap the local API token and surface the real API error
+  (no more opaque “Failed to save settings. Is the server running?”).
+- First-run: if settings cannot load yet, **Setup opens automatically**; **Open setup** warms auth first.
+- `apiFetch`: clearer network/timeout/401 messages; token bootstrap retries.
+
 ## [0.10.35] — 2026-07-24
 
 ### Fix: first-run after full wipe + uninstall UI

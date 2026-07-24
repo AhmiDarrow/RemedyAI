@@ -59,6 +59,43 @@ class TestMarkSetupCompleted:
         assert "efficient" in text
         assert needs_first_run_setup(config_path=path) is False
 
+    def test_scalars_written_before_tables(self, tmp_path: Path):
+        """Root keys after [table] sections corrupt TOML (duplicate key errors)."""
+        path = tmp_path / "config.toml"
+        path.write_text(
+            'name = "Remedy"\nsetup_completed = false\n\n[slack]\nbot_token = ""\n',
+            encoding="utf-8",
+        )
+        mark_setup_completed(
+            config_path=path,
+            extra={
+                "launch_at_login": False,
+                "secrets_store": "auth/provider_keys.json",
+                "slack": {"bot_token": "", "channel_id": ""},
+            },
+        )
+        text = path.read_text(encoding="utf-8")
+        # setup_completed / launch_at_login must appear before any [section]
+        first_table = text.find("[")
+        assert first_table > 0
+        head = text[:first_table]
+        assert "setup_completed = true" in head
+        assert "launch_at_login = false" in head
+        assert "secrets_store" in head
+        # File must still parse
+        assert needs_first_run_setup(config_path=path) is False
+
+
+class TestCorruptConfigNeedsSetup:
+    def test_duplicate_key_toml_forces_wizard(self, tmp_path: Path):
+        path = tmp_path / "config.toml"
+        # Classic bug: root key written twice under last table
+        path.write_text(
+            '[slack]\nbot_token = ""\nsecrets_store = "a"\nsecrets_store = "b"\n',
+            encoding="utf-8",
+        )
+        assert needs_first_run_setup(config_path=path) is True
+
 
 class TestProviderCredentialsReady:
     def test_api_key_present(self):

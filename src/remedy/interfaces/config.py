@@ -818,6 +818,26 @@ def config_path_for_home(home_dir: str | Path | None = None) -> Path:
     return hd / "config.toml"
 
 
+def config_file_readable(config_path: Path | None = None) -> bool:
+    """True when config.toml exists and parses as a non-empty TOML table.
+
+    Corrupt TOML (e.g. root keys written after ``[table]`` sections) fails parse
+    and must be treated as first-run / repair territory.
+    """
+    path = Path(config_path or config_path_for_home()).expanduser()
+    if not path.exists():
+        return False
+    try:
+        content = path.read_text(encoding="utf-8")
+        if path.suffix in (".yaml", ".yml"):
+            data = yaml.safe_load(content) or {}
+        else:
+            data = tomllib.loads(content)
+        return isinstance(data, dict)
+    except Exception:
+        return False
+
+
 def needs_first_run_setup(
     config: dict[str, Any] | None = None,
     *,
@@ -828,6 +848,7 @@ def needs_first_run_setup(
 
     Rules:
     - No config file → need setup
+    - Config unreadable / corrupt → need setup (repair via wizard)
     - ``setup_completed`` present → honor it (True skips, False forces)
     - Legacy config without the flag → treat as already set up (do not re-wizard upgrades)
 
@@ -844,7 +865,15 @@ def needs_first_run_setup(
     if not path.exists():
         return True
 
+    # Corrupt file: load_config returns {} and would look like a "legacy" install
+    # without setup_completed — force the wizard so users are not stuck.
+    if not config_file_readable(path):
+        return True
+
     cfg = config if config is not None else load_config(path)
+    # Empty parse result on an existing file is also first-run territory.
+    if not cfg and path.exists():
+        return True
     if "setup_completed" in cfg:
         return not bool(cfg["setup_completed"])
     # Pre-flag installs: config already exists → do not force wizard again.
@@ -872,21 +901,31 @@ def mark_setup_completed(
     if "home_dir" not in cfg:
         cfg["home_dir"] = path.parent.as_posix()
 
-    # Minimal TOML writer (top-level scalars only + nested dicts as sections).
+    # Minimal TOML writer: ALL root scalars first, THEN [table] sections.
+    # Scalars after a table are absorbed into that table (TOML rule) and can
+    # corrupt the file (duplicate keys / unreadable config).
     lines = ["# Remedy AI Configuration", ""]
+    scalars: list[tuple[str, Any]] = []
+    tables: list[tuple[str, dict[str, Any]]] = []
     for key, value in cfg.items():
         if value is None:
             # Omit null keys instead of writing misleading empty strings.
             continue
         if isinstance(value, dict):
-            lines.append(f"[{key}]")
-            for k, v in value.items():
-                if v is None:
-                    continue
-                lines.append(f"{k} = {_toml_scalar(v)}")
-            lines.append("")
+            tables.append((key, value))
         else:
-            lines.append(f"{key} = {_toml_scalar(value)}")
+            scalars.append((key, value))
+    for key, value in scalars:
+        lines.append(f"{key} = {_toml_scalar(value)}")
+    if scalars and tables:
+        lines.append("")
+    for key, value in tables:
+        lines.append(f"[{key}]")
+        for k, v in value.items():
+            if v is None:
+                continue
+            lines.append(f"{k} = {_toml_scalar(v)}")
+        lines.append("")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path
 

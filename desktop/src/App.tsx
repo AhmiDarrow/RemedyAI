@@ -265,10 +265,13 @@ export default function App() {
       if (cancelled) return
 
       if (!settings) {
-        setServerState('error')
+        // Fresh / wiped installs: still open setup so the user is not stuck on
+        // "Failed to load server config" when the API is only partially up.
+        // Open setup + Retry remain available if save still fails.
+        setShowSetupWizard(true)
         setServerError(
-          'Failed to load server config: could not reach settings API. '
-          + 'If this is a fresh install, click Retry, then complete Setup.',
+          'Could not load settings yet — complete setup once the local server is ready. '
+          + 'If save fails, use Retry then Open setup.',
         )
         return
       }
@@ -793,9 +796,19 @@ export default function App() {
             <button
               type="button"
               onClick={() => {
-                // Open setup once API is up; if still down, retry first.
-                setShowSetupWizard(true)
-                setServerState('ready')
+                // Always offer setup on error (first run / wipe). Warm token first.
+                void (async () => {
+                  try {
+                    const { clearApiToken, ensureApiToken } = await import('./api/client')
+                    clearApiToken()
+                    await ensureApiToken()
+                  } catch {
+                    /* wizard will surface save/oauth errors */
+                  }
+                  setServerError('')
+                  setServerState('ready')
+                  setShowSetupWizard(true)
+                })()
               }}
               className="px-5 py-2 rounded-md text-sm"
               style={{

@@ -158,11 +158,12 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
 
     @app.put("/api/settings")
     async def update_settings(req: SettingsUpdateRequest):
+        from fastapi import HTTPException
+
         config_path = _find_config_path()
         if config_path is None:
             config_path = _default_config_path()
             config_path.parent.mkdir(parents=True, exist_ok=True)
-
 
         from remedy.interfaces.config import (
             migrate_provider_keys,
@@ -171,7 +172,10 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         )
         from remedy.interfaces.secret_store import scrub_config_secrets
 
-        cfg = migrate_provider_keys(load_config())
+        # Corrupt TOML previously caused load → {} then a bad re-write; still accept
+        # the PUT so setup can heal the file (scalars-before-tables writer).
+        raw_cfg = load_config()
+        cfg = migrate_provider_keys(raw_cfg if isinstance(raw_cfg, dict) else {})
         prev_provider = str(cfg.get("llm_provider") or "").strip().lower()
         updates = req.model_dump(exclude_none=True)
 
@@ -276,7 +280,20 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         cfg = scrub_config_secrets(cfg)
         cfg["llm_api_key"] = ""
         cfg.pop("provider_keys", None)
-        _write_config(config_path, cfg)
+        try:
+            _write_config(config_path, cfg)
+        except OSError as exc:
+            logger.exception("Failed to write settings to %s", config_path)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to write config.toml: {exc}",
+            ) from exc
+        except Exception as exc:
+            logger.exception("Settings save failed for %s", config_path)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to save settings: {exc}",
+            ) from exc
 
         # Invalidate model discovery cache after provider/url changes.
         cache = getattr(app.state, "_model_discovery_cache", None)

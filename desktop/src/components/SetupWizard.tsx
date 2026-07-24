@@ -134,6 +134,14 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
     setError('')
     stopXaiPoll()
     try {
+      // Ensure local Bearer is ready (first-run race with sidecar).
+      try {
+        const { clearApiToken, ensureApiToken } = await import('../api/client')
+        clearApiToken()
+        await ensureApiToken()
+      } catch {
+        /* apiFetch will retry */
+      }
       const start = await startXaiLogin()
       setXaiUserCode(start.user_code)
       setXaiVerifyUrl(start.verification_uri_complete || start.verification_uri)
@@ -215,6 +223,14 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
           /* browser or missing command */
         }
       }
+      // Re-bootstrap auth then save — corrupt/wiped installs often need a fresh token.
+      try {
+        const { clearApiToken, ensureApiToken } = await import('../api/client')
+        clearApiToken()
+        await ensureApiToken()
+      } catch {
+        /* updateSettings will surface the real error */
+      }
       await updateSettings({
         llm_provider: provider,
         llm_model: model,
@@ -229,8 +245,13 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
         close_to_tray: launchAtLogin,
       })
       onComplete()
-    } catch {
-      setError('Failed to save settings. Is the server running?')
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e)
+      setError(
+        msg && msg !== 'Failed to fetch'
+          ? `Failed to save settings: ${msg}`
+          : 'Failed to save settings. Is the local server running? Click Retry on the error screen, then try again.',
+      )
     } finally {
       setSaving(false)
     }
@@ -242,10 +263,18 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
     setSaving(true)
     setError('')
     try {
+      try {
+        const { clearApiToken, ensureApiToken } = await import('../api/client')
+        clearApiToken()
+        await ensureApiToken()
+      } catch {
+        /* best effort */
+      }
       await updateSettings({ setup_completed: true })
       onComplete()
-    } catch {
+    } catch (e: unknown) {
       // Still enter the app if the server briefly fails — avoid lockout.
+      console.warn('Skip setup save failed:', e)
       onComplete()
     } finally {
       setSaving(false)

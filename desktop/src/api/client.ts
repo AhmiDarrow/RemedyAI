@@ -91,6 +91,44 @@ export class ApiError extends Error {
   }
 }
 
+/** Flatten FastAPI / gateway error bodies into a short user-facing string. */
+export function formatApiErrorBody(body: unknown, fallback = 'Request failed'): string {
+  if (body == null || body === '') return fallback
+  if (typeof body === 'string') return body
+  if (typeof body !== 'object') return String(body)
+  const o = body as Record<string, unknown>
+  const detail = o.detail ?? o.error ?? o.message
+  if (typeof detail === 'string' && detail.trim()) return detail
+  if (Array.isArray(detail)) {
+    const parts = detail
+      .map((item) => {
+        if (typeof item === 'string') return item
+        if (item && typeof item === 'object') {
+          const row = item as Record<string, unknown>
+          const loc = Array.isArray(row.loc) ? row.loc.join('.') : ''
+          const msg = typeof row.msg === 'string' ? row.msg : JSON.stringify(row)
+          return loc ? `${loc}: ${msg}` : msg
+        }
+        return String(item)
+      })
+      .filter(Boolean)
+    if (parts.length) return parts.join('; ')
+  }
+  if (detail && typeof detail === 'object') {
+    try {
+      return JSON.stringify(detail)
+    } catch {
+      /* fall through */
+    }
+  }
+  if (typeof o.error === 'string' && o.error.trim()) return o.error
+  try {
+    return JSON.stringify(o)
+  } catch {
+    return fallback
+  }
+}
+
 export { getApiBase, SERVER_URL }
 
 export async function apiFetch<T = unknown>(
@@ -99,26 +137,22 @@ export async function apiFetch<T = unknown>(
 ): Promise<T> {
   const { timeout = 30000, ...fetchOpts } = options
 
-  await ensureApiToken()
+  // Retry token bootstrap a few times — first-run can race the sidecar.
+  let token = await ensureApiToken()
+  if (!token) {
+    for (let i = 0; i < 4 && !token; i++) {
+      await new Promise((r) => setTimeout(r, 200 * (i + 1)))
+      clearApiToken()
+      token = await ensureApiToken()
+    }
+  }
 
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), timeout)
 
   try {
-    let res = await fetch(`${getApiBase()}${path}`, {
-      ...fetchOpts,
-      signal: controller.signal,
-      headers: {
-        'Content-Type': 'application/json',
-        ...authHeaders(),
-        ...fetchOpts.headers,
-      },
-    })
-
-    // One retry after re-bootstrap on 401 (token rotated after wipe/reinstall)
-    if (res.status === 401) {
-      clearApiToken()
-      await ensureApiToken()
+    let res: Response
+    try {
       res = await fetch(`${getApiBase()}${path}`, {
         ...fetchOpts,
         signal: controller.signal,
@@ -128,11 +162,51 @@ export async function apiFetch<T = unknown>(
           ...fetchOpts.headers,
         },
       })
+    } catch (e: unknown) {
+      const name = e instanceof Error ? e.name : ''
+      if (name === 'AbortError') {
+        throw new ApiError(0, `Request timed out after ${timeout}ms (${path})`)
+      }
+      const msg = e instanceof Error ? e.message : String(e)
+      throw new ApiError(
+        0,
+        msg.includes('Failed to fetch')
+          ? `Cannot reach local API at ${SERVER_URL} (${path}). Is the server running?`
+          : msg || `Network error (${path})`,
+      )
+    }
+
+    // One retry after re-bootstrap on 401 (token rotated after wipe/reinstall)
+    if (res.status === 401) {
+      clearApiToken()
+      await ensureApiToken()
+      try {
+        res = await fetch(`${getApiBase()}${path}`, {
+          ...fetchOpts,
+          signal: controller.signal,
+          headers: {
+            'Content-Type': 'application/json',
+            ...authHeaders(),
+            ...fetchOpts.headers,
+          },
+        })
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e)
+        throw new ApiError(
+          0,
+          msg.includes('Failed to fetch')
+            ? `Cannot reach local API at ${SERVER_URL} (${path}). Is the server running?`
+            : msg || `Network error (${path})`,
+        )
+      }
     }
 
     if (!res.ok) {
       const body = await res.json().catch(() => ({}))
-      throw new ApiError(res.status, body?.error || body?.detail || res.statusText)
+      throw new ApiError(
+        res.status,
+        formatApiErrorBody(body, res.statusText || `HTTP ${res.status}`),
+      )
     }
 
     return (await res.json()) as T
