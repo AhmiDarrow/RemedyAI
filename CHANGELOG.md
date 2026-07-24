@@ -2,6 +2,18 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.10.39] — 2026-07-24
+
+### Feature: ComfyUI skill — from-scratch bootstrap
+
+- Bundled **comfyui** skill **v1.1.0**: end-to-end instructions for a blank machine —
+  download official Windows portable (or git), start server, fetch Flux.2 Klein models,
+  API workflows, then `comfyui` generate into chat (works with any chat provider).
+- `status` / `locate` when nothing is installed point at the bootstrap path (not only “start”).
+- Agent tool description + ReAct policy: bootstrap if empty, then generate; paste markdown images.
+- Seeded skills refresh when bundled frontmatter `version` is newer (opt-out: `.user_locked`).
+- Tests: version refresh seed; ComfyUI discovery still green.
+
 ## [0.10.38] — 2026-07-24
 
 ### Fix: xAI OAuth “Cannot reach local API” on fresh install (0.10.37)

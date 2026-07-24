@@ -2,7 +2,12 @@
 
 High-level product notes for owners. Full detail lives in repo `CHANGELOG.md`.
 
-Ship **one** installer/tag for the current series (**v0.10.38**).
+Ship **one** installer/tag for the current series (**v0.10.39**).
+
+## 0.10.39 — ComfyUI from scratch
+
+- **ComfyUI skill** now includes full bootstrap: install portable ComfyUI, start it, get Flux.2 Klein models, workflows, then generate images into chat — even on a PC that had nothing installed (with your approval for downloads).
+- Seeded skills auto-upgrade when the package ships a newer skill version.
 
 ## 0.10.38 — xAI OAuth on fresh install
 

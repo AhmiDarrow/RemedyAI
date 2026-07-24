@@ -84,7 +84,7 @@ The desktop app bundles the full Remedy server as a sidecar, so everything runs 
 | **Approvals** | High-impact shell / write / skill scripts: Approve/Deny (auto mode remains an owner choice) |
 | **Diff view** | Unified diffs and `file_write` process dumps: red removals / green additions |
 | **Goals** | `/goal`, `/goals`, goal tools |
-| **ComfyUI skill** | Portable local discovery + image generation into chat |
+| **ComfyUI skill** | From-scratch install guide + portable discovery + generate images into chat (Flux.2 Klein) |
 | **Themes** | System, Dark, **Neutral Dark**, Light, Emerald, Amethyst, Amber, Ocean |
 | **Side panels** | Memory · Skills · Settings (status bar) |
 | **Tray** | Circuit-R icon; right-click Settings and more |
@@ -443,7 +443,7 @@ def teardown_plugin():
 git clone https://github.com/AhmiDarrow/RemedyAI.git
 cd RemedyAI
 uv sync --group dev
-uv run pytest -q          # full suite (560+ tests; currently ~568)
+uv run pytest -q          # full suite (560+ tests; currently ~569)
 cd desktop && npm test    # frontend unit tests (vitest)
 python scripts/check_docs.py  # docs stay synced with code (help, cmds, versions)
 uv run remedy --help

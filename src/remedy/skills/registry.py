@@ -26,6 +26,68 @@ _STATUS_SCORE = {
 }
 
 
+def _skill_frontmatter(path: Path) -> dict[str, Any]:
+    import yaml
+
+    if not path.is_file():
+        return {}
+    raw = path.read_text(encoding="utf-8")
+    m = re.match(r"^---\s*\n(.*?)\n---\s*\n?", raw, re.DOTALL)
+    if not m:
+        return {}
+    try:
+        data = yaml.safe_load(m.group(1)) or {}
+    except yaml.YAMLError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _version_tuple(ver: Any) -> tuple[int, ...]:
+    """Parse ``1.2.3`` / ``1.1`` into comparable ints; unknown → (0,)."""
+    s = str(ver or "0").strip()
+    parts: list[int] = []
+    for p in re.split(r"[^\d]+", s):
+        if p.isdigit():
+            parts.append(int(p))
+    return tuple(parts) if parts else (0,)
+
+
+def _bundled_version_newer(bundled_skill_md: Path, user_skill_md: Path) -> bool:
+    b = _skill_frontmatter(bundled_skill_md)
+    u = _skill_frontmatter(user_skill_md)
+    return _version_tuple(b.get("version")) > _version_tuple(u.get("version"))
+
+
+def _refresh_seeded_skill_from_bundled(bundled_dir: Path, user_dir: Path) -> bool:
+    """Copy SKILL.md + scripts from bundled when its version is newer.
+
+    Skips if the user placed a ``.user_locked`` file in the skill dir (opt-out).
+    Does not delete extra user files under the skill folder.
+    """
+    import shutil
+
+    if (user_dir / ".user_locked").is_file():
+        return False
+    b_md = bundled_dir / "SKILL.md"
+    u_md = user_dir / "SKILL.md"
+    if not b_md.is_file() or not u_md.is_file():
+        return False
+    if not _bundled_version_newer(b_md, u_md):
+        return False
+    shutil.copy2(b_md, u_md)
+    b_scripts = bundled_dir / "scripts"
+    if b_scripts.is_dir():
+        dest_scripts = user_dir / "scripts"
+        dest_scripts.mkdir(parents=True, exist_ok=True)
+        for src in b_scripts.rglob("*"):
+            if src.is_file():
+                rel = src.relative_to(b_scripts)
+                target = dest_scripts / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, target)
+    return True
+
+
 def _merge_bundled_local_frontmatter(
     *,
     bundled_skill_md: Path,
@@ -129,10 +191,10 @@ class SkillRegistry:
                 else Path("~/.remedy/skills").expanduser()
             )
         user_skills.mkdir(parents=True, exist_ok=True)
-        # Seed missing bundled skills into user dir (never overwrite customizations).
-        # If a seeded skill is outdated and lacks a ``local:`` discovery block that
-        # the bundled copy now has, merge only that frontmatter key so ambient
-        # discovery works without clobbering user edits to instructions.
+        # Seed missing bundled skills into user dir.
+        # Upgrades: if bundled frontmatter ``version`` is newer than the seeded
+        # copy, refresh SKILL.md + scripts (skip when ``.user_locked`` exists).
+        # Also merge ``local:`` discovery into older copies that only lack that key.
         if bundled.is_dir():
             for child in bundled.iterdir():
                 if not child.is_dir() or not (child / "SKILL.md").is_file():
@@ -142,6 +204,8 @@ class SkillRegistry:
                     with contextlib.suppress(OSError):
                         shutil.copytree(child, dest)
                 else:
+                    with contextlib.suppress(OSError):
+                        _refresh_seeded_skill_from_bundled(child, dest)
                     with contextlib.suppress(OSError):
                         _merge_bundled_local_frontmatter(
                             bundled_skill_md=child / "SKILL.md",

@@ -851,11 +851,14 @@ class BasicRuntime(AgentRuntime):
             base_url: str = "",
             timeout: float = 300.0,
         ) -> str:
-            """Local ComfyUI via HTTP API only — never search the disk.
+            """Local ComfyUI via HTTP API — never full-disk list_dir.
 
-            action=status   → GET /system_stats on http://127.0.0.1:8188
-            action=locate   → known install paths + start hints (no recursive scan)
+            action=status   → GET /system_stats (+ install hints if down)
+            action=locate   → portable discovery + start hints
             action=generate → txt2img + attach PNG to current session
+
+            If status/locate show no install, follow the bundled comfyui skill
+            "From scratch bootstrap" (download portable, models, start, then generate).
             """
             from remedy.tools import comfyui as comfy
 
@@ -958,20 +961,22 @@ class BasicRuntime(AgentRuntime):
                     code="COMFY_ERROR",
                     tool_name="comfyui",
                     suggestion=(
-                        "Call comfyui action=locate for start hints, then start "
-                        "ComfyUI (main.py --listen on :8188). Do NOT list_dir the "
-                        "whole disk or run where/dir hunts."
+                        "Call comfyui action=locate. If no install: follow comfyui "
+                        "skill From scratch bootstrap (portable download → models → "
+                        "start). If install exists: run start_hint / main.py --listen. "
+                        "Do NOT list_dir the whole disk."
                     ),
                 )
 
         self.tool_registry.register_builtin_handler(
             "comfyui",
-            "Local ComfyUI on ANY machine. NEVER list_dir/bash to hunt installs — "
-            "use this tool. action=status → probe API (auto ports); "
-            "action=locate → portable discovery (env/config, live ports, process, "
-            "bounded home search) + start hints; "
-            "action=generate → txt2img and attach PNG to this chat session. "
-            "Optional overrides: COMFYUI_URL / COMFYUI_HOME or ~/.remedy/comfyui.json.",
+            "Local ComfyUI on ANY machine (including from-scratch). NEVER list_dir "
+            "to hunt installs — use this tool. action=status → probe API; "
+            "action=locate → discovery + start hints (empty = bootstrap from skill); "
+            "action=generate → txt2img + attach PNG. If nothing is installed, follow "
+            "the comfyui skill bootstrap: official portable download, Flux.2 Klein "
+            "models, start server, then generate. "
+            "Overrides: COMFYUI_URL / COMFYUI_HOME or ~/.remedy/comfyui.json.",
             comfyui,
             {
                 "type": "object",

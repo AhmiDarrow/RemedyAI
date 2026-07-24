@@ -28,6 +28,20 @@ disabled / deprecated
 - Bundled skills ship ready for use.  
 - Auto-learned skills may start on probation.  
 - Stats persist in `~/.remedy/skill_stats.json`.  
+- When a bundled skill’s frontmatter **version** is newer than your seeded copy under
+  `~/.remedy/skills/`, Remedy refreshes that pack on next discover (add `.user_locked` in
+  the skill folder to keep a hand-edited copy).
+
+## ComfyUI (bundled)
+
+The **comfyui** skill can run **from a blank machine** (with your approval for downloads):
+
+1. Install official Windows portable (or git) ComfyUI  
+2. Start the server (`run_*_gpu.bat` / `main.py --listen`)  
+3. Place Flux.2 Klein models in the right `models/` folders  
+4. Generate via the built-in `comfyui` tool (`status` / `locate` / `generate`) — images attach to chat  
+
+If nothing is installed, ask Remedy to set up local ComfyUI for images; it follows the skill bootstrap instead of only probing a missing server.
 
 ## How the agent uses skills
 

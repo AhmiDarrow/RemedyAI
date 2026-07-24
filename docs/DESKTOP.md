@@ -35,7 +35,7 @@ Quarantined packs cannot load instructions or run scripts until **Trust**.
 - Sessions: auto-title from first prompt; rename; search / pin / tags
 - Approvals banner for high-impact shell commands
 - Tray: Show, Settings, updates, About, Quit
-- ComfyUI + portable local discovery
+- ComfyUI skill: from-scratch bootstrap + portable local discovery + generate into chat
 
 ## Branding / icons
 

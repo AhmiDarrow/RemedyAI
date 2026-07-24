@@ -468,9 +468,11 @@ def status(base_url: str | None = None) -> dict[str, Any]:
                 hints.append(f"    Start: {inst['start_hint']}")
         else:
             hints.append(
-                "No install found. Set COMFYUI_HOME (folder with main.py) and/or "
-                "COMFYUI_URL, or add comfyui_home / comfyui_url to ~/.remedy/config.toml, "
-                "or create ~/.remedy/comfyui.json with {\"home\": \"...\", \"url\": \"...\"}."
+                "No install found — treat as fresh machine. Follow the comfyui skill "
+                "section **From scratch bootstrap**: download official Windows portable "
+                "(or git clone), extract, start run_*_gpu.bat / main.py --listen, "
+                "download Flux.2 Klein models into models/, write ~/.remedy/comfyui.json. "
+                "Or set COMFYUI_HOME / COMFYUI_URL (or comfyui_home / comfyui_url in config)."
             )
         return {
             "ok": False,
@@ -479,8 +481,11 @@ def status(base_url: str | None = None) -> dict[str, Any]:
             "installs": installs,
             "live_endpoints": endpoints,
             "hint": "\n".join(hints),
+            "bootstrap": "from_scratch",
             "note": (
-                "Never use list_dir/bash to hunt for ComfyUI — use action=locate/status."
+                "Never use list_dir/bash to hunt for ComfyUI — use action=locate/status. "
+                "If installs is empty, use the skill's from-scratch install guide "
+                "(portable download → models → start → generate)."
             ),
         }
 
@@ -507,7 +512,14 @@ def locate() -> dict[str, Any]:
         },
         "note": (
             "Discovery is automatic for any machine. "
-            "Override with env/config when installs live in unusual places."
+            "Override with env/config when installs live in unusual places. "
+            "If installs and live_endpoints are empty, follow the comfyui skill "
+            "**From scratch bootstrap** (download portable, models, start, generate)."
+        ),
+        "bootstrap_if_empty": (
+            None
+            if (installs or endpoints or primary)
+            else "from_scratch"
         ),
     }
 

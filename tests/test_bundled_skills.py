@@ -44,3 +44,42 @@ def test_skills_meta_question_skips_tools():
     assert _message_wants_tools("what skills do you have?") is False
     assert _message_wants_tools("list tools") is False
     assert _message_wants_tools("review project") is True
+
+
+def test_seeded_skill_refreshes_on_bundled_version_bump(tmp_path: Path):
+    """Older seeded SKILL.md is replaced when package ships a higher version."""
+    from remedy.skills.registry import (
+        _bundled_version_newer,
+        _refresh_seeded_skill_from_bundled,
+    )
+
+    bundled = tmp_path / "bundled" / "comfyui"
+    user = tmp_path / "user" / "comfyui"
+    bundled.mkdir(parents=True)
+    user.mkdir(parents=True)
+    (bundled / "SKILL.md").write_text(
+        "---\nname: comfyui\nversion: 1.1.0\n---\n# New bootstrap\n",
+        encoding="utf-8",
+    )
+    (user / "SKILL.md").write_text(
+        "---\nname: comfyui\nversion: 1.0.0\n---\n# Old\n",
+        encoding="utf-8",
+    )
+    assert _bundled_version_newer(bundled / "SKILL.md", user / "SKILL.md")
+    assert _refresh_seeded_skill_from_bundled(bundled, user) is True
+    body = (user / "SKILL.md").read_text(encoding="utf-8")
+    assert "1.1.0" in body
+    assert "New bootstrap" in body
+
+    # Locked skills are not overwritten
+    (user / "SKILL.md").write_text(
+        "---\nname: comfyui\nversion: 1.0.0\n---\n# Locked\n",
+        encoding="utf-8",
+    )
+    (user / ".user_locked").write_text("", encoding="utf-8")
+    (bundled / "SKILL.md").write_text(
+        "---\nname: comfyui\nversion: 9.9.9\n---\n# Even newer\n",
+        encoding="utf-8",
+    )
+    assert _refresh_seeded_skill_from_bundled(bundled, user) is False
+    assert "Locked" in (user / "SKILL.md").read_text(encoding="utf-8")
