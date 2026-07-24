@@ -2,6 +2,14 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.10.23] — 2026-07-24
+
+### Desktop release rebuild
+
+- Rebuild sidecar + installer so **xAI OAuth (`auth.x.ai`)** is in the frozen
+  desktop package (0.10.22 source fix was easy to miss if an older sidecar stayed installed).
+- Includes Defender Persistence.A!ml fix (Startup folder, no HKCU Run).
+
 ## [0.10.22] — 2026-07-24
 
 ### xAI OAuth 307 fix
