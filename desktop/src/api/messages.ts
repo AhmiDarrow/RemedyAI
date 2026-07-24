@@ -1,4 +1,4 @@
-import { apiFetch, getApiBase } from './client'
+import { apiFetch, authHeaders, ensureApiToken, getApiBase } from './client'
 import type { ChatMessage, ModelDefinition, AgentDefinition, CommandDefinition } from '../types'
 
 export async function listMessages(
@@ -66,9 +66,13 @@ export function streamMessage(
 
   ;(async () => {
     try {
+      await ensureApiToken()
       const res = await fetch(`${getApiBase()}/sessions/${sessionId}/messages/stream`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...authHeaders(),
+        },
         body: JSON.stringify({
           message,
           model,

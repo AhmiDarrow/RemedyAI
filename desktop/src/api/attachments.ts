@@ -43,9 +43,14 @@ async function postAttachmentJson(
   content_type: string | undefined,
   data_base64: string,
 ): Promise<AttachmentMeta> {
+  const { authHeaders, ensureApiToken } = await import('./client')
+  await ensureApiToken()
   const res = await fetch(`${getApiBase()}/sessions/${sessionId}/attachments`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...authHeaders(),
+    },
     body: JSON.stringify({
       filename,
       content_type: content_type || undefined,

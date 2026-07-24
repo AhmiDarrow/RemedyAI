@@ -549,6 +549,15 @@ export function MessageFeed({
 
   const visible = useMemo(() => messages.filter((m) => !m.reverted), [messages])
 
+  // Window long chats: only mount recent messages (virtualization lite) unless expanded.
+  const WINDOW = 80
+  const [showAll, setShowAll] = useState(false)
+  const windowed = useMemo(() => {
+    if (showAll || visible.length <= WINDOW) return visible
+    return visible.slice(-WINDOW)
+  }, [visible, showAll])
+  const hiddenCount = Math.max(0, visible.length - windowed.length)
+
   const feedItems = useMemo(() => {
     const items: Array<
       | { type: 'day'; key: string; label: string }
@@ -556,7 +565,7 @@ export function MessageFeed({
     > = []
     let lastDay = ''
     let prevRole: string | null = null
-    visible.forEach((msg, index) => {
+    windowed.forEach((msg, index) => {
       const dk = dayKey(msg.created_at)
       if (dk && dk !== lastDay) {
         lastDay = dk
@@ -571,7 +580,7 @@ export function MessageFeed({
       items.push({ type: 'msg', msg, hideAvatar, index })
     })
     return items
-  }, [visible])
+  }, [windowed])
 
   return (
     <div
@@ -596,6 +605,23 @@ export function MessageFeed({
       {loading && visible.length === 0 && (
         <div className="px-4 py-8 text-center" style={{ color: 'var(--text-muted)' }}>
           Loading messages...
+        </div>
+      )}
+
+      {hiddenCount > 0 && (
+        <div className="px-4 py-2 text-center">
+          <button
+            type="button"
+            className="text-xs px-3 py-1 rounded"
+            style={{
+              border: '1px solid var(--border)',
+              color: 'var(--text-secondary)',
+              background: 'var(--bg-tertiary)',
+            }}
+            onClick={() => setShowAll(true)}
+          >
+            Show {hiddenCount} earlier messages
+          </button>
         </div>
       )}
 

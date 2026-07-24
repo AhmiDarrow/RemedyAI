@@ -236,6 +236,26 @@ class BasicRuntime(AgentRuntime):
             return data
 
         async def file_write(path: str, content: str = "") -> str:
+            from remedy.core.approvals import APPROVALS
+
+            ask_reason = APPROVALS.needs_ask(f"write {path}", tool_name="file_write")
+            sid = getattr(self, "_session_id", None)
+            if ask_reason and not APPROVALS.is_approved(
+                "file_write", f"write {path}", session_id=sid
+            ):
+                item = APPROVALS.create(
+                    tool_name="file_write",
+                    command=f"write {path}",
+                    reason=ask_reason,
+                    session_id=sid,
+                )
+                return (
+                    f"APPROVAL_REQUIRED id={item.id}\n"
+                    f"reason={ask_reason}\n"
+                    f"path={path}\n"
+                    "Do not invent success. Tell the user this needs approval in the UI "
+                    f"(or /approve {item.id}). After they approve, retry file_write."
+                )
             target = self.resolve_tool_path(path)
             try:
                 target.parent.mkdir(parents=True, exist_ok=True)
@@ -323,8 +343,8 @@ class BasicRuntime(AgentRuntime):
                         "avoid destructive or network-restricted commands)."
                     ),
                 )
-            # Partner trust: high-impact patterns require explicit user approval first
-            ask_reason = APPROVALS.needs_ask(command)
+            # Partner trust: bash_exec always asks in ask-mode (high-impact tool)
+            ask_reason = APPROVALS.needs_ask(command, tool_name="bash_exec")
             sid = getattr(self, "_session_id", None)
             if ask_reason and not APPROVALS.is_approved(
                 "bash_exec", command, session_id=sid
@@ -451,8 +471,9 @@ class BasicRuntime(AgentRuntime):
         """Progressive disclosure: activate full SKILL.md / run skill scripts."""
 
         async def skill_activate(
-            name: str = "",
+            skill: str = "",
             include_references: bool = False,
+            name: str = "",  # alias — avoid clashing with ToolRegistry.execute(name=)
         ) -> str:
             """Load full skill instructions into this turn (stage 2 disclosure)."""
             reg = getattr(self, "skills", None)
@@ -463,12 +484,12 @@ class BasicRuntime(AgentRuntime):
                     tool_name="skill_activate",
                     suggestion="Restart the server so bundled skills can load.",
                 )
-            nm = (name or "").strip()
+            nm = (skill or name or "").strip()
             if not nm:
                 # Rank against empty → top trusted catalog
                 ranked = reg.match_skills("", limit=10)
                 names = ", ".join(s.manifest.name for s, _ in ranked) or "(none)"
-                return f"Pass name=. Available (top): {names}"
+                return f"Pass skill=. Available (top): {names}"
             body = reg.skill_body(nm, include_references=bool(include_references))
             if body is None:
                 # fuzzy match
@@ -489,6 +510,12 @@ class BasicRuntime(AgentRuntime):
                     + ", ".join(related)
                     + " — activate if needed._"
                 )
+            with suppress(Exception):
+                from remedy.core.metrics import default_registry
+
+                default_registry.counter(
+                    "remedy_skill_activate_total", status="ok"
+                ).inc()
             # Feedback: activation counts as a soft "use" (success until proven otherwise)
             with suppress(Exception):
                 loop = self._get_learning_loop()
@@ -504,9 +531,10 @@ class BasicRuntime(AgentRuntime):
             return body + footer
 
         async def skill_run(
-            name: str = "",
+            skill: str = "",
             script: str = "",
             args: str = "",
+            name: str = "",  # alias
         ) -> str:
             """Execute a script bundled under a skill's scripts/ directory."""
             reg = getattr(self, "skills", None)
@@ -517,16 +545,48 @@ class BasicRuntime(AgentRuntime):
                     tool_name="skill_run",
                     suggestion="Restart the server.",
                 )
-            nm = (name or "").strip()
-            skill = reg.get(nm) if nm else None
-            if skill is None:
+            nm = (skill or name or "").strip()
+            sk = reg.get(nm) if nm else None
+            if sk is None:
                 return format_tool_error(
                     f"Skill not found: {nm}",
                     code="SKILL_NOT_FOUND",
                     tool_name="skill_run",
                     suggestion="skill_activate first, or check /skills.",
                 )
-            scripts = list(skill.scripts or [])
+            meta = sk.manifest.metadata or {}
+            if meta.get("quarantine"):
+                return format_tool_error(
+                    f"Skill '{nm}' is quarantined (imported pack)",
+                    code="QUARANTINE",
+                    tool_name="skill_run",
+                    suggestion=(
+                        "Open Skills panel → Trust / Activate after review. "
+                        "Script execution is blocked until quarantine is cleared."
+                    ),
+                )
+            from remedy.core.approvals import APPROVALS
+
+            run_cmd = f"skill_run {nm} {script or ''}".strip()
+            ask_reason = APPROVALS.needs_ask(run_cmd, tool_name="skill_run")
+            sid = getattr(self, "_session_id", None)
+            if ask_reason and not APPROVALS.is_approved(
+                "skill_run", run_cmd, session_id=sid
+            ):
+                item = APPROVALS.create(
+                    tool_name="skill_run",
+                    command=run_cmd,
+                    reason=ask_reason,
+                    session_id=sid,
+                )
+                return (
+                    f"APPROVAL_REQUIRED id={item.id}\n"
+                    f"reason={ask_reason}\n"
+                    f"skill={nm}\n"
+                    "Do not invent success. Tell the user this needs approval "
+                    f"(or /approve {item.id})."
+                )
+            scripts = list(sk.scripts or [])
             if not scripts:
                 return format_tool_error(
                     f"Skill '{nm}' has no scripts/",
@@ -548,7 +608,7 @@ class BasicRuntime(AgentRuntime):
                         tool_name="skill_run",
                         suggestion=f"Available: {', '.join(scripts)}",
                     )
-            base = Path(skill.source_skill_dir or skill.manifest.path or "")
+            base = Path(sk.source_skill_dir or sk.manifest.path or "")
             script_path = (base / chosen).resolve()
             # Jail: must stay under skill dir
             try:
@@ -577,7 +637,7 @@ class BasicRuntime(AgentRuntime):
                             session_id=str(getattr(self, "_session_id", "") or ""),
                             error=result.error,
                         )
-                        loop.auto_refine_skill(skill)
+                        loop.auto_refine_skill(sk)
                 if ok:
                     out = (result.stdout or "")[:12000]
                     return out or f"Script {chosen} exited 0 (no stdout)."
@@ -616,21 +676,25 @@ class BasicRuntime(AgentRuntime):
         self.tool_registry.register_builtin_handler(
             "skill_activate",
             "Load full instructions for a skill pack (progressive disclosure). "
-            "Use when a catalog skill matches the task. Pass name= exact skill id.",
+            "Use when a catalog skill matches the task. Pass skill= exact skill id.",
             skill_activate,
             {
                 "type": "object",
                 "properties": {
+                    "skill": {
+                        "type": "string",
+                        "description": "Skill id (from catalog)",
+                    },
                     "name": {
                         "type": "string",
-                        "description": "Skill name (from catalog)",
+                        "description": "Alias for skill=",
                     },
                     "include_references": {
                         "type": "boolean",
                         "description": "Also load references/ files (default false)",
                     },
                 },
-                "required": ["name"],
+                "required": ["skill"],
             },
         )
         self.tool_registry.register_builtin_handler(
@@ -641,7 +705,8 @@ class BasicRuntime(AgentRuntime):
             {
                 "type": "object",
                 "properties": {
-                    "name": {"type": "string", "description": "Skill name"},
+                    "skill": {"type": "string", "description": "Skill id"},
+                    "name": {"type": "string", "description": "Alias for skill="},
                     "script": {
                         "type": "string",
                         "description": "Relative script path (default first script)",
@@ -651,7 +716,7 @@ class BasicRuntime(AgentRuntime):
                         "description": "Space-separated CLI args",
                     },
                 },
-                "required": ["name"],
+                "required": ["skill"],
             },
         )
         self.tool_registry.register_builtin_handler(
@@ -1778,22 +1843,51 @@ class BasicRuntime(AgentRuntime):
                 *history,
                 {"role": "user", "content": user_content},
             ]
-            # Memory Harness auto: soft/strong compress nudge by fill estimate
+            # Memory Harness auto: soft nudge; strong = drop stale tool payloads + brief merge
             with suppress(Exception):
                 if self._harness_mode == "auto":
                     from remedy.memory.harness.compressor import (
                         compression_nudge_message,
                         estimate_tokens,
+                        heuristic_merge_from_history,
                         should_nudge_compress,
                     )
+                    from remedy.memory.harness.pruner import prune_messages_for_send
 
+                    est = estimate_tokens(messages)
                     level = should_nudge_compress(
-                        estimate_tokens(messages),
+                        est,
                         min_pct=self._harness_min_pct,
                         max_pct=self._harness_max_pct,
                     )
-                    if level:
+                    if level == "strong":
+                        # Force shrink: hard-cap old tool bodies so the turn can continue
+                        messages[:] = prune_messages_for_send(
+                            messages,
+                            max_tool_chars=max(4_000, (_TOOL_RESULT_CHAR_CAP or 64_000) // 4),
+                            dedupe_tools=True,
+                        )
+                        with suppress(Exception):
+                            brief = getattr(self, "_session_brief", None)
+                            if brief is not None:
+                                self._session_brief = heuristic_merge_from_history(
+                                    brief, messages, intent_hint=message
+                                )
+                        messages.insert(-1, compression_nudge_message("strong"))
+                        with suppress(Exception):
+                            from remedy.core.metrics import default_registry
+
+                            default_registry.counter(
+                                "remedy_context_auto_compress_total", level="strong"
+                            ).inc()
+                    elif level == "soft":
                         messages.insert(-1, compression_nudge_message(level))
+                    with suppress(Exception):
+                        from remedy.core.metrics import default_registry
+
+                        default_registry.gauge("remedy_context_tokens_estimate").set(
+                            float(est)
+                        )
             all_tools = self._openai_tools()
             # Creative image prompts ("make something cool/spacey") must keep tools on.
             tools = (
@@ -2708,19 +2802,40 @@ class BasicRuntime(AgentRuntime):
             reg = getattr(self, "skills", None)
             count = int(getattr(reg, "count", 0) or 0) if reg is not None else 0
             if reg is not None and count > 0:
-                # Prefer skills relevant to workspace path tokens
                 ws = str(self.effective_project_path())
-                ranked_lines = reg.summary_lines(limit=28, query="")
-                # Re-rank with workspace when possible
+                # Single ranked catalog with workspace hint (no double rank / discard)
+                ranked_lines = reg.summary_lines(limit=24, query="")
                 if hasattr(reg, "match_skills"):
-                    top = reg.match_skills("", limit=28, workspace_hint=ws)
+                    top = reg.match_skills(
+                        "",
+                        limit=24,
+                        workspace_hint=ws,
+                    )
                     if top:
-                        ranked_lines = reg.summary_lines(limit=28)
+                        # Rebuild lines from ranked order with status badges
+                        lines: list[str] = []
+                        for skill, _sc in top:
+                            m = skill.manifest
+                            st = m.status.value if hasattr(m.status, "value") else str(m.status)
+                            desc = (m.description or "").strip()
+                            if len(desc) > 140:
+                                desc = desc[:137] + "…"
+                            lines.append(f"- **{m.name}** [{st}]: {desc}")
+                        lines.append(
+                            "_Activate with skill_activate(name=…); rank with skill_search._"
+                        )
+                        ranked_lines = lines
                 parts.append(
                     "Skills catalog (name+status only — call skill_activate to load "
                     "full procedure; skill_search to rank by task):\n"
                     + "\n".join(ranked_lines)
                 )
+                with suppress(Exception):
+                    from remedy.core.metrics import default_registry
+
+                    default_registry.gauge(
+                        "remedy_context_skills_listed"
+                    ).set(float(min(count, 24)))
             else:
                 parts.append(
                     "Skills loaded: (none yet — bundled defaults load on server start)."

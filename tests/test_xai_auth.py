@@ -59,7 +59,11 @@ class TestXaiCredentialsStore:
         path = xai_auth.auth_path(home=tmp_path)
         assert path.exists()
         data = json.loads(path.read_text(encoding="utf-8"))
-        assert data["auth_method"] == "api_key"
+        # Plain JSON or DPAPI envelope (v2)
+        if data.get("v") == 2 and data.get("dpapi"):
+            assert isinstance(data["dpapi"], str) and len(data["dpapi"]) > 8
+        else:
+            assert data["auth_method"] == "api_key"
 
     def test_oauth_store_and_resolve(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("REMEDY_HOME", str(tmp_path))

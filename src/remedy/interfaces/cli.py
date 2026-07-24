@@ -1079,7 +1079,12 @@ def _cmd_serve(args) -> None:
 
     runtime, gateway, memory, n_skills = asyncio.run(_start())
 
-    api_key = os.environ.get("REMEDY_API_KEY", config.get("api_key", ""))
+    from remedy.interfaces.local_auth import ensure_local_api_token
+
+    api_key = ensure_local_api_token(
+        home,
+        explicit=os.environ.get("REMEDY_API_KEY") or config.get("api_key") or None,
+    )
     app = create_app(
         runtime=runtime,
         gateway=gateway,
@@ -1088,6 +1093,14 @@ def _cmd_serve(args) -> None:
         version=__version__,
         api_key=api_key,
     )
+    if api_key:
+        console.print(
+            "[dim]API auth:[/dim]   enabled (Bearer token in ~/.remedy/auth/local_api_token)"
+        )
+    else:
+        console.print(
+            "[yellow]API auth:[/yellow]  disabled (REMEDY_API_AUTH=0) — not recommended"
+        )
 
     if not agent_config.llm_api_key:
         console.print("[bold yellow]WARNING: No LLM API key configured.[/bold yellow]")

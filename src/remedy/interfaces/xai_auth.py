@@ -126,7 +126,27 @@ def load_credentials(home: Path | None = None) -> XaiCredentials:
             return XaiCredentials(auth_method="api_key", api_key=env_key)
         return XaiCredentials()
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        raw_bytes = path.read_bytes()
+        data: dict[str, Any]
+        # DPAPI envelope (v2): {"v": 2, "dpapi": "<base64>"}
+        try:
+            outer = json.loads(raw_bytes.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            outer = None
+        if isinstance(outer, dict) and outer.get("v") == 2 and outer.get("dpapi"):
+            try:
+                from remedy.interfaces.secret_store import _dpapi_unprotect
+                import base64
+
+                plain = _dpapi_unprotect(base64.b64decode(outer["dpapi"]))
+                data = json.loads(plain.decode("utf-8"))
+            except Exception as exc:
+                logger.warning("xAI DPAPI decrypt failed: %s", exc)
+                return XaiCredentials()
+        elif isinstance(outer, dict):
+            data = outer
+        else:
+            return XaiCredentials()
     except (OSError, json.JSONDecodeError):
         return XaiCredentials()
     return XaiCredentials(
@@ -151,12 +171,30 @@ def save_credentials(creds: XaiCredentials, home: Path | None = None) -> None:
         "token_type": creds.token_type,
         "updated_at": time.time(),
     }
-    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    plain = json.dumps(payload, indent=2).encode("utf-8")
+    # Prefer DPAPI on Windows so the file is opaque to other accounts / casual copy.
+    written = False
+    try:
+        from remedy.interfaces.secret_store import _dpapi_available, _dpapi_protect
+        import base64
+
+        if _dpapi_available():
+            sealed = _dpapi_protect(plain)
+            envelope = {
+                "v": 2,
+                "dpapi": base64.b64encode(sealed).decode("ascii"),
+                "updated_at": time.time(),
+            }
+            path.write_text(json.dumps(envelope, indent=2) + "\n", encoding="utf-8")
+            written = True
+    except Exception as exc:
+        logger.warning("xAI DPAPI protect failed, falling back to ACL-only: %s", exc)
+    if not written:
+        path.write_text(plain.decode("utf-8") + "\n", encoding="utf-8")
     try:
         path.chmod(0o600)
     except OSError:
         pass
-    # Same owner-only hardening as provider secret store (icacls on Windows).
     try:
         from remedy.interfaces.secret_store import _harden_path
 

@@ -338,14 +338,27 @@ class SkillRegistry:
             chain = meta.get("requires_chain") or meta.get("composes_with")
             header.append(f"**Composes with:** {chain}")
         header.append("")
-        header.append(skill.instructions or "")
+        body = skill.instructions or ""
+        # Cap inject size so one skill cannot dominate context
+        try:
+            from remedy.core.react_policy import SKILL_BODY_CHAR_CAP
+
+            cap = int(SKILL_BODY_CHAR_CAP)
+        except Exception:
+            cap = 24_000
+        if cap > 0 and len(body) > cap:
+            body = (
+                body[:cap]
+                + f"\n\n…[skill body truncated at {cap} chars — open SKILL.md on disk for full text]"
+            )
+        header.append(body)
         if include_references and skill.source_skill_dir and skill.references:
             base = Path(skill.source_skill_dir)
-            for rel in skill.references[:5]:
+            for rel in skill.references[:3]:
                 p = base / rel
                 if p.is_file():
                     try:
-                        text = p.read_text(encoding="utf-8")[:4000]
+                        text = p.read_text(encoding="utf-8")[:3000]
                         header.append(f"\n\n## Reference: {rel}\n\n{text}")
                     except OSError:
                         pass

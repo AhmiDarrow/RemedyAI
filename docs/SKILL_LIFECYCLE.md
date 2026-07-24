@@ -27,10 +27,17 @@ frontmatter status (probation). Imported packs enter **quarantine** (`discovered
 ## Progressive disclosure
 
 1. **Discovery** — system prompt gets a ranked catalog (`summary_lines` / `match_skills`).
-2. **Activation** — tool `skill_activate(name=…)` injects the full procedure.
-3. **Execution** — follow instructions; optional `skill_run` for `scripts/`.
+2. **Activation** — tool `skill_activate(skill=…)` injects the full procedure (body capped).
+3. **Execution** — follow instructions; optional `skill_run(skill=…)` for `scripts/`
+   (requires approval in ask mode; **blocked while quarantined**).
 
 Also available: `skill_search` (rank by query), composition hints (related skills).
+
+## Security notes (0.10.33+)
+
+- Imported packs start quarantined — `skill_run` refuses until Trust/Activate.
+- ZIP import is Zip-Slip safe (paths must stay under extract root).
+- Local HTTP API uses a Bearer token by default (desktop auto-loads it).
 
 ## Effort weight (hard-won knowledge)
 

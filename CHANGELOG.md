@@ -2,6 +2,28 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.10.33] — 2026-07-24
+
+### Security, tests, and performance (Phases A–C)
+
+**Phase A — Trust & safety**
+- Local API auth **on by default** (`~/.remedy/auth/local_api_token`); desktop loads Bearer automatically; disable with `REMEDY_API_AUTH=0`.
+- Zip Slip protection on skill pack import; **quarantine blocks `skill_run`**.
+- Secret store: never grant Everyone ACL; xAI credentials DPAPI-encrypted on Windows.
+- Updater: only `AhmiDarrow/RemedyAI` release URLs + known GitHub asset CDNs.
+- Default approval (ask mode) for `bash_exec`, `file_write`, `skill_run`.
+- Tool subprocess env scrubbed of secrets; webhooks require auth when API key set.
+
+**Phase B — Tests**
+- New: `test_api_auth`, `test_zip_import_security`, `test_skill_tools`, `test_skills_api`, `test_session_stream`, `test_updater_api`, `test_secret_acl_no_everyone`.
+- Desktop: vitest + `sanitizeChat` unit test.
+
+**Phase C — Scale & polish**
+- Tiered context caps (tool 64k / file 128k / history 1.5M); `REMEDY_FULL_CONTEXT=1` for legacy unlimited.
+- Strong auto-compress when harness fill is high; skill body inject cap 24k.
+- Fixed skill catalog ranking (workspace-aware, no discard); context/skill metrics.
+- MessageFeed windowing (last 80 messages + “show earlier”).
+
 ## [0.10.32] — 2026-07-24
 
 ### Fix: interactive installer no longer launches before finish page

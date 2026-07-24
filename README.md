@@ -306,6 +306,13 @@ remedy learn changelog my-skill
 See [docs/SKILL_LIFECYCLE.md](docs/SKILL_LIFECYCLE.md) for gates, ranking, API,
 quarantine import, and the desktop Skills panel.
 
+### Local API auth (0.10.33+)
+
+The agent HTTP API enables a **Bearer token by default** (file:
+`~/.remedy/auth/local_api_token`). The desktop shell loads it automatically.
+Set `REMEDY_API_AUTH=0` only for local tests. High-impact tools (`bash_exec`,
+`file_write`, `skill_run`) require approval in **ask** mode (status bar).
+
 ---
 
 ## Configuration

@@ -97,8 +97,12 @@ export function MemoryPanel({
   useEffect(() => {
     if (!open) return
     setLoading(true)
-    fetch('/api/memory/search?query=&limit=20')
-      .then((r) => r.json())
+    void import('../api/client')
+      .then(({ apiFetch }) =>
+        apiFetch<{ results?: { id: string; title: string; content: string; type: string }[] }>(
+          '/memory/search?query=&limit=20',
+        ),
+      )
       .then((d) => setEntries(d.results || []))
       .catch(() => setEntries([]))
       .finally(() => setLoading(false))
@@ -181,8 +185,8 @@ export function SkillsPanel({
     setLoading(true)
     setError(null)
     const q = filter.trim() ? `?q=${encodeURIComponent(filter.trim())}` : ''
-    fetch(`/api/skills${q}`)
-      .then((r) => r.json())
+    void import('../api/client')
+      .then(({ apiFetch }) => apiFetch<SkillRow[]>(`/skills${q}`))
       .then((d) => setSkills(Array.isArray(d) ? d : []))
       .catch(() => {
         setSkills([])
@@ -201,12 +205,11 @@ export function SkillsPanel({
     setBusy(name)
     setError(null)
     try {
-      const r = await fetch(`/api/skills/${encodeURIComponent(name)}/status`, {
+      const { apiFetch } = await import('../api/client')
+      await apiFetch(`/skills/${encodeURIComponent(name)}/status`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status }),
       })
-      if (!r.ok) throw new Error(await r.text())
       await load()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Status update failed')
@@ -218,9 +221,9 @@ export function SkillsPanel({
   const feedback = async (name: string, success: boolean) => {
     setBusy(name)
     try {
-      await fetch(`/api/skills/${encodeURIComponent(name)}/feedback`, {
+      const { apiFetch } = await import('../api/client')
+      await apiFetch(`/skills/${encodeURIComponent(name)}/feedback`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ success }),
       })
       await load()

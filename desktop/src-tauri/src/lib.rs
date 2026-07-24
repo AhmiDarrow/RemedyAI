@@ -903,6 +903,30 @@ fn desktop_update_result(current: String) -> DesktopUpdateInfo {
     }
 }
 
+/// Read the local API bearer token written by the Python sidecar
+/// (`~/.remedy/auth/local_api_token`) so the webview can authenticate.
+#[tauri::command]
+fn get_local_api_token() -> Result<String, String> {
+    let home = if cfg!(target_os = "windows") {
+        env::var("USERPROFILE").unwrap_or_else(|_| ".".to_string())
+    } else {
+        env::var("HOME").unwrap_or_else(|_| ".".to_string())
+    };
+    let path = PathBuf::from(home)
+        .join(".remedy")
+        .join("auth")
+        .join("local_api_token");
+    if !path.is_file() {
+        return Err("local API token not found — is the sidecar running?".into());
+    }
+    let raw = std::fs::read_to_string(&path).map_err(|e| format!("read token: {e}"))?;
+    let tok = raw.trim().to_string();
+    if tok.len() < 16 {
+        return Err("local API token is empty or invalid".into());
+    }
+    Ok(tok)
+}
+
 /// Non-blocking update check (network I/O off the UI thread).
 #[tauri::command]
 async fn check_desktop_update(app: AppHandle) -> Result<DesktopUpdateInfo, String> {
@@ -923,11 +947,23 @@ fn emit_progress(app: &AppHandle, phase: &str, percent: u8, message: &str) {
     );
 }
 
+/// Only this repository's release assets (not arbitrary GitHub releases).
 fn is_trusted_download_url(url: &str) -> bool {
-    url.starts_with("https://github.com/AhmiDarrow/RemedyAI/")
-        || url.starts_with("https://objects.githubusercontent.com/")
+    // Official release pages / assets for RemedyAI only.
+    if url.starts_with("https://github.com/AhmiDarrow/RemedyAI/releases/") {
+        return true;
+    }
+    // CDN hostnames used by GitHub Releases — require our repo path segment when present.
+    // objects.githubusercontent.com URLs are signed and opaque; only accept when the
+    // referrer path was already resolved from our latest.json (caller responsibility).
+    // We still require HTTPS + known hosts (no open redirect to other schemes).
+    if url.starts_with("https://objects.githubusercontent.com/")
         || url.starts_with("https://release-assets.githubusercontent.com/")
-        || (url.starts_with("https://github.com/") && url.contains("/releases/download/"))
+    {
+        // Reject obvious non-asset paths
+        return !url.contains("..") && url.len() < 2048;
+    }
+    false
 }
 
 /// Validate that the file looks like a Windows PE installer (not an HTML error page).
@@ -1452,6 +1488,7 @@ pub fn run() {
             restart_server,
             check_desktop_update,
             start_desktop_update,
+            get_local_api_token,
             read_dropped_files,
             take_pending_file_drops
         ])

@@ -317,6 +317,24 @@ def register_memory_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
     async def receive_webhook(source: str, payload: WebhookPayload, request: Request):
         if gateway is None:
             raise HTTPException(503, "Gateway not available")
+        # Require API key or shared secret when agent auth is enabled
+        import os as _os
+
+        expected = (
+            getattr(getattr(request.app, "state", None), "api_key", None)
+            or _os.environ.get("REMEDY_API_KEY")
+            or _os.environ.get("REMEDY_WEBHOOK_SECRET")
+            or ""
+        )
+        if expected:
+            auth = request.headers.get("Authorization", "")
+            secret = request.headers.get("X-Remedy-Webhook-Secret", "")
+            bearer_ok = auth == f"Bearer {expected}"
+            secret_ok = secret == expected or secret == _os.environ.get(
+                "REMEDY_WEBHOOK_SECRET", ""
+            )
+            if not (bearer_ok or secret_ok):
+                raise HTTPException(401, "Webhook auth required")
 
         body = await request.body()
         event = GatewayEvent(

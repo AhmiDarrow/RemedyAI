@@ -81,16 +81,36 @@ RECOVERY_NUDGE = (
 MAX_REACT_STEPS = 256
 MAX_PARALLEL_TOOLS = 16
 # Prefer recent turns, but allow very long multi-turn sessions.
-HISTORY_MSG_LIMIT = 2_000
-# Large multi-turn budget — do not shorten individual answers/thinking/tools.
-HISTORY_CHAR_BUDGET = 8_000_000
-# 0 = no soft-trim of single history messages (never shorten prior answers).
-HISTORY_MSG_SOFT_TRIM = 0
-# 0 = no truncation of tool results or file reads passed to the model.
-TOOL_RESULT_CHAR_CAP = 0
-FILE_READ_CHAR_CAP = 0
-# Absolute emergency only (OOM guard), not a quality/provider limit.
-HARD_SAFETY_CHARS = 50_000_000
+HISTORY_MSG_LIMIT = 400
+# Practical multi-turn budget (tiered). Full mode can raise via env.
+HISTORY_CHAR_BUDGET = 1_500_000
+# Soft-trim only for very large individual history messages.
+HISTORY_MSG_SOFT_TRIM = 200_000
+# Tiered defaults: keep answers complete while bounding tool bloat.
+# Set REMEDY_FULL_CONTEXT=1 for legacy "uncapped" behavior.
+import os as _os
+
+_FULL = str(_os.environ.get("REMEDY_FULL_CONTEXT", "")).lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+if _FULL:
+    TOOL_RESULT_CHAR_CAP = 0
+    FILE_READ_CHAR_CAP = 0
+    HARD_SAFETY_CHARS = 50_000_000
+    HISTORY_CHAR_BUDGET = 8_000_000
+    HISTORY_MSG_LIMIT = 2_000
+    HISTORY_MSG_SOFT_TRIM = 0
+else:
+    TOOL_RESULT_CHAR_CAP = 64_000
+    FILE_READ_CHAR_CAP = 128_000
+    # Absolute emergency only (OOM guard).
+    HARD_SAFETY_CHARS = 2_000_000
+
+# Skill body inject cap (progressive disclosure stage 2)
+SKILL_BODY_CHAR_CAP = 24_000
 
 # Messages that look like they need filesystem / shell tools.
 _TOOL_HINT_RE = re.compile(

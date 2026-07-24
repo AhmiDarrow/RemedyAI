@@ -68,15 +68,27 @@ class ApprovalQueue:
     def fingerprint(tool_name: str, command: str) -> str:
         return f"{tool_name}::{(command or '').strip()}"
 
-    def needs_ask(self, command: str) -> str | None:
-        """Return reason string if command should require approval.
+    # Tools that always require approval in ``ask`` mode (not only pattern match).
+    HIGH_IMPACT_TOOLS = frozenset({"bash_exec", "file_write", "skill_run"})
 
-        When mode is ``auto`` (status-bar thumbs-up), skip prompts entirely.
+    def needs_ask(self, command: str, *, tool_name: str = "") -> str | None:
+        """Return reason string if action should require approval.
+
+        When mode is ``auto`` (status-bar thumbs-up), skip prompts for pattern
+        matches only — callers may still force ask for skill quarantine etc.
         """
         with self._lock:
             if self._mode == "auto":
                 return None
+        tool = (tool_name or "").strip()
         c = (command or "").strip()
+        if tool in self.HIGH_IMPACT_TOOLS:
+            if tool == "bash_exec":
+                return "Shell execution requires approval (bash_exec)"
+            if tool == "file_write":
+                return "File write requires approval (file_write)"
+            if tool == "skill_run":
+                return "Skill script execution requires approval (skill_run)"
         if not c:
             return None
         if _ASK_PATTERNS.search(c):

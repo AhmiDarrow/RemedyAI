@@ -157,15 +157,53 @@ def create_app(
         allow_credentials=cors_origins != ["*"],
     )
 
+    # Local agent API: auth is ON by default when a key is available.
+    # Public allowlist is intentionally small (health + docs + token bootstrap).
+    _AUTH_PUBLIC = {
+        "/docs",
+        "/redoc",
+        "/openapi.json",
+        "/dashboard",
+        "/api/status",
+        "/api/auth/local-bootstrap",
+        "/api/openapi.json",
+        "/api/openapi.yaml",
+    }
     if api_key:
+        app.state.api_key = api_key  # type: ignore[attr-defined]
+
         @app.middleware("http")
         async def require_auth(request: Request, call_next):
-            if request.url.path in ("/docs", "/redoc", "/openapi.json", "/dashboard", "/api/status"):
+            path = request.url.path
+            if path in _AUTH_PUBLIC or path.startswith("/docs") or path.startswith("/redoc"):
                 return await call_next(request)
             auth = request.headers.get("Authorization", "")
             if auth != f"Bearer {api_key}":
-                return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+                # Also accept X-Remedy-Token for simple clients
+                alt = request.headers.get("X-Remedy-Token", "")
+                if alt != api_key:
+                    return JSONResponse(
+                        status_code=401,
+                        content={
+                            "error": "Unauthorized",
+                            "detail": "Missing or invalid Bearer token. "
+                            "Desktop loads it automatically; CLI: REMEDY_API_KEY.",
+                        },
+                    )
             return await call_next(request)
+
+        @app.get("/api/auth/local-bootstrap")
+        async def local_bootstrap(request: Request):
+            """Loopback-only: return the local API token for desktop/dev clients.
+
+            Not a remote auth endpoint — only 127.0.0.1 / ::1 may call this.
+            Token file is also user-ACL protected on disk.
+            """
+            client = (request.client.host if request.client else "") or ""
+            # Starlette TestClient uses host "testclient"
+            if client not in ("127.0.0.1", "::1", "localhost", "testclient"):
+                return JSONResponse(status_code=403, content={"error": "loopback only"})
+            return {"token": api_key, "auth_required": True}
 
     @app.middleware("http")
     async def log_requests(request: Request, call_next):

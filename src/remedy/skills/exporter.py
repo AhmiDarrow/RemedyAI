@@ -201,7 +201,7 @@ class SkillExporter:
         extract_root.mkdir(parents=True, exist_ok=True)
 
         with zipfile.ZipFile(zip_path, "r") as zf:
-            zf.extractall(extract_root)
+            _safe_extract_zip(zf, extract_root)
 
         imported: list[Skill] = []
         # Find SKILL.md files under extract root
@@ -245,3 +245,34 @@ class SkillExporter:
                 pass
             imported.append(skill)
         return imported
+
+
+def _safe_extract_zip(zf: zipfile.ZipFile, dest: Path, *, max_files: int = 500) -> None:
+    """Extract ZIP members with Zip-Slip protection (paths must stay under dest)."""
+    dest = dest.resolve()
+    count = 0
+    for info in zf.infolist():
+        name = info.filename
+        if not name or name.endswith("/"):
+            # Directory entry — create later via parents
+            continue
+        # Normalize and reject absolute / traversal
+        # zip uses forward slashes; strip drive and leading slashes
+        cleaned = name.replace("\\", "/").lstrip("/")
+        if ".." in cleaned.split("/"):
+            raise ValueError(f"Zip Slip blocked: {name}")
+        if cleaned.startswith("/") or (len(cleaned) > 1 and cleaned[1] == ":"):
+            raise ValueError(f"Zip Slip blocked (absolute): {name}")
+        target = (dest / cleaned).resolve()
+        try:
+            target.relative_to(dest)
+        except ValueError as exc:
+            raise ValueError(f"Zip Slip blocked: {name}") from exc
+        if info.file_size > 5_000_000:
+            raise ValueError(f"Zip member too large: {name}")
+        count += 1
+        if count > max_files:
+            raise ValueError(f"Zip has too many files (>{max_files})")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with zf.open(info, "r") as src, open(target, "wb") as out:
+            out.write(src.read())

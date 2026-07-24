@@ -107,19 +107,28 @@ def _harden_path(path: Path, *, is_dir: bool = False) -> None:
             else:
                 path.read_bytes()[:1]
         except OSError:
-            logger.warning(
-                "ACL harden left %s unreadable; restoring user+SYSTEM access",
-                path,
-            )
-            _run(["icacls", str(path), "/grant", user_ace])
-            _run(["icacls", str(path), "/grant", sys_ace])
-            _run(["icacls", str(path), "/grant", "Everyone:F" if not is_dir else "Everyone:(OI)(CI)F"])
-            # Last resort: Everyone so we never brick OAuth tokens; log loudly.
+            # Fail closed — NEVER grant Everyone:F (that is worse than default ACLs).
             logger.error(
-                "Could not apply tight ACL on %s without locking out the process; "
-                "file remains accessible. Check UAC / integrity level.",
+                "ACL harden left %s unreadable by this process; restoring "
+                "user+Administrators+SYSTEM only (no Everyone). Check UAC / IL.",
                 path,
             )
+            _run(["icacls", str(path), "/inheritance:r"])
+            _run(["icacls", str(path), "/grant:r", user_ace])
+            _run(["icacls", str(path), "/grant:r", adm_ace])
+            _run(["icacls", str(path), "/grant:r", sys_ace])
+            _run(["icacls", str(path), "/remove:g", "Everyone"])
+            try:
+                if is_dir:
+                    next(path.iterdir(), None)
+                else:
+                    path.read_bytes()[:1]
+            except OSError:
+                logger.error(
+                    "Still unreadable after ACL restore: %s — secrets may be "
+                    "inaccessible until permissions are fixed manually.",
+                    path,
+                )
     except Exception as exc:
         logger.debug("icacls harden failed for %s: %s", path, exc)
 

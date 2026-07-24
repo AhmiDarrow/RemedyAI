@@ -105,13 +105,39 @@ class SubprocessSandbox(Sandbox):
                     duration_ms=0.0,
                 )
 
-        # Sanitize environment: strip inheritable dangerous vars
-        safe_env = dict(env) if env else None
-        if safe_env is not None:
-            for key in list(safe_env):
-                upper = key.upper()
-                if upper in ("LD_PRELOAD", "LD_LIBRARY_PATH", "PYTHONPATH", "PYTHONSTARTUP"):
-                    safe_env.pop(key)
+        # Always scrub secrets / injection vectors from child env.
+        # Start from parent env when caller did not pass a custom map.
+        import os as _os
+
+        safe_env = dict(env) if env is not None else dict(_os.environ)
+        _DROP_PREFIXES = (
+            "REMEDY_",
+            "OPENAI_",
+            "ANTHROPIC_",
+            "XAI_",
+            "DEEPSEEK_",
+            "GEMINI_",
+            "GOOGLE_",
+            "AWS_",
+            "AZURE_",
+        )
+        _DROP_EXACT = {
+            "LD_PRELOAD",
+            "LD_LIBRARY_PATH",
+            "PYTHONPATH",
+            "PYTHONSTARTUP",
+            "API_KEY",
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "XAI_API_KEY",
+        }
+        for key in list(safe_env):
+            upper = key.upper()
+            if upper in _DROP_EXACT or any(upper.startswith(p) for p in _DROP_PREFIXES):
+                safe_env.pop(key, None)
+            elif "API_KEY" in upper or "SECRET" in upper or "TOKEN" in upper:
+                if upper not in ("TERM", "TEMP", "TMP", "TMPDIR"):
+                    safe_env.pop(key, None)
 
         try:
             from remedy.execution.process import create_hidden_subprocess_exec
