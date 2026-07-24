@@ -392,39 +392,102 @@ if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
     Ok(None)
 }
 
-/// Windows: enable/disable "Start with Windows" via HKCU Run key.
+/// Startup-folder shortcut name (user-visible in Settings → Apps → Startup).
+///
+/// IMPORTANT: Do **not** use HKCU\...\Run. Writing that key from a background
+/// process is a classic malware pattern and triggers Windows Defender ML
+/// `Behavior:Win32/Persistence.A!ml`. The Startup folder is the supported,
+/// user-auditable approach.
+#[cfg(target_os = "windows")]
+fn windows_startup_dir() -> PathBuf {
+    let appdata = env::var("APPDATA").unwrap_or_else(|_| ".".to_string());
+    PathBuf::from(appdata)
+        .join("Microsoft")
+        .join("Windows")
+        .join("Start Menu")
+        .join("Programs")
+        .join("Startup")
+}
+
+#[cfg(target_os = "windows")]
+fn windows_startup_lnk_path() -> PathBuf {
+    windows_startup_dir().join("Remedy Desktop.lnk")
+}
+
+/// Remove legacy HKCU Run entries left by older Remedy builds (Defender false-positive source).
+#[cfg(target_os = "windows")]
+fn remove_legacy_run_key() {
+    use std::os::windows::process::CommandExt;
+    // Names used in 0.10.19–0.10.21
+    let ps = r#"
+$names = @('RemedyDesktop','Remedy Desktop','remedy-desktop')
+foreach ($n in $names) {
+  Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name $n -ErrorAction SilentlyContinue
+}
+"#;
+    let _ = Command::new("powershell")
+        .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps])
+        .creation_flags(CREATE_NO_WINDOW)
+        .status();
+}
+
+/// Windows: enable/disable "Start with Windows" via **Startup folder shortcut only**.
+/// Never writes the registry Run key (avoids Persistence.A!ml false positives).
 #[tauri::command]
 fn set_launch_at_login(enabled: bool) -> Result<bool, String> {
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
+        // Always scrub legacy Run keys when toggling.
+        remove_legacy_run_key();
+
         let exe = env::current_exe().map_err(|e| e.to_string())?;
         let exe_str = exe.to_string_lossy().replace('\'', "''");
-        let name = "RemedyDesktop";
+        let work_dir = exe
+            .parent()
+            .map(|p| p.to_string_lossy().replace('\'', "''"))
+            .unwrap_or_default();
+        let lnk = windows_startup_lnk_path();
+        let lnk_str = lnk.to_string_lossy().replace('\'', "''");
+
         if enabled {
+            let startup = windows_startup_dir();
+            std::fs::create_dir_all(&startup)
+                .map_err(|e| format!("create Startup folder: {e}"))?;
+            // User-visible shortcut only — shows under Settings → Apps → Startup.
             let ps = format!(
-                "New-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' \
-                 -Name '{name}' -Value '\"{exe_str}\"' -PropertyType String -Force | Out-Null"
+                r#"
+$ErrorActionPreference = 'Stop'
+$ws = New-Object -ComObject WScript.Shell
+$s = $ws.CreateShortcut('{lnk}')
+$s.TargetPath = '{exe}'
+$s.WorkingDirectory = '{wd}'
+$s.WindowStyle = 1
+$s.Description = 'Remedy Desktop (optional Start with Windows — disable in Settings or Startup apps)'
+$s.Save()
+"#,
+                lnk = lnk_str,
+                exe = exe_str,
+                wd = work_dir,
             );
-            let status = Command::new("powershell")
-                .args(["-NoProfile", "-Command", &ps])
+            let output = Command::new("powershell")
+                .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &ps])
                 .creation_flags(CREATE_NO_WINDOW)
-                .status()
-                .map_err(|e| format!("set login item: {e}"))?;
-            if !status.success() {
-                return Err("Failed to write HKCU Run key".into());
+                .output()
+                .map_err(|e| format!("create Startup shortcut: {e}"))?;
+            if !output.status.success() {
+                let err = String::from_utf8_lossy(&output.stderr);
+                return Err(format!(
+                    "Failed to create Startup shortcut: {}",
+                    err.trim()
+                ));
             }
-            log::info!("Launch at login enabled → {}", exe.display());
+            log::info!("Launch at login enabled via Startup folder → {}", lnk.display());
         } else {
-            let ps = format!(
-                "Remove-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' \
-                 -Name '{name}' -ErrorAction SilentlyContinue"
-            );
-            let _ = Command::new("powershell")
-                .args(["-NoProfile", "-Command", &ps])
-                .creation_flags(CREATE_NO_WINDOW)
-                .status();
-            log::info!("Launch at login disabled");
+            if lnk.exists() {
+                let _ = std::fs::remove_file(&lnk);
+            }
+            log::info!("Launch at login disabled (Startup shortcut removed)");
         }
         return Ok(enabled);
     }
@@ -439,22 +502,28 @@ fn set_launch_at_login(enabled: bool) -> Result<bool, String> {
 fn get_launch_at_login() -> Result<bool, String> {
     #[cfg(target_os = "windows")]
     {
-        use std::os::windows::process::CommandExt;
-        let output = Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-Command",
-                "(Get-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -ErrorAction SilentlyContinue).RemedyDesktop",
-            ])
-            .creation_flags(CREATE_NO_WINDOW)
-            .output()
-            .map_err(|e| format!("read login item: {e}"))?;
-        let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        return Ok(!s.is_empty() && s != "");
+        // Migrate away from registry Run (one-shot cleanup on every status check).
+        remove_legacy_run_key();
+        let lnk = windows_startup_lnk_path();
+        return Ok(lnk.is_file());
     }
     #[cfg(not(target_os = "windows"))]
     {
         Ok(false)
+    }
+}
+
+/// One-shot cleanup for Defender: remove legacy Run keys without enabling autostart.
+#[tauri::command]
+fn scrub_legacy_autostart() -> Result<String, String> {
+    #[cfg(target_os = "windows")]
+    {
+        remove_legacy_run_key();
+        Ok("Removed legacy registry Run entries if present. Autostart now uses Startup folder only.".into())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok("No Windows registry cleanup needed.".into())
     }
 }
 
@@ -1134,6 +1203,7 @@ pub fn run() {
             pick_folder,
             set_launch_at_login,
             get_launch_at_login,
+            scrub_legacy_autostart,
             set_desktop_prefs,
             get_desktop_prefs,
             show_main_window,
@@ -1199,6 +1269,12 @@ pub fn run() {
                 } else {
                     log::warn!("No tray icon id 'main' — check tauri.conf.json trayIcon");
                 }
+            }
+
+            // Scrub legacy HKCU Run keys on every launch (Defender Persistence.A!ml mitigation).
+            #[cfg(target_os = "windows")]
+            {
+                remove_legacy_run_key();
             }
 
             // Start hidden when always-ready start_in_tray is on

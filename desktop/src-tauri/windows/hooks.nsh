@@ -32,7 +32,11 @@
 !macroend
 
 !macro NSIS_HOOK_POSTINSTALL
-  ; One-click update: relaunch after files are written.
+  ; Scrub legacy HKCU Run keys from older builds (Defender Persistence.A!ml false positive).
+  ; Autostart (if user enables) uses Startup folder only — never registry Run.
+  DetailPrint "Removing legacy autostart registry entries if present..."
+  nsExec::ExecToLog 'powershell -NoProfile -ExecutionPolicy Bypass -Command "foreach ($n in @(''RemedyDesktop'',''Remedy Desktop'',''remedy-desktop'')) { Remove-ItemProperty -Path ''HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'' -Name $n -ErrorAction SilentlyContinue }"'
+  ; One-click update: relaunch after files are written (normal for updaters; not silent persistence).
   DetailPrint "Launching Remedy Desktop after install/update..."
   IfFileExists "$INSTDIR\Remedy Desktop.exe" 0 try_app_exe
     Exec '"$INSTDIR\Remedy Desktop.exe"'
@@ -45,4 +49,7 @@
 
 !macro NSIS_HOOK_PREUNINSTALL
   !insertmacro _REMEDY_KILL_ALL
+  ; Remove optional Startup shortcut + any leftover Run keys
+  Delete "$APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\Remedy Desktop.lnk"
+  nsExec::ExecToLog 'powershell -NoProfile -ExecutionPolicy Bypass -Command "foreach ($n in @(''RemedyDesktop'',''Remedy Desktop'',''remedy-desktop'')) { Remove-ItemProperty -Path ''HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'' -Name $n -ErrorAction SilentlyContinue }"'
 !macroend

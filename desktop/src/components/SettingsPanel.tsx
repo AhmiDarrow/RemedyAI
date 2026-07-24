@@ -687,7 +687,8 @@ export function SettingsPanel({
                 <span style={{ color: 'var(--text-primary)' }}>Close window hides to tray</span>
               </label>
               <div className="text-[10px] leading-snug" style={{ color: 'var(--text-muted)' }}>
-                Opt-in only. Keeps Remedy ready with a warm local server.
+                Opt-in only. Uses the Windows <strong>Startup folder</strong> (Settings → Apps → Startup) —
+                not the registry Run key. Change or disable anytime.
               </div>
             </section>
 

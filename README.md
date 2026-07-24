@@ -44,7 +44,7 @@ The desktop app bundles the full Remedy server as a sidecar, so everything runs 
 | **Providers** | OpenAI, Anthropic, Google, DeepSeek, xAI, Groq, Mistral, OpenRouter, Ollama; Custom under Advanced |
 | **Settings** | Persona, project browse, access scope, Memory Harness, launch-at-login; Save reloads Remedy |
 | **Access scope** | Project only / home / full user machine (opt-in, no silent elevation) |
-| **Always ready** | Start with Windows, tray Show/Quit, close-to-tray (optional) |
+| **Always ready** | Optional Start with Windows via **Startup folder** (not registry Run); tray Show/Quit; close-to-tray |
 | **Memory Harness** | Context prune + Session Brief + `/compact` for long sessions |
 | **Approvals** | High-impact shell commands need Approve/Deny (banner or `/approve`) |
 | **Goals** | Partner checklist: `/goal`, `/goals`, goal tools + verify/learn |

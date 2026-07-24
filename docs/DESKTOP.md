@@ -26,6 +26,25 @@ That refreshes `desktop/src-tauri/icons/*` (including multi-size `icon.ico` for
 Windows taskbar) and public favicons. **Rebuild the desktop app** after running
 the script so the new ICO is embedded in the EXE.
 
+### Windows Defender: `Behavior:Win32/Persistence.A!ml`
+
+Older builds (0.10.19–0.10.21) used the **HKCU Run** registry key for “Start with Windows”.
+Defender’s ML model often flags that pattern as malware-style persistence.
+
+**Fix (0.10.22+):**
+- Autostart uses only the **Startup folder** shortcut  
+  (`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\Remedy Desktop.lnk`)
+- Visible under **Settings → Apps → Startup**
+- Registry Run entries are **never written**; install/launch **remove** any legacy ones
+
+**If Defender already blocked an older install:**
+1. Update to 0.10.22+ (or reinstall the new installer).
+2. Windows Security → Virus & threat protection → Protection history → allow Remedy if listed.
+3. Optional: Windows Security → Manage settings → Add exclusion for  
+   `%LOCALAPPDATA%\Remedy Desktop\` (only if you trust the signed release).
+4. Confirm no `RemedyDesktop` value under  
+   `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`.
+
 ### Taskbar still shows an old (medical) icon?
 
 Windows caches taskbar icons aggressively. After reinstalling/rebuilding:
