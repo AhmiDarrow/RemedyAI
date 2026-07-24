@@ -2,6 +2,22 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.10.22] — 2026-07-24
+
+### xAI OAuth 307 fix
+
+- Device-code + token endpoints now use **`https://auth.x.ai`** (was
+  `accounts.x.ai`, which returns **307** to `/sign-in?redirect=…` and broke
+  “Sign in with xAI”).
+- Verification URLs still open on `accounts.x.ai` (as returned by xAI).
+
+### Windows Defender Persistence.A!ml (critical)
+
+- **Stop writing HKCU Run** for “Start with Windows” (triggered `Behavior:Win32/Persistence.A!ml`).
+- Autostart now uses a **Startup folder** `.lnk` only (Settings → Apps → Startup).
+- On launch / toggle / uninstall: **scrub legacy Run keys** (`RemedyDesktop`, etc.).
+- Installer PREUNINSTALL removes Startup shortcut + Run leftovers.
+
 ## [0.10.21] — 2026-07-23
 
 ### Final partner phase (goals · approve · knowledge)

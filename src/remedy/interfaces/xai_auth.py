@@ -24,10 +24,15 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-AUTH_SERVER = "https://accounts.x.ai"
+# User-facing account UI (verification pages, sign-in).
+ACCOUNTS_SERVER = "https://accounts.x.ai"
+# OAuth device + token endpoints live on auth.x.ai (accounts.x.ai returns 307 to /sign-in).
+OAUTH_SERVER = "https://auth.x.ai"
 API_BASE = "https://api.x.ai/v1"
-DEVICE_CODE_URL = f"{AUTH_SERVER}/oauth2/device/code"
-TOKEN_URL = f"{AUTH_SERVER}/oauth2/token"
+DEVICE_CODE_URL = f"{OAUTH_SERVER}/oauth2/device/code"
+TOKEN_URL = f"{OAUTH_SERVER}/oauth2/token"
+# Back-compat alias used in older docs/tests
+AUTH_SERVER = OAUTH_SERVER
 # Public client id used by Grok Build / OpenClaw-class agents for device OAuth.
 # https://github.com/openclaw/openclaw/issues/84504
 DEFAULT_CLIENT_ID = "b1a00492-073a-47ea-816f-4c329264a828"
@@ -172,11 +177,19 @@ def _http_form(url: str, data: dict[str, str], timeout: float = 30.0) -> dict[st
             return json.loads(raw) if raw else {}
     except urllib.error.HTTPError as e:
         err_body = e.read().decode("utf-8", errors="replace")
+        loc = e.headers.get("Location") or e.headers.get("location") or ""
         try:
             parsed = json.loads(err_body)
         except json.JSONDecodeError:
             parsed = {"error": err_body or str(e), "status": e.code}
         parsed.setdefault("status", e.code)
+        if e.code in (301, 302, 303, 307, 308) and loc:
+            parsed["location"] = loc
+            parsed["hint"] = (
+                "xAI OAuth endpoint redirected (often wrong host). "
+                "Device/token requests must use https://auth.x.ai — "
+                "not accounts.x.ai (which redirects to /sign-in)."
+            )
         raise RuntimeError(json.dumps(parsed)) from e
 
 
@@ -200,7 +213,7 @@ def start_device_login(home: Path | None = None) -> dict[str, Any]:
     verification_uri = (
         data.get("verification_uri")
         or data.get("verification_url")
-        or f"{AUTH_SERVER}/oauth2/device"
+        or f"{ACCOUNTS_SERVER}/oauth2/device"
     )
     verification_uri_complete = data.get("verification_uri_complete") or (
         f"{verification_uri}?user_code={urllib.parse.quote(str(user_code))}"
