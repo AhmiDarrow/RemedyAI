@@ -123,6 +123,7 @@ export default function App() {
     desktopInfo,
     checking: checkingUpdates,
     check: checkUpdates,
+    lastStatus: updateLastStatus,
     updateAvailable,
   } = useUpdateChecker()
   const [showSetupWizard, setShowSetupWizard] = useState(false)
@@ -131,6 +132,16 @@ export default function App() {
   const [askUserName, setAskUserName] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
   const [appVersion, setAppVersion] = useState('')
+
+  /** Run update check with visible UI (settings About section), not a silent focus. */
+  const runUpdateCheckVisible = useCallback(async () => {
+    setPanel('settings')
+    const result = await checkUpdates()
+    if (result.updateAvailable && result.desktopInfo?.download_url) {
+      setShowUpdateScreen(true)
+    }
+    return result
+  }, [checkUpdates])
 
   const handleMenuAction = useCallback(
     (action: AppMenuAction) => {
@@ -151,11 +162,14 @@ export default function App() {
           })()
           break
         case 'check_updates':
-          void checkUpdates()
+          void runUpdateCheckVisible()
           break
         case 'install_update':
-          if (desktopInfo?.update_available) setShowUpdateScreen(true)
-          else void checkUpdates()
+          if (desktopInfo?.update_available && desktopInfo.download_url) {
+            setShowUpdateScreen(true)
+          } else {
+            void runUpdateCheckVisible()
+          }
           break
         case 'about':
           setAboutOpen(true)
@@ -166,7 +180,7 @@ export default function App() {
           break
       }
     },
-    [checkUpdates, desktopInfo, create],
+    [runUpdateCheckVisible, desktopInfo, create],
   )
 
   useEffect(() => {
@@ -185,21 +199,23 @@ export default function App() {
     }
   }, [])
 
-  // Tray menu → themed in-app panels
+  // Tray menu → themed in-app panels (must open Settings, not just focus chat)
   useEffect(() => {
     if (!isTauri()) return
     let off: Array<() => void> = []
     void (async () => {
       off.push(await tauriListen('tray-open-settings', () => setPanel('settings')))
-      off.push(await tauriListen('tray-check-updates', () => {
-        void checkUpdates()
-      }))
+      off.push(
+        await tauriListen('tray-check-updates', () => {
+          void runUpdateCheckVisible()
+        }),
+      )
       off.push(await tauriListen('tray-about', () => setAboutOpen(true)))
     })()
     return () => {
       for (const u of off) u()
     }
-  }, [checkUpdates])
+  }, [runUpdateCheckVisible])
 
   /** Refresh model list only — does not change the selected model unless asked. */
   const refreshModels = useCallback(async (opts?: { selectDefault?: boolean }) => {
@@ -851,12 +867,16 @@ export default function App() {
             onCustomAccentChange={setCustomAccent}
             updateInfo={updateInfo}
             checkingUpdates={checkingUpdates}
+            updateStatus={updateLastStatus}
             onCheckUpdates={() => {
-              void checkUpdates()
+              void runUpdateCheckVisible()
             }}
             onInstallUpdate={() => {
-              if (desktopInfo?.update_available) setShowUpdateScreen(true)
-              else void checkUpdates()
+              if (desktopInfo?.update_available && desktopInfo.download_url) {
+                setShowUpdateScreen(true)
+              } else {
+                void runUpdateCheckVisible()
+              }
             }}
             models={models}
             toolProcessMode={toolProcessMode}
@@ -914,10 +934,15 @@ export default function App() {
           panel={panel}
           onTogglePanel={(p) => setPanel((prev) => (prev === p ? null : p))}
           updateAvailable={updateAvailable}
-          onCheckUpdates={checkUpdates}
+          onCheckUpdates={() => {
+            void runUpdateCheckVisible()
+          }}
           onInstallUpdate={() => {
-            if (desktopInfo?.update_available) setShowUpdateScreen(true)
-            else void checkUpdates()
+            if (desktopInfo?.update_available && desktopInfo.download_url) {
+              setShowUpdateScreen(true)
+            } else {
+              void runUpdateCheckVisible()
+            }
           }}
         />
       </div>

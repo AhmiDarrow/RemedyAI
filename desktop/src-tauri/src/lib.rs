@@ -787,7 +787,10 @@ fn fetch_latest_desktop() -> Result<(String, Option<String>, Option<String>), St
         let resp = match ureq::get(url)
             .set("User-Agent", "RemedyDesktop-Updater/0.10")
             .set("Accept", "application/json")
-            .timeout(Duration::from_secs(15))
+            // Avoid stale CDN/proxy copies of latest.json after a new release.
+            .set("Cache-Control", "no-cache")
+            .set("Pragma", "no-cache")
+            .timeout(Duration::from_secs(20))
             .call()
         {
             Ok(r) => r,

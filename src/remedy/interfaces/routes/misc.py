@@ -73,14 +73,24 @@ def register_misc_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
     """Register routes (closes over runtime/gateway/memory)."""
     # -- updates ------------------------------------------------------------
     @app.get("/api/updates/check")
-    async def check_updates():
+    async def check_updates(current: str | None = Query(default=None)):
         """Report package + desktop release versions.
 
         Desktop UI prefers the Tauri ``check_desktop_update`` command; this
         endpoint is the browser/dev fallback and a secondary path when Rust
         GitHub fetch fails.
+
+        Optional ``current``: shell/app version to compare against (desktop
+        package version). When omitted, uses the Python package version — which
+        can lag or lead the installed EXE if the sidecar was rebuilt separately.
         """
-        current = _remedy_version
+        from remedy.interfaces.updater import _parse_version
+
+        python_version = _remedy_version
+        # Prefer explicit shell version so a newer sidecar cannot mask an
+        # outdated desktop EXE (or vice versa).
+        current_raw = (current or "").strip() or python_version
+        current_norm = str(current_raw).lstrip("vV").strip() or python_version
         latest_python = None
         latest_desktop = None
         release_url = None
@@ -118,11 +128,11 @@ def register_misc_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
                         "User-Agent": "Remedy-Updater",
                     },
                 )
-                with _urllib.urlopen(req, timeout=10) as resp:
+                with _urllib.urlopen(req, timeout=15) as resp:
                     data = _json.loads(resp.read().decode())
                 if "version" in data:
-                    latest_desktop = str(data.get("version") or "").lstrip("v")
-                    release_url = data.get("url") or (
+                    latest_desktop = str(data.get("version") or "").lstrip("vV")
+                    release_url = (
                         "https://github.com/AhmiDarrow/RemedyAI/releases/latest"
                     )
                     installer_url = (
@@ -132,7 +142,7 @@ def register_misc_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
                     ) or data.get("url")
                     break
                 if "tag_name" in data:
-                    latest_desktop = str(data.get("tag_name") or "").lstrip("v")
+                    latest_desktop = str(data.get("tag_name") or "").lstrip("vV")
                     release_url = data.get("html_url") or (
                         "https://github.com/AhmiDarrow/RemedyAI/releases/latest"
                     )
@@ -150,20 +160,33 @@ def register_misc_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
                 errors.append(f"GitHub ({url.split('/')[-1]}): {e}")
 
         update_available = False
-        from remedy.interfaces.updater import _parse_version
-
         # Desktop installer is the product of record for the app.
-        if latest_desktop and _parse_version(latest_desktop) > _parse_version(current):
+        if latest_desktop and _parse_version(latest_desktop) > _parse_version(
+            current_norm
+        ):
             update_available = True
         elif (
             latest_python
             and not latest_desktop
-            and _parse_version(latest_python) > _parse_version(current)
+            and _parse_version(latest_python) > _parse_version(current_norm)
         ):
             update_available = True
 
+        # Require an installer URL before claiming a desktop update is installable.
+        if (
+            update_available
+            and latest_desktop
+            and not (installer_url and str(installer_url).strip())
+        ):
+            errors.append(
+                "Newer desktop release found but no Windows installer URL on the release."
+            )
+            # Still flag available so the UI can open the releases page.
+            # Install button needs installer_url; UpdateScreen checks it.
+
         return {
-            "current_version": current,
+            "current_version": current_norm,
+            "python_version": python_version,
             "latest_python": latest_python,
             "latest_desktop": latest_desktop,
             "release_url": release_url,

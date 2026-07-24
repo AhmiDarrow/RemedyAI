@@ -150,11 +150,28 @@ def _pip_upgrade() -> bool:
 
 
 def _parse_version(v: str) -> tuple[int, ...]:
-    """Parse a version string into a comparable tuple."""
+    """Parse a version string into a comparable tuple (major, minor, patch, …).
+
+    Strips leading ``v``, ignores pre-release/build suffixes after ``-``/``+``.
+    Non-numeric segments become 0 so ``0.10.26`` always compares cleanly.
+    """
     try:
-        return tuple(int(p) for p in v.split("."))
+        s = str(v or "").strip().lstrip("vV")
+        # Drop pre-release / build metadata for ordering of stable tags.
+        for sep in ("-", "+"):
+            if sep in s:
+                s = s.split(sep, 1)[0]
+        parts: list[int] = []
+        for p in s.split("."):
+            # Allow "10" or empty
+            num = "".join(ch for ch in p if ch.isdigit())
+            parts.append(int(num) if num else 0)
+        # Normalize to at least 3 components for stable ordering
+        while len(parts) < 3:
+            parts.append(0)
+        return tuple(parts)
     except Exception:
-        return (0,)
+        return (0, 0, 0)
 
 
 def _is_newer(latest: str, installed: str) -> bool:

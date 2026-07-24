@@ -9,6 +9,8 @@ export interface UpdateInfo {
   installer_url: string | null
   update_available: boolean
   error: string | null
+  /** Python sidecar version when different from shell (optional). */
+  python_version?: string | null
 }
 
 export interface DesktopUpdateInfo {
@@ -26,8 +28,39 @@ export interface UpdateProgress {
   message: string
 }
 
-export async function checkUpdates(): Promise<UpdateInfo> {
-  return apiFetch<UpdateInfo>('/updates/check')
+/** Parse semver-ish strings for ordering (mirrors Rust/Python helpers). */
+export function parseSemver(raw: string | null | undefined): [number, number, number] {
+  const s = String(raw || '')
+    .trim()
+    .replace(/^[vV]/, '')
+    .split(/[-+]/, 1)[0] || ''
+  const parts = s.split('.').map((p) => {
+    const digits = p.replace(/\D/g, '')
+    return digits ? parseInt(digits, 10) : 0
+  })
+  return [parts[0] || 0, parts[1] || 0, parts[2] || 0]
+}
+
+export function isNewerVersion(latest: string, current: string): boolean {
+  const a = parseSemver(latest)
+  const b = parseSemver(current)
+  for (let i = 0; i < 3; i++) {
+    if (a[i]! > b[i]!) return true
+    if (a[i]! < b[i]!) return false
+  }
+  return false
+}
+
+/**
+ * API update check. Pass the *desktop shell* version as ``current`` so a
+ * newer/older Python sidecar cannot hide a real desktop update.
+ */
+export async function checkUpdates(currentShellVersion?: string): Promise<UpdateInfo> {
+  const q =
+    currentShellVersion && currentShellVersion.trim()
+      ? `?current=${encodeURIComponent(currentShellVersion.trim())}`
+      : ''
+  return apiFetch<UpdateInfo>(`/updates/check${q}`)
 }
 
 /**

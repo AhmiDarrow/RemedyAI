@@ -51,6 +51,8 @@ interface SettingsPanelProps {
   onCustomAccentChange?: (hex: string) => void
   updateInfo: UpdateInfo | null
   checkingUpdates: boolean
+  /** Live status line from the last check (e.g. "Up to date — v0.10.25"). */
+  updateStatus?: string | null
   onCheckUpdates: () => void
   /** Opens the Ollama-style download → install → relaunch screen. */
   onInstallUpdate?: () => void
@@ -71,6 +73,7 @@ export function SettingsPanel({
   onCustomAccentChange,
   updateInfo,
   checkingUpdates,
+  updateStatus = null,
   onCheckUpdates,
   onInstallUpdate,
   models,
@@ -955,22 +958,36 @@ export function SettingsPanel({
                 </button>
                 {/* Always reserve status area so a check never looks like a no-op */}
                 <div className="mt-2 space-y-1 min-h-[2.5rem]">
-                  {checkingUpdates && !updateInfo && (
+                  {checkingUpdates && (
                     <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
                       Contacting GitHub releases…
+                    </div>
+                  )}
+                  {!checkingUpdates && updateStatus && (
+                    <div
+                      className="text-xs break-words"
+                      style={{
+                        color: updateInfo?.update_available
+                          ? 'var(--accent)'
+                          : updateInfo?.error
+                            ? 'var(--error, #ef4444)'
+                            : 'var(--text-secondary)',
+                      }}
+                    >
+                      {updateStatus}
                     </div>
                   )}
                   {updateInfo && (
                     <>
                       <div className="flex justify-between text-xs">
-                        <span style={{ color: 'var(--text-muted)' }}>Current</span>
+                        <span style={{ color: 'var(--text-muted)' }}>This app</span>
                         <span style={{ color: 'var(--text-primary)' }}>
-                          {updateInfo.current_version}
+                          v{updateInfo.current_version}
                         </span>
                       </div>
                       {(updateInfo.latest_desktop || updateInfo.latest_python) && (
                         <div className="flex justify-between text-xs">
-                          <span style={{ color: 'var(--text-muted)' }}>Latest</span>
+                          <span style={{ color: 'var(--text-muted)' }}>Latest release</span>
                           <span
                             style={{
                               color: updateInfo.update_available
@@ -978,10 +995,19 @@ export function SettingsPanel({
                                 : 'var(--text-primary)',
                             }}
                           >
-                            {updateInfo.latest_desktop || updateInfo.latest_python}
+                            v{updateInfo.latest_desktop || updateInfo.latest_python}
                           </span>
                         </div>
                       )}
+                      {updateInfo.python_version &&
+                        updateInfo.python_version !== updateInfo.current_version && (
+                          <div className="flex justify-between text-xs">
+                            <span style={{ color: 'var(--text-muted)' }}>Sidecar</span>
+                            <span style={{ color: 'var(--text-muted)' }}>
+                              v{updateInfo.python_version}
+                            </span>
+                          </div>
+                        )}
                       {updateInfo.update_available && (
                         <button
                           type="button"
@@ -997,11 +1023,13 @@ export function SettingsPanel({
                           Downloads the installer, updates Remedy, and restarts — like Ollama.
                         </div>
                       )}
-                      {!updateInfo.update_available && !updateInfo.error && (
-                        <div className="mt-1 text-xs" style={{ color: 'var(--success)' }}>
-                          You&apos;re up to date
-                        </div>
-                      )}
+                      {!updateInfo.update_available &&
+                        !updateInfo.error &&
+                        !checkingUpdates && (
+                          <div className="mt-1 text-xs" style={{ color: 'var(--success)' }}>
+                            You&apos;re up to date
+                          </div>
+                        )}
                       {updateInfo.error && (
                         <div
                           className="mt-1 text-xs break-words"

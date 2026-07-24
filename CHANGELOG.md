@@ -2,6 +2,14 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.10.27] — 2026-07-24
+
+### Fix: desktop update check (tray + Settings)
+
+- Tray **Check for updates** now opens Settings and runs a real check (no longer only focuses the chat composer).
+- Compare against the **desktop shell** version, not only the Python sidecar (prevented 0.10.25 EXE from seeing 0.10.26 when the sidecar was already newer).
+- Merge Tauri + API update sources; always show **This app** vs **Latest release**.
+- Cache-bust GitHub `latest.json`; `/api/updates/check?current=` for shell version.
 ## [0.10.26] — 2026-07-24
 
 ### Agent headroom (no cut-off answers / thinking / tools)
