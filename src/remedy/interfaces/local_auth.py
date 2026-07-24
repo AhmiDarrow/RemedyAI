@@ -24,9 +24,7 @@ MIN_TOKEN_LEN = 16
 def auth_enabled() -> bool:
     """Return False when API auth is explicitly disabled (tests)."""
     flag = str(os.environ.get("REMEDY_API_AUTH", "1")).strip().lower()
-    if flag in ("0", "false", "no", "off", "disable", "disabled"):
-        return False
-    return True
+    return flag not in ("0", "false", "no", "off", "disable", "disabled")
 
 
 def token_path(home: Path | str | None = None) -> Path:

@@ -134,7 +134,7 @@ def cmd_download(args: argparse.Namespace) -> int:
 
 def cmd_run(args: argparse.Namespace) -> int:
     # queue
-    qns = argparse.Namespace(
+    argparse.Namespace(
         workflow=args.workflow,
         client_id=args.client_id,
     )

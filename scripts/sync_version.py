@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+from datetime import UTC
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -72,13 +73,13 @@ def _bump_cargo_toml(ver: str) -> None:
 def _bump_latest_json(ver: str) -> None:
     if not PATHS["latest_json"].exists():
         return
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     data = json.loads(PATHS["latest_json"].read_text(encoding="utf-8"))
     old_raw = str(data.get("version", "")).lstrip("v")
     data["version"] = f"v{ver}"
     data["notes"] = f"Remedy Desktop v{ver} — Windows installer"
-    data["pub_date"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    data["pub_date"] = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     # Prefer rewriting known GitHub release URL shape so notes/URL/version stay aligned.
     installer_name = f"Remedy_Desktop_{ver}_x64-setup.exe"
@@ -185,19 +186,19 @@ def main():
     print(f"Bumping to: {new_ver}")
 
     _bump_pyproject(new_ver)
-    print(f"  Updated pyproject.toml")
+    print("  Updated pyproject.toml")
 
     _bump_package_json(new_ver)
-    print(f"  Updated package.json")
+    print("  Updated package.json")
 
     _bump_tauri_conf(new_ver)
-    print(f"  Updated tauri.conf.json")
+    print("  Updated tauri.conf.json")
 
     _bump_cargo_toml(new_ver)
-    print(f"  Updated Cargo.toml")
+    print("  Updated Cargo.toml")
 
     _bump_latest_json(new_ver)
-    print(f"  Updated scripts/latest.json")
+    print("  Updated scripts/latest.json")
 
     print(f"\nDone! Version bumped from {current} -> {new_ver}")
     print("Reinstall editable so dist-info matches:")

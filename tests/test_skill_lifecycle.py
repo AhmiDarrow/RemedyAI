@@ -2,17 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
-from uuid import uuid4
+from datetime import UTC, datetime
 
 import pytest
 
 from remedy.core.learning.lifecycle import (
-    SkillHealth,
     SkillLifecyclePolicy,
     compute_effort_score,
 )
-from remedy.core.learning.reflection import ExecutionTrace, ReflectionEngine, TraceStep
+from remedy.core.learning.reflection import TraceStep
 from remedy.core.learning_loop import LearningLoop
 from remedy.models import Skill, SkillKind, SkillManifest, SkillStatus, Task, TaskStatus
 

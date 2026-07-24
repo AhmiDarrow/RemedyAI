@@ -1,70 +1,22 @@
 """API route registration for Remedy FastAPI app."""
 from __future__ import annotations
 
-import asyncio
-import json
+import contextlib
 import logging
 import os
-import time
 from pathlib import Path
-from typing import Any
-from uuid import uuid4
 
-import aiohttp
-import yaml
-from fastapi import FastAPI, HTTPException, Query, Request, Response
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi import FastAPI, HTTPException, Query
 
-from remedy import __version__ as _remedy_version
 from remedy.core.errors import SecurityError
-from remedy.core.security import safe_path
 from remedy.interfaces.api_models import (
-    AttachmentRef,
-    AttachmentUploadRequest,
-    ChatRequest,
-    ChatResponse,
-    CommandRequest,
-    CreateSessionRequest,
     ImportSessionRequest,
-    MemoryAddRequest,
-    MemorySearchRequest,
-    SendMessageRequest,
-    SettingsUpdateRequest,
-    SkillInfo,
-    StatusResponse,
-    UpdateSessionRequest,
-    WebhookPayload,
 )
 from remedy.interfaces.api_support import (
-    _apply_llm_to_runtime,
-    _BUILTIN_AGENTS,
-    _BUILTIN_COMMANDS,
-    _BUILTIN_MODELS,
-    _default_config_path,
-    _find_config_path,
-    _load_config_cached,
-    _serialize_toml,
-    _sse_stream_text,
-    _sync_runtime_llm_from_config,
-    _write_config,
-    handle_slash_command,
     load_config,
-    sse_headers,
 )
-from remedy.interfaces.config import (
-    PROVIDER_CATALOG,
-    catalog_models_for_provider,
-    needs_first_run_setup,
-    normalize_llm_settings,
-    provider_credentials_ready,
-)
-from remedy.interfaces.config import _is_local_url
 from remedy.models import (
-    ChannelKind,
     ChatMessageRole,
-    EventKind,
-    GatewayEvent,
-    MemoryEntryType,
 )
 
 logger = logging.getLogger(__name__)
@@ -120,7 +72,11 @@ def register_workspace_routes(app: FastAPI, *, runtime=None, gateway=None, memor
     @app.get("/api/workspace")
     async def get_workspace(session_id: str | None = Query(default=None)):
         """Return the active project/workspace root for UI and tools."""
-        from remedy.core.workspace import ensure_project_dir, list_workspace_entries, resolve_project_path
+        from remedy.core.workspace import (
+            ensure_project_dir,
+            list_workspace_entries,
+            resolve_project_path,
+        )
 
         root: Path | None = None
         source = "cwd"
@@ -138,10 +94,8 @@ def register_workspace_routes(app: FastAPI, *, runtime=None, gateway=None, memor
         if root is None:
             root = _files_base()
             source = "config"
-        try:
+        with contextlib.suppress(Exception):
             root = ensure_project_dir(root)
-        except Exception:
-            pass
         return {
             "project_path": str(root),
             "source": source,

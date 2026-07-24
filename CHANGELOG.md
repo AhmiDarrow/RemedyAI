@@ -2,6 +2,13 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.10.34] — 2026-07-24
+
+### CI / release hygiene
+
+- Ruff config tuned so CI lint is green (E501/noise ignores; real F/N issues fixed).
+- Duplicate test renamed; signing secrets confirmed for signed Desktop Release.
+
 ## [0.10.33] — 2026-07-24
 
 ### Security, tests, and performance (Phases A–C)

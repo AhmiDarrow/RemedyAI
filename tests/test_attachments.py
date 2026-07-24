@@ -8,8 +8,8 @@ from remedy.interfaces.attachments import (
     build_multimodal_user_content,
     is_image,
     is_probably_text,
-    save_upload,
     sanitize_filename,
+    save_upload,
 )
 
 

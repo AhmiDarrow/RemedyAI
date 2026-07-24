@@ -12,6 +12,7 @@ Full implementations can be swapped in for production use.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 
@@ -85,10 +86,8 @@ class TelegramChannel(ChannelAdapter):
     async def stop(self) -> None:
         if self._poll_task is not None:
             self._poll_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._poll_task
-            except asyncio.CancelledError:
-                pass
             self._poll_task = None
         await super().stop()
 

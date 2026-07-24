@@ -2,19 +2,21 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
 from pathlib import Path
 from typing import Any
 
-from remedy import __version__ as _remedy_version
-from remedy.interfaces.config import CONFIG_PATHS
 from remedy.interfaces.config import (
+    CONFIG_PATHS,
     PROVIDER_CATALOG,
+    _is_local_url,
+)
+from remedy.interfaces.config import (
     load_config as _load_toml_config,
 )
-from remedy.interfaces.config import _is_local_url
 
 logger = logging.getLogger(__name__)
 
@@ -708,10 +710,8 @@ def _write_config(path: Path, cfg: dict[str, Any]) -> None:
             lines.append(f"{key} = {_serialize_toml(value)}\n")
     content = "".join(lines)
     path.write_text(content, encoding="utf-8")
-    try:
+    with contextlib.suppress(OSError):
         path.chmod(0o600)
-    except OSError:
-        pass
 
 
 def _serialize_toml(value: Any) -> str:

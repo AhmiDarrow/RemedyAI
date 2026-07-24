@@ -7,6 +7,7 @@ philosophy, inspired by Hermes' autonomous learning.
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 
 import yaml
@@ -244,10 +245,8 @@ class LearningLoop:
 
         # Register into live registry when available
         if self.registry is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self.registry.register(skill)
-            except Exception:
-                pass
 
         self._last_decision = LifecycleDecision(
             "accept",
@@ -314,10 +313,8 @@ class LearningLoop:
         self.history.record_status_change(name, old_status, decision.new_status)
         # Persist status change when skill is on disk
         if skill.manifest.path or skill.manifest.metadata.get("skill_path"):
-            try:
+            with contextlib.suppress(OSError):
                 self._write_skill_md(skill)
-            except OSError:
-                pass
         return True
 
     def prune_skill(self, skill: Skill, *, remove_files: bool = False) -> bool:
@@ -349,18 +346,16 @@ class LearningLoop:
         if remove_files:
             path = skill.manifest.path or skill.manifest.metadata.get("skill_path")
             if path:
-                from pathlib import Path as _P
                 import shutil
+                from pathlib import Path as _P
 
                 p = _P(path)
                 target = p if p.is_dir() else p.parent
                 if target.exists() and target.is_dir():
                     shutil.rmtree(target, ignore_errors=True)
         else:
-            try:
+            with contextlib.suppress(OSError):
                 self._write_skill_md(skill)
-            except OSError:
-                pass
         return True
 
     def get_skill_stats(self, skill_name: str):
@@ -567,10 +562,8 @@ class LearningLoop:
         path = self._write_skill_md(existing)
         existing.manifest.path = str(path.parent)
         if self.registry is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self.registry.register(existing)
-            except Exception:
-                pass
         self.history.record_refinement(
             existing.manifest.name,
             from_version="merge",

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import io
 import zipfile
 from pathlib import Path
 
@@ -18,9 +17,8 @@ def test_zip_slip_blocked(tmp_path: Path):
         zf.writestr("ok/SKILL.md", "---\nname: x\ndescription: d\n---\n\nbody\n")
     dest = tmp_path / "out"
     dest.mkdir()
-    with zipfile.ZipFile(zpath, "r") as zf:
-        with pytest.raises(ValueError, match="Zip Slip"):
-            _safe_extract_zip(zf, dest)
+    with zipfile.ZipFile(zpath, "r") as zf, pytest.raises(ValueError, match="Zip Slip"):
+        _safe_extract_zip(zf, dest)
     assert not (tmp_path / "escape.txt").exists()
 
 

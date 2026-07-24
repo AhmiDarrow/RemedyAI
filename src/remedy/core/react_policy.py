@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from typing import Any
 from uuid import uuid4
@@ -88,9 +89,7 @@ HISTORY_CHAR_BUDGET = 1_500_000
 HISTORY_MSG_SOFT_TRIM = 200_000
 # Tiered defaults: keep answers complete while bounding tool bloat.
 # Set REMEDY_FULL_CONTEXT=1 for legacy "uncapped" behavior.
-import os as _os
-
-_FULL = str(_os.environ.get("REMEDY_FULL_CONTEXT", "")).lower() in (
+_FULL = str(os.environ.get("REMEDY_FULL_CONTEXT", "")).lower() in (
     "1",
     "true",
     "yes",
@@ -182,9 +181,7 @@ def message_wants_tools(message: str) -> bool:
         return False
     if _TOOL_HINT_RE.search(msg):
         return True
-    if len(msg) <= 160:
-        return False
-    return True
+    return not len(msg) <= 160
 
 
 # Back-compat alias used by older tests / imports.
@@ -209,9 +206,7 @@ def looks_like_pseudo_tools(text: str) -> bool:
         )
     ):
         return True
-    if "&&" in text and re.search(r"\w+\(\s*[\"']", text):
-        return True
-    return False
+    return bool("&&" in text and re.search(r"\w+\(\s*[\"']", text))
 
 
 _looks_like_pseudo_tools = looks_like_pseudo_tools
@@ -279,9 +274,7 @@ def _is_comfy_hunt_text(text: str) -> bool:
     # Tool spam listing C:\…\ComfyUI or where/dir searches
     if re.search(r"\b(list_dir|bash_exec|where|dir\s+/s)\b", text, re.I):
         return True
-    if re.search(r"[A-Za-z]:\\[^\n]*ComfyUI", text, re.I):
-        return True
-    return False
+    return bool(re.search(r"[A-Za-z]:\\[^\n]*ComfyUI", text, re.I))
 
 
 def _parse_dsml_tool_calls(text: str) -> list[dict[str, Any]]:
@@ -453,7 +446,7 @@ def parse_pseudo_tool_calls(text: str) -> list[dict[str, Any]]:
     out.extend(_parse_dsml_tool_calls(text))
 
     # 2) Classic function-call-as-text
-    pat = re.compile(
+    re.compile(
         r"\b(file_read|file_write|list_dir|bash_exec|comfyui)\s*\(\s*"
         r"(?:[\"']([^\"']*)[\"']|(action|prompt|path|command)\s*=\s*[\"']([^\"']*)[\"'])"
         r"(?:\s*,\s*(?:[\"']([^\"']*)[\"']|(\w+)\s*=\s*[\"']([^\"']*)[\"']))?\s*\)",

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import json
-
 from remedy.core.react_stream import (
     StreamRoundState,
     accumulate_tool_call_delta,
@@ -131,7 +129,7 @@ def test_finalize_promotes_reasoning_when_no_tools() -> None:
     assert finalize_round_text(state, [{"function": {"name": "list_dir"}}]) == ""
 
 
-def test_finish_reason_length_detected() -> None:
+def test_finish_reason_length_stream_live_false() -> None:
     state = StreamRoundState()
     apply_openai_sse_chunk(
         state,

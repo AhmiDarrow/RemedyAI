@@ -1,4 +1,7 @@
-import urllib.request, urllib.parse, json, time, os
+import json
+import time
+import urllib.parse
+import urllib.request
 
 API = "http://127.0.0.1:8188"
 

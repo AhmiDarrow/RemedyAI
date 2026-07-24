@@ -9,7 +9,7 @@ from remedy.core.learning.procedural import LearningHistory
 from remedy.core.learning.refiner import SkillRefiner
 from remedy.core.learning.reflection import ExecutionTrace, ReflectionEngine, TraceStep
 from remedy.core.learning_loop import LearningLoop
-from remedy.models import Skill, SkillKind, SkillManifest, SkillStatus
+from remedy.models import Skill, SkillManifest, SkillStatus
 from remedy.skills.exporter import SkillExporter
 from remedy.skills.registry import SkillRegistry
 

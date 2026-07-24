@@ -7,6 +7,7 @@ and provides structured result reporting.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import re
 import sys
 import tempfile
@@ -155,10 +156,8 @@ class SkillExecutor:
         tmp = self.sandbox_dir / f"exec_{uuid4().hex[:8]}.py"
         tmp.write_text(code, encoding="utf-8")
         result = await self.run_script(tmp, env=env)
-        try:
+        with contextlib.suppress(OSError):
             tmp.unlink(missing_ok=True)
-        except OSError:
-            pass
         return result
 
     async def _run_bash_block(

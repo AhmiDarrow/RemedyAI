@@ -349,7 +349,7 @@ class ReflectionEngine:
             lines.append(f"{i + 1}. **{step.tool_name}** [SUCCESS]")
             if step.arguments:
                 # Keep arg keys only — avoid baking session-specific values as gospel
-                keys = ", ".join(sorted(str(k) for k in step.arguments.keys())[:12])
+                keys = ", ".join(sorted(str(k) for k in step.arguments)[:12])
                 if keys:
                     lines.append(f"   - Argument keys: `{keys}`")
             if step.result_summary:

@@ -7,14 +7,13 @@ from pathlib import Path
 import pytest
 
 from remedy.core.local_discover import (
+    BinarySpec,
     HttpServiceSpec,
-    LocalNeedSpec,
     discover_all,
     discover_binaries,
     discover_install_dirs,
     parse_skill_local_spec,
     probe_http_service,
-    BinarySpec,
 )
 
 

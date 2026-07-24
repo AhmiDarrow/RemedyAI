@@ -50,9 +50,7 @@ def looks_like_xai_credential(key: str | None) -> bool:
     if k.startswith("xai-"):
         return True
     # OAuth access tokens are JWTs (header.payload.sig)
-    if k.startswith("eyJ") and k.count(".") >= 2:
-        return True
-    return False
+    return bool(k.startswith("eyJ") and k.count(".") >= 2)
 
 
 def infer_key_provider(key: str | None) -> str | None:

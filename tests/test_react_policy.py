@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 
 from remedy.core.react_policy import (
-    RECOVERY_NUDGE,
     _DEFAULT_SYSTEM_PROMPT,
+    RECOVERY_NUDGE,
     batch_has_tool_errors,
     looks_like_pseudo_tools,
     message_wants_tools,

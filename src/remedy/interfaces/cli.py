@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import json
 import os
 from pathlib import Path
@@ -19,7 +20,6 @@ from rich.table import Table
 from remedy import __version__
 from remedy.core.learning.reflection import ExecutionTrace, TraceStep
 from remedy.core.learning_loop import LearningLoop
-from remedy.execution.runtime import ToolRuntime
 from remedy.execution.sandbox import SubprocessSandbox
 from remedy.gateway.cli import main_gateway
 from remedy.interfaces.config import (
@@ -44,7 +44,6 @@ from remedy.models import (
 from remedy.skills.executor import SkillExecutor
 from remedy.skills.exporter import SkillExporter
 from remedy.skills.registry import SkillRegistry
-from remedy.skills.tool_registry import ToolRegistry
 from remedy.skills.validator import SkillValidator
 
 console = Console()
@@ -970,10 +969,8 @@ def _cmd_auth(args) -> None:
         console.print(f"User code: [bold cyan]{code}[/bold cyan]")
         console.print(f"Open: [link={uri}]{uri}[/link]")
         if uri:
-            try:
+            with contextlib.suppress(Exception):
                 webbrowser.open(str(uri))
-            except Exception:
-                pass
         session_id = start.get("session_id") or code
         deadline = time.time() + int(start.get("expires_in") or 900)
         interval = max(3, int(start.get("interval") or 5))
@@ -1021,6 +1018,7 @@ async def _cmd_config(args) -> None:
 
 def _cmd_serve(args) -> None:
     import sys
+
     import uvicorn
 
     from remedy.core.agent import BasicRuntime

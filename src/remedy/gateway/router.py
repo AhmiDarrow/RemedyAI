@@ -8,6 +8,7 @@ Web/API, and webhook channels to the core runtime.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import inspect
 import json
 import logging
@@ -148,10 +149,8 @@ class Gateway:
         for task in [self._heartbeat_task, self._queue_task]:
             if task:
                 task.cancel()
-                try:
+                with contextlib.suppress(asyncio.CancelledError):
                     await task
-                except asyncio.CancelledError:
-                    pass
 
         logger.info("Gateway stopped (events=%d, uptime=%s)",
                      self._event_counter,

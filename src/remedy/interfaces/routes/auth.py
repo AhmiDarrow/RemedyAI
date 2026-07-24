@@ -1,6 +1,7 @@
 """Provider auth routes (xAI OAuth device-code + API key)."""
 from __future__ import annotations
 
+import contextlib
 import logging
 from typing import Any
 
@@ -190,8 +191,6 @@ def register_auth_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
                 cfg.pop("llm_api_key", None)
                 _write_config(config_path, cfg)
         if runtime is not None and str(getattr(runtime, "_llm_provider", "")).lower() == "xai":
-            try:
+            with contextlib.suppress(Exception):
                 runtime._llm_api_key = ""
-            except Exception:
-                pass
         return {"status": "logged_out", "provider": "xai", "connected": False}

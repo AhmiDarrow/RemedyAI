@@ -8,6 +8,7 @@ and MCP-based tool backends with retry, timeout, and streaming.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import shutil
 import sys
 import time
@@ -173,10 +174,8 @@ class ToolRuntime:
 
         # 4. Update registry stats
         if self.tool_registry:
-            try:
+            with contextlib.suppress(Exception):
                 self.tool_registry.record_invocation(tool_call, result)
-            except Exception:
-                pass
 
         return result
 

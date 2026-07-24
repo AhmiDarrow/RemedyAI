@@ -7,6 +7,7 @@ in context; full bodies load only on activation.
 
 from __future__ import annotations
 
+import contextlib
 import re
 from pathlib import Path
 from typing import Any
@@ -138,18 +139,14 @@ class SkillRegistry:
                     continue
                 dest = user_skills / child.name
                 if not dest.exists():
-                    try:
+                    with contextlib.suppress(OSError):
                         shutil.copytree(child, dest)
-                    except OSError:
-                        pass
                 else:
-                    try:
+                    with contextlib.suppress(OSError):
                         _merge_bundled_local_frontmatter(
                             bundled_skill_md=child / "SKILL.md",
                             user_skill_md=dest / "SKILL.md",
                         )
-                    except OSError:
-                        pass
         if user_skills.is_dir():
             self.discover(user_skills, recurse=True)
 

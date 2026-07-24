@@ -1,4 +1,7 @@
-import urllib.request, json, time, sys
+import json
+import sys
+import time
+import urllib.request
 
 API = "http://127.0.0.1:8188"
 p_id = sys.argv[1] if len(sys.argv) > 1 else "263a4246-08ea-4de4-abb1-eb02666dcc22"

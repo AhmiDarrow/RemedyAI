@@ -23,7 +23,7 @@ def register_all_routes(
     memory=None,
 ) -> None:
     """Attach all HTTP routes to *app*."""
-    kw = dict(runtime=runtime, gateway=gateway, memory=memory)
+    kw = {"runtime": runtime, "gateway": gateway, "memory": memory}
     register_status_routes(app, **kw)
     register_chat_routes(app, **kw)
     register_sessions_routes(app, **kw)

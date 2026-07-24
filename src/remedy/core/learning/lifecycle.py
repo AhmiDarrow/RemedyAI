@@ -34,7 +34,6 @@ from typing import Any
 
 from remedy.models import Skill, SkillStatus
 
-
 # -- thresholds (tunable) ----------------------------------------------------
 
 MIN_STEPS_TO_LEARN = 3
@@ -144,7 +143,7 @@ def compute_effort_score(
         return EffortScore(score=0.0, reasons=["empty trace"])
 
     failed = [s for s in steps if not getattr(s, "success", True)]
-    succeeded = [s for s in steps if getattr(s, "success", True)]
+    [s for s in steps if getattr(s, "success", True)]
     tools = [str(getattr(s, "tool_name", "") or "") for s in steps]
     unique_tools = len({t for t in tools if t})
 

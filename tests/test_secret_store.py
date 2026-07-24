@@ -8,12 +8,12 @@ from pathlib import Path
 import pytest
 
 from remedy.interfaces import secret_store
+from remedy.interfaces.api_support import _write_config
 from remedy.interfaces.config import (
     migrate_provider_keys,
     resolve_provider_api_key,
     set_provider_key,
 )
-from remedy.interfaces.api_support import _write_config
 
 
 def test_save_load_roundtrip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

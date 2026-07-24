@@ -23,22 +23,38 @@ from remedy.core.errors import SecurityError, format_tool_error
 from remedy.core.providers import ProviderAdapter, get_provider
 from remedy.core.react_policy import (
     FILE_READ_CHAR_CAP as _FILE_READ_CHAR_CAP,
+)
+from remedy.core.react_policy import (
     HARD_SAFETY_CHARS as _HARD_SAFETY_CHARS,
+)
+from remedy.core.react_policy import (
     HISTORY_CHAR_BUDGET as _HISTORY_CHAR_BUDGET,
+)
+from remedy.core.react_policy import (
     HISTORY_MSG_LIMIT as _HISTORY_MSG_LIMIT,
+)
+from remedy.core.react_policy import (
     HISTORY_MSG_SOFT_TRIM as _HISTORY_MSG_SOFT_TRIM,
+)
+from remedy.core.react_policy import (
     MAX_PARALLEL_TOOLS as _MAX_PARALLEL_TOOLS,
+)
+from remedy.core.react_policy import (
     MAX_REACT_STEPS as _MAX_REACT_STEPS,
+)
+from remedy.core.react_policy import (
     TOOL_RESULT_CHAR_CAP as _TOOL_RESULT_CHAR_CAP,
+)
+from remedy.core.react_policy import (
     _build_system_prompt,
     _looks_like_pseudo_tools,
     _message_wants_tools,
     _parse_pseudo_tool_calls,
-    strip_tool_markup,
     _tool_call_fingerprint,
     batch_has_tool_errors,
     message_wants_tools,
     recovery_nudge_message,
+    strip_tool_markup,
     tool_content_is_error,
 )
 from remedy.core.react_stream import (
@@ -168,18 +184,14 @@ class BasicRuntime(AgentRuntime):
             str(path) if path is not None else None,
             fallback=self._default_project_path,
         )
-        try:
+        with suppress(Exception):
             resolved = ensure_project_dir(resolved)
-        except Exception:
-            pass
         self._active_project_path = resolved
         if as_default:
             self._default_project_path = resolved
             if hasattr(self, "config") and self.config is not None:
-                try:
+                with suppress(Exception):
                     self.config.project_path = str(resolved)
-                except Exception:
-                    pass
         return resolved
 
     def _register_workspace_tools(self) -> None:
@@ -193,7 +205,7 @@ class BasicRuntime(AgentRuntime):
             return parent if parent not in ("", ".") else "."
 
         async def file_read(path: str = ".") -> str:
-            root = self.effective_project_path()
+            self.effective_project_path()
             target = self.resolve_tool_path(path)
             if not target.exists():
                 parent = _parent_hint(path)
@@ -1297,47 +1309,35 @@ class BasicRuntime(AgentRuntime):
             self._llm_provider = provider.strip().lower()
             self._provider = get_provider(self._llm_provider)
             if hasattr(self, "config") and self.config is not None:
-                try:
+                with suppress(Exception):
                     self.config.llm_provider = self._llm_provider
-                except Exception:
-                    pass
         if model is not None and model.strip():
             self._llm_model = model.strip()
             if hasattr(self, "config") and self.config is not None:
-                try:
+                with suppress(Exception):
                     self.config.llm_model = self._llm_model
-                except Exception:
-                    pass
         if base_url is not None and base_url.strip():
             self._llm_base_url = base_url.strip()
             if hasattr(self, "config") and self.config is not None:
-                try:
+                with suppress(Exception):
                     self.config.llm_base_url = self._llm_base_url
-                except Exception:
-                    pass
         if api_key is not None:
             # Empty string means leave unchanged (UI "keep current" path).
             if api_key != "":
                 self._llm_api_key = api_key
                 if hasattr(self, "config") and self.config is not None:
-                    try:
+                    with suppress(Exception):
                         self.config.llm_api_key = self._llm_api_key
-                    except Exception:
-                        pass
         if persona is not None:
             p = persona.strip().lower() if persona.strip() else "default"
             if hasattr(self, "config") and self.config is not None:
-                try:
+                with suppress(Exception):
                     self.config.persona = p
-                except Exception:
-                    pass
             self._system_prompt = _build_system_prompt(p)
         if name is not None and name.strip():
             if hasattr(self, "config") and self.config is not None:
-                try:
+                with suppress(Exception):
                     self.config.name = name.strip()
-                except Exception:
-                    pass
         if project_path is not None:
             # Allow clearing to cwd via empty string.
             self.set_project_path(project_path if project_path.strip() else None, as_default=True)

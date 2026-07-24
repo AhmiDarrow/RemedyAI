@@ -10,6 +10,7 @@ register your own application with xAI.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -135,8 +136,9 @@ def load_credentials(home: Path | None = None) -> XaiCredentials:
             outer = None
         if isinstance(outer, dict) and outer.get("v") == 2 and outer.get("dpapi"):
             try:
-                from remedy.interfaces.secret_store import _dpapi_unprotect
                 import base64
+
+                from remedy.interfaces.secret_store import _dpapi_unprotect
 
                 plain = _dpapi_unprotect(base64.b64decode(outer["dpapi"]))
                 data = json.loads(plain.decode("utf-8"))
@@ -175,8 +177,9 @@ def save_credentials(creds: XaiCredentials, home: Path | None = None) -> None:
     # Prefer DPAPI on Windows so the file is opaque to other accounts / casual copy.
     written = False
     try:
-        from remedy.interfaces.secret_store import _dpapi_available, _dpapi_protect
         import base64
+
+        from remedy.interfaces.secret_store import _dpapi_available, _dpapi_protect
 
         if _dpapi_available():
             sealed = _dpapi_protect(plain)
@@ -191,10 +194,8 @@ def save_credentials(creds: XaiCredentials, home: Path | None = None) -> None:
         logger.warning("xAI DPAPI protect failed, falling back to ACL-only: %s", exc)
     if not written:
         path.write_text(plain.decode("utf-8") + "\n", encoding="utf-8")
-    try:
+    with contextlib.suppress(OSError):
         path.chmod(0o600)
-    except OSError:
-        pass
     try:
         from remedy.interfaces.secret_store import _harden_path
 

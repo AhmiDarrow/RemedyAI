@@ -267,16 +267,10 @@ def _supports_unicode() -> bool:
 
 def _print_welcome() -> None:
     """Print the welcome banner with fallback for legacy terminals."""
-    if _supports_unicode():
-        art = WELCOME_ART
-    else:
-        art = WELCOME_ASCII
+    art = WELCOME_ART if _supports_unicode() else WELCOME_ASCII
 
     for i, line in enumerate(art):
-        if 0 <= i < 6:
-            style = "bold green" if i % 2 == 0 else "bold #a855f7"
-        else:
-            style = "dim"
+        style = ("bold green" if i % 2 == 0 else "bold #a855f7") if 0 <= i < 6 else "dim"
         console.print(line, style=style)
 
     console.print(
@@ -615,14 +609,13 @@ def _write_config(config: dict) -> Path:
             if isinstance(value, dict) and value.get("bot_token"):
                 lines.append(f"\n[{key}]")
                 lines.append(f'bot_token = "{value["bot_token"]}"')
-        elif key in ("gateway", "execution"):
-            if isinstance(value, dict):
-                lines.append(f"\n[{key}]")
-                for k, v in value.items():
-                    if isinstance(v, str):
-                        lines.append(f'{k} = "{v}"')
-                    else:
-                        lines.append(f"{k} = {v}")
+        elif key in ("gateway", "execution") and isinstance(value, dict):
+            lines.append(f"\n[{key}]")
+            for k, v in value.items():
+                if isinstance(v, str):
+                    lines.append(f'{k} = "{v}"')
+                else:
+                    lines.append(f"{k} = {v}")
 
     content = "\n".join(lines) + "\n"
     cfg_path.write_text(content, encoding="utf-8")

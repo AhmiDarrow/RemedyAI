@@ -9,6 +9,7 @@ Monitors skill execution success/failure signals and:
 
 from __future__ import annotations
 
+import contextlib
 import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -126,24 +127,18 @@ class SkillRefiner:
             )
             le = raw.get("last_executed")
             if le:
-                try:
+                with contextlib.suppress(ValueError):
                     stats.last_executed = datetime.fromisoformat(str(le))
-                except ValueError:
-                    pass
             self._stats[str(name)] = stats
             self._failure_streak[str(name)] = stats.consecutive_failures
             ls = raw.get("last_success_at")
             lf = raw.get("last_failure_at")
             if ls:
-                try:
+                with contextlib.suppress(ValueError):
                     self._last_success_at[str(name)] = datetime.fromisoformat(str(ls))
-                except ValueError:
-                    pass
             if lf:
-                try:
+                with contextlib.suppress(ValueError):
                     self._last_failure_at[str(name)] = datetime.fromisoformat(str(lf))
-                except ValueError:
-                    pass
             n += 1
         return n
 

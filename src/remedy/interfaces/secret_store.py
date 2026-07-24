@@ -362,7 +362,7 @@ def clear_provider_secret(
 
 def providers_with_secrets(home: Path | str | None = None) -> dict[str, bool]:
     """Public map of which providers have a stored key (no secret values)."""
-    return {k: True for k in load_provider_keys(home)}
+    return dict.fromkeys(load_provider_keys(home), True)
 
 
 def fingerprint_key(api_key: str | None) -> str | None:
@@ -387,7 +387,7 @@ def public_secret_status(home: Path | str | None = None) -> dict[str, Any]:
             encoding = "unknown"
     return {
         "providers_with_keys": sorted(keys.keys()),
-        "provider_keys_set": {k: True for k in keys},
+        "provider_keys_set": dict.fromkeys(keys, True),
         "store_path": str(path),
         "encoding": encoding,
         "fingerprints": {k: fingerprint_key(v) for k, v in keys.items()},

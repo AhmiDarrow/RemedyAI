@@ -3,7 +3,7 @@
 # unrelated package (remedy 0.0.6) that pulls ancient Jinja2/begins.
 # Import package and CLI entry point remain `remedy`.
 name = "remedy-ai"
-version = "0.10.33"
+version = "0.10.34"
 description = "Self-improving multi-channel software coding agent framework (memory, learning, tools) — not a medical product"
 readme = "README.md"
 license = { text = "LicenseRef-Proprietary" }
@@ -68,12 +68,20 @@ testpaths = ["tests"]
 target-version = "py312"
 line-length = 100
 lint.select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM"]
-lint.ignore = ["SIM114", "C419"]
+# E501/SIM102: long prompts + intentional nested guards; N81x short import aliases.
+lint.ignore = ["SIM114", "C419", "E501", "SIM102", "N814", "N817", "B005"]
 fix = true
 unsafe-fixes = false
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["N802", "N803", "N806", "E501"]
+"tests/*" = ["N802", "N803", "N806", "SIM117"]
+"scripts/*" = ["B007", "N806"]
+"src/remedy/interfaces/api.py" = ["N806"]
+"src/remedy/interfaces/secret_store.py" = ["N801"]
+"src/remedy/execution/sandbox.py" = ["N806"]
+"src/remedy/core/agent.py" = ["N806"]
+"src/remedy/interfaces/config.py" = ["N806"]
+"src/remedy/interfaces/routes/*" = ["SIM117"]
 
 [tool.ruff.format]
 quote-style = "double"

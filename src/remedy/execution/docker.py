@@ -8,6 +8,7 @@ and image caching.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import shutil
 import tempfile
 from pathlib import Path
@@ -159,10 +160,8 @@ class DockerSandbox(Sandbox):
         finally:
             # Cleanup temp dir
             import shutil
-            try:
+            with contextlib.suppress(Exception):
                 shutil.rmtree(tmpdir, ignore_errors=True)
-            except Exception:
-                pass
 
         elapsed = (time.monotonic() - start) * 1000
 

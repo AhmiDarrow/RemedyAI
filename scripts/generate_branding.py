@@ -1,4 +1,8 @@
-import urllib.request, urllib.parse, json, time, os
+import json
+import os
+import time
+import urllib.parse
+import urllib.request
 
 API_URL = "http://127.0.0.1:8188"
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "..", "assets")

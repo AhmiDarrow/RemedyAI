@@ -1,11 +1,11 @@
 {
-  "version": "v0.10.33",
-  "notes": "Remedy Desktop v0.10.33 \u2014 Windows installer",
-  "pub_date": "2026-07-24T16:07:15Z",
+  "version": "v0.10.34",
+  "notes": "Remedy Desktop v0.10.34 \u2014 security, tests, performance + CI green",
+  "pub_date": "2026-07-24T16:16:30Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "",
-      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.10.33/Remedy_Desktop_0.10.33_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUZ3ZLempYUXdCMXUyczZjVVRmOHUyVGJSbXArWVNWM2dtOGZrbTlPU2JsY09Jc28xWWJMbnVMZEFJVG50OWRqZlVvRHJ5WXZaVXJuczBGTHlUc1d6bTR2SmtPSXlMRmdnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0OTA5Nzc4CWZpbGU6UmVtZWR5IERlc2t0b3BfMC4xMC4zNF94NjQtc2V0dXAuZXhlCk0zcUZIR0d0RUhLUVk2NmQzak9qM0QyYm9Zbm9JNmpDREEzdHNZcm9uNlFjU1FKK0ZtNmN3WkNSWmdQZG9JNXRVUnFlNUkwLzF6dVdNWWhVdjAvR0N3PT0K",
+      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.10.34/Remedy.Desktop_0.10.34_x64-setup.exe"
     }
   }
 }

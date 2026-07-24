@@ -7,7 +7,7 @@ from uuid import uuid4
 import pytest
 
 from remedy.memory.store import MemoryStore
-from remedy.models import MemoryEntry, MemoryEntryType, HandoffNote
+from remedy.models import HandoffNote, MemoryEntry, MemoryEntryType
 
 
 @pytest.mark.asyncio

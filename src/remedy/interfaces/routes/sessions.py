@@ -2,68 +2,31 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
-import os
 import time
 from pathlib import Path
-from typing import Any
 from uuid import uuid4
 
-import aiohttp
-import yaml
-from fastapi import FastAPI, HTTPException, Query, Request, Response
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse, StreamingResponse
 
-from remedy import __version__ as _remedy_version
-from remedy.core.errors import SecurityError
-from remedy.core.security import safe_path
 from remedy.interfaces.api_models import (
-    AttachmentRef,
     AttachmentUploadRequest,
     ChatRequest,
-    ChatResponse,
-    CommandRequest,
     CreateSessionRequest,
-    MemoryAddRequest,
-    MemorySearchRequest,
     SendMessageRequest,
-    SettingsUpdateRequest,
-    SkillInfo,
-    StatusResponse,
     UpdateSessionRequest,
-    WebhookPayload,
 )
 from remedy.interfaces.api_support import (
-    _apply_llm_to_runtime,
-    _BUILTIN_AGENTS,
-    _BUILTIN_COMMANDS,
-    _BUILTIN_MODELS,
-    _default_config_path,
-    _find_config_path,
-    _load_config_cached,
-    _serialize_toml,
     _sse_stream_text,
     _sync_runtime_llm_from_config,
-    _write_config,
-    handle_slash_command,
     load_config,
     sse_headers,
 )
-from remedy.interfaces.config import (
-    PROVIDER_CATALOG,
-    catalog_models_for_provider,
-    needs_first_run_setup,
-    normalize_llm_settings,
-    provider_credentials_ready,
-)
-from remedy.interfaces.config import _is_local_url
 from remedy.models import (
-    ChannelKind,
     ChatMessageRole,
-    EventKind,
-    GatewayEvent,
-    MemoryEntryType,
 )
 
 logger = logging.getLogger(__name__)
@@ -84,7 +47,7 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
 
     def _default_project_path() -> str | None:
         """Resolved default workspace from config / runtime."""
-        from remedy.core.workspace import default_project_from_config, resolve_project_path
+        from remedy.core.workspace import default_project_from_config
 
         cfg = load_config()
         if runtime is not None and hasattr(runtime, "effective_project_path"):
@@ -304,10 +267,8 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                 f"File too large (max {MAX_ATTACHMENT_BYTES // (1024 * 1024)} MB)",
             )
         home = None
-        try:
+        with contextlib.suppress(Exception):
             home = load_config().get("home_dir")
-        except Exception:
-            pass
         try:
             meta = save_upload(
                 session_id=session_id,
@@ -325,10 +286,8 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         from remedy.interfaces.attachments import session_attachments_dir
 
         home = None
-        try:
+        with contextlib.suppress(Exception):
             home = load_config().get("home_dir")
-        except Exception:
-            pass
         directory = session_attachments_dir(session_id, home)
         # Prevent path traversal
         safe = Path(filename).name
@@ -410,7 +369,7 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                         session_id,
                         title=_title_from_prompt(
                             user_text
-                            or str((att_dicts[0].get("name") if att_dicts else "Attachments"))
+                            or str(att_dicts[0].get("name") if att_dicts else "Attachments")
                         ),
                     )
                 if req.model and req.model != existing.model:

@@ -15,7 +15,6 @@ from remedy.core.react_policy import (
     looks_like_pseudo_tools,
     message_wants_tools,
     parse_pseudo_tool_calls,
-    strip_tool_markup,
     tool_call_fingerprint,
 )
 

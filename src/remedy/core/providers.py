@@ -572,10 +572,7 @@ class DeepSeekProvider(OpenAIProvider):
     ) -> dict[str, Any]:
         # Cap at DeepSeek's accepted max so we don't 400 and abort the turn.
         cap = self.provider_max_output_tokens(model)
-        if max_tokens is None:
-            max_tokens = cap
-        else:
-            max_tokens = min(max(int(max_tokens), 1), cap)
+        max_tokens = cap if max_tokens is None else min(max(int(max_tokens), 1), cap)
         body = super().build_body(
             model,
             messages,

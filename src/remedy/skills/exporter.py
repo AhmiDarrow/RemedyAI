@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import shutil
 import zipfile
+from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -190,7 +191,7 @@ class SkillExporter:
         Imported skills start DISCOVERED + quarantine=true until the user
         promotes them via the Skills panel / API.
         """
-        from remedy.models import SkillKind, SkillManifest, SkillStatus
+        from remedy.models import SkillKind, SkillStatus
         from remedy.skills.loader import load_skill_from_dir
 
         dest_skills_dir = Path(dest_skills_dir).expanduser()
@@ -239,10 +240,8 @@ class SkillExporter:
                 + body
             )
             (target / "SKILL.md").write_text(content, encoding="utf-8")
-            try:
+            with suppress(Exception):
                 skill = load_skill_from_dir(target)
-            except Exception:
-                pass
             imported.append(skill)
         return imported
 

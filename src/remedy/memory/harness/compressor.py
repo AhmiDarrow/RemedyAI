@@ -7,7 +7,6 @@ from typing import Any
 
 from remedy.memory.harness.brief import SessionBrief
 
-
 _PATH_RE = re.compile(
     r"(?:[A-Za-z]:)?[\\/][\w.\\/ -]{3,}|"
     r"[\w.-]+\.(?:py|ts|tsx|js|jsx|rs|go|md|toml|json|yml|yaml|css|html)\b"

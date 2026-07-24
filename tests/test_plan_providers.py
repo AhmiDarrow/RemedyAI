@@ -8,12 +8,12 @@ from unittest.mock import patch
 import pytest
 
 from remedy.core.providers import get_provider, get_provider_for_base_url
+from remedy.interfaces.cli import _cmd_auth, build_parser
 from remedy.interfaces.config import (
     PROVIDER_CATALOG,
     detect_ollama,
     public_provider_catalog,
 )
-from remedy.interfaces.cli import build_parser, _cmd_auth
 
 
 class TestCatalogSprintC:
@@ -46,7 +46,6 @@ class TestOllamaDetect:
         assert result["models"] == []
 
     def test_detect_success_mocked(self):
-        import io
         import json
 
         payload = json.dumps({"models": [{"name": "llama3.2:latest"}, {"name": "qwen2.5"}]}).encode()
