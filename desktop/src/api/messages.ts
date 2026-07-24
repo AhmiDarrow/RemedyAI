@@ -28,8 +28,8 @@ export type StreamHandlers = {
   onDone: (data: { request_id: string }) => void
   onError: (message: string) => void
   onThinking?: (text: string) => void
-  onToolCall?: (name: string) => void
-  onToolResult?: (name: string) => void
+  onToolCall?: (name: string, args?: Record<string, unknown>) => void
+  onToolResult?: (name: string, preview?: string, ok?: boolean) => void
 }
 
 export type AttachmentPayload = {
@@ -41,6 +41,14 @@ export type AttachmentPayload = {
   is_text?: boolean
 }
 
+export type StreamProgress = {
+  percent?: number | null
+  label?: string
+  eta?: string | null
+  step?: number | null
+  total?: number | null
+}
+
 export function streamMessage(
   sessionId: string,
   message: string,
@@ -49,9 +57,10 @@ export function streamMessage(
   onError: (message: string) => void,
   model?: string,
   onThinking?: (text: string) => void,
-  onToolCall?: (name: string) => void,
-  onToolResult?: (name: string) => void,
+  onToolCall?: (name: string, args?: Record<string, unknown>) => void,
+  onToolResult?: (name: string, preview?: string, ok?: boolean) => void,
   attachments?: AttachmentPayload[],
+  onProgress?: (info: StreamProgress) => void,
 ): AbortController {
   const controller = new AbortController()
 
@@ -101,10 +110,31 @@ export function streamMessage(
             if (typeof payload.text === 'string' && payload.text) onThinking?.(payload.text)
             break
           case 'tool_call':
-            if (typeof payload.name === 'string' && payload.name) onToolCall?.(payload.name)
+            if (typeof payload.name === 'string' && payload.name) {
+              const args =
+                payload.args && typeof payload.args === 'object' && !Array.isArray(payload.args)
+                  ? (payload.args as Record<string, unknown>)
+                  : undefined
+              onToolCall?.(payload.name, args)
+            }
             break
           case 'tool_result':
-            if (typeof payload.name === 'string' && payload.name) onToolResult?.(payload.name)
+            if (typeof payload.name === 'string' && payload.name) {
+              onToolResult?.(
+                payload.name,
+                typeof payload.preview === 'string' ? payload.preview : undefined,
+                typeof payload.ok === 'boolean' ? payload.ok : true,
+              )
+            }
+            break
+          case 'progress':
+            onProgress?.({
+              percent: typeof payload.percent === 'number' ? payload.percent : null,
+              label: typeof payload.label === 'string' ? payload.label : undefined,
+              eta: typeof payload.eta === 'string' ? payload.eta : null,
+              step: typeof payload.step === 'number' ? payload.step : null,
+              total: typeof payload.total === 'number' ? payload.total : null,
+            })
             break
           case 'done':
             finished = true

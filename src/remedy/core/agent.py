@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from collections.abc import AsyncIterator
 from contextlib import suppress
 from pathlib import Path
@@ -29,6 +30,7 @@ from remedy.core.react_policy import (
     _looks_like_pseudo_tools,
     _message_wants_tools,
     _parse_pseudo_tool_calls,
+    strip_tool_markup,
     _tool_call_fingerprint,
     batch_has_tool_errors,
     message_wants_tools,
@@ -116,6 +118,16 @@ class BasicRuntime(AgentRuntime):
         self._harness_max_pct: float = float(
             getattr(config, "harness_max_context_pct", None) or 0.70
         )
+        tl = str(getattr(config, "thinking_level", None) or "medium").strip().lower()
+        self._thinking_level: str = (
+            tl if tl in ("off", "low", "medium", "high") else "medium"
+        )
+        am = str(getattr(config, "approval_mode", None) or "ask").strip().lower()
+        self._approval_mode: str = am if am in ("ask", "auto") else "ask"
+        with suppress(Exception):
+            from remedy.core.approvals import APPROVALS
+
+            APPROVALS.set_mode(self._approval_mode)
         # Memory Harness L2 working state (per agent instance / session)
         self._session_brief = None  # type: ignore[assignment]
         self._register_workspace_tools()
@@ -386,6 +398,243 @@ class BasicRuntime(AgentRuntime):
                     "command": {"type": "string", "description": "Shell command to run"},
                 },
                 "required": ["command"],
+            },
+        )
+        self._register_comfyui_tools()
+        self._register_local_discover_tools()
+
+    def _register_local_discover_tools(self) -> None:
+        """Portable discovery for *any* skill/service local deps — no disk thrash."""
+
+        async def local_discover(
+            action: str = "scan",
+            target: str = "",
+        ) -> str:
+            """Find local services/binaries skills need on this machine.
+
+            action=scan   → all skill local: specs + built-ins (comfyui, ollama, …)
+            action=status → same as scan (alias)
+            action=one    → single target id (e.g. comfyui, ollama)
+            """
+            from remedy.core.local_discover import (
+                collect_skill_local_specs,
+                discover_all,
+                discover_one,
+            )
+
+            act = (action or "scan").strip().lower()
+            specs = []
+            with suppress(Exception):
+                reg = getattr(self, "skills", None)
+                if reg is not None:
+                    specs = collect_skill_local_specs(list(getattr(reg, "skills", []) or []))
+
+            try:
+                if act in ("one", "get", "find") and (target or "").strip():
+                    result = await asyncio.to_thread(
+                        discover_one, str(target).strip(), skill_specs=specs
+                    )
+                else:
+                    result = await asyncio.to_thread(
+                        discover_all, skill_specs=specs, include_builtins=True
+                    )
+                return json.dumps(result, indent=2, default=str)
+            except Exception as e:
+                return format_tool_error(
+                    str(e),
+                    code="DISCOVER_ERROR",
+                    tool_name="local_discover",
+                    suggestion=(
+                        "Set env/config for the service (e.g. COMFYUI_URL) or "
+                        "~/.remedy/<service>.json — do not list_dir the whole disk."
+                    ),
+                )
+
+        self.tool_registry.register_builtin_handler(
+            "local_discover",
+            "Portable discovery of local services/binaries that skills need "
+            "(ComfyUI, Ollama, anything declared in skill frontmatter local:). "
+            "ALWAYS prefer this over list_dir/bash disk hunts. "
+            "action=scan (default) or action=one with target=comfyui|ollama|…",
+            local_discover,
+            {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "description": "scan | one (default scan)",
+                    },
+                    "target": {
+                        "type": "string",
+                        "description": "Service id when action=one (comfyui, ollama, …)",
+                    },
+                },
+            },
+        )
+
+    def _register_comfyui_tools(self) -> None:
+        """Local ComfyUI image generation (status / generate + session attach)."""
+
+        async def comfyui(
+            action: str = "status",
+            prompt: str = "",
+            width: int = 512,
+            height: int = 512,
+            steps: int = 16,
+            seed: int | None = None,
+            base_url: str = "",
+            timeout: float = 300.0,
+        ) -> str:
+            """Local ComfyUI via HTTP API only — never search the disk.
+
+            action=status   → GET /system_stats on http://127.0.0.1:8188
+            action=locate   → known install paths + start hints (no recursive scan)
+            action=generate → txt2img + attach PNG to current session
+            """
+            from remedy.tools import comfyui as comfy
+
+            act = (action or "status").strip().lower()
+            try:
+                if act in ("status", "health", "ping"):
+                    info = await asyncio.to_thread(comfy.status, base_url or None)
+                    return json.dumps(info, indent=2)
+
+                if act in ("locate", "find", "where", "install"):
+                    info = await asyncio.to_thread(comfy.locate)
+                    return json.dumps(info, indent=2)
+
+                if act in ("generate", "run", "txt2img", "image"):
+                    text = (prompt or "").strip()
+                    if not text:
+                        return format_tool_error(
+                            "prompt is required for action=generate",
+                            code="MISSING_PROMPT",
+                            tool_name="comfyui",
+                            suggestion=(
+                                'Call comfyui with action="generate" and a non-empty prompt.'
+                            ),
+                        )
+                    result = await asyncio.to_thread(
+                        comfy.generate_image,
+                        text,
+                        base_url=base_url or None,
+                        width=int(width or 512),
+                        height=int(height or 512),
+                        steps=int(steps or 16),
+                        seed=seed,
+                        timeout=float(timeout or 300),
+                    )
+                    paths = result.get("paths") or []
+                    if not paths:
+                        return (
+                            "ComfyUI finished but no images were returned. "
+                            f"prompt_id={result.get('prompt_id')}"
+                        )
+                    # Attach into the active chat session so the UI can show it.
+                    sid = getattr(self, "_session_id", None)
+                    home = None
+                    if getattr(self, "config", None) is not None:
+                        home = getattr(self.config, "home_dir", None)
+                    blocks: list[str] = [
+                        f"ComfyUI generate ok (prompt_id={result.get('prompt_id')}, "
+                        f"seed={result.get('seed')}).",
+                    ]
+                    # Mark for the agent loop to surface immediately to the user.
+                    image_blocks: list[str] = []
+                    for p in paths[:4]:
+                        img_path = Path(p)
+                        if sid:
+                            meta = await asyncio.to_thread(
+                                comfy.attach_image_to_session,
+                                str(sid),
+                                img_path,
+                                home_dir=home,
+                            )
+                            md = comfy.markdown_for_image(
+                                meta, caption=text[:80], embed_data_uri=True
+                            )
+                            blocks.append(md)
+                            image_blocks.append(md)
+                            self._track_artifact(str(meta.get("path") or img_path))
+                        else:
+                            # Still embed for display even without session id
+                            meta = {
+                                "name": img_path.name,
+                                "path": str(img_path),
+                                "mime": "image/png",
+                                "view_url": "",
+                            }
+                            md = comfy.markdown_for_image(
+                                meta, caption=text[:80], embed_data_uri=True
+                            )
+                            blocks.append(md)
+                            image_blocks.append(md)
+                            self._track_artifact(str(img_path))
+                    blocks.append(
+                        "IMPORTANT: Your next message to the user MUST include the "
+                        "markdown image block(s) above exactly (do not invent links)."
+                    )
+                    # Special marker consumed by the ReAct loop to stream the image
+                    # into chat even if the model forgets to paste it.
+                    if image_blocks:
+                        blocks.append("@@REMEDY_IMAGE_MARKDOWN@@\n" + "\n\n".join(image_blocks))
+                    return "\n\n".join(blocks)
+
+                return format_tool_error(
+                    f"unknown action: {action}",
+                    code="BAD_ACTION",
+                    tool_name="comfyui",
+                    suggestion='Use action="status", "locate", or "generate".',
+                )
+            except Exception as e:
+                return format_tool_error(
+                    str(e),
+                    code="COMFY_ERROR",
+                    tool_name="comfyui",
+                    suggestion=(
+                        "Call comfyui action=locate for start hints, then start "
+                        "ComfyUI (main.py --listen on :8188). Do NOT list_dir the "
+                        "whole disk or run where/dir hunts."
+                    ),
+                )
+
+        self.tool_registry.register_builtin_handler(
+            "comfyui",
+            "Local ComfyUI on ANY machine. NEVER list_dir/bash to hunt installs — "
+            "use this tool. action=status → probe API (auto ports); "
+            "action=locate → portable discovery (env/config, live ports, process, "
+            "bounded home search) + start hints; "
+            "action=generate → txt2img and attach PNG to this chat session. "
+            "Optional overrides: COMFYUI_URL / COMFYUI_HOME or ~/.remedy/comfyui.json.",
+            comfyui,
+            {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "description": "status | locate | generate (default status)",
+                    },
+                    "prompt": {
+                        "type": "string",
+                        "description": "Image prompt (required for generate)",
+                    },
+                    "width": {"type": "integer", "description": "Width (default 512)"},
+                    "height": {"type": "integer", "description": "Height (default 512)"},
+                    "steps": {"type": "integer", "description": "Sampler steps (default 16)"},
+                    "seed": {
+                        "type": "integer",
+                        "description": "Optional seed (random if omitted)",
+                    },
+                    "base_url": {
+                        "type": "string",
+                        "description": "Override ComfyUI URL (default http://127.0.0.1:8188)",
+                    },
+                    "timeout": {
+                        "type": "number",
+                        "description": "Max wait seconds for generation (default 300)",
+                    },
+                },
+                "required": ["action"],
             },
         )
 
@@ -690,8 +939,20 @@ class BasicRuntime(AgentRuntime):
         harness_mode: str | None = None,
         harness_min_context_pct: float | None = None,
         harness_max_context_pct: float | None = None,
+        thinking_level: str | None = None,
+        approval_mode: str | None = None,
     ) -> None:
         """Hot-apply LLM / persona / project settings without restarting."""
+        if thinking_level is not None:
+            tl = str(thinking_level).strip().lower()
+            self._thinking_level = tl if tl in ("off", "low", "medium", "high") else "medium"
+        if approval_mode is not None:
+            try:
+                from remedy.core.approvals import APPROVALS
+
+                self._approval_mode = APPROVALS.set_mode(str(approval_mode))
+            except Exception:
+                self._approval_mode = str(approval_mode).strip().lower() or "ask"
         if access_scope is not None:
             self._access_scope = normalize_access_scope(access_scope)
             if hasattr(self, "config") and self.config is not None:
@@ -1021,13 +1282,81 @@ class BasicRuntime(AgentRuntime):
             seen_fps.add(fp)
             return content_str
 
+        def _progress_marker(
+            *,
+            label: str,
+            step: int | None = None,
+            total: int | None = None,
+            percent: float | None = None,
+            force_percent: bool = False,
+        ) -> str:
+            """Build @@progress payload for the desktop task progress bar.
+
+            Single long jobs stay indeterminate (no percent) until finished so
+            the UI doesn't freeze at 0%. Multi-step batches get real %.
+            """
+            payload: dict[str, Any] = {"label": label}
+            if step is not None:
+                payload["step"] = step
+            if total is not None:
+                payload["total"] = total
+            multi = bool(total and total > 1)
+            if percent is not None and (force_percent or multi or (step or 0) >= (total or 0) > 0):
+                payload["percent"] = round(float(percent), 1)
+            elif multi and step is not None and total:
+                payload["percent"] = round(100.0 * float(step) / float(total), 1)
+            return f"@@progress:{json.dumps(payload, separators=(',', ':'))}"
+
         # Execute only fingerprints not already cached; never drop remainder past cap.
         to_run = [fp for fp in fp_order if fp not in result_cache]
+        total_jobs = max(len(to_run), 1)
+        completed_jobs = 0
+        if to_run:
+            first_name = (
+                ((fp_to_tc[to_run[0]].get("function") or {}).get("name") or "tools").strip()
+            )
+            # Label only while in-flight; avoid a stuck 0% for one long job.
+            yield _progress_marker(
+                label=first_name if len(to_run) == 1 else f"{len(to_run)} tools",
+                step=0,
+                total=total_jobs,
+            ), {}
+
         for wave_start in range(0, len(to_run), _MAX_PARALLEL_TOOLS):
             wave = to_run[wave_start : wave_start + _MAX_PARALLEL_TOOLS]
+            wave_names: list[str] = []
             for fp in wave:
-                name = ((fp_to_tc[fp].get("function") or {}).get("name") or "").strip()
-                yield f"@@tool_call:{name}", {}
+                tc = fp_to_tc[fp]
+                name = ((tc.get("function") or {}).get("name") or "").strip()
+                wave_names.append(name or "tool")
+                raw_args = (tc.get("function") or {}).get("arguments") or "{}"
+                try:
+                    args_obj = (
+                        json.loads(raw_args) if isinstance(raw_args, str) else dict(raw_args)
+                    )
+                except Exception:
+                    args_obj = {"_raw": str(raw_args)[:2000]}
+                if not isinstance(args_obj, dict):
+                    args_obj = {"value": args_obj}
+                # Structured tool_call for UI process trace (args for full mode).
+                yield (
+                    "@@tool_call:"
+                    + json.dumps(
+                        {"name": name or "tool", "args": args_obj},
+                        default=str,
+                        separators=(",", ":"),
+                    )
+                ), {}
+            label = (
+                wave_names[0]
+                if len(wave_names) == 1
+                else f"{len(wave_names)} tools"
+            )
+            yield _progress_marker(
+                label=label,
+                step=completed_jobs,
+                total=total_jobs,
+            ), {}
 
             results = await asyncio.gather(
                 *[_run_one(fp_to_tc[fp]) for fp in wave],
@@ -1049,6 +1378,15 @@ class BasicRuntime(AgentRuntime):
                     result_cache[fp] = content_str
                     seen_fps.add(fp)
                 # Success path already wrote result_cache inside _run_one.
+                completed_jobs += 1
+                done = completed_jobs >= total_jobs
+                yield _progress_marker(
+                    label=name or "tool",
+                    step=completed_jobs,
+                    total=total_jobs,
+                    percent=(100.0 if done else 100.0 * completed_jobs / total_jobs),
+                    force_percent=done,
+                ), {}
 
         # Always emit one tool result per original tool_call id (API contract).
         for tc in pending:
@@ -1064,7 +1402,42 @@ class BasicRuntime(AgentRuntime):
                 ),
             )
             call_id = tc.get("id") or str(uuid4())
-            yield f"@@tool_result:{name or 'unknown'}", {
+            # Surface generated images immediately (don't wait for model to restate).
+            if name == "comfyui" and "@@REMEDY_IMAGE_MARKDOWN@@" in content_str:
+                marker = "@@REMEDY_IMAGE_MARKDOWN@@"
+                img_md = content_str.split(marker, 1)[-1].strip()
+                if img_md:
+                    yield f"@@image_markdown:{img_md}", {}
+                # Keep tool payload for the model without the huge data-URI blob.
+                content_str = content_str.split(marker, 1)[0].strip()
+                if len(content_str) > 2000:
+                    content_str = content_str[:2000] + "\n…[image already sent to user]"
+            # Full raw dump for UI process trace (Full mode).
+            # Keep a hard ceiling only so multi‑MB binary dumps cannot freeze SSE.
+            _UI_TRACE_CAP = 500_000
+            preview = content_str
+            if len(preview) > _UI_TRACE_CAP:
+                preview = (
+                    preview[:_UI_TRACE_CAP]
+                    + f"\n…[{len(content_str)} chars total — UI safety cap]"
+                )
+            ok = not (
+                '"code": "TOOL_' in content_str
+                or content_str.startswith("Error")
+                or "TOOL_EXCEPTION" in content_str
+            )
+            yield (
+                "@@tool_result:"
+                + json.dumps(
+                    {
+                        "name": name or "unknown",
+                        "preview": preview,
+                        "ok": ok,
+                    },
+                    default=str,
+                    separators=(",", ":"),
+                )
+            ), {
                 "role": "tool",
                 "tool_call_id": call_id,
                 "content": content_str,
@@ -1126,10 +1499,18 @@ class BasicRuntime(AgentRuntime):
                     if level:
                         messages.insert(-1, compression_nudge_message(level))
             all_tools = self._openai_tools()
+            # Creative image prompts ("make something cool/spacey") must keep tools on.
             tools = (
                 all_tools
                 if should_enable_tools(
                     message, all_tools, has_attachments=bool(attachments)
+                )
+                or bool(
+                    re.search(
+                        r"\b(comfy|image|picture|nebula|spacey|generate|draw|illustrat)\b",
+                        message or "",
+                        re.I,
+                    )
                 )
                 else []
             )
@@ -1203,6 +1584,7 @@ class BasicRuntime(AgentRuntime):
                         messages=messages,
                         tools=step_tools,
                         stream=use_openai_sse,
+                        thinking_level=getattr(self, "_thinking_level", "medium"),
                     )
 
                     collected: dict[str, Any] = {"content": None, "tool_calls": None}
@@ -1309,9 +1691,10 @@ class BasicRuntime(AgentRuntime):
                             force_answer_sticky = True
                             continue
 
-                        # Live-stream tokens when tools are off (simple Qs / final answer).
-                        # When tools are on, buffer text so "Let me check…" never jitters the UI.
-                        stream_live = step_tools is None
+                        # Live-stream only when tools are fully off (simple Qs).
+                        # Always buffer when any tools exist — DeepSeek-class models
+                        # often dump DSML tool markup as content if we stream live.
+                        stream_live = step_tools is None and not all_tools
 
                         headers_map = getattr(resp, "headers", None) or {}
                         content_type = str(
@@ -1343,9 +1726,13 @@ class BasicRuntime(AgentRuntime):
                                 chunk = parse_sse_data_line(line_text)
                                 if chunk is None:
                                     continue
+                                r_before = len(''.join(round_state.reasoning_parts))
                                 live = apply_openai_sse_chunk(
                                     round_state, chunk, stream_live=stream_live
                                 )
+                                r_after = ''.join(round_state.reasoning_parts)
+                                if len(r_after) > r_before:
+                                    yield f'@@thinking:{r_after[r_before:]}'
                                 if live:
                                     produced_user_text = True
                                     yield live
@@ -1376,6 +1763,15 @@ class BasicRuntime(AgentRuntime):
 
                     # Finalize text. Live-stream already yielded tokens when tools off.
                     text_out = finalize_round_text(round_state, tool_calls_list)
+                    # Never treat DSML / text-tool dumps as user-visible answer text.
+                    if text_out and _looks_like_pseudo_tools(text_out):
+                        recovered_preview = _parse_pseudo_tool_calls(text_out)
+                        clean = strip_tool_markup(text_out)
+                        # Keep only non-markup prose (if any) for the bubble.
+                        text_out = clean if clean and not _looks_like_pseudo_tools(clean) else ""
+                        if not tool_calls_list and recovered_preview:
+                            # Force recovery path below even if tools were off this round.
+                            pass
                     if (
                         text_out
                         and stream_live
@@ -1389,16 +1785,17 @@ class BasicRuntime(AgentRuntime):
                     if text_out:
                         collected["content"] = text_out
 
-                    # Recovery: model wrote tool calls as plain text → run them for real.
+                    # Recovery: model wrote tool calls as plain text / DSML → run them for real.
+                    raw_round = finalize_round_text(round_state, tool_calls_list)
                     if (
                         not tool_calls_list
-                        and text_out
-                        and _looks_like_pseudo_tools(text_out)
+                        and raw_round
+                        and _looks_like_pseudo_tools(raw_round)
                         and all_tools
                         and not pseudo_recovery_done
                         and not force_answer
                     ):
-                        recovered = _parse_pseudo_tool_calls(text_out)
+                        recovered = _parse_pseudo_tool_calls(raw_round)
                         if recovered:
                             pseudo_recovery_done = True
                             tools = all_tools  # ensure schemas stay available
@@ -1407,8 +1804,7 @@ class BasicRuntime(AgentRuntime):
                             messages.append(
                                 build_assistant_api_message(
                                     content=(
-                                        "I'll use tools to inspect the project "
-                                        "(recovering from text-form tool calls)."
+                                        "Using tools now (recovered from a non-native tool dump)."
                                     ),
                                     tool_calls=recovered,
                                     reasoning_content=reasoning_out or None,
@@ -1436,7 +1832,8 @@ class BasicRuntime(AgentRuntime):
                     if text_out and (not tool_calls_list or force_answer):
                         # Don't ship faux tool syntax as the final answer.
                         if (
-                            _looks_like_pseudo_tools(text_out)
+                            raw_round
+                            and _looks_like_pseudo_tools(raw_round)
                             and all_tools
                             and not force_answer
                             and pseudo_nudge_count < 1
@@ -1448,42 +1845,15 @@ class BasicRuntime(AgentRuntime):
                                 {
                                     "role": "user",
                                     "content": (
-                                        "Do not write tool calls as text. "
+                                        "Do not write tool calls as text or DSML/XML. "
                                         "Use the function-calling API now "
-                                        "(file_read / list_dir / bash_exec), "
-                                        "or answer from context."
+                                        "(comfyui / local_discover / file_read / "
+                                        "list_dir / bash_exec), or answer from context."
                                     ),
                                 }
                             )
                             continue
                         if stream_live and produced_user_text:
-                            # Already streamed live; if it was pseudo-tool junk, apologize once.
-                            if _looks_like_pseudo_tools(text_out):
-                                # Tools were off during live stream — re-enable and recover.
-                                if all_tools and not pseudo_recovery_done:
-                                    recovered = normalize_tool_calls(
-                                        _parse_pseudo_tool_calls(text_out)
-                                    )
-                                    if recovered:
-                                        pseudo_recovery_done = True
-                                        tools = all_tools
-                                        messages.append(
-                                            build_assistant_api_message(
-                                                content=text_out[:500],
-                                                tool_calls=recovered,
-                                                reasoning_content=reasoning_out or None,
-                                            )
-                                        )
-                                        async for event, tool_msg in self._execute_tool_calls(
-                                            recovered,
-                                            seen_fps=seen_fps,
-                                            result_cache=result_cache,
-                                        ):
-                                            if event.startswith("@@"):
-                                                yield event
-                                            if tool_msg:
-                                                messages.append(tool_msg)
-                                        continue
                             # Hit max_tokens mid-answer → seamless continuation.
                             if (
                                 round_state.hit_length_limit
@@ -1516,8 +1886,10 @@ class BasicRuntime(AgentRuntime):
                                 continue
                             return
                         if not stream_live:
-                            yield text_out
-                            produced_user_text = True
+                            # Final safety: never yield markup-only blobs.
+                            if text_out and not _looks_like_pseudo_tools(text_out):
+                                yield text_out
+                                produced_user_text = True
                             if (
                                 round_state.hit_length_limit
                                 and length_continuations < max_length_continuations
@@ -1637,6 +2009,7 @@ class BasicRuntime(AgentRuntime):
                     messages=messages,
                     tools=None,
                     stream=use_openai_sse,
+                    thinking_level=getattr(self, "_thinking_level", "medium"),
                 )
                 try:
                     async with aiohttp.ClientSession(
@@ -1822,11 +2195,25 @@ class BasicRuntime(AgentRuntime):
 
         # User profile (companion personalization)
         with suppress(Exception):
+            user_name = ""
             if self.memory is not None:
                 profile = await self.memory.get_or_create_profile()
                 profile_lines: list[str] = []
-                if profile.display_name:
-                    profile_lines.append(f"- Name: {profile.display_name}")
+                user_name = (profile.display_name or "").strip()
+                # Config user_name is the settings field; prefer live profile, fall back to config.
+                if not user_name:
+                    try:
+                        from remedy.interfaces.config import load_config
+
+                        user_name = str(load_config().get("user_name") or "").strip()
+                        if user_name and not profile.display_name:
+                            profile.display_name = user_name
+                            await self.memory.save_user_profile(profile)
+                    except Exception:
+                        pass
+                if user_name:
+                    profile_lines.append(f"- Call the user: {user_name}")
+                    profile_lines.append(f"- Name: {user_name}")
                 for key, trait in list(profile.traits.items())[:12]:
                     if trait.confidence >= 0.4:
                         profile_lines.append(f"- {key}: {trait.value}")
@@ -1837,6 +2224,11 @@ class BasicRuntime(AgentRuntime):
                     parts.append(
                         "User profile (remember across sessions):\n"
                         + "\n".join(profile_lines)
+                        + (
+                            f"\nAddress the user as {user_name} when natural."
+                            if user_name
+                            else ""
+                        )
                     )
 
         # Session Brief (Memory Harness L2) when present on agent

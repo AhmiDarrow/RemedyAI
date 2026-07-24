@@ -15,6 +15,7 @@ from remedy.core.react_policy import (
     looks_like_pseudo_tools,
     message_wants_tools,
     parse_pseudo_tool_calls,
+    strip_tool_markup,
     tool_call_fingerprint,
 )
 
@@ -31,6 +32,8 @@ class StreamRoundState:
     tool_call_acc: dict[int, dict[str, Any]] = field(default_factory=dict)
     produced_user_text: bool = False
     finish_reason: str | None = None
+    # True when we buffered content that looked like DSML / text tool-calls.
+    suppressed_tool_markup: bool = False
 
     @property
     def text_out(self) -> str:
@@ -104,9 +107,16 @@ def apply_openai_sse_chunk(
     live: str | None = None
     if content_delta:
         state.content_parts.append(content_delta)
-        if stream_live:
+        # Never live-stream DSML / fake tool markup — it becomes chat spam.
+        acc = "".join(state.content_parts)
+        if stream_live and not looks_like_pseudo_tools(acc) and not looks_like_pseudo_tools(
+            str(content_delta)
+        ):
             state.produced_user_text = True
             live = content_delta
+        elif stream_live and looks_like_pseudo_tools(acc):
+            # Mark so callers know we suppressed junk (recovery will run later).
+            state.suppressed_tool_markup = True
     # DeepSeek thinking mode streams reasoning_content alongside (or before) content.
     # Must accumulate independently — not only in the no-content branch.
     reason_delta = delta.get("reasoning_content") or delta.get("reasoning")

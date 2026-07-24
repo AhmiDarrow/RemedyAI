@@ -1,4 +1,12 @@
-export type ThemeId = 'system' | 'dark' | 'light' | 'green' | 'purple' | 'orange' | 'cyan'
+export type ThemeId =
+  | 'system'
+  | 'dark'
+  | 'neutral'
+  | 'light'
+  | 'green'
+  | 'purple'
+  | 'orange'
+  | 'cyan'
 
 export interface ThemeColors {
   '--bg-primary': string
@@ -29,8 +37,8 @@ export interface ThemeColors {
 
 /** Shared chat geometry (colors differ per theme). */
 const CHAT_GEOMETRY = {
-  '--chat-bubble-radius': '1rem',
-  '--chat-max-width': '78%',
+  '--chat-bubble-radius': '0.65rem',
+  '--chat-max-width': '72%',
 } as const
 
 function chatFromPalette(
@@ -56,6 +64,7 @@ function chatFromPalette(
   | '--chat-max-width'
 > {
   return {
+    // Keep chat user bubble = theme accent so swatches match what you see in chat.
     '--chat-user-bg': accent,
     '--chat-user-fg': kind === 'light' ? '#ffffff' : '#ffffff',
     '--chat-user-border': accent,
@@ -66,6 +75,61 @@ function chatFromPalette(
     '--chat-system-fg': error,
     '--chat-system-border': border,
     ...CHAT_GEOMETRY,
+  }
+}
+
+/** Colors for theme picker dots — always taken from the real palette. */
+export type ThemeSwatch = {
+  /** Main surface (dark/light character of the theme) */
+  bg: string
+  /** Signature accent */
+  accent: string
+  /** Secondary surface for multi-tone rings */
+  surface: string
+  /** Border tone for the swatch outline */
+  border: string
+}
+
+export function themeSwatch(id: ThemeId): ThemeSwatch {
+  if (id === 'system') {
+    // Split preview: left follows OS dark, right follows OS light accent.
+    const dark = THEMES.dark.colors
+    const light = THEMES.light.colors
+    const osLight = systemPrefersLight()
+    const active = osLight ? light : dark
+    return {
+      bg: active['--bg-primary'],
+      accent: active['--accent'],
+      surface: active['--bg-secondary'],
+      border: active['--border'],
+    }
+  }
+  const c = THEMES[id].colors
+  return {
+    bg: c['--bg-primary'],
+    accent: c['--accent'],
+    surface: c['--bg-secondary'],
+    border: c['--border'],
+  }
+}
+
+/** System option shows dual dark/light halves so it isn't confused with Dark. */
+export function systemThemeSwatch(): { dark: ThemeSwatch; light: ThemeSwatch } {
+  const d = THEMES.dark.colors
+  const l = THEMES.light.colors
+  return {
+    dark: {
+      bg: d['--bg-primary'],
+      accent: d['--accent'],
+      surface: d['--bg-secondary'],
+      border: d['--border'],
+    },
+    light: {
+      bg: l['--bg-primary'],
+      accent: l['--accent'],
+      surface: l['--bg-secondary'],
+      border: l['--border'],
+    },
   }
 }
 
@@ -84,6 +148,7 @@ export const THEMES: Record<Exclude<ThemeId, 'system'>, Theme> = {
     name: 'Dark',
     kind: 'dark',
     colors: {
+      // Classic violet dark (original Remedy look)
       '--bg-primary': '#0c0c14',
       '--bg-secondary': '#14141f',
       '--bg-tertiary': '#1c1c2a',
@@ -100,6 +165,28 @@ export const THEMES: Record<Exclude<ThemeId, 'system'>, Theme> = {
     },
   },
 
+  /** True slate dark — no purple so it is distinct from Amethyst / Dark violet. */
+  neutral: {
+    id: 'neutral',
+    name: 'Neutral Dark',
+    kind: 'dark',
+    colors: {
+      '--bg-primary': '#0f1115',
+      '--bg-secondary': '#161a20',
+      '--bg-tertiary': '#1e2430',
+      '--border': '#2e3644',
+      '--accent': '#94a3b8',
+      '--accent-hover': '#cbd5e1',
+      '--text-primary': '#f1f5f9',
+      '--text-secondary': '#94a3b8',
+      '--text-muted': '#64748b',
+      '--success': '#34d399',
+      '--error': '#f87171',
+      '--warning': '#fbbf24',
+      ...chatFromPalette('dark', '#94a3b8', '#161a20', '#1e2430', '#2e3644', '#f1f5f9', '#f87171'),
+    },
+  },
+
   light: {
     id: 'light',
     name: 'Light',
@@ -107,8 +194,9 @@ export const THEMES: Record<Exclude<ThemeId, 'system'>, Theme> = {
     colors: {
       '--bg-primary': '#f4f4f8',
       '--bg-secondary': '#ffffff',
-      '--bg-tertiary': '#eaeaef',
-      '--border': '#c8c8d4',
+      '--bg-tertiary': '#e8e8ef',
+      // Stronger borders for light mode contrast
+      '--border': '#a8a8b8',
       '--accent': '#7c3aed',
       '--accent-hover': '#6d28d9',
       '--text-primary': '#14141f',
@@ -117,7 +205,7 @@ export const THEMES: Record<Exclude<ThemeId, 'system'>, Theme> = {
       '--success': '#15803d',
       '--error': '#b91c1c',
       '--warning': '#b45309',
-      ...chatFromPalette('light', '#7c3aed', '#ffffff', '#eaeaef', '#c8c8d4', '#14141f', '#b91c1c'),
+      ...chatFromPalette('light', '#7c3aed', '#ffffff', '#e8e8ef', '#a8a8b8', '#14141f', '#b91c1c'),
     },
   },
 
@@ -138,7 +226,7 @@ export const THEMES: Record<Exclude<ThemeId, 'system'>, Theme> = {
       '--success': '#6ee7b7',
       '--error': '#fca5a5',
       '--warning': '#fcd34d',
-      ...chatFromPalette('dark', '#10b981', '#0f1f18', '#163026', '#1f4a38', '#ecfdf5', '#fca5a5'),
+      ...chatFromPalette('dark', '#34d399', '#0f1f18', '#163026', '#1f4a38', '#ecfdf5', '#fca5a5'),
     },
   },
 
@@ -159,7 +247,7 @@ export const THEMES: Record<Exclude<ThemeId, 'system'>, Theme> = {
       '--success': '#6ee7b7',
       '--error': '#fca5a5',
       '--warning': '#fde68a',
-      ...chatFromPalette('dark', '#a855f7', '#1a1224', '#261a36', '#3d2a55', '#f5f3ff', '#fca5a5'),
+      ...chatFromPalette('dark', '#c084fc', '#1a1224', '#261a36', '#3d2a55', '#f5f3ff', '#fca5a5'),
     },
   },
 
@@ -180,7 +268,7 @@ export const THEMES: Record<Exclude<ThemeId, 'system'>, Theme> = {
       '--success': '#6ee7b7',
       '--error': '#fca5a5',
       '--warning': '#fde68a',
-      ...chatFromPalette('dark', '#f97316', '#1f1810', '#2e2418', '#4a3a24', '#fff7ed', '#fca5a5'),
+      ...chatFromPalette('dark', '#fb923c', '#1f1810', '#2e2418', '#4a3a24', '#fff7ed', '#fca5a5'),
     },
   },
 
@@ -201,7 +289,7 @@ export const THEMES: Record<Exclude<ThemeId, 'system'>, Theme> = {
       '--success': '#6ee7b7',
       '--error': '#fca5a5',
       '--warning': '#fde68a',
-      ...chatFromPalette('dark', '#06b6d4', '#0f1c22', '#163038', '#1e4a55', '#ecfeff', '#fca5a5'),
+      ...chatFromPalette('dark', '#22d3ee', '#0f1c22', '#163038', '#1e4a55', '#ecfeff', '#fca5a5'),
     },
   },
 } as const
@@ -237,14 +325,39 @@ export function getResolvedTheme(id: ThemeId): Theme {
   return THEMES[resolved]
 }
 
-export function applyTheme(theme: Theme): void {
-  document.documentElement.setAttribute('data-theme', theme.id)
-  document.documentElement.setAttribute('data-theme-kind', theme.kind)
-  document.documentElement.style.colorScheme = theme.kind
+export function applyTheme(theme: Theme, opts?: { customAccent?: string }): void {
+  const root = document.documentElement
+  // Brief CSS transition so theme switches feel polished (not jarring).
+  root.classList.add('theme-animating')
+  root.setAttribute('data-theme', theme.id)
+  root.setAttribute('data-theme-kind', theme.kind)
+  root.style.colorScheme = theme.kind
   // Apply CSS variables for components that read inline from THEMES
   for (const [k, v] of Object.entries(theme.colors)) {
-    document.documentElement.style.setProperty(k, v)
+    root.style.setProperty(k, v)
   }
+  // Optional custom accent override (after palette so it wins).
+  const ca = (opts?.customAccent || '').trim()
+  if (ca && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(ca)) {
+    const h = ca.replace('#', '')
+    const full =
+      h.length === 3
+        ? h
+            .split('')
+            .map((c) => c + c)
+            .join('')
+        : h
+    const n = parseInt(full, 16)
+    const r = Math.max(0, ((n >> 16) & 255) - 18)
+    const g = Math.max(0, ((n >> 8) & 255) - 18)
+    const b = Math.max(0, (n & 255) - 18)
+    const hover = `#${[r, g, b].map((x) => x.toString(16).padStart(2, '0')).join('')}`
+    root.style.setProperty('--accent', ca)
+    root.style.setProperty('--accent-hover', hover)
+    root.style.setProperty('--chat-user-bg', ca)
+    root.style.setProperty('--chat-user-border', ca)
+  }
+  window.setTimeout(() => root.classList.remove('theme-animating'), 260)
   void syncNativeWindowTheme(theme.kind)
 }
 

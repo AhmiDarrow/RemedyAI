@@ -62,7 +62,9 @@ class TestMarkSetupCompleted:
 
 class TestProviderCredentialsReady:
     def test_api_key_present(self):
-        assert provider_credentials_ready({"llm_api_key": "sk-test"}) is True
+        assert provider_credentials_ready(
+            {"llm_provider": "openai", "llm_api_key": "sk-test"}
+        ) is True
 
     def test_local_url(self):
         assert provider_credentials_ready(
@@ -77,7 +79,16 @@ class TestProviderCredentialsReady:
             {"llm_provider": "openai", "llm_base_url": "https://api.openai.com/v1"}
         ) is False
 
-    def test_xai_without_credentials(self):
+    def test_xai_without_credentials(self, monkeypatch):
+        # Isolate from any on-disk OAuth session on the developer machine.
+        monkeypatch.setattr(
+            "remedy.interfaces.xai_auth.resolve_bearer",
+            lambda *a, **k: None,
+        )
+        monkeypatch.setattr(
+            "remedy.interfaces.secret_store.get_provider_secret",
+            lambda *a, **k: None,
+        )
         assert provider_credentials_ready(
             {
                 "llm_provider": "xai",

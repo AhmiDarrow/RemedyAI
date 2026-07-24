@@ -69,6 +69,22 @@ from remedy.models import (
 logger = logging.getLogger(__name__)
 
 
+def _normalize_tool_process(cfg: dict | None = None, raw: object = None) -> str:
+    """off | medium | full — default off. Legacy show_tool_calls bool maps to full."""
+    if raw is None and isinstance(cfg, dict):
+        raw = cfg.get("tool_process")
+        if raw is None and cfg.get("show_tool_calls") is True:
+            return "full"
+    s = str(raw or "off").strip().lower()
+    if s in ("medium", "med"):
+        return "medium"
+    if s in ("full", "on", "true", "1", "yes"):
+        return "full"
+    if raw is True:
+        return "full"
+    return "off"
+
+
 def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory=None) -> None:
     """Register routes (closes over runtime/gateway/memory)."""
     # -- settings -----------------------------------------------------------
@@ -102,21 +118,40 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             if raw_url:
                 base_url = str(raw_url)
 
+        from remedy.interfaces.config import (
+            migrate_provider_keys,
+            resolve_provider_api_key,
+        )
+        from remedy.interfaces.secret_store import public_secret_status
+
+        # Migrate any leftover plaintext keys out of config into secure store.
+        cfg_migrated = migrate_provider_keys(cfg)
+        if cfg_migrated != cfg or cfg.get("provider_keys") or cfg.get("llm_api_key"):
+            try:
+                if config_path is not None:
+                    _write_config(config_path, cfg_migrated)
+            except Exception:
+                pass
+            cfg = cfg_migrated
+
+        home_for_secrets = cfg.get("home_dir")
+        from pathlib import Path as _Path
+
+        home_path = _Path(home_for_secrets).expanduser() if home_for_secrets else None
+        secret_status = public_secret_status(home_path)
+
         runtime_key = ""
         if runtime is not None:
+            # Do not treat runtime key material as something we echo — only bool.
             runtime_key = str(getattr(runtime, "_llm_api_key", "") or "")
-        key_set = bool(
-            cfg.get("llm_api_key") or os.environ.get("REMEDY_LLM_API_KEY") or runtime_key
-        )
+        effective_key = resolve_provider_api_key(cfg, provider, home=home_path)
+        key_set = bool(effective_key or runtime_key)
         xai_auth: dict | None = None
         if provider == "xai":
             try:
                 from remedy.interfaces.xai_auth import load_credentials
 
-                home = cfg.get("home_dir")
-                from pathlib import Path
-
-                creds = load_credentials(Path(home).expanduser() if home else None)
+                creds = load_credentials(home_path)
                 xai_auth = creds.to_public_dict()
                 if creds.connected:
                     key_set = True
@@ -128,10 +163,14 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             "llm_model": model,
             "llm_base_url": base_url,
             "llm_api_key_set": key_set,
+            # Booleans only — never raw keys.
+            "provider_keys_set": secret_status.get("provider_keys_set") or {},
+            "secrets_encoding": secret_status.get("encoding"),
             "llm_ready": provider_credentials_ready(cfg) or bool(runtime_key) or bool(
                 xai_auth and xai_auth.get("connected")
             ),
             "name": cfg.get("name", "Remedy"),
+            "user_name": str(cfg.get("user_name") or "").strip(),
             "persona": cfg.get("persona", "default"),
             "project_path": cfg.get("project_path")
             or (
@@ -146,6 +185,9 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             "harness_mode": cfg.get("harness_mode", "auto"),
             "harness_min_context_pct": float(cfg.get("harness_min_context_pct", 0.35)),
             "harness_max_context_pct": float(cfg.get("harness_max_context_pct", 0.70)),
+            "thinking_level": str(cfg.get("thinking_level") or "medium").lower(),
+            "approval_mode": str(cfg.get("approval_mode") or "ask").lower(),
+            "tool_process": _normalize_tool_process(cfg),
             "version": _remedy_version,
             "config_exists": config_path is not None,
             "setup_completed": setup_completed,
@@ -163,7 +205,17 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             config_path = _default_config_path()
             config_path.parent.mkdir(parents=True, exist_ok=True)
 
-        cfg = load_config()
+        from pathlib import Path
+
+        from remedy.interfaces.config import (
+            migrate_provider_keys,
+            resolve_provider_api_key,
+            set_provider_key,
+        )
+        from remedy.interfaces.secret_store import scrub_config_secrets
+
+        cfg = migrate_provider_keys(load_config())
+        prev_provider = str(cfg.get("llm_provider") or "").strip().lower()
         updates = req.model_dump(exclude_none=True)
 
         if "llm_api_key" in updates and not updates["llm_api_key"]:
@@ -180,6 +232,8 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         updates["llm_provider"] = provider
         updates["llm_model"] = model
         updates["llm_base_url"] = base_url
+        if prev_provider and prev_provider != provider:
+            updates["last_llm_provider"] = prev_provider
 
         # Normalize project_path to an absolute directory when provided.
         if "project_path" in updates and updates["project_path"] is not None:
@@ -206,7 +260,65 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             hm = str(updates["harness_mode"]).strip().lower()
             updates["harness_mode"] = hm if hm in ("off", "manual", "auto") else "auto"
 
+        if "thinking_level" in updates and updates["thinking_level"] is not None:
+            tl = str(updates["thinking_level"]).strip().lower()
+            updates["thinking_level"] = (
+                tl if tl in ("off", "low", "medium", "high") else "medium"
+            )
+
+        if "approval_mode" in updates and updates["approval_mode"] is not None:
+            am = str(updates["approval_mode"]).strip().lower()
+            updates["approval_mode"] = am if am in ("ask", "auto") else "ask"
+            try:
+                from remedy.core.approvals import APPROVALS
+
+                APPROVALS.set_mode(updates["approval_mode"])
+            except Exception:
+                pass
+
+        # tool_process: off | medium | full (legacy show_tool_calls bool → full/off)
+        if "tool_process" in updates and updates["tool_process"] is not None:
+            updates["tool_process"] = _normalize_tool_process(raw=updates["tool_process"])
+        elif "show_tool_calls" in updates and updates["show_tool_calls"] is not None:
+            updates["tool_process"] = (
+                "full" if updates["show_tool_calls"] else "off"
+            )
+        updates.pop("show_tool_calls", None)
+
+        # Secrets go ONLY to the secure store — never into config.toml.
+        incoming_key = updates.pop("llm_api_key", None)
         cfg.update(updates)
+        home = cfg.get("home_dir")
+        home_path = Path(home).expanduser() if home else None
+
+        if incoming_key is not None and str(incoming_key).strip():
+            set_provider_key(
+                cfg, provider, str(incoming_key).strip(), home=home_path
+            )
+            if provider == "xai":
+                try:
+                    from remedy.interfaces.xai_auth import save_api_key
+
+                    save_api_key(str(incoming_key).strip(), home=home_path)
+                except Exception as exc:
+                    logger.debug("xAI settings key sync: %s", exc)
+
+        # Keep profile.display_name in sync so the agent addresses the user correctly.
+        if "user_name" in updates and updates["user_name"] is not None:
+            uname = str(updates["user_name"]).strip()
+            updates["user_name"] = uname
+            if memory is not None and uname:
+                try:
+                    profile = await memory.get_or_create_profile()
+                    profile.display_name = uname
+                    await memory.save_user_profile(profile)
+                except Exception as exc:
+                    logger.debug("sync user_name → profile: %s", exc)
+
+        # Always scrub before disk write (no llm_api_key / provider_keys).
+        cfg = scrub_config_secrets(cfg)
+        cfg["llm_api_key"] = ""
+        cfg.pop("provider_keys", None)
         _write_config(config_path, cfg)
 
         # Invalidate model discovery cache after provider/url changes.
@@ -214,29 +326,14 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         if isinstance(cache, dict):
             cache.clear()
 
-        # Hot-reload live agent so the next chat uses the new endpoint/model/persona/project.
-        api_key_for_runtime = updates.get("llm_api_key")
-        # xAI: persist API key to auth store + resolve OAuth bearer when no key in request.
-        if provider == "xai":
-            try:
-                from pathlib import Path
-
-                from remedy.interfaces.xai_auth import resolve_bearer, save_api_key
-
-                home = cfg.get("home_dir")
-                home_path = Path(home).expanduser() if home else None
-                if api_key_for_runtime:
-                    save_api_key(str(api_key_for_runtime), home=home_path)
-                if not api_key_for_runtime:
-                    api_key_for_runtime = resolve_bearer(home_path)
-            except Exception as exc:
-                logger.debug("xAI settings key sync: %s", exc)
+        # Hot-reload live agent so the next chat uses the saved provider's own key.
+        api_key_for_runtime = resolve_provider_api_key(cfg, provider)
         _apply_llm_to_runtime(
             runtime,
             provider=provider,
             model=model,
             base_url=base_url,
-            api_key=api_key_for_runtime,
+            api_key=api_key_for_runtime or None,
             persona=updates.get("persona"),
             name=updates.get("name"),
             project_path=updates.get("project_path", cfg.get("project_path")),
@@ -244,6 +341,8 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             harness_mode=cfg.get("harness_mode"),
             harness_min_context_pct=cfg.get("harness_min_context_pct"),
             harness_max_context_pct=cfg.get("harness_max_context_pct"),
+            thinking_level=cfg.get("thinking_level"),
+            approval_mode=cfg.get("approval_mode"),
         )
 
         changes = list(updates.keys())
@@ -261,5 +360,9 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             "start_in_tray": bool(cfg.get("start_in_tray", False)),
             "close_to_tray": bool(cfg.get("close_to_tray", False)),
             "harness_mode": cfg.get("harness_mode", "auto"),
+            "thinking_level": str(cfg.get("thinking_level") or "medium"),
+            "approval_mode": str(cfg.get("approval_mode") or "ask"),
+            "user_name": str(cfg.get("user_name") or "").strip(),
+            "tool_process": _normalize_tool_process(cfg),
         }
 

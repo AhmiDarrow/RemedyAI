@@ -7,6 +7,14 @@ import {
   getResolvedTheme,
   resolveThemeId,
 } from '../themes'
+import {
+  type Density,
+  loadDensity,
+  saveDensity,
+  applyDensity,
+  loadCustomAccent,
+  saveCustomAccent,
+} from '../utils/chatPrefs'
 
 const STORAGE_KEY = 'remedy-theme'
 
@@ -31,14 +39,23 @@ function saveTheme(id: ThemeId): void {
 
 export function useTheme() {
   const [themeId, setThemeId] = useState<ThemeId>(loadTheme)
+  const [density, setDensityState] = useState<Density>(loadDensity)
+  const [customAccent, setCustomAccentState] = useState(loadCustomAccent)
 
-  const applyResolved = useCallback((id: ThemeId) => {
-    applyTheme(getResolvedTheme(id))
-  }, [])
+  const applyResolved = useCallback(
+    (id: ThemeId, accent = customAccent) => {
+      applyTheme(getResolvedTheme(id), { customAccent: accent })
+    },
+    [customAccent],
+  )
 
   useEffect(() => {
     applyResolved(themeId)
   }, [themeId, applyResolved])
+
+  useEffect(() => {
+    applyDensity(density)
+  }, [density])
 
   // Follow OS when theme is System
   useEffect(() => {
@@ -59,8 +76,34 @@ export function useTheme() {
     saveTheme(id)
   }, [])
 
+  const setDensity = useCallback((d: Density) => {
+    setDensityState(d)
+    saveDensity(d)
+    applyDensity(d)
+  }, [])
+
+  const setCustomAccent = useCallback(
+    (hex: string) => {
+      const v = hex.trim()
+      setCustomAccentState(v)
+      saveCustomAccent(v)
+      applyResolved(themeId, v)
+    },
+    [themeId, applyResolved],
+  )
+
   const resolvedId = resolveThemeId(themeId)
   const theme = THEMES[resolvedId]
 
-  return { themeId, theme, resolvedId, set, themes: THEME_LIST }
+  return {
+    themeId,
+    theme,
+    resolvedId,
+    set,
+    themes: THEME_LIST,
+    density,
+    setDensity,
+    customAccent,
+    setCustomAccent,
+  }
 }

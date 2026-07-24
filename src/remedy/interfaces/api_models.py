@@ -110,7 +110,8 @@ class SettingsUpdateRequest(BaseModel):
     llm_base_url: str | None = None
     llm_api_key: str | None = None
     project_path: str | None = None
-    name: str | None = None
+    name: str | None = None  # agent display name (what the AI is called)
+    user_name: str | None = None  # human name (what Remedy calls the user)
     persona: str | None = None
     setup_completed: bool | None = None
     access_scope: str | None = None
@@ -120,3 +121,9 @@ class SettingsUpdateRequest(BaseModel):
     harness_mode: str | None = None
     harness_min_context_pct: float | None = None
     harness_max_context_pct: float | None = None
+    # Status-bar controls
+    thinking_level: str | None = None  # off | low | medium | high
+    approval_mode: str | None = None  # ask | auto
+    show_tool_calls: bool | None = None  # legacy → maps to tool_process
+    # off = minimal progress only; medium = labels+status; full = near-raw process
+    tool_process: str | None = None

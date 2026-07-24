@@ -316,7 +316,9 @@ class TestAnthropicProvider:
         )
         assert body["model"] == "claude-sonnet-4-20250514"
         assert body["stream"] is False
-        assert "system" not in body
+        # Default thinking_level injects a short system nudge when none provided.
+        assert "system" in body
+        assert "Thinking" in str(body["system"])
         assert "tools" not in body
 
     def test_build_body_with_system(self):
@@ -330,7 +332,8 @@ class TestAnthropicProvider:
             tools=None,
             stream=True,
         )
-        assert body["system"] == "You are helpful."
+        # User system retained; may be combined with thinking nudge.
+        assert "You are helpful." in str(body.get("system") or "")
         assert body["stream"] is True
         assert len(body["messages"]) == 1
         assert body["messages"][0]["role"] == "user"

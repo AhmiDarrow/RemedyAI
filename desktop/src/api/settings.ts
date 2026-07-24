@@ -15,6 +15,8 @@ export interface Settings {
   llm_base_url: string
   llm_api_key_set: boolean
   name: string
+  /** What Remedy calls the human user */
+  user_name?: string
   persona: string
   project_path: string
   access_scope?: string
@@ -24,6 +26,14 @@ export interface Settings {
   harness_mode?: string
   harness_min_context_pct?: number
   harness_max_context_pct?: number
+  /** Status bar: off | low | medium | high */
+  thinking_level?: string
+  /** Status bar: ask (default) | auto */
+  approval_mode?: string
+  /** Tool process: off | medium | full (default off) */
+  tool_process?: string
+  /** @deprecated use tool_process */
+  show_tool_calls?: boolean
   version: string
   config_exists: boolean
   setup_completed: boolean
@@ -39,6 +49,7 @@ export interface SettingsUpdate {
   llm_api_key?: string
   project_path?: string
   name?: string
+  user_name?: string
   persona?: string
   setup_completed?: boolean
   access_scope?: string
@@ -48,6 +59,9 @@ export interface SettingsUpdate {
   harness_mode?: string
   harness_min_context_pct?: number
   harness_max_context_pct?: number
+  thinking_level?: string
+  approval_mode?: string
+  tool_process?: string
 }
 
 export async function getSettings(): Promise<Settings> {

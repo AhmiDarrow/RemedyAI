@@ -424,6 +424,8 @@ def _apply_llm_to_runtime(
     harness_mode: str | None = None,
     harness_min_context_pct: float | None = None,
     harness_max_context_pct: float | None = None,
+    thinking_level: str | None = None,
+    approval_mode: str | None = None,
 ) -> None:
     """Push LLM settings into the live runtime so chat uses the saved config."""
     if runtime is None:
@@ -447,6 +449,10 @@ def _apply_llm_to_runtime(
             kwargs["harness_min_context_pct"] = harness_min_context_pct
         if harness_max_context_pct is not None:
             kwargs["harness_max_context_pct"] = harness_max_context_pct
+        if thinking_level is not None:
+            kwargs["thinking_level"] = thinking_level
+        if approval_mode is not None:
+            kwargs["approval_mode"] = approval_mode
         runtime.reconfigure_llm(**kwargs)
         return
     # Fallback for older runtimes without reconfigure_llm
@@ -462,6 +468,15 @@ def _apply_llm_to_runtime(
         runtime.set_project_path(project_path, as_default=True)
     if access_scope is not None:
         runtime._access_scope = access_scope
+    if thinking_level is not None:
+        runtime._thinking_level = str(thinking_level).strip().lower()
+    if approval_mode is not None:
+        try:
+            from remedy.core.approvals import APPROVALS
+
+            APPROVALS.set_mode(str(approval_mode))
+        except Exception:
+            pass
 
 
 # Cache config disk reads across chat messages; invalidate on mtime/size change.
@@ -532,23 +547,19 @@ def _sync_runtime_llm_from_config(
         or os.environ.get("REMEDY_LLM_BASE_URL")
         or ""
     )
-    api_key = str(
-        cfg.get("llm_api_key")
-        or os.environ.get("REMEDY_LLM_API_KEY")
-        or getattr(runtime, "_llm_api_key", "")
-        or ""
-    )
-    # xAI dual auth (OAuth token or stored console key).
-    if not api_key and provider.lower() == "xai":
-        try:
-            from remedy.interfaces.xai_auth import resolve_bearer
+    # Per-provider only — never reuse DeepSeek sk-… for xAI, etc.
+    try:
+        from remedy.interfaces.config import resolve_provider_api_key
 
-            home = cfg.get("home_dir")
-            token = resolve_bearer(Path(home).expanduser() if home else None)
-            if token:
-                api_key = token
-        except Exception as exc:
-            logger.debug("xAI resolve_bearer failed: %s", exc)
+        api_key = resolve_provider_api_key(cfg, provider)
+    except Exception as exc:
+        logger.debug("resolve_provider_api_key failed: %s", exc)
+        api_key = str(
+            cfg.get("llm_api_key")
+            or os.environ.get("REMEDY_LLM_API_KEY")
+            or getattr(runtime, "_llm_api_key", "")
+            or ""
+        )
     # Local providers: ensure a dummy key so stream path does not fall back.
     if not api_key and (
         provider.lower() == "ollama" or (base_url and _is_local_url(base_url))
@@ -566,9 +577,27 @@ def _sync_runtime_llm_from_config(
 
 
 def _write_config(path: Path, cfg: dict[str, Any]) -> None:
+    """Persist non-secret settings only. API keys never land in config.toml."""
+    try:
+        from remedy.interfaces.secret_store import scrub_config_secrets
+
+        safe = scrub_config_secrets(cfg)
+    except Exception:
+        safe = dict(cfg or {})
+        safe.pop("provider_keys", None)
+        if "llm_api_key" in safe:
+            safe["llm_api_key"] = ""
+
+    # Refuse to serialize any remaining nested maps that look like key bags.
     lines = []
     lines.append("# Remedy AI Configuration\n\n")
-    for key, value in cfg.items():
+    lines.append(
+        "# API keys are stored in ~/.remedy/auth/ (DPAPI-encrypted on Windows),\n"
+        "# not in this file.\n\n"
+    )
+    for key, value in safe.items():
+        if key in ("provider_keys", "llm_api_key"):
+            continue  # hard block — never write secrets here
         if isinstance(value, dict):
             lines.append(f"[{key}]\n")
             for k, v in value.items():
@@ -578,6 +607,10 @@ def _write_config(path: Path, cfg: dict[str, Any]) -> None:
             lines.append(f"{key} = {_serialize_toml(value)}\n")
     content = "".join(lines)
     path.write_text(content, encoding="utf-8")
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
 
 
 def _serialize_toml(value: Any) -> str:

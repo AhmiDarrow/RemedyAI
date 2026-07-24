@@ -1,16 +1,31 @@
 # Changelog
 
+All notable changes to Remedy (`remedy-ai`) are documented here.
+
+## [0.10.25] — 2026-07-24
+
+### Partner desktop UX polish
+
+- **Tool process** modes: **Off** (minimal) · **Medium** (labels + short results) · **Full** (complete raw args/stdout). Settings + status-bar **Proc** cycle. Process log stays under the message, collapsed after the turn.
+- **Stick-to-bottom** chat feed for tokens, thinking, tools, and full process dumps; detach when user scrolls up; **↓** resumes follow. Process panel has the same rule.
+- **Chat**: sleek shrink-wrap bubbles; user initials/name; icon-only copy/edit; image lightbox; progress bar for tools/jobs.
+- **Branding**: title-bar wordmark (logo menu: Settings, About, Updates); session avatars use circuit-R icon.
+- **You & Agent**: `user_name` (what Remedy calls you) before agent name; first-run name prompt; profile sync.
+- **Sessions**: auto-title from first prompt; double-click / ✎ rename; search, pin, tags.
+- **Tray**: Show, Settings, Check for updates, About, Quit.
+- **Themes**: Neutral Dark; density cozy/compact; custom accent; accurate theme swatches; smoother switches.
+- **ComfyUI / local discover**: portable discovery, image embed path, tool progress SSE.
+- **Auth / keys**: per-provider secret store; DSML strip + pseudo-tool recovery; thinking stream to UI.
+
 ## [0.10.24] — 2026-07-24
 
 ### xAI OAuth in frozen desktop (hard fix)
 
-- Device OAuth **must** use \https://auth.x.ai\ (never \ccounts.x.ai\ → 307 \/sign-in\).
+- Device OAuth **must** use `https://auth.x.ai` (never `accounts.x.ai` → 307 `/sign-in`).
 - Refuse wrong host; no redirect following for device/token POSTs.
-- PyInstaller builds force \--paths src\ + PYTHONPATH so site-packages cannot pin old OAuth.
+- PyInstaller builds force `--paths src` + PYTHONPATH so site-packages cannot pin old OAuth.
 - Sidecar start kills anything on :7400 (prevents dual stale servers).
-- Diagnostics: \GET /api/auth/xai/oauth-meta\ shows \oauth_build\ / device URL.
-
-All notable changes to Remedy (`remedy-ai`) are documented here.
+- Diagnostics: `GET /api/auth/xai/oauth-meta` shows `oauth_build` / device URL.
 
 ## [0.10.23] — 2026-07-24
 

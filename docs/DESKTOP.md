@@ -6,13 +6,18 @@
 partner for knowledge, design, code, and get-it-done work (not a medical or
 clinical product). Current package series: **0.10.x** (see root `CHANGELOG.md`).
 
-### Partner features (0.10.18+)
+### Partner features (0.10.18–0.10.25)
 
-- Chat bubbles: user right / Remedy left (theme tokens)
+- Chat bubbles: user right / Remedy left (theme tokens); sleek shrink-wrap; user name/initials
+- Stick-to-bottom feed (tokens, thinking, tools); **↓** if you scrolled up
+- **Tool process**: Off / Medium / Full (status bar **Proc** + Settings)
 - Prompt history: ↑ / ↓ in the composer
-- Settings: persona, project browse, access scope, Memory Harness, always-ready
+- Title-bar wordmark menu: Settings, About, Updates; session avatars use circuit-R
+- Settings: your name, agent name, persona, project browse, scope, harness, themes, density, accent
+- Sessions: auto-title from first prompt; rename; search / pin / tags
 - Approvals banner for high-impact shell commands
-- Status bar partner chip (goals, harness, scope, pending approvals)
+- Tray: Show, Settings, updates, About, Quit
+- ComfyUI + portable local discovery
 
 ## Branding / icons
 

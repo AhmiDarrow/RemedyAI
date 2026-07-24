@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { getSettings, updateSettings, type Settings, type SettingsUpdate } from '../api/settings'
+import { SettingsSection } from './SettingsSection'
 import {
   getXaiAuthStatus,
   startXaiLogin,
@@ -16,9 +17,12 @@ import {
 } from '../api/providers'
 import type { ThemeId } from '../themes'
 import type { UpdateInfo } from '../api/updates'
-import { THEME_LIST, getResolvedTheme } from '../themes'
+import { THEME_LIST } from '../themes'
+import { ThemeColorDot } from './ThemeSwitcher'
 import { HOTKEYS } from '../hotkeys'
 import type { ModelInfo } from '../App'
+import type { Density } from '../utils/chatPrefs'
+import { normalizeToolProcess, TOOL_PROCESS_MODES, type ToolProcessMode } from '../utils/toolLabels'
 
 /** Matches SetupWizard personas (style overlay). */
 const PERSONAS = [
@@ -42,6 +46,10 @@ interface SettingsPanelProps {
   onClose: () => void
   themeId: ThemeId
   onThemeChange: (id: ThemeId) => void
+  density?: Density
+  onDensityChange?: (d: Density) => void
+  customAccent?: string
+  onCustomAccentChange?: (hex: string) => void
   updateInfo: UpdateInfo | null
   checkingUpdates: boolean
   onCheckUpdates: () => void
@@ -49,6 +57,8 @@ interface SettingsPanelProps {
   onInstallUpdate?: () => void
   models: ModelInfo[]
   onSettingsSaved?: () => void
+  toolProcessMode?: ToolProcessMode
+  onToolProcessChange?: (mode: ToolProcessMode) => void
 }
 
 export function SettingsPanel({
@@ -56,12 +66,18 @@ export function SettingsPanel({
   onClose,
   themeId,
   onThemeChange,
+  density = 'cozy',
+  onDensityChange,
+  customAccent = '',
+  onCustomAccentChange,
   updateInfo,
   checkingUpdates,
   onCheckUpdates,
   onInstallUpdate,
   models,
   onSettingsSaved,
+  toolProcessMode,
+  onToolProcessChange,
 }: SettingsPanelProps) {
   const [settings, setSettings] = useState<Settings | null>(null)
   const [loading, setLoading] = useState(false)
@@ -76,12 +92,16 @@ export function SettingsPanel({
   const [apiKeySet, setApiKeySet] = useState(false)
   const [projectPath, setProjectPath] = useState('.')
   const [persona, setPersona] = useState('balanced')
+  const [userName, setUserName] = useState('')
   const [agentName, setAgentName] = useState('Remedy')
   const [accessScope, setAccessScope] = useState('project')
   const [launchAtLogin, setLaunchAtLogin] = useState(false)
   const [startInTray, setStartInTray] = useState(false)
   const [closeToTray, setCloseToTray] = useState(false)
   const [harnessMode, setHarnessMode] = useState('auto')
+  const [toolProcess, setToolProcess] = useState<ToolProcessMode>(
+    () => toolProcessMode || 'off',
+  )
   const [statusMessage, setStatusMessage] = useState('')
   const [catalog, setCatalog] = useState<ProviderInfo[]>(FALLBACK_PROVIDERS)
   const [showAdvanced, setShowAdvanced] = useState(false)
@@ -143,12 +163,18 @@ export function SettingsPanel({
       setPersona(
         PERSONAS.some((x) => x.id === p) ? p : p === 'default' ? 'balanced' : 'balanced',
       )
+      setUserName((s.user_name || '').trim())
       setAgentName(s.name || 'Remedy')
       setAccessScope(s.access_scope || 'project')
       setLaunchAtLogin(Boolean(s.launch_at_login))
       setStartInTray(Boolean(s.start_in_tray))
       setCloseToTray(Boolean(s.close_to_tray))
       setHarnessMode(s.harness_mode || 'auto')
+      {
+        const tp = normalizeToolProcess(s.tool_process)
+        setToolProcess(tp)
+        onToolProcessChange?.(tp)
+      }
       setApiKey('')
       try {
         const osLogin = await invoke<boolean>('get_launch_at_login')
@@ -272,12 +298,14 @@ export function SettingsPanel({
       llm_base_url: baseUrl,
       project_path: projectPath,
       persona,
+      user_name: userName.trim(),
       name: agentName.trim() || 'Remedy',
       access_scope: accessScope,
       launch_at_login: launchAtLogin,
       start_in_tray: startInTray,
       close_to_tray: closeToTray,
       harness_mode: harnessMode,
+      tool_process: toolProcess,
     }
     if (apiKey) {
       updates.llm_api_key = apiKey
@@ -526,13 +554,22 @@ export function SettingsPanel({
               />
             </section>
 
-            {/* Agent */}
+            {/* You + Agent */}
             <section>
               <div className="font-semibold mb-2" style={{ color: 'var(--text-primary)', fontSize: '0.75rem' }}>
-                Agent
+                You &amp; Agent
               </div>
               <Field
-                label="Display name"
+                label="Your name (what Remedy calls you)"
+                value={userName}
+                onChange={setUserName}
+                placeholder="e.g. Alex"
+              />
+              <div className="text-[10px] mb-2 leading-snug" style={{ color: 'var(--text-muted)' }}>
+                Saved to your profile so Remedy can address you naturally.
+              </div>
+              <Field
+                label="Agent name"
                 value={agentName}
                 onChange={setAgentName}
                 placeholder="Remedy"
@@ -692,6 +729,40 @@ export function SettingsPanel({
               </div>
             </section>
 
+            {/* Tool process visibility */}
+            <section>
+              <div className="font-semibold mb-2" style={{ color: 'var(--text-primary)', fontSize: '0.75rem' }}>
+                Tool process
+              </div>
+              <div className="text-[10px] leading-snug mb-2" style={{ color: 'var(--text-muted)' }}>
+                How much of the provider tool trail to show in chat. Default is Off (minimal).
+              </div>
+              <div className="flex gap-1 mb-1">
+                {TOOL_PROCESS_MODES.map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => {
+                      setToolProcess(m.id)
+                      onToolProcessChange?.(m.id)
+                    }}
+                    className="flex-1 py-1.5 rounded text-xs font-medium"
+                    title={m.hint}
+                    style={{
+                      background: toolProcess === m.id ? 'var(--accent)' : 'var(--bg-tertiary)',
+                      color: toolProcess === m.id ? '#fff' : 'var(--text-secondary)',
+                      border: '1px solid var(--border)',
+                    }}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+              <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                {TOOL_PROCESS_MODES.find((m) => m.id === toolProcess)?.hint}
+              </div>
+            </section>
+
             {/* Memory Harness */}
             <section>
               <div className="font-semibold mb-2" style={{ color: 'var(--text-primary)', fontSize: '0.75rem' }}>
@@ -727,39 +798,87 @@ export function SettingsPanel({
                 Theme
               </div>
               <div className="flex flex-col gap-1">
-                {THEME_LIST.map((t) => {
-                  const swatch =
-                    t.id === 'system'
-                      ? getResolvedTheme('system').colors['--accent']
-                      : t.colors['--accent']
-                  return (
+                {THEME_LIST.map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => onThemeChange(t.id)}
+                    className="flex items-center gap-2 px-2 py-1.5 rounded text-xs text-left transition-colors w-full"
+                    style={{
+                      background: t.id === themeId ? 'var(--bg-tertiary)' : 'transparent',
+                      color: 'var(--text-primary)',
+                    }}
+                  >
+                    <ThemeColorDot themeId={t.id} />
+                    <span>
+                      {t.name}
+                      {t.id === 'system' ? (
+                        <span style={{ color: 'var(--text-muted)' }}> · match OS</span>
+                      ) : null}
+                    </span>
+                    {t.id === themeId && (
+                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="ml-auto">
+                        <path d="M2 6l3 3 5-5" stroke="var(--accent)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    )}
+                  </button>
+                ))}
+              </div>
+
+              <div className="mt-3 space-y-2">
+                <label className="block text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                  Density
+                </label>
+                <div className="flex gap-1">
+                  {(['cozy', 'compact'] as Density[]).map((d) => (
                     <button
-                      key={t.id}
-                      onClick={() => onThemeChange(t.id)}
-                      className="flex items-center gap-2 px-2 py-1.5 rounded text-xs text-left transition-colors w-full"
+                      key={d}
+                      type="button"
+                      onClick={() => onDensityChange?.(d)}
+                      className="flex-1 py-1.5 rounded text-xs capitalize"
                       style={{
-                        background: t.id === themeId ? 'var(--bg-tertiary)' : 'transparent',
-                        color: 'var(--text-primary)',
+                        background: density === d ? 'var(--accent)' : 'var(--bg-tertiary)',
+                        color: density === d ? '#fff' : 'var(--text-secondary)',
+                        border: '1px solid var(--border)',
                       }}
                     >
-                      <span
-                        className="inline-block w-3 h-3 rounded-full border"
-                        style={{ background: swatch, borderColor: 'var(--border)' }}
-                      />
-                      <span>
-                        {t.name}
-                        {t.id === 'system' ? (
-                          <span style={{ color: 'var(--text-muted)' }}> · match OS</span>
-                        ) : null}
-                      </span>
-                      {t.id === themeId && (
-                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="ml-auto">
-                          <path d="M2 6l3 3 5-5" stroke="var(--accent)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                        </svg>
-                      )}
+                      {d}
                     </button>
-                  )
-                })}
+                  ))}
+                </div>
+                <label className="block text-[10px] mt-2" style={{ color: 'var(--text-muted)' }}>
+                  Custom accent (optional)
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="color"
+                    value={customAccent && /^#/.test(customAccent) ? customAccent : '#8b5cf6'}
+                    onChange={(e) => onCustomAccentChange?.(e.target.value)}
+                    className="w-8 h-8 rounded cursor-pointer border-0 bg-transparent"
+                    title="Pick accent color"
+                  />
+                  <input
+                    type="text"
+                    value={customAccent}
+                    onChange={(e) => onCustomAccentChange?.(e.target.value)}
+                    placeholder="#hex or empty"
+                    className="flex-1 rounded px-2 py-1 text-xs outline-none font-mono"
+                    style={{
+                      background: 'var(--bg-primary)',
+                      border: '1px solid var(--border)',
+                      color: 'var(--text-primary)',
+                    }}
+                  />
+                  {customAccent && (
+                    <button
+                      type="button"
+                      className="text-[10px] px-1.5 py-1 rounded"
+                      style={{ color: 'var(--text-muted)', border: '1px solid var(--border)' }}
+                      onClick={() => onCustomAccentChange?.('')}
+                    >
+                      Reset
+                    </button>
+                  )}
+                </div>
               </div>
             </section>
 

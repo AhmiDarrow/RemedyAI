@@ -1,26 +1,35 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { listMessages, streamMessage, executeCommand, editFromMessageApi } from '../api/messages'
+import {
+  listMessages,
+  streamMessage,
+  executeCommand,
+  editFromMessageApi,
+  type StreamProgress,
+} from '../api/messages'
 import type { ChatMessage } from '../types'
+import { toolLabel, type ProcessStep } from '../utils/toolLabels'
 
-export type ActiveTool = { name: string; status: 'running' | 'done' }
+export type ActiveTool = { name: string; status: 'running' | 'done' | 'error' }
 
 export function useMessages(sessionId: string | null) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [loading, setLoading] = useState(false)
   const [streaming, setStreaming] = useState(false)
   const [partialText, setPartialText] = useState('')
+  const [partialThinking, setPartialThinking] = useState('')
   const [activeTools, setActiveTools] = useState<ActiveTool[]>([])
+  const [processSteps, setProcessSteps] = useState<ProcessStep[]>([])
+  const [taskProgress, setTaskProgress] = useState<StreamProgress | null>(null)
   const [streamCtrl, setStreamCtrl] = useState<AbortController | null>(null)
-  /** Blocks load() from wiping in-flight optimistic state during session create race. */
   const streamingRef = useRef(false)
   const sendLockRef = useRef(false)
+  const processStepsRef = useRef<ProcessStep[]>([])
 
   const load = useCallback(async () => {
     if (!sessionId) {
       setMessages([])
       return
     }
-    // Don't clobber an in-flight send (common when create() flips sessionId mid-send).
     if (streamingRef.current) return
     setLoading(true)
     try {
@@ -54,7 +63,6 @@ export function useMessages(sessionId: string | null) {
       const targetId = sid || sessionId
       const hasAtt = Boolean(attachments?.length)
       if (!targetId || (!text.trim() && !hasAtt)) return
-      // Prevent double-submit (Enter + button, or rapid re-entry).
       if (sendLockRef.current || streamingRef.current) return
       sendLockRef.current = true
       streamingRef.current = true
@@ -86,26 +94,52 @@ export function useMessages(sessionId: string | null) {
 
       setStreaming(true)
       setPartialText('')
+      setPartialThinking('')
       setActiveTools([])
+      setProcessSteps([])
+      processStepsRef.current = []
+      setTaskProgress(null)
 
       let doneReceived = false
 
       const finishOk = async () => {
         if (doneReceived) return
         doneReceived = true
+        const stepsSnapshot = [...processStepsRef.current]
         setStreaming(false)
         setStreamCtrl(null)
         setPartialText('')
+        setPartialThinking('')
         setActiveTools([])
+        setTaskProgress(null)
         streamingRef.current = false
         sendLockRef.current = false
-        // Single source of truth: reload from server (avoids duplicate client+server rows).
         try {
           const msgs = await listMessages(targetId)
+          // Ensure last assistant has process data if server omitted it.
+          if (stepsSnapshot.length && msgs.length) {
+            const last = msgs[msgs.length - 1]
+            if (last && last.role === 'assistant') {
+              const hasTools = (last.tool_calls?.length || 0) > 0
+              if (!hasTools) {
+                last.tool_calls = stepsSnapshot.map((s) => ({
+                  name: s.name,
+                  args: s.argsText ? safeParseArgs(s.argsText) : {},
+                }))
+                last.tool_results = stepsSnapshot.map((s) => ({
+                  name: s.name,
+                  output: s.resultText || '',
+                  error: s.error,
+                }))
+              }
+            }
+          }
           setMessages(msgs)
         } catch {
           // keep optimistic state
         }
+        setProcessSteps([])
+        processStepsRef.current = []
       }
 
       const finishErr = async (errMsg: string) => {
@@ -114,7 +148,11 @@ export function useMessages(sessionId: string | null) {
         setStreaming(false)
         setStreamCtrl(null)
         setPartialText('')
+        setPartialThinking('')
         setActiveTools([])
+        setProcessSteps([])
+        processStepsRef.current = []
+        setTaskProgress(null)
         streamingRef.current = false
         sendLockRef.current = false
         setMessages((prev) => [
@@ -135,6 +173,11 @@ export function useMessages(sessionId: string | null) {
         ])
       }
 
+      const pushSteps = (next: ProcessStep[]) => {
+        processStepsRef.current = next
+        setProcessSteps(next)
+      }
+
       const ctrl = streamMessage(
         targetId,
         text.trim() || '(see attached files)',
@@ -146,19 +189,66 @@ export function useMessages(sessionId: string | null) {
           void finishErr(errMsg)
         },
         model,
-        undefined,
-        (name) => {
+        (thought) => setPartialThinking((prev) => prev + thought),
+        (name, args) => {
           setActiveTools((prev) => {
             if (prev.some((t) => t.name === name && t.status === 'running')) return prev
             return [...prev, { name, status: 'running' }]
           })
+          const step: ProcessStep = {
+            id: `${name}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            name,
+            label: toolLabel(name),
+            status: 'running',
+            startedAt: Date.now(),
+            argsText:
+              args && Object.keys(args).length
+                ? JSON.stringify(args, null, 2)
+                : undefined,
+          }
+          pushSteps([...processStepsRef.current, step])
         },
-        (name) => {
+        (name, preview, ok = true) => {
           setActiveTools((prev) =>
-            prev.map((t) => (t.name === name ? { ...t, status: 'done' as const } : t)),
+            prev.map((t) =>
+              t.name === name
+                ? { ...t, status: ok ? ('done' as const) : ('error' as const) }
+                : t,
+            ),
           )
+          const prev = processStepsRef.current
+          let hit = false
+          const next = prev.map((s) => {
+            if (!hit && s.name === name && s.status === 'running') {
+              hit = true
+              return {
+                ...s,
+                status: (ok ? 'done' : 'error') as ProcessStep['status'],
+                endedAt: Date.now(),
+                resultText: preview,
+                error: ok ? undefined : preview || 'tool failed',
+              }
+            }
+            return s
+          })
+          if (!hit) {
+            next.push({
+              id: `${name}-done-${Date.now()}`,
+              name,
+              label: toolLabel(name),
+              status: ok ? 'done' : 'error',
+              startedAt: Date.now(),
+              endedAt: Date.now(),
+              resultText: preview,
+              error: ok ? undefined : preview || 'tool failed',
+            })
+          }
+          pushSteps(next)
         },
         attachments,
+        (info) => {
+          setTaskProgress(info)
+        },
       )
 
       setStreamCtrl(ctrl)
@@ -170,17 +260,28 @@ export function useMessages(sessionId: string | null) {
     streamCtrl?.abort()
     setStreaming(false)
     setStreamCtrl(null)
+    setActiveTools([])
+    setTaskProgress(null)
     streamingRef.current = false
     sendLockRef.current = false
+    setPartialThinking('')
     setPartialText((text) => {
       if (text.trim()) {
+        const steps = processStepsRef.current
         const assistantMsg: ChatMessage = {
           id: crypto.randomUUID(),
           role: 'assistant',
           content: text,
           thinking: null,
-          tool_calls: [],
-          tool_results: [],
+          tool_calls: steps.map((s) => ({
+            name: s.name,
+            args: s.argsText ? safeParseArgs(s.argsText) : {},
+          })),
+          tool_results: steps.map((s) => ({
+            name: s.name,
+            output: s.resultText || '',
+            error: s.error,
+          })),
           model: null,
           agent: null,
           tokens: null,
@@ -191,16 +292,13 @@ export function useMessages(sessionId: string | null) {
       }
       return ''
     })
+    setProcessSteps([])
+    processStepsRef.current = []
   }, [streamCtrl])
 
-  /**
-   * Edit-and-resend: soft-delete this user message + all after it,
-   * return text for the composer (falls back to *fallbackContent* if API omits it).
-   */
   const beginEdit = useCallback(
     async (msgId: string, fallbackContent?: string): Promise<string | null> => {
       if (!sessionId || streamingRef.current) return null
-      // Always drop local messages from this user msg onward for immediate UI feedback.
       setMessages((prev) => {
         const idx = prev.findIndex((m) => m.id === msgId)
         if (idx < 0) return prev.filter((m) => !m.reverted)
@@ -208,7 +306,6 @@ export function useMessages(sessionId: string | null) {
       })
       try {
         const r = await editFromMessageApi(sessionId, msgId)
-        // Sync from server (reverted msgs are filtered out).
         await load()
         const text =
           typeof r.content === 'string' && r.content.length > 0
@@ -217,7 +314,6 @@ export function useMessages(sessionId: string | null) {
         return text
       } catch (e: unknown) {
         console.warn('Edit failed:', e instanceof Error ? e.message : e)
-        // Still return local text so the composer is never blank after Edit.
         return fallbackContent ?? null
       }
     },
@@ -227,10 +323,10 @@ export function useMessages(sessionId: string | null) {
   const runCommand = useCallback(
     async (command: string, sid?: string): Promise<{ text: string; action?: string }> => {
       const targetId = sid || sessionId
-      if (!targetId) return { text: 'No session active.' }
+      if (!targetId) return { text: 'No session' }
       try {
         const r = await executeCommand(targetId, command)
-        return { text: r.text, action: r.action }
+        return r
       } catch {
         return { text: `Error executing ${command}` }
       }
@@ -273,12 +369,24 @@ export function useMessages(sessionId: string | null) {
     loading,
     streaming,
     partialText,
+    partialThinking,
     activeTools,
+    processSteps,
+    taskProgress,
     send,
     stop,
     runCommand,
     load,
     addCommandMessage,
     beginEdit,
+  }
+}
+
+function safeParseArgs(text: string): Record<string, unknown> {
+  try {
+    const v = JSON.parse(text)
+    return typeof v === 'object' && v && !Array.isArray(v) ? v : { value: v }
+  } catch {
+    return { _raw: text }
   }
 }

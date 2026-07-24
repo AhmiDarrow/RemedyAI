@@ -36,14 +36,21 @@ _DEFAULT_SYSTEM_PROMPT = (
     "- **Skills** are named procedure packs (how to review code, write tests, etc.). "
     "When asked \"what skills do you have?\", list them from the Skills block in context "
     "— do NOT shell out or invent names.\n"
-    "- **Tools** are executable actions: file_read, file_write, list_dir, bash_exec "
-    "(and others when registered).\n\n"
+    "- **Tools** are executable actions: file_read, file_write, list_dir, bash_exec, "
+    "local_discover, comfyui (and others when registered).\n\n"
     "Tool policy:\n"
     "- Simple chat (greetings, definitions, provider/model/skills questions): "
     "answer immediately with NO tools.\n"
     "- Project work (review, files, shell, debug, implement): use the function-calling API.\n"
+    "- Local apps/services (ComfyUI, Ollama, skill deps): use **local_discover** "
+    "(scan / one) or the dedicated tool (e.g. comfyui). "
+    "NEVER thrash list_dir on C:\\ or / or run where/dir /s to find installs — "
+    "discovery is built-in and portable for any machine.\n"
+    "- ComfyUI images: **comfyui** action=status|locate|generate; paste markdown images "
+    "from the tool result into your final answer.\n"
     "- NEVER write tool calls as plain text (e.g. file_read(\"x\") && list_dir(\"y\")). "
     "That hangs the UI — always use native tool_calls.\n"
+    "- NEVER emit DSML/XML tool markup (tool_calls, invoke, invoke_parameter) as chat text.\n"
     "- Prefer parallel tool calls for independent reads; avoid repeating the same call.\n"
     "- After tool results, synthesize a clear final answer. Never stall or loop.\n"
     "- If information is already in context (provider block, skills list, history), use it.\n\n"
@@ -81,7 +88,12 @@ _TOOL_HINT_RE = re.compile(
     r"review|analyze|analyse|explore|overview|inspect|structure|architecture|"
     r"run|execute|shell|bash|command|terminal|install|build|test|"
     r"implement|refactor|debug|fix|bug|error|stack|trace|"
-    r"git|commit|diff|branch|src/|\\.[a-z]{1,5}\b"
+    r"git|commit|diff|branch|src/|\\.[a-z]{1,5}\b|"
+    r"comfyui|comfy|txt2img|img2img|portrait|nebula|spacey|"
+    r"generate(\s+an?)?\s+image|image\s+generation|render(\s+an?)?\s+image|"
+    r"make\s+(me\s+)?(an?\s+)?(image|picture|photo)|"
+    r"draw\s+(me\s+)?|illustrat|picture\s+of|photo\s+of|"
+    r"show\s+(it|me|the\s+image)|embed(\s+it)?|display(\s+it)?"
     r")\b|"
     r"(?:[A-Za-z]:)?[\\/][\w.\\/ -]+",
     re.IGNORECASE,
@@ -97,7 +109,34 @@ _META_NO_TOOLS_RE = re.compile(
 
 # Models sometimes emit tool syntax as plain text instead of function-calls.
 _PSEUDO_TOOL_RE = re.compile(
-    r"\b(file_read|file_write|list_dir|bash_exec)\s*\(",
+    r"\b(file_read|file_write|list_dir|bash_exec|comfyui|local_discover)\s*\(",
+    re.IGNORECASE,
+)
+# Leaked "tool markup" (DSML / XML-ish tool_calls) that must never show as chat text.
+# DeepSeek-class models often emit fullwidth pipes: ｜DSML｜tool_calls
+_DSML_TOOL_RE = re.compile(
+    r"(tool[_\s-]?calls|function[_\s-]?calls|DSML|"
+    r"</?invoke\b|invoke_parameter|invoke_step|"
+    r"</?parameter\b|name\s*=\s*[\"'](?:file_read|bash_exec|comfyui|list_dir))",
+    re.IGNORECASE,
+)
+_DSML_INVOKE_RE = re.compile(
+    r"""name\s*=\s*["'](file_read|file_write|list_dir|bash_exec|comfyui|local_discover)["']""",
+    re.IGNORECASE,
+)
+# Supports both <parameter name="path">val</parameter> and unclosed ...name="path"...>val
+# Also: parameter name="action" string="true">status
+_DSML_PARAM_RE = re.compile(
+    r"""(?:invoke_parameter|parameter)\s+[^>\n]*\bname\s*=\s*["'](\w+)["'][^>\n]*>\s*([^<\n｜|]*)""",
+    re.IGNORECASE | re.DOTALL,
+)
+# Fullwidth / markup noise that should never reach the chat bubble.
+_DSML_NOISE_RE = re.compile(
+    r"[|｜]{1,2}\s*DSML\s*[|｜]{1,2}|[|｜]{2}",
+    re.IGNORECASE,
+)
+_COMFY_HUNT_RE = re.compile(
+    r"comfyui|comfy.?ui|\\\\ComfyUI|/ComfyUI|8188",
     re.IGNORECASE,
 )
 
@@ -121,10 +160,22 @@ _message_wants_tools = message_wants_tools
 
 
 def looks_like_pseudo_tools(text: str) -> bool:
-    """True when the model faked tool calls in natural language."""
+    """True when the model faked tool calls in natural language or DSML markup."""
     if not text:
         return False
     if _PSEUDO_TOOL_RE.search(text):
+        return True
+    if _DSML_NOISE_RE.search(text) and re.search(
+        r"tool|invoke|parameter|comfyui|bash_exec|list_dir", text, re.I
+    ):
+        return True
+    # Any leaked tool_calls / invoke markup counts — even without a clean name=.
+    if _DSML_TOOL_RE.search(text) and (
+        _DSML_INVOKE_RE.search(text)
+        or re.search(
+            r"\b(list_dir|bash_exec|file_read|comfyui|local_discover)\b", text, re.I
+        )
+    ):
         return True
     if "&&" in text and re.search(r"\w+\(\s*[\"']", text):
         return True
@@ -134,22 +185,255 @@ def looks_like_pseudo_tools(text: str) -> bool:
 _looks_like_pseudo_tools = looks_like_pseudo_tools
 
 
+def strip_tool_markup(text: str) -> str:
+    """Remove DSML / fake tool-call markup so it never stays in the user bubble."""
+    if not text:
+        return ""
+    t = text
+    # Strip DSML wrapper tokens
+    t = _DSML_NOISE_RE.sub(" ", t)
+    # Remove tool_calls … blocks (greedy enough for multi-invoke dumps)
+    t = re.sub(
+        r"(?is)(?:tool[_\s-]?calls|function[_\s-]?calls)\b.*?(?=(?:\n{2,}|\Z))",
+        " ",
+        t,
+    )
+    t = re.sub(r"(?is)</?(?:invoke|parameter|invoke_parameter|invoke_step)[^>]*>", " ", t)
+    t = re.sub(
+        r"""(?is)name\s*=\s*["'](?:file_read|file_write|list_dir|bash_exec|comfyui|local_discover)["'][^<\n]*""",
+        " ",
+        t,
+    )
+    t = re.sub(r"[ \t]{2,}", " ", t)
+    t = re.sub(r"\n{3,}", "\n\n", t)
+    return t.strip()
+
+
+_strip_tool_markup = strip_tool_markup
+
+
+def _rewrite_bash_to_comfyui(command: str) -> dict[str, Any] | None:
+    """If bash is clearly a ComfyUI health/locate probe, map to comfyui tool."""
+    cmd = (command or "").strip().lower()
+    if not cmd:
+        return None
+    # Disk hunts for ComfyUI (where/dir/Get-ChildItem) → locate, not recursive bash
+    if re.search(r"\b(where|dir|get-childitem|findstr|find)\b", cmd) and _COMFY_HUNT_RE.search(
+        cmd
+    ):
+        return {"action": "locate"}
+    if "8188" in cmd or "comfyui" in cmd or "comfy" in cmd:
+        if any(
+            x in cmd
+            for x in (
+                "curl",
+                "wget",
+                "invoke-webrequest",
+                "system_stats",
+                "http://",
+                "https://",
+            )
+        ):
+            return {"action": "status"}
+        if re.search(r"\b(where|dir|ls|find)\b", cmd):
+            return {"action": "locate"}
+    return None
+
+
+def _is_comfy_hunt_text(text: str) -> bool:
+    """True when the model is thrashing the FS looking for ComfyUI."""
+    if not text or not _COMFY_HUNT_RE.search(text):
+        return False
+    # Tool spam listing C:\…\ComfyUI or where/dir searches
+    if re.search(r"\b(list_dir|bash_exec|where|dir\s+/s)\b", text, re.I):
+        return True
+    if re.search(r"[A-Za-z]:\\[^\n]*ComfyUI", text, re.I):
+        return True
+    return False
+
+
+def _parse_dsml_tool_calls(text: str) -> list[dict[str, Any]]:
+    """Recover OpenAI tool_calls from leaked DSML/XML-style tool markup.
+
+    Example failure modes (shown as chat text):
+      tool_calls invoke name="bash_exec" ... curl ...8188
+      tool_calls invoke name="list_dir" ... relative_path ... C:\\...\\ComfyUI
+      ｜DSML｜tool_calls invoke name="comfyui" parameter name="action">status
+    """
+    if not text:
+        return []
+    # Normalize fullwidth junk so matching is reliable
+    norm = (
+        text.replace("｜", "|")
+        .replace("\u200b", "")
+        .replace("\ufeff", "")
+    )
+    if not (
+        _DSML_TOOL_RE.search(norm)
+        or "tool_calls" in norm.lower()
+        or "dsml" in norm.lower()
+        or _DSML_INVOKE_RE.search(norm)
+    ):
+        return []
+    text = norm
+
+    # Collapse entire "find ComfyUI on disk" spam → one comfyui call.
+    if _is_comfy_hunt_text(text):
+        # Prefer status if it also looks like an HTTP check; else locate.
+        action = "status" if re.search(r"curl|8188|system_stats|http", text, re.I) else "locate"
+        # Pure path hunting without HTTP → locate (returns start hints)
+        if re.search(r"\b(where|dir\s+/s|list_dir)\b", text, re.I) and not re.search(
+            r"curl|system_stats", text, re.I
+        ):
+            action = "locate"
+        # Explicit comfyui action=status in the dump wins
+        if re.search(r"""name\s*=\s*["']action["'][^>]*>\s*status""", text, re.I):
+            action = "status"
+        if re.search(r"""name\s*=\s*["']action["'][^>]*>\s*generate""", text, re.I):
+            action = "generate"
+        return [
+            {
+                "id": f"dsml_comfy_{uuid4().hex[:8]}",
+                "type": "function",
+                "function": {
+                    "name": "comfyui",
+                    "arguments": json.dumps({"action": action}),
+                },
+            }
+        ]
+
+    out: list[dict[str, Any]] = []
+    # Split on invoke boundaries when possible
+    chunks = re.split(r"(?i)(?:invoke\b|tool_call\b|tool_calls\b)", text)
+    for i, chunk in enumerate(chunks):
+        m = _DSML_INVOKE_RE.search(chunk)
+        if not m:
+            m = re.search(
+                r"""["'](file_read|file_write|list_dir|bash_exec|comfyui)["']""",
+                chunk,
+                re.IGNORECASE,
+            )
+            if not m:
+                if "bash_exec" in chunk.lower() and (
+                    "curl" in chunk.lower() or "8188" in chunk or "comfy" in chunk.lower()
+                ):
+                    name = "bash_exec"
+                elif "list_dir" in chunk.lower() and _COMFY_HUNT_RE.search(chunk):
+                    name = "list_dir"
+                else:
+                    continue
+            else:
+                name = m.group(1).lower()
+        else:
+            name = m.group(1).lower()
+
+        params: dict[str, str] = {}
+        for pm in _DSML_PARAM_RE.finditer(chunk):
+            params[pm.group(1).lower()] = pm.group(2).strip()
+        if not params:
+            code_m = re.search(
+                r"""(?:code|command|path|relative_path|prompt|action)\s*[:=]\s*["']?([^"'<\n]+)""",
+                chunk,
+                re.IGNORECASE,
+            )
+            if code_m:
+                key = "command" if name == "bash_exec" else "path"
+                if "prompt" in chunk.lower():
+                    key = "prompt"
+                if "action" in chunk.lower():
+                    key = "action"
+                params[key] = code_m.group(1).strip()
+
+        # Normalize aliases models invent
+        if "relative_path" in params and "path" not in params:
+            params["path"] = params["relative_path"]
+        if "directory" in params and "path" not in params:
+            params["path"] = params["directory"]
+
+        args: dict[str, Any]
+        if name == "bash_exec":
+            command = (
+                params.get("command")
+                or params.get("code")
+                or params.get("cmd")
+                or ""
+            )
+            rewritten = _rewrite_bash_to_comfyui(command)
+            if rewritten:
+                name = "comfyui"
+                args = rewritten
+            else:
+                args = {"command": command}
+        elif name == "comfyui":
+            args = {"action": params.get("action") or "status"}
+            if params.get("prompt"):
+                args["prompt"] = params["prompt"]
+        elif name == "file_read":
+            args = {"path": params.get("path") or params.get("file") or ""}
+        elif name == "list_dir":
+            path = params.get("path") or params.get("directory") or "."
+            # list_dir of ComfyUI install paths is never useful — use comfyui
+            if _COMFY_HUNT_RE.search(path) or _COMFY_HUNT_RE.search(chunk):
+                name = "comfyui"
+                args = {"action": "locate"}
+            else:
+                args = {"path": path}
+        elif name == "file_write":
+            args = {
+                "path": params.get("path") or "",
+                "content": params.get("content") or params.get("code") or "",
+            }
+        else:
+            continue
+
+        if name == "bash_exec" and not args.get("command"):
+            continue
+        if name in ("file_read", "file_write") and not args.get("path"):
+            continue
+
+        out.append(
+            {
+                "id": f"dsml_{i}_{uuid4().hex[:8]}",
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "arguments": json.dumps(args),
+                },
+            }
+        )
+        if len(out) >= MAX_PARALLEL_TOOLS:
+            break
+    return out
+
+
 def parse_pseudo_tool_calls(text: str) -> list[dict[str, Any]]:
     """Best-effort parse of text-faked tools into OpenAI-style tool_call dicts.
 
     Models sometimes emit file_read("x") as plain text instead of native tool
-    calls. We recover them here and log aggressively so system prompts can be
-    tuned from real telemetry rather than growing more recovery heuristics.
+    calls, or dump DSML/XML tool markup into the chat bubble. We recover them
+    here so the ReAct loop can still execute.
     """
     if not text:
         return []
+    out: list[dict[str, Any]] = []
+
+    # 1) DSML / XML-ish dumps first (the ComfyUI failure mode)
+    out.extend(_parse_dsml_tool_calls(text))
+
+    # 2) Classic function-call-as-text
     pat = re.compile(
+        r"\b(file_read|file_write|list_dir|bash_exec|comfyui)\s*\(\s*"
+        r"(?:[\"']([^\"']*)[\"']|(action|prompt|path|command)\s*=\s*[\"']([^\"']*)[\"'])"
+        r"(?:\s*,\s*(?:[\"']([^\"']*)[\"']|(\w+)\s*=\s*[\"']([^\"']*)[\"']))?\s*\)",
+        re.IGNORECASE,
+    )
+    # Simpler reliable pattern for positional forms
+    pat_simple = re.compile(
         r"\b(file_read|file_write|list_dir|bash_exec)\s*\(\s*[\"']([^\"']+)[\"']"
         r"(?:\s*,\s*[\"']([\s\S]*?)[\"'])?\s*\)",
         re.IGNORECASE,
     )
-    out: list[dict[str, Any]] = []
-    for i, m in enumerate(pat.finditer(text)):
+    for i, m in enumerate(pat_simple.finditer(text)):
         name = m.group(1).lower()
         arg0 = m.group(2)
         arg1 = m.group(3)
@@ -158,7 +442,12 @@ def parse_pseudo_tool_calls(text: str) -> list[dict[str, Any]]:
         elif name == "list_dir":
             args = {"path": arg0}
         elif name == "bash_exec":
-            args = {"command": arg0}
+            rewritten = _rewrite_bash_to_comfyui(arg0)
+            if rewritten:
+                name = "comfyui"
+                args = rewritten
+            else:
+                args = {"command": arg0}
         elif name == "file_write":
             args = {"path": arg0, "content": arg1 or ""}
         else:
@@ -175,14 +464,51 @@ def parse_pseudo_tool_calls(text: str) -> list[dict[str, Any]]:
         )
         if len(out) >= MAX_PARALLEL_TOOLS:
             break
-    if out:
+
+    # comfyui(action="status") / comfyui(action="generate", prompt="...")
+    for i, m in enumerate(
+        re.finditer(
+            r"""\bcomfyui\s*\(\s*action\s*=\s*["'](\w+)["']"""
+            r"""(?:\s*,\s*prompt\s*=\s*["']([^"']*)["'])?\s*\)""",
+            text,
+            re.IGNORECASE,
+        )
+    ):
+        args = {"action": m.group(1).lower()}
+        if m.group(2):
+            args["prompt"] = m.group(2)
+        out.append(
+            {
+                "id": f"pseudo_comfy_{i}_{uuid4().hex[:8]}",
+                "type": "function",
+                "function": {
+                    "name": "comfyui",
+                    "arguments": json.dumps(args),
+                },
+            }
+        )
+
+    # De-dupe by name+arguments
+    seen: set[str] = set()
+    unique: list[dict[str, Any]] = []
+    for tc in out:
+        fn = tc.get("function") or {}
+        key = f"{fn.get('name')}::{fn.get('arguments')}"
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(tc)
+        if len(unique) >= MAX_PARALLEL_TOOLS:
+            break
+
+    if unique:
         logger.warning(
             "pseudo_tool_recovery count=%s names=%s preview=%r",
-            len(out),
-            [c["function"]["name"] for c in out],
+            len(unique),
+            [c["function"]["name"] for c in unique],
             (text or "")[:200],
         )
-    return out
+    return unique
 
 
 _parse_pseudo_tool_calls = parse_pseudo_tool_calls

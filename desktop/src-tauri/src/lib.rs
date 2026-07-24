@@ -45,18 +45,71 @@ fn desktop_prefs_path() -> PathBuf {
     remedy_home().join("desktop.json")
 }
 
-fn load_desktop_prefs() -> DesktopPrefs {
-    let path = desktop_prefs_path();
-    let Ok(raw) = std::fs::read_to_string(&path) else {
-        return DesktopPrefs::default();
-    };
-    // Minimal parse — avoid pulling serde_json key path complexity beyond what's needed
-    let close_to_tray = raw.contains("\"close_to_tray\": true") || raw.contains("\"close_to_tray\":true");
-    let start_in_tray = raw.contains("\"start_in_tray\": true") || raw.contains("\"start_in_tray\":true");
-    DesktopPrefs {
-        close_to_tray,
-        start_in_tray,
+fn config_toml_path() -> PathBuf {
+    remedy_home().join("config.toml")
+}
+
+/// Parse a simple TOML bool assignment: `key = true` / `key = false`.
+fn toml_bool(raw: &str, key: &str) -> Option<bool> {
+    for line in raw.lines() {
+        let line = line.split('#').next().unwrap_or("").trim();
+        if let Some(rest) = line.strip_prefix(key) {
+            let rest = rest.trim();
+            if let Some(val) = rest.strip_prefix('=') {
+                let val = val.trim().trim_matches('"');
+                if val.eq_ignore_ascii_case("true") {
+                    return Some(true);
+                }
+                if val.eq_ignore_ascii_case("false") {
+                    return Some(false);
+                }
+            }
+        }
     }
+    None
+}
+
+fn load_desktop_prefs() -> DesktopPrefs {
+    // Defaults: always-ready partner UX — close hides to tray (does not kill).
+    let mut prefs = DesktopPrefs {
+        close_to_tray: true,
+        start_in_tray: false,
+    };
+
+    // 1) Prefer shell-owned desktop.json when present
+    let desk = desktop_prefs_path();
+    if let Ok(raw) = std::fs::read_to_string(&desk) {
+        prefs.close_to_tray = raw.contains("\"close_to_tray\": true")
+            || raw.contains("\"close_to_tray\":true");
+        prefs.start_in_tray = raw.contains("\"start_in_tray\": true")
+            || raw.contains("\"start_in_tray\":true");
+        // Also accept false explicitly when file exists
+        if raw.contains("\"close_to_tray\": false") || raw.contains("\"close_to_tray\":false") {
+            prefs.close_to_tray = false;
+        }
+        if raw.contains("\"start_in_tray\": false") || raw.contains("\"start_in_tray\":false") {
+            prefs.start_in_tray = false;
+        }
+        return prefs;
+    }
+
+    // 2) Fall back to config.toml (Settings writes here; desktop.json may be missing)
+    if let Ok(raw) = std::fs::read_to_string(config_toml_path()) {
+        if let Some(v) = toml_bool(&raw, "close_to_tray") {
+            prefs.close_to_tray = v;
+        }
+        if let Some(v) = toml_bool(&raw, "start_in_tray") {
+            prefs.start_in_tray = v;
+        }
+        // Seed desktop.json so CloseRequested and future launches stay in sync
+        let _ = save_desktop_prefs(&prefs);
+        log::info!(
+            "desktop prefs seeded from config.toml (close_to_tray={}, start_in_tray={})",
+            prefs.close_to_tray,
+            prefs.start_in_tray
+        );
+    }
+    prefs
 }
 
 fn save_desktop_prefs(prefs: &DesktopPrefs) -> Result<(), String> {
@@ -579,6 +632,59 @@ fn show_main_window(app: AppHandle) -> Result<(), String> {
         let _ = w.show();
         let _ = w.unminimize();
         let _ = w.set_focus();
+    }
+    Ok(())
+}
+
+/// Reliable minimize from the custom title bar (avoids webview permission races).
+#[tauri::command]
+fn minimize_main_window(app: AppHandle) -> Result<(), String> {
+    if let Some(w) = app.get_webview_window("main") {
+        w.minimize().map_err(|e| format!("minimize failed: {e}"))?;
+    }
+    Ok(())
+}
+
+/// Maximize / restore from the custom title bar.
+#[tauri::command]
+fn toggle_maximize_main_window(app: AppHandle) -> Result<bool, String> {
+    if let Some(w) = app.get_webview_window("main") {
+        let max = w
+            .is_maximized()
+            .map_err(|e| format!("is_maximized failed: {e}"))?;
+        if max {
+            w.unmaximize()
+                .map_err(|e| format!("unmaximize failed: {e}"))?;
+        } else {
+            w.maximize()
+                .map_err(|e| format!("maximize failed: {e}"))?;
+        }
+        return w
+            .is_maximized()
+            .map_err(|e| format!("is_maximized failed: {e}"));
+    }
+    Ok(false)
+}
+
+/// Close button: hide to tray when enabled, otherwise quit (sidecar stopped via CloseRequested).
+#[tauri::command]
+fn request_close_main_window(
+    app: AppHandle,
+    state: State<'_, ServerState>,
+) -> Result<(), String> {
+    let close_to_tray = state
+        .desktop_prefs
+        .lock()
+        .map(|p| p.close_to_tray)
+        .unwrap_or(true);
+    if let Some(w) = app.get_webview_window("main") {
+        if close_to_tray {
+            w.hide().map_err(|e| format!("hide failed: {e}"))?;
+            log::info!("request_close_main_window: hidden to tray");
+        } else {
+            // Triggers CloseRequested → sidecar shutdown on full quit
+            w.close().map_err(|e| format!("close failed: {e}"))?;
+        }
     }
     Ok(())
 }
@@ -1224,6 +1330,9 @@ pub fn run() {
             set_desktop_prefs,
             get_desktop_prefs,
             show_main_window,
+            minimize_main_window,
+            toggle_maximize_main_window,
+            request_close_main_window,
             restart_server,
             check_desktop_update,
             start_desktop_update,
@@ -1239,19 +1348,33 @@ pub fn run() {
             // Tray already uses icons/icon.png; taskbar often stuck on old embedded ICO.
             apply_window_icons(&app_handle);
 
-            // Tray menu: Show / Quit (always-ready partner)
+            // Tray menu (OS-native chrome; labels only — UI panels are themed in-app)
             {
-                use tauri::menu::{Menu, MenuItem};
+                use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
                 use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};
 
                 let show_i = MenuItem::with_id(app, "show", "Show Remedy", true, None::<&str>)?;
-                let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-                let menu = Menu::with_items(app, &[&show_i, &quit_i])?;
+                let settings_i =
+                    MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
+                let updates_i = MenuItem::with_id(
+                    app,
+                    "check_updates",
+                    "Check for updates…",
+                    true,
+                    None::<&str>,
+                )?;
+                let about_i = MenuItem::with_id(app, "about", "About Remedy", true, None::<&str>)?;
+                let sep = PredefinedMenuItem::separator(app)?;
+                let quit_i = MenuItem::with_id(app, "quit", "Quit Remedy", true, None::<&str>)?;
+                let menu = Menu::with_items(
+                    app,
+                    &[&show_i, &settings_i, &updates_i, &about_i, &sep, &quit_i],
+                )?;
 
                 // Prefer tray from tauri.conf.json; attach menu + events
                 if let Some(tray) = app.tray_by_id("main") {
                     let _ = tray.set_menu(Some(menu.clone()));
-                    let _ = tray.set_tooltip(Some("Remedy"));
+                    let _ = tray.set_tooltip(Some("Remedy — right-click for Settings"));
                     let app_for_menu = app.handle().clone();
                     tray.on_menu_event(move |_tray, event| match event.id.as_ref() {
                         "show" => {
@@ -1260,6 +1383,30 @@ pub fn run() {
                                 let _ = w.unminimize();
                                 let _ = w.set_focus();
                             }
+                        }
+                        "settings" => {
+                            if let Some(w) = app_for_menu.get_webview_window("main") {
+                                let _ = w.show();
+                                let _ = w.unminimize();
+                                let _ = w.set_focus();
+                            }
+                            let _ = app_for_menu.emit("tray-open-settings", ());
+                        }
+                        "check_updates" => {
+                            if let Some(w) = app_for_menu.get_webview_window("main") {
+                                let _ = w.show();
+                                let _ = w.unminimize();
+                                let _ = w.set_focus();
+                            }
+                            let _ = app_for_menu.emit("tray-check-updates", ());
+                        }
+                        "about" => {
+                            if let Some(w) = app_for_menu.get_webview_window("main") {
+                                let _ = w.show();
+                                let _ = w.unminimize();
+                                let _ = w.set_focus();
+                            }
+                            let _ = app_for_menu.emit("tray-about", ());
                         }
                         "quit" => {
                             let state = app_for_menu.state::<ServerState>();
@@ -1354,12 +1501,15 @@ pub fn run() {
             match event {
                 // Close-to-tray: hide instead of quit when always-ready is enabled.
                 tauri::WindowEvent::CloseRequested { api, .. } => {
-                    let close_to_tray = window
-                        .state::<ServerState>()
-                        .desktop_prefs
-                        .lock()
-                        .map(|p| p.close_to_tray)
-                        .unwrap_or(false);
+                    // Re-read disk in case Settings saved prefs without a live reload.
+                    let fresh = load_desktop_prefs();
+                    if let Ok(mut g) = window.state::<ServerState>().desktop_prefs.lock() {
+                        *g = DesktopPrefs {
+                            close_to_tray: fresh.close_to_tray,
+                            start_in_tray: fresh.start_in_tray,
+                        };
+                    }
+                    let close_to_tray = fresh.close_to_tray;
                     if close_to_tray {
                         api.prevent_close();
                         let _ = window.hide();
@@ -1370,10 +1520,17 @@ pub fn run() {
                     }
                 }
                 tauri::WindowEvent::Destroyed => {
-                    // Only if we actually quit (not hide-to-tray)
-                    let state = window.state::<ServerState>();
-                    // If process still managed, tear down — hide path never destroys.
-                    shutdown_sidecar(&state);
+                    // Full quit only (hide-to-tray never destroys the window).
+                    let close_to_tray = window
+                        .state::<ServerState>()
+                        .desktop_prefs
+                        .lock()
+                        .map(|p| p.close_to_tray)
+                        .unwrap_or(true);
+                    if !close_to_tray {
+                        let state = window.state::<ServerState>();
+                        shutdown_sidecar(&state);
+                    }
                 }
                 // Native OS file drops (Explorer → app). WebView2 often won't
                 // deliver HTML5 DataTransfer.files for external drops.

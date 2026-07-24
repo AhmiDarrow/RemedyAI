@@ -33,29 +33,29 @@ The desktop app bundles the full Remedy server as a sidecar, so everything runs 
 
 | Feature | Description |
 |---------|-------------|
-| **Chat UI** | Streaming tokens, markdown; **you on the right, Remedy on the left** (themed bubbles) |
+| **Chat UI** | Streaming markdown bubbles (you right / Remedy left); shrink-wrap size; stick-to-bottom unless you scroll up (**↓** resumes) |
+| **Your name** | Settings + first-run: what Remedy calls you; avatar initials in chat |
+| **Tool process** | **Off / Medium / Full** — minimal progress, labeled steps, or full raw tool args/stdout (Settings + status bar **Proc**) |
+| **Icons** | Copy / edit / send / attach as icons (language-neutral); image lightbox |
 | **Prompt history** | **↑ / ↓** in the composer for previous prompts (shell-style) |
-| **Session tabs** | Multi-tab session management — open, switch, close tabs |
-| **Attachments** | Drag-and-drop or attach files/images into the session |
-| **Plan/Build mode** | Toggle between plan mode (no tools) and build mode |
-| **@file references** | Type `@` to search and autocomplete project files |
-| **First-run setup** | Setup wizard (provider, workspace, persona, optional always-ready) |
-| **xAI Sign-in** | Device-code OAuth for Grok (SuperGrok / X Premium+) plus console API key |
+| **Sessions** | Tabs; auto-title from first prompt; rename; search / pin / tags |
+| **Attachments** | Drag-and-drop, paste, or attach files/images |
+| **Plan/Build mode** | Toggle plan (no tools) vs build |
+| **@file / /** | `@` file search; `/` slash-command menu while typing |
+| **First-run setup** | Provider, workspace, persona, optional always-ready |
+| **xAI Sign-in** | Device-code OAuth for Grok + console API key (per-provider secure store) |
 | **Providers** | OpenAI, Anthropic, Google, DeepSeek, xAI, Groq, Mistral, OpenRouter, Ollama; Custom under Advanced |
-| **Settings** | Persona, project browse, access scope, Memory Harness, launch-at-login; Save reloads Remedy |
-| **Access scope** | Project only / home / full user machine (opt-in, no silent elevation) |
-| **Always ready** | Optional Start with Windows via **Startup folder** (not registry Run); tray Show/Quit; close-to-tray |
-| **Memory Harness** | Context prune + Session Brief + `/compact` for long sessions |
-| **Approvals** | High-impact shell commands need Approve/Deny (banner or `/approve`) |
-| **Goals** | Partner checklist: `/goal`, `/goals`, goal tools + verify/learn |
-| **Bundled skills** | Engineering + companion skills (research, design critique, remember-me, …) |
-| **Undo** | Hover any assistant message to revert it |
-| **Themes** | System (follow OS) + Dark, Light, Emerald, Amethyst, Amber, Ocean |
-| **Keyboard help** | Settings → Help & shortcuts; `/help` lists hotkeys |
-| **Side panels** | Memory browser and Skills viewer accessible from the status bar |
-| **Slash commands** | See table below |
-| **Tray icon** | Circuit-R monogram; menu Show / Quit |
-| **Auto-update** | In-app check → download → install → relaunch (minisign-signed releases) |
+| **Settings** | Logo menu + panel: You & Agent, project, scope, harness, tool process, themes, density, accent |
+| **Access scope** | Project only / home / full user machine (opt-in) |
+| **Always ready** | Startup folder (not registry Run); tray Show / **Settings** / Updates / About / Quit; close-to-tray |
+| **Memory Harness** | Context prune + Session Brief + `/compact` |
+| **Approvals** | High-impact shell: Approve/Deny |
+| **Goals** | `/goal`, `/goals`, goal tools |
+| **ComfyUI skill** | Portable local discovery + image generation into chat |
+| **Themes** | System, Dark, **Neutral Dark**, Light, Emerald, Amethyst, Amber, Ocean |
+| **Side panels** | Memory · Skills · Settings (status bar) |
+| **Tray** | Circuit-R icon; right-click Settings and more |
+| **Auto-update** | Check → download → install → relaunch (signed releases) |
 
 ### Slash commands (desktop & API)
 

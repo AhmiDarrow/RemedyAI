@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { searchFiles } from '../api/messages'
+import { searchFiles, listCommands } from '../api/messages'
+import type { CommandDefinition } from '../types'
 import {
   uploadAttachment,
   uploadDroppedPayload,
@@ -11,6 +12,7 @@ import {
   type DroppedFilePayload,
 } from '../api/attachments'
 import { isTauri } from '../api/tauri'
+import { IconPaperclip, IconSend, IconStop } from './icons'
 
 export interface AgentDef {
   name: string
@@ -42,9 +44,26 @@ interface ComposerProps {
   sessionId?: string | null
   /** Create a session if needed before upload. */
   ensureSession?: () => Promise<string | null>
+  /** Optional preloaded slash commands (falls back to API). */
+  slashCommands?: CommandDefinition[]
 }
 
-type SuggestionItem = { label: string; value: string; icon: string; type: 'file' | 'agent' }
+type SuggestionItem = {
+  label: string
+  value: string
+  icon: string
+  type: 'file' | 'agent' | 'command'
+  description?: string
+}
+
+const FALLBACK_COMMANDS: CommandDefinition[] = [
+  { name: '/help', description: 'List commands', aliases: [], arguments: null },
+  { name: '/new', description: 'New session', aliases: [], arguments: null },
+  { name: '/compact', description: 'Compact conversation', aliases: [], arguments: null },
+  { name: '/remember', description: 'Save a memory', aliases: [], arguments: null },
+  { name: '/thinking', description: 'Toggle thinking visibility', aliases: [], arguments: null },
+  { name: '/export', description: 'Export session', aliases: [], arguments: null },
+]
 
 const MAX_FILES = 12
 const PROMPT_HISTORY_KEY = 'remedy.composer.promptHistory'
@@ -81,11 +100,35 @@ export function Composer({
   editDraft,
   sessionId,
   ensureSession,
+  slashCommands: slashCommandsProp,
 }: ComposerProps) {
   const [input, setInput] = useState('')
   const [suggestions, setSuggestions] = useState<SuggestionItem[]>([])
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [suggestionIdx, setSuggestionIdx] = useState(0)
+  const [slashCommands, setSlashCommands] = useState<CommandDefinition[]>(
+    slashCommandsProp?.length ? slashCommandsProp : FALLBACK_COMMANDS,
+  )
+
+  useEffect(() => {
+    if (slashCommandsProp?.length) {
+      setSlashCommands(slashCommandsProp)
+      return
+    }
+    let cancelled = false
+    listCommands()
+      .then((r) => {
+        if (cancelled) return
+        const cmds = r?.commands
+        if (Array.isArray(cmds) && cmds.length) setSlashCommands(cmds)
+      })
+      .catch(() => {
+        /* keep fallback */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [slashCommandsProp])
   const [attachments, setAttachments] = useState<AttachmentMeta[]>([])
   const [dragOver, setDragOver] = useState(false)
   const [uploading, setUploading] = useState(false)
@@ -155,11 +198,30 @@ export function Composer({
     return match ? match[1] : null
   }, [])
 
+  /** Slash menu only at start of input (or sole line beginning with /). */
+  const detectSlashQuery = useCallback((text: string, cursorPos: number) => {
+    const before = text.slice(0, cursorPos)
+    if (!before.startsWith('/')) return null
+    if (before.includes('\n')) return null
+    // Full line is the command draft
+    if (before.includes(' ') && !before.endsWith(' ')) {
+      // typing arguments — hide menu
+      return null
+    }
+    return before.slice(1) // without leading /
+  }, [])
+
   const handleSuggestionSelect = useCallback(
     (item: SuggestionItem) => {
       const cursorPos = textareaRef.current?.selectionStart ?? input.length
       const before = input.slice(0, cursorPos)
       const after = input.slice(cursorPos)
+      if (item.type === 'command') {
+        setInput(item.value + (item.value.endsWith(' ') ? '' : ' '))
+        setShowSuggestions(false)
+        textareaRef.current?.focus()
+        return
+      }
       const atIdx = before.lastIndexOf('@')
       const newInput = before.slice(0, atIdx) + item.value + ' ' + after
       setInput(newInput)
@@ -515,6 +577,37 @@ export function Composer({
         draftBeforeHistoryRef.current = ''
       }
       const cursorPos = textareaRef.current?.selectionStart ?? text.length
+      const slashQ = detectSlashQuery(text, cursorPos)
+      if (slashQ !== null) {
+        clearTimeout(suggestTimer.current ?? undefined)
+        const ql = slashQ.toLowerCase()
+        const items: SuggestionItem[] = slashCommands
+          .filter((c) => {
+            const name = (c.name || '').replace(/^\//, '').toLowerCase()
+            const full = (c.name || '').toLowerCase()
+            return !ql || name.startsWith(ql) || full.includes(ql) || (c.description || '').toLowerCase().includes(ql)
+          })
+          .slice(0, 10)
+          .map((c) => {
+            const name = c.name.startsWith('/') ? c.name : `/${c.name}`
+            return {
+              label: name,
+              value: name,
+              icon: '/',
+              type: 'command' as const,
+              description: c.description || '',
+            }
+          })
+        if (items.length) {
+          setSuggestions(items)
+          setSuggestionIdx(0)
+          setShowSuggestions(true)
+        } else {
+          setShowSuggestions(false)
+        }
+        return
+      }
+
       const q = detectAtQuery(text, cursorPos)
 
       if (q !== null && q.length >= 1) {
@@ -561,7 +654,7 @@ export function Composer({
         setShowSuggestions(false)
       }
     },
-    [agents, detectAtQuery],
+    [agents, detectAtQuery, detectSlashQuery, slashCommands],
   )
 
   const onDragEnter = useCallback((e: React.DragEvent) => {
@@ -671,11 +764,27 @@ export function Composer({
                 handleSuggestionSelect(s)
               }}
             >
-              <span style={{ color: s.type === 'agent' ? 'var(--accent)' : 'var(--text-muted)', width: 16, textAlign: 'center' }}>
+              <span
+                style={{
+                  color:
+                    s.type === 'agent' || s.type === 'command'
+                      ? 'var(--accent)'
+                      : 'var(--text-muted)',
+                  width: 16,
+                  textAlign: 'center',
+                }}
+              >
                 {s.icon}
               </span>
-              <span className="truncate">{s.label}</span>
-              <span className="ml-auto text-[0.65rem]" style={{ color: 'var(--text-muted)' }}>
+              <span className="truncate min-w-0">
+                {s.label}
+                {s.description ? (
+                  <span className="ml-1.5" style={{ color: 'var(--text-muted)' }}>
+                    {s.description}
+                  </span>
+                ) : null}
+              </span>
+              <span className="ml-auto text-[0.65rem] flex-shrink-0" style={{ color: 'var(--text-muted)' }}>
                 {s.type}
               </span>
             </button>
@@ -805,21 +914,24 @@ export function Composer({
         />
         <button
           type="button"
-          title="Attach files (same as drag & drop)"
+          title="Attach files"
+          aria-label="Attach files"
           disabled={disabled || streaming || uploading}
           onClick={() => fileInputRef.current?.click()}
-          className="relative px-2.5 py-2 rounded-md text-sm flex-shrink-0"
+          className="relative flex items-center justify-center rounded-xl flex-shrink-0"
           style={{
+            width: 40,
+            height: 40,
             background: attachments.length ? 'var(--accent)' : 'var(--bg-tertiary)',
             border: '1px solid var(--border)',
             color: attachments.length ? '#fff' : 'var(--text-secondary)',
             opacity: disabled || streaming || uploading ? 0.5 : 1,
           }}
         >
-          📎
+          <IconPaperclip size={16} />
           {attachments.length > 0 && (
             <span
-              className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full text-[0.65rem] font-bold flex items-center justify-center"
+              className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-1 rounded-full text-[0.6rem] font-bold flex items-center justify-center"
               style={{ background: 'var(--bg-primary)', color: 'var(--accent)', border: '1px solid var(--accent)' }}
             >
               {attachments.length}
@@ -835,59 +947,59 @@ export function Composer({
           onPaste={onPaste}
           placeholder={
             planMode
-              ? 'Plan mode — describe what to do (no tools executed)'
+              ? 'Plan mode — describe what to do (no tools)'
               : attachments.length
-                ? 'Add a message (optional) and press Send…'
-                : 'Message, /command, @file…  ·  drop, paste, or 📎 to attach'
+                ? 'Message (optional)…'
+                : 'Message, /command, @file…'
           }
           disabled={disabled}
           rows={1}
-          className="flex-1 resize-none rounded-md px-3 py-2 text-sm outline-none transition-colors"
+          className="composer-input flex-1 resize-none rounded-xl px-3 py-2.5 text-sm outline-none transition-colors"
           style={{
             background: 'var(--bg-primary)',
             border: `1px solid ${dragOver || attachments.length ? 'var(--accent)' : 'var(--border)'}`,
             color: 'var(--text-primary)',
             maxHeight: 160,
           }}
-          onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--accent)')}
-          onBlur={(e) => {
-            if (!dragOver && !attachments.length) e.currentTarget.style.borderColor = 'var(--border)'
-          }}
         />
 
-        {/* Send + Stop always side-by-side (Stop enabled only while streaming) */}
         <button
           type="button"
           onClick={handleSubmit}
           disabled={!canSend}
-          className="px-4 py-2 rounded-md text-sm font-medium transition-colors flex-shrink-0"
+          title={uploading ? 'Uploading…' : 'Send'}
+          aria-label="Send"
+          className="flex items-center justify-center rounded-xl flex-shrink-0 transition-colors"
           style={{
+            width: 40,
+            height: 40,
             background: !canSend ? 'var(--bg-tertiary)' : 'var(--accent)',
             color: !canSend ? 'var(--text-muted)' : '#fff',
             cursor: !canSend ? 'not-allowed' : 'pointer',
+            border: '1px solid var(--border)',
           }}
         >
-          {uploading ? '…' : 'Send'}
+          <IconSend size={16} />
         </button>
         <button
           type="button"
           onClick={onStop}
           disabled={!streaming}
-          title={streaming ? 'Stop generation' : 'Stop (available while generating)'}
-          className="px-4 py-2 rounded-md text-sm font-medium transition-colors flex-shrink-0"
+          title={streaming ? 'Stop generation' : 'Stop'}
+          aria-label="Stop"
+          className="flex items-center justify-center rounded-xl flex-shrink-0 transition-colors"
           style={{
+            width: 40,
+            height: 40,
             background: streaming ? 'var(--error)' : 'var(--bg-tertiary)',
             color: streaming ? '#fff' : 'var(--text-muted)',
             border: streaming ? 'none' : '1px solid var(--border)',
             cursor: streaming ? 'pointer' : 'not-allowed',
-            opacity: streaming ? 1 : 0.7,
+            opacity: streaming ? 1 : 0.55,
           }}
         >
-          Stop
+          <IconStop size={14} />
         </button>
-      </div>
-      <div className="mt-1 text-[0.65rem]" style={{ color: 'var(--text-muted)' }}>
-        ↑ previous prompt · ↓ next · Shift+Enter new line · 📎 / drop attach · max {MAX_FILES}
       </div>
     </div>
   )

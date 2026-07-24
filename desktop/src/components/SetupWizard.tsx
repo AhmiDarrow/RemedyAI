@@ -36,6 +36,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
   const [baseUrl, setBaseUrl] = useState('https://api.openai.com/v1')
   const [projectPath, setProjectPath] = useState('')
   const [persona, setPersona] = useState('balanced')
+  const [userName, setUserName] = useState('')
   const [launchAtLogin, setLaunchAtLogin] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -221,6 +222,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
         llm_api_key: apiKey || undefined,
         project_path: projectPath || undefined,
         persona: persona || undefined,
+        user_name: userName.trim() || undefined,
         setup_completed: true,
         launch_at_login: launchAtLogin,
         start_in_tray: launchAtLogin,
@@ -232,7 +234,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
     } finally {
       setSaving(false)
     }
-  }, [apiKey, provider, model, baseUrl, projectPath, persona, launchAtLogin, onComplete])
+  }, [apiKey, provider, model, baseUrl, projectPath, persona, userName, launchAtLogin, onComplete])
 
   const handleSkip = useCallback(async () => {
     // Mark setup done so the wizard never blocks launch again.
@@ -584,6 +586,25 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
 
           {step === 'persona' && (
             <div className="space-y-3">
+              <div>
+                <label className="block mb-1 text-xs font-medium" style={labelStyles}>
+                  Your name (what Remedy calls you)
+                </label>
+                <input
+                  value={userName}
+                  onChange={(e) => setUserName(e.target.value)}
+                  placeholder="e.g. Alex"
+                  className="w-full rounded-lg px-3 py-2 text-sm outline-none mb-1"
+                  style={{
+                    background: 'var(--bg-primary)',
+                    border: '1px solid var(--border)',
+                    color: 'var(--text-primary)',
+                  }}
+                />
+                <div className="text-[10px] mb-2" style={mutedStyles}>
+                  Optional now — you can set this later in Settings.
+                </div>
+              </div>
               <div>
                 <label
                   className="block mb-1 text-xs font-medium"

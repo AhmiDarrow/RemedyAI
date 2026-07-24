@@ -25,9 +25,25 @@ uv sync
 ### Verify
 
 ```bash
-remedy --version   # remedy 0.10.15 (or current package version)
+remedy --version   # remedy 0.10.25 (or current package version)
 remedy --help      # Lists all commands
 ```
+
+### Desktop: tool process visibility
+
+In **Settings → Tool process** (or status bar **Proc**):
+
+| Mode | What you see |
+|------|----------------|
+| **Off** (default) | Progress only — clean chat |
+| **Medium** | Human labels + status + short results |
+| **Full** | Complete raw tool args and stdout (safety cap ~500k chars) |
+
+After a turn, process stays under the assistant message, **collapsed** until you expand it. The feed (and the process frame while live) auto-scrolls unless you scroll up; **↓** resumes follow.
+
+### Desktop: your name
+
+**Settings → You & Agent → Your name** is what Remedy calls you (synced to profile). Set during setup or when prompted after first run.
 
 ---
 

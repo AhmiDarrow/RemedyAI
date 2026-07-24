@@ -15,6 +15,57 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+_THINKING_NUDGES = {
+    "off": (
+        "Thinking level: off. Answer directly and concisely. "
+        "Skip long deliberation; prefer action."
+    ),
+    "low": (
+        "Thinking level: low. Brief reasoning only when needed; keep answers tight."
+    ),
+    "medium": (
+        "Thinking level: medium. Think step-by-step when useful, then answer clearly."
+    ),
+    "high": (
+        "Thinking level: high. Reason carefully before tools or final answers. "
+        "Check edge cases and verify tool results."
+    ),
+}
+
+
+def _thinking_nudge(level: str) -> str:
+    return _THINKING_NUDGES.get((level or "medium").lower(), "")
+
+
+def _prepend_system_nudge(
+    messages: list[dict[str, Any]], nudge: str
+) -> list[dict[str, Any]]:
+    if not nudge:
+        return messages
+    out = list(messages)
+    if out and out[0].get("role") == "system":
+        base = str(out[0].get("content") or "")
+        if nudge not in base:
+            out[0] = {**out[0], "content": f"{base}\n\n{nudge}".strip()}
+        return out
+    return [{"role": "system", "content": nudge}, *out]
+
+
+def _model_wants_reasoning_effort(model: str) -> bool:
+    m = (model or "").lower()
+    return any(
+        x in m
+        for x in (
+            "o1",
+            "o3",
+            "o4",
+            "gpt-5",
+            "grok-3-mini",
+            "reasoning",
+            "think",
+        )
+    )
+
 
 class ProviderAdapter(ABC):
     """Abstract base for an LLM provider API adapter."""
@@ -55,12 +106,14 @@ class ProviderAdapter(ABC):
         stream: bool,
         *,
         max_tokens: int | None = None,
+        thinking_level: str | None = None,
     ) -> dict[str, Any]:
         """Build the JSON request body for a chat completion call.
 
         Receives messages in OpenAI format with roles: system, user, assistant, tool.
         Returns provider-native body dict.
         ``max_tokens`` overrides the provider default when set.
+        ``thinking_level`` is off|low|medium|high (status-bar control).
         """
 
     @abstractmethod
@@ -123,14 +176,31 @@ class OpenAIProvider(ProviderAdapter):
         stream: bool,
         *,
         max_tokens: int | None = None,
+        thinking_level: str | None = None,
     ) -> dict[str, Any]:
         # Slightly lower temp with tools → fewer rambling / fake tool-call transcripts.
         temperature = 0.4 if tools else 0.6
+        level = (thinking_level or "medium").strip().lower()
+        if level == "off":
+            temperature = 0.3 if tools else 0.5
+        elif level == "high":
+            temperature = 0.5 if tools else 0.7
         if max_tokens is None:
             max_tokens = self.MAX_TOKENS_TOOLS if tools else self.MAX_TOKENS_ANSWER
+            if level == "high" and not tools:
+                max_tokens = max(max_tokens, 65_536)
+            elif level == "low":
+                max_tokens = min(max_tokens, 8_192 if tools else 16_384)
+            elif level == "off":
+                max_tokens = min(max_tokens, 4_096 if tools else 8_192)
+        # Soft system nudge for deliberation (providers without native effort API).
+        msgs = list(messages)
+        nudge = _thinking_nudge(level)
+        if nudge:
+            msgs = _prepend_system_nudge(msgs, nudge)
         body: dict[str, Any] = {
             "model": model,
-            "messages": messages,
+            "messages": msgs,
             "temperature": temperature,
             "max_tokens": max_tokens,
             "stream": stream,
@@ -138,6 +208,9 @@ class OpenAIProvider(ProviderAdapter):
         if tools:
             body["tools"] = tools
             body["tool_choice"] = "auto"
+        # Native effort when the model/API understands it (xAI/OpenAI-compat).
+        if level in ("low", "medium", "high") and _model_wants_reasoning_effort(model):
+            body["reasoning_effort"] = level
         return body
 
     def extract_response(self, response_json: dict[str, Any]) -> dict[str, Any]:
@@ -229,8 +302,13 @@ class AnthropicProvider(ProviderAdapter):
         stream: bool,
         *,
         max_tokens: int | None = None,
+        thinking_level: str | None = None,
     ) -> dict[str, Any]:
-        system_prompt, converted = self._convert_messages(messages)
+        msgs = list(messages)
+        nudge = _thinking_nudge(thinking_level or "medium")
+        if nudge:
+            msgs = _prepend_system_nudge(msgs, nudge)
+        system_prompt, converted = self._convert_messages(msgs)
         if max_tokens is None:
             max_tokens = self.MAX_TOKENS_TOOLS if tools else self.MAX_TOKENS_ANSWER
         body: dict[str, Any] = {
@@ -414,12 +492,18 @@ class GoogleProvider(OpenAIProvider):
         stream: bool,
         *,
         max_tokens: int | None = None,
+        thinking_level: str | None = None,
     ) -> dict[str, Any]:
         body = super().build_body(
-            model, messages, tools, stream, max_tokens=max_tokens
+            model,
+            messages,
+            tools,
+            stream,
+            max_tokens=max_tokens,
+            thinking_level=thinking_level,
         )
         # Gemini OpenAI-compat is picky about some OpenAI-only knobs.
-        for key in ("logit_bias", "logprobs", "top_logprobs", "n", "user"):
+        for key in ("logit_bias", "logprobs", "top_logprobs", "n", "user", "reasoning_effort"):
             body.pop(key, None)
         # Empty tools list is invalid; omit instead.
         if not body.get("tools"):
@@ -442,13 +526,21 @@ class DeepSeekProvider(OpenAIProvider):
         stream: bool,
         *,
         max_tokens: int | None = None,
+        thinking_level: str | None = None,
     ) -> dict[str, Any]:
         body = super().build_body(
-            model, messages, tools, stream, max_tokens=max_tokens
+            model,
+            messages,
+            tools,
+            stream,
+            max_tokens=max_tokens,
+            thinking_level=thinking_level,
         )
         # Reasoner models work better with slightly lower temperature.
         if "reasoner" in (model or "").lower():
             body["temperature"] = min(float(body.get("temperature") or 0.6), 0.5)
+        # DeepSeek does not use OpenAI reasoning_effort field
+        body.pop("reasoning_effort", None)
         return body
 
 

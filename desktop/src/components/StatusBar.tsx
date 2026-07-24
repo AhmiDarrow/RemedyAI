@@ -3,6 +3,10 @@ import { getPartnerStatus } from '../api/partner'
 import { ThemeSwitcher } from './ThemeSwitcher'
 import type { ThemeId, Theme } from '../themes'
 import type { ModelInfo } from '../App'
+import type { ToolProcessMode } from '../utils/toolLabels'
+
+export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high'
+export type ApprovalMode = 'ask' | 'auto'
 
 interface StatusBarProps {
   sessionId: string | null
@@ -10,6 +14,12 @@ interface StatusBarProps {
   model: string
   models?: ModelInfo[]
   onModelChange?: (id: string) => void
+  thinkingLevel: ThinkingLevel
+  onThinkingLevelChange?: (level: ThinkingLevel) => void
+  approvalMode: ApprovalMode
+  onApprovalModeChange?: (mode: ApprovalMode) => void
+  toolProcessMode?: ToolProcessMode
+  onToolProcessChange?: (mode: ToolProcessMode) => void
   themeId: ThemeId
   theme: Theme
   onThemeChange: (id: ThemeId) => void
@@ -22,12 +32,24 @@ interface StatusBarProps {
   onInstallUpdate?: () => void
 }
 
+const THINKING_OPTIONS: { id: ThinkingLevel; label: string }[] = [
+  { id: 'off', label: 'Off' },
+  { id: 'low', label: 'Low' },
+  { id: 'medium', label: 'Med' },
+  { id: 'high', label: 'High' },
+]
+
 export function StatusBar({
-  sessionId,
   streaming,
   model,
   models = [],
   onModelChange,
+  thinkingLevel,
+  onThinkingLevelChange,
+  approvalMode,
+  onApprovalModeChange,
+  toolProcessMode = 'off',
+  onToolProcessChange,
   themeId,
   theme,
   onThemeChange,
@@ -41,14 +63,12 @@ export function StatusBar({
 }: StatusBarProps) {
   const [version, setVersion] = useState('')
   const [status, setStatus] = useState<'connected' | 'disconnected' | 'checking'>('checking')
-  const [partnerHint, setPartnerHint] = useState('')
+  const [alerts, setAlerts] = useState('')
 
   useEffect(() => {
     let cancelled = false
     async function check() {
-      // Don't flash "checking" on routine polls — only first paint.
       try {
-        // One request for health + version (was healthCheck + status = double spam).
         const res = await fetch('http://127.0.0.1:7400/api/status', {
           signal: AbortSignal.timeout(3000),
         })
@@ -59,19 +79,17 @@ export function StatusBar({
             const data = await res.json()
             if (data?.version) setVersion(String(data.version))
           } catch {
-            // body optional
+            /* */
           }
           try {
             const p = await getPartnerStatus()
             if (cancelled) return
             const bits: string[] = []
-            if (p.pending_approvals > 0) bits.push(`⚠ ${p.pending_approvals} approve`)
+            if (p.pending_approvals > 0) bits.push(`${p.pending_approvals} approve`)
             if (p.open_goals > 0) bits.push(`${p.open_goals} goals`)
-            if (p.harness_mode && p.harness_mode !== 'off') bits.push(`Harness ${p.harness_mode}`)
-            if (p.access_scope && p.access_scope !== 'project') bits.push(`scope:${p.access_scope}`)
-            setPartnerHint(bits.join(' · '))
+            setAlerts(bits.join(' · '))
           } catch {
-            if (!cancelled) setPartnerHint('')
+            if (!cancelled) setAlerts('')
           }
         } else {
           setStatus('disconnected')
@@ -82,7 +100,6 @@ export function StatusBar({
     }
 
     check()
-    // 30s is enough for a local sidecar; cuts access-log / CPU noise in half.
     const interval = setInterval(check, 30000)
     return () => {
       cancelled = true
@@ -92,92 +109,76 @@ export function StatusBar({
 
   const dotColor =
     status === 'connected' ? 'var(--success)' : status === 'checking' ? 'var(--warning)' : 'var(--error)'
+  const autoApprove = approvalMode === 'auto'
 
   return (
     <div
-      className="flex items-center justify-between px-4 py-1.5 text-xs border-t"
+      className="flex items-center justify-between px-3 py-1 text-xs border-t gap-2"
       style={{
         background: 'var(--bg-secondary)',
         borderColor: 'var(--border)',
         color: 'var(--text-muted)',
       }}
     >
-      <div className="flex items-center gap-3">
-        <div className="flex items-center gap-1.5">
-          <span className="inline-block w-2 h-2 rounded-full" style={{ background: dotColor }} />
-          <span>
-            {status === 'connected' ? 'Connected' : status === 'checking' ? 'Checking...' : 'Disconnected'}
-            {version && ` \u00B7 v${version}`}
+      {/* Left: status + mode + panels */}
+      <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+        <div
+          className="flex items-center gap-1.5 px-1.5 py-0.5 rounded"
+          title={status === 'connected' ? `Remedy ${version || ''}`.trim() : 'Server offline'}
+          style={{ background: 'var(--bg-tertiary)' }}
+        >
+          <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: dotColor }} />
+          <span className="truncate max-w-[7rem]">
+            {status === 'connected' ? (version ? `v${version}` : 'Online') : status === 'checking' ? '…' : 'Offline'}
           </span>
         </div>
 
-        <button
-          onClick={onTogglePlanMode}
-          className="px-2 py-0.5 rounded text-xs font-medium transition-colors"
-          title={`Toggle plan mode (ctrl+b)`}
-          style={{
-            background: planMode ? 'var(--accent)' : 'var(--bg-tertiary)',
-            color: planMode ? '#fff' : 'var(--text-secondary)',
-          }}
-        >
-          {planMode ? 'Plan' : 'Build'}
-        </button>
-
-        <button
-          onClick={() => onTogglePanel('memory')}
-          className="px-2 py-0.5 rounded text-xs transition-colors"
-          title="Memory panel"
-          style={{
-            background: panel === 'memory' ? 'var(--accent)' : 'var(--bg-tertiary)',
-            color: panel === 'memory' ? '#fff' : 'var(--text-secondary)',
-          }}
-        >
-          Memory
-        </button>
-
-        <button
-          onClick={() => onTogglePanel('skills')}
-          className="px-2 py-0.5 rounded text-xs transition-colors"
-          title="Skills panel"
-          style={{
-            background: panel === 'skills' ? 'var(--accent)' : 'var(--bg-tertiary)',
-            color: panel === 'skills' ? '#fff' : 'var(--text-secondary)',
-          }}
-        >
-          Skills
-        </button>
-
-        <button
-          onClick={() => onTogglePanel('settings')}
-          className="px-2 py-0.5 rounded text-xs transition-colors"
-          title="Settings panel"
-          style={{
-            background: panel === 'settings' ? 'var(--accent)' : 'var(--bg-tertiary)',
-            color: panel === 'settings' ? '#fff' : 'var(--text-secondary)',
-          }}
-        >
-          Settings
-        </button>
-
-        {sessionId && <span style={{ color: 'var(--text-muted)' }}>{sessionId.slice(0, 8)}</span>}
-        {partnerHint && (
-          <span title="Partner status" style={{ color: 'var(--text-secondary)' }}>
-            {partnerHint}
+        {streaming && (
+          <span className="px-1.5 py-0.5 rounded font-medium" style={{ color: 'var(--accent)', background: 'color-mix(in srgb, var(--accent) 12%, transparent)' }}>
+            Streaming
           </span>
         )}
-        {streaming && <span style={{ color: 'var(--accent)' }}>Streaming...</span>}
+
+        {alerts && (
+          <span className="px-1.5 py-0.5 rounded truncate max-w-[10rem]" style={{ color: 'var(--warning)' }} title={alerts}>
+            ⚠ {alerts}
+          </span>
+        )}
+
+        <SegButton active={planMode} onClick={onTogglePlanMode} title="Plan mode (Ctrl+B)">
+          {planMode ? 'Plan' : 'Build'}
+        </SegButton>
+
+        {/* Separate labeled buttons — not MemSkillsSet jammed together */}
+        <SegButton
+          active={panel === 'memory'}
+          onClick={() => onTogglePanel('memory')}
+          title="Memory panel"
+        >
+          Memory
+        </SegButton>
+        <SegButton
+          active={panel === 'skills'}
+          onClick={() => onTogglePanel('skills')}
+          title="Skills (agent skill packs)"
+        >
+          Skills
+        </SegButton>
+        <SegButton
+          active={panel === 'settings'}
+          onClick={() => onTogglePanel('settings')}
+          title="Settings — provider, project, theme, account"
+        >
+          Settings
+        </SegButton>
 
         {updateAvailable && (
           <button
             onClick={() => (onInstallUpdate ? onInstallUpdate() : onCheckUpdates())}
-            className="px-2 py-0.5 rounded text-xs font-medium animate-pulse"
-            title="Update available — download, install, and relaunch"
-            style={{
-              background: 'var(--accent)',
-              color: '#fff',
-            }}
+            className="px-2 py-0.5 rounded text-xs font-medium"
+            style={{ background: 'var(--accent)', color: '#fff' }}
           >
-            Update Now
+            Update
           </button>
         )}
 
@@ -192,16 +193,19 @@ export function StatusBar({
         )}
       </div>
 
-      <div className="flex items-center gap-3">
+      {/* Right: model · think · approve · theme */}
+      <div className="flex items-center gap-1.5 flex-shrink-0">
         {models.length > 0 && onModelChange ? (
           <select
             value={model}
             onChange={(e) => onModelChange(e.target.value)}
             className="text-xs rounded px-1.5 py-0.5 outline-none"
+            title="Active model"
             style={{
               background: 'var(--bg-tertiary)',
               color: 'var(--text-primary)',
               border: '1px solid var(--border)',
+              maxWidth: 140,
             }}
           >
             {models.map((m) => (
@@ -211,10 +215,113 @@ export function StatusBar({
             ))}
           </select>
         ) : (
-          <span>Model: {model}</span>
+          <span className="truncate max-w-[8rem]" title={model}>
+            {model}
+          </span>
         )}
+
+        <select
+          value={thinkingLevel}
+          onChange={(e) => onThinkingLevelChange?.(e.target.value as ThinkingLevel)}
+          className="text-xs rounded px-1.5 py-0.5 outline-none"
+          title="Thinking level"
+          style={{
+            background: 'var(--bg-tertiary)',
+            color: 'var(--text-primary)',
+            border: '1px solid var(--border)',
+          }}
+        >
+          {THINKING_OPTIONS.map((o) => (
+            <option key={o.id} value={o.id}>
+              Think {o.label}
+            </option>
+          ))}
+        </select>
+
+        <button
+          type="button"
+          onClick={() => onApprovalModeChange?.(autoApprove ? 'ask' : 'auto')}
+          className="flex items-center justify-center rounded px-1.5 py-0.5 text-sm"
+          title={
+            autoApprove
+              ? 'Auto-approve on — click for Ask'
+              : 'Ask before risky tools — click for Auto'
+          }
+          aria-label={autoApprove ? 'Auto-approve' : 'Ask before risky actions'}
+          style={{
+            background: autoApprove
+              ? 'color-mix(in srgb, var(--success) 25%, var(--bg-tertiary))'
+              : 'var(--bg-tertiary)',
+            color: autoApprove ? 'var(--success)' : 'var(--text-secondary)',
+            border: `1px solid ${autoApprove ? 'var(--success)' : 'var(--border)'}`,
+            minWidth: 28,
+          }}
+        >
+          {autoApprove ? '👍' : '👎'}
+        </button>
+
+        {/* Tool process: cycle off → medium → full */}
+        <button
+          type="button"
+          onClick={() => {
+            const order: ToolProcessMode[] = ['off', 'medium', 'full']
+            const i = order.indexOf(toolProcessMode)
+            const next = order[(i + 1) % order.length]!
+            onToolProcessChange?.(next)
+          }}
+          className="px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide"
+          title={
+            toolProcessMode === 'off'
+              ? 'Tool process: Off (minimal) — click for Medium'
+              : toolProcessMode === 'medium'
+                ? 'Tool process: Medium — click for Full'
+                : 'Tool process: Full — click for Off'
+          }
+          aria-label={`Tool process ${toolProcessMode}`}
+          style={{
+            background:
+              toolProcessMode === 'off'
+                ? 'var(--bg-tertiary)'
+                : toolProcessMode === 'medium'
+                  ? 'color-mix(in srgb, var(--accent) 20%, var(--bg-tertiary))'
+                  : 'var(--accent)',
+            color: toolProcessMode === 'full' ? '#fff' : 'var(--text-secondary)',
+            border: `1px solid ${toolProcessMode === 'off' ? 'var(--border)' : 'var(--accent)'}`,
+            minWidth: 36,
+          }}
+        >
+          {toolProcessMode === 'off' ? 'Proc' : toolProcessMode === 'medium' ? 'Med' : 'Full'}
+        </button>
+
         <ThemeSwitcher currentId={themeId} currentTheme={theme} onChange={onThemeChange} />
       </div>
     </div>
+  )
+}
+
+function SegButton({
+  children,
+  active,
+  onClick,
+  title,
+}: {
+  children: React.ReactNode
+  active: boolean
+  onClick: () => void
+  title?: string
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      className="px-2 py-0.5 rounded text-xs font-medium"
+      style={{
+        background: active ? 'var(--accent)' : 'var(--bg-tertiary)',
+        color: active ? '#fff' : 'var(--text-secondary)',
+      }}
+    >
+      {children}
+    </button>
   )
 }

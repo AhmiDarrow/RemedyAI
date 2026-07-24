@@ -370,6 +370,21 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
 
         if memory:
             from remedy.models import ChatMessage, ChatSession
+
+            def _title_from_prompt(text: str, *, max_len: int = 52) -> str:
+                t = " ".join((text or "").strip().split())
+                if not t:
+                    return "New Session"
+                # Drop attachment display blocks from title.
+                if "📎" in t:
+                    t = t.split("📎", 1)[0].strip() or t
+                if t.startswith("(") and "see attached" in t.lower():
+                    name = (att_dicts[0].get("name") if att_dicts else "") or "Attachments"
+                    t = str(name)
+                if len(t) > max_len:
+                    t = t[: max_len - 1].rstrip() + "…"
+                return t or "New Session"
+
             existing = await memory.get_chat_session(session_id)
             if existing is None:
                 default_proj = load_config().get("project_path")
@@ -378,13 +393,28 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                 )
                 await memory.create_chat_session(ChatSession(
                     id=session_id,
-                    title=str(title_src)[:60],
+                    title=_title_from_prompt(str(title_src)),
                     model=req.model,
                     agent=req.agent,
                     project_path=default_proj,
                 ))
-            elif req.model and req.model != existing.model:
-                await memory.update_chat_session(session_id, model=req.model)
+            else:
+                # Auto-name placeholder sessions from the first real prompt.
+                cur_title = (existing.title or "").strip()
+                placeholder = (
+                    not cur_title
+                    or cur_title.lower() in ("new session", "new chat", "untitled")
+                )
+                if placeholder and (user_text or att_dicts):
+                    await memory.update_chat_session(
+                        session_id,
+                        title=_title_from_prompt(
+                            user_text
+                            or str((att_dicts[0].get("name") if att_dicts else "Attachments"))
+                        ),
+                    )
+                if req.model and req.model != existing.model:
+                    await memory.update_chat_session(session_id, model=req.model)
 
             await memory.add_chat_message(ChatMessage(
                 session_id=session_id,
@@ -408,6 +438,9 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
 
             try:
                 full_response = ""
+                full_thinking = ""
+                collected_tool_calls: list[dict] = []
+                collected_tool_results: list[dict] = []
                 if not api_key:
                     status = "no_key"
                     msg = (
@@ -424,18 +457,102 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                     attachments=att_dicts,
                 ):
                     if token.startswith("@@tool_call:"):
-                        tool_name = token[len("@@tool_call:"):]
+                        raw = token[len("@@tool_call:") :]
+                        tool_name = raw
+                        args: dict = {}
+                        try:
+                            if raw.strip().startswith("{"):
+                                obj = json.loads(raw)
+                                tool_name = str(obj.get("name") or "tool")
+                                a = obj.get("args")
+                                if isinstance(a, dict):
+                                    args = a
+                        except Exception:
+                            tool_name = raw.split("|", 1)[0].strip() or "tool"
+                        collected_tool_calls.append({"name": tool_name, "args": args})
                         yield (
-                            f"event: tool_call\ndata: {json.dumps({'type': 'tool_call', 'name': tool_name})}\n\n"
+                            "event: tool_call\ndata: "
+                            + json.dumps(
+                                {
+                                    "type": "tool_call",
+                                    "name": tool_name,
+                                    "args": args,
+                                },
+                                default=str,
+                            )
+                            + "\n\n"
                         )
                     elif token.startswith("@@tool_result:"):
-                        tool_name = token[len("@@tool_result:"):]
-                        yield (
-                            f"event: tool_result\ndata: {json.dumps({'type': 'tool_result', 'name': tool_name})}\n\n"
+                        raw = token[len("@@tool_result:") :]
+                        tool_name = raw
+                        preview = ""
+                        ok = True
+                        try:
+                            if raw.strip().startswith("{"):
+                                obj = json.loads(raw)
+                                tool_name = str(obj.get("name") or "tool")
+                                preview = str(obj.get("preview") or "")
+                                ok = bool(obj.get("ok", True))
+                            else:
+                                tool_name = raw.split("|", 1)[0].strip() or "tool"
+                        except Exception:
+                            tool_name = raw.split("|", 1)[0].strip() or "tool"
+                        collected_tool_results.append(
+                            {
+                                "name": tool_name,
+                                "output": preview,
+                                "error": None if ok else (preview or "tool failed"),
+                            }
                         )
+                        yield (
+                            "event: tool_result\ndata: "
+                            + json.dumps(
+                                {
+                                    "type": "tool_result",
+                                    "name": tool_name,
+                                    "preview": preview,
+                                    "ok": ok,
+                                },
+                                default=str,
+                            )
+                            + "\n\n"
+                        )
+                    elif token.startswith("@@progress:"):
+                        # Generic task/job progress for the desktop progress bar.
+                        raw = token[len("@@progress:") :]
+                        try:
+                            payload = json.loads(raw) if raw else {}
+                        except Exception:
+                            payload = {"label": raw or "Working…"}
+                        if not isinstance(payload, dict):
+                            payload = {"label": str(payload)}
+                        event = {"type": "progress", **payload}
+                        yield f"event: progress\ndata: {json.dumps(event)}\n\n"
+                    elif token.startswith("@@thinking:"):
+                        thought = token[len("@@thinking:") :]
+                        if thought:
+                            full_thinking += thought
+                            yield await _sse_stream_text(thought, event="thinking")
+                    elif token.startswith("@@image_markdown:"):
+                        # ComfyUI (etc.): image markdown with data-URI — show immediately.
+                        md = token[len("@@image_markdown:"):]
+                        if md:
+                            full_response += ("\n\n" if full_response else "") + md
+                            yield await _sse_stream_text(md, event="token")
                     elif token == "@@tool_calls":
                         pass
                     else:
+                        # Never stream DSML / fake tool markup into the chat bubble.
+                        from remedy.core.react_policy import (
+                            looks_like_pseudo_tools,
+                            strip_tool_markup,
+                        )
+
+                        if looks_like_pseudo_tools(token):
+                            cleaned = strip_tool_markup(token)
+                            if not cleaned:
+                                continue
+                            token = cleaned
                         full_response += token
                         yield await _sse_stream_text(token, event="token")
 
@@ -444,6 +561,9 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                         session_id=session_id,
                         role=ChatMessageRole.ASSISTANT,
                         content=full_response,
+                        thinking=full_thinking.strip() or None,
+                        tool_calls=collected_tool_calls,
+                        tool_results=collected_tool_results,
                         model=req.model or getattr(runtime, "_llm_model", None),
                     ))
 

@@ -47,13 +47,35 @@ class ApprovalQueue:
         self._approved_fps: set[str] = set()
         # Session-scoped approvals
         self._session_fps: dict[str, set[str]] = {}
+        # ask (default) | auto — status-bar thumbs toggle
+        self._mode: str = "ask"
+
+    @property
+    def mode(self) -> str:
+        with self._lock:
+            return self._mode
+
+    def set_mode(self, mode: str) -> str:
+        """Set approval mode: ``ask`` (thumbs down) or ``auto`` (thumbs up)."""
+        m = (mode or "ask").strip().lower()
+        if m not in ("ask", "auto"):
+            m = "ask"
+        with self._lock:
+            self._mode = m
+            return self._mode
 
     @staticmethod
     def fingerprint(tool_name: str, command: str) -> str:
         return f"{tool_name}::{(command or '').strip()}"
 
     def needs_ask(self, command: str) -> str | None:
-        """Return reason string if command should require approval."""
+        """Return reason string if command should require approval.
+
+        When mode is ``auto`` (status-bar thumbs-up), skip prompts entirely.
+        """
+        with self._lock:
+            if self._mode == "auto":
+                return None
         c = (command or "").strip()
         if not c:
             return None

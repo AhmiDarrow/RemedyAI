@@ -29,6 +29,195 @@ CONFIG_PATHS = [
 
 ENV_PREFIX = "REMEDY_"
 
+# Env vars that can supply a key for a given provider (checked after provider_keys).
+_PROVIDER_ENV_KEYS: dict[str, tuple[str, ...]] = {
+    "openai": ("OPENAI_API_KEY", "REMEDY_LLM_API_KEY"),
+    "anthropic": ("ANTHROPIC_API_KEY",),
+    "google": ("GOOGLE_API_KEY", "GEMINI_API_KEY"),
+    "deepseek": ("DEEPSEEK_API_KEY",),
+    "xai": ("XAI_API_KEY", "REMEDY_XAI_API_KEY"),
+    "groq": ("GROQ_API_KEY",),
+    "mistral": ("MISTRAL_API_KEY",),
+    "openrouter": ("OPENROUTER_API_KEY",),
+}
+
+
+def looks_like_xai_credential(key: str | None) -> bool:
+    """True if the secret is an xAI console key or OAuth access JWT."""
+    k = (key or "").strip()
+    if not k:
+        return False
+    if k.startswith("xai-"):
+        return True
+    # OAuth access tokens are JWTs (header.payload.sig)
+    if k.startswith("eyJ") and k.count(".") >= 2:
+        return True
+    return False
+
+
+def infer_key_provider(key: str | None) -> str | None:
+    """Best-effort owner for a raw API key (used only for migration)."""
+    k = (key or "").strip()
+    if not k:
+        return None
+    if looks_like_xai_credential(k):
+        return "xai"
+    if k.startswith("sk-ant"):
+        return "anthropic"
+    if k.startswith("gsk_"):
+        return "groq"
+    if k.startswith("AIza"):
+        return "google"
+    if k.startswith("sk-or-"):
+        return "openrouter"
+    # DeepSeek console keys are sk-… (same prefix as OpenAI). Prefer deepseek when
+    # the key was incorrectly parked on xAI; OpenAI users can re-save once.
+    if k.startswith("sk-"):
+        return "deepseek"
+    return None
+
+
+def _home_from_cfg(cfg: dict[str, Any] | None, home: Path | str | None = None) -> Path | None:
+    if home is not None:
+        return Path(home).expanduser()
+    if cfg and cfg.get("home_dir"):
+        return Path(str(cfg["home_dir"])).expanduser()
+    return None
+
+
+def get_provider_keys(
+    cfg: dict[str, Any] | None = None,
+    *,
+    home: Path | str | None = None,
+) -> dict[str, str]:
+    """Return {provider: api_key} from the **secure store** (not config.toml).
+
+    Legacy plaintext ``cfg['provider_keys']`` is still read for one-shot
+    migration, then ignored for ongoing use.
+    """
+    from remedy.interfaces.secret_store import load_provider_keys
+
+    home_path = _home_from_cfg(cfg, home)
+    stored = load_provider_keys(home_path)
+    # Transient legacy table (only until migrate_provider_keys scrubs it)
+    raw = (cfg or {}).get("provider_keys") or {}
+    if isinstance(raw, dict):
+        for k, v in raw.items():
+            pk = str(k or "").strip().lower()
+            val = str(v or "").strip()
+            if pk and val and pk not in stored:
+                stored[pk] = val
+    return stored
+
+
+def set_provider_key(
+    cfg: dict[str, Any],
+    provider: str,
+    api_key: str | None,
+    *,
+    home: Path | str | None = None,
+) -> dict[str, Any]:
+    """Write/clear a per-provider API key in the secure store. Scrubs cfg secrets."""
+    from remedy.interfaces.secret_store import scrub_config_secrets, set_provider_secret
+
+    provider = str(provider or "").strip().lower()
+    if not provider:
+        return cfg
+    home_path = _home_from_cfg(cfg, home)
+    set_provider_secret(provider, api_key, home=home_path)
+    # Never keep secrets in the config dict destined for disk.
+    cfg = scrub_config_secrets(cfg)
+    cfg.pop("provider_keys", None)
+    cfg["llm_api_key"] = ""
+    return cfg
+
+
+def migrate_provider_keys(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Move secrets into the secure store; scrub config; unstick foreign xAI keys.
+
+    Legacy configs used a single ``llm_api_key`` shared across providers and/or a
+    plaintext ``[provider_keys]`` table. Both are migrated into
+    ``~/.remedy/auth/provider_keys.json`` (DPAPI-encrypted on Windows) and
+    removed from the config representation.
+    """
+    from remedy.interfaces.secret_store import migrate_secrets_from_config
+
+    cfg = dict(cfg or {})
+    home = _home_from_cfg(cfg)
+    # Pull plaintext secrets into secure store + scrub cfg
+    cfg = migrate_secrets_from_config(cfg, home=home)
+    # Ensure global key is never left populated (secrets live in the store / OAuth)
+    cfg["llm_api_key"] = ""
+    cfg.pop("provider_keys", None)
+    return cfg
+
+
+def resolve_provider_api_key(
+    cfg: dict[str, Any] | None = None,
+    provider: str | None = None,
+    *,
+    home: Path | str | None = None,
+) -> str:
+    """Resolve the API key/bearer for *this* provider only (never another provider's).
+
+    Order:
+      1. Secure store (``~/.remedy/auth/provider_keys.json``)
+      2. xAI OAuth / auth store via ``resolve_bearer``
+      3. Provider-specific env vars
+      4. Legacy ``llm_api_key`` / ``REMEDY_LLM_API_KEY`` only if plausible for provider
+         (and never written back to disk by this function)
+    """
+    cfg = dict(cfg or {})
+    home_path = _home_from_cfg(cfg, home)
+    provider = str(provider or cfg.get("llm_provider") or "").strip().lower()
+    if not provider:
+        return ""
+
+    # Secure store first (after optional lazy migration of any leftover plaintext)
+    if cfg.get("provider_keys") or str(cfg.get("llm_api_key") or "").strip():
+        cfg = migrate_provider_keys(cfg)
+
+    from remedy.interfaces.secret_store import get_provider_secret
+
+    mapped = (get_provider_secret(provider, home=home_path) or "").strip()
+    if mapped:
+        if provider == "xai" and not looks_like_xai_credential(mapped):
+            mapped = ""
+        else:
+            return mapped
+
+    if provider == "xai":
+        try:
+            from remedy.interfaces.xai_auth import resolve_bearer
+
+            token = resolve_bearer(home_path)
+            if token:
+                return token
+        except Exception:
+            pass
+
+    for env_name in _PROVIDER_ENV_KEYS.get(provider, ()):
+        val = os.environ.get(env_name, "").strip()
+        if val:
+            if provider == "xai" and env_name in ("XAI_API_KEY", "REMEDY_XAI_API_KEY"):
+                return val
+            if provider != "xai":
+                return val
+            if looks_like_xai_credential(val):
+                return val
+
+    # Legacy global / env — only when it matches this provider. Not persisted.
+    global_key = str(
+        cfg.get("llm_api_key") or os.environ.get("REMEDY_LLM_API_KEY") or ""
+    ).strip()
+    if not global_key:
+        return ""
+    if provider == "xai":
+        return global_key if looks_like_xai_credential(global_key) else ""
+    if looks_like_xai_credential(global_key):
+        return ""
+    return global_key
+
 
 def load_config(path: Path | None = None) -> dict[str, Any]:
     """Load config from a file, auto-detecting format (TOML or YAML)."""
@@ -509,30 +698,14 @@ def config_to_agent_config(config: dict[str, Any]) -> AgentConfig:
         "https://api.openai.com/v1",
     )
 
-    llm_api_key = _resolve_str(
-        config.get("llm_api_key"),
-        "REMEDY_LLM_API_KEY",
-        "",
-    )
-
     llm_provider = _resolve_str(
         config.get("llm_provider"),
         "REMEDY_LLM_PROVIDER",
         "openai",
     )
 
-    # xAI: prefer OAuth access token / stored key from ~/.remedy/auth/xai.json
-    # (OpenCode-style dual auth) over a missing config key.
-    if not llm_api_key and str(llm_provider).lower() == "xai":
-        try:
-            from remedy.interfaces.xai_auth import resolve_bearer
-
-            home = config.get("home_dir")
-            token = resolve_bearer(Path(home).expanduser() if home else None)
-            if token:
-                llm_api_key = token
-        except Exception as exc:
-            logger.debug("xAI credential resolve skipped: %s", exc)
+    # Per-provider keys (DeepSeek sk- never rides into xAI, etc.).
+    llm_api_key = resolve_provider_api_key(config, llm_provider)
 
     # Local servers (Ollama, Kobold.cpp, LM Studio, etc.) don't need a real
     # API key.  Supply a dummy value so the agent doesn't fall back to echo
@@ -738,35 +911,30 @@ def _toml_scalar(value: Any) -> str:
 
 def provider_credentials_ready(config: dict[str, Any] | None = None) -> bool:
     """True when an LLM key is configured (or local URL which needs none)."""
-    cfg = config if config is not None else load_config()
-    key = str(cfg.get("llm_api_key") or os.environ.get("REMEDY_LLM_API_KEY") or "").strip()
-    if key:
-        return True
+    # Use a copy of the *input* mapping — migrate_provider_keys scrubs llm_api_key.
+    raw = dict(config) if config is not None else load_config()
+    provider = str(
+        raw.get("llm_provider") or os.environ.get("REMEDY_LLM_PROVIDER") or ""
+    ).lower()
     base = str(
-        cfg.get("llm_base_url")
+        raw.get("llm_base_url")
         or os.environ.get("REMEDY_LLM_BASE_URL")
         or ""
     ).strip()
     if base and _is_local_url(base):
         return True
-    provider = str(cfg.get("llm_provider") or os.environ.get("REMEDY_LLM_PROVIDER") or "").lower()
-    if provider == "xai":
-        try:
-            from remedy.interfaces.xai_auth import load_credentials, resolve_bearer
-
-            home = cfg.get("home_dir")
-            home_path = Path(home).expanduser() if home else None
-            if load_credentials(home_path).connected or resolve_bearer(home_path):
-                return True
-        except Exception:
-            pass
-        # Env-only keys still count
-        if (
-            os.environ.get("XAI_API_KEY", "").strip()
-            or os.environ.get("REMEDY_XAI_API_KEY", "").strip()
-        ):
-            return True
-    return provider in ("ollama",)
+    if provider in ("ollama",):
+        return True
+    plain = str(raw.get("llm_api_key") or "").strip()
+    if not plain and config is None:
+        plain = str(os.environ.get("REMEDY_LLM_API_KEY") or "").strip()
+    if plain:
+        if provider == "xai":
+            return looks_like_xai_credential(plain) or plain.startswith("xai-")
+        return True
+    # Secure store / OAuth / env (may migrate leftovers as a side effect).
+    key = resolve_provider_api_key(raw, provider or "openai")
+    return bool(key)
 
 
 def public_provider_catalog() -> list[dict[str, Any]]:

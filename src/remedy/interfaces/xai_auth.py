@@ -33,7 +33,13 @@ API_BASE = "https://api.x.ai/v1"
 DEVICE_CODE_URL = f"{OAUTH_SERVER}/oauth2/device/code"
 TOKEN_URL = f"{OAUTH_SERVER}/oauth2/token"
 # Marker embedded in frozen builds so we can verify the sidecar is up to date.
-OAUTH_BUILD_ID = "auth.x.ai-device-v3"
+OAUTH_BUILD_ID = "auth.x.ai-device-v4-api-access"
+# Full grant used by Hermes / OpenClaw-class agents. Identity-only scopes
+# (openid profile email offline_access) produce JWTs that api.x.ai rejects with
+# "OAuth2 token missing required scope: api:access".
+DEFAULT_OAUTH_SCOPE = (
+    "openid profile email offline_access grok-cli:access api:access"
+)
 # Back-compat alias
 AUTH_SERVER = OAUTH_SERVER
 # Prefer auth.x.ai; never accounts.x.ai for API POSTs.
@@ -150,6 +156,14 @@ def save_credentials(creds: XaiCredentials, home: Path | None = None) -> None:
         path.chmod(0o600)
     except OSError:
         pass
+    # Same owner-only hardening as provider secret store (icacls on Windows).
+    try:
+        from remedy.interfaces.secret_store import _harden_path
+
+        _harden_path(path, is_dir=False)
+        _harden_path(path.parent, is_dir=True)
+    except Exception:
+        pass
 
 
 def clear_credentials(home: Path | None = None) -> None:
@@ -229,7 +243,7 @@ def start_device_login(home: Path | None = None) -> dict[str, Any]:
     client_id = _client_id()
     form = {
         "client_id": client_id,
-        "scope": "openid profile email offline_access",
+        "scope": os.environ.get("REMEDY_XAI_OAUTH_SCOPE", "").strip() or DEFAULT_OAUTH_SCOPE,
     }
     data: dict[str, Any] | None = None
     last_err: Exception | None = None
