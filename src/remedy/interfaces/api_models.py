@@ -113,3 +113,10 @@ class SettingsUpdateRequest(BaseModel):
     name: str | None = None
     persona: str | None = None
     setup_completed: bool | None = None
+    access_scope: str | None = None
+    launch_at_login: bool | None = None
+    start_in_tray: bool | None = None
+    close_to_tray: bool | None = None
+    harness_mode: str | None = None
+    harness_min_context_pct: float | None = None
+    harness_max_context_pct: float | None = None

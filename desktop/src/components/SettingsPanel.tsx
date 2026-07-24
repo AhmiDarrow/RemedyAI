@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { invoke } from '@tauri-apps/api/core'
 import { getSettings, updateSettings, type Settings, type SettingsUpdate } from '../api/settings'
 import {
   getXaiAuthStatus,
@@ -18,6 +19,23 @@ import type { UpdateInfo } from '../api/updates'
 import { THEME_LIST, getResolvedTheme } from '../themes'
 import { HOTKEYS } from '../hotkeys'
 import type { ModelInfo } from '../App'
+
+/** Matches SetupWizard personas (style overlay). */
+const PERSONAS = [
+  { id: 'balanced', name: 'Balanced', description: 'Helpful and adaptable to the task' },
+  { id: 'efficient', name: 'Efficient', description: 'Concise, code-first, minimal explanation' },
+  { id: 'detailed', name: 'Detailed', description: 'Thorough explanations with context' },
+  { id: 'playful', name: 'Playful', description: 'Casual tone with light humor' },
+] as const
+
+async function pickProjectFolder(): Promise<string | null> {
+  try {
+    const path = await invoke<string | null>('pick_folder')
+    return path && path.trim() ? path.trim() : null
+  } catch {
+    return null
+  }
+}
 
 interface SettingsPanelProps {
   open: boolean
@@ -57,6 +75,14 @@ export function SettingsPanel({
   const [apiKey, setApiKey] = useState('')
   const [apiKeySet, setApiKeySet] = useState(false)
   const [projectPath, setProjectPath] = useState('.')
+  const [persona, setPersona] = useState('balanced')
+  const [agentName, setAgentName] = useState('Remedy')
+  const [accessScope, setAccessScope] = useState('project')
+  const [launchAtLogin, setLaunchAtLogin] = useState(false)
+  const [startInTray, setStartInTray] = useState(false)
+  const [closeToTray, setCloseToTray] = useState(false)
+  const [harnessMode, setHarnessMode] = useState('auto')
+  const [statusMessage, setStatusMessage] = useState('')
   const [catalog, setCatalog] = useState<ProviderInfo[]>(FALLBACK_PROVIDERS)
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [xaiAuth, setXaiAuth] = useState<XaiAuthStatus | null>(null)
@@ -113,7 +139,23 @@ export function SettingsPanel({
       setBaseUrl(s.llm_base_url || 'https://api.openai.com/v1')
       setApiKeySet(s.llm_api_key_set)
       setProjectPath(s.project_path || '.')
+      const p = (s.persona || 'balanced').toLowerCase()
+      setPersona(
+        PERSONAS.some((x) => x.id === p) ? p : p === 'default' ? 'balanced' : 'balanced',
+      )
+      setAgentName(s.name || 'Remedy')
+      setAccessScope(s.access_scope || 'project')
+      setLaunchAtLogin(Boolean(s.launch_at_login))
+      setStartInTray(Boolean(s.start_in_tray))
+      setCloseToTray(Boolean(s.close_to_tray))
+      setHarnessMode(s.harness_mode || 'auto')
       setApiKey('')
+      try {
+        const osLogin = await invoke<boolean>('get_launch_at_login')
+        setLaunchAtLogin(Boolean(osLogin || s.launch_at_login))
+      } catch {
+        /* browser / missing permission */
+      }
       const isAdvanced = providers.some((p) => p.id === prov && p.advanced)
       if (isAdvanced) setShowAdvanced(true)
       if (prov === 'xai' || s.xai_auth) {
@@ -209,31 +251,78 @@ export function SettingsPanel({
     }
   }
 
+  const handleBrowseProject = async () => {
+    setErrorMessage('')
+    const path = await pickProjectFolder()
+    if (path) {
+      setProjectPath(path)
+      setStatusMessage('Folder selected — click Save to load project and reload Remedy')
+    }
+  }
+
   const handleSave = async () => {
     setSaving(true)
     setSaved(false)
     setErrorMessage('')
+    setStatusMessage('')
+    const prevProject = (settings?.project_path || '').trim()
     const updates: SettingsUpdate = {
       llm_provider: provider,
       llm_model: model,
       llm_base_url: baseUrl,
       project_path: projectPath,
+      persona,
+      name: agentName.trim() || 'Remedy',
+      access_scope: accessScope,
+      launch_at_login: launchAtLogin,
+      start_in_tray: startInTray,
+      close_to_tray: closeToTray,
+      harness_mode: harnessMode,
     }
     if (apiKey) {
       updates.llm_api_key = apiKey
     }
     try {
+      try {
+        await invoke('set_launch_at_login', { enabled: launchAtLogin })
+      } catch (e) {
+        console.warn('launch_at_login OS sync:', e)
+      }
+      try {
+        await invoke('set_desktop_prefs', {
+          close_to_tray: closeToTray,
+          start_in_tray: startInTray,
+        })
+      } catch (e) {
+        console.warn('desktop prefs OS sync:', e)
+      }
       const result = await updateSettings(updates)
       // Server may normalize provider/model/url — reflect that immediately.
       if (result && typeof result === 'object') {
-        const r = result as SettingsUpdate & { llm_provider?: string; llm_model?: string; llm_base_url?: string }
+        const r = result as SettingsUpdate & {
+          llm_provider?: string
+          llm_model?: string
+          llm_base_url?: string
+          project_path?: string
+          persona?: string
+        }
         if (r.llm_provider) setProvider(r.llm_provider)
         if (r.llm_model) setModel(r.llm_model)
         if (r.llm_base_url) setBaseUrl(r.llm_base_url)
+        if (r.project_path !== undefined) setProjectPath(r.project_path || projectPath)
+        if (r.persona) setPersona(r.persona)
       }
       setSaved(true)
       setApiKey('')
       setApiKeySet(apiKey ? true : apiKeySet)
+      const projectChanged =
+        (projectPath || '').trim() !== prevProject
+          && (projectPath || '').trim() !== ''
+      setStatusMessage(
+        projectChanged
+          ? 'Settings saved · Project loaded · Remedy reloaded'
+          : 'Settings saved · Remedy reloaded',
+      )
       await load()
       onSettingsSaved?.()
     } catch (e: unknown) {
@@ -437,20 +526,197 @@ export function SettingsPanel({
               />
             </section>
 
+            {/* Agent */}
+            <section>
+              <div className="font-semibold mb-2" style={{ color: 'var(--text-primary)', fontSize: '0.75rem' }}>
+                Agent
+              </div>
+              <Field
+                label="Display name"
+                value={agentName}
+                onChange={setAgentName}
+                placeholder="Remedy"
+              />
+              <label className="block mb-1" style={{ color: 'var(--text-muted)' }}>
+                Persona
+              </label>
+              <div className="space-y-1.5 mb-1">
+                {PERSONAS.map((p) => (
+                  <label
+                    key={p.id}
+                    className="flex items-start gap-2 px-2 py-1.5 rounded cursor-pointer"
+                    style={{
+                      background: persona === p.id ? 'var(--bg-tertiary)' : 'transparent',
+                      border: persona === p.id ? '1px solid var(--accent)' : '1px solid var(--border)',
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="settings-persona"
+                      value={p.id}
+                      checked={persona === p.id}
+                      onChange={() => setPersona(p.id)}
+                      className="mt-0.5"
+                      style={{ accentColor: 'var(--accent)' }}
+                    />
+                    <span>
+                      <span className="block font-medium" style={{ color: 'var(--text-primary)' }}>
+                        {p.name}
+                      </span>
+                      <span className="block text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                        {p.description}
+                      </span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+              <div className="text-[10px] leading-snug" style={{ color: 'var(--text-muted)' }}>
+                Persona is a communication style. Identity stays your partner — change anytime.
+              </div>
+            </section>
+
             {/* Project */}
             <section>
               <div className="font-semibold mb-2" style={{ color: 'var(--text-primary)', fontSize: '0.75rem' }}>
                 Project workspace
               </div>
-              <Field
-                label="Default project folder"
-                value={projectPath}
-                onChange={setProjectPath}
-                placeholder="e.g. C:\Users\You\Projects\MyApp"
-              />
+              <label className="block mb-0.5" style={{ color: 'var(--text-muted)' }}>
+                Default project folder
+              </label>
+              <div className="flex gap-1 mb-1">
+                <input
+                  type="text"
+                  value={projectPath}
+                  onChange={(e) => setProjectPath(e.target.value)}
+                  placeholder="e.g. C:\Users\You\Projects\MyApp"
+                  className="flex-1 min-w-0 rounded px-2 py-1 text-xs outline-none"
+                  style={{
+                    background: 'var(--bg-tertiary)',
+                    color: 'var(--text-primary)',
+                    border: '1px solid var(--border)',
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => void handleBrowseProject()}
+                  title="Browse for folder"
+                  className="flex-shrink-0 px-2 rounded text-xs font-medium"
+                  style={{
+                    background: 'var(--bg-tertiary)',
+                    color: 'var(--text-primary)',
+                    border: '1px solid var(--border)',
+                  }}
+                  aria-label="Browse for project folder"
+                >
+                  <span className="inline-flex items-center gap-1">
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
+                      <path
+                        d="M1.5 3.5h4l1.5 1.5H14.5v8a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9.5z"
+                        stroke="currentColor"
+                        strokeWidth="1.2"
+                        fill="none"
+                      />
+                    </svg>
+                    Browse
+                  </span>
+                </button>
+              </div>
               <div className="text-[10px] leading-snug" style={{ color: 'var(--text-muted)' }}>
-                New chat sessions use this as the agent working directory (file tools, shell cwd, and @file search),
-                like opening a folder in OpenCode.
+                Type a path or browse. Save reloads the workspace (file tools, shell cwd, @file search).
+              </div>
+            </section>
+
+            {/* Access */}
+            <section>
+              <div className="font-semibold mb-2" style={{ color: 'var(--text-primary)', fontSize: '0.75rem' }}>
+                Access &amp; permissions
+              </div>
+              <label className="block mb-0.5" style={{ color: 'var(--text-muted)' }}>
+                Filesystem scope
+              </label>
+              <select
+                value={accessScope}
+                onChange={(e) => setAccessScope(e.target.value)}
+                className="w-full rounded px-2 py-1 text-xs mb-1 outline-none"
+                style={{
+                  background: 'var(--bg-tertiary)',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--border)',
+                }}
+              >
+                <option value="project">Project only (safest)</option>
+                <option value="home">Project + home folder</option>
+                <option value="full">Full user machine (you grant)</option>
+              </select>
+              <div className="text-[10px] leading-snug" style={{ color: 'var(--text-muted)' }}>
+                Full scope still runs as your Windows user — no silent admin elevation.
+                Prefer project-only unless Remedy needs files outside the workspace.
+              </div>
+            </section>
+
+            {/* Always ready */}
+            <section>
+              <div className="font-semibold mb-2" style={{ color: 'var(--text-primary)', fontSize: '0.75rem' }}>
+                Always ready
+              </div>
+              <label className="flex items-center gap-2 mb-1.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={launchAtLogin}
+                  onChange={(e) => setLaunchAtLogin(e.target.checked)}
+                  style={{ accentColor: 'var(--accent)' }}
+                />
+                <span style={{ color: 'var(--text-primary)' }}>Start with Windows</span>
+              </label>
+              <label className="flex items-center gap-2 mb-1.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={startInTray}
+                  onChange={(e) => setStartInTray(e.target.checked)}
+                  style={{ accentColor: 'var(--accent)' }}
+                />
+                <span style={{ color: 'var(--text-primary)' }}>Start in tray (when at login)</span>
+              </label>
+              <label className="flex items-center gap-2 mb-1 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={closeToTray}
+                  onChange={(e) => setCloseToTray(e.target.checked)}
+                  style={{ accentColor: 'var(--accent)' }}
+                />
+                <span style={{ color: 'var(--text-primary)' }}>Close window hides to tray</span>
+              </label>
+              <div className="text-[10px] leading-snug" style={{ color: 'var(--text-muted)' }}>
+                Opt-in only. Keeps Remedy ready with a warm local server.
+              </div>
+            </section>
+
+            {/* Memory Harness */}
+            <section>
+              <div className="font-semibold mb-2" style={{ color: 'var(--text-primary)', fontSize: '0.75rem' }}>
+                Memory Harness
+              </div>
+              <label className="block mb-0.5" style={{ color: 'var(--text-muted)' }}>
+                Mode
+              </label>
+              <select
+                value={harnessMode}
+                onChange={(e) => setHarnessMode(e.target.value)}
+                className="w-full rounded px-2 py-1 text-xs mb-1 outline-none"
+                style={{
+                  background: 'var(--bg-tertiary)',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--border)',
+                }}
+              >
+                <option value="auto">Auto — prune + nudge compress</option>
+                <option value="manual">Manual — /compact only</option>
+                <option value="off">Off</option>
+              </select>
+              <div className="text-[10px] leading-snug" style={{ color: 'var(--text-muted)' }}>
+                Keeps long chats lean without deleting your transcript. Use{' '}
+                <code style={{ color: 'var(--accent)' }}>/compact</code> or{' '}
+                <code style={{ color: 'var(--accent)' }}>/harness</code>.
               </div>
             </section>
 
@@ -652,6 +918,18 @@ export function SettingsPanel({
             {errorMessage}
           </div>
         )}
+        {statusMessage && !errorMessage && (
+          <div
+            className="px-2 py-1.5 rounded text-xs"
+            style={{
+              background: 'var(--bg-tertiary)',
+              color: 'var(--success)',
+              border: '1px solid var(--border)',
+            }}
+          >
+            {statusMessage}
+          </div>
+        )}
         <div className="flex items-center gap-2">
           <button
             onClick={handleSave}
@@ -662,9 +940,9 @@ export function SettingsPanel({
               color: saving ? 'var(--text-muted)' : '#fff',
             }}
           >
-            {saving ? 'Saving...' : 'Save Settings'}
+            {saving ? 'Saving & reloading…' : 'Save Settings'}
           </button>
-          {saved && !errorMessage && (
+          {saved && !errorMessage && !statusMessage && (
             <span className="text-xs" style={{ color: 'var(--success)' }}>
               Saved
             </span>

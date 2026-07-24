@@ -2,6 +2,52 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.10.21] — 2026-07-23
+
+### Final partner phase (goals · approve · knowledge)
+
+- **Goals loop**: tools `goal_add` / `goal_list` / `goal_complete` / `goal_verify`; slash `/goal`, `/goals`.
+- **Approvals**: high-impact bash patterns require explicit approve; API + `/approve` `/deny`; desktop **ApprovalBanner**.
+- **Knowledge packs**: import `.md`/`.txt` folders via `POST /api/memory/import` and `/import <path>`.
+- **Partner status**: `GET /api/partner/status` + status-bar chip (approvals, goals, harness, scope).
+
+## [0.10.20] — 2026-07-23
+
+### Remaining phases + prompt history
+
+- **Composer ↑ / ↓**: shell-style previous/next prompt history (localStorage, up to 80 entries).
+- **Always ready runtime**: close-to-tray (hide, keep sidecar), start-in-tray, tray menu Show/Quit, left-click tray to show.
+- **Desktop prefs** file `~/.remedy/desktop.json` + Tauri commands.
+- **Setup finish**: optional “Keep Remedy ready” + ↑ tip.
+- **Handoff** includes Memory Harness Session Brief when present.
+
+## [0.10.19] — 2026-07-23
+
+### Partner plan (remaining phases)
+
+- **Access scope**: `project` | `home` | `full` multi-root path resolution; Settings control; agent hot-reload.
+- **Always ready**: Start with Windows (HKCU Run), start-in-tray / close-to-tray prefs in Settings + config.
+- **Memory Harness**: auto compress nudges by context fill; artifact tracking on file tools; Settings mode.
+- **Companion skills**: `remember-me`, `design-critique`, `personal-briefing`, `write-with-user`, `decision-journal`.
+- Slash already: `/compact`, `/harness`, `/remember`, `/whoami`.
+
+## [0.10.18] — 2026-07-23
+
+### Partner vision (Phase A foundation)
+
+- **System identity**: partner framing (knowledge, design, code, PC tasks when allowed); medical disclaimer retained.
+- **Desktop chat**: user messages on the **right**, Remedy on the **left**, themed bubble tokens for all palettes.
+- **Settings**: persona + agent name; project path **input + Browse**; save reports **Remedy reloaded** / project loaded.
+- **Native folder picker** (`pick_folder` Tauri command) for project workspace.
+- **Memory Harness (L0–L2)**: mechanical send-view prune; Session Brief; `compress_context` tool; real `/compact`, `/harness`, `/remember`, `/whoami`; profile injection.
+- Empty chat copy: “Your partner is ready.”
+
+### Branding / taskbar icon
+
+- Multi-size `icon.ico` (16–256) from circuit-R monogram via `scripts/setup_branding.py`.
+- Runtime `set_icon` on main window so taskbar matches tray (not stale medical PE cache).
+- Docs: Windows icon-cache clear steps in `docs/DESKTOP.md`.
+
 ## [0.10.17] — 2026-07-23
 
 ### Branding (not medical)

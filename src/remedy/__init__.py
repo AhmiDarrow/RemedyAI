@@ -1,4 +1,4 @@
-"""Remedy: The self-improving, multi-channel AI agent framework."""
+"""Remedy: personal AI partner — knowledge, design, code, and get-it-done."""
 
 from __future__ import annotations
 

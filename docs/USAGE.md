@@ -91,6 +91,21 @@ remedy memory add "start" "Remedy initial setup complete"
 remedy memory list --limit 5
 ```
 
+### Desktop partner commands
+
+In chat (desktop or `POST /api/sessions/{id}/command`):
+
+| Command | Purpose |
+|---------|---------|
+| `/remember …` | Save a durable fact |
+| `/whoami` | Show profile facts |
+| `/goal …` / `/goals` | Goals checklist |
+| `/compact` / `/harness` | Memory Harness |
+| `/approve` / `/deny` | High-impact shell approvals |
+| `/import <folder>` | Import markdown/text notes into memory |
+
+Composer: **↑** previous prompt, **↓** next (stored locally).
+
 ---
 
 ## Memory Commands

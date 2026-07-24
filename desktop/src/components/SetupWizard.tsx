@@ -36,6 +36,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
   const [baseUrl, setBaseUrl] = useState('https://api.openai.com/v1')
   const [projectPath, setProjectPath] = useState('')
   const [persona, setPersona] = useState('balanced')
+  const [launchAtLogin, setLaunchAtLogin] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [showAdvanced, setShowAdvanced] = useState(false)
@@ -201,6 +202,18 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
     setSaving(true)
     setError('')
     try {
+      if (launchAtLogin) {
+        try {
+          const { invoke } = await import('@tauri-apps/api/core')
+          await invoke('set_launch_at_login', { enabled: true })
+          await invoke('set_desktop_prefs', {
+            close_to_tray: true,
+            start_in_tray: true,
+          })
+        } catch {
+          /* browser or missing command */
+        }
+      }
       await updateSettings({
         llm_provider: provider,
         llm_model: model,
@@ -209,6 +222,9 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
         project_path: projectPath || undefined,
         persona: persona || undefined,
         setup_completed: true,
+        launch_at_login: launchAtLogin,
+        start_in_tray: launchAtLogin,
+        close_to_tray: launchAtLogin,
       })
       onComplete()
     } catch {
@@ -216,7 +232,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
     } finally {
       setSaving(false)
     }
-  }, [apiKey, provider, model, baseUrl, projectPath, persona, onComplete])
+  }, [apiKey, provider, model, baseUrl, projectPath, persona, launchAtLogin, onComplete])
 
   const handleSkip = useCallback(async () => {
     // Mark setup done so the wizard never blocks launch again.
@@ -613,15 +629,38 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
             <div className="space-y-4">
               <div className="text-center space-y-3">
                 <div className="text-xl font-semibold" style={{ color: 'var(--accent)' }}>
-                  You're ready!
+                  Your partner is ready
                 </div>
                 <div className="text-xs space-y-2" style={mutedStyles}>
                   <p><strong>Enter</strong> send · <strong>Shift+Enter</strong> new line</p>
-                  <p><strong>/help</strong> — Commands and keyboard shortcuts</p>
-                  <p><strong>/memory</strong> — Search what Remedy remembers</p>
-                  <p><strong>Ctrl+/</strong> — Open help anytime</p>
+                  <p><strong>↑</strong> previous prompt · <strong>↓</strong> next</p>
+                  <p><strong>/help</strong> · <strong>/remember</strong> · <strong>/compact</strong></p>
+                  <p><strong>Ctrl+/</strong> — shortcuts anytime</p>
                 </div>
               </div>
+              <label
+                className="flex items-start gap-2 px-3 py-2.5 rounded cursor-pointer text-left"
+                style={{
+                  background: 'var(--bg-tertiary)',
+                  border: '1px solid var(--border)',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={launchAtLogin}
+                  onChange={(e) => setLaunchAtLogin(e.target.checked)}
+                  className="mt-0.5"
+                  style={{ accentColor: 'var(--accent)' }}
+                />
+                <span>
+                  <span className="block text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                    Keep Remedy ready (Start with Windows)
+                  </span>
+                  <span className="block text-xs" style={mutedStyles}>
+                    Optional. Launches at login, tray presence, warm local server. Change anytime in Settings.
+                  </span>
+                </span>
+              </label>
               <button
                 onClick={handleFinish}
                 disabled={saving}

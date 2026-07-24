@@ -139,6 +139,13 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                 if runtime is not None and hasattr(runtime, "effective_project_path")
                 else os.getcwd()
             ),
+            "access_scope": cfg.get("access_scope", "project"),
+            "launch_at_login": bool(cfg.get("launch_at_login", False)),
+            "start_in_tray": bool(cfg.get("start_in_tray", False)),
+            "close_to_tray": bool(cfg.get("close_to_tray", False)),
+            "harness_mode": cfg.get("harness_mode", "auto"),
+            "harness_min_context_pct": float(cfg.get("harness_min_context_pct", 0.35)),
+            "harness_max_context_pct": float(cfg.get("harness_max_context_pct", 0.70)),
             "version": _remedy_version,
             "config_exists": config_path is not None,
             "setup_completed": setup_completed,
@@ -190,6 +197,15 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                 # Explicit clear → store empty so sessions fall back to cwd
                 updates["project_path"] = ""
 
+        if "access_scope" in updates and updates["access_scope"] is not None:
+            from remedy.core.workspace import normalize_access_scope
+
+            updates["access_scope"] = normalize_access_scope(str(updates["access_scope"]))
+
+        if "harness_mode" in updates and updates["harness_mode"] is not None:
+            hm = str(updates["harness_mode"]).strip().lower()
+            updates["harness_mode"] = hm if hm in ("off", "manual", "auto") else "auto"
+
         cfg.update(updates)
         _write_config(config_path, cfg)
 
@@ -224,6 +240,10 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             persona=updates.get("persona"),
             name=updates.get("name"),
             project_path=updates.get("project_path", cfg.get("project_path")),
+            access_scope=cfg.get("access_scope"),
+            harness_mode=cfg.get("harness_mode"),
+            harness_min_context_pct=cfg.get("harness_min_context_pct"),
+            harness_max_context_pct=cfg.get("harness_max_context_pct"),
         )
 
         changes = list(updates.keys())
@@ -236,5 +256,10 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             "llm_base_url": base_url,
             "persona": cfg.get("persona"),
             "project_path": cfg.get("project_path"),
+            "access_scope": cfg.get("access_scope", "project"),
+            "launch_at_login": bool(cfg.get("launch_at_login", False)),
+            "start_in_tray": bool(cfg.get("start_in_tray", False)),
+            "close_to_tray": bool(cfg.get("close_to_tray", False)),
+            "harness_mode": cfg.get("harness_mode", "auto"),
         }
 

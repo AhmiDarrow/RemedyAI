@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "allow-pick-folder"
+description = "Allow native project folder picker"
+commands.allow = ["pick_folder"]

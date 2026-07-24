@@ -189,11 +189,26 @@ class AgentRuntime(ABC):
             self._user_profile.record_session(duration)
             await self.memory.save_user_profile(self._user_profile)
 
+        # Session Brief (Memory Harness) into handoff when present on agent
+        brief_extra = None
+        try:
+            from remedy.memory.harness.brief import brief_to_context_block
+
+            brief = getattr(self, "_session_brief", None)
+            if brief is None and hasattr(self, "agent"):
+                brief = getattr(self.agent, "_session_brief", None)
+            block = brief_to_context_block(brief) if brief is not None else ""
+            if block:
+                brief_extra = block
+        except Exception:
+            brief_extra = None
+
         # Generate handoff
         handoff = await self.handoff.generate_handoff(
             session_id=self._session_id,
             tasks=completed,
             open_tasks=open_tasks_list,
+            extra_context=brief_extra,
         )
 
         # Generate session summary

@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Remedy Desktop",
-  "version": "0.10.17",
+  "version": "0.10.21",
   "identifier": "com.remedy.desktop",
   "build": {
     "frontendDist": "../dist",
@@ -27,9 +27,10 @@
       }
     ],
     "trayIcon": {
+      "id": "main",
       "iconPath": "icons/icon.png",
       "iconAsTemplate": true,
-      "tooltip": "Remedy Desktop"
+      "tooltip": "Remedy"
     },
     "security": {
       "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:7400 https://github.com https://*.github.com https://api.github.com; img-src 'self' data: blob: asset: http://asset.localhost; font-src 'self' data:; object-src 'none'; base-uri 'self'"

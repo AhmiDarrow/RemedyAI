@@ -47,6 +47,28 @@ interface ComposerProps {
 type SuggestionItem = { label: string; value: string; icon: string; type: 'file' | 'agent' }
 
 const MAX_FILES = 12
+const PROMPT_HISTORY_KEY = 'remedy.composer.promptHistory'
+const PROMPT_HISTORY_MAX = 80
+
+function loadPromptHistory(): string[] {
+  try {
+    const raw = localStorage.getItem(PROMPT_HISTORY_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((x): x is string => typeof x === 'string' && x.trim().length > 0).slice(0, PROMPT_HISTORY_MAX)
+  } catch {
+    return []
+  }
+}
+
+function savePromptHistory(entries: string[]) {
+  try {
+    localStorage.setItem(PROMPT_HISTORY_KEY, JSON.stringify(entries.slice(0, PROMPT_HISTORY_MAX)))
+  } catch {
+    /* quota / private mode */
+  }
+}
 
 export function Composer({
   onSend,
@@ -81,6 +103,10 @@ export function Composer({
   const seenDropKeysRef = useRef<Set<string>>(new Set())
   /** Last applied edit key — re-apply when parent issues a new edit, including remount. */
   const lastEditKeyRef = useRef<number | null>(null)
+  /** Shell-style prompt history: newest first in storage; index navigates with ↑/↓. */
+  const promptHistoryRef = useRef<string[]>(loadPromptHistory())
+  const historyIndexRef = useRef<number>(-1) // -1 = drafting current (not browsing history)
+  const draftBeforeHistoryRef = useRef<string>('')
 
   const dropKey = (p: DroppedFilePayload) =>
     `${p.filename}|${p.size}|${(p.data_base64 || '').slice(0, 48)}`
@@ -342,12 +368,38 @@ export function Composer({
     })
   }, [])
 
+  const applyHistoryEntry = useCallback((text: string) => {
+    setInput(text)
+    requestAnimationFrame(() => {
+      const el = textareaRef.current
+      if (!el) return
+      el.style.height = 'auto'
+      el.style.height = `${Math.min(el.scrollHeight, 200)}px`
+      // Cursor at end so user can edit / send immediately
+      const len = el.value.length
+      el.selectionStart = el.selectionEnd = len
+    })
+  }, [])
+
+  const pushPromptHistory = useCallback((text: string) => {
+    const t = text.trim()
+    if (!t) return
+    const prev = promptHistoryRef.current
+    // Dedupe consecutive duplicates; move match to front
+    const next = [t, ...prev.filter((x) => x !== t)].slice(0, PROMPT_HISTORY_MAX)
+    promptHistoryRef.current = next
+    savePromptHistory(next)
+    historyIndexRef.current = -1
+    draftBeforeHistoryRef.current = ''
+  }, [])
+
   const handleSubmit = useCallback(() => {
     const text = input.trim()
     if ((!text && attachments.length === 0) || streaming || disabled || uploading) return
     if (submittingRef.current) return
     submittingRef.current = true
     try {
+      if (text) pushPromptHistory(text)
       if (text.startsWith('/') && attachments.length === 0) {
         onCommand(text)
       } else {
@@ -362,6 +414,8 @@ export function Composer({
         onSend(text, payload.length ? payload : undefined)
       }
       setInput('')
+      historyIndexRef.current = -1
+      draftBeforeHistoryRef.current = ''
       for (const a of attachments) {
         if (a.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(a.previewUrl)
       }
@@ -374,7 +428,7 @@ export function Composer({
         submittingRef.current = false
       })
     }
-  }, [input, attachments, onSend, onCommand, streaming, disabled, uploading])
+  }, [input, attachments, onSend, onCommand, streaming, disabled, uploading, pushPromptHistory])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -402,17 +456,64 @@ export function Composer({
         }
       }
 
+      // Prompt history (shell-style): ↑ previous, ↓ next — when not in multi-line mid-edit
+      const el = textareaRef.current
+      const hist = promptHistoryRef.current
+      if (el && hist.length > 0 && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const atStart = el.selectionStart === 0 && el.selectionEnd === 0
+        const atEnd = el.selectionStart === el.value.length && el.selectionEnd === el.value.length
+        const empty = el.value.length === 0
+        const singleLine = !el.value.includes('\n')
+
+        if (e.key === 'ArrowUp' && (empty || (atStart && singleLine) || (atStart && historyIndexRef.current >= 0))) {
+          e.preventDefault()
+          if (historyIndexRef.current === -1) {
+            draftBeforeHistoryRef.current = input
+          }
+          const nextIdx = Math.min(historyIndexRef.current + 1, hist.length - 1)
+          historyIndexRef.current = nextIdx
+          applyHistoryEntry(hist[nextIdx] ?? '')
+          return
+        }
+        if (e.key === 'ArrowDown' && historyIndexRef.current >= 0 && (atEnd || singleLine || empty)) {
+          e.preventDefault()
+          const nextIdx = historyIndexRef.current - 1
+          if (nextIdx < 0) {
+            historyIndexRef.current = -1
+            applyHistoryEntry(draftBeforeHistoryRef.current)
+            draftBeforeHistoryRef.current = ''
+          } else {
+            historyIndexRef.current = nextIdx
+            applyHistoryEntry(hist[nextIdx] ?? '')
+          }
+          return
+        }
+      }
+
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault()
         handleSubmit()
       }
     },
-    [showSuggestions, suggestions, suggestionIdx, handleSuggestionSelect, handleSubmit],
+    [
+      showSuggestions,
+      suggestions,
+      suggestionIdx,
+      handleSuggestionSelect,
+      handleSubmit,
+      input,
+      applyHistoryEntry,
+    ],
   )
 
   const handleChange = useCallback(
     (text: string) => {
       setInput(text)
+      // User typed while browsing history → leave history mode; draft becomes current
+      if (historyIndexRef.current >= 0) {
+        historyIndexRef.current = -1
+        draftBeforeHistoryRef.current = ''
+      }
       const cursorPos = textareaRef.current?.selectionStart ?? text.length
       const q = detectAtQuery(text, cursorPos)
 
@@ -786,7 +887,7 @@ export function Composer({
         </button>
       </div>
       <div className="mt-1 text-[0.65rem]" style={{ color: 'var(--text-muted)' }}>
-        Drag & drop, paste, or 📎 — files attach to this message · max {MAX_FILES}
+        ↑ previous prompt · ↓ next · Shift+Enter new line · 📎 / drop attach · max {MAX_FILES}
       </div>
     </div>
   )

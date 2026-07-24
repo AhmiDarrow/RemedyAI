@@ -43,10 +43,18 @@ _BUILTIN_COMMANDS: list[dict] = [
     {"name": "/help", "description": "Show available commands", "aliases": [], "arguments": None},
     {"name": "/new", "description": "Create a new chat session", "aliases": [], "arguments": None},
     {"name": "/sessions", "description": "List recent sessions", "aliases": [], "arguments": None},
-    {"name": "/compact", "description": "Compact / summarize the current session", "aliases": [], "arguments": None},
+    {"name": "/compact", "description": "Memory Harness: compress session into Session Brief", "aliases": [], "arguments": "focus"},
+    {"name": "/harness", "description": "Show Memory Harness Session Brief / stats", "aliases": [], "arguments": None},
     {"name": "/models", "description": "List available models", "aliases": [], "arguments": None},
     {"name": "/thinking", "description": "Toggle thinking visibility", "aliases": [], "arguments": None},
     {"name": "/memory", "description": "Search memory", "aliases": [], "arguments": "query"},
+    {"name": "/remember", "description": "Save a durable fact to memory", "aliases": [], "arguments": "text"},
+    {"name": "/whoami", "description": "Show what Remedy knows about you", "aliases": [], "arguments": None},
+    {"name": "/goals", "description": "List open goals", "aliases": [], "arguments": None},
+    {"name": "/goal", "description": "Add a goal: /goal <title>", "aliases": [], "arguments": "title"},
+    {"name": "/approve", "description": "Approve a pending high-impact action", "aliases": [], "arguments": "id"},
+    {"name": "/deny", "description": "Deny a pending high-impact action", "aliases": [], "arguments": "id"},
+    {"name": "/import", "description": "Import a folder of notes into memory", "aliases": [], "arguments": "path"},
     {"name": "/skills", "description": "List available skills", "aliases": [], "arguments": None},
     {"name": "/handoff", "description": "List handoff notes", "aliases": [], "arguments": None},
     {"name": "/init", "description": "Scan the project and generate AGENTS.md", "aliases": [], "arguments": "path"},
@@ -75,10 +83,17 @@ _BUILTIN_AGENTS: list[dict] = [
 
 
 async def handle_slash_command(
-    command: str, session_id: str | None, memory
+    command: str,
+    session_id: str | None,
+    memory,
+    runtime: Any = None,
 ) -> dict:
     """Execute a slash command and return a result."""
+    from contextlib import suppress
+
     stripped = command.strip().lower()
+    # Preserve original casing for /remember text
+    raw = command.strip()
 
     if stripped in ("/help", "/h"):
         cmds = "\n".join(f"  {c['name']} — {c['description']}" for c in _BUILTIN_COMMANDS)
@@ -188,8 +203,180 @@ async def handle_slash_command(
             lines.append(f"  **{h.title}** — {h.content[:100]}")
         return {"text": "Handoffs:\n" + "\n".join(lines)}
 
-    if stripped == "/compact":
-        return {"text": "Session compaction requested (stub)."}
+    if stripped == "/compact" or stripped.startswith("/compact "):
+        focus = raw[len("/compact") :].strip()
+        agent = runtime if runtime is not None else None
+        # BasicRuntime is often the agent itself
+        if agent is not None and hasattr(agent, "tool_registry"):
+            try:
+                result = await agent.tool_registry.execute(
+                    "compress_context", focus=focus
+                )
+                return {"text": str(result)}
+            except Exception as e:
+                return {"text": f"Memory Harness compact failed: {e}"}
+        return {
+            "text": (
+                "Memory Harness compact: agent runtime not available. "
+                "Ask Remedy to call compress_context in chat."
+                + (f" Focus: {focus}" if focus else "")
+            )
+        }
+
+    if stripped in ("/harness", "/brief"):
+        agent = runtime
+        brief = getattr(agent, "_session_brief", None) if agent is not None else None
+        if brief is None:
+            return {
+                "text": (
+                    "Memory Harness: no Session Brief yet. "
+                    "Use /compact after some work, or ask Remedy to compress_context."
+                )
+            }
+        try:
+            from remedy.memory.harness.brief import brief_to_context_block
+
+            block = brief_to_context_block(brief) or "(empty brief)"
+            return {
+                "text": (
+                    f"**Memory Harness** · compress passes: {brief.compress_count}\n\n"
+                    f"{block}"
+                )
+            }
+        except Exception as e:
+            return {"text": f"Harness status error: {e}"}
+
+    if stripped.startswith("/remember"):
+        text = raw[len("/remember") :].strip()
+        if not text:
+            return {"text": "Usage: /remember <fact to store>"}
+        if memory is None:
+            return {"text": "Memory store not available."}
+        try:
+            from remedy.models import MemoryEntry, MemoryEntryType
+
+            await memory.upsert(
+                MemoryEntry(
+                    title="Remembered",
+                    content=text,
+                    entry_type=MemoryEntryType.NOTE,
+                    importance=0.8,
+                )
+            )
+            with suppress(Exception):
+                profile = await memory.get_or_create_profile()
+                profile.add_fact(text, category="general", confidence=0.9)
+                await memory.save_user_profile(profile)
+            return {"text": f"Remembered: {text[:300]}"}
+        except Exception as e:
+            return {"text": f"Could not save: {e}"}
+
+    if stripped in ("/whoami", "/who-am-i"):
+        if memory is None:
+            return {"text": "Memory store not available."}
+        try:
+            profile = await memory.get_or_create_profile()
+            lines = ["**What I know about you**"]
+            if profile.display_name:
+                lines.append(f"- Name: {profile.display_name}")
+            for key, trait in list(profile.traits.items())[:20]:
+                lines.append(f"- {key}: {trait.value}")
+            for fact in profile.facts[-15:]:
+                lines.append(f"- ({fact.category}) {fact.fact}")
+            if len(lines) == 1:
+                lines.append(
+                    "_Nothing stored yet. Use_ `/remember …` _or tell me preferences to save._"
+                )
+            return {"text": "\n".join(lines)}
+        except Exception as e:
+            return {"text": f"Profile error: {e}"}
+
+    if stripped in ("/goals", "/goal"):
+        if stripped == "/goal" or stripped.startswith("/goal "):
+            title = raw[len("/goal") :].strip()
+            if not title:
+                return {"text": "Usage: /goal <title>"}
+            if runtime is not None and hasattr(runtime, "create_task"):
+                task = runtime.create_task(title, tags=["goal"])
+                return {"text": f"Goal added: **{task.title}** (`{task.id}`)"}
+            return {"text": "Runtime not available to store goals."}
+        if runtime is not None and hasattr(runtime, "list_tasks"):
+            tasks = runtime.list_tasks()
+            goals = [t for t in tasks if "goal" in (t.tags or [])] or list(tasks)
+            if not goals:
+                return {"text": "No goals yet. `/goal <title>` to add one."}
+            lines = [
+                f"- [{t.status.value}] {t.title}"
+                + (f" — {t.result_summary}" if t.result_summary else "")
+                for t in goals[:30]
+            ]
+            return {"text": "**Goals**\n" + "\n".join(lines)}
+        return {"text": "Runtime not available."}
+
+    if stripped.startswith("/approve"):
+        aid = raw[len("/approve") :].strip()
+        if not aid:
+            from remedy.core.approvals import APPROVALS
+
+            pending = APPROVALS.list_pending()
+            if not pending:
+                return {"text": "No pending approvals."}
+            lines = [
+                f"- `{p.id}`: {p.reason} — `{p.command[:80]}`" for p in pending[:10]
+            ]
+            return {
+                "text": "**Pending approvals**\n"
+                + "\n".join(lines)
+                + "\n\n`/approve <id>` to allow."
+            }
+        from remedy.core.approvals import APPROVALS
+
+        item = APPROVALS.resolve(aid, approve=True, scope="session")
+        if not item:
+            return {"text": f"Unknown approval id: {aid}"}
+        return {
+            "text": (
+                f"Approved `{item.id}`. Ask Remedy to **retry** the command:\n"
+                f"`{item.command[:200]}`"
+            )
+        }
+
+    if stripped.startswith("/deny"):
+        aid = raw[len("/deny") :].strip()
+        if not aid:
+            return {"text": "Usage: /deny <approval-id>"}
+        from remedy.core.approvals import APPROVALS
+
+        item = APPROVALS.resolve(aid, approve=False)
+        if not item:
+            return {"text": f"Unknown approval id: {aid}"}
+        return {"text": f"Denied `{item.id}` — command will not run."}
+
+    if stripped.startswith("/import"):
+        path = raw[len("/import") :].strip().strip('"').strip("'")
+        if not path:
+            return {
+                "text": "Usage: /import <folder path>\n"
+                "Imports .md/.txt notes into durable memory (knowledge pack)."
+            }
+        if memory is None:
+            return {"text": "Memory store not available."}
+        from remedy.memory.knowledge_pack import import_knowledge_pack
+
+        result = await import_knowledge_pack(memory, path)
+        if not result.get("ok"):
+            return {"text": f"Import failed: {result.get('error')}"}
+        return {
+            "text": (
+                f"Imported **{result['imported']}** notes from `{result['root']}` "
+                f"(scanned {result['scanned']}, skipped {result['skipped']})."
+                + (
+                    f"\nErrors: {'; '.join(result['errors'][:5])}"
+                    if result.get("errors")
+                    else ""
+                )
+            )
+        }
 
     if stripped.startswith("/init"):
         parts = stripped.split(" ", 1)
@@ -233,6 +420,10 @@ def _apply_llm_to_runtime(
     persona: str | None = None,
     name: str | None = None,
     project_path: str | None = None,
+    access_scope: str | None = None,
+    harness_mode: str | None = None,
+    harness_min_context_pct: float | None = None,
+    harness_max_context_pct: float | None = None,
 ) -> None:
     """Push LLM settings into the live runtime so chat uses the saved config."""
     if runtime is None:
@@ -248,6 +439,14 @@ def _apply_llm_to_runtime(
         }
         if project_path is not None:
             kwargs["project_path"] = project_path
+        if access_scope is not None:
+            kwargs["access_scope"] = access_scope
+        if harness_mode is not None:
+            kwargs["harness_mode"] = harness_mode
+        if harness_min_context_pct is not None:
+            kwargs["harness_min_context_pct"] = harness_min_context_pct
+        if harness_max_context_pct is not None:
+            kwargs["harness_max_context_pct"] = harness_max_context_pct
         runtime.reconfigure_llm(**kwargs)
         return
     # Fallback for older runtimes without reconfigure_llm
@@ -261,6 +460,8 @@ def _apply_llm_to_runtime(
         runtime._llm_api_key = api_key
     if project_path is not None and hasattr(runtime, "set_project_path"):
         runtime.set_project_path(project_path, as_default=True)
+    if access_scope is not None:
+        runtime._access_scope = access_scope
 
 
 # Cache config disk reads across chat messages; invalidate on mtime/size change.

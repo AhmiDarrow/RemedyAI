@@ -94,10 +94,19 @@ class AutoHandoffManager:
             content_parts.append("**Still open**:\n" + "\n".join(open_summaries))
         if memory_highlights:
             content_parts.append("**Key memories**:\n" + "\n".join(memory_highlights[:5]))
+        if extra_context:
+            content_parts.append("**Session Brief (Memory Harness)**:\n" + extra_context)
 
         content = "\n\n".join(content_parts) if content_parts else "Session ended."
 
         action_items = [t.title for t in open_tasks] if open_tasks else []
+        # Pull decisions from brief text lines if present
+        decisions: list[str] = []
+        if extra_context:
+            for line in extra_context.splitlines():
+                s = line.strip().lstrip("·-").strip()
+                if s.lower().startswith("decision") or "decided" in s.lower():
+                    decisions.append(s[:200])
 
         return await self.store.create_handoff(HandoffNote(
             title=f"Handoff from session {session_id}",
@@ -105,7 +114,7 @@ class AutoHandoffManager:
             from_session=session_id,
             context_summary="\n".join(context_parts) if context_parts else None,
             action_items=action_items,
-            decisions=[],
+            decisions=decisions[:12],
             tags=["auto-handoff", f"session-{session_id}"],
         ))
 

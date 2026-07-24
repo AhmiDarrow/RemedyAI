@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { getPartnerStatus } from '../api/partner'
 import { ThemeSwitcher } from './ThemeSwitcher'
 import type { ThemeId, Theme } from '../themes'
 import type { ModelInfo } from '../App'
@@ -40,6 +41,7 @@ export function StatusBar({
 }: StatusBarProps) {
   const [version, setVersion] = useState('')
   const [status, setStatus] = useState<'connected' | 'disconnected' | 'checking'>('checking')
+  const [partnerHint, setPartnerHint] = useState('')
 
   useEffect(() => {
     let cancelled = false
@@ -58,6 +60,18 @@ export function StatusBar({
             if (data?.version) setVersion(String(data.version))
           } catch {
             // body optional
+          }
+          try {
+            const p = await getPartnerStatus()
+            if (cancelled) return
+            const bits: string[] = []
+            if (p.pending_approvals > 0) bits.push(`⚠ ${p.pending_approvals} approve`)
+            if (p.open_goals > 0) bits.push(`${p.open_goals} goals`)
+            if (p.harness_mode && p.harness_mode !== 'off') bits.push(`Harness ${p.harness_mode}`)
+            if (p.access_scope && p.access_scope !== 'project') bits.push(`scope:${p.access_scope}`)
+            setPartnerHint(bits.join(' · '))
+          } catch {
+            if (!cancelled) setPartnerHint('')
           }
         } else {
           setStatus('disconnected')
@@ -146,6 +160,11 @@ export function StatusBar({
         </button>
 
         {sessionId && <span style={{ color: 'var(--text-muted)' }}>{sessionId.slice(0, 8)}</span>}
+        {partnerHint && (
+          <span title="Partner status" style={{ color: 'var(--text-secondary)' }}>
+            {partnerHint}
+          </span>
+        )}
         {streaming && <span style={{ color: 'var(--accent)' }}>Streaming...</span>}
 
         {updateAvailable && (

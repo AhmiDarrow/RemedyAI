@@ -355,3 +355,25 @@ class AgentConfig(BaseModel):
         default=None,
         description="Default project/workspace directory for agent file tools and shell cwd",
     )
+    access_scope: str = Field(
+        default="project",
+        description="Filesystem access: project | home | full (user-granted)",
+    )
+    launch_at_login: bool = Field(
+        default=False,
+        description="Start Remedy when the user signs in (desktop, opt-in)",
+    )
+    start_in_tray: bool = Field(
+        default=False,
+        description="When launching at login, start minimized to tray",
+    )
+    close_to_tray: bool = Field(
+        default=False,
+        description="Close window hides to tray instead of quitting",
+    )
+    harness_mode: str = Field(
+        default="auto",
+        description="Memory Harness: off | manual | auto",
+    )
+    harness_min_context_pct: float = Field(default=0.35, ge=0.05, le=0.95)
+    harness_max_context_pct: float = Field(default=0.70, ge=0.1, le=0.99)

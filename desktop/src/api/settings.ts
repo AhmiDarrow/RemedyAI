@@ -17,6 +17,13 @@ export interface Settings {
   name: string
   persona: string
   project_path: string
+  access_scope?: string
+  launch_at_login?: boolean
+  start_in_tray?: boolean
+  close_to_tray?: boolean
+  harness_mode?: string
+  harness_min_context_pct?: number
+  harness_max_context_pct?: number
   version: string
   config_exists: boolean
   setup_completed: boolean
@@ -34,6 +41,13 @@ export interface SettingsUpdate {
   name?: string
   persona?: string
   setup_completed?: boolean
+  access_scope?: string
+  launch_at_login?: boolean
+  start_in_tray?: boolean
+  close_to_tray?: boolean
+  harness_mode?: string
+  harness_min_context_pct?: number
+  harness_max_context_pct?: number
 }
 
 export async function getSettings(): Promise<Settings> {

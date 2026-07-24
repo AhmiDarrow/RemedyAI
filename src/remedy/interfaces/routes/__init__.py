@@ -8,6 +8,7 @@ from remedy.interfaces.routes.catalog import register_catalog_routes
 from remedy.interfaces.routes.chat import register_chat_routes
 from remedy.interfaces.routes.memory import register_memory_routes
 from remedy.interfaces.routes.misc import register_misc_routes
+from remedy.interfaces.routes.partner import register_partner_routes
 from remedy.interfaces.routes.sessions import register_sessions_routes
 from remedy.interfaces.routes.settings import register_settings_routes
 from remedy.interfaces.routes.status import register_status_routes
@@ -31,4 +32,5 @@ def register_all_routes(
     register_workspace_routes(app, **kw)
     register_settings_routes(app, **kw)
     register_auth_routes(app, **kw)
+    register_partner_routes(app, **kw)
     register_misc_routes(app, **kw)

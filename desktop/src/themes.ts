@@ -13,6 +13,60 @@ export interface ThemeColors {
   '--success': string
   '--error': string
   '--warning': string
+  /** Chat bubbles — user right / assistant left */
+  '--chat-user-bg': string
+  '--chat-user-fg': string
+  '--chat-user-border': string
+  '--chat-assistant-bg': string
+  '--chat-assistant-fg': string
+  '--chat-assistant-border': string
+  '--chat-system-bg': string
+  '--chat-system-fg': string
+  '--chat-system-border': string
+  '--chat-bubble-radius': string
+  '--chat-max-width': string
+}
+
+/** Shared chat geometry (colors differ per theme). */
+const CHAT_GEOMETRY = {
+  '--chat-bubble-radius': '1rem',
+  '--chat-max-width': '78%',
+} as const
+
+function chatFromPalette(
+  kind: 'dark' | 'light',
+  accent: string,
+  secondary: string,
+  tertiary: string,
+  border: string,
+  textPrimary: string,
+  error: string,
+): Pick<
+  ThemeColors,
+  | '--chat-user-bg'
+  | '--chat-user-fg'
+  | '--chat-user-border'
+  | '--chat-assistant-bg'
+  | '--chat-assistant-fg'
+  | '--chat-assistant-border'
+  | '--chat-system-bg'
+  | '--chat-system-fg'
+  | '--chat-system-border'
+  | '--chat-bubble-radius'
+  | '--chat-max-width'
+> {
+  return {
+    '--chat-user-bg': accent,
+    '--chat-user-fg': kind === 'light' ? '#ffffff' : '#ffffff',
+    '--chat-user-border': accent,
+    '--chat-assistant-bg': secondary,
+    '--chat-assistant-fg': textPrimary,
+    '--chat-assistant-border': border,
+    '--chat-system-bg': tertiary,
+    '--chat-system-fg': error,
+    '--chat-system-border': border,
+    ...CHAT_GEOMETRY,
+  }
 }
 
 export interface Theme {
@@ -42,6 +96,7 @@ export const THEMES: Record<Exclude<ThemeId, 'system'>, Theme> = {
       '--success': '#34d399',
       '--error': '#f87171',
       '--warning': '#fbbf24',
+      ...chatFromPalette('dark', '#8b5cf6', '#14141f', '#1c1c2a', '#2a2a3d', '#f0f0f5', '#f87171'),
     },
   },
 
@@ -62,6 +117,7 @@ export const THEMES: Record<Exclude<ThemeId, 'system'>, Theme> = {
       '--success': '#15803d',
       '--error': '#b91c1c',
       '--warning': '#b45309',
+      ...chatFromPalette('light', '#7c3aed', '#ffffff', '#eaeaef', '#c8c8d4', '#14141f', '#b91c1c'),
     },
   },
 
@@ -82,6 +138,7 @@ export const THEMES: Record<Exclude<ThemeId, 'system'>, Theme> = {
       '--success': '#6ee7b7',
       '--error': '#fca5a5',
       '--warning': '#fcd34d',
+      ...chatFromPalette('dark', '#10b981', '#0f1f18', '#163026', '#1f4a38', '#ecfdf5', '#fca5a5'),
     },
   },
 
@@ -102,6 +159,7 @@ export const THEMES: Record<Exclude<ThemeId, 'system'>, Theme> = {
       '--success': '#6ee7b7',
       '--error': '#fca5a5',
       '--warning': '#fde68a',
+      ...chatFromPalette('dark', '#a855f7', '#1a1224', '#261a36', '#3d2a55', '#f5f3ff', '#fca5a5'),
     },
   },
 
@@ -122,6 +180,7 @@ export const THEMES: Record<Exclude<ThemeId, 'system'>, Theme> = {
       '--success': '#6ee7b7',
       '--error': '#fca5a5',
       '--warning': '#fde68a',
+      ...chatFromPalette('dark', '#f97316', '#1f1810', '#2e2418', '#4a3a24', '#fff7ed', '#fca5a5'),
     },
   },
 
@@ -142,6 +201,7 @@ export const THEMES: Record<Exclude<ThemeId, 'system'>, Theme> = {
       '--success': '#6ee7b7',
       '--error': '#fca5a5',
       '--warning': '#fde68a',
+      ...chatFromPalette('dark', '#06b6d4', '#0f1c22', '#163038', '#1e4a55', '#ecfeff', '#fca5a5'),
     },
   },
 } as const

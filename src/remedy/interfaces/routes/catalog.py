@@ -78,7 +78,9 @@ def register_catalog_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
 
     @app.post("/api/sessions/{session_id}/command")
     async def execute_command(session_id: str, req: CommandRequest):
-        result = await handle_slash_command(req.command, session_id, memory)
+        result = await handle_slash_command(
+            req.command, session_id, memory, runtime=runtime
+        )
         return {"session_id": session_id, "command": req.command, **result}
 
     # -- models & agents -----------------------------------------------------

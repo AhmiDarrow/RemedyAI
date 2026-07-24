@@ -27,6 +27,51 @@ fn status_addr() -> SocketAddr {
     SocketAddr::from(([127, 0, 0, 1], 7400))
 }
 
+struct DesktopPrefs {
+    close_to_tray: bool,
+    start_in_tray: bool,
+}
+
+impl Default for DesktopPrefs {
+    fn default() -> Self {
+        Self {
+            close_to_tray: false,
+            start_in_tray: false,
+        }
+    }
+}
+
+fn desktop_prefs_path() -> PathBuf {
+    remedy_home().join("desktop.json")
+}
+
+fn load_desktop_prefs() -> DesktopPrefs {
+    let path = desktop_prefs_path();
+    let Ok(raw) = std::fs::read_to_string(&path) else {
+        return DesktopPrefs::default();
+    };
+    // Minimal parse — avoid pulling serde_json key path complexity beyond what's needed
+    let close_to_tray = raw.contains("\"close_to_tray\": true") || raw.contains("\"close_to_tray\":true");
+    let start_in_tray = raw.contains("\"start_in_tray\": true") || raw.contains("\"start_in_tray\":true");
+    DesktopPrefs {
+        close_to_tray,
+        start_in_tray,
+    }
+}
+
+fn save_desktop_prefs(prefs: &DesktopPrefs) -> Result<(), String> {
+    let path = desktop_prefs_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let body = format!(
+        "{{\n  \"close_to_tray\": {},\n  \"start_in_tray\": {}\n}}\n",
+        if prefs.close_to_tray { "true" } else { "false" },
+        if prefs.start_in_tray { "true" } else { "false" },
+    );
+    std::fs::write(&path, body).map_err(|e| e.to_string())
+}
+
 struct ServerState {
     process: Arc<Mutex<Option<Child>>>,
     /// Path to the sidecar binary discovered at startup.
@@ -34,6 +79,8 @@ struct ServerState {
     /// Files dropped from OS (Explorer). Frontend polls this because WebView
     /// event delivery is unreliable for drag-drop on Windows.
     pending_drops: Arc<Mutex<Vec<DroppedFilePayload>>>,
+    /// Always-ready window prefs (close-to-tray / start-in-tray).
+    desktop_prefs: Arc<Mutex<DesktopPrefs>>,
 }
 
 fn current_exe_dir() -> Option<std::path::PathBuf> {
@@ -274,6 +321,194 @@ fn start_sidecar(process: &Arc<Mutex<Option<Child>>>, cmd: &str) -> Result<(), S
     }
     *guard = Some(child);
     Ok(())
+}
+
+/// Native folder picker for Settings project workspace (Windows Forms / zenity / osascript).
+#[tauri::command]
+fn pick_folder() -> Result<Option<String>, String> {
+    #[cfg(target_os = "windows")]
+    {
+        // PowerShell FolderBrowserDialog — no extra crate; works from Tauri main thread spawn.
+        let script = r#"
+Add-Type -AssemblyName System.Windows.Forms | Out-Null
+$d = New-Object System.Windows.Forms.FolderBrowserDialog
+$d.Description = 'Select project folder'
+$d.ShowNewFolderButton = $true
+if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+  Write-Output $d.SelectedPath
+}
+"#;
+        let output = Command::new("powershell")
+            .args(["-NoProfile", "-STA", "-Command", script])
+            .output()
+            .map_err(|e| format!("folder picker failed: {e}"))?;
+        if !output.status.success() {
+            let err = String::from_utf8_lossy(&output.stderr);
+            if err.trim().is_empty() {
+                return Ok(None);
+            }
+            return Err(format!("folder picker error: {}", err.trim()));
+        }
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if path.is_empty() {
+            return Ok(None);
+        }
+        return Ok(Some(path));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let output = Command::new("osascript")
+            .args([
+                "-e",
+                "POSIX path of (choose folder with prompt \"Select project folder\")",
+            ])
+            .output()
+            .map_err(|e| format!("folder picker failed: {e}"))?;
+        if !output.status.success() {
+            return Ok(None);
+        }
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if path.is_empty() {
+            return Ok(None);
+        }
+        return Ok(Some(path));
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let output = Command::new("zenity")
+            .args(["--file-selection", "--directory", "--title=Select project folder"])
+            .output()
+            .map_err(|e| format!("folder picker failed (install zenity): {e}"))?;
+        if !output.status.success() {
+            return Ok(None);
+        }
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if path.is_empty() {
+            return Ok(None);
+        }
+        return Ok(Some(path));
+    }
+    #[allow(unreachable_code)]
+    Ok(None)
+}
+
+/// Windows: enable/disable "Start with Windows" via HKCU Run key.
+#[tauri::command]
+fn set_launch_at_login(enabled: bool) -> Result<bool, String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        let exe = env::current_exe().map_err(|e| e.to_string())?;
+        let exe_str = exe.to_string_lossy().replace('\'', "''");
+        let name = "RemedyDesktop";
+        if enabled {
+            let ps = format!(
+                "New-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' \
+                 -Name '{name}' -Value '\"{exe_str}\"' -PropertyType String -Force | Out-Null"
+            );
+            let status = Command::new("powershell")
+                .args(["-NoProfile", "-Command", &ps])
+                .creation_flags(CREATE_NO_WINDOW)
+                .status()
+                .map_err(|e| format!("set login item: {e}"))?;
+            if !status.success() {
+                return Err("Failed to write HKCU Run key".into());
+            }
+            log::info!("Launch at login enabled → {}", exe.display());
+        } else {
+            let ps = format!(
+                "Remove-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' \
+                 -Name '{name}' -ErrorAction SilentlyContinue"
+            );
+            let _ = Command::new("powershell")
+                .args(["-NoProfile", "-Command", &ps])
+                .creation_flags(CREATE_NO_WINDOW)
+                .status();
+            log::info!("Launch at login disabled");
+        }
+        return Ok(enabled);
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = enabled;
+        Err("Launch at login is only implemented on Windows in this build".into())
+    }
+}
+
+#[tauri::command]
+fn get_launch_at_login() -> Result<bool, String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        let output = Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-Command",
+                "(Get-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -ErrorAction SilentlyContinue).RemedyDesktop",
+            ])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+            .map_err(|e| format!("read login item: {e}"))?;
+        let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        return Ok(!s.is_empty() && s != "");
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(false)
+    }
+}
+
+#[tauri::command]
+fn set_desktop_prefs(
+    state: State<'_, ServerState>,
+    close_to_tray: bool,
+    start_in_tray: bool,
+) -> Result<(), String> {
+    let prefs = DesktopPrefs {
+        close_to_tray,
+        start_in_tray,
+    };
+    save_desktop_prefs(&prefs)?;
+    if let Ok(mut g) = state.desktop_prefs.lock() {
+        *g = prefs;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn get_desktop_prefs(state: State<'_, ServerState>) -> Result<serde_json::Value, String> {
+    let g = state
+        .desktop_prefs
+        .lock()
+        .map_err(|_| "prefs lock poisoned".to_string())?;
+    Ok(serde_json::json!({
+        "close_to_tray": g.close_to_tray,
+        "start_in_tray": g.start_in_tray,
+    }))
+}
+
+#[tauri::command]
+fn show_main_window(app: AppHandle) -> Result<(), String> {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+    }
+    Ok(())
+}
+
+/// Apply the current branding PNG as the window icon (taskbar / Alt-Tab).
+/// `include_image!` embeds icons/icon.png (circuit-R) at compile time.
+fn apply_window_icons(app: &AppHandle) {
+    // Path is relative to the crate root (desktop/src-tauri/)
+    let icon = tauri::include_image!("icons/icon.png");
+    for (_, window) in app.webview_windows() {
+        if let Err(e) = window.set_icon(icon.clone()) {
+            log::warn!("set_icon on {}: {e}", window.label());
+        } else {
+            log::info!("Applied window icon on {}", window.label());
+        }
+    }
 }
 
 /// Open the Remedy user-data folder in the OS file manager.
@@ -892,9 +1127,16 @@ pub fn run() {
             process: Arc::new(Mutex::new(None)),
             sidecar_cmd: Arc::new(Mutex::new(None)),
             pending_drops: Arc::new(Mutex::new(Vec::new())),
+            desktop_prefs: Arc::new(Mutex::new(load_desktop_prefs())),
         })
         .invoke_handler(tauri::generate_handler![
             open_data_folder,
+            pick_folder,
+            set_launch_at_login,
+            get_launch_at_login,
+            set_desktop_prefs,
+            get_desktop_prefs,
+            show_main_window,
             restart_server,
             check_desktop_update,
             start_desktop_update,
@@ -905,6 +1147,75 @@ pub fn run() {
             let _shell = app.handle().plugin(tauri_plugin_shell::init())?;
             let _updater = app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
             let app_handle = app.handle().clone();
+
+            // Force window/taskbar icon to the circuit-R monogram (not stale PE/cache).
+            // Tray already uses icons/icon.png; taskbar often stuck on old embedded ICO.
+            apply_window_icons(&app_handle);
+
+            // Tray menu: Show / Quit (always-ready partner)
+            {
+                use tauri::menu::{Menu, MenuItem};
+                use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};
+
+                let show_i = MenuItem::with_id(app, "show", "Show Remedy", true, None::<&str>)?;
+                let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+                let menu = Menu::with_items(app, &[&show_i, &quit_i])?;
+
+                // Prefer tray from tauri.conf.json; attach menu + events
+                if let Some(tray) = app.tray_by_id("main") {
+                    let _ = tray.set_menu(Some(menu.clone()));
+                    let _ = tray.set_tooltip(Some("Remedy"));
+                    let app_for_menu = app.handle().clone();
+                    tray.on_menu_event(move |_tray, event| match event.id.as_ref() {
+                        "show" => {
+                            if let Some(w) = app_for_menu.get_webview_window("main") {
+                                let _ = w.show();
+                                let _ = w.unminimize();
+                                let _ = w.set_focus();
+                            }
+                        }
+                        "quit" => {
+                            let state = app_for_menu.state::<ServerState>();
+                            shutdown_sidecar(&state);
+                            app_for_menu.exit(0);
+                        }
+                        _ => {}
+                    });
+                    tray.on_tray_icon_event(|tray, event| {
+                        if let TrayIconEvent::Click {
+                            button: MouseButton::Left,
+                            button_state: MouseButtonState::Up,
+                            ..
+                        } = event
+                        {
+                            let app = tray.app_handle();
+                            if let Some(w) = app.get_webview_window("main") {
+                                let _ = w.show();
+                                let _ = w.unminimize();
+                                let _ = w.set_focus();
+                            }
+                        }
+                    });
+                } else {
+                    log::warn!("No tray icon id 'main' — check tauri.conf.json trayIcon");
+                }
+            }
+
+            // Start hidden when always-ready start_in_tray is on
+            {
+                let state = app.state::<ServerState>();
+                let start_hidden = state
+                    .desktop_prefs
+                    .lock()
+                    .map(|p| p.start_in_tray)
+                    .unwrap_or(false);
+                if start_hidden {
+                    if let Some(w) = app.get_webview_window("main") {
+                        let _ = w.hide();
+                        log::info!("start_in_tray: main window hidden");
+                    }
+                }
+            }
 
             let (remedy_cmd, find_err) = find_remedy();
             if !find_err.is_empty() {
@@ -948,10 +1259,27 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             match event {
-                // Close / destroy: always stop the sidecar. Without this (and Exit
-                // below), Windows leaves remedy-desktop.exe running as an orphan.
-                tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed => {
+                // Close-to-tray: hide instead of quit when always-ready is enabled.
+                tauri::WindowEvent::CloseRequested { api, .. } => {
+                    let close_to_tray = window
+                        .state::<ServerState>()
+                        .desktop_prefs
+                        .lock()
+                        .map(|p| p.close_to_tray)
+                        .unwrap_or(false);
+                    if close_to_tray {
+                        api.prevent_close();
+                        let _ = window.hide();
+                        log::info!("close_to_tray: window hidden (sidecar stays up)");
+                    } else {
+                        let state = window.state::<ServerState>();
+                        shutdown_sidecar(&state);
+                    }
+                }
+                tauri::WindowEvent::Destroyed => {
+                    // Only if we actually quit (not hide-to-tray)
                     let state = window.state::<ServerState>();
+                    // If process still managed, tear down — hide path never destroys.
                     shutdown_sidecar(&state);
                 }
                 // Native OS file drops (Explorer → app). WebView2 often won't

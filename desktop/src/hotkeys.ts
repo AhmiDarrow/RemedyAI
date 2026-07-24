@@ -30,6 +30,16 @@ export const HOTKEYS: HotkeyDef[] = [
     action: 'Insert a new line',
   },
   {
+    keys: '↑',
+    scope: 'composer',
+    action: 'Previous prompt (empty / start of single line)',
+  },
+  {
+    keys: '↓',
+    scope: 'composer',
+    action: 'Next prompt (while browsing history)',
+  },
+  {
     keys: 'Ctrl+N',
     scope: 'global',
     action: 'New chat session',

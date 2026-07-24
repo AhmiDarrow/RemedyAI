@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useMemo } from 'react'
 import { Sidebar } from './components/Sidebar'
+import { ApprovalBanner } from './components/ApprovalBanner'
 import { MessageFeed } from './components/MessageFeed'
 import { Composer } from './components/Composer'
 import { StatusBar } from './components/StatusBar'
@@ -502,6 +503,7 @@ export default function App() {
         <div className="flex-1 flex min-h-0">
           {/* Full chat column is the drop target (not only the small composer bar). */}
           <div className="flex-1 flex flex-col min-w-0 min-h-0">
+            <ApprovalBanner sessionId={activeId} />
             <MessageFeed
               messages={messages}
               partialText={partialText}

@@ -51,9 +51,11 @@ from remedy.core.react_stream import (
 from remedy.core.runtime import AgentRuntime
 from remedy.core.security import check_dangerous_command
 from remedy.core.workspace import (
+    allowed_roots_for_scope,
     ensure_project_dir,
-    jail_path,
+    normalize_access_scope,
     resolve_project_path,
+    resolve_under_roots,
     workspace_context_block,
 )
 from remedy.memory.store import MemoryStore
@@ -102,7 +104,22 @@ class BasicRuntime(AgentRuntime):
             getattr(config, "project_path", None)
         )
         self._active_project_path: Path = self._default_project_path
+        self._access_scope: str = normalize_access_scope(
+            getattr(config, "access_scope", None) or "project"
+        )
+        self._harness_mode: str = (
+            str(getattr(config, "harness_mode", None) or "auto").strip().lower()
+        )
+        self._harness_min_pct: float = float(
+            getattr(config, "harness_min_context_pct", None) or 0.35
+        )
+        self._harness_max_pct: float = float(
+            getattr(config, "harness_max_context_pct", None) or 0.70
+        )
+        # Memory Harness L2 working state (per agent instance / session)
+        self._session_brief = None  # type: ignore[assignment]
         self._register_workspace_tools()
+        self._register_memory_tools()
 
     def effective_project_path(self) -> Path:
         """Active workspace root for tools / context (session or default)."""
@@ -110,6 +127,22 @@ class BasicRuntime(AgentRuntime):
             return ensure_project_dir(self._active_project_path)
         except Exception:
             return resolve_project_path(None)
+
+    def access_scope(self) -> str:
+        return normalize_access_scope(self._access_scope)
+
+    def allowed_roots(self) -> list[Path]:
+        return allowed_roots_for_scope(
+            self.access_scope(), self.effective_project_path()
+        )
+
+    def resolve_tool_path(self, path: str) -> Path:
+        """Resolve a tool path under the current access scope roots."""
+        return resolve_under_roots(
+            path or ".",
+            self.allowed_roots(),
+            access_scope=self.access_scope(),
+        )
 
     def set_project_path(self, path: str | Path | None, *, as_default: bool = False) -> Path:
         """Set active (and optionally default) project workspace."""
@@ -143,7 +176,7 @@ class BasicRuntime(AgentRuntime):
 
         async def file_read(path: str = ".") -> str:
             root = self.effective_project_path()
-            target = jail_path(path, root)
+            target = self.resolve_tool_path(path)
             if not target.exists():
                 parent = _parent_hint(path)
                 return format_tool_error(
@@ -176,11 +209,11 @@ class BasicRuntime(AgentRuntime):
             # Cap large files for context safety
             if len(data) > 200_000:
                 return data[:200_000] + f"\n\n... [truncated, {len(data)} bytes total]"
+            self._track_artifact(str(target))
             return data
 
         async def file_write(path: str, content: str = "") -> str:
-            root = self.effective_project_path()
-            target = jail_path(path, root)
+            target = self.resolve_tool_path(path)
             try:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(content, encoding="utf-8")
@@ -192,14 +225,16 @@ class BasicRuntime(AgentRuntime):
                     tool_name="file_write",
                     suggestion=(
                         f"Verify the parent path with list_dir('{parent}') "
-                        "and ensure the path is inside the project workspace."
+                        "and ensure the path is inside allowed roots "
+                        f"(access scope: {self.access_scope()})."
                     ),
                 )
+            self._track_artifact(str(target))
             return f"Wrote {len(content)} bytes to {path}"
 
         async def list_dir(path: str = ".") -> str:
             root = self.effective_project_path()
-            target = jail_path(path, root)
+            target = self.resolve_tool_path(path)
             if not target.exists():
                 parent = _parent_hint(path)
                 return format_tool_error(
@@ -223,7 +258,10 @@ class BasicRuntime(AgentRuntime):
                 for p in sorted(target.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
                     if p.name.startswith("."):
                         continue
-                    rel = p.relative_to(root).as_posix()
+                    try:
+                        rel = p.relative_to(root).as_posix()
+                    except ValueError:
+                        rel = str(p)
                     lines.append(f"{'dir ' if p.is_dir() else 'file'} {rel}")
                     if len(lines) >= 200:
                         lines.append("... (truncated)")
@@ -239,6 +277,7 @@ class BasicRuntime(AgentRuntime):
 
         async def bash_exec(command: str = "") -> str:
             """Run a shell command through SubprocessSandbox (hidden console on Windows)."""
+            from remedy.core.approvals import APPROVALS
             from remedy.execution.process import win_shell_prefix
             from remedy.execution.sandbox import SubprocessSandbox
 
@@ -260,9 +299,30 @@ class BasicRuntime(AgentRuntime):
                         "avoid destructive or network-restricted commands)."
                     ),
                 )
+            # Partner trust: high-impact patterns require explicit user approval first
+            ask_reason = APPROVALS.needs_ask(command)
+            sid = getattr(self, "_session_id", None)
+            if ask_reason and not APPROVALS.is_approved(
+                "bash_exec", command, session_id=sid
+            ):
+                item = APPROVALS.create(
+                    tool_name="bash_exec",
+                    command=command,
+                    reason=ask_reason,
+                    session_id=sid,
+                )
+                return (
+                    f"APPROVAL_REQUIRED id={item.id}\n"
+                    f"reason={ask_reason}\n"
+                    f"command={command[:400]}\n"
+                    "Do not invent success. Tell the user this needs approval in the UI "
+                    f"(or /approve {item.id}). After they approve, retry bash_exec with "
+                    "the same command."
+                )
             root = self.effective_project_path()
+            roots = self.allowed_roots()
             argv = [*win_shell_prefix(), command]
-            sandbox = SubprocessSandbox(allowed_paths=[root])
+            sandbox = SubprocessSandbox(allowed_paths=roots or [root])
             result = await sandbox.execute(argv, workdir=root, timeout_seconds=60.0)
             parts = [f"exit_code={result.exit_code}", f"cwd={root}"]
             if result.stdout:
@@ -278,7 +338,8 @@ class BasicRuntime(AgentRuntime):
 
         self.tool_registry.register_builtin_handler(
             "file_read",
-            "Read a text file under the project working directory. Path is relative to the project root.",
+            "Read a text file under allowed roots (see access scope). "
+            "Prefer paths relative to the project root.",
             file_read,
             {
                 "type": "object",
@@ -290,7 +351,7 @@ class BasicRuntime(AgentRuntime):
         )
         self.tool_registry.register_builtin_handler(
             "file_write",
-            "Write a text file under the project working directory.",
+            "Write a text file under allowed roots (see access scope).",
             file_write,
             {
                 "type": "object",
@@ -303,7 +364,7 @@ class BasicRuntime(AgentRuntime):
         )
         self.tool_registry.register_builtin_handler(
             "list_dir",
-            "List files and directories under the project working directory.",
+            "List files and directories under allowed roots (see access scope).",
             list_dir,
             {
                 "type": "object",
@@ -328,6 +389,293 @@ class BasicRuntime(AgentRuntime):
             },
         )
 
+    def _register_memory_tools(self) -> None:
+        """Memory + Memory Harness tools (search, save, compress)."""
+
+        async def memory_search(query: str = "", limit: int = 8) -> str:
+            if self.memory is None:
+                return "Memory store not available."
+            q = (query or "").strip()
+            if not q:
+                return "Provide a search query."
+            try:
+                hits = await self.memory.search(q, limit=max(1, min(int(limit), 20)))
+            except Exception as e:
+                return f"Memory search failed: {e}"
+            if not hits:
+                return f"No memory matches for: {q}"
+            lines = []
+            for e in hits:
+                title = getattr(e, "title", "") or ""
+                content = (getattr(e, "content", None) or "")[:200]
+                lines.append(f"- {title}: {content}" if title else f"- {content}")
+            return "Memory hits:\n" + "\n".join(lines)
+
+        async def memory_save(
+            content: str = "",
+            title: str = "Remembered",
+            category: str = "general",
+        ) -> str:
+            if self.memory is None:
+                return "Memory store not available."
+            text = (content or "").strip()
+            if not text:
+                return "Nothing to save — provide content."
+            try:
+                from remedy.models import MemoryEntry, MemoryEntryType
+
+                await self.memory.upsert(
+                    MemoryEntry(
+                        title=(title or "Remembered")[:120],
+                        content=text,
+                        entry_type=MemoryEntryType.NOTE,
+                        importance=0.75,
+                    )
+                )
+                # Also surface as a user fact when short
+                if len(text) < 400:
+                    with suppress(Exception):
+                        profile = await self.memory.get_or_create_profile()
+                        profile.add_fact(
+                            text, category=category or "general", confidence=0.85
+                        )
+                        await self.memory.save_user_profile(profile)
+                return f"Saved to memory: {(title or 'Remembered')[:80]}"
+            except Exception as e:
+                return f"Memory save failed: {e}"
+
+        async def compress_context(focus: str = "") -> str:
+            """Memory Harness L1: merge history into Session Brief (send-view stays lean)."""
+            from remedy.memory.harness.brief import SessionBrief
+            from remedy.memory.harness.compressor import heuristic_merge_from_history
+
+            if self._session_brief is None:
+                self._session_brief = SessionBrief(
+                    session_id=getattr(self, "_session_id", None) or ""
+                )
+            history: list[dict[str, Any]] = []
+            sid = getattr(self, "_session_id", None)
+            if sid and self.memory is not None:
+                with suppress(Exception):
+                    history = await self._load_session_history(sid, "")
+            self._session_brief = heuristic_merge_from_history(
+                self._session_brief,
+                history,
+                intent_hint=(focus or None),
+            )
+            brief = self._session_brief
+            return (
+                f"Memory Harness compressed (pass #{brief.compress_count}). "
+                f"Intent: {brief.intent or '(set)'}. "
+                f"Artifacts: {len(brief.artifacts)}. "
+                f"Decisions: {len(brief.decisions)}."
+            )
+
+        self.tool_registry.register_builtin_handler(
+            "memory_search",
+            "Search durable Remedy memory for relevant notes and facts.",
+            memory_search,
+            {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "limit": {"type": "integer", "description": "Max results (default 8)"},
+                },
+                "required": ["query"],
+            },
+        )
+        self.tool_registry.register_builtin_handler(
+            "memory_save",
+            "Save a durable note or fact about the user or project to memory.",
+            memory_save,
+            {
+                "type": "object",
+                "properties": {
+                    "content": {"type": "string"},
+                    "title": {"type": "string"},
+                    "category": {"type": "string", "description": "e.g. work, personal, preference"},
+                },
+                "required": ["content"],
+            },
+        )
+        self.tool_registry.register_builtin_handler(
+            "compress_context",
+            "Memory Harness: compress stale session detail into the Session Brief "
+            "(intent, files, decisions, next steps). Call when a subtask finishes or context is large.",
+            compress_context,
+            {
+                "type": "object",
+                "properties": {
+                    "focus": {
+                        "type": "string",
+                        "description": "Optional focus for what to keep in the brief",
+                    },
+                },
+            },
+        )
+
+        # --- Partner loop: goals ---
+        async def goal_add(title: str = "", description: str = "") -> str:
+            t = (title or "").strip()
+            if not t:
+                return "Provide a goal title."
+            task = self.create_task(t, description=description or "", tags=["goal"])
+            with suppress(Exception):
+                from remedy.memory.harness.brief import SessionBrief
+
+                if self._session_brief is None:
+                    self._session_brief = SessionBrief()
+                if t not in self._session_brief.open_tasks:
+                    self._session_brief.open_tasks.append(t)
+                    self._session_brief.open_tasks = self._session_brief.open_tasks[-20:]
+                    self._session_brief.touch()
+            return f"Goal added id={task.id} title={t}"
+
+        async def goal_list(status: str = "") -> str:
+            from remedy.models import TaskStatus
+
+            st = (status or "").strip().lower()
+            tasks = self.list_tasks()
+            if st:
+                try:
+                    enum_st = TaskStatus(st)
+                    tasks = [t for t in tasks if t.status == enum_st]
+                except Exception:
+                    tasks = [t for t in tasks if t.status.value == st]
+            tagged = [t for t in tasks if "goal" in (t.tags or [])]
+            use = tagged if tagged else list(tasks)
+            if not use:
+                return "No goals yet. Use goal_add to create one."
+            lines = []
+            for t in use[:30]:
+                lines.append(
+                    f"- [{t.status.value}] {t.title}"
+                    + (f" — {t.result_summary}" if t.result_summary else "")
+                    + f"  (id={t.id})"
+                )
+            return "Goals:\n" + "\n".join(lines)
+
+        async def goal_complete(title: str = "", evidence: str = "") -> str:
+            from datetime import UTC, datetime
+
+            from remedy.models import TaskStatus
+
+            needle = (title or "").strip().lower()
+            if not needle:
+                return "Provide goal title (or partial) to complete."
+            matches = [
+                t
+                for t in self.list_tasks()
+                if needle in t.title.lower() and t.status != TaskStatus.COMPLETED
+            ]
+            if not matches:
+                return f"No open goal matching: {title}"
+            task = matches[0]
+            task.status = TaskStatus.COMPLETED
+            task.result_summary = (evidence or "done").strip()[:500]
+            task.completed_at = datetime.now(UTC)
+            task.updated_at = datetime.now(UTC)
+            with suppress(Exception):
+                if self._session_brief is not None:
+                    self._session_brief.open_tasks = [
+                        x
+                        for x in self._session_brief.open_tasks
+                        if x.lower() != task.title.lower()
+                    ]
+                    if evidence:
+                        self._session_brief.decisions.append(
+                            f"Completed goal: {task.title} — {evidence[:120]}"
+                        )
+                        self._session_brief.decisions = self._session_brief.decisions[-20:]
+                    self._session_brief.touch()
+            # Learn: store short success note
+            if self.memory is not None and evidence:
+                with suppress(Exception):
+                    from remedy.models import MemoryEntry, MemoryEntryType
+
+                    await self.memory.upsert(
+                        MemoryEntry(
+                            title=f"Goal done: {task.title}",
+                            content=evidence[:2000],
+                            entry_type=MemoryEntryType.NOTE,
+                            tags=["goal", "verified"],
+                            importance=0.7,
+                        )
+                    )
+            return f"Goal completed: {task.title}" + (
+                f" evidence={evidence[:200]}" if evidence else ""
+            )
+
+        async def goal_verify(title: str = "", evidence: str = "") -> str:
+            """Record verification evidence for a goal (partner verify loop)."""
+            if not (evidence or "").strip():
+                return "Provide evidence of completion (command output, file path, result)."
+            # Completing with evidence is the verify path
+            return await goal_complete(title=title, evidence=evidence)
+
+        self.tool_registry.register_builtin_handler(
+            "goal_add",
+            "Add a user goal / checklist item for this session (partner loop).",
+            goal_add,
+            {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "description": {"type": "string"},
+                },
+                "required": ["title"],
+            },
+        )
+        self.tool_registry.register_builtin_handler(
+            "goal_list",
+            "List tracked goals and their status.",
+            goal_list,
+            {
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "description": "Optional filter: created, in_progress, completed",
+                    },
+                },
+            },
+        )
+        self.tool_registry.register_builtin_handler(
+            "goal_complete",
+            "Mark a goal complete; optionally store evidence for the verify/learn loop.",
+            goal_complete,
+            {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "evidence": {"type": "string"},
+                },
+                "required": ["title"],
+            },
+        )
+        self.tool_registry.register_builtin_handler(
+            "goal_verify",
+            "Verify a goal with evidence (path, test output, screenshot note) and mark done.",
+            goal_verify,
+            {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "evidence": {"type": "string"},
+                },
+                "required": ["title", "evidence"],
+            },
+        )
+
+    def _track_artifact(self, path: str) -> None:
+        """Record a path in the Session Brief (Memory Harness L2)."""
+        with suppress(Exception):
+            from remedy.memory.harness.brief import SessionBrief
+
+            if self._session_brief is None:
+                self._session_brief = SessionBrief()
+            self._session_brief.add_artifact(path)
+
     def reconfigure_llm(
         self,
         *,
@@ -338,8 +686,23 @@ class BasicRuntime(AgentRuntime):
         persona: str | None = None,
         name: str | None = None,
         project_path: str | None = None,
+        access_scope: str | None = None,
+        harness_mode: str | None = None,
+        harness_min_context_pct: float | None = None,
+        harness_max_context_pct: float | None = None,
     ) -> None:
         """Hot-apply LLM / persona / project settings without restarting."""
+        if access_scope is not None:
+            self._access_scope = normalize_access_scope(access_scope)
+            if hasattr(self, "config") and self.config is not None:
+                with suppress(Exception):
+                    self.config.access_scope = self._access_scope
+        if harness_mode is not None and str(harness_mode).strip():
+            self._harness_mode = str(harness_mode).strip().lower()
+        if harness_min_context_pct is not None:
+            self._harness_min_pct = float(harness_min_context_pct)
+        if harness_max_context_pct is not None:
+            self._harness_max_pct = float(harness_max_context_pct)
         if provider is not None and provider.strip():
             self._llm_provider = provider.strip().lower()
             self._provider = get_provider(self._llm_provider)
@@ -724,6 +1087,12 @@ class BasicRuntime(AgentRuntime):
 
             context = await self._build_context()
             history = await self._load_session_history(session_id, message)
+            # Memory Harness L0: prune send-view only (stored transcript untouched)
+            with suppress(Exception):
+                from remedy.memory.harness.pruner import prune_messages_for_send
+
+                if self._harness_mode != "off":
+                    history = prune_messages_for_send(history)
             user_content = build_multimodal_user_content(message, attachments)
             messages: list[dict[str, Any]] = [
                 {
@@ -740,6 +1109,22 @@ class BasicRuntime(AgentRuntime):
                 *history,
                 {"role": "user", "content": user_content},
             ]
+            # Memory Harness auto: soft/strong compress nudge by fill estimate
+            with suppress(Exception):
+                if self._harness_mode == "auto":
+                    from remedy.memory.harness.compressor import (
+                        compression_nudge_message,
+                        estimate_tokens,
+                        should_nudge_compress,
+                    )
+
+                    level = should_nudge_compress(
+                        estimate_tokens(messages),
+                        min_pct=self._harness_min_pct,
+                        max_pct=self._harness_max_pct,
+                    )
+                    if level:
+                        messages.insert(-1, compression_nudge_message(level))
             all_tools = self._openai_tools()
             tools = (
                 all_tools
@@ -1427,11 +1812,46 @@ class BasicRuntime(AgentRuntime):
         parts = []
         # Project workspace (OpenCode-style default directory for this session)
         with suppress(Exception):
-            parts.append(workspace_context_block(self.effective_project_path()))
+            parts.append(
+                workspace_context_block(
+                    self.effective_project_path(),
+                    access_scope=self.access_scope(),
+                    extra_roots=self.allowed_roots(),
+                )
+            )
+
+        # User profile (companion personalization)
+        with suppress(Exception):
+            if self.memory is not None:
+                profile = await self.memory.get_or_create_profile()
+                profile_lines: list[str] = []
+                if profile.display_name:
+                    profile_lines.append(f"- Name: {profile.display_name}")
+                for key, trait in list(profile.traits.items())[:12]:
+                    if trait.confidence >= 0.4:
+                        profile_lines.append(f"- {key}: {trait.value}")
+                for fact in profile.facts[-8:]:
+                    if fact.confidence >= 0.5:
+                        profile_lines.append(f"- ({fact.category}) {fact.fact}")
+                if profile_lines:
+                    parts.append(
+                        "User profile (remember across sessions):\n"
+                        + "\n".join(profile_lines)
+                    )
+
+        # Session Brief (Memory Harness L2) when present on agent
+        with suppress(Exception):
+            from remedy.memory.harness.brief import brief_to_context_block
+
+            brief = getattr(self, "_session_brief", None)
+            block = brief_to_context_block(brief)
+            if block:
+                parts.append(block)
 
         recent: list[Any] = []
         with suppress(Exception):
             # Keep short — large memory dumps push weak models into pointless tool loops.
+            # Prefer query-time search later; recent is a light fallback.
             recent = await self.memory.list_recent(limit=6)
         if recent:
             lines = []

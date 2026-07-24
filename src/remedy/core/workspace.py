@@ -70,23 +70,113 @@ def ensure_project_dir(path: Path) -> Path:
 
 def jail_path(user_path: str, project_root: Path) -> Path:
     """Resolve ``user_path`` under ``project_root`` (blocks traversal)."""
-    root = ensure_project_dir(project_root)
+    return resolve_under_roots(user_path, [project_root])
+
+
+def normalize_access_scope(raw: str | None) -> str:
+    """Return project | home | full."""
+    s = (raw or "project").strip().lower()
+    if s in ("home", "user", "project+home", "project_home"):
+        return "home"
+    if s in ("full", "machine", "all", "unrestricted"):
+        return "full"
+    return "project"
+
+
+def allowed_roots_for_scope(
+    scope: str,
+    project_root: Path,
+    *,
+    home: Path | None = None,
+) -> list[Path]:
+    """Roots the agent may touch for the given access scope."""
+    roots: list[Path] = []
+    try:
+        roots.append(ensure_project_dir(project_root))
+    except Exception:
+        roots.append(resolve_project_path(str(project_root)))
+    scope = normalize_access_scope(scope)
+    if scope in ("home", "full"):
+        h = (home or Path.home()).expanduser()
+        try:
+            h = h.resolve()
+        except OSError:
+            h = h.absolute()
+        if h not in roots:
+            roots.append(h)
+    # full: roots still list project + home for cwd defaults; absolute paths
+    # under the user's OS permissions are allowed via resolve_under_roots.
+    return roots
+
+
+def resolve_under_roots(
+    user_path: str,
+    roots: list[Path],
+    *,
+    access_scope: str = "project",
+) -> Path:
+    """Resolve a path that must stay under one of *roots* (or full-user on full).
+
+    ``access_scope=full`` allows any absolute path the process can resolve
+    under the current user (still no silent admin elevation).
+    """
+    scope = normalize_access_scope(access_scope)
+    if not roots:
+        roots = [Path.cwd()]
+    primary = roots[0]
     if not user_path or user_path in (".", "./"):
-        return root
-    # Absolute paths must still stay under root
+        return ensure_project_dir(primary)
+
     candidate = Path(user_path).expanduser()
     if candidate.is_absolute():
-        resolved = candidate.resolve()
         try:
-            resolved.relative_to(root)
+            resolved = candidate.resolve()
+        except OSError:
+            resolved = candidate.absolute()
+        if scope == "full":
+            # Block a few clearly dangerous locations
+            parts_lower = {p.lower() for p in resolved.parts}
+            if any(x in parts_lower for x in ("$recycle.bin", "system volume information")):
+                raise SecurityError(
+                    f"Path not allowed: {user_path}",
+                    rule="path_denied",
+                    detail={"input": user_path},
+                )
             return resolved
-        except ValueError as err:
-            raise SecurityError(
-                f"Path outside project workspace: {user_path}",
-                rule="path_traversal",
-                detail={"input": user_path, "root": str(root)},
-            ) from err
-    return safe_path(user_path, base_dir=root)
+        for root in roots:
+            try:
+                r = ensure_project_dir(root) if root.exists() else root.resolve()
+            except Exception:
+                try:
+                    r = root.resolve()
+                except OSError:
+                    r = root.absolute()
+            try:
+                resolved.relative_to(r)
+                return resolved
+            except ValueError:
+                continue
+        raise SecurityError(
+            f"Path outside allowed roots ({scope}): {user_path}",
+            rule="path_traversal",
+            detail={
+                "input": user_path,
+                "roots": [str(r) for r in roots],
+                "scope": scope,
+            },
+        )
+
+    # Relative: try each root; prefer first root that exists
+    last_err: Exception | None = None
+    for root in roots:
+        try:
+            return safe_path(user_path, base_dir=root)
+        except Exception as e:
+            last_err = e
+            continue
+    if last_err:
+        raise last_err
+    return safe_path(user_path, base_dir=primary)
 
 
 def list_workspace_entries(project_root: Path, *, limit: int = 40) -> list[dict[str, str]]:
@@ -112,17 +202,40 @@ def list_workspace_entries(project_root: Path, *, limit: int = 40) -> list[dict[
     return entries
 
 
-def workspace_context_block(project_root: Path) -> str:
+def workspace_context_block(
+    project_root: Path,
+    *,
+    access_scope: str = "project",
+    extra_roots: list[Path] | None = None,
+) -> str:
     """Markdown-ish block for the agent system prompt."""
     try:
         root = ensure_project_dir(project_root)
     except Exception as exc:
         return f"Working directory: (unavailable: {exc})"
+    scope = normalize_access_scope(access_scope)
     lines = [
         f"Working directory (project root): {root}",
-        "All file and shell tools are jailed to this directory unless stated otherwise.",
-        "Prefer relative paths from this root.",
+        f"Access scope: {scope}",
     ]
+    if scope == "project":
+        lines.append(
+            "File and shell tools are jailed to the project directory unless the user "
+            "raises access scope in Settings."
+        )
+    elif scope == "home":
+        lines.append(
+            "File tools may use the project directory and the user home profile. "
+            "Prefer the project root for code work."
+        )
+    else:
+        lines.append(
+            "Access scope is full user machine (no silent admin elevation). "
+            "Prefer reversible actions; confirm destructive ops."
+        )
+    if extra_roots:
+        lines.append("Allowed roots: " + ", ".join(str(r) for r in extra_roots[:6]))
+    lines.append("Prefer relative paths from the project root when possible.")
     entries = list_workspace_entries(root)
     if entries:
         listing = ", ".join(

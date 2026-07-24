@@ -1,10 +1,11 @@
 # Remedy
 
-**The self-improving, multi-channel AI agent framework that grows with you.**
+**Your personal AI partner — knowledge, design, code, and get-it-done on your machine.**
 
-Remedy is a **software engineering agent** for code, tools, and long-running
-projects — not a medical, clinical, or healthcare product. The name refers to
-fixing software and workflow problems, not medicine.
+Remedy is a self-improving multi-channel agent for real work: research, writing,
+design, software engineering, and (with permission) tasks across your PC. It is
+**not** a medical, clinical, or healthcare product — the name means unsticking
+problems and finishing requests, not medicine.
 
 It combines:
 
@@ -32,22 +33,47 @@ The desktop app bundles the full Remedy server as a sidecar, so everything runs 
 
 | Feature | Description |
 |---------|-------------|
-| **Chat UI** | Streaming tokens, markdown rendering, syntax highlighting |
+| **Chat UI** | Streaming tokens, markdown; **you on the right, Remedy on the left** (themed bubbles) |
+| **Prompt history** | **↑ / ↓** in the composer for previous prompts (shell-style) |
 | **Session tabs** | Multi-tab session management — open, switch, close tabs |
 | **Attachments** | Drag-and-drop or attach files/images into the session |
 | **Plan/Build mode** | Toggle between plan mode (no tools) and build mode |
 | **@file references** | Type `@` to search and autocomplete project files |
-| **First-run setup** | Setup wizard for provider connect (OAuth or API key) before chat |
+| **First-run setup** | Setup wizard (provider, workspace, persona, optional always-ready) |
 | **xAI Sign-in** | Device-code OAuth for Grok (SuperGrok / X Premium+) plus console API key |
 | **Providers** | OpenAI, Anthropic, Google, DeepSeek, xAI, Groq, Mistral, OpenRouter, Ollama; Custom under Advanced |
-| **Bundled skills** | Default skills pack loads on start (not an empty skill list) |
+| **Settings** | Persona, project browse, access scope, Memory Harness, launch-at-login; Save reloads Remedy |
+| **Access scope** | Project only / home / full user machine (opt-in, no silent elevation) |
+| **Always ready** | Start with Windows, tray Show/Quit, close-to-tray (optional) |
+| **Memory Harness** | Context prune + Session Brief + `/compact` for long sessions |
+| **Approvals** | High-impact shell commands need Approve/Deny (banner or `/approve`) |
+| **Goals** | Partner checklist: `/goal`, `/goals`, goal tools + verify/learn |
+| **Bundled skills** | Engineering + companion skills (research, design critique, remember-me, …) |
 | **Undo** | Hover any assistant message to revert it |
 | **Themes** | System (follow OS) + Dark, Light, Emerald, Amethyst, Amber, Ocean |
 | **Keyboard help** | Settings → Help & shortcuts; `/help` lists hotkeys |
 | **Side panels** | Memory browser and Skills viewer accessible from the status bar |
-| **Slash commands** | `/help`, `/new`, `/sessions`, `/models`, `/memory`, `/skills`, `/handoff` |
-| **Tray icon** | Minimize to system tray |
+| **Slash commands** | See table below |
+| **Tray icon** | Circuit-R monogram; menu Show / Quit |
 | **Auto-update** | In-app check → download → install → relaunch (minisign-signed releases) |
+
+### Slash commands (desktop & API)
+
+| Command | Purpose |
+|---------|---------|
+| `/help` | Commands + keyboard shortcuts |
+| `/new` | New session |
+| `/sessions` | Recent sessions |
+| `/models` | Model picker guidance |
+| `/memory <q>` | Search durable memory |
+| `/remember <fact>` | Store a fact in memory/profile |
+| `/whoami` | What Remedy knows about you |
+| `/goals` · `/goal <title>` | List / add goals |
+| `/compact` · `/harness` | Memory Harness compress / show Session Brief |
+| `/approve` · `/deny` | High-impact command approvals |
+| `/import <folder>` | Import `.md`/`.txt` knowledge pack into memory |
+| `/skills` · `/handoff` | Skills list · handoff notes |
+| `/init` | Project scan helpers |
 
 ### Architecture
 
@@ -222,21 +248,25 @@ remedy skill export my-skill --format zip      # Portable archive
 
 ---
 
-## Memory & Handoff
+## Memory, Harness & Handoff
 
 Remedy's memory system provides companion continuity across sessions:
 
 - **Full-text search** (FTS5) with relevance scoring
-- **Structured handoff notes** with action items, decisions, and context summaries
-- **Session summaries** for tracking progress
-- **Importance scoring** for prioritized recall
-- **User profile** with persistent traits and facts
+- **User profile** with persistent traits and facts (injected into the agent)
+- **Memory Harness** — send-view prune + Session Brief so long chats stay sharp
+- **Knowledge packs** — import a folder of notes (`/import` or `POST /api/memory/import`)
+- **Structured handoff notes** with action items, decisions, and Session Brief context
+- **Session summaries** and importance scoring for prioritized recall
 
 ```bash
 remedy memory add "milestone" "Phase 3 learning loop shipped"
 remedy memory search "learning loop"
 remedy handoff create "Context Transfer" "Working on Phase 4. Next: gateway channels."
 ```
+
+Partner APIs (when `remedy serve` is running): `GET /api/partner/status`,  
+`GET /api/approvals`, `GET /api/goals`, `POST /api/memory/import`.
 
 ---
 

@@ -2,8 +2,48 @@
 
 ## Overview
 
-**Remedy Desktop** is the recommended way to use Remedy — a **software coding
-agent** for engineering work, not a medical or clinical product.
+**Remedy Desktop** is the recommended way to use Remedy — your personal AI
+partner for knowledge, design, code, and get-it-done work (not a medical or
+clinical product). Current package series: **0.10.x** (see root `CHANGELOG.md`).
+
+### Partner features (0.10.18+)
+
+- Chat bubbles: user right / Remedy left (theme tokens)
+- Prompt history: ↑ / ↓ in the composer
+- Settings: persona, project browse, access scope, Memory Harness, always-ready
+- Approvals banner for high-impact shell commands
+- Status bar partner chip (goals, harness, scope, pending approvals)
+
+## Branding / icons
+
+App icons are generated from `assets/remedy_icon.png` (circuit-R monogram):
+
+```bash
+python scripts/setup_branding.py
+```
+
+That refreshes `desktop/src-tauri/icons/*` (including multi-size `icon.ico` for
+Windows taskbar) and public favicons. **Rebuild the desktop app** after running
+the script so the new ICO is embedded in the EXE.
+
+### Taskbar still shows an old (medical) icon?
+
+Windows caches taskbar icons aggressively. After reinstalling/rebuilding:
+
+1. Fully quit Remedy (tray → Quit).
+2. Clear the icon cache, e.g. in PowerShell as your user:
+
+```powershell
+# Stop explorer, clear icon cache, restart
+Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
+Remove-Item "$env:LOCALAPPDATA\IconCache.db" -Force -ErrorAction SilentlyContinue
+Remove-Item "$env:LOCALAPPDATA\Microsoft\Windows\Explorer\iconcache*" -Force -ErrorAction SilentlyContinue
+Start-Process explorer
+```
+
+3. Unpin Remedy from the taskbar and pin again (or reboot).
+4. Confirm you launched the newly built `app.exe` under
+   `%LOCALAPPDATA%\Remedy Desktop\`.
 
 It bundles the full Remedy server as a sidecar inside a native Tauri application,
 so users only need to download and run one installer — no Python, Node, or Rust
