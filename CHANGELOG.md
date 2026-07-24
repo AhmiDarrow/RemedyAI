@@ -4,6 +4,11 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [0.10.37] — 2026-07-24
 
+### Feature: Grok-style diff colors in chat
+
+- Unified diffs in chat code fences (`diff`/`patch` or auto-detected) show **red removals** and **green additions**, with muted meta/hunk lines.
+- Tool process (Proc) args/results use the same highlighting when content looks like a patch.
+
 ### Feature: offline Help wiki + technical owner's manual
 
 - **`docs/manual/`** — full owner chapters (install → troubleshooting → CLI/API).

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { ProcessStep, ToolProcessMode } from '../utils/toolLabels'
 import { IconBtn, IconCheck, IconChevronDown, IconChevronUp, IconCopy } from './icons'
 import { useStickToBottom } from '../hooks/useStickToBottom'
+import { DiffCode } from './DiffCode'
 
 interface ProcessTraceProps {
   mode: ToolProcessMode
@@ -223,18 +224,19 @@ export function ProcessTrace({
                             >
                               Args / code
                             </div>
-                            <pre
-                              className="text-[10px] p-1.5 rounded overflow-x-auto whitespace-pre-wrap break-all font-mono"
+                            <div
+                              className="rounded overflow-x-auto process-diff-wrap"
                               style={{
                                 background: 'var(--bg-primary)',
                                 border: '1px solid var(--border)',
-                                color: 'var(--text-secondary)',
-                                margin: 0,
                                 maxHeight: mode === 'full' ? 'none' : '12rem',
                               }}
                             >
-                              {previewText(s.argsText, mode)}
-                            </pre>
+                              <DiffCode
+                                text={previewText(s.argsText, mode)}
+                                compact
+                              />
+                            </div>
                           </div>
                         )}
                         {showResult && (
@@ -245,18 +247,29 @@ export function ProcessTrace({
                             >
                               {s.error ? 'Error' : 'Result / stdout'}
                             </div>
-                            <pre
-                              className="text-[10px] p-1.5 rounded overflow-x-auto whitespace-pre-wrap break-all font-mono"
+                            <div
+                              className="rounded overflow-x-auto process-diff-wrap"
                               style={{
                                 background: 'var(--bg-primary)',
                                 border: '1px solid var(--border)',
-                                color: s.error ? 'var(--error)' : 'var(--text-secondary)',
-                                margin: 0,
                                 maxHeight: mode === 'full' ? 'none' : '12rem',
+                                color: s.error ? 'var(--error)' : undefined,
                               }}
                             >
-                              {previewText(s.error || s.resultText, mode)}
-                            </pre>
+                              {s.error ? (
+                                <pre
+                                  className="text-[10px] p-1.5 m-0 whitespace-pre-wrap break-all font-mono"
+                                  style={{ color: 'var(--error)', margin: 0 }}
+                                >
+                                  {previewText(s.error, mode)}
+                                </pre>
+                              ) : (
+                                <DiffCode
+                                  text={previewText(s.resultText, mode)}
+                                  compact
+                                />
+                              )}
+                            </div>
                           </div>
                         )}
                       </div>

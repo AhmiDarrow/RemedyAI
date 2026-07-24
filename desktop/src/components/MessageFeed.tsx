@@ -31,6 +31,7 @@ import {
   type ToolProcessMode,
 } from '../utils/toolLabels'
 import { useStickToBottom } from '../hooks/useStickToBottom'
+import { DiffCode } from './DiffCode'
 
 export type ActiveTool = { name: string; status: 'running' | 'done' | 'error' }
 
@@ -121,14 +122,12 @@ function CodeBlock({
   return (
     <div className="code-block" data-user={isUser ? '1' : undefined}>
       <div className="code-block-header">
-        <span>{lang}</span>
+        <span>{lang === 'diff' || lang === 'patch' ? `${lang} · changes` : lang}</span>
         <IconBtn title={copied ? 'Copied' : 'Copy code'} onClick={() => void copy()} active={copied}>
           {copied ? <IconCheck size={12} /> : <IconCopy size={12} />}
         </IconBtn>
       </div>
-      <pre>
-        <code className={className}>{children}</code>
-      </pre>
+      <DiffCode text={text} className={className} />
     </div>
   )
 }
