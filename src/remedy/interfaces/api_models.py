@@ -151,3 +151,9 @@ class SettingsUpdateRequest(BaseModel):
     show_tool_calls: bool | None = None  # legacy → maps to tool_process
     # off = minimal progress only; medium = labels+status; full = near-raw process
     tool_process: str | None = None
+    # Local visual decoder (llama.cpp + Qwen2.5-VL 3B)
+    vision_enabled: bool | None = None
+    vision_model_id: str | None = None
+    # Prefer local image→text even when the chat model supports native vision
+    # (saves provider image tokens / context when decoder is ready).
+    vision_force_decode: bool | None = None

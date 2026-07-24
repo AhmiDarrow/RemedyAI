@@ -124,6 +124,7 @@ export default function App() {
     setCustomAccent,
   } = useTheme()
   const [model, setModel] = useState('gpt-4o-mini')
+  const [llmProvider, setLlmProvider] = useState('openai')
   const [models, setModels] = useState<ModelInfo[]>([])
   const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>('high')
   const [approvalMode, setApprovalMode] = useState<ApprovalMode>('ask')
@@ -441,6 +442,7 @@ export default function App() {
 
       if (settings) {
         if (settings.llm_model) setModel(settings.llm_model)
+        if (settings.llm_provider) setLlmProvider(settings.llm_provider)
         const tl = String(settings.thinking_level || 'high').toLowerCase()
         if (tl === 'off' || tl === 'low' || tl === 'medium' || tl === 'high') {
           setThinkingLevel(tl)
@@ -916,6 +918,7 @@ export default function App() {
             void getSettings()
               .then((s) => {
                 if (s.llm_model) setModel(s.llm_model)
+                if (s.llm_provider) setLlmProvider(s.llm_provider)
                 const un = (s.user_name || '').trim()
                 setUserName(un)
                 if (!un) setAskUserName(true)
@@ -1112,6 +1115,9 @@ export default function App() {
               agents={agentDefs}
               editDraft={editDraft}
               sessionId={activeId}
+              llmProvider={llmProvider}
+              llmModel={model}
+              onOpenSettings={() => setPanel('settings')}
               ensureSession={async () => {
                 if (activeId) return activeId
                 const s = await create()
@@ -1166,6 +1172,7 @@ export default function App() {
               void getSettings()
                 .then((s) => {
                   if (s.llm_model) setModel(s.llm_model)
+                  if (s.llm_provider) setLlmProvider(s.llm_provider)
                   setUserName((s.user_name || '').trim())
                   setToolProcessMode(normalizeToolProcess(s.tool_process))
                   return refreshModels()

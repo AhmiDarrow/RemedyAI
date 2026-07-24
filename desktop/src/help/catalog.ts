@@ -130,6 +130,14 @@ const META: HelpArticleMeta[] = [
     tags: ['changelog', 'release', 'version'],
     summary: 'Recent product changes for owners.',
   },
+  {
+    id: '14-visual-decoder',
+    title: 'Visual decoder',
+    category: 'Configuration',
+    order: 14,
+    tags: ['vision', 'image', 'ocr', 'llama', 'qwen', 'screenshot'],
+    summary: 'Local image→text for text-only models (Qwen2.5-VL 3B).',
+  },
 ]
 
 const rawModules = import.meta.glob('./articles/*.md', {

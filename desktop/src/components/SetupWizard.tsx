@@ -11,6 +11,12 @@ import {
   FALLBACK_PROVIDERS,
   type ProviderInfo,
 } from '../api/providers'
+import {
+  getVisionStatus,
+  installVision,
+  formatDownloadGb,
+  type VisionStatus,
+} from '../api/vision'
 
 const PERSONAS = [
   { id: 'balanced', name: 'Balanced', description: 'Helpful and adaptable to the task' },
@@ -24,8 +30,8 @@ interface SetupWizardProps {
   onComplete: () => void
 }
 
-type Step = 'welcome' | 'provider' | 'workspace' | 'persona' | 'finish'
-const STEPS: Step[] = ['welcome', 'provider', 'workspace', 'persona', 'finish']
+type Step = 'welcome' | 'provider' | 'workspace' | 'persona' | 'vision' | 'finish'
+const STEPS: Step[] = ['welcome', 'provider', 'workspace', 'persona', 'vision', 'finish']
 
 export function SetupWizard({ open, onComplete }: SetupWizardProps) {
   const [step, setStep] = useState<Step>('welcome')
@@ -48,6 +54,11 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
   const [xaiVerifyUrl, setXaiVerifyUrl] = useState('')
   const [xaiLoginMsg, setXaiLoginMsg] = useState('')
   const xaiPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [enableVision, setEnableVision] = useState(false)
+  const [visionStatus, setVisionStatus] = useState<VisionStatus | null>(null)
+  const [visionInstallMsg, setVisionInstallMsg] = useState('')
+  const [visionInstalling, setVisionInstalling] = useState(false)
+  const visionPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const stepIndex = STEPS.indexOf(step)
   const primaryProviders = useMemo(() => catalog.filter((p) => !p.advanced), [catalog])
@@ -64,6 +75,30 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
   }, [])
 
   useEffect(() => () => stopXaiPoll(), [stopXaiPoll])
+
+  useEffect(() => {
+    return () => {
+      if (visionPollRef.current) clearInterval(visionPollRef.current)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!open || step !== 'vision') return
+    let cancelled = false
+    void getVisionStatus()
+      .then((s) => {
+        if (!cancelled) {
+          setVisionStatus(s)
+          if (s.installed) setEnableVision(true)
+        }
+      })
+      .catch(() => {
+        /* offline */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [open, step])
 
   // Load catalog + env bootstrap + Ollama detect when wizard opens.
   useEffect(() => {
@@ -257,7 +292,20 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
         launch_at_login: launchAtLogin,
         start_in_tray: launchAtLogin,
         close_to_tray: launchAtLogin,
+        vision_enabled: enableVision,
+        vision_model_id: 'qwen2.5-vl-3b',
       })
+      if (enableVision && !visionStatus?.installed) {
+        try {
+          setVisionInstalling(true)
+          setVisionInstallMsg('Starting visual decoder download…')
+          await installVision({ prefer_cuda: false })
+          // Non-blocking: install continues in background after wizard closes
+          setVisionInstallMsg('Download started — check Settings → Visual decoder for progress.')
+        } catch (ve) {
+          console.warn('Vision install start failed', ve)
+        }
+      }
       onComplete()
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e)
@@ -269,7 +317,19 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
     } finally {
       setSaving(false)
     }
-  }, [apiKey, provider, model, baseUrl, projectPath, persona, userName, launchAtLogin, onComplete])
+  }, [
+    apiKey,
+    provider,
+    model,
+    baseUrl,
+    projectPath,
+    persona,
+    userName,
+    launchAtLogin,
+    enableVision,
+    visionStatus?.installed,
+    onComplete,
+  ])
 
   const handleSkip = useCallback(async () => {
     // Mark setup done so the wizard never blocks launch again.
@@ -372,6 +432,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                 {s === 'provider' && 'Provider'}
                 {s === 'workspace' && 'Workspace'}
                 {s === 'persona' && 'Persona'}
+                {s === 'vision' && 'Vision'}
                 {s === 'finish' && 'Ready'}
               </span>
             ))}
@@ -697,6 +758,58 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                   ))}
                 </div>
               </div>
+            </div>
+          )}
+
+          {step === 'vision' && (
+            <div className="space-y-3">
+              <div>
+                <div className="text-sm font-medium mb-1" style={{ color: 'var(--text-primary)' }}>
+                  Local visual decoder (optional)
+                </div>
+                <p className="text-xs leading-relaxed" style={mutedStyles}>
+                  If your chat model cannot see images (e.g. DeepSeek, many Ollama models),
+                  Remedy can install a local <strong style={{ color: 'var(--text-secondary)' }}>Qwen2.5-VL 3B</strong>{' '}
+                  decoder via llama.cpp. It runs only on this PC (loopback).
+                  Download is about {formatDownloadGb(visionStatus?.model?.approx_download_bytes)} for the model
+                  plus the llama-server runtime.
+                </p>
+              </div>
+              <label
+                className="flex items-start gap-2 px-3 py-2.5 rounded cursor-pointer text-left"
+                style={{
+                  background: enableVision ? 'var(--accent-subtle, rgba(99,102,241,0.1))' : 'var(--bg-tertiary)',
+                  border: enableVision ? '1px solid var(--accent)' : '1px solid var(--border)',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={enableVision}
+                  onChange={(e) => setEnableVision(e.target.checked)}
+                  className="mt-0.5"
+                  style={{ accentColor: 'var(--accent)' }}
+                />
+                <span>
+                  <span className="block text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                    Enable visual decoder
+                  </span>
+                  <span className="block text-xs" style={mutedStyles}>
+                    {visionStatus?.installed
+                      ? 'Already installed on this machine — will stay enabled.'
+                      : 'Install starts when you finish setup (no further clicks). Skip to leave off.'}
+                  </span>
+                </span>
+              </label>
+              {visionInstallMsg ? (
+                <div className="text-[10px]" style={mutedStyles}>
+                  {visionInstallMsg}
+                </div>
+              ) : null}
+              {visionInstalling ? (
+                <div className="text-[10px]" style={{ color: 'var(--accent)' }}>
+                  Install running in background…
+                </div>
+              ) : null}
             </div>
           )}
 

@@ -2,7 +2,14 @@
 
 High-level product notes for owners. Full detail lives in repo `CHANGELOG.md`.
 
-Ship **one** installer/tag for the current series (**v0.10.39**).
+Ship **one** installer/tag for the current series (**v0.10.40**).
+
+## 0.10.40 — Visual decoder
+
+- **Local visual decoder** (opt-in): llama.cpp + **Qwen2.5-VL 3B** turns screenshots/photos into structured text for **text-only** chat models.
+- Settings: install, cancel/resume, enable, prefer-local (saves provider vision tokens), **Switch to CUDA** when NVIDIA is detected.
+- Setup wizard optional Vision step; composer banner when images need decode.
+- Data under `~/.remedy/vision/`; removed on config wipe / full uninstall.
 
 ## 0.10.39 — ComfyUI from scratch
 

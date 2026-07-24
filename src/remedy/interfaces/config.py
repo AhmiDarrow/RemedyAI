@@ -324,10 +324,10 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
         "env_keys": ["OPENAI_API_KEY", "REMEDY_LLM_API_KEY"],
         "show_base_url": False,
         "models": [
-            {"id": "gpt-4o-mini", "name": "GPT-4o Mini"},
-            {"id": "gpt-4o", "name": "GPT-4o"},
-            {"id": "gpt-4.1-mini", "name": "GPT-4.1 Mini"},
-            {"id": "o4-mini", "name": "o4-mini"},
+            {"id": "gpt-4o-mini", "name": "GPT-4o Mini", "vision": True},
+            {"id": "gpt-4o", "name": "GPT-4o", "vision": True},
+            {"id": "gpt-4.1-mini", "name": "GPT-4.1 Mini", "vision": True},
+            {"id": "o4-mini", "name": "o4-mini", "vision": False},
         ],
     },
     "anthropic": {
@@ -337,11 +337,11 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
         "env_keys": ["ANTHROPIC_API_KEY"],
         "show_base_url": False,
         "models": [
-            {"id": "claude-3-5-sonnet-latest", "name": "Claude 3.5 Sonnet"},
-            {"id": "claude-3-5-haiku-latest", "name": "Claude 3.5 Haiku"},
-            {"id": "claude-3-haiku-20240307", "name": "Claude 3 Haiku"},
-            {"id": "claude-3.5-sonnet", "name": "Claude 3.5 Sonnet (alias)"},
-            {"id": "claude-3-haiku", "name": "Claude 3 Haiku (alias)"},
+            {"id": "claude-3-5-sonnet-latest", "name": "Claude 3.5 Sonnet", "vision": True},
+            {"id": "claude-3-5-haiku-latest", "name": "Claude 3.5 Haiku", "vision": True},
+            {"id": "claude-3-haiku-20240307", "name": "Claude 3 Haiku", "vision": True},
+            {"id": "claude-3.5-sonnet", "name": "Claude 3.5 Sonnet (alias)", "vision": True},
+            {"id": "claude-3-haiku", "name": "Claude 3 Haiku (alias)", "vision": True},
         ],
     },
     "google": {
@@ -351,9 +351,9 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
         "env_keys": ["GOOGLE_API_KEY", "GEMINI_API_KEY"],
         "show_base_url": False,
         "models": [
-            {"id": "gemini-2.5-flash", "name": "Gemini 2.5 Flash"},
-            {"id": "gemini-2.0-flash", "name": "Gemini 2.0 Flash"},
-            {"id": "gemini-1.5-pro", "name": "Gemini 1.5 Pro"},
+            {"id": "gemini-2.5-flash", "name": "Gemini 2.5 Flash", "vision": True},
+            {"id": "gemini-2.0-flash", "name": "Gemini 2.0 Flash", "vision": True},
+            {"id": "gemini-1.5-pro", "name": "Gemini 1.5 Pro", "vision": True},
         ],
     },
     "deepseek": {
@@ -363,8 +363,8 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
         "env_keys": ["DEEPSEEK_API_KEY"],
         "show_base_url": False,
         "models": [
-            {"id": "deepseek-chat", "name": "DeepSeek Chat"},
-            {"id": "deepseek-reasoner", "name": "DeepSeek Reasoner"},
+            {"id": "deepseek-chat", "name": "DeepSeek Chat", "vision": False},
+            {"id": "deepseek-reasoner", "name": "DeepSeek Reasoner", "vision": False},
         ],
     },
     "xai": {
@@ -375,11 +375,11 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
         "show_base_url": False,
         "key_docs_url": "https://console.x.ai/team/default/api-keys",
         "models": [
-            {"id": "grok-4", "name": "Grok 4"},
-            {"id": "grok-3", "name": "Grok 3"},
-            {"id": "grok-3-mini", "name": "Grok 3 Mini"},
-            {"id": "grok-2", "name": "Grok 2"},
-            {"id": "grok-2-vision-1212", "name": "Grok 2 Vision"},
+            {"id": "grok-4", "name": "Grok 4", "vision": True},
+            {"id": "grok-3", "name": "Grok 3", "vision": False},
+            {"id": "grok-3-mini", "name": "Grok 3 Mini", "vision": False},
+            {"id": "grok-2", "name": "Grok 2", "vision": False},
+            {"id": "grok-2-vision-1212", "name": "Grok 2 Vision", "vision": True},
         ],
     },
     "groq": {
@@ -389,9 +389,9 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
         "env_keys": ["GROQ_API_KEY"],
         "show_base_url": False,
         "models": [
-            {"id": "llama-3.3-70b-versatile", "name": "Llama 3.3 70B"},
-            {"id": "llama-3.1-8b-instant", "name": "Llama 3.1 8B Instant"},
-            {"id": "mixtral-8x7b-32768", "name": "Mixtral 8x7B"},
+            {"id": "llama-3.3-70b-versatile", "name": "Llama 3.3 70B", "vision": False},
+            {"id": "llama-3.1-8b-instant", "name": "Llama 3.1 8B Instant", "vision": False},
+            {"id": "mixtral-8x7b-32768", "name": "Mixtral 8x7B", "vision": False},
         ],
     },
     "mistral": {
@@ -401,9 +401,9 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
         "env_keys": ["MISTRAL_API_KEY"],
         "show_base_url": False,
         "models": [
-            {"id": "mistral-small-latest", "name": "Mistral Small"},
-            {"id": "mistral-large-latest", "name": "Mistral Large"},
-            {"id": "codestral-latest", "name": "Codestral"},
+            {"id": "mistral-small-latest", "name": "Mistral Small", "vision": False},
+            {"id": "mistral-large-latest", "name": "Mistral Large", "vision": False},
+            {"id": "codestral-latest", "name": "Codestral", "vision": False},
         ],
     },
     "openrouter": {
@@ -799,6 +799,17 @@ channel_id = ""
 [slack]
 bot_token = ""
 channel_id = ""
+
+# Local visual decoder (llama-server + Qwen2.5-VL 3B) — opt-in; not downloaded until enabled
+[vision]
+enabled = false
+model_id = "qwen2.5-vl-3b"
+# Prefer local image→text even when the chat model has native vision (saves provider tokens)
+force_decode = false
+host = "127.0.0.1"
+port = 8740
+auto_start = true
+idle_stop_s = 600
 """
 
 

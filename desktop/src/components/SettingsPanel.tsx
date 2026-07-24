@@ -2,6 +2,17 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { getSettings, updateSettings, type Settings, type SettingsUpdate } from '../api/settings'
 import {
+  getVisionStatus,
+  installVision,
+  cancelVisionInstall,
+  reinstallVisionRuntime,
+  uninstallVision,
+  startVisionServer,
+  stopVisionServer,
+  formatDownloadGb,
+  type VisionStatus,
+} from '../api/vision'
+import {
   getXaiAuthStatus,
   startXaiLogin,
   pollXaiLogin,
@@ -117,6 +128,10 @@ export function SettingsPanel({
   const [xaiVerifyUrl, setXaiVerifyUrl] = useState('')
   const [xaiLoginMsg, setXaiLoginMsg] = useState('')
   const xaiPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [vision, setVision] = useState<VisionStatus | null>(null)
+  const [visionBusy, setVisionBusy] = useState(false)
+  const [visionMsg, setVisionMsg] = useState('')
+  const visionPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const primaryProviders = useMemo(
     () => catalog.filter((p) => !p.advanced),
@@ -152,6 +167,49 @@ export function SettingsPanel({
       xaiPollRef.current = null
     }
   }, [])
+
+  const stopVisionPoll = useCallback(() => {
+    if (visionPollRef.current) {
+      clearInterval(visionPollRef.current)
+      visionPollRef.current = null
+    }
+  }, [])
+
+  const refreshVision = useCallback(async () => {
+    try {
+      const vs = await getVisionStatus()
+      setVision(vs)
+      return vs
+    } catch {
+      return null
+    }
+  }, [])
+
+  const startVisionInstallPoll = useCallback(() => {
+    stopVisionPoll()
+    visionPollRef.current = setInterval(() => {
+      void (async () => {
+        const vs = await refreshVision()
+        const phase = vs?.progress?.phase || ''
+        if (phase === 'ready' || phase === 'error' || phase === 'idle' || phase === 'cancelled') {
+          stopVisionPoll()
+          setVisionBusy(false)
+          if (phase === 'ready') {
+            setVisionMsg('Visual decoder ready — Qwen2.5-VL 3B')
+          } else if (phase === 'error') {
+            setVisionMsg(vs?.progress?.error || 'Install failed')
+          } else if (phase === 'cancelled') {
+            setVisionMsg(
+              vs?.progress?.message
+                || 'Install cancelled — click Install again to resume partial downloads.',
+            )
+          }
+        }
+      })()
+    }, 1500)
+  }, [refreshVision, stopVisionPoll])
+
+  useEffect(() => () => stopVisionPoll(), [stopVisionPoll])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -190,6 +248,12 @@ export function SettingsPanel({
         const tp = normalizeToolProcess(s.tool_process)
         setToolProcess(tp)
         onToolProcessChange?.(tp)
+      }
+      try {
+        const vs = await getVisionStatus()
+        setVision(vs)
+      } catch {
+        setVision(null)
       }
       setApiKey('')
       try {
@@ -829,6 +893,460 @@ export function SettingsPanel({
               </div>
             </section>
 
+            {/* Visual decoder (local vision for text-only models) */}
+            <section>
+              <div className="font-semibold mb-2" style={{ color: 'var(--text-primary)', fontSize: '0.75rem' }}>
+                Visual decoder
+              </div>
+              <div className="text-[10px] leading-snug mb-2" style={{ color: 'var(--text-muted)' }}>
+                When your chat model cannot see images, Remedy can run a local{' '}
+                <strong style={{ color: 'var(--text-secondary)' }}>Qwen2.5-VL 3B</strong> decoder
+                (llama.cpp) on this PC. Nothing downloads until you install.
+              </div>
+              {(vision?.warnings?.length || 0) > 0 && (
+                <div
+                  className="rounded-md px-2 py-1.5 mb-2 text-[10px] space-y-1"
+                  style={{
+                    background: 'color-mix(in srgb, #f59e0b 12%, var(--bg-primary))',
+                    border: '1px solid var(--border)',
+                    color: 'var(--text-secondary)',
+                  }}
+                >
+                  {(vision?.warnings || []).map((w) => (
+                    <div key={w.slice(0, 48)}>{w}</div>
+                  ))}
+                </div>
+              )}
+              <div
+                className="rounded-md px-2 py-1.5 mb-2 text-[10px] space-y-0.5"
+                style={{
+                  background: 'var(--bg-tertiary)',
+                  border: '1px solid var(--border)',
+                  color: 'var(--text-secondary)',
+                }}
+              >
+                <div className="flex justify-between gap-2">
+                  <span style={{ color: 'var(--text-muted)' }}>Model</span>
+                  <span>{vision?.model?.name || 'Qwen2.5-VL 3B'}</span>
+                </div>
+                <div className="flex justify-between gap-2">
+                  <span style={{ color: 'var(--text-muted)' }}>Status</span>
+                  <span>
+                    {!vision
+                      ? '…'
+                      : vision.ready
+                        ? vision.running
+                          ? 'Ready (running)'
+                          : 'Ready (idle)'
+                        : vision.installed
+                          ? vision.enabled
+                            ? 'Installed'
+                            : 'Installed · disabled'
+                          : vision.progress?.phase === 'downloading' ||
+                              vision.progress?.phase === 'extracting' ||
+                              vision.progress?.phase === 'verifying'
+                            ? `${vision.progress?.resumed ? 'Resuming…' : 'Installing…'} ${vision.progress?.message || ''}`
+                            : vision.progress?.phase === 'cancelled'
+                              ? 'Cancelled (resume available)'
+                              : 'Not installed'}
+                  </span>
+                </div>
+                {vision?.runtime_version ? (
+                  <div className="flex justify-between gap-2">
+                    <span style={{ color: 'var(--text-muted)' }}>llama.cpp</span>
+                    <span>{vision.runtime_version}</span>
+                  </div>
+                ) : null}
+                {vision?.health?.cpu_runtime != null ? (
+                  <div className="flex justify-between gap-2">
+                    <span style={{ color: 'var(--text-muted)' }}>Runtime</span>
+                    <span>
+                      {vision.health.cpu_runtime ? 'CPU' : 'GPU/CUDA'}
+                      {vision.health.nvidia_detected ? ' · NVIDIA seen' : ''}
+                    </span>
+                  </div>
+                ) : null}
+                {vision?.health?.ram_gb != null || vision?.health?.disk_free_gb != null ? (
+                  <div className="flex justify-between gap-2">
+                    <span style={{ color: 'var(--text-muted)' }}>Resources</span>
+                    <span>
+                      {vision.health?.ram_gb != null ? `RAM ~${vision.health.ram_gb} GB` : ''}
+                      {vision.health?.ram_gb != null && vision.health?.disk_free_gb != null
+                        ? ' · '
+                        : ''}
+                      {vision.health?.disk_free_gb != null
+                        ? `Disk free ~${vision.health.disk_free_gb} GB`
+                        : ''}
+                    </span>
+                  </div>
+                ) : null}
+                {(vision?.progress?.bytes_total || 0) > 0 &&
+                (vision?.progress?.phase === 'downloading' ||
+                  vision?.progress?.phase === 'extracting') ? (
+                  <div className="mt-1">
+                    <div
+                      className="h-1 rounded overflow-hidden"
+                      style={{ background: 'var(--bg-primary)' }}
+                    >
+                      <div
+                        className="h-full rounded"
+                        style={{
+                          width: `${Math.min(
+                            100,
+                            Math.round(
+                              (100 * (vision.progress?.bytes_done || 0)) /
+                                (vision.progress?.bytes_total || 1),
+                            ),
+                          )}%`,
+                          background: 'var(--accent)',
+                        }}
+                      />
+                    </div>
+                    <div className="mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                      {formatDownloadGb(vision.progress?.bytes_done)} /{' '}
+                      {formatDownloadGb(vision.progress?.bytes_total)}
+                      {vision.progress?.current_file
+                        ? ` · ${vision.progress.current_file}`
+                        : ''}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+              <label className="flex items-start gap-2 mb-2 text-xs cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={Boolean(vision?.enabled)}
+                  disabled={!vision?.installed || visionBusy}
+                  onChange={(e) => {
+                    const on = e.target.checked
+                    void (async () => {
+                      setVisionBusy(true)
+                      setVisionMsg('')
+                      try {
+                        await updateSettings({ vision_enabled: on })
+                        await refreshVision()
+                        setVisionMsg(on ? 'Decoder enabled' : 'Decoder disabled')
+                      } catch (err) {
+                        setVisionMsg(err instanceof Error ? err.message : String(err))
+                      } finally {
+                        setVisionBusy(false)
+                      }
+                    })()
+                  }}
+                />
+                <span>
+                  <span className="block" style={{ color: 'var(--text-primary)' }}>
+                    Enable for text-only chat models
+                  </span>
+                  <span className="block text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                    When the provider cannot see images, decode locally into text.
+                  </span>
+                </span>
+              </label>
+              <label className="flex items-start gap-2 mb-2 text-xs cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={Boolean(vision?.force_decode)}
+                  disabled={!vision?.installed || !vision?.enabled || visionBusy}
+                  onChange={(e) => {
+                    const on = e.target.checked
+                    void (async () => {
+                      setVisionBusy(true)
+                      setVisionMsg('')
+                      try {
+                        await updateSettings({ vision_force_decode: on })
+                        await refreshVision()
+                        setVisionMsg(
+                          on
+                            ? 'Prefer local decoder even when the chat model has vision'
+                            : 'Using provider vision when the model supports it',
+                        )
+                      } catch (err) {
+                        setVisionMsg(err instanceof Error ? err.message : String(err))
+                      } finally {
+                        setVisionBusy(false)
+                      }
+                    })()
+                  }}
+                />
+                <span>
+                  <span className="block" style={{ color: 'var(--text-primary)' }}>
+                    Prefer local decoder even if chat model has vision
+                  </span>
+                  <span className="block text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                    Sends a short text brief to the provider instead of image pixels — usually
+                    fewer tokens and lower cost. Falls back to provider vision if the decoder
+                    is not ready.
+                  </span>
+                </span>
+              </label>
+              <div className="flex flex-wrap gap-1.5">
+                {!vision?.installed ||
+                vision.progress?.phase === 'cancelled' ||
+                vision.progress?.phase === 'error' ? (
+                  <>
+                    <button
+                      type="button"
+                      disabled={
+                        visionBusy
+                        && (vision?.progress?.phase === 'downloading'
+                          || vision?.progress?.phase === 'extracting'
+                          || vision?.progress?.phase === 'verifying')
+                      }
+                      className="px-2 py-1 rounded text-[10px] font-medium"
+                      style={{ background: 'var(--accent)', color: '#fff' }}
+                      onClick={() => {
+                        void (async () => {
+                          setVisionBusy(true)
+                          setVisionMsg('Starting install…')
+                          try {
+                            const r = await installVision({ prefer_cuda: false })
+                            if (r.warnings?.length) {
+                              setVisionMsg(r.warnings[0] || 'Installing…')
+                            }
+                            startVisionInstallPoll()
+                            setVisionMsg(
+                              `Downloading Qwen2.5-VL 3B + llama-server (${formatDownloadGb(
+                                vision?.model?.approx_download_bytes,
+                              )}+). Leave this open — Cancel keeps partials for resume.`,
+                            )
+                          } catch (err) {
+                            setVisionBusy(false)
+                            setVisionMsg(err instanceof Error ? err.message : String(err))
+                          }
+                        })()
+                      }}
+                    >
+                      {visionBusy
+                        && (vision?.progress?.phase === 'downloading'
+                          || vision?.progress?.phase === 'extracting')
+                        ? 'Installing…'
+                        : vision?.progress?.phase === 'cancelled' || vision?.progress?.phase === 'error'
+                          ? 'Resume install'
+                          : 'Install visual decoder'}
+                    </button>
+                    {(vision?.progress?.phase === 'downloading'
+                      || vision?.progress?.phase === 'extracting'
+                      || vision?.progress?.phase === 'verifying') && (
+                      <button
+                        type="button"
+                        className="px-2 py-1 rounded text-[10px]"
+                        style={{
+                          background: 'var(--bg-tertiary)',
+                          color: 'var(--text-primary)',
+                          border: '1px solid var(--border)',
+                        }}
+                        onClick={() => {
+                          void (async () => {
+                            try {
+                              await cancelVisionInstall()
+                              setVisionMsg('Cancel requested…')
+                              await refreshVision()
+                            } catch (err) {
+                              setVisionMsg(err instanceof Error ? err.message : String(err))
+                            }
+                          })()
+                        }}
+                      >
+                        Cancel install
+                      </button>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    {!vision.running ? (
+                      <button
+                        type="button"
+                        disabled={visionBusy}
+                        className="px-2 py-1 rounded text-[10px]"
+                        style={{
+                          background: 'var(--bg-tertiary)',
+                          color: 'var(--text-primary)',
+                          border: '1px solid var(--border)',
+                        }}
+                        onClick={() => {
+                          void (async () => {
+                            setVisionBusy(true)
+                            try {
+                              const r = await startVisionServer()
+                              if (!r.ok) setVisionMsg(r.error || 'Start failed')
+                              else setVisionMsg('Server started')
+                              await refreshVision()
+                            } catch (err) {
+                              setVisionMsg(err instanceof Error ? err.message : String(err))
+                            } finally {
+                              setVisionBusy(false)
+                            }
+                          })()
+                        }}
+                      >
+                        Start server
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={visionBusy}
+                        className="px-2 py-1 rounded text-[10px]"
+                        style={{
+                          background: 'var(--bg-tertiary)',
+                          color: 'var(--text-primary)',
+                          border: '1px solid var(--border)',
+                        }}
+                        onClick={() => {
+                          void (async () => {
+                            setVisionBusy(true)
+                            try {
+                              await stopVisionServer()
+                              setVisionMsg('Server stopped')
+                              await refreshVision()
+                            } catch (err) {
+                              setVisionMsg(err instanceof Error ? err.message : String(err))
+                            } finally {
+                              setVisionBusy(false)
+                            }
+                          })()
+                        }}
+                      >
+                        Stop server
+                      </button>
+                    )}
+                    {vision.health?.nvidia_detected && vision.health?.cpu_runtime ? (
+                      <button
+                        type="button"
+                        disabled={visionBusy}
+                        className="px-2 py-1 rounded text-[10px]"
+                        style={{
+                          background: 'var(--bg-tertiary)',
+                          color: 'var(--text-primary)',
+                          border: '1px solid var(--border)',
+                        }}
+                        title="Download CUDA llama-server; keeps Qwen model files"
+                        onClick={() => {
+                          if (
+                            !window.confirm(
+                              'Reinstall the visual decoder runtime with CUDA (NVIDIA)? '
+                              + 'Model weights are kept. Downloads the CUDA llama-server package.',
+                            )
+                          ) {
+                            return
+                          }
+                          void (async () => {
+                            setVisionBusy(true)
+                            setVisionMsg('Reinstalling CUDA runtime…')
+                            try {
+                              await reinstallVisionRuntime(true)
+                              startVisionInstallPoll()
+                              setVisionMsg(
+                                'Downloading CUDA llama-server — models kept. Leave this open.',
+                              )
+                            } catch (err) {
+                              setVisionBusy(false)
+                              setVisionMsg(err instanceof Error ? err.message : String(err))
+                            }
+                          })()
+                        }}
+                      >
+                        Switch to CUDA
+                      </button>
+                    ) : null}
+                    {vision.health && !vision.health.cpu_runtime ? (
+                      <button
+                        type="button"
+                        disabled={visionBusy}
+                        className="px-2 py-1 rounded text-[10px]"
+                        style={{
+                          background: 'var(--bg-tertiary)',
+                          color: 'var(--text-muted)',
+                          border: '1px solid var(--border)',
+                        }}
+                        onClick={() => {
+                          if (
+                            !window.confirm(
+                              'Reinstall the CPU llama-server runtime? Model weights are kept.',
+                            )
+                          ) {
+                            return
+                          }
+                          void (async () => {
+                            setVisionBusy(true)
+                            setVisionMsg('Reinstalling CPU runtime…')
+                            try {
+                              await reinstallVisionRuntime(false)
+                              startVisionInstallPoll()
+                            } catch (err) {
+                              setVisionBusy(false)
+                              setVisionMsg(err instanceof Error ? err.message : String(err))
+                            }
+                          })()
+                        }}
+                      >
+                        Switch to CPU
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      disabled={visionBusy}
+                      className="px-2 py-1 rounded text-[10px]"
+                      style={{
+                        background: 'var(--bg-tertiary)',
+                        color: 'var(--text-muted)',
+                        border: '1px solid var(--border)',
+                      }}
+                      onClick={() => {
+                        if (
+                          !window.confirm(
+                            'Remove the visual decoder runtime and model files from ~/.remedy/vision?',
+                          )
+                        ) {
+                          return
+                        }
+                        void (async () => {
+                          setVisionBusy(true)
+                          try {
+                            await uninstallVision(false)
+                            await updateSettings({ vision_enabled: false })
+                            setVisionMsg('Uninstalled')
+                            await refreshVision()
+                          } catch (err) {
+                            setVisionMsg(err instanceof Error ? err.message : String(err))
+                          } finally {
+                            setVisionBusy(false)
+                          }
+                        })()
+                      }}
+                    >
+                      Uninstall
+                    </button>
+                  </>
+                )}
+                <button
+                  type="button"
+                  className="px-2 py-1 rounded text-[10px]"
+                  style={{ color: 'var(--text-muted)' }}
+                  onClick={() => void refreshVision()}
+                >
+                  Refresh
+                </button>
+              </div>
+              {visionMsg ? (
+                <div className="text-[10px] mt-1.5" style={{ color: 'var(--text-muted)' }}>
+                  {visionMsg}
+                </div>
+              ) : null}
+              {onOpenHelp ? (
+                <button
+                  type="button"
+                  className="text-[10px] mt-1 underline"
+                  style={{ color: 'var(--accent)' }}
+                  onClick={() => onOpenHelp('14-visual-decoder')}
+                >
+                  Help: visual decoder
+                </button>
+              ) : null}
+            </section>
+
             {/* Memory Harness */}
             <section>
               <div className="font-semibold mb-2" style={{ color: 'var(--text-primary)', fontSize: '0.75rem' }}>
@@ -974,6 +1492,7 @@ export function SettingsPanel({
                       [
                         ['02-first-run', 'Setup'],
                         ['03-providers-and-auth', 'Providers'],
+                        ['14-visual-decoder', 'Vision'],
                         ['09-troubleshooting', 'Troubleshoot'],
                         ['13-whats-new', "What's new"],
                       ] as const

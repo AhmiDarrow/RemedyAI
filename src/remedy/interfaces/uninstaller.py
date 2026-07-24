@@ -85,6 +85,26 @@ def _wipe_config() -> None:
     if auth.exists():
         shutil.rmtree(auth, ignore_errors=True)
         console.print(f"  removed [dim]{auth}[/dim]")
+    # Visual decoder side state (keep large models unless full purge)
+    vj = REMEDY_HOME / "vision" / "vision.json"
+    if vj.exists():
+        vj.unlink(missing_ok=True)
+        console.print(f"  removed [dim]{vj}[/dim]")
+
+
+def _wipe_vision() -> None:
+    """Remove local visual decoder runtime + models under ~/.remedy/vision."""
+    vision = REMEDY_HOME / "vision"
+    if not vision.exists():
+        return
+    try:
+        from remedy.vision.install import wipe_vision_data
+
+        wipe_vision_data(REMEDY_HOME)
+        console.print(f"  removed [dim]{vision}[/dim]")
+    except Exception:
+        shutil.rmtree(vision, ignore_errors=True)
+        console.print(f"  removed [dim]{vision}[/dim]")
 
 
 def _wipe_skills() -> None:
@@ -181,6 +201,11 @@ def run_uninstall(
     # Data wipe
     if purge and REMEDY_HOME.exists():
         console.print(f"\n[bold]Full wipe {REMEDY_HOME}...[/bold]")
+        # Stop vision server before deleting weights/runtime
+        try:
+            _wipe_vision()
+        except Exception:
+            pass
         try:
             shutil.rmtree(REMEDY_HOME)
             console.print("[green]Remedy data removed.[/green]")
@@ -191,6 +216,8 @@ def run_uninstall(
             console.print("\n[bold]Removing selected user data...[/bold]")
         if config:
             _wipe_config()
+            # Config wipe also drops vision runtime/models (large; re-download on reinstall)
+            _wipe_vision()
         if skills:
             _wipe_skills()
 

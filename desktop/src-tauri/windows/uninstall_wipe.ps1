@@ -108,7 +108,9 @@ if ($config -eq 1 -and (Test-Path -LiteralPath $homeRem)) {
     'comfyui.json'
   ) | ForEach-Object { Remove-PathSafe (Join-Path $homeRem $_) }
   Remove-PathSafe (Join-Path $homeRem 'auth')
-  Log 'Config wipe done'
+  # Local visual decoder (llama-server + GGUF) lives under vision/
+  Remove-PathSafe (Join-Path $homeRem 'vision')
+  Log 'Config wipe done (includes vision decoder)'
 }
 
 if ($skills -eq 1) {

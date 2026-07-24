@@ -34,6 +34,20 @@ export interface Settings {
   tool_process?: string
   /** @deprecated use tool_process */
   show_tool_calls?: boolean
+  /** Local visual decoder enabled in config */
+  vision_enabled?: boolean
+  vision_model_id?: string
+  /** Prefer local decode even when chat model has native vision */
+  vision_force_decode?: boolean
+  vision?: {
+    enabled?: boolean
+    installed?: boolean
+    ready?: boolean
+    running?: boolean
+    model_id?: string
+    model_name?: string
+    force_decode?: boolean
+  }
   version: string
   config_exists: boolean
   setup_completed: boolean
@@ -62,6 +76,9 @@ export interface SettingsUpdate {
   thinking_level?: string
   approval_mode?: string
   tool_process?: string
+  vision_enabled?: boolean
+  vision_model_id?: string
+  vision_force_decode?: boolean
 }
 
 export async function getSettings(): Promise<Settings> {

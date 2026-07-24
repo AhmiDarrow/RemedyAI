@@ -2,6 +2,22 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.10.40] — 2026-07-24
+
+### Feature: Local visual decoder (image → text for text-only models)
+
+- New first-class package `remedy.vision`: opt-in **llama.cpp** `llama-server` + pinned **Qwen2.5-VL 3B** (GGUF + mmproj).
+- When the chat model has no native vision, attachments are decoded into a structured brief (scene, OCR, UI, design) before the main LLM runs.
+- **Prefer local decoder even if chat model has vision** (`vision.force_decode`) to save provider image tokens; falls back to native vision if decoder is not ready.
+- REST: `/api/vision/status|catalog|install|install/cancel|reinstall-runtime|uninstall|start|stop|test`.
+- Desktop: Settings Visual decoder (progress, cancel/resume, CUDA switch, warnings), Setup wizard Vision step, composer banner.
+- Install: cancel + HTTP Range resume of `.partial` files; host health (RAM/disk/CPU/NVIDIA) warnings.
+- Uninstall wipe: `~/.remedy/vision` removed on config wipe / full purge (CLI + desktop NSIS wipe script).
+- Metrics: `remedy_vision_decode_total`, `remedy_vision_decode_seconds`.
+- Agent tool `vision_decode` (status / install / decode).
+- Anthropic adapter: OpenAI-style `image_url` parts → native image blocks.
+- Help/manual: `14-visual-decoder`; tests: `tests/test_vision.py`.
+
 ## [0.10.39] — 2026-07-24
 
 ### Feature: ComfyUI skill — from-scratch bootstrap

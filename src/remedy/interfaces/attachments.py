@@ -190,8 +190,17 @@ def inject_text_file_snippets(attachments: list[dict[str, Any]]) -> str:
 def build_multimodal_user_content(
     message: str,
     attachments: list[dict[str, Any]] | None,
+    *,
+    vision_mode: str = "native",
+    decode_brief: str | None = None,
 ) -> str | list[dict[str, Any]]:
-    """Build OpenAI-style user content (string or multimodal parts)."""
+    """Build OpenAI-style user content (string or multimodal parts).
+
+    ``vision_mode``:
+      - ``native`` — attach image_url parts when images are present
+      - ``decode`` — inject local visual-decoder text; no image_url parts
+      - ``text_only`` — paths only (no pixels, no decoder brief)
+    """
     atts = list(attachments or [])
     block = build_attachment_prompt_block(atts)
     snippets = inject_text_file_snippets(atts)
@@ -200,6 +209,15 @@ def build_multimodal_user_content(
         text = f"{text}{block}" if text else block.lstrip()
     if snippets:
         text = f"{text}\n{snippets}"
+
+    mode = (vision_mode or "native").strip().lower()
+    brief = (decode_brief or "").strip()
+    if mode == "decode" and brief:
+        text = f"{text}\n\n{brief}".strip() if text else brief
+        return text
+
+    if mode != "native":
+        return text
 
     image_parts: list[dict[str, Any]] = []
     for a in atts:

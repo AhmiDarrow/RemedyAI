@@ -462,6 +462,7 @@ class BasicRuntime(AgentRuntime):
             },
         )
         self._register_comfyui_tools()
+        self._register_vision_tools()
         self._register_local_discover_tools()
         self._register_skill_tools()
         # Per-turn tool trace for auto-learn (reset each stream_response)
@@ -1006,6 +1007,151 @@ class BasicRuntime(AgentRuntime):
                     },
                 },
                 "required": ["action"],
+            },
+        )
+
+    def _register_vision_tools(self) -> None:
+        """Local visual decoder: status / install / decode image paths."""
+
+        async def vision_decode(
+            action: str = "status",
+            path: str = "",
+            question: str = "",
+            prefer_cuda: bool = False,
+        ) -> str:
+            """Local visual decoder (llama.cpp + Qwen2.5-VL 3B).
+
+            action=status   → install/ready/running + model id
+            action=install  → start opt-in download of runtime + model (background)
+            action=decode   → describe/OCR an image path into structured text
+            """
+            from remedy.vision import catalog as vision_catalog
+            from remedy.vision.service import (
+                ensure_server,
+                get_status,
+                start_install,
+            )
+            from remedy.vision.decoder import decode_image
+
+            cfg: dict[str, Any] = {}
+            with suppress(Exception):
+                from remedy.interfaces.config import load_config
+
+                cfg = load_config() or {}
+            if getattr(self, "config", None) is not None:
+                home = getattr(self.config, "home_dir", None)
+                if home:
+                    cfg = {**cfg, "home_dir": home}
+
+            act = (action or "status").strip().lower()
+            if act in ("status", "info", "health"):
+                st = get_status(cfg)
+                return json.dumps(
+                    {
+                        "enabled": st.get("enabled"),
+                        "installed": st.get("installed"),
+                        "ready": st.get("ready"),
+                        "running": st.get("running"),
+                        "force_decode": st.get("force_decode"),
+                        "model_id": st.get("model_id"),
+                        "model": st.get("model"),
+                        "progress": st.get("progress"),
+                        "hint": st.get("not_ready_hint"),
+                        "default_model_id": vision_catalog.DEFAULT_MODEL_ID,
+                    },
+                    indent=2,
+                )
+
+            if act in ("install", "setup", "download"):
+                result = start_install(cfg=cfg, prefer_cuda=bool(prefer_cuda))
+                return json.dumps(result, indent=2, default=str)
+
+            if act in ("decode", "describe", "ocr", "read"):
+                p = (path or "").strip()
+                if not p:
+                    return format_tool_error(
+                        "path is required for action=decode",
+                        code="MISSING_PATH",
+                        tool_name="vision_decode",
+                        suggestion='vision_decode action="decode" path="C:/path/to/image.png"',
+                    )
+                img = Path(p)
+                if not img.is_file():
+                    # Try workspace resolve
+                    with suppress(Exception):
+                        img = self.resolve_tool_path(p)
+                if not img.is_file():
+                    return format_tool_error(
+                        f"Image not found: {path}",
+                        code="FILE_NOT_FOUND",
+                        tool_name="vision_decode",
+                        suggestion="Use an absolute path or a session attachment path.",
+                    )
+                st = get_status(cfg)
+                if not st.get("ready"):
+                    return format_tool_error(
+                        st.get("not_ready_hint")
+                        or "Visual decoder not ready. Install via Settings or action=install.",
+                        code="VISION_NOT_READY",
+                        tool_name="vision_decode",
+                        suggestion='Call vision_decode action="install" (with user approval) then retry decode.',
+                    )
+                started = await asyncio.to_thread(ensure_server, cfg)
+                if not started.get("ok"):
+                    return format_tool_error(
+                        started.get("error") or "Failed to start llama-server",
+                        code="VISION_START_FAILED",
+                        tool_name="vision_decode",
+                    )
+                base = st.get("base_url") or started.get("base_url")
+                result = await asyncio.to_thread(
+                    decode_image,
+                    img,
+                    base_url=str(base),
+                    extra_question=(question or "").strip() or None,
+                )
+                if not result.get("ok"):
+                    return format_tool_error(
+                        result.get("error") or "decode failed",
+                        code="VISION_DECODE_FAILED",
+                        tool_name="vision_decode",
+                    )
+                return str(result.get("text") or "")
+
+            return format_tool_error(
+                f"Unknown action={action!r}",
+                code="BAD_ACTION",
+                tool_name="vision_decode",
+                suggestion='Use action="status", "install", or "decode".',
+            )
+
+        self.tool_registry.register_builtin_handler(
+            "vision_decode",
+            "Local visual decoder (Qwen2.5-VL 3B via llama.cpp). "
+            "status | install | decode an image path to structured text "
+            "(scene, OCR, UI). Use when the chat model cannot see images, "
+            "or to re-ask about an attached screenshot.",
+            vision_decode,
+            {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "description": "status | install | decode (default status)",
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "Image path (required for decode)",
+                    },
+                    "question": {
+                        "type": "string",
+                        "description": "Optional focus question for decode",
+                    },
+                    "prefer_cuda": {
+                        "type": "boolean",
+                        "description": "For install: prefer CUDA llama-server build",
+                    },
+                },
             },
         )
 
@@ -1863,7 +2009,47 @@ class BasicRuntime(AgentRuntime):
                         max_tool_chars=_TOOL_RESULT_CHAR_CAP,
                         dedupe_tools=True,
                     )
-            user_content = build_multimodal_user_content(message, attachments)
+            # Visual decoder path for text-only chat models + image attachments.
+            vision_mode = "native"
+            decode_brief: str | None = None
+            with suppress(Exception):
+                from remedy.vision.service import decode_for_turn
+
+                cfg_for_vision: dict[str, Any] = {}
+                with suppress(Exception):
+                    from remedy.interfaces.config import load_config
+
+                    cfg_for_vision = load_config() or {}
+                vres = decode_for_turn(
+                    attachments,
+                    provider=self._llm_provider,
+                    model=self._llm_model,
+                    cfg=cfg_for_vision,
+                )
+                mode = str(vres.get("mode") or "native")
+                if mode == "decode" and vres.get("combined"):
+                    vision_mode = "decode"
+                    decode_brief = str(vres.get("combined") or "")
+                    for ev in vres.get("events") or []:
+                        yield f"@@status:{ev}\n"
+                elif mode == "unavailable" and vres.get("hint"):
+                    # Inject hint text (no image_url) so text-only models stay safe
+                    vision_mode = "decode"
+                    decode_brief = (
+                        f"[Visual decoder unavailable] {vres.get('hint')}\n"
+                        "Image files are attached by path only."
+                    )
+                    yield (
+                        "@@status:Visual decoder unavailable — "
+                        "enable in Settings for local image understanding\n"
+                    )
+
+            user_content = build_multimodal_user_content(
+                message,
+                attachments,
+                vision_mode=vision_mode,
+                decode_brief=decode_brief,
+            )
             messages: list[dict[str, Any]] = [
                 {
                     "role": "system",

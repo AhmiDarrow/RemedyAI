@@ -157,6 +157,29 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             "needs_setup": not setup_completed,
             "config_path": str(config_path) if config_path else str(_default_config_path()),
         }
+        # Visual decoder summary (full detail via /api/vision/status)
+        try:
+            from remedy.vision.config import vision_section_from_config
+            from remedy.vision.service import get_status as vision_get_status
+
+            vsec = vision_section_from_config(cfg)
+            out["vision_enabled"] = bool(vsec.get("enabled"))
+            out["vision_model_id"] = str(vsec.get("model_id") or "qwen2.5-vl-3b")
+            out["vision_force_decode"] = bool(vsec.get("force_decode"))
+            vst = vision_get_status(cfg)
+            out["vision"] = {
+                "enabled": vst.get("enabled"),
+                "installed": vst.get("installed"),
+                "ready": vst.get("ready"),
+                "running": vst.get("running"),
+                "model_id": vst.get("model_id"),
+                "model_name": (vst.get("model") or {}).get("name"),
+                "force_decode": bool(vsec.get("force_decode")),
+            }
+        except Exception:
+            out["vision_enabled"] = False
+            out["vision_model_id"] = "qwen2.5-vl-3b"
+            out["vision_force_decode"] = False
         if xai_auth is not None:
             out["xai_auth"] = xai_auth
         return out
@@ -251,6 +274,24 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             )
         updates.pop("show_tool_calls", None)
 
+        # Nested [vision] table — do not flatten vision_* onto root TOML.
+        vision_enabled = updates.pop("vision_enabled", None)
+        vision_model_id = updates.pop("vision_model_id", None)
+        vision_force_decode = updates.pop("vision_force_decode", None)
+        if (
+            vision_enabled is not None
+            or vision_model_id is not None
+            or vision_force_decode is not None
+        ):
+            vision_tbl = dict(cfg.get("vision") or {}) if isinstance(cfg.get("vision"), dict) else {}
+            if vision_enabled is not None:
+                vision_tbl["enabled"] = bool(vision_enabled)
+            if vision_model_id is not None and str(vision_model_id).strip():
+                vision_tbl["model_id"] = str(vision_model_id).strip()
+            if vision_force_decode is not None:
+                vision_tbl["force_decode"] = bool(vision_force_decode)
+            cfg["vision"] = vision_tbl
+
         # Secrets go ONLY to the secure store — never into config.toml.
         incoming_key = updates.pop("llm_api_key", None)
         cfg.update(updates)
@@ -343,5 +384,21 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             "approval_mode": str(cfg.get("approval_mode") or "ask"),
             "user_name": str(cfg.get("user_name") or "").strip(),
             "tool_process": _normalize_tool_process(cfg),
+            "vision_enabled": bool(
+                (cfg.get("vision") or {}).get("enabled")
+                if isinstance(cfg.get("vision"), dict)
+                else False
+            ),
+            "vision_model_id": str(
+                (cfg.get("vision") or {}).get("model_id")
+                if isinstance(cfg.get("vision"), dict)
+                else "qwen2.5-vl-3b"
+            )
+            or "qwen2.5-vl-3b",
+            "vision_force_decode": bool(
+                (cfg.get("vision") or {}).get("force_decode")
+                if isinstance(cfg.get("vision"), dict)
+                else False
+            ),
         }
 

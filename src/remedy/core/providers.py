@@ -388,7 +388,13 @@ class AnthropicProvider(ProviderAdapter):
                 continue
 
             if role == "user":
-                anthropic.append({"role": "user", "content": msg.get("content") or ""})
+                raw_content = msg.get("content")
+                anthropic.append(
+                    {
+                        "role": "user",
+                        "content": AnthropicProvider._convert_user_content(raw_content),
+                    }
+                )
 
             elif role == "assistant":
                 content_blocks: list[dict[str, Any]] = []
@@ -420,6 +426,53 @@ class AnthropicProvider(ProviderAdapter):
                 })
 
         return "\n\n".join(system_texts), anthropic
+
+    @staticmethod
+    def _convert_user_content(content: Any) -> str | list[dict[str, Any]]:
+        """Map OpenAI string or multimodal parts to Anthropic content blocks."""
+        if content is None:
+            return ""
+        if isinstance(content, str):
+            return content
+        if not isinstance(content, list):
+            return str(content)
+        blocks: list[dict[str, Any]] = []
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            ptype = part.get("type")
+            if ptype == "text":
+                text = part.get("text")
+                if text is not None:
+                    blocks.append({"type": "text", "text": str(text)})
+            elif ptype == "image_url":
+                url = ""
+                image_url = part.get("image_url")
+                if isinstance(image_url, dict):
+                    url = str(image_url.get("url") or "")
+                elif isinstance(image_url, str):
+                    url = image_url
+                if url.startswith("data:") and ";base64," in url:
+                    header, b64 = url.split(";base64,", 1)
+                    media = header[5:] if header.startswith("data:") else "image/png"
+                    blocks.append(
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": media or "image/png",
+                                "data": b64,
+                            },
+                        }
+                    )
+                elif url:
+                    blocks.append(
+                        {
+                            "type": "image",
+                            "source": {"type": "url", "url": url},
+                        }
+                    )
+        return blocks if blocks else ""
 
     @staticmethod
     def _convert_tools(

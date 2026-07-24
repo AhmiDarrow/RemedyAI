@@ -12,6 +12,11 @@ import {
   type DroppedFilePayload,
 } from '../api/attachments'
 import { isTauri } from '../api/tauri'
+import {
+  getVisionStatus,
+  chatModelSupportsVision,
+  type VisionStatus,
+} from '../api/vision'
 import { IconPaperclip, IconSend, IconStop } from './icons'
 
 export interface AgentDef {
@@ -46,6 +51,11 @@ interface ComposerProps {
   ensureSession?: () => Promise<string | null>
   /** Optional preloaded slash commands (falls back to API). */
   slashCommands?: CommandDefinition[]
+  /** Current chat provider/model — used for visual-decoder banner. */
+  llmProvider?: string
+  llmModel?: string
+  /** Open Settings (optionally scrolled to vision later). */
+  onOpenSettings?: () => void
 }
 
 type SuggestionItem = {
@@ -123,10 +133,14 @@ export function Composer({
   sessionId,
   ensureSession,
   slashCommands: slashCommandsProp,
+  llmProvider = '',
+  llmModel = '',
+  onOpenSettings,
 }: ComposerProps) {
   const [input, setInput] = useState('')
   const [suggestions, setSuggestions] = useState<SuggestionItem[]>([])
   const [showSuggestions, setShowSuggestions] = useState(false)
+  const [visionStatus, setVisionStatus] = useState<VisionStatus | null>(null)
   const [suggestionIdx, setSuggestionIdx] = useState(0)
   const [slashCommands, setSlashCommands] = useState<CommandDefinition[]>(
     slashCommandsProp?.length ? slashCommandsProp : FALLBACK_COMMANDS,
@@ -156,6 +170,24 @@ export function Composer({
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState('')
   const [attachNotice, setAttachNotice] = useState('')
+  const hasImageAttachments = attachments.some((a) => a.is_image)
+  const modelHasVision = chatModelSupportsVision(llmProvider, llmModel)
+
+  useEffect(() => {
+    if (!hasImageAttachments) return
+    let cancelled = false
+    void getVisionStatus()
+      .then((s) => {
+        if (!cancelled) setVisionStatus(s)
+      })
+      .catch(() => {
+        if (!cancelled) setVisionStatus(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [hasImageAttachments, attachments.length])
+
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const attachRailRef = useRef<HTMLDivElement>(null)
@@ -766,6 +798,47 @@ export function Composer({
           }}
         >
           <div className="text-sm font-medium">Drop files or images to attach</div>
+        </div>
+      )}
+
+      {hasImageAttachments &&
+        (!modelHasVision || (visionStatus?.force_decode && visionStatus?.ready)) && (
+        <div
+          className="mb-2 px-2.5 py-1.5 rounded-md text-[11px] leading-snug flex items-start justify-between gap-2"
+          style={{
+            background: 'color-mix(in srgb, var(--accent) 10%, var(--bg-primary))',
+            border: '1px solid var(--border)',
+            color: 'var(--text-secondary)',
+          }}
+        >
+          <div>
+            {visionStatus?.ready && (!modelHasVision || visionStatus.force_decode) ? (
+              <>
+                <span style={{ color: 'var(--accent)', fontWeight: 600 }}>Decoded locally</span>
+                {' · '}
+                {visionStatus.force_decode && modelHasVision
+                  ? `Prefer-local is on — image brief via ${visionStatus.model?.name || 'Qwen2.5-VL 3B'} (saves provider vision tokens).`
+                  : `This chat model is text-only; images go through ${visionStatus.model?.name || 'Qwen2.5-VL 3B'} on this PC.`}
+              </>
+            ) : (
+              <>
+                This chat model may not see images.
+                {visionStatus?.installed
+                  ? ' Enable the visual decoder in Settings.'
+                  : ' Install the local visual decoder (Qwen2.5-VL 3B) in Settings for screenshots & OCR.'}
+              </>
+            )}
+          </div>
+          {onOpenSettings && !visionStatus?.ready ? (
+            <button
+              type="button"
+              className="shrink-0 px-2 py-0.5 rounded text-[10px] font-medium"
+              style={{ background: 'var(--accent)', color: '#fff' }}
+              onClick={() => onOpenSettings()}
+            >
+              Settings
+            </button>
+          ) : null}
         </div>
       )}
 
