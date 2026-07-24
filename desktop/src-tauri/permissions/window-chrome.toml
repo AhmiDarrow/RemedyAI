@@ -7,6 +7,8 @@ commands.allow = [
   "toggle_maximize_main_window",
   "request_close_main_window",
   "switch_to_web_ui",
+  "quit_app",
+  "request_quit_app",
   "set_desktop_prefs",
   "get_desktop_prefs",
 ]

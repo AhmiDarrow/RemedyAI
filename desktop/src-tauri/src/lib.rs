@@ -30,6 +30,8 @@ fn status_addr() -> SocketAddr {
 struct DesktopPrefs {
     close_to_tray: bool,
     start_in_tray: bool,
+    /// When true, skip the "quitting stops the local server / Web UI" dialog.
+    skip_quit_server_warning: bool,
 }
 
 impl Default for DesktopPrefs {
@@ -37,6 +39,7 @@ impl Default for DesktopPrefs {
         Self {
             close_to_tray: false,
             start_in_tray: false,
+            skip_quit_server_warning: false,
         }
     }
 }
@@ -69,26 +72,40 @@ fn toml_bool(raw: &str, key: &str) -> Option<bool> {
     None
 }
 
+fn json_bool(raw: &str, key: &str) -> Option<bool> {
+    // Match "key": true/false with optional spaces
+    let true_pat = format!("\"{}\": true", key);
+    let true_pat2 = format!("\"{}\":true", key);
+    let false_pat = format!("\"{}\": false", key);
+    let false_pat2 = format!("\"{}\":false", key);
+    if raw.contains(&true_pat) || raw.contains(&true_pat2) {
+        return Some(true);
+    }
+    if raw.contains(&false_pat) || raw.contains(&false_pat2) {
+        return Some(false);
+    }
+    None
+}
+
 fn load_desktop_prefs() -> DesktopPrefs {
     // Defaults: always-ready partner UX — close hides to tray (does not kill).
     let mut prefs = DesktopPrefs {
         close_to_tray: true,
         start_in_tray: false,
+        skip_quit_server_warning: false,
     };
 
     // 1) Prefer shell-owned desktop.json when present
     let desk = desktop_prefs_path();
     if let Ok(raw) = std::fs::read_to_string(&desk) {
-        prefs.close_to_tray = raw.contains("\"close_to_tray\": true")
-            || raw.contains("\"close_to_tray\":true");
-        prefs.start_in_tray = raw.contains("\"start_in_tray\": true")
-            || raw.contains("\"start_in_tray\":true");
-        // Also accept false explicitly when file exists
-        if raw.contains("\"close_to_tray\": false") || raw.contains("\"close_to_tray\":false") {
-            prefs.close_to_tray = false;
+        if let Some(v) = json_bool(&raw, "close_to_tray") {
+            prefs.close_to_tray = v;
         }
-        if raw.contains("\"start_in_tray\": false") || raw.contains("\"start_in_tray\":false") {
-            prefs.start_in_tray = false;
+        if let Some(v) = json_bool(&raw, "start_in_tray") {
+            prefs.start_in_tray = v;
+        }
+        if let Some(v) = json_bool(&raw, "skip_quit_server_warning") {
+            prefs.skip_quit_server_warning = v;
         }
         return prefs;
     }
@@ -101,12 +118,16 @@ fn load_desktop_prefs() -> DesktopPrefs {
         if let Some(v) = toml_bool(&raw, "start_in_tray") {
             prefs.start_in_tray = v;
         }
+        if let Some(v) = toml_bool(&raw, "skip_quit_server_warning") {
+            prefs.skip_quit_server_warning = v;
+        }
         // Seed desktop.json so CloseRequested and future launches stay in sync
         let _ = save_desktop_prefs(&prefs);
         log::info!(
-            "desktop prefs seeded from config.toml (close_to_tray={}, start_in_tray={})",
+            "desktop prefs seeded from config.toml (close_to_tray={}, start_in_tray={}, skip_quit_warn={})",
             prefs.close_to_tray,
-            prefs.start_in_tray
+            prefs.start_in_tray,
+            prefs.skip_quit_server_warning
         );
     }
     prefs
@@ -118,9 +139,14 @@ fn save_desktop_prefs(prefs: &DesktopPrefs) -> Result<(), String> {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     let body = format!(
-        "{{\n  \"close_to_tray\": {},\n  \"start_in_tray\": {}\n}}\n",
+        "{{\n  \"close_to_tray\": {},\n  \"start_in_tray\": {},\n  \"skip_quit_server_warning\": {}\n}}\n",
         if prefs.close_to_tray { "true" } else { "false" },
         if prefs.start_in_tray { "true" } else { "false" },
+        if prefs.skip_quit_server_warning {
+            "true"
+        } else {
+            "false"
+        },
     );
     std::fs::write(&path, body).map_err(|e| e.to_string())
 }
@@ -607,10 +633,17 @@ fn set_desktop_prefs(
     state: State<'_, ServerState>,
     close_to_tray: bool,
     start_in_tray: bool,
+    skip_quit_server_warning: Option<bool>,
 ) -> Result<(), String> {
+    let prev_skip = state
+        .desktop_prefs
+        .lock()
+        .map(|g| g.skip_quit_server_warning)
+        .unwrap_or(false);
     let prefs = DesktopPrefs {
         close_to_tray,
         start_in_tray,
+        skip_quit_server_warning: skip_quit_server_warning.unwrap_or(prev_skip),
     };
     save_desktop_prefs(&prefs)?;
     if let Ok(mut g) = state.desktop_prefs.lock() {
@@ -621,14 +654,56 @@ fn set_desktop_prefs(
 
 #[tauri::command]
 fn get_desktop_prefs(state: State<'_, ServerState>) -> Result<serde_json::Value, String> {
-    let g = state
-        .desktop_prefs
-        .lock()
-        .map_err(|_| "prefs lock poisoned".to_string())?;
+    // Prefer disk so Settings / dialogs see latest "don't warn" flag
+    let g = load_desktop_prefs();
+    if let Ok(mut lock) = state.desktop_prefs.lock() {
+        *lock = DesktopPrefs {
+            close_to_tray: g.close_to_tray,
+            start_in_tray: g.start_in_tray,
+            skip_quit_server_warning: g.skip_quit_server_warning,
+        };
+    }
     Ok(serde_json::json!({
         "close_to_tray": g.close_to_tray,
         "start_in_tray": g.start_in_tray,
+        "skip_quit_server_warning": g.skip_quit_server_warning,
     }))
+}
+
+/// Full quit: stop sidecar (Web UI dies) and exit. Use after the warning dialog.
+#[tauri::command]
+fn quit_app(app: AppHandle, state: State<'_, ServerState>) -> Result<(), String> {
+    log::info!("quit_app: shutting down sidecar and exiting");
+    shutdown_sidecar(&state);
+    app.exit(0);
+    Ok(())
+}
+
+/// Request quit: if user has not dismissed the warning, ask the frontend dialog.
+/// Returns `{ needs_confirm: bool }`.
+#[tauri::command]
+fn request_quit_app(app: AppHandle, state: State<'_, ServerState>) -> Result<serde_json::Value, String> {
+    let fresh = load_desktop_prefs();
+    if let Ok(mut g) = state.desktop_prefs.lock() {
+        *g = DesktopPrefs {
+            close_to_tray: fresh.close_to_tray,
+            start_in_tray: fresh.start_in_tray,
+            skip_quit_server_warning: fresh.skip_quit_server_warning,
+        };
+    }
+    if fresh.skip_quit_server_warning {
+        shutdown_sidecar(&state);
+        app.exit(0);
+        return Ok(serde_json::json!({ "needs_confirm": false, "quitting": true }));
+    }
+    // Bring window forward so the in-app dialog is visible (e.g. tray Quit).
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+    }
+    let _ = app.emit("app-quit-requested", ());
+    Ok(serde_json::json!({ "needs_confirm": true, "quitting": false }))
 }
 
 #[tauri::command]
@@ -1533,6 +1608,8 @@ pub fn run() {
             toggle_maximize_main_window,
             request_close_main_window,
             switch_to_web_ui,
+            quit_app,
+            request_quit_app,
             restart_server,
             check_desktop_update,
             start_desktop_update,
@@ -1610,9 +1687,25 @@ pub fn run() {
                             let _ = app_for_menu.emit("tray-about", ());
                         }
                         "quit" => {
+                            // Confirm via UI (server/Web UI warning) unless user opted out
                             let state = app_for_menu.state::<ServerState>();
-                            shutdown_sidecar(&state);
-                            app_for_menu.exit(0);
+                            let skip = state
+                                .desktop_prefs
+                                .lock()
+                                .map(|p| p.skip_quit_server_warning)
+                                .unwrap_or(false)
+                                || load_desktop_prefs().skip_quit_server_warning;
+                            if skip {
+                                shutdown_sidecar(&state);
+                                app_for_menu.exit(0);
+                            } else {
+                                if let Some(w) = app_for_menu.get_webview_window("main") {
+                                    let _ = w.show();
+                                    let _ = w.unminimize();
+                                    let _ = w.set_focus();
+                                }
+                                let _ = app_for_menu.emit("app-quit-requested", ());
+                            }
                         }
                         _ => {}
                     });
@@ -1709,16 +1802,24 @@ pub fn run() {
                         *g = DesktopPrefs {
                             close_to_tray: fresh.close_to_tray,
                             start_in_tray: fresh.start_in_tray,
+                            skip_quit_server_warning: fresh.skip_quit_server_warning,
                         };
                     }
                     let close_to_tray = fresh.close_to_tray;
                     if close_to_tray {
+                        // Hide to tray — server keeps running (Web UI stays alive).
                         api.prevent_close();
                         let _ = window.hide();
                         log::info!("close_to_tray: window hidden (sidecar stays up)");
-                    } else {
+                    } else if fresh.skip_quit_server_warning {
+                        // Full quit without dialog
                         let state = window.state::<ServerState>();
                         shutdown_sidecar(&state);
+                    } else {
+                        // Confirm: quitting kills local server + browser Web UI
+                        api.prevent_close();
+                        let _ = window.emit("app-quit-requested", ());
+                        log::info!("close_to_tray=false: asked UI to confirm quit (server would stop)");
                     }
                 }
                 tauri::WindowEvent::Destroyed => {

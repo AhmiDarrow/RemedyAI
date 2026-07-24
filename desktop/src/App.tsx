@@ -8,6 +8,7 @@ import { TabBar } from './components/TabBar'
 import { MemoryPanel, SkillsPanel } from './components/Panels'
 import { SettingsPanel } from './components/SettingsPanel'
 import { HelpPanel } from './components/HelpPanel'
+import { QuitServerWarning } from './components/QuitServerWarning'
 import { SplashScreen } from './components/SplashScreen'
 import { SetupWizard } from './components/SetupWizard'
 import { UpdateScreen } from './components/UpdateScreen'
@@ -151,10 +152,74 @@ export default function App() {
   const [appVersion, setAppVersion] = useState('')
   const [helpOpen, setHelpOpen] = useState(false)
   const [helpArticleId, setHelpArticleId] = useState<string | null>(null)
+  const [quitWarnOpen, setQuitWarnOpen] = useState(false)
 
   const openHelp = useCallback((articleId?: string) => {
     setHelpArticleId(articleId || null)
     setHelpOpen(true)
+  }, [])
+
+  const confirmQuitApp = useCallback(async (dontWarnAgain: boolean) => {
+    setQuitWarnOpen(false)
+    if (!isTauri()) {
+      window.close()
+      return
+    }
+    try {
+      const { tauriInvoke } = await import('./api/tauri')
+      if (dontWarnAgain) {
+        try {
+          const prefs = await tauriInvoke<{
+            close_to_tray?: boolean
+            start_in_tray?: boolean
+          }>('get_desktop_prefs')
+          await tauriInvoke('set_desktop_prefs', {
+            close_to_tray: Boolean(prefs?.close_to_tray ?? true),
+            start_in_tray: Boolean(prefs?.start_in_tray ?? false),
+            skip_quit_server_warning: true,
+          })
+        } catch (e) {
+          console.warn('save skip_quit_server_warning:', e)
+          try {
+            localStorage.setItem('remedy.skipQuitServerWarning', '1')
+          } catch {
+            /* */
+          }
+        }
+      }
+      await tauriInvoke('quit_app')
+    } catch (e) {
+      console.warn('quit_app failed:', e)
+    }
+  }, [])
+
+  const requestQuitWithWarning = useCallback(async () => {
+    if (!isTauri()) {
+      setQuitWarnOpen(true)
+      return
+    }
+    try {
+      // localStorage fast-path
+      try {
+        if (localStorage.getItem('remedy.skipQuitServerWarning') === '1') {
+          const { tauriInvoke } = await import('./api/tauri')
+          await tauriInvoke('quit_app')
+          return
+        }
+      } catch {
+        /* */
+      }
+      const { tauriInvoke } = await import('./api/tauri')
+      const res = await tauriInvoke<{ needs_confirm?: boolean; quitting?: boolean }>(
+        'request_quit_app',
+      )
+      if (res?.needs_confirm) {
+        setQuitWarnOpen(true)
+      }
+      // if already quitting, no dialog
+    } catch {
+      setQuitWarnOpen(true)
+    }
   }, [])
 
   // Dev / browser review: open wiki with ?help=1 or ?help=09-troubleshooting
@@ -243,13 +308,28 @@ export default function App() {
           setAboutOpen(true)
           break
         case 'quit':
+          void requestQuitWithWarning()
           break
         default:
           break
       }
     },
-    [runUpdateCheckVisible, desktopInfo, create, openHelp],
+    [runUpdateCheckVisible, desktopInfo, create, openHelp, requestQuitWithWarning],
   )
+
+  // Tray Quit / window close when not hide-to-tray → show server-stop warning
+  useEffect(() => {
+    if (!isTauri()) return
+    let off: (() => void) | undefined
+    void tauriListen('app-quit-requested', () => {
+      setQuitWarnOpen(true)
+    }).then((fn) => {
+      off = fn
+    })
+    return () => {
+      off?.()
+    }
+  }, [])
 
   useEffect(() => {
     if (!isTauri()) return
@@ -1167,6 +1247,14 @@ export default function App() {
         } catch {
           /* */
         }
+      }}
+    />
+
+    <QuitServerWarning
+      open={quitWarnOpen}
+      onCancel={() => setQuitWarnOpen(false)}
+      onConfirmQuit={(dont) => {
+        void confirmQuitApp(dont)
       }}
     />
 

@@ -103,6 +103,7 @@ export function SettingsPanel({
   const [launchAtLogin, setLaunchAtLogin] = useState(false)
   const [startInTray, setStartInTray] = useState(false)
   const [closeToTray, setCloseToTray] = useState(false)
+  const [skipQuitWarn, setSkipQuitWarn] = useState(false)
   const [harnessMode, setHarnessMode] = useState('auto')
   const [toolProcess, setToolProcess] = useState<ToolProcessMode>(
     () => toolProcessMode || 'off',
@@ -174,6 +175,16 @@ export function SettingsPanel({
       setLaunchAtLogin(Boolean(s.launch_at_login))
       setStartInTray(Boolean(s.start_in_tray))
       setCloseToTray(Boolean(s.close_to_tray))
+      try {
+        const prefs = await invoke<{ skip_quit_server_warning?: boolean }>('get_desktop_prefs')
+        setSkipQuitWarn(Boolean(prefs?.skip_quit_server_warning))
+      } catch {
+        try {
+          setSkipQuitWarn(localStorage.getItem('remedy.skipQuitServerWarning') === '1')
+        } catch {
+          setSkipQuitWarn(false)
+        }
+      }
       setHarnessMode(s.harness_mode || 'auto')
       {
         const tp = normalizeToolProcess(s.tool_process)
@@ -343,7 +354,14 @@ export function SettingsPanel({
         await invoke('set_desktop_prefs', {
           close_to_tray: closeToTray,
           start_in_tray: startInTray,
+          skip_quit_server_warning: skipQuitWarn,
         })
+        try {
+          if (skipQuitWarn) localStorage.setItem('remedy.skipQuitServerWarning', '1')
+          else localStorage.removeItem('remedy.skipQuitServerWarning')
+        } catch {
+          /* */
+        }
       } catch (e) {
         console.warn('desktop prefs OS sync:', e)
       }
@@ -746,9 +764,21 @@ export function SettingsPanel({
                 />
                 <span style={{ color: 'var(--text-primary)' }}>Close window hides to tray</span>
               </label>
+              <label className="flex items-center gap-2 mb-1 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={skipQuitWarn}
+                  onChange={(e) => setSkipQuitWarn(e.target.checked)}
+                  style={{ accentColor: 'var(--accent)' }}
+                />
+                <span style={{ color: 'var(--text-primary)' }}>
+                  Don&apos;t warn when quitting (server stops)
+                </span>
+              </label>
               <div className="text-[10px] leading-snug" style={{ color: 'var(--text-muted)' }}>
                 Opt-in only. Uses the Windows <strong>Startup folder</strong> (Settings → Apps → Startup) —
-                not the registry Run key. Change or disable anytime.
+                not the registry Run key. Quit fully stops the local API (browser Web UI dies);
+                use <strong>Switch to Web UI</strong> or hide-to-tray to keep the server running.
               </div>
             </section>
 

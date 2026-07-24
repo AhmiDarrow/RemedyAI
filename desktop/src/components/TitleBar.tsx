@@ -123,21 +123,7 @@ export function TitleBar({
 
   const run = (action: AppMenuAction) => {
     setMenuOpen(false)
-    if (action === 'quit') {
-      if (inTauri) {
-        void tauriInvoke('request_close_main_window').catch(() => {
-          /* */
-        })
-        // Prefer full quit from tray path if available
-        try {
-          void tauriInvoke('quit_app')
-        } catch {
-          /* optional command */
-        }
-      }
-      onMenuAction?.(action)
-      return
-    }
+    // Quit is handled by App (server-stop warning dialog) via onMenuAction
     onMenuAction?.(action)
   }
 
