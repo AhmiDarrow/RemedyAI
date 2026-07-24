@@ -274,7 +274,18 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
       onComplete()
     } catch (e: unknown) {
       // Still enter the app if the server briefly fails — avoid lockout.
+      // Surface a soft notice so the user knows setup may reappear next launch.
+      const msg = e instanceof Error ? e.message : String(e)
       console.warn('Skip setup save failed:', e)
+      try {
+        window.alert(
+          `Could not save “setup complete” (${msg || 'server error'}). `
+          + 'You can still use the app; the setup wizard may show again next launch. '
+          + 'Use Settings or Retry if problems continue.',
+        )
+      } catch {
+        /* headless */
+      }
       onComplete()
     } finally {
       setSaving(false)
@@ -685,7 +696,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                   <p><strong>Enter</strong> send · <strong>Shift+Enter</strong> new line</p>
                   <p><strong>↑</strong> previous prompt · <strong>↓</strong> next</p>
                   <p><strong>/help</strong> · <strong>/remember</strong> · <strong>/compact</strong></p>
-                  <p><strong>Ctrl+/</strong> — shortcuts anytime</p>
+                  <p><strong>F1</strong> / <strong>Ctrl+/</strong> — Help wiki (owner&apos;s manual)</p>
                 </div>
               </div>
               <label

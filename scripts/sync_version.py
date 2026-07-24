@@ -26,8 +26,10 @@ ROOT = Path(__file__).resolve().parent.parent
 PATHS = {
     "pyproject": ROOT / "pyproject.toml",
     "package": ROOT / "desktop" / "package.json",
+    "package_lock": ROOT / "desktop" / "package-lock.json",
     "tauri": ROOT / "desktop" / "src-tauri" / "tauri.conf.json",
     "cargo": ROOT / "desktop" / "src-tauri" / "Cargo.toml",
+    "cargo_lock": ROOT / "desktop" / "src-tauri" / "Cargo.lock",
     "latest_json": ROOT / "scripts" / "latest.json",
 }
 
@@ -48,6 +50,43 @@ def _bump_package_json(ver: str) -> None:
     data = json.loads(PATHS["package"].read_text(encoding="utf-8"))
     data["version"] = ver
     PATHS["package"].write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+def _bump_package_lock(ver: str) -> None:
+    """Keep package-lock.json root version aligned with package.json."""
+    path = PATHS["package_lock"]
+    if not path.exists():
+        return
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["version"] = ver
+    packages = data.get("packages")
+    if isinstance(packages, dict) and "" in packages and isinstance(packages[""], dict):
+        packages[""]["version"] = ver
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+def _bump_cargo_lock(ver: str) -> None:
+    """Bump the local app package version in Cargo.lock (name = \"app\")."""
+    path = PATHS["cargo_lock"]
+    if not path.exists():
+        return
+    text = path.read_text(encoding="utf-8")
+    # Prefer package name "app" (Tauri crate name in this repo).
+    for name in ("app", "remedy-desktop"):
+        marker = f'name = "{name}"\nversion = "'
+        idx = text.find(marker)
+        if idx < 0:
+            marker = f'name = "{name}"\r\nversion = "'
+            idx = text.find(marker)
+        if idx < 0:
+            continue
+        start = idx + len(marker)
+        end = text.find('"', start)
+        if end < 0:
+            continue
+        text = text[:start] + ver + text[end:]
+        path.write_text(text, encoding="utf-8")
+        return
 
 
 def _bump_tauri_conf(ver: str) -> None:
@@ -82,14 +121,16 @@ def _bump_latest_json(ver: str) -> None:
     data["pub_date"] = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     # Prefer rewriting known GitHub release URL shape so notes/URL/version stay aligned.
-    installer_name = f"Remedy_Desktop_{ver}_x64-setup.exe"
+    # Real NSIS assets use dots for spaces: "Remedy Desktop" → "Remedy.Desktop_…".
+    installer_name = f"Remedy.Desktop_{ver}_x64-setup.exe"
     default_url = (
         f"https://github.com/AhmiDarrow/RemedyAI/releases/download/v{ver}/{installer_name}"
     )
 
+    version_changed = bool(old_raw and old_raw != ver)
     for plat in data.get("platforms", {}).values():
         url = str(plat.get("url") or "")
-        if old_raw and old_raw != ver and url:
+        if version_changed and url:
             # Replace tag (vX.Y.Z) first, then bare version in filenames.
             url = url.replace(f"v{old_raw}", f"v{ver}")
             url = re.sub(
@@ -97,11 +138,30 @@ def _bump_latest_json(ver: str) -> None:
                 ver,
                 url,
             )
+            # Normalize legacy underscore installer names.
+            url = url.replace("Remedy_Desktop_", "Remedy.Desktop_")
             plat["url"] = url
         else:
             plat["url"] = default_url
-        # Preserve existing signature if present; empty means unsigned / not ready.
-        plat.setdefault("signature", "")
+        # Always normalize URL to the canonical installer name for this version.
+        plat["url"] = default_url
+        # Signature is per-installer file. Clear when version changes OR when the
+        # trusted comment / URL still mentions a different version (stale).
+        sig = str(plat.get("signature") or "")
+        stale_sig = bool(sig) and (
+            version_changed
+            or (old_raw and old_raw in sig and old_raw != ver)
+            or (f"_{ver}_" not in sig and ver not in sig and bool(sig))
+        )
+        # Heuristic: if signature blob mentions another setup version, drop it.
+        if sig:
+            m = re.search(r"(\d+\.\d+\.\d+)_x64-setup", sig)
+            if m and m.group(1) != ver:
+                stale_sig = True
+        if stale_sig or version_changed:
+            plat["signature"] = ""
+        else:
+            plat.setdefault("signature", "")
 
     PATHS["latest_json"].write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
@@ -144,6 +204,10 @@ def _check_aligned(expected: str) -> int:
     pkg = json.loads(PATHS["package"].read_text(encoding="utf-8"))
     rows.append(("package.json", str(pkg.get("version", "?"))))
 
+    if PATHS["package_lock"].exists():
+        lock = json.loads(PATHS["package_lock"].read_text(encoding="utf-8"))
+        rows.append(("package-lock.json", str(lock.get("version", "?"))))
+
     taur = PATHS["tauri"].read_text(encoding="utf-8")
     m = re.search(r'"version":\s*"([^"]*)"', taur)
     rows.append(("tauri.conf.json", m.group(1) if m else "?"))
@@ -153,10 +217,25 @@ def _check_aligned(expected: str) -> int:
         cm = re.search(r'(?m)^version\s*=\s*"([^"]*)"', cargo)
         rows.append(("Cargo.toml", cm.group(1) if cm else "?"))
 
+    if PATHS["cargo_lock"].exists():
+        clock = PATHS["cargo_lock"].read_text(encoding="utf-8")
+        # Prefer the local app package entry.
+        am = re.search(
+            r'(?ms)name = "app"\s*\nversion = "([^"]*)"',
+            clock,
+        )
+        rows.append(("Cargo.lock (app)", am.group(1) if am else "?"))
+
     if PATHS["latest_json"].exists():
         latest = json.loads(PATHS["latest_json"].read_text(encoding="utf-8"))
         lv = str(latest.get("version", "?")).lstrip("v")
         rows.append(("scripts/latest.json", lv))
+        # Installer asset naming: Remedy.Desktop_* (not Remedy_Desktop_*)
+        for plat in (latest.get("platforms") or {}).values():
+            url = str(plat.get("url") or "")
+            if url and "Remedy_Desktop_" in url and "Remedy.Desktop_" not in url:
+                rows.append(("latest.json URL shape", "BAD_UNDERSCORE_NAME"))
+                break
 
     rows.append(("remedy.__version__", _runtime_version()))
 
@@ -191,11 +270,17 @@ def main():
     _bump_package_json(new_ver)
     print("  Updated package.json")
 
+    _bump_package_lock(new_ver)
+    print("  Updated package-lock.json")
+
     _bump_tauri_conf(new_ver)
     print("  Updated tauri.conf.json")
 
     _bump_cargo_toml(new_ver)
     print("  Updated Cargo.toml")
+
+    _bump_cargo_lock(new_ver)
+    print("  Updated Cargo.lock")
 
     _bump_latest_json(new_ver)
     print("  Updated scripts/latest.json")

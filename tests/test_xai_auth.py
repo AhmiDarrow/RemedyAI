@@ -20,6 +20,28 @@ from remedy.interfaces.config import (
 )
 
 
+class TestXaiOAuthHosts:
+    """Device/token API must hit auth.x.ai — accounts.x.ai 307s to /sign-in."""
+
+    def test_device_and_token_urls_use_auth_host(self):
+        assert xai_auth.OAUTH_SERVER == "https://auth.x.ai"
+        assert xai_auth.DEVICE_CODE_URL.startswith("https://auth.x.ai/")
+        assert xai_auth.TOKEN_URL.startswith("https://auth.x.ai/")
+        assert "accounts.x.ai" not in xai_auth.DEVICE_CODE_URL
+        assert "accounts.x.ai" not in xai_auth.TOKEN_URL
+        for url in xai_auth._DEVICE_CODE_CANDIDATES:
+            assert "auth.x.ai" in url
+            assert "accounts.x.ai" not in url
+
+    def test_http_form_refuses_accounts_device_api(self):
+        with pytest.raises(RuntimeError) as ei:
+            xai_auth._http_form(
+                "https://accounts.x.ai/oauth2/device/code",
+                {"client_id": "test"},
+            )
+        assert "refusing accounts.x.ai" in str(ei.value)
+
+
 class TestXaiCatalog:
     def test_xai_in_catalog(self):
         assert "xai" in PROVIDER_CATALOG

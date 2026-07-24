@@ -82,15 +82,20 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         )
         from remedy.interfaces.secret_store import public_secret_status
 
-        # Migrate any leftover plaintext keys out of config into secure store.
+        # Migrate plaintext keys into the secure store in memory for this response.
+        # Disk rewrite is deferred to PUT/auth paths to avoid racing first-run setup.
         cfg_migrated = migrate_provider_keys(cfg)
         if cfg_migrated != cfg or cfg.get("provider_keys") or cfg.get("llm_api_key"):
+            cfg = cfg_migrated
+            # Best-effort async-safe write only when path exists and setup is already done
+            # (never rewrite a partial first-run file from a GET).
             try:
-                if config_path is not None:
-                    _write_config(config_path, cfg_migrated)
+                if config_path is not None and config_path.exists() and cfg.get(
+                    "setup_completed"
+                ):
+                    _write_config(config_path, cfg)
             except Exception:
                 pass
-            cfg = cfg_migrated
 
         home_for_secrets = cfg.get("home_dir")
         from pathlib import Path as _Path

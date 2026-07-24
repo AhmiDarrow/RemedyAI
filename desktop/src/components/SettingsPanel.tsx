@@ -230,6 +230,14 @@ export function SettingsPanel({
     setErrorMessage('')
     stopXaiPoll()
     try {
+      // Same first-run/wipe bootstrap as SetupWizard — avoid 401 races.
+      try {
+        const { clearApiToken, ensureApiToken } = await import('../api/client')
+        clearApiToken()
+        await ensureApiToken()
+      } catch {
+        /* apiFetch will retry */
+      }
       const start = await startXaiLogin()
       setXaiUserCode(start.user_code)
       setXaiVerifyUrl(start.verification_uri_complete || start.verification_uri)
@@ -248,10 +256,20 @@ export function SettingsPanel({
             setApiKeySet(true)
             setXaiLoginMsg('Signed in with xAI')
             setXaiUserCode('')
-            // Ensure provider is xAI after OAuth
+            // Ensure provider is xAI after OAuth — persist so chat switches now.
+            const nextModel = model.startsWith('grok') ? model : 'grok-3-mini'
             setProvider('xai')
             setBaseUrl('https://api.x.ai/v1')
-            if (!model.startsWith('grok')) setModel('grok-3-mini')
+            setModel(nextModel)
+            try {
+              await updateSettings({
+                llm_provider: 'xai',
+                llm_model: nextModel,
+                llm_base_url: 'https://api.x.ai/v1',
+              })
+            } catch (err) {
+              console.warn('persist xAI after OAuth:', err)
+            }
             onSettingsSaved?.()
           } else if (st === 'error') {
             stopXaiPoll()
@@ -1005,29 +1023,8 @@ export function SettingsPanel({
                       updateInfo?.current_version
                       || settings?.version
                       || 'unknown'
-                    const body = encodeURIComponent(
-                      [
-                        '## What happened',
-                        '',
-                        '(Describe the issue…)',
-                        '',
-                        '## Steps to reproduce',
-                        '',
-                        '1. ',
-                        '',
-                        '## Expected vs actual',
-                        '',
-                        '',
-                        '## Environment',
-                        '',
-                        `- Remedy Desktop: v${ver}`,
-                        `- OS: Windows`,
-                        '',
-                      ].join('\n'),
-                    )
-                    const title = encodeURIComponent(`[Desktop v${ver}] `)
-                    void openExternalUrl(
-                      `https://github.com/AhmiDarrow/RemedyAI/issues/new?title=${title}&body=${body}&labels=bug`,
+                    void import('../utils/reportIssue').then(({ openReportIssue }) =>
+                      openReportIssue(ver),
                     )
                   }}
                   className="w-full py-1.5 rounded text-xs font-medium transition-colors"
@@ -1047,7 +1044,9 @@ export function SettingsPanel({
                     className="underline"
                     style={{ color: 'var(--accent)' }}
                     onClick={() =>
-                      void openExternalUrl('https://github.com/AhmiDarrow/RemedyAI/issues')
+                      void import('../utils/reportIssue').then(({ githubIssuesUrl }) =>
+                        openExternalUrl(githubIssuesUrl()),
+                      )
                     }
                   >
                     github.com/AhmiDarrow/RemedyAI/issues

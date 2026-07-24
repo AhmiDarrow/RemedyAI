@@ -24,8 +24,10 @@ import { listAgents, listCommands, exportSession, importSession } from './api/me
 import { apiFetch } from './api/client'
 import { getSettings, updateSettings } from './api/settings'
 import { isPlaceholderTitle, titleFromPrompt } from './utils/sessionTitle'
-import { tauriListen } from './api/tauri'
+import { tauriInvoke, tauriListen } from './api/tauri'
 import { normalizeToolProcess, type ToolProcessMode } from './utils/toolLabels'
+import { HOTKEYS } from './hotkeys'
+import type { ShortcutDef } from './hooks/useKeyboardShortcuts'
 
 export interface ModelInfo {
   id: string
@@ -73,6 +75,7 @@ function AppShell({
           open={Boolean(helpOpen)}
           onClose={onCloseHelp}
           initialArticleId={helpArticleId}
+          version={version}
         />
       )}
     </div>
@@ -220,18 +223,23 @@ export default function App() {
   )
 
   useEffect(() => {
-    if (isTauri()) {
-      const handleReady = () => setServerState('ready')
-      const handleError = (e: any) => {
-        setServerState('error')
-        setServerError(typeof e.payload === 'string' ? e.payload : 'Server failed to start')
-      }
-      ;(window as any).__TAURI_INTERNALS__?.invoke('plugin:event|listen', {
-        event: 'server-ready', handler: handleReady,
-      }).catch((e: any) => console.warn('Tauri listen(server-ready) failed:', e))
-      ;(window as any).__TAURI_INTERNALS__?.invoke('plugin:event|listen', {
-        event: 'server-error', handler: handleError,
-      }).catch((e: any) => console.warn('Tauri listen(server-error) failed:', e))
+    if (!isTauri()) return
+    let off: Array<() => void> = []
+    void (async () => {
+      off.push(
+        await tauriListen('server-ready', () => {
+          setServerState('ready')
+        }),
+      )
+      off.push(
+        await tauriListen('server-error', (payload) => {
+          setServerState('error')
+          setServerError(typeof payload === 'string' ? payload : 'Server failed to start')
+        }),
+      )
+    })()
+    return () => {
+      for (const u of off) u()
     }
   }, [])
 
@@ -359,15 +367,9 @@ export default function App() {
         }
         void listCommands().catch(() => null)
       } catch (e: unknown) {
+        // Settings already loaded (or wizard already open). Models/agents failures
+        // must not block first-run or the chat shell.
         console.warn('Secondary startup load failed:', e)
-        // If we never got settings and models also failed, surface a soft error
-        // only when we are not already opening the setup wizard.
-        if (!settings && !needsWizard) {
-          setServerState('error')
-          setServerError(
-            `Failed to load server config: ${e instanceof Error ? e.message : String(e)}`,
-          )
-        }
       }
     })()
     return () => {
@@ -720,29 +722,18 @@ export default function App() {
     openHelp,
   ])
 
-  useKeyboardShortcuts([
-    { key: 'n', ctrl: true, handler: handleNewSession },
-    { key: 'p', ctrl: true, handler: () => setPaletteOpen((o) => !o) },
-    { key: 'k', ctrl: true, handler: () => setPaletteOpen((o) => !o) },
-    { key: 'b', ctrl: true, handler: () => setPlanMode((p) => !p) },
-    { key: ',', ctrl: true, handler: () => setPanel((p) => (p === 'settings' ? null : 'settings')) },
-    {
-      key: '/',
-      ctrl: true,
-      allowInInput: true,
-      handler: () => openHelp(),
-    },
-    {
-      key: 'F1',
-      ctrl: false,
-      allowInInput: true,
-      handler: () => openHelp(),
-    },
-    {
-      key: 'Escape',
-      ctrl: false,
-      allowInInput: true,
-      handler: () => {
+  // Wire global shortcuts from hotkeys.ts (single source of truth for labels + keys).
+  const globalShortcuts: ShortcutDef[] = useMemo(() => {
+    const byAction: Record<string, () => void> = {
+      'New chat session': () => {
+        void handleNewSession()
+      },
+      'Open command palette': () => setPaletteOpen((o) => !o),
+      'Toggle plan mode': () => setPlanMode((p) => !p),
+      'Open settings': () => setPanel((p) => (p === 'settings' ? null : 'settings')),
+      "Open Help wiki (owner's manual)": () => openHelp(),
+      'Close panels and command palette': () => {
+        // HelpPanel also handles Esc while open; this covers palette / side panels.
         if (helpOpen) {
           setHelpOpen(false)
           return
@@ -750,8 +741,29 @@ export default function App() {
         setPaletteOpen(false)
         setPanel(null)
       },
-    },
-  ])
+    }
+    const out: ShortcutDef[] = []
+    for (const h of HOTKEYS) {
+      if (!h.match || h.scope !== 'global') continue
+      const handler = byAction[h.action]
+      if (!handler) continue
+      const allowInInput =
+        h.match.key === 'F1'
+        || h.match.key === 'Escape'
+        || (h.match.key === '/' && h.match.ctrl)
+      out.push({
+        key: h.match.key,
+        ctrl: h.match.ctrl ?? false,
+        shift: h.match.shift ?? false,
+        alt: h.match.alt ?? false,
+        allowInInput,
+        handler,
+      })
+    }
+    return out
+  }, [handleNewSession, openHelp, helpOpen])
+
+  useKeyboardShortcuts(globalShortcuts)
 
   const shellProps = {
     version: appVersion || updateInfo?.current_version || desktopInfo?.current_version,
@@ -828,14 +840,11 @@ export default function App() {
                 setServerError('')
                 setServerState('connecting')
                 if (isTauri()) {
-                  const invoke = (window as any).__TAURI_INTERNALS__?.invoke
-                  if (invoke) {
-                    invoke('restart_server').catch((e: unknown) => {
-                      const msg = e instanceof Error ? e.message : String(e)
-                      setServerState('error')
-                      setServerError(msg || 'Failed to restart server')
-                    })
-                  }
+                  void tauriInvoke('restart_server').catch((e: unknown) => {
+                    const msg = e instanceof Error ? e.message : String(e)
+                    setServerState('error')
+                    setServerError(msg || 'Failed to restart server')
+                  })
                 }
               }}
               className="px-5 py-2 rounded-md text-sm"
@@ -873,14 +882,11 @@ export default function App() {
               type="button"
               onClick={() => {
                 if (!isTauri()) return
-                const invoke = (window as any).__TAURI_INTERNALS__?.invoke
-                if (!invoke) {
-                  setServerError((prev) => prev || 'Cannot open data folder (Tauri bridge unavailable)')
-                  return
-                }
-                invoke('open_data_folder').catch((e: unknown) => {
+                void tauriInvoke('open_data_folder').catch((e: unknown) => {
                   const msg = e instanceof Error ? e.message : String(e)
-                  setServerError((prev) => `${prev ? prev + ' - ' : ''}Could not open data folder: ${msg}`)
+                  setServerError((prev) =>
+                    `${prev ? prev + ' - ' : ''}Could not open data folder: ${msg || 'Tauri bridge unavailable'}`,
+                  )
                 })
               }}
               className="px-5 py-2 rounded-md text-sm"

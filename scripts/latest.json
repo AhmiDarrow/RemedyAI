@@ -1,11 +1,11 @@
 {
-  "version": "v0.10.35",
-  "notes": "Remedy Desktop v0.10.35 \u2014 first-run setup + uninstall UI",
-  "pub_date": "2026-07-24T16:37:30Z",
+  "version": "v0.10.37",
+  "notes": "Remedy Desktop v0.10.37 \u2014 Windows installer",
+  "pub_date": "2026-07-24T17:40:44Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUZ3ZLempYUXdCMWtERllnYkFIcVgzTU1UV0JZNS9jNTNyUUdXS2JkUmVyK1FlUlREZlNzZjRROGFiMlhEcGdrRjdyWUx6aWdadG0yalpncXRTa2tXaUdlZ0k1V0M4V3d3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0OTExMDQxCWZpbGU6UmVtZWR5IERlc2t0b3BfMC4xMC4zNV94NjQtc2V0dXAuZXhlClFCUFhNU3NJdUdOQmxrQjYxTzhtZVNoSlVPMUwxMVBEdEtIWVR3TkNDSFR4SUZISVREOEVHcUdMNUhGQ0lER2xJVUN5MWM4MkdxdXZTZi9BaGlhaURRPT0K",
-      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.10.35/Remedy.Desktop_0.10.35_x64-setup.exe"
+      "signature": "",
+      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.10.37/Remedy.Desktop_0.10.37_x64-setup.exe"
     }
   }
 }

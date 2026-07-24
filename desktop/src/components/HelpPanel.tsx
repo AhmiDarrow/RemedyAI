@@ -10,19 +10,21 @@ import {
   searchArticles,
   type HelpArticle,
 } from '../help/catalog'
-import { openExternalUrl } from '../api/auth'
+import { openReportIssue } from '../utils/reportIssue'
 
 export interface HelpPanelProps {
   open: boolean
   onClose: () => void
   /** Article id to open (e.g. "09-troubleshooting"). */
   initialArticleId?: string | null
+  /** App version for Report an issue prefill. */
+  version?: string | null
 }
 
 /**
  * Full-screen wiki-style Help: searchable TOC + offline owner's manual.
  */
-export function HelpPanel({ open, onClose, initialArticleId }: HelpPanelProps) {
+export function HelpPanel({ open, onClose, initialArticleId, version }: HelpPanelProps) {
   const [query, setQuery] = useState('')
   const [articleId, setArticleId] = useState(getDefaultArticleId())
   const [history, setHistory] = useState<string[]>([getDefaultArticleId()])
@@ -428,9 +430,7 @@ export function HelpPanel({ open, onClose, initialArticleId }: HelpPanelProps) {
                 type="button"
                 className="underline"
                 style={{ color: 'var(--accent)' }}
-                onClick={() =>
-                  void openExternalUrl('https://github.com/AhmiDarrow/RemedyAI/issues/new')
-                }
+                onClick={() => void openReportIssue(version)}
               >
                 Report an issue
               </button>

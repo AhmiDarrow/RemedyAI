@@ -322,7 +322,7 @@ cd desktop
 npm run tauri build
 ```
 
-Version is sourced from `pyproject.toml` — `scripts/sync_version.py` / `build_desktop.py` keep `package.json`, `tauri.conf.json`, and `Cargo.toml` in sync. `src/remedy/__init__.py` reads the package version at runtime.
+Version is sourced from `pyproject.toml` — `scripts/sync_version.py` / `build_desktop.py` keep `package.json`, `package-lock.json`, `tauri.conf.json`, `Cargo.toml`, `Cargo.lock`, and `scripts/latest.json` in sync (installer URL uses `Remedy.Desktop_*`). Help chapters: `python scripts/sync_help_manual.py`. `src/remedy/__init__.py` reads the package version at runtime.
 
 ## Releases & auto-update
 

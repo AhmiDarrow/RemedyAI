@@ -97,6 +97,53 @@ class TestCorruptConfigNeedsSetup:
         assert needs_first_run_setup(config_path=path) is True
 
 
+class TestApiWriteConfigOrder:
+    def test_api_write_config_scalars_before_tables(self, tmp_path: Path):
+        """Settings PUT path must never emit root keys after [table] sections."""
+        import tomllib
+
+        from remedy.interfaces.api_support import _write_config
+
+        path = tmp_path / "config.toml"
+        _write_config(
+            path,
+            {
+                "name": "Remedy",
+                "setup_completed": True,
+                "secrets_store": "auth/provider_keys.json",
+                "launch_at_login": False,
+                "gateway": {"heartbeat_interval": 60, "rate_limit": 120},
+                "slack": {"bot_token": "", "channel_id": ""},
+                "llm_api_key": "sk-should-not-appear",
+                "provider_keys": {"openai": "sk-nope"},
+            },
+        )
+        text = path.read_text(encoding="utf-8")
+        first_table = text.find("[")
+        assert first_table > 0
+        head = text[:first_table]
+        assert "setup_completed = true" in head
+        assert "secrets_store" in head
+        assert "launch_at_login = false" in head
+        assert "sk-should-not-appear" not in text
+        assert "sk-nope" not in text
+        # Round-trip must parse
+        data = tomllib.loads(text)
+        assert data["setup_completed"] is True
+        assert data["secrets_store"] == "auth/provider_keys.json"
+        assert isinstance(data.get("slack"), dict)
+
+        # Multiple update cycles (scalars added after nested load) stay valid
+        for i in range(3):
+            data["close_to_tray"] = False
+            data["start_in_tray"] = False
+            data["secrets_store"] = "auth/provider_keys.json"
+            _write_config(path, data)
+            data = tomllib.loads(path.read_text(encoding="utf-8"))
+        assert data["close_to_tray"] is False
+        assert "slack" in data
+
+
 class TestProviderCredentialsReady:
     def test_api_key_present(self):
         assert provider_credentials_ready(

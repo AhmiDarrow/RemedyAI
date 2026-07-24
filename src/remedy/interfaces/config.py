@@ -901,32 +901,10 @@ def mark_setup_completed(
     if "home_dir" not in cfg:
         cfg["home_dir"] = path.parent.as_posix()
 
-    # Minimal TOML writer: ALL root scalars first, THEN [table] sections.
-    # Scalars after a table are absorbed into that table (TOML rule) and can
-    # corrupt the file (duplicate keys / unreadable config).
-    lines = ["# Remedy AI Configuration", ""]
-    scalars: list[tuple[str, Any]] = []
-    tables: list[tuple[str, dict[str, Any]]] = []
-    for key, value in cfg.items():
-        if value is None:
-            # Omit null keys instead of writing misleading empty strings.
-            continue
-        if isinstance(value, dict):
-            tables.append((key, value))
-        else:
-            scalars.append((key, value))
-    for key, value in scalars:
-        lines.append(f"{key} = {_toml_scalar(value)}")
-    if scalars and tables:
-        lines.append("")
-    for key, value in tables:
-        lines.append(f"[{key}]")
-        for k, v in value.items():
-            if v is None:
-                continue
-            lines.append(f"{k} = {_toml_scalar(v)}")
-        lines.append("")
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    # Shared writer: scalars before tables + secret scrub (single code path).
+    from remedy.interfaces.api_support import _write_config as api_write
+
+    api_write(path, cfg)
     return path
 
 

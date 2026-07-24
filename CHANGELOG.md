@@ -12,6 +12,18 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 - **Settings → About: Report an issue on GitHub** (pre-fills version in the issue template); Help footer link too.
 - Vitest coverage for the help catalog.
 
+### Pre-push polish (same version)
+
+- Version surfaces aligned (`latest.json`, package-lock, Cargo.lock); installer URL uses `Remedy.Desktop_*`; stale minisign signatures cleared on version bump.
+- `scripts/sync_help_manual.py` keeps docs/manual ↔ desktop help articles in sync.
+- Setup finish copy: F1/Ctrl+/ open Help wiki; What’s new splits 0.10.36 vs 0.10.37 correctly.
+- Settings xAI sign-in re-bootstraps local API token and **persists provider=xAI** on connect; Help report-issue prefills version.
+- CLI wizard + `mark_setup_completed` use safe TOML write (scalars before tables; scrub secrets).
+- `server-ready` / `server-error` / Retry / Open data folder use official Tauri bridge helpers.
+- Hotkeys wired from `hotkeys.ts` SSOT; GET `/settings` no longer rewrites config mid first-run.
+- OAuth poll status switches active provider to xAI so chat uses new credentials immediately.
+- Tests: API `_write_config` order, xAI OAuth host lock, reportIssue + formatApiErrorBody.
+
 ## [0.10.36] — 2026-07-24
 
 ### Fix: first-run setup save + xAI OAuth + corrupt config.toml

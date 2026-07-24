@@ -89,6 +89,16 @@ export const HOTKEYS: HotkeyDef[] = [
   },
 ]
 
+/** Actions that are wired by App (composer-only keys are handled in Composer). */
+export const GLOBAL_HOTKEY_ACTIONS = [
+  'New chat session',
+  'Open command palette',
+  'Toggle plan mode',
+  'Open settings',
+  "Open Help wiki (owner's manual)",
+  'Close panels and command palette',
+] as const
+
 export function formatHotkeysHelpText(): string {
   const lines = ['**Keyboard shortcuts**', '']
   for (const h of HOTKEYS) {

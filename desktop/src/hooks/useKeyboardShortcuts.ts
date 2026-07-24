@@ -20,7 +20,8 @@ export function useKeyboardShortcuts(shortcuts: ShortcutDef[]) {
       const isInput = ['INPUT', 'TEXTAREA', 'SELECT'].includes(tag)
 
       for (const s of ref.current) {
-        const ctrl = s.ctrl ?? true
+        // Default ctrl=false so F1/Escape work; callers must set ctrl:true explicitly.
+        const ctrl = s.ctrl ?? false
         const shift = s.shift ?? false
         const alt = s.alt ?? false
         const keyMatch =
