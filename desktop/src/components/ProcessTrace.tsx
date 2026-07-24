@@ -1,8 +1,12 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { ProcessStep, ToolProcessMode } from '../utils/toolLabels'
 import { IconBtn, IconCheck, IconChevronDown, IconChevronUp, IconCopy } from './icons'
 import { useStickToBottom } from '../hooks/useStickToBottom'
 import { DiffCode } from './DiffCode'
+import {
+  formatToolArgsDisplay,
+  formatToolResultDisplay,
+} from '../utils/toolProcessFormat'
 
 interface ProcessTraceProps {
   mode: ToolProcessMode
@@ -49,6 +53,19 @@ export function ProcessTrace({
     alwaysOfferJump: follow,
     deps: [stepSig, mode, collapsed],
   })
+
+  // Precompute file_write args as synthetic unified diffs (path-aware within turn).
+  const formattedArgs = useMemo(() => {
+    const prior = new Map<string, string>()
+    const map = new Map<string, ReturnType<typeof formatToolArgsDisplay>>()
+    for (const s of steps) {
+      map.set(
+        s.id,
+        formatToolArgsDisplay(s.name, s.argsText, prior),
+      )
+    }
+    return map
+  }, [steps, stepSig])
 
   if (mode === 'off' || steps.length === 0) return null
 
@@ -216,62 +233,72 @@ export function ProcessTrace({
 
                     {detailOpen && (argsShown || showResult) && (
                       <div className="mt-1 ml-4 space-y-1">
-                        {argsShown && (
-                          <div>
-                            <div
-                              className="text-[9px] font-semibold mb-0.5 uppercase tracking-wide"
-                              style={{ color: 'var(--text-muted)' }}
-                            >
-                              Args / code
-                            </div>
-                            <div
-                              className="rounded overflow-x-auto process-diff-wrap"
-                              style={{
-                                background: 'var(--bg-primary)',
-                                border: '1px solid var(--border)',
-                                maxHeight: mode === 'full' ? 'none' : '12rem',
-                              }}
-                            >
-                              <DiffCode
-                                text={previewText(s.argsText, mode)}
-                                compact
-                              />
-                            </div>
-                          </div>
-                        )}
-                        {showResult && (
-                          <div>
-                            <div
-                              className="text-[9px] font-semibold mb-0.5 uppercase tracking-wide"
-                              style={{ color: 'var(--text-muted)' }}
-                            >
-                              {s.error ? 'Error' : 'Result / stdout'}
-                            </div>
-                            <div
-                              className="rounded overflow-x-auto process-diff-wrap"
-                              style={{
-                                background: 'var(--bg-primary)',
-                                border: '1px solid var(--border)',
-                                maxHeight: mode === 'full' ? 'none' : '12rem',
-                                color: s.error ? 'var(--error)' : undefined,
-                              }}
-                            >
-                              {s.error ? (
-                                <pre
-                                  className="text-[10px] p-1.5 m-0 whitespace-pre-wrap break-all font-mono"
-                                  style={{ color: 'var(--error)', margin: 0 }}
-                                >
-                                  {previewText(s.error, mode)}
-                                </pre>
-                              ) : (
+                        {argsShown && (() => {
+                          const fmt = formattedArgs.get(s.id) || {
+                            text: s.argsText || '',
+                          }
+                          const body = previewText(fmt.text, mode)
+                          return (
+                            <div>
+                              <div
+                                className="text-[9px] font-semibold mb-0.5 uppercase tracking-wide"
+                                style={{ color: 'var(--text-muted)' }}
+                              >
+                                {fmt.caption || 'Args / code'}
+                              </div>
+                              <div
+                                className="rounded overflow-x-auto process-diff-wrap"
+                                style={{
+                                  background: 'var(--bg-primary)',
+                                  border: '1px solid var(--border)',
+                                  maxHeight: mode === 'full' ? 'none' : '14rem',
+                                }}
+                              >
                                 <DiffCode
-                                  text={previewText(s.resultText, mode)}
+                                  text={body}
+                                  className={fmt.className}
                                   compact
                                 />
-                              )}
+                              </div>
                             </div>
-                          </div>
-                        )}
+                          )
+                        })()}
+                        {showResult && (() => {
+                          const fmt = formatToolResultDisplay(s.name, s.resultText)
+                          return (
+                            <div>
+                              <div
+                                className="text-[9px] font-semibold mb-0.5 uppercase tracking-wide"
+                                style={{ color: 'var(--text-muted)' }}
+                              >
+                                {s.error ? 'Error' : 'Result / stdout'}
+                              </div>
+                              <div
+                                className="rounded overflow-x-auto process-diff-wrap"
+                                style={{
+                                  background: 'var(--bg-primary)',
+                                  border: '1px solid var(--border)',
+                                  maxHeight: mode === 'full' ? 'none' : '14rem',
+                                }}
+                              >
+                                {s.error ? (
+                                  <pre
+                                    className="text-[10px] p-1.5 m-0 whitespace-pre-wrap break-all font-mono"
+                                    style={{ color: 'var(--error)', margin: 0 }}
+                                  >
+                                    {previewText(s.error, mode)}
+                                  </pre>
+                                ) : (
+                                  <DiffCode
+                                    text={previewText(fmt.text, mode)}
+                                    className={fmt.className}
+                                    compact
+                                  />
+                                )}
+                              </div>
+                            </div>
+                          )
+                        })()}
                       </div>
                     )}
                   </li>
