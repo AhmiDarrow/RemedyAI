@@ -62,7 +62,13 @@ const FALLBACK_COMMANDS: CommandDefinition[] = [
   { name: '/compact', description: 'Compact conversation', aliases: [], arguments: null },
   { name: '/remember', description: 'Save a memory', aliases: [], arguments: null },
   { name: '/thinking', description: 'Toggle thinking visibility', aliases: [], arguments: null },
-  { name: '/export', description: 'Export session', aliases: [], arguments: null },
+  { name: '/export', description: 'Export session as .txt', aliases: [], arguments: null },
+  {
+    name: '/import-session',
+    description: 'Import session from .txt / .md',
+    aliases: ['/session-import'],
+    arguments: 'path',
+  },
 ]
 
 const MAX_FILES = 12

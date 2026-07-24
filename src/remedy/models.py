@@ -375,5 +375,13 @@ class AgentConfig(BaseModel):
         default="auto",
         description="Memory Harness: off | manual | auto",
     )
-    harness_min_context_pct: float = Field(default=0.35, ge=0.05, le=0.95)
-    harness_max_context_pct: float = Field(default=0.70, ge=0.1, le=0.99)
+    harness_min_context_pct: float = Field(default=0.75, ge=0.05, le=0.95)
+    harness_max_context_pct: float = Field(default=0.92, ge=0.1, le=0.99)
+    thinking_level: str = Field(
+        default="high",
+        description="Deliberation level: off | low | medium | high",
+    )
+    approval_mode: str = Field(
+        default="ask",
+        description="High-impact shell: ask | auto",
+    )

@@ -199,7 +199,7 @@ export function streamMessage(
 export async function executeCommand(
   sessionId: string,
   command: string,
-): Promise<{ text: string; action?: string }> {
+): Promise<{ text: string; action?: string; session_id?: string }> {
   return apiFetch(`/sessions/${sessionId}/command`, {
     method: 'POST',
     body: JSON.stringify({ command }),
@@ -247,8 +247,36 @@ export async function revertMessageApi(
   return editFromMessageApi(sessionId, msgId)
 }
 
-export async function exportSession(sessionId: string): Promise<{ markdown: string; filename: string }> {
-  return apiFetch(`/sessions/${sessionId}/export`)
+export async function exportSession(
+  sessionId: string,
+  format: 'txt' | 'md' = 'txt',
+): Promise<{ text: string; markdown: string; filename: string; format: string }> {
+  return apiFetch(`/sessions/${sessionId}/export?format=${format}`)
+}
+
+/** Create a session from a plain-text or legacy markdown export body. */
+export async function importSession(params: {
+  text?: string
+  path?: string
+  title?: string
+  model?: string
+  agent?: string
+  project_path?: string
+}): Promise<{
+  id: string
+  title: string
+  model?: string | null
+  agent?: string | null
+  project_path?: string | null
+  message_count: number
+  imported_messages: number
+  created_at?: string | null
+  updated_at?: string | null
+}> {
+  return apiFetch('/sessions/import', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  })
 }
 
 export async function listCustomCommands(): Promise<{ commands: { name: string; description: string; file: string }[] }> {

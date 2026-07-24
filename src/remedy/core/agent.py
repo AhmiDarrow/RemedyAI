@@ -22,10 +22,14 @@ import aiohttp
 from remedy.core.errors import SecurityError, format_tool_error
 from remedy.core.providers import ProviderAdapter, get_provider
 from remedy.core.react_policy import (
+    FILE_READ_CHAR_CAP as _FILE_READ_CHAR_CAP,
+    HARD_SAFETY_CHARS as _HARD_SAFETY_CHARS,
     HISTORY_CHAR_BUDGET as _HISTORY_CHAR_BUDGET,
     HISTORY_MSG_LIMIT as _HISTORY_MSG_LIMIT,
+    HISTORY_MSG_SOFT_TRIM as _HISTORY_MSG_SOFT_TRIM,
     MAX_PARALLEL_TOOLS as _MAX_PARALLEL_TOOLS,
     MAX_REACT_STEPS as _MAX_REACT_STEPS,
+    TOOL_RESULT_CHAR_CAP as _TOOL_RESULT_CHAR_CAP,
     _build_system_prompt,
     _looks_like_pseudo_tools,
     _message_wants_tools,
@@ -112,15 +116,17 @@ class BasicRuntime(AgentRuntime):
         self._harness_mode: str = (
             str(getattr(config, "harness_mode", None) or "auto").strip().lower()
         )
+        # Stay hands-off until context is genuinely full (was 0.35/0.70 — too early).
         self._harness_min_pct: float = float(
-            getattr(config, "harness_min_context_pct", None) or 0.35
+            getattr(config, "harness_min_context_pct", None) or 0.75
         )
         self._harness_max_pct: float = float(
-            getattr(config, "harness_max_context_pct", None) or 0.70
+            getattr(config, "harness_max_context_pct", None) or 0.92
         )
-        tl = str(getattr(config, "thinking_level", None) or "medium").strip().lower()
+        # Default high — medium/off were throttling max_tokens and truncating reasoning.
+        tl = str(getattr(config, "thinking_level", None) or "high").strip().lower()
         self._thinking_level: str = (
-            tl if tl in ("off", "low", "medium", "high") else "medium"
+            tl if tl in ("off", "low", "medium", "high") else "high"
         )
         am = str(getattr(config, "approval_mode", None) or "ask").strip().lower()
         self._approval_mode: str = am if am in ("ask", "auto") else "ask"
@@ -218,9 +224,14 @@ class BasicRuntime(AgentRuntime):
                     tool_name="file_read",
                     suggestion="Check permissions or try list_dir on the parent path.",
                 )
-            # Cap large files for context safety
-            if len(data) > 200_000:
-                return data[:200_000] + f"\n\n... [truncated, {len(data)} bytes total]"
+            # Full file contents — only emergency OOM guard (not a quality limit).
+            cap = _FILE_READ_CHAR_CAP if _FILE_READ_CHAR_CAP > 0 else _HARD_SAFETY_CHARS
+            if len(data) > cap:
+                return (
+                    data[:cap]
+                    + f"\n\n... [safety cap {cap} chars of {len(data)} — "
+                    f"read a smaller path or a specific section if needed]"
+                )
             self._track_artifact(str(target))
             return data
 
@@ -275,8 +286,9 @@ class BasicRuntime(AgentRuntime):
                     except ValueError:
                         rel = str(p)
                     lines.append(f"{'dir ' if p.is_dir() else 'file'} {rel}")
-                    if len(lines) >= 200:
-                        lines.append("... (truncated)")
+                    # Generous listing (no short 200-entry wall).
+                    if len(lines) >= 50_000:
+                        lines.append(f"... ({len(lines)}+ entries; listing safety stop)")
                         break
             except OSError as e:
                 return format_tool_error(
@@ -337,10 +349,17 @@ class BasicRuntime(AgentRuntime):
             sandbox = SubprocessSandbox(allowed_paths=roots or [root])
             result = await sandbox.execute(argv, workdir=root, timeout_seconds=60.0)
             parts = [f"exit_code={result.exit_code}", f"cwd={root}"]
+            # Full stdout/stderr — no quality truncation for the model.
             if result.stdout:
-                parts.append(result.stdout[:50_000])
+                out = result.stdout
+                if len(out) > _HARD_SAFETY_CHARS:
+                    out = out[:_HARD_SAFETY_CHARS] + f"\n…[stdout safety cap {_HARD_SAFETY_CHARS}]"
+                parts.append(out)
             if result.stderr:
-                parts.append(f"stderr:\n{result.stderr[:20_000]}")
+                err = result.stderr
+                if len(err) > _HARD_SAFETY_CHARS:
+                    err = err[:_HARD_SAFETY_CHARS] + f"\n…[stderr safety cap {_HARD_SAFETY_CHARS}]"
+                parts.append(f"stderr:\n{err}")
             if result.exit_code != 0:
                 parts.append(
                     "Suggestion: Read stderr, fix flags/paths/cwd, or try a different "
@@ -945,7 +964,7 @@ class BasicRuntime(AgentRuntime):
         """Hot-apply LLM / persona / project settings without restarting."""
         if thinking_level is not None:
             tl = str(thinking_level).strip().lower()
-            self._thinking_level = tl if tl in ("off", "low", "medium", "high") else "medium"
+            self._thinking_level = tl if tl in ("off", "low", "medium", "high") else "high"
         if approval_mode is not None:
             try:
                 from remedy.core.approvals import APPROVALS
@@ -1203,11 +1222,16 @@ class BasicRuntime(AgentRuntime):
             if role == "assistant":
                 if content.startswith("@@") or "[LLM" in content[:40]:
                     continue
-                # Soft-trim huge prior answers (raised with HISTORY_CHAR_BUDGET)
-                if len(content) > 12_000:
-                    content = content[:12_000] + "\n…[truncated]"
+                # Soft-trim only when explicitly configured (>0). Default 0 = full text.
+                if _HISTORY_MSG_SOFT_TRIM > 0 and len(content) > _HISTORY_MSG_SOFT_TRIM:
+                    content = content[:_HISTORY_MSG_SOFT_TRIM] + "\n…[truncated]"
+            # Prefer dropping older turns over mid-message slicing.
             if len(content) > budget:
-                content = content[:budget] + "\n…[truncated]"
+                if selected:
+                    break
+                # Newest message alone exceeds budget — keep full unless soft-trim on.
+                if _HISTORY_MSG_SOFT_TRIM > 0:
+                    content = content[:budget] + "\n…[truncated]"
             budget -= len(content)
             selected.append({"role": role, "content": content})
             if budget <= 0:
@@ -1276,8 +1300,13 @@ class BasicRuntime(AgentRuntime):
                     tool_name=name or "unknown",
                     suggestion="Retry with corrected arguments or a different tool.",
                 )
-            if len(content_str) > 48_000:
-                content_str = content_str[:48_000] + "\n…[tool output truncated]"
+            # Full tool results for the model (cap only if TOOL_RESULT_CHAR_CAP > 0).
+            cap = _TOOL_RESULT_CHAR_CAP if _TOOL_RESULT_CHAR_CAP > 0 else _HARD_SAFETY_CHARS
+            if len(content_str) > cap:
+                content_str = (
+                    content_str[:cap]
+                    + f"\n…[safety cap {cap} chars — re-run with a narrower query if needed]"
+                )
             result_cache[fp] = content_str
             seen_fps.add(fp)
             return content_str
@@ -1465,7 +1494,12 @@ class BasicRuntime(AgentRuntime):
                 from remedy.memory.harness.pruner import prune_messages_for_send
 
                 if self._harness_mode != "off":
-                    history = prune_messages_for_send(history)
+                    # max_tool_chars=0 → no content shortening (dedupe only).
+                    history = prune_messages_for_send(
+                        history,
+                        max_tool_chars=_TOOL_RESULT_CHAR_CAP,
+                        dedupe_tools=True,
+                    )
             user_content = build_multimodal_user_content(message, attachments)
             messages: list[dict[str, Any]] = [
                 {
@@ -1525,21 +1559,21 @@ class BasicRuntime(AgentRuntime):
             headers = self._provider.auth_headers(self._llm_api_key)
             endpoint = self._provider.chat_endpoint(self._llm_base_url)
 
-            # Long project reviews need headroom; cap overall wall so a runaway
-            # stream cannot hang forever (sock_read still covers silence).
-            timeout = aiohttp.ClientTimeout(total=900, sock_read=300, connect=30)
+            # Long agent runs: high wall-clock + read idle so multi-step work
+            # (and long thinking streams) are not killed mid-flight.
+            timeout = aiohttp.ClientTimeout(total=3_600, sock_read=900, connect=60)
             connector = aiohttp.TCPConnector(
-                limit=12,
+                limit=24,
                 ttl_dns_cache=300,
             )
-            # How many times we auto-continue after finish_reason=length / max_tokens.
-            max_length_continuations = 6
+            # Auto-continue after finish_reason=length / max_tokens until complete.
+            max_length_continuations = 64
             length_continuations = 0
             # Retry once after repairing DeepSeek reasoning_content on tool turns.
             reasoning_repair_done = False
             # Soft API errors: keep going when we already have tool context.
             api_soft_failures = 0
-            max_api_soft_failures = 3
+            max_api_soft_failures = 8
             # Sticky force-answer after recoverable provider failures.
             force_answer_sticky = False
             # One OAuth/API re-auth attempt per turn (xAI 401 → refresh token).
@@ -1549,14 +1583,16 @@ class BasicRuntime(AgentRuntime):
             ) as http:
                 for step in range(self._max_react_steps):
                     is_final_step = step >= self._max_react_steps - 1
-                    # Force answer before the hard wall (and whenever tools disabled).
+                    # Only force a final answer at the true step wall (or sticky).
+                    # Early force-answer (old: step>=8) made long tool chains "stuck".
                     force_answer = (
                         is_final_step or not tools or force_answer_sticky
                     )
-                    # Also force answer if we have already spent many tool steps
-                    # and produced no visible text — keep UX snappy.
-                    if step >= 8 and not produced_user_text:
-                        force_answer = True
+                    # Soft warning only in the last few steps if still tool-only.
+                    near_wall = step >= max(1, self._max_react_steps - 4)
+                    if near_wall and not produced_user_text and not is_final_step:
+                        # Nudge toward synthesis without hard-stopping tools yet.
+                        pass
                     step_tools = None if force_answer else tools
 
                     if force_answer and step > 0 and length_continuations == 0:
@@ -1567,7 +1603,7 @@ class BasicRuntime(AgentRuntime):
                                 "content": (
                                     "Stop calling tools. Using the information above, "
                                     "give your complete final answer to the user now. "
-                                    "Do not cut off mid-section."
+                                    "Be thorough — do not cut off mid-section."
                                 ),
                             }
                         )
@@ -1584,7 +1620,7 @@ class BasicRuntime(AgentRuntime):
                         messages=messages,
                         tools=step_tools,
                         stream=use_openai_sse,
-                        thinking_level=getattr(self, "_thinking_level", "medium"),
+                        thinking_level=getattr(self, "_thinking_level", "high"),
                     )
 
                     collected: dict[str, Any] = {"content": None, "tool_calls": None}
@@ -2009,7 +2045,7 @@ class BasicRuntime(AgentRuntime):
                     messages=messages,
                     tools=None,
                     stream=use_openai_sse,
-                    thinking_level=getattr(self, "_thinking_level", "medium"),
+                    thinking_level=getattr(self, "_thinking_level", "high"),
                 )
                 try:
                     async with aiohttp.ClientSession(

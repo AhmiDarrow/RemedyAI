@@ -16,6 +16,8 @@ interface SidebarProps {
   onNew: () => void
   onDelete: (id: string) => void
   onRename?: (id: string, title: string) => void
+  onExport?: (id: string) => void
+  onImport?: () => void
 }
 
 export function Sidebar({
@@ -25,6 +27,8 @@ export function Sidebar({
   onNew,
   onDelete,
   onRename,
+  onExport,
+  onImport,
 }: SidebarProps) {
   const [query, setQuery] = useState('')
   const [meta, setMeta] = useState<Record<string, SessionMeta>>(() => getAllSessionMeta())
@@ -117,6 +121,41 @@ export function Sidebar({
         >
           + New Session
         </button>
+        {(onExport || onImport) && (
+          <div className="flex gap-1.5">
+            {onImport && (
+              <button
+                type="button"
+                onClick={onImport}
+                className="flex-1 px-2 py-1.5 rounded-md text-xs font-medium transition-colors"
+                style={{
+                  background: 'var(--bg-primary)',
+                  border: '1px solid var(--border)',
+                  color: 'var(--text-secondary)',
+                }}
+                title="Import session from .txt file"
+              >
+                Import
+              </button>
+            )}
+            {onExport && (
+              <button
+                type="button"
+                onClick={() => activeId && onExport(activeId)}
+                disabled={!activeId}
+                className="flex-1 px-2 py-1.5 rounded-md text-xs font-medium transition-colors disabled:opacity-40"
+                style={{
+                  background: 'var(--bg-primary)',
+                  border: '1px solid var(--border)',
+                  color: 'var(--text-secondary)',
+                }}
+                title="Export active session as .txt"
+              >
+                Export
+              </button>
+            )}
+          </div>
+        )}
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}

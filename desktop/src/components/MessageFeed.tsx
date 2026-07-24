@@ -2,6 +2,8 @@ import {
   useMemo,
   useState,
   useCallback,
+  useEffect,
+  useRef,
   type ReactNode,
   Fragment,
 } from 'react'
@@ -73,7 +75,8 @@ const STARTERS = [
   { label: 'Plan a task', text: 'Help me plan: ' },
 ]
 
-const COLLAPSE_CHARS = 1400
+/** Do not collapse answers — user wants full provider text visible. */
+const COLLAPSE_CHARS = Number.POSITIVE_INFINITY
 
 function formatTime(iso: string | null | undefined): string | null {
   if (!iso) return null
@@ -132,6 +135,20 @@ function CodeBlock({
 
 function ThinkingPanel({ text, openDefault = false }: { text: string; openDefault?: boolean }) {
   const [open, setOpen] = useState(openDefault)
+  const bodyRef = useRef<HTMLDivElement | null>(null)
+  // Keep expanded while streaming new thinking; user can still collapse.
+  useEffect(() => {
+    if (openDefault) setOpen(true)
+  }, [openDefault])
+  // Stick to bottom of thinking while it grows (unless user scrolled up).
+  useEffect(() => {
+    const el = bodyRef.current
+    if (!el || !open) return
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    if (nearBottom || openDefault) {
+      el.scrollTop = el.scrollHeight
+    }
+  }, [text, open, openDefault])
   if (!text.trim()) return null
   return (
     <div
@@ -145,12 +162,13 @@ function ThinkingPanel({ text, openDefault = false }: { text: string; openDefaul
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
       >
-        <span>Thinking</span>
+        <span>Thinking{text.length > 80 ? ` · ${text.length.toLocaleString()} chars` : ''}</span>
         <span>{open ? '▾' : '▸'}</span>
       </button>
       {open && (
         <div
-          className="px-2.5 pb-2 text-xs whitespace-pre-wrap max-h-48 overflow-y-auto"
+          ref={bodyRef}
+          className="px-2.5 pb-2 text-xs whitespace-pre-wrap max-h-[min(60vh,28rem)] overflow-y-auto"
           style={{ color: 'var(--text-secondary)', lineHeight: 1.45 }}
         >
           {text}

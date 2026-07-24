@@ -55,6 +55,13 @@ _BUILTIN_COMMANDS: list[dict] = [
     {"name": "/approve", "description": "Approve a pending high-impact action", "aliases": [], "arguments": "id"},
     {"name": "/deny", "description": "Deny a pending high-impact action", "aliases": [], "arguments": "id"},
     {"name": "/import", "description": "Import a folder of notes into memory", "aliases": [], "arguments": "path"},
+    {"name": "/export", "description": "Export this session as a .txt file (desktop)", "aliases": [], "arguments": None},
+    {
+        "name": "/import-session",
+        "description": "Import a session from .txt/.md (path or desktop file picker)",
+        "aliases": ["/session-import"],
+        "arguments": "path",
+    },
     {"name": "/skills", "description": "List available skills", "aliases": [], "arguments": None},
     {"name": "/handoff", "description": "List handoff notes", "aliases": [], "arguments": None},
     {"name": "/init", "description": "Scan the project and generate AGENTS.md", "aliases": [], "arguments": "path"},
@@ -352,12 +359,106 @@ async def handle_slash_command(
             return {"text": f"Unknown approval id: {aid}"}
         return {"text": f"Denied `{item.id}` — command will not run."}
 
-    if stripped.startswith("/import"):
+    if stripped in ("/export", "/export-session"):
+        # Desktop intercepts this for file download; CLI/API returns guidance.
+        return {
+            "text": (
+                "Export this session as a plain-text `.txt` file from the desktop:\n"
+                "• Right-click the session tab → export\n"
+                "• Command palette → **Export Session**\n"
+                "• Sidebar → **Export**\n"
+                "• API: `GET /api/sessions/{id}/export?format=txt`"
+            ),
+            "action": "export_session",
+        }
+
+    if stripped.startswith("/import-session") or stripped.startswith("/session-import"):
+        # Desktop uses the file picker when no path is given.
+        path = ""
+        for prefix in ("/import-session", "/session-import"):
+            if raw.lower().startswith(prefix):
+                path = raw[len(prefix) :].strip().strip('"').strip("'")
+                break
+        if not path:
+            return {
+                "text": (
+                    "Import a session from a `.txt` or `.md` export:\n"
+                    "• Desktop: Command palette → **Import Session** (file picker)\n"
+                    "• Slash: `/import-session <path-to-file.txt>`\n"
+                    "• API: `POST /api/sessions/import` with `{ \"text\": \"...\" }`"
+                ),
+                "action": "import_session",
+            }
+        if memory is None:
+            return {"text": "Memory store not available."}
+        from remedy.core.workspace import (
+            allowed_roots_for_scope,
+            default_project_from_config,
+            resolve_under_roots,
+        )
+        from remedy.memory.session_io import parse_session_text
+        from remedy.models import ChatMessage, ChatMessageRole
+        from remedy.models import ChatSession as CS
+
+        cfg = load_config()
+        scope = str(cfg.get("access_scope") or "home")
+        project = default_project_from_config(cfg)
+        roots = allowed_roots_for_scope(scope, project)
+        try:
+            fpath = resolve_under_roots(path, roots, access_scope=scope)
+        except Exception as exc:
+            return {"text": f"Path not allowed: {exc}"}
+        if not fpath.is_file():
+            return {"text": f"File not found: {fpath}"}
+        try:
+            text = fpath.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            text = fpath.read_text(encoding="utf-8", errors="replace")
+        try:
+            parsed = parse_session_text(text)
+        except ValueError as exc:
+            return {"text": f"Import failed: {exc}"}
+        title = (parsed.title or "Imported Session")[:200]
+        session = CS(title=title, model=parsed.model, agent=parsed.agent)
+        saved = await memory.create_chat_session(session)
+        role_map = {
+            "user": ChatMessageRole.USER,
+            "assistant": ChatMessageRole.ASSISTANT,
+            "system": ChatMessageRole.SYSTEM,
+            "tool": ChatMessageRole.TOOL,
+        }
+        n = 0
+        for pm in parsed.messages:
+            role = role_map.get((pm.role or "user").lower(), ChatMessageRole.USER)
+            if role == ChatMessageRole.SYSTEM and not (pm.content or "").strip():
+                continue
+            await memory.add_chat_message(
+                ChatMessage(
+                    session_id=saved.id,
+                    role=role,
+                    content=pm.content or "",
+                    model=pm.model or parsed.model,
+                    agent=pm.agent or parsed.agent,
+                )
+            )
+            n += 1
+        return {
+            "text": (
+                f"Imported session **{title}** (`{saved.id[:8]}…`) "
+                f"with **{n}** messages."
+            ),
+            "action": "import_session_done",
+            "session_id": saved.id,
+        }
+
+    # Knowledge-pack import (folder of notes) — must not match /import-session
+    if stripped == "/import" or stripped.startswith("/import "):
         path = raw[len("/import") :].strip().strip('"').strip("'")
         if not path:
             return {
                 "text": "Usage: /import <folder path>\n"
-                "Imports .md/.txt notes into durable memory (knowledge pack)."
+                "Imports .md/.txt notes into durable memory (knowledge pack).\n"
+                "To import a chat session, use `/import-session <file.txt>`."
             }
         if memory is None:
             return {"text": "Memory store not available."}

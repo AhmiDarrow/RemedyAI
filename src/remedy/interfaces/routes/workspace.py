@@ -25,6 +25,7 @@ from remedy.interfaces.api_models import (
     ChatResponse,
     CommandRequest,
     CreateSessionRequest,
+    ImportSessionRequest,
     MemoryAddRequest,
     MemorySearchRequest,
     SendMessageRequest,
@@ -278,39 +279,150 @@ def register_workspace_routes(app: FastAPI, *, runtime=None, gateway=None, memor
         """Legacy alias → edit-from (user messages only, cascade to later msgs)."""
         return await edit_from_message(session_id, msg_id)
 
-    # -- session export -------------------------------------------------------
+    # -- session export / import (plain text) ---------------------------------
     @app.get("/api/sessions/{session_id}/export")
-    async def export_session(session_id: str):
+    async def export_session(
+        session_id: str,
+        format: str = Query(default="txt", description="txt (default) or md"),
+    ):
         if memory is None:
             raise HTTPException(503, "Memory store not available")
         session = await memory.get_chat_session(session_id)
         if not session:
             raise HTTPException(404, "Session not found")
         messages = await memory.get_chat_messages(session_id, limit=10000)
+        from remedy.memory.session_io import (
+            format_session_markdown,
+            format_session_txt,
+            safe_filename_stem,
+        )
+
         session_title = getattr(session, "title", "Session") or "Session"
-        lines = [f"# {session_title}", "", f"**Session ID:** `{session_id}`", f"**Messages:** {len(messages)}", ""]
-        for m in messages:
-            role = getattr(m, "role", None) or (m.get("role") if isinstance(m, dict) else "user")
-            content = getattr(m, "content", None) or (m.get("content") if isinstance(m, dict) else "")
-            created = getattr(m, "created_at", None) or (m.get("created_at") if isinstance(m, dict) else "")
-            agent = getattr(m, "agent", None) or (m.get("agent") if isinstance(m, dict) else "")
-            model = getattr(m, "model", None) or (m.get("model") if isinstance(m, dict) else "")
-            header = f"**{role.capitalize()}**"
-            if agent:
-                header += f" ({agent})"
-            if model:
-                header += f" — {model}"
-            if created:
-                header += f" `{created[:19]}`"
-            lines.append(header)
-            lines.append("")
-            if content:
-                lines.append(content)
-                lines.append("")
-            lines.append("---")
-            lines.append("")
-        markdown = "\n".join(lines)
-        safe_name = "".join(c if c.isalnum() or c in "._- " else "_" for c in session_title)[:60]
-        filename = f"remedy-export-{safe_name}.md"
-        return {"markdown": markdown, "filename": filename}
+        fmt = (format or "txt").strip().lower()
+        if fmt in ("md", "markdown"):
+            body = format_session_markdown(
+                title=session_title, session_id=session_id, messages=messages
+            )
+            ext = "md"
+        else:
+            body = format_session_txt(
+                title=session_title,
+                session_id=session_id,
+                messages=messages,
+                model=getattr(session, "model", None),
+                agent=getattr(session, "agent", None),
+            )
+            ext = "txt"
+        safe_name = safe_filename_stem(session_title)
+        filename = f"remedy-export-{safe_name}.{ext}"
+        # ``text`` is canonical; ``markdown`` kept for older desktop clients.
+        return {
+            "text": body,
+            "markdown": body,
+            "filename": filename,
+            "format": ext,
+        }
+
+    @app.post("/api/sessions/import")
+    async def import_session(req: ImportSessionRequest):
+        """Create a new chat session from plain-text or legacy markdown export."""
+        from remedy.memory.session_io import parse_session_text
+        from remedy.models import ChatMessage, ChatMessageRole
+        from remedy.models import ChatSession as CS
+
+        if memory is None:
+            raise HTTPException(503, "Memory store not available")
+
+        text = (req.text or "").strip()
+        if not text and req.path:
+            from remedy.core.workspace import (
+                allowed_roots_for_scope,
+                default_project_from_config,
+                resolve_under_roots,
+            )
+
+            cfg = load_config()
+            scope = str(cfg.get("access_scope") or "home")
+            project = default_project_from_config(cfg)
+            roots = allowed_roots_for_scope(scope, project)
+            try:
+                path = resolve_under_roots(
+                    str(req.path), roots, access_scope=scope
+                )
+            except Exception as exc:
+                raise HTTPException(400, f"Path not allowed: {exc}") from exc
+            if not path.is_file():
+                raise HTTPException(404, f"File not found: {path}")
+            try:
+                text = path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                text = path.read_text(encoding="utf-8", errors="replace")
+
+        if not text.strip():
+            raise HTTPException(400, "Provide text or path to a session .txt / .md export")
+
+        try:
+            parsed = parse_session_text(text)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+        title = (req.title or parsed.title or "Imported Session").strip()
+        model = req.model or parsed.model
+        agent = req.agent or parsed.agent
+
+        from remedy.core.workspace import ensure_project_dir, resolve_project_path
+
+        raw_project = req.project_path or load_config().get("project_path")
+        project_path = None
+        if raw_project and str(raw_project).strip() and str(raw_project).strip() not in (".", "./"):
+            try:
+                project_path = str(ensure_project_dir(resolve_project_path(str(raw_project))))
+            except Exception:
+                project_path = str(resolve_project_path(str(raw_project)))
+
+        session = CS(
+            title=title[:200],
+            model=model,
+            agent=agent,
+            project_path=project_path,
+        )
+        saved = await memory.create_chat_session(session)
+
+        role_map = {
+            "user": ChatMessageRole.USER,
+            "assistant": ChatMessageRole.ASSISTANT,
+            "system": ChatMessageRole.SYSTEM,
+            "tool": ChatMessageRole.TOOL,
+        }
+        imported = 0
+        for pm in parsed.messages:
+            role = role_map.get((pm.role or "user").lower(), ChatMessageRole.USER)
+            if role == ChatMessageRole.SYSTEM and not (pm.content or "").strip():
+                continue
+            msg = ChatMessage(
+                session_id=saved.id,
+                role=role,
+                content=pm.content or "",
+                model=pm.model or model,
+                agent=pm.agent or agent,
+            )
+            await memory.add_chat_message(msg)
+            imported += 1
+
+        refreshed = await memory.get_chat_session(saved.id)
+        return {
+            "id": saved.id,
+            "title": refreshed.title if refreshed else title,
+            "model": refreshed.model if refreshed else model,
+            "agent": refreshed.agent if refreshed else agent,
+            "project_path": refreshed.project_path if refreshed else project_path,
+            "message_count": refreshed.message_count if refreshed else imported,
+            "imported_messages": imported,
+            "created_at": saved.created_at.isoformat() if saved.created_at else None,
+            "updated_at": (
+                refreshed.updated_at.isoformat()
+                if refreshed and refreshed.updated_at
+                else None
+            ),
+        }
 

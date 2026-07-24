@@ -81,11 +81,12 @@ class TestOpenAIProvider:
             [{"role": "user", "content": "hello"}],
             tools=None,
             stream=False,
+            thinking_level="medium",
         )
         assert body["model"] == "gpt-4o-mini"
         assert body["stream"] is False
         assert body["temperature"] == 0.6  # chat / no-tools path
-        assert body["max_tokens"] >= 16000  # long reviews must not hit 4k wall
+        assert body["max_tokens"] >= 128_000  # never throttle completion length
         assert "tools" not in body
 
     def test_build_body_with_tools(self):
@@ -94,12 +95,30 @@ class TestOpenAIProvider:
             "type": "function",
             "function": {"name": "search", "description": "Search", "parameters": {}},
         }]
-        body = p.build_body("gpt-4o", [{"role": "user", "content": "q"}], tools=tools, stream=True)
+        body = p.build_body(
+            "gpt-4o",
+            [{"role": "user", "content": "q"}],
+            tools=tools,
+            stream=True,
+            thinking_level="medium",
+        )
         assert body["tools"] == tools
         assert body["tool_choice"] == "auto"
         assert body["stream"] is True
         assert body["temperature"] == 0.4  # tool path — more decisive
-        assert body["max_tokens"] >= 4096
+        assert body["max_tokens"] >= 128_000  # full budget with tools too
+
+    def test_build_body_never_throttles_by_thinking_level(self):
+        p = OpenAIProvider()
+        for level in ("off", "low", "medium", "high"):
+            body = p.build_body(
+                "gpt-4o",
+                [{"role": "user", "content": "q"}],
+                tools=None,
+                stream=False,
+                thinking_level=level,
+            )
+            assert body["max_tokens"] >= 128_000, level
 
     def test_extract_response_text(self):
         p = OpenAIProvider()

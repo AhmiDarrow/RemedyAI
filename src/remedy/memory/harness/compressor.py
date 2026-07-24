@@ -29,11 +29,15 @@ def estimate_tokens(messages: list[dict[str, Any]]) -> int:
 def should_nudge_compress(
     token_estimate: int,
     *,
-    context_window: int = 128_000,
-    min_pct: float = 0.35,
-    max_pct: float = 0.70,
+    context_window: int = 200_000,
+    min_pct: float = 0.75,
+    max_pct: float = 0.92,
 ) -> str | None:
-    """Return 'soft', 'strong', or None based on fill percentage."""
+    """Return 'soft', 'strong', or None based on fill percentage.
+
+    Defaults stay out of the way until context is genuinely full — early
+    compress nudges made the agent feel stuck mid-task.
+    """
     if context_window <= 0:
         return None
     pct = token_estimate / context_window

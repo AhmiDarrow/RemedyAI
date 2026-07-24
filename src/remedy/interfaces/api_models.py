@@ -74,6 +74,21 @@ class UpdateSessionRequest(BaseModel):
     project_path: str | None = None
 
 
+class ImportSessionRequest(BaseModel):
+    """Import a chat session from plain-text (or legacy markdown) export.
+
+    Provide either ``text`` (preferred; client-read file) or ``path`` (server-side
+    read under the configured access scope).
+    """
+
+    text: str | None = Field(default=None, description="Full .txt / .md session export body")
+    path: str | None = Field(default=None, description="Local file path to a session export")
+    title: str | None = Field(default=None, description="Override imported title")
+    model: str | None = None
+    agent: str | None = None
+    project_path: str | None = None
+
+
 class AttachmentRef(BaseModel):
     """Client-side reference to a previously uploaded session attachment."""
 

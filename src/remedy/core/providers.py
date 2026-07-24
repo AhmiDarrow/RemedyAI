@@ -17,20 +17,27 @@ logger = logging.getLogger(__name__)
 
 _THINKING_NUDGES = {
     "off": (
-        "Thinking level: off. Answer directly and concisely. "
-        "Skip long deliberation; prefer action."
+        "Thinking level: off. Prefer action over long internal monologue. "
+        "Still give complete answers — never cut off mid-thought or mid-reply."
     ),
     "low": (
-        "Thinking level: low. Brief reasoning only when needed; keep answers tight."
+        "Thinking level: low. Light reasoning when useful. "
+        "Still give complete answers and full tool work — never truncate."
     ),
     "medium": (
-        "Thinking level: medium. Think step-by-step when useful, then answer clearly."
+        "Thinking level: medium. Think step-by-step when useful, then answer fully. "
+        "Never cut off mid-section; finish the full response."
     ),
     "high": (
         "Thinking level: high. Reason carefully before tools or final answers. "
-        "Check edge cases and verify tool results."
+        "Check edge cases and verify tool results. "
+        "Never truncate thinking or answers — complete every response fully."
     ),
 }
+
+# Provider completion budget: highest widely accepted completion size.
+# We never lower this for thinking_level. Auto-continue covers true hard walls.
+MAX_OUTPUT_TOKENS = 128_000
 
 
 def _thinking_nudge(level: str) -> str:
@@ -164,9 +171,9 @@ class OpenAIProvider(ProviderAdapter):
     def chat_endpoint(self, base_url: str) -> str:
         return f"{base_url.rstrip('/')}/chat/completions"
 
-    # Tool rounds stay modest; final answers (reviews, long write-ups) need headroom.
-    MAX_TOKENS_TOOLS = 12_288
-    MAX_TOKENS_ANSWER = 65_536
+    # Never throttle completion length by thinking level or tool vs answer.
+    MAX_TOKENS_TOOLS = MAX_OUTPUT_TOKENS
+    MAX_TOKENS_ANSWER = MAX_OUTPUT_TOKENS
 
     def build_body(
         self,
@@ -180,19 +187,16 @@ class OpenAIProvider(ProviderAdapter):
     ) -> dict[str, Any]:
         # Slightly lower temp with tools → fewer rambling / fake tool-call transcripts.
         temperature = 0.4 if tools else 0.6
-        level = (thinking_level or "medium").strip().lower()
+        level = (thinking_level or "high").strip().lower()
         if level == "off":
             temperature = 0.3 if tools else 0.5
         elif level == "high":
             temperature = 0.5 if tools else 0.7
+        # Full output budget always — no short answers/thinking from our side.
         if max_tokens is None:
-            max_tokens = self.MAX_TOKENS_TOOLS if tools else self.MAX_TOKENS_ANSWER
-            if level == "high" and not tools:
-                max_tokens = max(max_tokens, 65_536)
-            elif level == "low":
-                max_tokens = min(max_tokens, 8_192 if tools else 16_384)
-            elif level == "off":
-                max_tokens = min(max_tokens, 4_096 if tools else 8_192)
+            max_tokens = MAX_OUTPUT_TOKENS
+        else:
+            max_tokens = max(int(max_tokens), MAX_OUTPUT_TOKENS)
         # Soft system nudge for deliberation (providers without native effort API).
         msgs = list(messages)
         nudge = _thinking_nudge(level)
@@ -220,16 +224,23 @@ class OpenAIProvider(ProviderAdapter):
         # requires it to be passed back on subsequent requests.
         reasoning_raw = msg.get("reasoning_content") or msg.get("reasoning") or ""
         if not isinstance(reasoning_raw, str):
-            reasoning_raw = ""
-        reasoning = reasoning_raw.strip()
-        content = (msg.get("content") or "").strip()
+            reasoning_raw = str(reasoning_raw) if reasoning_raw is not None else ""
+        # Full reasoning — never slice/shorten provider thinking.
+        reasoning = reasoning_raw
+        content_raw = msg.get("content")
+        if content_raw is None:
+            content = ""
+        elif isinstance(content_raw, str):
+            content = content_raw
+        else:
+            content = str(content_raw)
         # Final answers sometimes only appear in reasoning_content.
-        if not content and reasoning and not msg.get("tool_calls"):
+        if not content.strip() and reasoning.strip() and not msg.get("tool_calls"):
             content = reasoning
         return {
-            "content": content or None,
+            "content": content if content else None,
             "tool_calls": msg.get("tool_calls"),
-            "reasoning_content": reasoning or None,
+            "reasoning_content": reasoning if reasoning else None,
         }
 
     def extract_finish_reason(self, response_json: dict[str, Any]) -> str | None:
@@ -291,8 +302,8 @@ class AnthropicProvider(ProviderAdapter):
     def chat_endpoint(self, base_url: str) -> str:
         return f"{base_url.rstrip('/')}/v1/messages"
 
-    MAX_TOKENS_TOOLS = 12_288
-    MAX_TOKENS_ANSWER = 65_536
+    MAX_TOKENS_TOOLS = MAX_OUTPUT_TOKENS
+    MAX_TOKENS_ANSWER = MAX_OUTPUT_TOKENS
 
     def build_body(
         self,
@@ -305,12 +316,16 @@ class AnthropicProvider(ProviderAdapter):
         thinking_level: str | None = None,
     ) -> dict[str, Any]:
         msgs = list(messages)
-        nudge = _thinking_nudge(thinking_level or "medium")
+        level = (thinking_level or "high").strip().lower()
+        nudge = _thinking_nudge(level)
         if nudge:
             msgs = _prepend_system_nudge(msgs, nudge)
         system_prompt, converted = self._convert_messages(msgs)
+        # Full output budget always — Anthropic requires max_tokens; never throttle it.
         if max_tokens is None:
-            max_tokens = self.MAX_TOKENS_TOOLS if tools else self.MAX_TOKENS_ANSWER
+            max_tokens = MAX_OUTPUT_TOKENS
+        else:
+            max_tokens = max(int(max_tokens), MAX_OUTPUT_TOKENS)
         body: dict[str, Any] = {
             "model": model,
             "messages": converted,

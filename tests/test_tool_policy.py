@@ -14,8 +14,8 @@ from remedy.core.agent import (
 
 def test_max_tool_steps_has_headroom():
     # Real coding turns need headroom; simple turns never spend it.
-    assert _MAX_REACT_STEPS >= 16
-    assert _MAX_PARALLEL_TOOLS >= 4
+    assert _MAX_REACT_STEPS >= 64
+    assert _MAX_PARALLEL_TOOLS >= 8
 
 
 def test_simple_questions_skip_tools():

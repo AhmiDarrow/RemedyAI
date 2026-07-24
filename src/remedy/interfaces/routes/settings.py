@@ -183,9 +183,9 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             "start_in_tray": bool(cfg.get("start_in_tray", False)),
             "close_to_tray": bool(cfg.get("close_to_tray", False)),
             "harness_mode": cfg.get("harness_mode", "auto"),
-            "harness_min_context_pct": float(cfg.get("harness_min_context_pct", 0.35)),
-            "harness_max_context_pct": float(cfg.get("harness_max_context_pct", 0.70)),
-            "thinking_level": str(cfg.get("thinking_level") or "medium").lower(),
+            "harness_min_context_pct": float(cfg.get("harness_min_context_pct", 0.75)),
+            "harness_max_context_pct": float(cfg.get("harness_max_context_pct", 0.92)),
+            "thinking_level": str(cfg.get("thinking_level") or "high").lower(),
             "approval_mode": str(cfg.get("approval_mode") or "ask").lower(),
             "tool_process": _normalize_tool_process(cfg),
             "version": _remedy_version,
@@ -263,7 +263,7 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         if "thinking_level" in updates and updates["thinking_level"] is not None:
             tl = str(updates["thinking_level"]).strip().lower()
             updates["thinking_level"] = (
-                tl if tl in ("off", "low", "medium", "high") else "medium"
+                tl if tl in ("off", "low", "medium", "high") else "high"
             )
 
         if "approval_mode" in updates and updates["approval_mode"] is not None:
@@ -360,7 +360,7 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             "start_in_tray": bool(cfg.get("start_in_tray", False)),
             "close_to_tray": bool(cfg.get("close_to_tray", False)),
             "harness_mode": cfg.get("harness_mode", "auto"),
-            "thinking_level": str(cfg.get("thinking_level") or "medium"),
+            "thinking_level": str(cfg.get("thinking_level") or "high"),
             "approval_mode": str(cfg.get("approval_mode") or "ask"),
             "user_name": str(cfg.get("user_name") or "").strip(),
             "tool_process": _normalize_tool_process(cfg),

@@ -176,7 +176,8 @@ def build_runtime_system_block(
         f"Connected model: {model}\n"
         f"API base URL: {base_url}\n"
         f"Tool budget this turn: up to {max_steps} model steps "
-        f"(final step always answers without tools; budget is dynamic).\n"
+        f"(only the final step forces a no-tool answer — keep working until done).\n"
+        "Prefer finishing the user's task completely over early stop or partial answers.\n"
         "When asked which provider/model you use, answer from this block — do not call tools."
     )
     return f"{system_prompt}\n\n{runtime_info}\n\n{context}"

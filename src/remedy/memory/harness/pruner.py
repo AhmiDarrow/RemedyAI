@@ -24,32 +24,37 @@ def _tool_fingerprint(msg: dict[str, Any]) -> str | None:
 def prune_messages_for_send(
     messages: list[dict[str, Any]],
     *,
-    max_tool_chars: int = 12_000,
+    max_tool_chars: int = 0,
     dedupe_tools: bool = True,
 ) -> list[dict[str, Any]]:
     """Return a pruned *copy* of messages for the provider request.
 
     Does not mutate stored session history. Strategies:
     - Drop empty content noise
-    - Truncate huge tool / assistant bodies with a re-read hint
-    - Deduplicate identical tool results (keep latest)
+    - **No truncation by default** (max_tool_chars=0): full answers/thinking/tools
+    - Optional truncate only when max_tool_chars > 0 (legacy/tests)
+    - Deduplicate identical tool results (keep latest; keeps one full copy)
     """
     if not messages:
         return []
 
-    # First pass: truncate large bodies
+    # First pass: only truncate when explicitly requested (max_tool_chars > 0)
     trimmed: list[dict[str, Any]] = []
     for msg in messages:
         m = dict(msg)
         role = m.get("role")
         content = m.get("content")
-        if isinstance(content, str) and len(content) > max_tool_chars:
+        if (
+            max_tool_chars > 0
+            and isinstance(content, str)
+            and len(content) > max_tool_chars
+        ):
             if role == "tool":
                 m["content"] = (
                     content[:max_tool_chars]
                     + "\n…[harness truncated tool output — re-read file or re-run if needed]"
                 )
-            elif role == "assistant" and len(content) > max_tool_chars:
+            elif role == "assistant":
                 m["content"] = content[:max_tool_chars] + "\n…[truncated]"
         trimmed.append(m)
 

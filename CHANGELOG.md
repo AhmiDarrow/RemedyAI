@@ -2,6 +2,25 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.10.26] — 2026-07-24
+
+### Agent headroom (no cut-off answers / thinking / tools)
+
+- **Provider `max_tokens`**: always **128k** completion budget — never throttled by thinking level or tool vs answer.
+- **No soft-trim** of history answers, tool results, file reads, bash stdout/stderr (OOM safety only at 50M chars).
+- **Harness prune**: dedupe only by default — does **not** shorten tool/assistant bodies.
+- **ReAct**: up to **128** steps; removed early force-answer at step 8; **64** length auto-continues.
+- **History**: 2000 messages / large char budget; drop oldest turns instead of slicing mid-message.
+- **Thinking default**: **high**; nudges say finish fully, never truncate.
+- **UI**: full answers (no collapse); tall thinking panel with full text.
+- **Sessions**: export/import as plain-text `.txt` (round-trip) via API + desktop.
+
+### Session export / import
+
+- `GET /api/sessions/{id}/export?format=txt|md` — default plain-text export.
+- `POST /api/sessions/import` — create session from `.txt` / legacy `.md` / freeform.
+- Desktop: Sidebar Import/Export, command palette, `/export`, `/import-session`.
+
 ## [0.10.25] — 2026-07-24
 
 ### Partner desktop UX polish

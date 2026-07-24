@@ -19,7 +19,7 @@ import { useTheme } from './hooks/useTheme'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import { useNotifications } from './hooks/useNotifications'
 import { useUpdateChecker } from './hooks/useUpdateChecker'
-import { listAgents, listCommands, exportSession } from './api/messages'
+import { listAgents, listCommands, exportSession, importSession } from './api/messages'
 import { apiFetch } from './api/client'
 import { getSettings, updateSettings } from './api/settings'
 import { isPlaceholderTitle, titleFromPrompt } from './utils/sessionTitle'
@@ -107,7 +107,7 @@ export default function App() {
   } = useTheme()
   const [model, setModel] = useState('gpt-4o-mini')
   const [models, setModels] = useState<ModelInfo[]>([])
-  const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>('medium')
+  const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>('high')
   const [approvalMode, setApprovalMode] = useState<ApprovalMode>('ask')
   const [toolProcessMode, setToolProcessMode] = useState<ToolProcessMode>('off')
   const [planMode, setPlanMode] = useState(false)
@@ -238,7 +238,7 @@ export default function App() {
           } else if (modelsData?.default) {
             setModel(modelsData.default)
           }
-          const tl = String(settings.thinking_level || 'medium').toLowerCase()
+          const tl = String(settings.thinking_level || 'high').toLowerCase()
           if (tl === 'off' || tl === 'low' || tl === 'medium' || tl === 'high') {
             setThinkingLevel(tl)
           }
@@ -308,8 +308,103 @@ export default function App() {
     [activeId, setActiveId],
   )
 
+  const handleExport = useCallback(
+    async (sessionId: string) => {
+      try {
+        const { text, markdown, filename } = await exportSession(sessionId, 'txt')
+        const body = text || markdown || ''
+        const blob = new Blob([body], { type: 'text/plain;charset=utf-8' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = filename.endsWith('.txt') || filename.endsWith('.md')
+          ? filename
+          : `${filename}.txt`
+        a.click()
+        URL.revokeObjectURL(url)
+      } catch (e: unknown) {
+        console.warn('Export failed:', e instanceof Error ? e.message : e)
+      }
+    },
+    [],
+  )
+
+  const handleImport = useCallback(async () => {
+    try {
+      const input = document.createElement('input')
+      input.type = 'file'
+      input.accept = '.txt,.md,text/plain,text/markdown'
+      input.style.display = 'none'
+      const file = await new Promise<File | null>((resolve) => {
+        input.onchange = () => resolve(input.files?.[0] ?? null)
+        input.oncancel = () => resolve(null)
+        document.body.appendChild(input)
+        input.click()
+        window.setTimeout(() => {
+          if (input.parentNode) input.parentNode.removeChild(input)
+        }, 60_000)
+      })
+      if (!file) return
+      const text = await file.text()
+      if (!text.trim()) {
+        console.warn('Import failed: empty file')
+        return
+      }
+      const stem = file.name.replace(/\.(txt|md)$/i, '').trim()
+      const title =
+        stem && !stem.toLowerCase().startsWith('remedy-export') ? stem : undefined
+      const created = await importSession({ text, title })
+      await refreshSessions()
+      if (created?.id) {
+        setActiveId(created.id)
+        setOpenTabs((prev) => new Set([...prev, created.id]))
+      }
+    } catch (e: unknown) {
+      console.warn('Import failed:', e instanceof Error ? e.message : e)
+    }
+  }, [refreshSessions, setActiveId])
+
   const handleCommand = useCallback(
     async (command: string) => {
+      const stripped = command.trim().toLowerCase()
+      // Client-side session file export / import (download + file picker).
+      if (stripped === '/export' || stripped === '/export-session') {
+        const sid = activeId || (await create())?.id
+        if (!sid) return { text: 'No session available to export.' }
+        await handleExport(sid)
+        if (sid) {
+          addCommandMessage(command, 'Exported session as plain-text `.txt` (download started).')
+        }
+        return { text: 'Exported session as .txt', action: 'export_session' }
+      }
+      if (
+        stripped === '/import-session' ||
+        stripped === '/session-import' ||
+        stripped.startsWith('/import-session ') ||
+        stripped.startsWith('/session-import ')
+      ) {
+        const pathArg = command
+          .trim()
+          .replace(/^\/(import-session|session-import)\s*/i, '')
+          .trim()
+        if (pathArg) {
+          const sid = activeId || (await create())?.id
+          if (!sid) return { text: 'No session available.' }
+          const result = await runCommand(command, sid)
+          if (result.text) addCommandMessage(command, result.text)
+          if (result.session_id) {
+            await refreshSessions()
+            setActiveId(result.session_id)
+            setOpenTabs((prev) => new Set([...prev, result.session_id as string]))
+          } else if (result.action === 'import_session_done') {
+            await refreshSessions()
+          }
+          return result
+        }
+        await handleImport()
+        return { text: 'Import session…', action: 'import_session' }
+      }
+
       const sid = activeId || (await create())?.id
       if (!sid) return { text: 'No session available.' }
       const result = await runCommand(command, sid)
@@ -319,9 +414,24 @@ export default function App() {
       if (result.action === 'new_session') {
         await handleNewSession()
       }
+      if (result.action === 'import_session_done' && result.session_id) {
+        await refreshSessions()
+        setActiveId(result.session_id)
+        setOpenTabs((prev) => new Set([...prev, result.session_id as string]))
+      }
       return result
     },
-    [runCommand, handleNewSession, activeId, create, addCommandMessage],
+    [
+      runCommand,
+      handleNewSession,
+      activeId,
+      create,
+      addCommandMessage,
+      handleExport,
+      handleImport,
+      refreshSessions,
+      setActiveId,
+    ],
   )
 
   const handleSend = useCallback(
@@ -404,24 +514,6 @@ export default function App() {
     [activeId, streaming, messages, beginEdit, send, model],
   )
 
-  const handleExport = useCallback(
-    async (sessionId: string) => {
-      try {
-        const { markdown, filename } = await exportSession(sessionId)
-        const blob = new Blob([markdown], { type: 'text/markdown' })
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = filename
-        a.click()
-        URL.revokeObjectURL(url)
-      } catch (e: unknown) {
-        console.warn('Export failed:', e instanceof Error ? e.message : e)
-      }
-    },
-    [],
-  )
-
   useEffect(() => {
     if (!streaming && messages.length > 0) {
       const last = messages[messages.length - 1]
@@ -434,6 +526,22 @@ export default function App() {
   const paletteCommands: CommandItem[] = useMemo(() => {
     const items: CommandItem[] = [
       { id: 'new', label: 'New Session', description: 'Start a new chat session', category: 'session', action: handleNewSession },
+      {
+        id: 'export',
+        label: 'Export Session',
+        description: 'Download active session as .txt',
+        category: 'session',
+        action: () => {
+          if (activeId) void handleExport(activeId)
+        },
+      },
+      {
+        id: 'import',
+        label: 'Import Session',
+        description: 'Import a session from .txt / .md',
+        category: 'session',
+        action: () => void handleImport(),
+      },
       { id: 'palette', label: 'Command Palette', description: 'Open this palette', category: 'general', action: () => setPaletteOpen(true) },
       { id: 'plan', label: 'Toggle Plan Mode', description: 'Switch between plan and build', category: 'general', action: () => setPlanMode((p) => !p) },
       { id: 'memory', label: 'Memory Panel', description: 'Toggle memory panel', category: 'panel', action: () => setPanel((p) => (p === 'memory' ? null : 'memory')) },
@@ -473,7 +581,17 @@ export default function App() {
       })),
     ]
     return items
-  }, [sessions, agentDefs, models, handleNewSession, handleSelect, handleCommand])
+  }, [
+    sessions,
+    agentDefs,
+    models,
+    handleNewSession,
+    handleSelect,
+    handleCommand,
+    handleExport,
+    handleImport,
+    activeId,
+  ])
 
   useKeyboardShortcuts([
     { key: 'n', ctrl: true, handler: handleNewSession },
@@ -648,6 +766,8 @@ export default function App() {
         onRename={(id, title) => {
           void rename(id, title)
         }}
+        onExport={handleExport}
+        onImport={() => void handleImport()}
       />
 
       <div className="flex-1 flex flex-col min-w-0 relative min-h-0">

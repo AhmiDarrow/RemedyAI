@@ -321,7 +321,10 @@ export function useMessages(sessionId: string | null) {
   )
 
   const runCommand = useCallback(
-    async (command: string, sid?: string): Promise<{ text: string; action?: string }> => {
+    async (
+      command: string,
+      sid?: string,
+    ): Promise<{ text: string; action?: string; session_id?: string }> => {
       const targetId = sid || sessionId
       if (!targetId) return { text: 'No session' }
       try {

@@ -52,8 +52,10 @@ _DEFAULT_SYSTEM_PROMPT = (
     "That hangs the UI — always use native tool_calls.\n"
     "- NEVER emit DSML/XML tool markup (tool_calls, invoke, invoke_parameter) as chat text.\n"
     "- Prefer parallel tool calls for independent reads; avoid repeating the same call.\n"
-    "- After tool results, synthesize a clear final answer. Never stall or loop.\n"
-    "- If information is already in context (provider block, skills list, history), use it.\n\n"
+    "- After tool results, synthesize a clear final answer when the task is done. "
+    "Never stall, loop, or stop mid-task because of artificial step pressure.\n"
+    "- If information is already in context (provider block, skills list, history), use it.\n"
+    "- Prefer complete work over short partial answers. Keep going until the user request is finished.\n\n"
     "Recovery (do not give up on the first failure):\n"
     "- Tool errors include Error [CODE:tool] and often a Suggestion line — follow it.\n"
     "- Path not found → list_dir on the parent or project root; try alternate spellings.\n"
@@ -73,12 +75,21 @@ RECOVERY_NUDGE = (
     "Finish the user's task with corrected tool calls."
 )
 
-# Real coding agents need headroom; simple turns never spend this budget.
-MAX_REACT_STEPS = 32
-MAX_PARALLEL_TOOLS = 8
-HISTORY_MSG_LIMIT = 48
-# Larger project reviews need headroom (was 14k — hit walls mid-review).
-HISTORY_CHAR_BUDGET = 48_000
+# Near-unlimited agent headroom. Simple turns never spend this budget;
+# long builds / research / multi-file work need room to keep going.
+MAX_REACT_STEPS = 128
+MAX_PARALLEL_TOOLS = 16
+# Prefer recent turns, but allow very long multi-turn sessions.
+HISTORY_MSG_LIMIT = 2_000
+# Large multi-turn budget — do not shorten individual answers/thinking/tools.
+HISTORY_CHAR_BUDGET = 8_000_000
+# 0 = no soft-trim of single history messages (never shorten prior answers).
+HISTORY_MSG_SOFT_TRIM = 0
+# 0 = no truncation of tool results or file reads passed to the model.
+TOOL_RESULT_CHAR_CAP = 0
+FILE_READ_CHAR_CAP = 0
+# Absolute emergency only (OOM guard), not a quality/provider limit.
+HARD_SAFETY_CHARS = 50_000_000
 
 # Messages that look like they need filesystem / shell tools.
 _TOOL_HINT_RE = re.compile(

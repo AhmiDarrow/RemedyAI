@@ -16,7 +16,8 @@ from uuid import uuid4
 # Per-file cap; total batch should stay under ~25 MiB for API sanity.
 MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024
 MAX_IMAGE_VISION_BYTES = 4 * 1024 * 1024
-MAX_TEXT_INJECT_CHARS = 80_000
+# Prefer full attachments; only emergency OOM guard if ever needed.
+MAX_TEXT_INJECT_CHARS = 0  # 0 = no inject truncation
 
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9._\- ()\[\]]+")
 
@@ -179,7 +180,7 @@ def inject_text_file_snippets(attachments: list[dict[str, Any]]) -> str:
             continue
         if not text.strip():
             continue
-        if len(text) > MAX_TEXT_INJECT_CHARS:
+        if MAX_TEXT_INJECT_CHARS > 0 and len(text) > MAX_TEXT_INJECT_CHARS:
             text = text[:MAX_TEXT_INJECT_CHARS] + "\n…[truncated]"
         lang = path.suffix.lstrip(".") or "text"
         chunks.append(f"\n### Attached: {name}\n```{lang}\n{text}\n```\n")

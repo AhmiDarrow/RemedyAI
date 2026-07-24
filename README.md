@@ -72,6 +72,8 @@ The desktop app bundles the full Remedy server as a sidecar, so everything runs 
 | `/compact` · `/harness` | Memory Harness compress / show Session Brief |
 | `/approve` · `/deny` | High-impact command approvals |
 | `/import <folder>` | Import `.md`/`.txt` knowledge pack into memory |
+| `/export` | Export this chat session as plain-text `.txt` |
+| `/import-session` | Import a session from `.txt` / `.md` (file picker or path) |
 | `/skills` · `/handoff` | Skills list · handoff notes |
 | `/init` | Project scan helpers |
 
