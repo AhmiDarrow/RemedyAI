@@ -1,15 +1,6 @@
 #Requires -Version 5.1
 # Uninstall options dialog for Remedy Desktop (NSIS PREUNINSTALL).
-#
-# Checkboxes: config / skills / full wipe under %USERPROFILE%\.remedy
-# Writes: %TEMP%\RemedyDesktop-UninstallChoices.txt  (config=0|1, skills=0|1, full=0|1)
-#
-# Exit codes (NSIS PREUNINSTALL must honor these):
-#   0  continue uninstall (choices written)
-#   1  user cancelled -> Abort uninstall only for intentional cancel
-#   2  dialog/script error -> keep data and STILL uninstall the app
-#
-# Silent /UPDATE uninstalls skip UI and keep data (safe for auto-update).
+# ASCII-only UI strings so Windows codepages never show mojibake next to labels.
 param(
   [switch]$SilentKeepData,
   [switch]$ForceFull
@@ -60,45 +51,61 @@ try {
     exit 2
   }
 
+  [System.Windows.Forms.Application]::EnableVisualStyles()
+  $uiFont = [System.Drawing.SystemFonts]::MessageBoxFont
+  if (-not $uiFont) {
+    $uiFont = New-Object System.Drawing.Font('Segoe UI', 9.0)
+  }
+
   $form = New-Object System.Windows.Forms.Form
-  $form.Text = 'Remedy Desktop - Uninstall options'
-  $form.Size = New-Object System.Drawing.Size(480, 320)
+  $form.Text = 'Remedy Desktop - Uninstall'
+  $form.Size = New-Object System.Drawing.Size(500, 340)
   $form.StartPosition = 'CenterScreen'
   $form.FormBorderStyle = 'FixedDialog'
   $form.MaximizeBox = $false
   $form.MinimizeBox = $false
   $form.TopMost = $true
   $form.ShowInTaskbar = $true
+  $form.Font = $uiFont
+  $form.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::Font
 
   $label = New-Object System.Windows.Forms.Label
   $label.Location = New-Object System.Drawing.Point(16, 16)
-  $label.Size = New-Object System.Drawing.Size(430, 48)
-  $label.Text = "The app will be removed from this PC.`r`nChoose what user data to delete under your profile (.remedy):"
+  $label.Size = New-Object System.Drawing.Size(450, 48)
+  $label.Font = $uiFont
+  $label.Text = "Remove Remedy Desktop from this PC.`r`nOptionally delete user data under your profile (.remedy):"
   $form.Controls.Add($label)
 
   $cbConfig = New-Object System.Windows.Forms.CheckBox
   $cbConfig.Location = New-Object System.Drawing.Point(24, 76)
-  $cbConfig.Size = New-Object System.Drawing.Size(420, 28)
+  $cbConfig.Size = New-Object System.Drawing.Size(440, 28)
+  $cbConfig.Font = $uiFont
+  $cbConfig.UseVisualStyleBackColor = $true
   $cbConfig.Text = 'Remove configuration (config, desktop prefs, API keys / auth)'
   $form.Controls.Add($cbConfig)
 
   $cbSkills = New-Object System.Windows.Forms.CheckBox
   $cbSkills.Location = New-Object System.Drawing.Point(24, 110)
-  $cbSkills.Size = New-Object System.Drawing.Size(420, 28)
-  $cbSkills.Text = 'Remove skills (custom and learned skills under .remedy\skills)'
+  $cbSkills.Size = New-Object System.Drawing.Size(440, 28)
+  $cbSkills.Font = $uiFont
+  $cbSkills.UseVisualStyleBackColor = $true
+  $cbSkills.Text = 'Remove skills (custom and learned skills)'
   $form.Controls.Add($cbSkills)
 
   $cbFull = New-Object System.Windows.Forms.CheckBox
   $cbFull.Location = New-Object System.Drawing.Point(24, 144)
-  $cbFull.Size = New-Object System.Drawing.Size(420, 40)
-  $cbFull.Text = 'Full wipe - delete entire .remedy folder + leftovers (clean reinstall)'
+  $cbFull.Size = New-Object System.Drawing.Size(440, 40)
+  $cbFull.Font = $uiFont
+  $cbFull.UseVisualStyleBackColor = $true
+  $cbFull.Text = 'Full wipe - delete entire .remedy folder and leftovers'
   $form.Controls.Add($cbFull)
 
   $hint = New-Object System.Windows.Forms.Label
-  $hint.Location = New-Object System.Drawing.Point(24, 190)
-  $hint.Size = New-Object System.Drawing.Size(420, 36)
-  $hint.ForeColor = [System.Drawing.Color]::DimGray
-  $hint.Text = 'Leave all unchecked to keep your data. Full wipe implies config + skills and all memory/sessions.'
+  $hint.Location = New-Object System.Drawing.Point(24, 192)
+  $hint.Size = New-Object System.Drawing.Size(440, 40)
+  $hint.Font = $uiFont
+  $hint.ForeColor = [System.Drawing.SystemColors]::GrayText
+  $hint.Text = 'Leave all unchecked to keep your data. Full wipe includes config, skills, memory, and sessions.'
   $form.Controls.Add($hint)
 
   $cbFull.Add_CheckedChanged({
@@ -115,17 +122,21 @@ try {
 
   $btnOk = New-Object System.Windows.Forms.Button
   $btnOk.Text = 'Continue uninstall'
-  $btnOk.Location = New-Object System.Drawing.Point(230, 240)
-  $btnOk.Size = New-Object System.Drawing.Size(140, 28)
+  $btnOk.Location = New-Object System.Drawing.Point(250, 250)
+  $btnOk.Size = New-Object System.Drawing.Size(140, 30)
+  $btnOk.Font = $uiFont
   $btnOk.DialogResult = [System.Windows.Forms.DialogResult]::OK
+  $btnOk.UseVisualStyleBackColor = $true
   $form.Controls.Add($btnOk)
   $form.AcceptButton = $btnOk
 
   $btnCancel = New-Object System.Windows.Forms.Button
   $btnCancel.Text = 'Cancel'
-  $btnCancel.Location = New-Object System.Drawing.Point(120, 240)
-  $btnCancel.Size = New-Object System.Drawing.Size(90, 28)
+  $btnCancel.Location = New-Object System.Drawing.Point(140, 250)
+  $btnCancel.Size = New-Object System.Drawing.Size(90, 30)
+  $btnCancel.Font = $uiFont
   $btnCancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+  $btnCancel.UseVisualStyleBackColor = $true
   $form.Controls.Add($btnCancel)
   $form.CancelButton = $btnCancel
 

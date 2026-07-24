@@ -2,6 +2,17 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.10.35] — 2026-07-24
+
+### Fix: first-run after full wipe + uninstall UI
+
+- Desktop sidecar always passes **`--skip-setup`** so the CLI wizard cannot block the API.
+- Fresh home gets a default `config.toml` with `setup_completed = false`; **Setup Wizard** runs once the server is up.
+- Startup loads **auth + settings first**, then models; wizard no longer depends on models succeeding.
+- Token bootstrap retries on 401; splash pre-warms token; longer health wait for skill seed.
+- Error screen: **Open setup** + clearer first-install guidance.
+- Uninstall options dialog: system font / visual styles / ASCII labels (no mojibake).
+
 ## [0.10.34] — 2026-07-24
 
 ### CI / release hygiene

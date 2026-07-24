@@ -23,13 +23,19 @@ function getApiBase(): string {
   return '/api'
 }
 
-/** Load local API bearer token (once). Loopback bootstrap or Tauri file read. */
+/** Clear cached token so the next call re-bootstraps (e.g. after server restart). */
+export function clearApiToken(): void {
+  _apiToken = null
+  _tokenPromise = null
+}
+
+/** Load local API bearer token (retries when previous attempt failed). */
 export async function ensureApiToken(): Promise<string | null> {
   if (_apiToken) return _apiToken
   if (_tokenPromise) return _tokenPromise
+
   _tokenPromise = (async () => {
     try {
-      // Prefer loopback bootstrap (works for desktop + vite proxy to 127.0.0.1)
       const r = await fetch(`${SERVER_URL}/api/auth/local-bootstrap`, {
         headers: { Accept: 'application/json' },
       })
@@ -55,8 +61,11 @@ export async function ensureApiToken(): Promise<string | null> {
     } catch {
       /* command may be missing on older builds */
     }
+    // Allow retry on next call (do not cache permanent failure)
+    _tokenPromise = null
     return null
   })()
+
   return _tokenPromise
 }
 
@@ -96,7 +105,7 @@ export async function apiFetch<T = unknown>(
   const timeoutId = setTimeout(() => controller.abort(), timeout)
 
   try {
-    const res = await fetch(`${getApiBase()}${path}`, {
+    let res = await fetch(`${getApiBase()}${path}`, {
       ...fetchOpts,
       signal: controller.signal,
       headers: {
@@ -105,6 +114,21 @@ export async function apiFetch<T = unknown>(
         ...fetchOpts.headers,
       },
     })
+
+    // One retry after re-bootstrap on 401 (token rotated after wipe/reinstall)
+    if (res.status === 401) {
+      clearApiToken()
+      await ensureApiToken()
+      res = await fetch(`${getApiBase()}${path}`, {
+        ...fetchOpts,
+        signal: controller.signal,
+        headers: {
+          'Content-Type': 'application/json',
+          ...authHeaders(),
+          ...fetchOpts.headers,
+        },
+      })
+    }
 
     if (!res.ok) {
       const body = await res.json().catch(() => ({}))

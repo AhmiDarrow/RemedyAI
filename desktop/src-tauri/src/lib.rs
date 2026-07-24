@@ -185,6 +185,8 @@ fn find_remedy() -> (String, String) {
 fn spawn_remedy(cmd: &str) -> Option<Child> {
     let home_dir = remedy_home();
     let home_str = home_dir.to_string_lossy();
+    // --skip-setup: never block the sidecar on interactive CLI wizard.
+    // Desktop SetupWizard is the first-run UX (needs a running API).
     let args = [
         "--home",
         home_str.as_ref(),
@@ -193,12 +195,14 @@ fn spawn_remedy(cmd: &str) -> Option<Child> {
         "127.0.0.1",
         "--port",
         "7400",
+        "--skip-setup",
     ];
 
     #[cfg(target_os = "windows")]
     {
         Command::new(cmd)
             .args(args)
+            .env("REMEDY_DESKTOP_SIDECAR", "1")
             .creation_flags(CREATE_NO_WINDOW)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -209,6 +213,7 @@ fn spawn_remedy(cmd: &str) -> Option<Child> {
     {
         Command::new(cmd)
             .args(args)
+            .env("REMEDY_DESKTOP_SIDECAR", "1")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -1625,13 +1630,14 @@ pub fn run() {
                 *state.sidecar_cmd.lock().unwrap() = Some(remedy_cmd.clone());
                 match start_sidecar(&state.process, &remedy_cmd) {
                     Ok(()) => {
-                        if wait_for_health(Duration::from_secs(30)) {
+                        // First run seeds skills into ~/.remedy — allow extra time.
+                        if wait_for_health(Duration::from_secs(90)) {
                             log::info!("Remedy server ready");
                             let _ = app_handle.emit("server-ready", ());
                         } else {
-                            log::error!("Server failed to start within 30s");
+                            log::error!("Server failed to start within 90s");
                             let _ = app_handle
-                                .emit("server-error", "Server failed to start after 30s");
+                                .emit("server-error", "Server failed to start after 90s");
                         }
                     }
                     Err(e) => {

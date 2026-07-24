@@ -235,53 +235,105 @@ export default function App() {
 
   useEffect(() => {
     if (serverState !== 'ready') return
-    // Single settings fetch at startup (wizard gate + model selection + agents).
-    Promise.all([
-      refreshModels(),
-      listAgents(),
-      listCommands(),
-      getSettings().catch(() => null),
-    ]).then(([modelsData, agents, _commandsData, settings]) => {
-        setAgentDefs(Array.isArray(agents) ? agents : agents?.agents || [])
-        if (settings) {
-          // First-run gate: block chat UI until setup completes or is skipped.
-          // Skip / finish both set setup_completed so this does not reappear.
-          if (settings.needs_setup || !settings.setup_completed) {
-            setShowSetupWizard(true)
+    let cancelled = false
+    ;(async () => {
+      // Auth first — models/settings need Bearer after wipe/reinstall.
+      try {
+        const { ensureApiToken, clearApiToken } = await import('./api/client')
+        clearApiToken()
+        await ensureApiToken()
+      } catch {
+        /* continue — settings may still work offline later */
+      }
+      if (cancelled) return
+
+      // Settings first: first-run wizard must not depend on models/agents succeeding.
+      let settings: Awaited<ReturnType<typeof getSettings>> | null = null
+      try {
+        settings = await getSettings()
+      } catch (e: unknown) {
+        console.warn('getSettings failed, retrying auth:', e)
+        try {
+          const { clearApiToken, ensureApiToken } = await import('./api/client')
+          clearApiToken()
+          await ensureApiToken()
+          settings = await getSettings()
+        } catch (e2: unknown) {
+          console.warn('getSettings retry failed:', e2)
+        }
+      }
+      if (cancelled) return
+
+      if (!settings) {
+        setServerState('error')
+        setServerError(
+          'Failed to load server config: could not reach settings API. '
+          + 'If this is a fresh install, click Retry, then complete Setup.',
+        )
+        return
+      }
+
+      // True first run: no completed setup → wizard before chat UI
+      const needsWizard =
+        Boolean(settings.needs_setup)
+        || settings.setup_completed === false
+        || settings.config_exists === false
+
+      if (needsWizard) {
+        setShowSetupWizard(true)
+      }
+
+      if (settings) {
+        if (settings.llm_model) setModel(settings.llm_model)
+        const tl = String(settings.thinking_level || 'high').toLowerCase()
+        if (tl === 'off' || tl === 'low' || tl === 'medium' || tl === 'high') {
+          setThinkingLevel(tl)
+        }
+        const am = String(settings.approval_mode || 'ask').toLowerCase()
+        if (am === 'ask' || am === 'auto') setApprovalMode(am)
+        setToolProcessMode(normalizeToolProcess(settings.tool_process ?? settings.show_tool_calls))
+        const un = (settings.user_name || '').trim()
+        setUserName(un)
+        if (settings.version) setAppVersion(String(settings.version))
+        if (!needsWizard && !un) {
+          try {
+            const skipped = localStorage.getItem('remedy.userName.skipped')
+            if (!skipped) setAskUserName(true)
+          } catch {
+            setAskUserName(true)
           }
-          if (settings.llm_model) {
-            setModel(settings.llm_model)
-          } else if (modelsData?.default) {
-            setModel(modelsData.default)
-          }
-          const tl = String(settings.thinking_level || 'high').toLowerCase()
-          if (tl === 'off' || tl === 'low' || tl === 'medium' || tl === 'high') {
-            setThinkingLevel(tl)
-          }
-          const am = String(settings.approval_mode || 'ask').toLowerCase()
-          if (am === 'ask' || am === 'auto') setApprovalMode(am)
-          setToolProcessMode(normalizeToolProcess(settings.tool_process ?? settings.show_tool_calls))
-          const un = (settings.user_name || '').trim()
-          setUserName(un)
-          if (settings.version) setAppVersion(String(settings.version))
-          // Ask for name after setup when missing (skip while wizard is open).
-          const needsWizard = settings.needs_setup || !settings.setup_completed
-          if (!needsWizard && !un) {
-            try {
-              const skipped = localStorage.getItem('remedy.userName.skipped')
-              if (!skipped) setAskUserName(true)
-            } catch {
-              setAskUserName(true)
-            }
-          }
-        } else if (modelsData?.default) {
+        }
+      }
+
+      // Secondary loads — never kill first-run / chat shell if these fail
+      try {
+        const [modelsData, agents] = await Promise.all([
+          refreshModels({ selectDefault: !settings?.llm_model }),
+          listAgents().catch(() => null),
+        ])
+        if (cancelled) return
+        if (agents) {
+          setAgentDefs(Array.isArray(agents) ? agents : (agents as { agents?: typeof agentDefs }).agents || [])
+        }
+        if (!settings?.llm_model && modelsData?.default) {
           setModel(modelsData.default)
         }
-      })
-      .catch((e: any) => {
-        setServerState('error')
-        setServerError(`Failed to load server config: ${e?.message || e}`)
-      })
+        void listCommands().catch(() => null)
+      } catch (e: unknown) {
+        console.warn('Secondary startup load failed:', e)
+        // If we never got settings and models also failed, surface a soft error
+        // only when we are not already opening the setup wizard.
+        if (!settings && !needsWizard) {
+          setServerState('error')
+          setServerError(
+            `Failed to load server config: ${e instanceof Error ? e.message : String(e)}`,
+          )
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
   }, [serverState, refreshModels])
 
   const handleNewSession = useCallback(async () => {
@@ -679,63 +731,7 @@ export default function App() {
     )
   }
 
-  if (serverState === 'error') {
-    return (
-      <AppShell {...shellProps}>
-        <div className="flex items-center justify-center h-full flex-col gap-4" style={{ background: 'var(--bg-primary)', color: 'var(--text-primary)' }}>
-          <div style={{ color: 'var(--error)' }} className="text-lg font-medium">
-            {serverError || 'Server connection failed'}
-          </div>
-          <div className="text-sm" style={{ color: 'var(--text-muted)' }}>
-            The Remedy server could not start. Try restarting the app.
-          </div>
-          <div className="flex gap-3">
-            <button
-              onClick={() => {
-                setServerError('')
-                // Always re-enter splash so min duration + health poll apply.
-                setServerState('connecting')
-                if (isTauri()) {
-                  const invoke = (window as any).__TAURI_INTERNALS__?.invoke
-                  if (invoke) {
-                    invoke('restart_server').catch((e: unknown) => {
-                      const msg = e instanceof Error ? e.message : String(e)
-                      setServerState('error')
-                      setServerError(msg || 'Failed to restart server')
-                    })
-                  }
-                }
-              }}
-              className="px-5 py-2 rounded-md text-sm"
-              style={{ background: 'var(--accent)', color: '#fff' }}
-            >
-              Retry
-            </button>
-            <button
-              onClick={() => {
-                if (!isTauri()) return
-                const invoke = (window as any).__TAURI_INTERNALS__?.invoke
-                if (!invoke) {
-                  setServerError((prev) => prev || 'Cannot open data folder (Tauri bridge unavailable)')
-                  return
-                }
-                invoke('open_data_folder').catch((e: unknown) => {
-                  const msg = e instanceof Error ? e.message : String(e)
-                  console.warn('Open data folder failed:', msg)
-                  setServerError((prev) => `${prev ? prev + ' — ' : ''}Could not open data folder: ${msg}`)
-                })
-              }}
-              className="px-5 py-2 rounded-md text-sm"
-              style={{ background: 'var(--bg-tertiary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
-            >
-              Open Data Folder
-            </button>
-          </div>
-        </div>
-      </AppShell>
-    )
-  }
-
+  // First-run setup takes priority over hard error when possible
   if (showSetupWizard) {
     return (
       <AppShell {...shellProps}>
@@ -754,6 +750,87 @@ export default function App() {
               .catch(() => refreshModels())
           }}
         />
+      </AppShell>
+    )
+  }
+
+  if (serverState === 'error') {
+    return (
+      <AppShell {...shellProps}>
+        <div
+          className="flex items-center justify-center h-full flex-col gap-4 px-6"
+          style={{ background: 'var(--bg-primary)', color: 'var(--text-primary)' }}
+        >
+          <div style={{ color: 'var(--error)' }} className="text-lg font-medium text-center">
+            {serverError || 'Server connection failed'}
+          </div>
+          <div className="text-sm text-center max-w-md" style={{ color: 'var(--text-muted)' }}>
+            The Remedy server could not start or respond. On a fresh install, try
+            Retry (starts the local API), then complete setup.
+          </div>
+          <div className="flex flex-wrap gap-3 justify-center">
+            <button
+              type="button"
+              onClick={() => {
+                setServerError('')
+                setServerState('connecting')
+                if (isTauri()) {
+                  const invoke = (window as any).__TAURI_INTERNALS__?.invoke
+                  if (invoke) {
+                    invoke('restart_server').catch((e: unknown) => {
+                      const msg = e instanceof Error ? e.message : String(e)
+                      setServerState('error')
+                      setServerError(msg || 'Failed to restart server')
+                    })
+                  }
+                }
+              }}
+              className="px-5 py-2 rounded-md text-sm"
+              style={{ background: 'var(--accent)', color: '#fff' }}
+            >
+              Retry
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                // Open setup once API is up; if still down, retry first.
+                setShowSetupWizard(true)
+                setServerState('ready')
+              }}
+              className="px-5 py-2 rounded-md text-sm"
+              style={{
+                background: 'var(--bg-tertiary)',
+                color: 'var(--text-secondary)',
+                border: '1px solid var(--border)',
+              }}
+            >
+              Open setup
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (!isTauri()) return
+                const invoke = (window as any).__TAURI_INTERNALS__?.invoke
+                if (!invoke) {
+                  setServerError((prev) => prev || 'Cannot open data folder (Tauri bridge unavailable)')
+                  return
+                }
+                invoke('open_data_folder').catch((e: unknown) => {
+                  const msg = e instanceof Error ? e.message : String(e)
+                  setServerError((prev) => `${prev ? prev + ' - ' : ''}Could not open data folder: ${msg}`)
+                })
+              }}
+              className="px-5 py-2 rounded-md text-sm"
+              style={{
+                background: 'var(--bg-tertiary)',
+                color: 'var(--text-secondary)',
+                border: '1px solid var(--border)',
+              }}
+            >
+              Open data folder
+            </button>
+          </div>
+        </div>
       </AppShell>
     )
   }

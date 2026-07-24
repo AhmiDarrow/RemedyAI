@@ -1029,21 +1029,28 @@ def _cmd_serve(args) -> None:
     home = Path(args.home).expanduser()
     home.mkdir(parents=True, exist_ok=True)
 
-    # First-run setup before launch (TTY only). Desktop sidecar is non-TTY —
-    # its UI SetupWizard handles first run; do not block the server process.
-    # Packaged sidecars often have sys.stdin is None (no console).
-    skip = bool(getattr(args, "skip_setup", False))
+    # First-run setup: NEVER block the HTTP server for the desktop sidecar.
+    # Desktop UI (SetupWizard) is the first-run experience and needs the API up.
+    # Interactive CLI TTY can still run the wizard; --skip-setup / env skip it.
+    skip = bool(getattr(args, "skip_setup", False)) or str(
+        os.environ.get("REMEDY_DESKTOP_SIDECAR", "")
+    ).strip().lower() in ("1", "true", "yes")
     force = bool(getattr(args, "force_setup", False))
     is_tty = bool(sys.stdin is not None and sys.stdin.isatty())
-    if skip or force or is_tty:
+    # Only interactive CLI (real TTY, not desktop) may gate on the wizard.
+    if force or (is_tty and not skip):
         ok = ensure_setup_before_launch(
             home_dir=home,
-            skip_setup=skip,
+            skip_setup=False,
             force=force,
-            non_interactive=not is_tty,
+            non_interactive=False,
         )
         if not ok:
             return
+    elif skip and not force:
+        # Desktop / headless: ensure a minimal config exists so settings API works,
+        # but do NOT mark setup_completed — UI wizard still runs on first open.
+        create_default_config(home)
 
     config = resolve_config(
         config_path=Path(args.config_file) if args.config_file else None,

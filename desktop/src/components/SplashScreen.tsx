@@ -88,12 +88,23 @@ export function SplashScreen({ onReady, onError }: SplashScreenProps) {
         }
         if (cancelled) return
         if (ok) {
+          // Pre-warm local API token before the main app loads settings.
+          try {
+            const { clearApiToken, ensureApiToken } = await import('../api/client')
+            clearApiToken()
+            await ensureApiToken()
+          } catch {
+            /* token optional until settings fetch */
+          }
           await finishReady()
           return
         }
-        if (attempts >= 20) {
+        // ~90s total: first-run skill seed + auth can delay /api/status
+        if (attempts >= 45) {
           setStatus('error')
-          onErrorRef.current('Server failed to start after ~40s')
+          onErrorRef.current(
+            'Server failed to start after ~90s. On a fresh install, wait a moment and Retry.',
+          )
           return
         }
         const backoff = Math.min(250 * Math.pow(2, Math.min(attempts - 1, 3)), 2000)
