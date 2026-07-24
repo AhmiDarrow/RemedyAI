@@ -2,7 +2,11 @@
 
 High-level product notes for owners. Full detail lives in repo `CHANGELOG.md`.
 
-Ship **one** installer/tag for the current series (**v0.10.42**).
+Ship **one** installer/tag for the current series (**v0.10.43**).
+
+## 0.10.43 — Rebuild (CI mypy + package)
+
+- CI type-check fix and clean rebuild of the 0.10.42 feature set (github skill, MCP host, plan/checkpoints, vision shutdown).
 
 ## 0.10.42 — GitHub skill, MCP host, Plan mode, checkpoints, vision shutdown
 

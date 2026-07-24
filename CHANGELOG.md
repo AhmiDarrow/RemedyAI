@@ -2,6 +2,13 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.10.43] — 2026-07-24
+
+### Fix: CI mypy + full rebuild of 0.10.42 features
+
+- Resolve `uv run mypy` failures in agent tool extracts, `/plan approve`, and MCP stdio server.
+- Rebuild/publish package including vision-shutdown-on-exit and all 0.10.42 product work.
+
 ## [0.10.42] — 2026-07-24
 
 ### Feature: Bundled **github** skill + packaged MCP host
