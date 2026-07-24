@@ -2,7 +2,13 @@
 
 High-level product notes for owners. Full detail lives in repo `CHANGELOG.md`.
 
-Ship **one** installer/tag for the current series (**v0.10.37**).
+Ship **one** installer/tag for the current series (**v0.10.38**).
+
+## 0.10.38 — xAI OAuth on fresh install
+
+- Fix: **Sign in with xAI** no longer fails with *Cannot reach local API … (/auth/xai/login)* when the server is actually up.
+- Cause was CORS **OPTIONS** preflight blocked by API auth (looked like a dead server in the desktop UI).
+- Also waits for the local API before starting device login.
 
 ## 0.10.37 — Help wiki, Web UI, tools, security
 

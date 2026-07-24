@@ -134,13 +134,27 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
     setError('')
     stopXaiPoll()
     try {
-      // Ensure local Bearer is ready (first-run race with sidecar).
+      // Ensure local API + Bearer are ready (first-run race with sidecar).
       try {
-        const { clearApiToken, ensureApiToken } = await import('../api/client')
+        const {
+          clearApiToken,
+          ensureApiToken,
+          waitForLocalApi,
+        } = await import('../api/client')
+        const up = await waitForLocalApi(20000)
+        if (!up) {
+          throw new Error(
+            'Local Remedy server is not responding on http://127.0.0.1:7400. '
+              + 'Close setup, click Retry on the connection screen, then try Sign in again.',
+          )
+        }
         clearApiToken()
         await ensureApiToken()
-      } catch {
-        /* apiFetch will retry */
+      } catch (pre: unknown) {
+        if (pre instanceof Error && pre.message.includes('Local Remedy server')) {
+          throw pre
+        }
+        /* apiFetch will retry token */
       }
       const start = await startXaiLogin()
       setXaiUserCode(start.user_code)

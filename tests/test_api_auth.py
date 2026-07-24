@@ -88,3 +88,38 @@ def test_bootstrap_can_be_disabled(auth_on, tmp_path, monkeypatch):
     r = client.get("/api/auth/local-bootstrap")
     assert r.status_code == 403
     monkeypatch.setenv("REMEDY_HTTP_BOOTSTRAP", "1")
+
+
+def test_cors_preflight_options_not_blocked_by_auth(auth_on, tmp_path):
+    """OPTIONS must not 401 — browser preflight has no Bearer (desktop xAI OAuth)."""
+    tok = ensure_local_api_token(tmp_path)
+    app = create_app(api_key=tok)
+    client = TestClient(app)
+    r = client.options(
+        "/api/auth/xai/login",
+        headers={
+            "Origin": "http://tauri.localhost",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "authorization,content-type",
+        },
+    )
+    # Must not look like auth failure (401 → opaque Failed to fetch in webview)
+    assert r.status_code != 401
+    assert r.status_code in (200, 204, 400)
+    # CORS headers present for Tauri origin
+    assert r.headers.get("access-control-allow-origin") in (
+        "http://tauri.localhost",
+        "*",
+    )
+
+
+def test_cors_allows_tauri_https_origin(auth_on, tmp_path):
+    tok = ensure_local_api_token(tmp_path)
+    app = create_app(api_key=tok)
+    client = TestClient(app)
+    r = client.get(
+        "/api/status",
+        headers={"Origin": "https://tauri.localhost"},
+    )
+    assert r.status_code == 200
+    assert r.headers.get("access-control-allow-origin") == "https://tauri.localhost"

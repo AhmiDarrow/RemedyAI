@@ -2,6 +2,19 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.10.38] — 2026-07-24
+
+### Fix: xAI OAuth “Cannot reach local API” on fresh install (0.10.37)
+
+- **Root cause:** with API auth on, the auth middleware returned **401** for browser **OPTIONS**
+  CORS preflights (no `Authorization` header). Chromium/Tauri then surface
+  `Failed to fetch` → *Cannot reach local API at http://127.0.0.1:7400 (/auth/xai/login)*.
+  Splash `/api/status` still worked (simple GET, no preflight).
+- **Fix:** allow `OPTIONS` through auth so CORS middleware can answer preflights; expand
+  default CORS origins for Tauri 2 (`https://tauri.localhost`, asset/ipc hosts).
+- Setup/Settings xAI sign-in waits for local API health before starting device login.
+- Tests: OPTIONS preflight must not 401; `https://tauri.localhost` allowed.
+
 ## [0.10.37] — 2026-07-24
 
 ### Security (power preserved, outsiders hardened)

@@ -133,6 +133,18 @@ export function formatApiErrorBody(body: unknown, fallback = 'Request failed'): 
 
 export { getApiBase, SERVER_URL }
 
+/** Wait until /api/status answers (sidecar still booting on fresh install). */
+export async function waitForLocalApi(maxMs = 15000): Promise<boolean> {
+  const started = Date.now()
+  let delay = 200
+  while (Date.now() - started < maxMs) {
+    if (await healthCheck(1500)) return true
+    await new Promise((r) => setTimeout(r, delay))
+    delay = Math.min(delay * 1.5, 1500)
+  }
+  return healthCheck(1500)
+}
+
 export async function apiFetch<T = unknown>(
   path: string,
   options: FetchOptions = {},
@@ -170,10 +182,18 @@ export async function apiFetch<T = unknown>(
         throw new ApiError(0, `Request timed out after ${timeout}ms (${path})`)
       }
       const msg = e instanceof Error ? e.message : String(e)
+      // "Failed to fetch" is also what Chromium reports for CORS preflight failures
+      // (auth middleware blocking OPTIONS used to look like a dead server).
+      const unreachable =
+        msg.includes('Failed to fetch')
+        || msg.includes('NetworkError')
+        || msg.includes('Load failed')
       throw new ApiError(
         0,
-        msg.includes('Failed to fetch')
-          ? `Cannot reach local API at ${SERVER_URL} (${path}). Is the server running?`
+        unreachable
+          ? `Cannot reach local API at ${SERVER_URL} (${path}). `
+            + 'Is the server running? If setup just opened, wait a second and retry. '
+            + 'Use Retry on the splash if the local server failed to start.'
           : msg || `Network error (${path})`,
       )
     }

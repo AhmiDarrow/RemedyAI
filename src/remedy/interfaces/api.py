@@ -92,7 +92,7 @@ def create_app(
         elif isinstance(cfg_origins, list) and cfg_origins:
             cors_origins = [str(o).strip() for o in cfg_origins if str(o).strip()]
         else:
-            # Safe defaults for local desktop/dev
+            # Safe defaults for local desktop/dev (include Tauri 2 custom-protocol origins)
             cors_origins = [
                 "http://localhost:1420",
                 "http://127.0.0.1:1420",
@@ -104,6 +104,11 @@ def create_app(
                 "http://localhost:7400",
                 "tauri://localhost",
                 "http://tauri.localhost",
+                "https://tauri.localhost",
+                "http://asset.localhost",
+                "https://asset.localhost",
+                "http://ipc.localhost",
+                "https://ipc.localhost",
             ]
     # Owner power: they may still set explicit origin lists. Star is blocked when
     # api_key is set (browser could otherwise steal the bootstrap token).
@@ -119,6 +124,11 @@ def create_app(
             "http://127.0.0.1:5173",
             "tauri://localhost",
             "http://tauri.localhost",
+            "https://tauri.localhost",
+            "http://asset.localhost",
+            "https://asset.localhost",
+            "http://ipc.localhost",
+            "https://ipc.localhost",
         ]
     app.add_middleware(
         CORSMiddleware,
@@ -146,6 +156,11 @@ def create_app(
         @app.middleware("http")
         async def require_auth(request: Request, call_next):
             path = request.url.path
+            # CORS preflight must not require Bearer. Browsers / Tauri webviews send
+            # OPTIONS without Authorization; a 401 here becomes opaque "Failed to fetch"
+            # (looks like the server is down) and breaks xAI OAuth + all JSON API calls.
+            if request.method == "OPTIONS":
+                return await call_next(request)
             # Public docs / health / bootstrap
             if path in _AUTH_PUBLIC or path.startswith("/docs") or path.startswith("/redoc"):
                 return await call_next(request)

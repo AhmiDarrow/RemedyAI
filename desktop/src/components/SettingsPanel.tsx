@@ -241,13 +241,26 @@ export function SettingsPanel({
     setErrorMessage('')
     stopXaiPoll()
     try {
-      // Same first-run/wipe bootstrap as SetupWizard — avoid 401 races.
+      // Same first-run/wipe bootstrap as SetupWizard — avoid 401 / dead-server races.
       try {
-        const { clearApiToken, ensureApiToken } = await import('../api/client')
+        const {
+          clearApiToken,
+          ensureApiToken,
+          waitForLocalApi,
+        } = await import('../api/client')
+        const up = await waitForLocalApi(15000)
+        if (!up) {
+          throw new Error(
+            'Local Remedy server is not responding. Retry from the tray or restart the app.',
+          )
+        }
         clearApiToken()
         await ensureApiToken()
-      } catch {
-        /* apiFetch will retry */
+      } catch (pre: unknown) {
+        if (pre instanceof Error && pre.message.includes('not responding')) {
+          throw pre
+        }
+        /* apiFetch will retry token */
       }
       const start = await startXaiLogin()
       setXaiUserCode(start.user_code)

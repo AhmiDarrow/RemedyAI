@@ -24,15 +24,20 @@ Work top-down: is the **local server** up, is **auth** loaded, is the **provider
 - Confirm `%USERPROFILE%\.remedy` is writable.  
 - Real error text (0.10.36+) appears in the wizard — note it for support.
 
-## xAI OAuth fails / “Failed to fetch”
+## xAI OAuth fails / “Cannot reach local API” / “Failed to fetch”
+
+On **0.10.37**, Sign in with xAI could show *Cannot reach local API … (/auth/xai/login)* even when the
+server was up. Cause: CORS **OPTIONS** preflight was blocked by API auth (401 without CORS headers),
+so the webview reported a network error. **0.10.38+** lets OPTIONS through auth; update if you hit this.
 
 | Check | Fix |
 |-------|-----|
-| Server down | Retry until connected |
+| Still on 0.10.37 | Install **0.10.38+** (OPTIONS / CORS preflight fix) |
+| Server down | Splash **Retry** until connected, then open Setup |
 | Offline / proxy | Allow `auth.x.ai` and `accounts.x.ai` |
-| Stale sidecar | Install latest Remedy Desktop |
-| Browser blocked | Use **Open verification page** + code |
-| Still stuck | Paste console API key instead |
+| Stale sidecar | Quit fully, relaunch latest installer |
+| Browser blocked | Use verification URL + code from the wizard |
+| Still stuck | Paste an xAI console API key instead of OAuth |
 
 ## Unauthorized / 401 from local API
 
