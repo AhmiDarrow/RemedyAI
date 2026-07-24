@@ -22,6 +22,7 @@ Quarantined packs cannot load instructions or run scripts until **Trust**.
 - **Switch to Web UI**: hide to tray + open `http://127.0.0.1:7400/` (API serves `desktop/dist`).
 - Full quit warns that the local server stops (Web UI dies); hide-to-tray does not.
 - Sync wiki copies: `python scripts/sync_help_manual.py`
+- Docs stay aligned with code (CI gate): `python scripts/check_docs.py` — help bodies, versions, slash commands, hotkeys, catalog ids, README test-count claim
 
 ### Partner features (0.10.18–0.10.25)
 

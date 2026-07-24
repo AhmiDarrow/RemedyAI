@@ -25,6 +25,17 @@ Open **Help** ( **F1** or **Ctrl+/** ) for a searchable wiki UI that loads these
 | [12-reference-shortcuts.md](12-reference-shortcuts.md) | Shortcuts |
 | [13-whats-new.md](13-whats-new.md) | What’s new |
 
+## Keeping docs in sync
+
+This folder is the **canonical** source for Help wiki chapter bodies. After edits:
+
+```bash
+python scripts/sync_help_manual.py   # copy → desktop/src/help/articles/
+python scripts/check_docs.py         # CI gate: help, versions, slash cmds, hotkeys, catalog, test count
+```
+
+If you add a chapter file, also add a matching `META` entry in `desktop/src/help/catalog.ts`.
+
 ## Related maintainer docs
 
 - `../USAGE.md` — extended CLI reference  

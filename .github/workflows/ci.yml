@@ -32,5 +32,8 @@ jobs:
       - name: Import smoke
         run: uv run python -c "import remedy; from remedy.interfaces.api import create_app; create_app(); print('import OK')"
 
+      - name: Docs sync (versions, help, slash cmds, hotkeys, test count)
+        run: uv run python scripts/check_docs.py
+
       - name: Test
         run: uv run pytest -q --tb=short

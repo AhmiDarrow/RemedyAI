@@ -32,6 +32,7 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 - Version surfaces aligned (`latest.json`, package-lock, Cargo.lock); installer URL uses `Remedy.Desktop_*`; stale minisign signatures cleared on version bump.
 - `scripts/sync_help_manual.py` keeps docs/manual ↔ desktop help articles in sync.
+- **Docs sync pipeline** (`scripts/check_docs.py` + CI step): gates help copies, version surfaces, catalog ids, slash commands vs `_BUILTIN_COMMANDS`, hotkeys vs `hotkeys.ts`, and README test-count claims — same “check / sync” model as version control.
 - Setup finish copy: F1/Ctrl+/ open Help wiki; What’s new splits 0.10.36 vs 0.10.37 correctly.
 - Settings xAI sign-in re-bootstraps local API token and **persists provider=xAI** on connect; Help report-issue prefills version.
 - CLI wizard + `mark_setup_completed` use safe TOML write (scalars before tables; scrub secrets).
