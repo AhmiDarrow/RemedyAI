@@ -2,6 +2,14 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.10.32] — 2026-07-24
+
+### Fix: interactive installer no longer launches before finish page
+
+- NSIS POSTINSTALL only auto-starts Remedy for **silent / passive / update** installs.
+- Interactive installs wait for the finish page (“desktop shortcut” + “Run Remedy”).
+- In-app auto-update passes `/UPDATE` so update-mode hooks stay correct.
+
 ## [0.10.31] — 2026-07-24
 
 ### Fix: uninstall no longer aborts when options dialog fails

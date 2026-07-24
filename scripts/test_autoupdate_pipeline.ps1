@@ -87,7 +87,7 @@ $updateLines = @(
   '$before = @{}'
   'foreach ($c in $candidates) { if (Test-Path -LiteralPath $c) { $before[$c] = (Get-Item -LiteralPath $c).LastWriteTimeUtc.Ticks } }'
   'Log ("Snapshot count: " + $before.Count)'
-  '$argList = @("-NoProfile","-ExecutionPolicy","Bypass","-File",$installer,"/S","/NCRC",("/D=" + $priorDir))'
+  '$argList = @("-NoProfile","-ExecutionPolicy","Bypass","-File",$installer,"/S","/NCRC","/UPDATE",("/D=" + $priorDir))'
   'Log ("Starting fake installer -> " + $priorDir)'
   '$p = Start-Process -FilePath "powershell.exe" -ArgumentList $argList -PassThru -WindowStyle Hidden'
   'if (-not $p) { Log "ERROR: Start-Process null"; exit 3 }'

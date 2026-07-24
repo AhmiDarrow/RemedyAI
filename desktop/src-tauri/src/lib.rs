@@ -956,8 +956,9 @@ fn validate_installer_exe(path: &Path, min_bytes: u64) -> Result<(), String> {
 // Guard against double-click / concurrent update starts.
 static UPDATE_IN_FLIGHT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Download the NSIS installer, run it silently (/S), exit so files can be replaced.
-/// NSIS POSTINSTALL hook relaunches Remedy Desktop.
+/// Download the NSIS installer, run it silently (/S /UPDATE), exit so files can be replaced.
+/// NSIS POSTINSTALL relaunches only for silent/passive/update installs; this script also
+/// relaunches a binary whose mtime advanced as a belt-and-suspenders path.
 /// Progress is streamed to the UI via `update-progress` events.
 #[tauri::command]
 fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), String> {
@@ -1154,8 +1155,9 @@ foreach ($c in $candidates) {{
   }}
 }}
 
-# Silent install. /D= must be last and unquoted (NSIS rule) when forcing dir.
-$args = @('/S', '/NCRC')
+# Silent update install. /UPDATE marks update-mode (hooks keep user data, may relaunch).
+# /D= must be last and unquoted (NSIS rule) when forcing dir.
+$args = @('/S', '/NCRC', '/UPDATE')
 $priorDir = '{current_dir}'
 if ($priorDir -and (Test-Path -LiteralPath $priorDir)) {{
   $args += "/D=$priorDir"

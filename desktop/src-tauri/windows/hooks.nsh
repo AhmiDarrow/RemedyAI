@@ -50,16 +50,35 @@
   ; Autostart (if user enables) uses Startup folder only — never registry Run.
   DetailPrint "Removing legacy autostart registry entries if present..."
   nsExec::ExecToLog 'powershell -NoProfile -ExecutionPolicy Bypass -Command "foreach ($n in @(''RemedyDesktop'',''Remedy Desktop'',''remedy-desktop'')) { Remove-ItemProperty -Path ''HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'' -Name $n -ErrorAction SilentlyContinue }"'
-  ; One-click update: relaunch after files are written.
-  ; Use `cmd /c start` so launch is independent of the installer process tree
-  ; (silent /S installs sometimes tear down children when NSIS exits).
-  DetailPrint "Launching Remedy Desktop after install/update..."
+
+  ; ---- Launch policy ----
+  ; Interactive GUI installers show the finish page with:
+  ;   - "Create desktop shortcut"
+  ;   - "Run Remedy Desktop"
+  ; Never pre-launch there — it races the finish page and confuses users.
+  ;
+  ; Silent (/S), passive (/P), and update (/UPDATE) installs skip the finish page,
+  ; so we relaunch here (cmd /c start so the process survives installer exit).
+  StrCpy $R7 0
+  StrCmp $PassiveMode "1" 0 +2
+    StrCpy $R7 1
+  StrCmp $UpdateMode "1" 0 +2
+    StrCpy $R7 1
+  IfSilent 0 +2
+    StrCpy $R7 1
+  StrCmp $R7 "1" 0 skip_auto_launch
+
+  DetailPrint "Silent/passive/update install: launching Remedy Desktop..."
   IfFileExists "$INSTDIR\Remedy Desktop.exe" 0 try_app_exe
     nsExec::ExecToLog 'cmd /c start "" "$INSTDIR\Remedy Desktop.exe"'
     Goto launch_done
   try_app_exe:
   IfFileExists "$INSTDIR\app.exe" 0 launch_done
     nsExec::ExecToLog 'cmd /c start "" "$INSTDIR\app.exe"'
+  Goto launch_done
+
+  skip_auto_launch:
+  DetailPrint "Interactive install: launch deferred to finish page (Run checkbox)."
   launch_done:
 !macroend
 
