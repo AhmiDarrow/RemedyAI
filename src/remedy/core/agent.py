@@ -1567,15 +1567,19 @@ class BasicRuntime(AgentRuntime):
                 ttl_dns_cache=300,
             )
             # Auto-continue after finish_reason=length / max_tokens until complete.
-            max_length_continuations = 64
+            # No artificial short-answer wall — keep going until the model finishes.
+            max_length_continuations = 10_000
             length_continuations = 0
             # Retry once after repairing DeepSeek reasoning_content on tool turns.
             reasoning_repair_done = False
             # Soft API errors: keep going when we already have tool context.
             api_soft_failures = 0
-            max_api_soft_failures = 8
+            max_api_soft_failures = 16
             # Sticky force-answer after recoverable provider failures.
             force_answer_sticky = False
+            # Empty-answer recovery (model thought but sent no content).
+            empty_answer_retries = 0
+            max_empty_answer_retries = 8
             # One OAuth/API re-auth attempt per turn (xAI 401 → refresh token).
             auth_refresh_done = False
             async with aiohttp.ClientSession(
@@ -1588,22 +1592,18 @@ class BasicRuntime(AgentRuntime):
                     force_answer = (
                         is_final_step or not tools or force_answer_sticky
                     )
-                    # Soft warning only in the last few steps if still tool-only.
-                    near_wall = step >= max(1, self._max_react_steps - 4)
-                    if near_wall and not produced_user_text and not is_final_step:
-                        # Nudge toward synthesis without hard-stopping tools yet.
-                        pass
                     step_tools = None if force_answer else tools
 
                     if force_answer and step > 0 and length_continuations == 0:
-                        # Don't inject "be concise" when we're mid length-continuation.
+                        # Never ask for a "short" answer — complete full response.
                         messages.append(
                             {
                                 "role": "user",
                                 "content": (
                                     "Stop calling tools. Using the information above, "
                                     "give your complete final answer to the user now. "
-                                    "Be thorough — do not cut off mid-section."
+                                    "Be thorough and finish every section — "
+                                    "do not cut off mid-section or summarize-only."
                                 ),
                             }
                         )
@@ -1727,10 +1727,10 @@ class BasicRuntime(AgentRuntime):
                             force_answer_sticky = True
                             continue
 
-                        # Live-stream only when tools are fully off (simple Qs).
-                        # Always buffer when any tools exist — DeepSeek-class models
+                        # Live-stream final-answer rounds (no tools this step).
+                        # Buffer when tools are enabled — DeepSeek-class models
                         # often dump DSML tool markup as content if we stream live.
-                        stream_live = step_tools is None and not all_tools
+                        stream_live = step_tools is None
 
                         headers_map = getattr(resp, "headers", None) or {}
                         content_type = str(
@@ -1742,18 +1742,22 @@ class BasicRuntime(AgentRuntime):
                         is_event_stream = "event-stream" in content_type
                         if use_openai_sse or is_event_stream:
                             content_iter = resp.content.__aiter__()
+                            # DeepSeek thinking can pause for minutes between tokens.
+                            # 120s was killing long reasoner streams mid-thought.
+                            sse_idle_timeout = 900.0
                             while True:
                                 try:
-                                    # Reap keep-alive-only streams that never end.
                                     line = await asyncio.wait_for(
                                         content_iter.__anext__(),
-                                        timeout=120.0,
+                                        timeout=sse_idle_timeout,
                                     )
                                 except StopAsyncIteration:
                                     break
                                 except TimeoutError:
                                     logger.warning(
-                                        "SSE stream idle >120s; ending this model round"
+                                        "SSE stream idle >%.0fs; ending this model round "
+                                        "(will continue/promote reasoning if any)",
+                                        sse_idle_timeout,
                                     )
                                     break
                                 line_text = line.decode("utf-8").strip()
@@ -1948,11 +1952,74 @@ class BasicRuntime(AgentRuntime):
                         return
 
                     if not tool_calls_list or force_answer:
-                        # Nothing useful produced — soft empty, not a tool-limit scare.
+                        # Empty content after tools/thinking: never soft-give-up while
+                        # we still have budget. DeepSeek often leaves content blank
+                        # after a long reasoning stream — promote reasoning first.
                         if not produced_user_text:
+                            # 1) Reasoning-only answer (common for reasoner models).
+                            if reasoning_out and not _looks_like_pseudo_tools(
+                                reasoning_out
+                            ):
+                                yield reasoning_out
+                                produced_user_text = True
+                                if (
+                                    round_state.hit_length_limit
+                                    and length_continuations
+                                    < max_length_continuations
+                                ):
+                                    length_continuations += 1
+                                    messages.append(
+                                        {
+                                            "role": "assistant",
+                                            "content": reasoning_out,
+                                            "reasoning_content": reasoning_out,
+                                        }
+                                    )
+                                    messages.append(
+                                        {
+                                            "role": "user",
+                                            "content": (
+                                                "Continue your final answer exactly where "
+                                                "you stopped. Do not restart or summarize."
+                                            ),
+                                        }
+                                    )
+                                    tools = []
+                                    force_answer_sticky = True
+                                    continue
+                                return
+                            # 2) Retry synthesis — do not abandon the user mid-task.
+                            if (
+                                empty_answer_retries < max_empty_answer_retries
+                                and not is_final_step
+                            ):
+                                empty_answer_retries += 1
+                                force_answer_sticky = True
+                                tools = []
+                                messages.append(
+                                    {
+                                        "role": "user",
+                                        "content": (
+                                            "You gathered context (tools and/or thinking) "
+                                            "but returned no final answer text. "
+                                            "Write the complete final answer now as plain "
+                                            "chat content — full review, not a stub. "
+                                            "Do not call tools."
+                                        ),
+                                    }
+                                )
+                                logger.info(
+                                    "Empty answer retry %d/%d after step %d",
+                                    empty_answer_retries,
+                                    max_empty_answer_retries,
+                                    step + 1,
+                                )
+                                continue
+                            # 3) Last resort only after retries exhausted.
                             yield (
-                                "I couldn't produce a complete answer from the available "
-                                "context. Try a more specific request or point me at a file."
+                                "I gathered context but the model returned an empty "
+                                "final message after several retries. Please resend "
+                                "or ask me to continue from where I left off."
                             )
                         return
 
@@ -2025,14 +2092,15 @@ class BasicRuntime(AgentRuntime):
                             step + 1,
                         )
 
-            # Exhausted steps without a streamed answer — synthesize briefly.
+            # Exhausted steps without a streamed answer — full synthesis, not a stub.
             if not produced_user_text:
-                # One last non-tool call with whatever tool results we have.
                 messages.append(
                     {
                         "role": "user",
                         "content": (
-                            "Give a short final answer now based on the tool results above."
+                            "Using all tool results and context above, write the "
+                            "complete final answer now. Be thorough — do not give a "
+                            "one-line stub or say you cannot answer if context exists."
                         ),
                     }
                 )
@@ -2049,7 +2117,7 @@ class BasicRuntime(AgentRuntime):
                 )
                 try:
                     async with aiohttp.ClientSession(
-                        timeout=aiohttp.ClientTimeout(total=60)
+                        timeout=aiohttp.ClientTimeout(total=900, sock_read=900)
                     ) as http2, http2.post(
                         endpoint, headers=headers, json=body
                     ) as resp:
@@ -2080,10 +2148,25 @@ class BasicRuntime(AgentRuntime):
                                     if piece:
                                         produced_user_text = True
                                         yield piece
+                                    # Also surface trailing reasoning as answer if
+                                    # content stayed empty (DeepSeek reasoner).
+                                    reason = (
+                                        delta.get("reasoning_content")
+                                        or delta.get("reasoning")
+                                    )
+                                    if (
+                                        not piece
+                                        and isinstance(reason, str)
+                                        and reason
+                                    ):
+                                        produced_user_text = True
+                                        yield reason
                             else:
                                 data = await resp.json()
                                 parsed = self._provider.extract_response(data)
-                                piece = parsed.get("content")
+                                piece = parsed.get("content") or parsed.get(
+                                    "reasoning_content"
+                                )
                                 if piece:
                                     produced_user_text = True
                                     yield str(piece)
@@ -2091,8 +2174,9 @@ class BasicRuntime(AgentRuntime):
                     logger.debug("final synthesis failed", exc_info=True)
             if not produced_user_text:
                 yield (
-                    "Done exploring — I don't have enough signal for a confident answer. "
-                    "Point me at a specific file or error and I'll dig in."
+                    "I finished the tool loop but still have no final model text. "
+                    "Ask me to **continue** or restate the request and I will resume "
+                    "from the context already gathered."
                 )
         except Exception as e:
             logger.exception("LLM stream failed")

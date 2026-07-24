@@ -35,8 +35,10 @@ _THINKING_NUDGES = {
     ),
 }
 
-# Provider completion budget: highest widely accepted completion size.
+# Default completion budget (OpenAI-compat / xAI / etc.).
 # We never lower this for thinking_level. Auto-continue covers true hard walls.
+# Per-provider subclasses may raise provider_max_output_tokens() when the API
+# rejects absurd values (e.g. DeepSeek historically capped ~8k–64k).
 MAX_OUTPUT_TOKENS = 128_000
 
 
@@ -175,6 +177,14 @@ class OpenAIProvider(ProviderAdapter):
     MAX_TOKENS_TOOLS = MAX_OUTPUT_TOKENS
     MAX_TOKENS_ANSWER = MAX_OUTPUT_TOKENS
 
+    def provider_max_output_tokens(self, model: str | None = None) -> int:
+        """Highest completion budget this provider/model accepts.
+
+        Override per provider when the API rejects oversized max_tokens
+        (HTTP 400) — we still auto-continue on finish_reason=length.
+        """
+        return MAX_OUTPUT_TOKENS
+
     def build_body(
         self,
         model: str,
@@ -192,11 +202,15 @@ class OpenAIProvider(ProviderAdapter):
             temperature = 0.3 if tools else 0.5
         elif level == "high":
             temperature = 0.5 if tools else 0.7
-        # Full output budget always — no short answers/thinking from our side.
+        # Always request the provider's full allowed completion budget.
+        # Do not shrink for tools vs answer or thinking level.
+        provider_cap = self.provider_max_output_tokens(model)
         if max_tokens is None:
-            max_tokens = MAX_OUTPUT_TOKENS
+            max_tokens = provider_cap
         else:
-            max_tokens = max(int(max_tokens), MAX_OUTPUT_TOKENS)
+            # Honor explicit higher requests up to provider cap; never shrink below cap.
+            max_tokens = max(int(max_tokens), provider_cap)
+            max_tokens = min(max_tokens, provider_cap) if provider_cap > 0 else max_tokens
         # Soft system nudge for deliberation (providers without native effort API).
         msgs = list(messages)
         nudge = _thinking_nudge(level)
@@ -532,6 +546,19 @@ class DeepSeekProvider(OpenAIProvider):
 
     provider_name = "deepseek"
     default_base_url = "https://api.deepseek.com"
+    # DeepSeek rejects oversized max_tokens (HTTP 400). Use their documented
+    # ceiling; the agent auto-continues on finish_reason=length so long answers
+    # still complete without us artificially cutting the user off.
+    # Output default max is 4k; maximum max_tokens is 8k for chat; reasoner
+    # supports larger combined thinking+output — request the high end.
+    DEEPSEEK_MAX_OUTPUT = 8192
+
+    def provider_max_output_tokens(self, model: str | None = None) -> int:
+        mid = (model or "").lower()
+        # Reasoner / thinking models: allow larger completion when API supports it.
+        if "reasoner" in mid or "r1" in mid or "think" in mid:
+            return 65_536
+        return self.DEEPSEEK_MAX_OUTPUT
 
     def build_body(
         self,
@@ -543,6 +570,12 @@ class DeepSeekProvider(OpenAIProvider):
         max_tokens: int | None = None,
         thinking_level: str | None = None,
     ) -> dict[str, Any]:
+        # Cap at DeepSeek's accepted max so we don't 400 and abort the turn.
+        cap = self.provider_max_output_tokens(model)
+        if max_tokens is None:
+            max_tokens = cap
+        else:
+            max_tokens = min(max(int(max_tokens), 1), cap)
         body = super().build_body(
             model,
             messages,
@@ -551,6 +584,8 @@ class DeepSeekProvider(OpenAIProvider):
             max_tokens=max_tokens,
             thinking_level=thinking_level,
         )
+        # Ensure we never exceed DeepSeek's hard API limit after parent merge.
+        body["max_tokens"] = min(int(body.get("max_tokens") or cap), cap)
         # Reasoner models work better with slightly lower temperature.
         if "reasoner" in (model or "").lower():
             body["temperature"] = min(float(body.get("temperature") or 0.6), 0.5)

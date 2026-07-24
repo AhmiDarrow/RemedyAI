@@ -312,7 +312,12 @@ def finalize_round_text(
     state: StreamRoundState,
     tool_calls_list: list[dict[str, Any]],
 ) -> str:
-    """Pick best text for the round (content, or reasoning if no tools)."""
+    """Pick best text for the round (content, or reasoning if no tools).
+
+    DeepSeek-class models often put the entire useful answer in
+    ``reasoning_content`` and leave ``content`` empty. When this round has no
+    tool calls, promote reasoning so we never soft-empty a finished turn.
+    """
     text_out = state.text_out
     if not text_out and state.reasoning_parts and not tool_calls_list:
         text_out = state.reasoning_out

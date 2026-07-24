@@ -121,3 +121,21 @@ def test_build_runtime_system_block() -> None:
     assert "You are Remedy" in block
     assert "gpt-test" in block
     assert "Workspace: /tmp" in block
+
+def test_finalize_promotes_reasoning_when_no_tools() -> None:
+    """DeepSeek often leaves content empty and puts the answer in reasoning."""
+    state = StreamRoundState()
+    state.reasoning_parts.append("Complete project review text.")
+    assert finalize_round_text(state, []) == "Complete project review text."
+    # With tool calls this round, keep reasoning separate (API needs it on the msg).
+    assert finalize_round_text(state, [{"function": {"name": "list_dir"}}]) == ""
+
+
+def test_finish_reason_length_detected() -> None:
+    state = StreamRoundState()
+    apply_openai_sse_chunk(
+        state,
+        {"choices": [{"delta": {"content": "partial"}, "finish_reason": "length"}]},
+        stream_live=False,
+    )
+    assert state.hit_length_limit is True

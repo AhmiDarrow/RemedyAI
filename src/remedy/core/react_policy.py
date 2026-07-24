@@ -77,7 +77,8 @@ RECOVERY_NUDGE = (
 
 # Near-unlimited agent headroom. Simple turns never spend this budget;
 # long builds / research / multi-file work need room to keep going.
-MAX_REACT_STEPS = 128
+# Hard ceiling only for pathological loops — not a "finish soon" budget.
+MAX_REACT_STEPS = 256
 MAX_PARALLEL_TOOLS = 16
 # Prefer recent turns, but allow very long multi-turn sessions.
 HISTORY_MSG_LIMIT = 2_000

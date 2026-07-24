@@ -2,6 +2,16 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.10.28] — 2026-07-24
+
+### Fix: DeepSeek / long turns cut off mid-answer
+
+- SSE idle timeout **120s → 900s** (DeepSeek thinking pauses no longer kill the stream).
+- Never soft-empty after tools/thinking: promote `reasoning_content` to the answer; retry synthesis up to 8×.
+- DeepSeek `max_tokens` uses API-legal caps (chat 8k / reasoner 64k) so oversized 128k requests stop 400ing the turn; auto-continue on `finish_reason=length`.
+- Final-answer rounds stream live; ReAct budget **256** steps; length continuations effectively unlimited.
+- Last synthesis asks for a **complete** answer (not a short stub).
+
 ## [0.10.27] — 2026-07-24
 
 ### Fix: desktop update check (tray + Settings)
@@ -10,6 +20,7 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 - Compare against the **desktop shell** version, not only the Python sidecar (prevented 0.10.25 EXE from seeing 0.10.26 when the sidecar was already newer).
 - Merge Tauri + API update sources; always show **This app** vs **Latest release**.
 - Cache-bust GitHub `latest.json`; `/api/updates/check?current=` for shell version.
+
 ## [0.10.26] — 2026-07-24
 
 ### Agent headroom (no cut-off answers / thinking / tools)
