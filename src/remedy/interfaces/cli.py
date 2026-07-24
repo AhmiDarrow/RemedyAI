@@ -1114,6 +1114,17 @@ def _cmd_serve(args) -> None:
 
     console.print(f"[green]Starting Remedy API on http://{args.host}:{args.port}[/green]")
     console.print(f"[dim]Skills:[/dim]    {n_skills} loaded (bundled + user)")
+    webui = getattr(app.state, "webui_dir", None)
+    if webui:
+        console.print(
+            f"[dim]Web UI:[/dim]    http://{args.host}:{args.port}/  "
+            f"(from {webui})"
+        )
+    else:
+        console.print(
+            "[dim]Web UI:[/dim]    not found — build desktop UI "
+            "(`cd desktop && npm run build`) or set REMEDY_WEBUI_DIR"
+        )
     console.print("[dim]Dashboard:[/dim] /dashboard")
     console.print("[dim]OpenAPI:[/dim]   /api/openapi.json  /api/openapi.yaml")
     console.print("[dim]Docs:[/dim]       /docs  /redoc")

@@ -244,13 +244,9 @@ def _mount_web_ui(app: FastAPI) -> None:
 
     index = web_dir / "index.html"
 
-    @app.get("/", include_in_schema=False)
-    async def webui_index():
-        return FileResponse(index)
-
-    # SPA deep-link fallback (exclude /api, /docs, /dashboard, files with extensions)
-    @app.get("/{full_path:path}", include_in_schema=False)
-    async def webui_spa(full_path: str):
+    def _spa_file(full_path: str = ""):
+        if full_path in ("", ".", "/"):
+            return FileResponse(index)
         if (
             full_path.startswith("api")
             or full_path.startswith("docs")
@@ -272,6 +268,17 @@ def _mount_web_ui(app: FastAPI) -> None:
             return FileResponse(candidate)
         return FileResponse(index)
 
+    @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
+    async def webui_index():
+        return FileResponse(index)
+
+    # SPA deep-link fallback (exclude /api, /docs, /dashboard)
+    @app.api_route("/{full_path:path}", methods=["GET", "HEAD"], include_in_schema=False)
+    async def webui_spa(full_path: str):
+        return _spa_file(full_path)
+
+    # Stash for CLI banner
+    app.state.webui_dir = str(web_dir)  # type: ignore[attr-defined]
     logger.info("Web UI mounted from %s (open http://127.0.0.1:7400/)", web_dir)
 
 
