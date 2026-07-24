@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.1.0"
+version = "0.10.25"
 description = "A Tauri App"
 authors = ["you"]
 license = ""
@@ -25,3 +25,5 @@ tauri = { version = "2.11.3", features = ["tray-icon"] }
 tauri-plugin-log = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-updater = "2.10.1"
+ureq = { version = "2.12", default-features = false, features = ["tls", "json"] }
+base64 = "0.22"

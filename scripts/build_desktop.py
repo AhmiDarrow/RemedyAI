@@ -55,6 +55,15 @@ def sync_versions() -> str:
             tauri_conf.write_text(json.dumps(conf, indent=2) + "\n", encoding="utf-8")
             changes.append(f"tauri.conf.json: {conf.get('version')} -> {v}")
 
+    cargo_toml = ROOT / "desktop" / "src-tauri" / "Cargo.toml"
+    if cargo_toml.exists():
+        text = cargo_toml.read_text(encoding="utf-8")
+        m = re.search(r'(?m)^version\s*=\s*"([^"]*)"', text)
+        if m and m.group(1) != v:
+            text = re.sub(r'(?m)^(version\s*=\s*)"[^"]*"', rf'\1"{v}"', text, count=1)
+            cargo_toml.write_text(text, encoding="utf-8")
+            changes.append(f"Cargo.toml: {m.group(1)} -> {v}")
+
     if changes:
         print(f"Synced version to {v}:")
         for c in changes:
@@ -91,6 +100,11 @@ def get_hidden_imports() -> list[str]:
         "aiohttp.resolver",
         "fastapi",
         "fastapi.middleware",
+        # Optional multipart (dev); frozen builds use JSON+base64 uploads
+        "multipart",
+        "multipart.multipart",
+        "multipart.decoders",
+        "multipart.exceptions",
         "uvicorn",
         "uvicorn.loops",
         "uvicorn.loops.auto",
@@ -112,7 +126,9 @@ def get_hidden_imports() -> list[str]:
         "remedy.interfaces",
         "remedy.interfaces.cli",
         "remedy.interfaces.api",
+        "remedy.interfaces.attachments",
         "remedy.interfaces.config",
+        "remedy.bundled_skills",
         "remedy.core",
         "remedy.core.agent",
         "remedy.core.runtime",
@@ -162,11 +178,25 @@ def get_hidden_imports() -> list[str]:
     ]
 
 
-def build(cache_clean: bool = False):
+def build(cache_clean: bool = False, ci: bool = False):
     """Build the standalone remedy-desktop.exe via PyInstaller."""
     print(f"Building Remedy Desktop exe... (root={ROOT})")
 
-    sync_versions()
+    # Always sync package.json / tauri.conf / Cargo.toml from pyproject so CI
+    # and local builds never embed mismatched versions.
+    v = sync_versions()
+    if ci:
+        print(f"[CI] Stamped version {v} across manifests before build")
+        # Optional: REMEDY_RELEASE_VERSION must match pyproject when set
+        # (used by release workflow to catch tag/input skew).
+        expected = os.environ.get("REMEDY_RELEASE_VERSION", "").lstrip("v").strip()
+        if expected and expected != v:
+            print(
+                f"ERROR: REMEDY_RELEASE_VERSION={expected} does not match "
+                f"pyproject.toml version={v}. Bump with scripts/sync_version.py first."
+            )
+            sys.exit(1)
+
     ensure_pyinstaller()
 
     DESKTOP_BIN.mkdir(parents=True, exist_ok=True)
@@ -179,6 +209,7 @@ def build(cache_clean: bool = False):
 
     hidden_imports = get_hidden_imports()
 
+    src_path = str(ROOT / "src")
     cmd = [
         sys.executable,
         "-m",
@@ -194,6 +225,9 @@ def build(cache_clean: bool = False):
         str(ROOT / "build" / "pyinstaller"),
         "--noupx",
         "--noconsole",
+        # Prefer repo src/ over any older site-packages remedy-ai install
+        "--paths",
+        src_path,
         "--add-data",
         f"{ROOT / 'src' / 'remedy'}{os.pathsep}remedy",
         "--add-data",
@@ -207,11 +241,18 @@ def build(cache_clean: bool = False):
     cmd.extend([
         "--collect-all",
         "remedy",
+        "--collect-all",
+        "multipart",
+        "--hidden-import",
+        "remedy.interfaces.xai_auth",
         str(ROOT / "src" / "remedy" / "interfaces" / "cli.py"),
     ])
 
     print(f"Running: {' '.join(cmd)}")
-    subprocess.check_call(cmd, cwd=str(ROOT))
+    env = os.environ.copy()
+    # Force analysis/import from this checkout (editable installs can lag).
+    env["PYTHONPATH"] = src_path + os.pathsep + env.get("PYTHONPATH", "")
+    subprocess.check_call(cmd, cwd=str(ROOT), env=env)
 
     exe_path = DESKTOP_BIN / "remedy-desktop.exe"
     if exe_path.exists():
@@ -246,9 +287,12 @@ if __name__ == "__main__":
     p.add_argument(
         "--stage", action="store_true", help="Copy final installer to dist/ dir"
     )
+    p.add_argument(
+        "--ci", action="store_true", help="CI mode — skip version sync and interactive prompts"
+    )
     args = p.parse_args()
 
-    code = build(cache_clean=args.clean)
+    code = build(cache_clean=args.clean, ci=args.ci)
 
     if args.stage:
         candidates = sorted(

@@ -2,6 +2,8 @@
 
 Exposes chat sessions, streaming messages, memory, skills, commands,
 models, agents, and webhook endpoints for the desktop and web UI.
+
+Models: api_models.py  |  Helpers: api_support.py  |  Routes: create_app() below.
 """
 
 from __future__ import annotations
@@ -16,7 +18,6 @@ from typing import Any
 from uuid import uuid4
 
 import aiohttp
-
 import yaml
 from fastapi import (
     FastAPI,
@@ -26,14 +27,54 @@ from fastapi import (
     Response,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from remedy import __version__ as _remedy_version
 from remedy.core.errors import SecurityError
 from remedy.core.security import safe_path
+from remedy.interfaces.api_models import (
+    AttachmentRef,
+    AttachmentUploadRequest,
+    ChatRequest,
+    ChatResponse,
+    CommandRequest,
+    CreateSessionRequest,
+    MemoryAddRequest,
+    MemorySearchRequest,
+    SendMessageRequest,
+    SettingsUpdateRequest,
+    SkillInfo,
+    StatusResponse,
+    UpdateSessionRequest,
+    WebhookPayload,
+)
+from remedy.interfaces.api_support import (
+    _apply_llm_to_runtime,
+    _BUILTIN_AGENTS,
+    _BUILTIN_COMMANDS,
+    _BUILTIN_MODELS,
+    _default_config_path,
+    _find_config_path,
+    _load_config_cached,
+    _serialize_toml,
+    _sse_stream_text,
+    _sync_runtime_llm_from_config,
+    _write_config,
+    handle_slash_command,
+    load_config,
+    sse_headers,
+)
 from remedy.interfaces.config import CONFIG_PATHS
-from remedy.interfaces.config import load_config as _load_toml_config
+from remedy.interfaces.config import (
+    PROVIDER_CATALOG,
+    catalog_models_for_provider,
+    load_config as _load_toml_config,
+    needs_first_run_setup,
+    normalize_llm_settings,
+    provider_credentials_ready,
+)
+from remedy.interfaces.config import _is_local_url
 from remedy.models import (
     ChannelKind,
     ChatMessageRole,
@@ -44,265 +85,18 @@ from remedy.models import (
 
 logger = logging.getLogger(__name__)
 
-
-# -- request / response models -----------------------------------------------
-
-
-class ChatRequest(BaseModel):
-    message: str = Field(..., description="User message to the agent")
-    session_id: str | None = Field(default=None)
-    user_id: str | None = Field(default="default")
-    channel: str | None = Field(default="api")
-
-
-class ChatResponse(BaseModel):
-    response: str
-    request_id: str
-    session_id: str | None = None
-    processing_time_ms: float = 0.0
-
-
-class MemorySearchRequest(BaseModel):
-    query: str
-    limit: int = Field(default=10, ge=1, le=50)
-
-
-class MemoryAddRequest(BaseModel):
-    title: str = Field(..., description="Title for the memory entry")
-    content: str = Field(..., description="Memory content")
-    tags: list[str] = Field(default_factory=list, description="Optional tags")
-    importance: float = Field(default=0.5, ge=0.0, le=1.0)
-
-
-class SkillInfo(BaseModel):
-    name: str
-    description: str
-    version: str
-    kind: str
-    status: str
-    tags: list[str] = []
-
-
-class StatusResponse(BaseModel):
-    status: str = "ok"
-    version: str
-    uptime: str
-    gateway: dict
-    memory_entries: int = 0
-    skills_count: int = 0
-    sessions_count: int = 0
-    chat_sessions_count: int = 0
-
-
-class WebhookPayload(BaseModel):
-    source: str
-    event: str = "default"
-    data: dict[str, Any] = Field(default_factory=dict)
-    signature: str | None = None
-
-
-class CreateSessionRequest(BaseModel):
-    title: str = Field(default="New Session")
-    model: str | None = None
-    agent: str | None = None
-    project_path: str | None = None
-
-
-class UpdateSessionRequest(BaseModel):
-    title: str | None = None
-    model: str | None = None
-    agent: str | None = None
-
-
-class SendMessageRequest(BaseModel):
-    message: str = Field(..., description="User message text")
-    model: str | None = None
-    agent: str | None = None
-
-
-class CommandRequest(BaseModel):
-    command: str = Field(..., description="Slash command to execute (e.g. /new)")
-
-
-class SettingsUpdateRequest(BaseModel):
-    llm_provider: str | None = None
-    llm_model: str | None = None
-    llm_base_url: str | None = None
-    llm_api_key: str | None = None
-    project_path: str | None = None
-    name: str | None = None
-
-
-# -- API factory -------------------------------------------------------------
-
-
-# -- SSE streaming -----------------------------------------------------------
-async def _sse_stream_text(text: str, *, event: str | None = None) -> str:
-    """Format a single SSE frame."""
-    prefix = f"event: {event}\n" if event else ""
-    payload_obj: dict = {"text": text}
-    if event:
-        payload_obj["type"] = event
-    payload = json.dumps(payload_obj)
-    return f"{prefix}data: {payload}\n\n"
-
-
-def sse_headers() -> dict[str, str]:
-    return {
-        "Cache-Control": "no-cache",
-        "Connection": "keep-alive",
-        "X-Accel-Buffering": "no",
-    }
-
-
-# -- built-in slash commands -------------------------------------------------
-
-_BUILTIN_COMMANDS: list[dict] = [
-    {"name": "/help", "description": "Show available commands", "aliases": [], "arguments": None},
-    {"name": "/new", "description": "Create a new chat session", "aliases": [], "arguments": None},
-    {"name": "/sessions", "description": "List recent sessions", "aliases": [], "arguments": None},
-    {"name": "/compact", "description": "Compact / summarize the current session", "aliases": [], "arguments": None},
-    {"name": "/models", "description": "List available models", "aliases": [], "arguments": None},
-    {"name": "/thinking", "description": "Toggle thinking visibility", "aliases": [], "arguments": None},
-    {"name": "/memory", "description": "Search memory", "aliases": [], "arguments": "query"},
-    {"name": "/skills", "description": "List available skills", "aliases": [], "arguments": None},
-    {"name": "/handoff", "description": "List handoff notes", "aliases": [], "arguments": None},
-    {"name": "/init", "description": "Scan the project and generate AGENTS.md", "aliases": [], "arguments": "path"},
+# Re-export models for existing `from remedy.interfaces.api import ChatRequest` callers.
+__all__ = [
+    "create_app",
+    "yaml_schema",
+    "ChatRequest",
+    "ChatResponse",
+    "StatusResponse",
+    "WebhookPayload",
+    "handle_slash_command",
+    "load_config",
+    "sse_headers",
 ]
-
-_BUILTIN_MODELS: list[dict] = [
-    {"id": "gpt-4o-mini", "name": "GPT-4o Mini", "provider": "openai", "default": False},
-    {"id": "gpt-4o", "name": "GPT-4o", "provider": "openai", "default": False},
-    {"id": "claude-3-haiku", "name": "Claude 3 Haiku", "provider": "anthropic", "default": False},
-    {"id": "claude-3.5-sonnet", "name": "Claude 3.5 Sonnet", "provider": "anthropic", "default": False},
-]
-
-_BUILTIN_AGENTS: list[dict] = [
-    {"name": "default", "description": "Remedy — general-purpose agent", "build_mode": True},
-    {"name": "remedy", "description": "Remedy — meta-orchestrator with skill routing", "build_mode": True},
-    {"name": "explore", "description": "Codebase explorer for search and analysis", "build_mode": False},
-    {"name": "general", "description": "General-purpose agent for complex tasks", "build_mode": True},
-]
-
-
-async def handle_slash_command(
-    command: str, session_id: str | None, memory
-) -> dict:
-    """Execute a slash command and return a result."""
-    stripped = command.strip().lower()
-
-    if stripped in ("/help", "/h"):
-        cmds = "\n".join(f"  {c['name']} — {c['description']}" for c in _BUILTIN_COMMANDS)
-        return {"text": f"Available commands:\n{cmds}"}
-
-    if stripped in ("/new", "/n"):
-        return {"text": "Session marked for creation.", "action": "new_session"}
-
-    if stripped in ("/sessions", "/s"):
-        if memory is None:
-            return {"text": "Memory store not available."}
-        sessions = await memory.list_chat_sessions(limit=10)
-        if not sessions:
-            return {"text": "No sessions found."}
-        lines = []
-        for s in sessions:
-            sid = getattr(s, "id", None) or (s.get("id") if isinstance(s, dict) else "")
-            title = getattr(s, "title", None) or (s.get("title") if isinstance(s, dict) else "Untitled")
-            count = getattr(s, "message_count", None)
-            if count is None and isinstance(s, dict):
-                count = s.get("message_count", 0)
-            lines.append(f"  {title} — {count or 0} msg — {str(sid)[:8]}")
-        return {"text": "Recent sessions:\n" + "\n".join(lines)}
-
-    if stripped in ("/models", "/m"):
-        lines = []
-        for m in _BUILTIN_MODELS:
-            d = " [default]" if m["default"] else ""
-            lines.append(f"  {m['name']} ({m['id']}){d}")
-        return {"text": "Available models:\n" + "\n".join(lines)}
-
-    if stripped == "/thinking":
-        return {"text": "Thinking visibility toggled."}
-
-    if stripped.startswith("/memory "):
-        query = command[len("/memory "):].strip()
-        if not query or memory is None:
-            return {"text": "Usage: /memory <query>"}
-        entries = await memory.search(query, limit=5)
-        if not entries:
-            return {"text": "No memory entries found."}
-        lines = []
-        for e in entries:
-            lines.append(f"  **{e.title}** — {e.content[:120]}")
-        return {"text": "Memory results:\n" + "\n".join(lines)}
-
-    if stripped in ("/memory", "/mem"):
-        return {"text": "Usage: /memory <query>"}
-
-    if stripped in ("/skills", "/sk"):
-        return {"text": "Use GET /api/skills for the skill listing."}
-
-    if stripped in ("/handoff", "/ho"):
-        if memory is None:
-            return {"text": "Memory store not available."}
-        handoffs = await memory.list_handoffs(limit=5)
-        if not handoffs:
-            return {"text": "No handoff notes found."}
-        lines = []
-        for h in handoffs:
-            lines.append(f"  **{h.title}** — {h.content[:100]}")
-        return {"text": "Handoffs:\n" + "\n".join(lines)}
-
-    if stripped == "/compact":
-        return {"text": "Session compaction requested (stub)."}
-
-    if stripped.startswith("/init"):
-        parts = stripped.split(" ", 1)
-        path = parts[1] if len(parts) > 1 else "."
-        return {"text": f"Project scan requested for: {path}\nUse the API endpoint POST /api/projects/scan?path=... for detailed results.", "action": "init_scan"}
-
-    return {"text": f"Unknown command: {command}\nType /help for available commands."}
-
-
-def _find_config_path() -> Path | None:
-    for p in CONFIG_PATHS:
-        expanded = p.expanduser().resolve()
-        if expanded.exists():
-            return expanded
-    return None
-
-
-def load_config() -> dict[str, Any]:
-    path = _find_config_path()
-    if path is None:
-        return {}
-    return _load_toml_config(path)
-
-
-def _write_config(path: Path, cfg: dict[str, Any]) -> None:
-    lines = []
-    lines.append("# Remedy AI Configuration\n\n")
-    for key, value in cfg.items():
-        if isinstance(value, dict):
-            lines.append(f"[{key}]\n")
-            for k, v in value.items():
-                lines.append(f"{k} = {_serialize_toml(v)}\n")
-            lines.append("\n")
-        else:
-            lines.append(f"{key} = {_serialize_toml(value)}\n")
-    content = "".join(lines)
-    path.write_text(content, encoding="utf-8")
-
-
-def _serialize_toml(value: Any) -> str:
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if isinstance(value, (int, float)):
-        return str(value)
-    if isinstance(value, list):
-        items = ", ".join(_serialize_toml(v) for v in value)
-        return f"[{items}]"
-    return json.dumps(str(value))
 
 
 def create_app(
@@ -314,29 +108,47 @@ def create_app(
     *,
     api_key: str = "",
 ) -> FastAPI:
+    # Let slash commands list skills without threading runtime everywhere.
+    handle_slash_command._skills_registry = (  # type: ignore[attr-defined]
+        getattr(runtime, "skills", None) if runtime is not None else None
+    )
+
     app = FastAPI(
         title=title,
         version=version,
         description="Remedy AI Agent Framework — Desktop & Web API",
     )
 
+    # CORS: REMEDY_CORS_ORIGINS env wins, then config.toml `cors_origins`, else safe defaults.
     cors_origins_env = os.environ.get("REMEDY_CORS_ORIGINS", "").strip()
     if cors_origins_env == "*":
         cors_origins = ["*"]
     elif cors_origins_env:
         cors_origins = [o.strip() for o in cors_origins_env.split(",") if o.strip()]
     else:
-        # Safe defaults for local desktop/dev; override with REMEDY_CORS_ORIGINS
-        cors_origins = [
-            "http://localhost:1420",
-            "http://127.0.0.1:1420",
-            "http://localhost:3000",
-            "http://127.0.0.1:3000",
-            "http://localhost:5173",
-            "http://127.0.0.1:5173",
-            "tauri://localhost",
-            "http://tauri.localhost",
-        ]
+        try:
+            _cfg = load_config()
+        except Exception:
+            _cfg = {}
+        cfg_origins = _cfg.get("cors_origins") if isinstance(_cfg, dict) else None
+        if cfg_origins == "*" or cfg_origins == ["*"]:
+            cors_origins = ["*"]
+        elif isinstance(cfg_origins, str) and cfg_origins.strip():
+            cors_origins = [o.strip() for o in cfg_origins.split(",") if o.strip()]
+        elif isinstance(cfg_origins, list) and cfg_origins:
+            cors_origins = [str(o).strip() for o in cfg_origins if str(o).strip()]
+        else:
+            # Safe defaults for local desktop/dev
+            cors_origins = [
+                "http://localhost:1420",
+                "http://127.0.0.1:1420",
+                "http://localhost:3000",
+                "http://127.0.0.1:3000",
+                "http://localhost:5173",
+                "http://127.0.0.1:5173",
+                "tauri://localhost",
+                "http://tauri.localhost",
+            ]
     app.add_middleware(
         CORSMiddleware,
         allow_origins=cors_origins,
@@ -360,902 +172,24 @@ def create_app(
         start = time.time()
         response = await call_next(request)
         duration = (time.time() - start) * 1000
-        logger.info("%s %s -> %d (%.0fms)",
-                     request.method, request.url.path,
-                     response.status_code, duration)
+        # Health polls are high-frequency — don't spam the desktop console.
+        path = request.url.path
+        if path in ("/api/status",) or path.endswith("/api/status"):
+            logger.debug("%s %s -> %d (%.0fms)", request.method, path, response.status_code, duration)
+        else:
+            logger.info(
+                "%s %s -> %d (%.0fms)",
+                request.method,
+                path,
+                response.status_code,
+                duration,
+            )
         return response
 
-    # -- health / status -----------------------------------------------------
-    @app.get("/api/status", response_model=StatusResponse)
-    async def get_status():
-        gw_stats = gateway.stats() if gateway else {"running": False}
-        mem_count = 0
-        skills_count = 0
-        summary_sessions = 0
-        chat_sessions = 0
-        if memory:
-            try:
-                db = memory._ensure_db()
-                mem_count = db.execute("SELECT COUNT(*) FROM memory_entries").fetchone()[0]
-                summary_sessions = db.execute("SELECT COUNT(*) FROM session_summaries").fetchone()[0]
-                chat_sessions = db.execute("SELECT COUNT(*) FROM chat_sessions").fetchone()[0]
-            except Exception:
-                pass
 
-        if runtime and hasattr(runtime, "skills") and runtime.skills:
-            try:
-                skills_count = len(runtime.skills.skills)
-            except Exception:
-                pass
+    from remedy.interfaces.routes import register_all_routes
 
-        return StatusResponse(
-            version=version,
-            uptime=gw_stats.get("uptime", "N/A"),
-            gateway=gw_stats,
-            memory_entries=mem_count,
-            skills_count=skills_count,
-            sessions_count=summary_sessions,
-            chat_sessions_count=chat_sessions,
-        )
-
-    # -- chat (legacy) -------------------------------------------------------
-    @app.post("/api/chat", response_model=ChatResponse)
-    async def chat(req: ChatRequest):
-        if gateway is None:
-            raise HTTPException(503, "Gateway not available")
-
-        request_id = str(uuid4())
-        session_id = req.session_id or str(uuid4())
-        user_msg = req.message
-
-        if memory:
-            from remedy.models import ChatMessage, ChatSession
-            existing = await memory.get_chat_session(session_id)
-            if existing is None:
-                await memory.create_chat_session(ChatSession(
-                    id=session_id,
-                    title=user_msg[:60] if user_msg else "New Session",
-                ))
-            await memory.add_chat_message(ChatMessage(
-                session_id=session_id,
-                role=ChatMessageRole.USER,
-                content=user_msg,
-            ))
-
-        event = GatewayEvent(
-            id=uuid4(),
-            kind=EventKind.MESSAGE,
-            channel=ChannelKind.WEB,
-            source_id=req.user_id or "anonymous",
-            payload={
-                "message": user_msg,
-                "request_id": request_id,
-                "session_id": session_id,
-            },
-            session_id=session_id,
-        )
-
-        start = time.time()
-        responses = await gateway.emit(event)
-        elapsed = (time.time() - start) * 1000
-
-        response_text = ""
-        for r in responses:
-            if isinstance(r, str):
-                response_text = r
-                break
-
-        if memory and response_text:
-            await memory.add_chat_message(ChatMessage(
-                session_id=session_id,
-                role=ChatMessageRole.ASSISTANT,
-                content=response_text,
-            ))
-
-        return ChatResponse(
-            response=response_text or "Processed.",
-            request_id=request_id,
-            session_id=session_id,
-            processing_time_ms=round(elapsed, 1),
-        )
-
-    # -- chat sessions -------------------------------------------------------
-    @app.get("/api/sessions")
-    async def list_chat_sessions(
-        limit: int = Query(default=50, le=100),
-        offset: int = Query(default=0, ge=0),
-    ):
-        if memory is None:
-            return {"sessions": []}
-        sessions = await memory.list_chat_sessions(limit=limit, offset=offset)
-        return {"sessions": sessions}
-
-    @app.post("/api/sessions")
-    async def create_chat_session(req: CreateSessionRequest):
-        if memory is None:
-            raise HTTPException(503, "Memory store not available")
-
-        from remedy.models import ChatSession as CS
-        session = CS(
-            title=req.title,
-            model=req.model,
-            agent=req.agent,
-            project_path=req.project_path,
-        )
-        saved = await memory.create_chat_session(session)
-        return {
-            "id": saved.id,
-            "title": saved.title,
-            "model": saved.model,
-            "created_at": saved.created_at.isoformat() if saved.created_at else None,
-        }
-
-    @app.get("/api/sessions/{session_id}")
-    async def get_chat_session(session_id: str):
-        if memory is None:
-            raise HTTPException(503, "Memory store not available")
-        session = await memory.get_chat_session(session_id)
-        if session is None:
-            raise HTTPException(404, "Session not found")
-        return {
-            "id": session.id,
-            "title": session.title,
-            "model": session.model,
-            "agent": session.agent,
-            "message_count": session.message_count,
-            "created_at": session.created_at.isoformat() if session.created_at else None,
-            "updated_at": session.updated_at.isoformat() if session.updated_at else None,
-        }
-
-    @app.patch("/api/sessions/{session_id}")
-    async def update_chat_session(session_id: str, req: UpdateSessionRequest):
-        if memory is None:
-            raise HTTPException(503, "Memory store not available")
-        fields = {k: v for k, v in req.model_dump().items() if v is not None}
-        session = await memory.update_chat_session(session_id, **fields)
-        if session is None:
-            raise HTTPException(404, "Session not found")
-        return {
-            "id": session.id,
-            "title": session.title,
-            "model": session.model,
-            "agent": session.agent,
-            "updated_at": session.updated_at.isoformat() if session.updated_at else None,
-        }
-
-    @app.delete("/api/sessions/{session_id}")
-    async def delete_chat_session(session_id: str):
-        if memory is None:
-            raise HTTPException(503, "Memory store not available")
-        deleted = await memory.delete_chat_session(session_id)
-        if not deleted:
-            raise HTTPException(404, "Session not found")
-        return {"status": "deleted", "session_id": session_id}
-
-    @app.post("/api/sessions/{session_id}/abort")
-    async def abort_session(session_id: str):
-        return {"status": "aborted", "session_id": session_id}
-
-    # -- messages ------------------------------------------------------------
-    @app.get("/api/sessions/{session_id}/messages")
-    async def list_messages(
-        session_id: str,
-        limit: int = Query(default=100, le=500),
-        offset: int = Query(default=0, ge=0),
-    ):
-        if memory is None:
-            raise HTTPException(503, "Memory store not available")
-        msgs = await memory.get_chat_messages(session_id, limit=limit, offset=offset)
-        return {
-            "messages": [
-                {
-                    "id": str(m.id),
-                    "role": m.role.value,
-                    "content": m.content,
-                    "thinking": m.thinking,
-                    "tool_calls": m.tool_calls,
-                    "tool_results": m.tool_results,
-                    "model": m.model,
-                    "agent": m.agent,
-                    "tokens": m.tokens,
-                    "created_at": m.created_at.isoformat() if m.created_at else None,
-                    "reverted": m.reverted,
-                }
-                for m in msgs
-            ]
-        }
-
-    @app.post("/api/sessions/{session_id}/messages")
-    async def send_message(session_id: str, req: SendMessageRequest):
-        if runtime is None:
-            raise HTTPException(503, "Runtime not available")
-
-        request_id = str(uuid4())
-
-        if memory:
-            from remedy.models import ChatMessage, ChatSession
-            existing = await memory.get_chat_session(session_id)
-            if existing is None:
-                await memory.create_chat_session(ChatSession(
-                    id=session_id,
-                    title=req.message[:60],
-                    model=req.model,
-                    agent=req.agent,
-                ))
-            elif req.model and req.model != existing.model:
-                await memory.update_chat_session(session_id, model=req.model)
-
-            await memory.add_chat_message(ChatMessage(
-                session_id=session_id,
-                role=ChatMessageRole.USER,
-                content=req.message,
-            ))
-
-        start = time.time()
-        response_text = ""
-        async for token in runtime.stream_response(req.message, session_id=session_id):
-            response_text += token
-        elapsed = (time.time() - start) * 1000
-
-        if memory and response_text:
-            await memory.add_chat_message(ChatMessage(
-                session_id=session_id,
-                role=ChatMessageRole.ASSISTANT,
-                content=response_text,
-            ))
-
-        return {
-            "request_id": request_id,
-            "session_id": session_id,
-            "response": response_text or "Processed.",
-            "processing_time_ms": round(elapsed, 1),
-        }
-
-    # -- SSE streaming (structured events) -----------------------------------
-    @app.post("/api/sessions/{session_id}/messages/stream")
-    async def stream_message(session_id: str, req: SendMessageRequest):
-        if runtime is None:
-            raise HTTPException(503, "Runtime not available")
-
-        request_id = str(uuid4())
-
-        if memory:
-            from remedy.models import ChatMessage, ChatSession
-            existing = await memory.get_chat_session(session_id)
-            if existing is None:
-                await memory.create_chat_session(ChatSession(
-                    id=session_id,
-                    title=req.message[:60],
-                    model=req.model,
-                    agent=req.agent,
-                ))
-            elif req.model and req.model != existing.model:
-                await memory.update_chat_session(session_id, model=req.model)
-
-            await memory.add_chat_message(ChatMessage(
-                session_id=session_id,
-                role=ChatMessageRole.USER,
-                content=req.message,
-            ))
-
-        async def event_stream():
-            yield (
-                f"event: start\ndata: {json.dumps({'type': 'start', 'request_id': request_id, 'session_id': session_id})}\n\n"
-            )
-
-            try:
-                full_response = ""
-
-                async for token in runtime.stream_response(req.message, session_id=session_id):
-                    if token.startswith("@@tool_call:"):
-                        tool_name = token[len("@@tool_call:"):]
-                        yield (
-                            f"event: tool_call\ndata: {json.dumps({'type': 'tool_call', 'name': tool_name})}\n\n"
-                        )
-                    elif token.startswith("@@tool_result:"):
-                        tool_name = token[len("@@tool_result:"):]
-                        yield (
-                            f"event: tool_result\ndata: {json.dumps({'type': 'tool_result', 'name': tool_name})}\n\n"
-                        )
-                    elif token == "@@tool_calls":
-                        pass
-                    else:
-                        full_response += token
-                        yield await _sse_stream_text(token, event="token")
-
-                if full_response and memory:
-                    await memory.add_chat_message(ChatMessage(
-                        session_id=session_id,
-                        role=ChatMessageRole.ASSISTANT,
-                        content=full_response,
-                    ))
-
-                yield (
-                    f"event: done\ndata: {json.dumps({'type': 'done', 'request_id': request_id})}\n\n"
-                )
-
-            except asyncio.CancelledError:
-                yield await _sse_stream_text("Request cancelled.", event="error")
-            except Exception as e:
-                logger.exception("SSE stream error")
-                yield f"event: error\ndata: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
-
-        return StreamingResponse(
-            event_stream(),
-            media_type="text/event-stream",
-            headers=sse_headers(),
-        )
-
-    # -- legacy chat stream (maintained for backward compatibility) ----------
-    @app.post("/api/chat/stream")
-    async def chat_stream(req: ChatRequest):
-        if runtime is None:
-            raise HTTPException(503, "Runtime not available")
-
-        request_id = str(uuid4())
-        session_id = req.session_id or str(uuid4())
-
-        async def event_stream():
-            yield (
-                f"event: start\ndata: {json.dumps({'type': 'start', 'request_id': request_id, 'session_id': session_id})}\n\n"
-            )
-
-            try:
-                async for token in runtime.stream_response(req.message, session_id=session_id):
-                    yield await _sse_stream_text(token, event="token")
-            except Exception as e:
-                yield f"event: error\ndata: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
-
-            yield f"event: done\ndata: {json.dumps({'type': 'done', 'request_id': request_id})}\n\n"
-
-        return StreamingResponse(
-            event_stream(),
-            media_type="text/event-stream",
-            headers=sse_headers(),
-        )
-
-    # -- commands (slash palette) --------------------------------------------
-    @app.get("/api/commands")
-    async def list_commands():
-        return {"commands": _BUILTIN_COMMANDS}
-
-    @app.post("/api/sessions/{session_id}/command")
-    async def execute_command(session_id: str, req: CommandRequest):
-        result = await handle_slash_command(req.command, session_id, memory)
-        return {"session_id": session_id, "command": req.command, **result}
-
-    # -- models & agents -----------------------------------------------------
-    @app.get("/api/models")
-    async def list_models():
-        models = list(_BUILTIN_MODELS)
-        configured_id = None
-        configured_provider = "openai"
-        base_url = "https://api.openai.com/v1"
-
-        if runtime is not None:
-            configured_id = runtime._llm_model
-            configured_provider = runtime._llm_provider
-            base_url = runtime._llm_base_url
-
-        discovered: list[dict] = []
-        try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=4)) as session:
-                # Try OpenAI-compatible /v1/models endpoint
-                models_url = base_url.rstrip("/") + "/models"
-                auth = None
-                if runtime and runtime._llm_api_key and runtime._llm_api_key != "local":
-                    auth = f"Bearer {runtime._llm_api_key}"
-                headers = {"Authorization": auth} if auth else {}
-                async with session.get(models_url, headers=headers, ssl=False) as resp:
-                    if resp.ok:
-                        body = await resp.json()
-                        for m in body.get("data", []):
-                            mid = m.get("id", m.get("name", ""))
-                            if mid:
-                                discovered.append({"id": mid, "name": mid, "provider": configured_provider, "default": False})
-        except Exception:
-            pass
-
-        # Try Ollama native API if base URL contains localhost/127.0.0.1:11434
-        if "11434" in base_url:
-            try:
-                ollama_url = base_url.rstrip("/v1").rstrip("/") + "/api/tags"
-                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3)) as session:
-                    async with session.get(ollama_url) as resp:
-                        if resp.ok:
-                            body = await resp.json()
-                            for m in body.get("models", []):
-                                mid = m.get("name", "")
-                                if mid:
-                                    name = mid.rstrip(":latest")
-                                    if not any(d["id"] == name for d in discovered):
-                                        discovered.append({"id": name, "name": name, "provider": "ollama", "default": False})
-            except Exception:
-                pass
-
-        # Merge: discovered models first, then built-in (dedup by id)
-        seen = set()
-        merged = []
-        for m in discovered + models:
-            if m["id"] not in seen:
-                seen.add(m["id"])
-                merged.append(m)
-
-        # Ensure configured model is in the list and is default
-        if configured_id and not any(m["id"] == configured_id for m in merged):
-            merged.insert(0, {"id": configured_id, "name": configured_id, "provider": configured_provider, "default": True})
-
-        default_id = configured_id or merged[0]["id"]
-        for m in merged:
-            m["default"] = m["id"] == default_id
-
-        return {"models": merged, "default": default_id}
-
-    @app.get("/api/agents")
-    async def list_agents():
-        return {"agents": _BUILTIN_AGENTS}
-
-    # -- custom commands (markdown-based, ~/.remedy/commands/) ----------------
-    @app.get("/api/commands/custom")
-    async def list_custom_commands():
-        cmd_dir = Path.home() / ".remedy" / "commands"
-        if not cmd_dir.exists():
-            return {"commands": []}
-        commands: list[dict] = []
-        for f in sorted(cmd_dir.glob("*.md")):
-            name = f.stem
-            desc = ""
-            # try to read YAML frontmatter
-            content = f.read_text(encoding="utf-8", errors="replace")
-            if content.startswith("---"):
-                parts = content.split("---", 2)
-                if len(parts) >= 3:
-                    try:
-                        fm = yaml.safe_load(parts[1])
-                        if isinstance(fm, dict):
-                            name = fm.get("description", name)
-                            desc = fm.get("description", "")
-                    except Exception:
-                        pass
-            commands.append({"name": name, "description": desc, "file": str(f)})
-        return {"commands": commands}
-
-    @app.get("/api/commands/custom/{name}")
-    async def get_custom_command(name: str):
-        cmd_dir = Path.home() / ".remedy" / "commands"
-        path = safe_path(cmd_dir, name + ".md")
-        if not path or not path.exists():
-            raise HTTPException(404, f"Command '{name}' not found")
-        return {"content": path.read_text(encoding="utf-8", errors="replace")}
-
-    # -- custom agents (markdown-based, ~/.remedy/agents/) -------------------
-    @app.get("/api/agents/custom")
-    async def list_custom_agents():
-        agent_dir = Path.home() / ".remedy" / "agents"
-        if not agent_dir.exists():
-            return {"agents": []}
-        agents: list[dict] = []
-        for f in sorted(agent_dir.glob("*.md")):
-            name = f.stem
-            desc = ""
-            content = f.read_text(encoding="utf-8", errors="replace")
-            if content.startswith("---"):
-                parts = content.split("---", 2)
-                if len(parts) >= 3:
-                    try:
-                        fm = yaml.safe_load(parts[1])
-                        if isinstance(fm, dict):
-                            name = fm.get("name", name)
-                            desc = fm.get("description", "")
-                    except Exception:
-                        pass
-            agents.append({"name": name, "description": desc, "file": str(f)})
-        return {"agents": agents}
-
-    @app.get("/api/agents/custom/{name}")
-    async def get_custom_agent(name: str):
-        agent_dir = Path.home() / ".remedy" / "agents"
-        path = safe_path(agent_dir, name + ".md")
-        if not path or not path.exists():
-            raise HTTPException(404, f"Agent '{name}' not found")
-        return {"content": path.read_text(encoding="utf-8", errors="replace")}
-
-    # -- memory search -------------------------------------------------------
-    @app.get("/api/memory/search")
-    async def search_memory(query: str = Query(...), limit: int = Query(default=10, le=50)):
-        if memory is None:
-            raise HTTPException(503, "Memory store not available")
-
-        entries = await memory.search(query, limit=limit)
-        return {
-            "query": query,
-            "results": [
-                {
-                    "id": str(e.id),
-                    "title": e.title,
-                    "content": e.content[:300],
-                    "type": e.entry_type.value,
-                    "importance": e.importance,
-                    "created_at": e.created_at.isoformat() if e.created_at else None,
-                }
-                for e in entries
-            ],
-        }
-
-    # -- memory add ----------------------------------------------------------
-    @app.post("/api/memory/add")
-    async def add_memory(req: MemoryAddRequest):
-        if memory is None:
-            raise HTTPException(503, "Memory store not available")
-
-        from remedy.models import MemoryEntry
-        entry = MemoryEntry(
-            title=req.title,
-            content=req.content,
-            entry_type=MemoryEntryType.NOTE,
-            tags=req.tags,
-            importance=req.importance,
-        )
-        saved = await memory.upsert(entry)
-        return {"id": str(saved.id), "title": saved.title, "status": "saved"}
-
-    # -- skills --------------------------------------------------------------
-    @app.get("/api/skills", response_model=list[SkillInfo])
-    async def list_skills():
-        if runtime is None or not hasattr(runtime, "skills"):
-            return []
-        return [
-            SkillInfo(
-                name=s.manifest.name,
-                description=s.manifest.description,
-                version=s.manifest.version,
-                kind=s.manifest.kind.value,
-                status=s.manifest.status.value,
-                tags=s.manifest.tags,
-            )
-            for s in runtime.skills.skills
-        ]
-
-    # -- webhook -------------------------------------------------------------
-    @app.post("/api/webhook/{source}")
-    async def receive_webhook(source: str, payload: WebhookPayload, request: Request):
-        if gateway is None:
-            raise HTTPException(503, "Gateway not available")
-
-        body = await request.body()
-        event = GatewayEvent(
-            kind=EventKind.WEBHOOK,
-            channel=ChannelKind.API,
-            source_id=source,
-            payload={
-                "source": source,
-                "event": payload.event,
-                "data": payload.data,
-                "raw": body.decode("utf-8", errors="replace")[:1000],
-            },
-        )
-
-        await gateway.enqueue(event)
-        return {"status": "accepted", "source": source}
-
-    # -- legacy session summaries  -------------------------------------------
-    @app.get("/api/session-summaries")
-    async def list_session_summaries(limit: int = Query(default=10, le=50)):
-        if memory is None:
-            return {"sessions": []}
-        summaries = await memory.list_sessions(limit=limit)
-        return {
-            "sessions": [
-                {
-                    "session_id": s.session_id,
-                    "started_at": s.started_at.isoformat() if s.started_at else None,
-                    "ended_at": s.ended_at.isoformat() if s.ended_at else None,
-                    "tasks_completed": s.tasks_completed,
-                    "skills_created": s.skills_created,
-                    "summary": s.summary,
-                }
-                for s in summaries
-            ]
-        }
-
-    # -- handoffs  -----------------------------------------------------------
-    @app.get("/api/handoffs")
-    async def list_handoffs(limit: int = Query(default=10, le=50)):
-        if memory is None:
-            return {"handoffs": []}
-        handoffs = await memory.list_handoffs(limit=limit)
-        return {
-            "handoffs": [
-                {
-                    "id": str(h.id),
-                    "title": h.title,
-                    "content": h.content[:200],
-                    "acknowledged": h.acknowledged,
-                    "created_at": h.created_at.isoformat() if h.created_at else None,
-                }
-                for h in handoffs
-            ]
-        }
-
-    # -- file search (cwd-jailed) ---------------------------------------------
-    def _files_base() -> Path:
-        override = os.environ.get("REMEDY_FILES_ROOT", "").strip()
-        return Path(override).expanduser().resolve() if override else Path.cwd().resolve()
-
-    def _resolve_jailed(path: str, base: Path) -> Path:
-        """Resolve path under base; reject traversal."""
-        if path in (".", "", None):
-            return base
-        try:
-            return safe_path(path, base_dir=base)
-        except SecurityError:
-            # Also allow absolute paths that still stay under base
-            candidate = Path(path).expanduser().resolve()
-            candidate.relative_to(base)
-            return candidate
-
-    @app.get("/api/files")
-    async def list_files(path: str = Query(default=".")):
-        """List files in a directory for @file autocompletion (jailed to cwd)."""
-        base = _files_base()
-        try:
-            root = _resolve_jailed(path, base)
-        except (SecurityError, ValueError):
-            return {"files": [], "path": path, "error": "path outside allowed directory"}
-        try:
-            if not root.exists():
-                return {"files": [], "path": path}
-            entries = []
-            for p in sorted(root.iterdir()):
-                if p.name.startswith(".") and p.name != ".":
-                    continue
-                try:
-                    rel = str(p.relative_to(base))
-                except ValueError:
-                    continue
-                entries.append({
-                    "name": p.name,
-                    "path": rel,
-                    "is_dir": p.is_dir(),
-                })
-            return {"files": entries[:200], "path": str(root.relative_to(base) if root != base else ".")}
-        except Exception:
-            return {"files": [], "path": path}
-
-    @app.get("/api/files/search")
-    async def search_files(query: str = Query(..., min_length=1)):
-        """Search the jailed directory tree for matching files."""
-        base = _files_base()
-        # Prevent glob injection / path escapes via query
-        safe_query = query.replace("/", "").replace("\\", "").replace("..", "")
-        if not safe_query:
-            return {"query": query, "results": []}
-        try:
-            results = []
-            for p in base.rglob(f"*{safe_query}*"):
-                if ".git" in p.parts or "__pycache__" in p.parts or "node_modules" in p.parts:
-                    continue
-                if p.name.startswith("."):
-                    continue
-                try:
-                    rel = str(p.relative_to(base))
-                except ValueError:
-                    continue
-                results.append({
-                    "name": p.name,
-                    "path": rel,
-                    "is_dir": p.is_dir(),
-                })
-                if len(results) >= 50:
-                    break
-            return {"query": query, "results": sorted(results, key=lambda r: len(r["path"]))}
-        except Exception:
-            return {"query": query, "results": []}
-
-    # -- message revert ---------------------------------------------------------
-    @app.post("/api/sessions/{session_id}/messages/{msg_id}/revert")
-    async def revert_message(session_id: str, msg_id: str):
-        if memory is None:
-            raise HTTPException(503, "Memory store not available")
-        reverted = await memory.revert_message(msg_id)
-        if not reverted:
-            raise HTTPException(404, "Message not found")
-        return {"status": "reverted", "msg_id": msg_id}
-
-    # -- session export -------------------------------------------------------
-    @app.get("/api/sessions/{session_id}/export")
-    async def export_session(session_id: str):
-        if memory is None:
-            raise HTTPException(503, "Memory store not available")
-        session = await memory.get_chat_session(session_id)
-        if not session:
-            raise HTTPException(404, "Session not found")
-        messages = await memory.get_chat_messages(session_id, limit=10000)
-        session_title = getattr(session, "title", "Session") or "Session"
-        lines = [f"# {session_title}", "", f"**Session ID:** `{session_id}`", f"**Messages:** {len(messages)}", ""]
-        for m in messages:
-            role = getattr(m, "role", None) or (m.get("role") if isinstance(m, dict) else "user")
-            content = getattr(m, "content", None) or (m.get("content") if isinstance(m, dict) else "")
-            created = getattr(m, "created_at", None) or (m.get("created_at") if isinstance(m, dict) else "")
-            agent = getattr(m, "agent", None) or (m.get("agent") if isinstance(m, dict) else "")
-            model = getattr(m, "model", None) or (m.get("model") if isinstance(m, dict) else "")
-            header = f"**{role.capitalize()}**"
-            if agent:
-                header += f" ({agent})"
-            if model:
-                header += f" — {model}"
-            if created:
-                header += f" `{created[:19]}`"
-            lines.append(header)
-            lines.append("")
-            if content:
-                lines.append(content)
-                lines.append("")
-            lines.append("---")
-            lines.append("")
-        markdown = "\n".join(lines)
-        safe_name = "".join(c if c.isalnum() or c in "._- " else "_" for c in session_title)[:60]
-        filename = f"remedy-export-{safe_name}.md"
-        return {"markdown": markdown, "filename": filename}
-
-    # -- settings -----------------------------------------------------------
-    @app.get("/api/settings")
-    async def get_settings():
-        cfg = load_config()
-        config_path = _find_config_path()
-        return {
-            "llm_provider": cfg.get("llm_provider", os.environ.get("REMEDY_LLM_PROVIDER", "openai")),
-            "llm_model": cfg.get("llm_model", os.environ.get("REMEDY_LLM_MODEL", "gpt-4o-mini")),
-            "llm_base_url": cfg.get("llm_base_url", os.environ.get("REMEDY_LLM_BASE_URL", "https://api.openai.com/v1")),
-            "llm_api_key_set": bool(cfg.get("llm_api_key") or os.environ.get("REMEDY_LLM_API_KEY")),
-            "name": cfg.get("name", "Remedy"),
-            "project_path": cfg.get("project_path", os.getcwd()),
-            "version": version,
-            "config_exists": config_path is not None,
-        }
-
-    @app.put("/api/settings")
-    async def update_settings(req: SettingsUpdateRequest):
-        config_path = _find_config_path()
-        if config_path is None:
-            config_path = Path.home() / ".remedy" / "config.toml"
-            config_path.parent.mkdir(parents=True, exist_ok=True)
-
-        cfg = load_config()
-        updates = req.model_dump(exclude_none=True)
-
-        if "llm_api_key" in updates and not updates["llm_api_key"]:
-            del updates["llm_api_key"]
-
-        cfg.update(updates)
-        _write_config(config_path, cfg)
-
-        changes = list(updates.keys())
-        return {"status": "saved", "changes": changes, "config_path": str(config_path)}
-
-    # -- updates ------------------------------------------------------------
-    @app.get("/api/updates/check")
-    async def check_updates():
-        current = version
-        latest_python = None
-        latest_desktop = None
-        release_url = None
-        error = None
-
-        try:
-            import json as _json
-            import urllib.request as _urllib
-
-            req = _urllib.Request(
-                "https://pypi.org/pypi/remedy-ai/json",
-                headers={"Accept": "application/json"},
-            )
-            with _urllib.request.urlopen(req, timeout=8) as resp:
-                data = _json.loads(resp.read().decode())
-                latest_python = data["info"]["version"]
-        except Exception as e:
-            error = f"PyPI check failed: {e}"
-
-        try:
-            import json as _json
-            import urllib.request as _urllib
-
-            req = _urllib.Request(
-                "https://github.com/AhmiDarrow/RemedyAI/releases/latest/download/latest.json",
-                headers={"Accept": "application/json"},
-            )
-            with _urllib.request.urlopen(req, timeout=8) as resp:
-                data = _json.loads(resp.read().decode())
-                latest_desktop = data.get("version")
-                release_url = data.get("url")
-        except Exception:
-            pass
-
-        update_available = False
-        if latest_python:
-            from remedy.interfaces.updater import _parse_version
-            if _parse_version(latest_python) > _parse_version(current):
-                update_available = True
-        if latest_desktop:
-            from remedy.interfaces.updater import _parse_version
-            if _parse_version(latest_desktop) > _parse_version(current):
-                update_available = True
-
-        return {
-            "current_version": current,
-            "latest_python": latest_python,
-            "latest_desktop": latest_desktop,
-            "release_url": release_url,
-            "update_available": update_available,
-            "error": error,
-        }
-
-    # -- OpenAPI schema export -----------------------------------------------
-    @app.get("/api/openapi.yaml", include_in_schema=False)
-    async def export_openapi_yaml():
-        return Response(
-            content=yaml_schema(app),
-            media_type="application/yaml",
-        )
-
-    @app.get("/api/openapi.json", include_in_schema=False)
-    async def export_openapi_json():
-        return Response(
-            content=json.dumps(app.openapi(), indent=2),
-            media_type="application/json",
-        )
-
-    # -- project init scanner -------------------------------------------------
-    @app.post("/api/projects/scan")
-    async def scan_project(path: str = Query(default=".")):
-        target = Path(path).resolve()
-        if not target.exists():
-            raise HTTPException(404, f"Path not found: {path}")
-        if not target.is_dir():
-            target = target.parent
-
-        files: dict[str, list[str]] = {"python": [], "javascript": [], "typescript": [], "rust": [], "other": []}
-        exts_map = {
-            ".py": "python", ".js": "javascript", ".jsx": "javascript",
-            ".ts": "typescript", ".tsx": "typescript", ".mjs": "javascript",
-            ".rs": "rust", ".c": "other", ".cpp": "other", ".h": "other",
-            ".json": "other", ".yaml": "other", ".yml": "other", ".toml": "other",
-            ".md": "other", ".txt": "other", ".css": "other", ".html": "other",
-        }
-        ignored = {".git", "__pycache__", "node_modules", ".venv", "venv", "dist", "build", ".next", "target"}
-        for f in target.rglob("*"):
-            if f.is_file() and not any(p in ignored for p in f.parts):
-                ext = f.suffix.lower()
-                cat = exts_map.get(ext, "other")
-                rel = str(f.relative_to(target))
-                files[cat].append(rel)
-                if len(files[cat]) >= 100:
-                    continue
-
-        summary = {
-            "path": str(target),
-            "file_counts": {k: len(v) for k, v in files.items()},
-            "top_files": files,
-            "python_deps": "",
-            "js_deps": "",
-        }
-
-        # try reading pyproject.toml or package.json for deps
-        pp = target / "pyproject.toml"
-        if pp.exists():
-            summary["python_deps"] = pp.read_text(encoding="utf-8", errors="replace")[:2000]
-        pj = target / "package.json"
-        if pj.exists():
-            summary["js_deps"] = pj.read_text(encoding="utf-8", errors="replace")[:2000]
-
-        return summary
-
-    # -- dashboard (simple HTML) ---------------------------------------------
-    @app.get("/dashboard", include_in_schema=False)
-    async def dashboard():
-        html = DASHBOARD_HTML.replace("{{version}}", version)
-        return Response(content=html, media_type="text/html")
-
+    register_all_routes(app, runtime=runtime, gateway=gateway, memory=memory)
     return app
 
 

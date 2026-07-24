@@ -5,6 +5,10 @@ messaging apps, skill directories, and runtime settings.
 
 Sections can be skipped individually with --skip-* flags or interactively.
 
+First-run gate (before serve/chat):
+    ensure_setup_before_launch() runs setup when needed, or honors --skip-setup
+    so the wizard is not shown again after the first launch.
+
 Usage:
     remedy setup                                            # run the wizard
     remedy setup --quick                                    # non-interactive, use defaults
@@ -26,6 +30,11 @@ from rich.prompt import Confirm, FloatPrompt, IntPrompt, Prompt
 from rich.table import Table
 
 from remedy.core.security import validate_skill_name
+from remedy.interfaces.config import (
+    mark_setup_completed,
+    needs_first_run_setup,
+    resolve_config,
+)
 
 console = Console()
 
@@ -69,6 +78,79 @@ PERSONAS = {
 }
 
 LOG_LEVELS = ["DEBUG", "INFO", "WARNING", "ERROR"]
+
+
+def ensure_setup_before_launch(
+    *,
+    home_dir: str | Path = "~/.remedy",
+    skip_setup: bool = False,
+    force: bool = False,
+    non_interactive: bool = False,
+) -> bool:
+    """Run first-run setup before serve/chat, or skip and remember.
+
+    Returns True if setup ran (or was skipped/marked done), False if aborted.
+
+    - ``skip_setup``: mark setup complete without prompting (ignore after first launch)
+    - ``force``: always run the wizard
+    - ``non_interactive``: if setup is needed and not skipped, exit with guidance
+    """
+    home = Path(home_dir).expanduser()
+    home.mkdir(parents=True, exist_ok=True)
+
+    if skip_setup:
+        path = mark_setup_completed(home_dir=home)
+        console.print(
+            f"[dim]Setup skipped — remembered at {path}. "
+            "Configure later with [bold]remedy setup[/bold] or Settings.[/dim]"
+        )
+        return True
+
+    cfg = resolve_config(home_dir=str(home))
+    if not force and not needs_first_run_setup(cfg, home_dir=home):
+        return True
+
+    stdin = sys.stdin
+    interactive = bool(stdin is not None and stdin.isatty())
+    if non_interactive or not interactive:
+        console.print(
+            "[bold yellow]First-run setup required before launch.[/bold yellow]\n"
+            "  Run [bold]remedy setup[/bold] once, or pass [bold]--skip-setup[/bold] "
+            "to continue without a provider (fallback mode)."
+        )
+        sys.exit(1)
+
+    console.print()
+    console.print(
+        Panel.fit(
+            "Welcome — configure your LLM provider before launching.\n"
+            "You can skip and configure later; you will not be asked again.",
+            title="Remedy first-run setup",
+            border_style="cyan",
+        )
+    )
+    console.print()
+    console.print("  [bold]1[/bold]  Run setup wizard (recommended)")
+    console.print("  [bold]2[/bold]  Skip setup for now (fallback mode; won't ask again)")
+    console.print("  [bold]3[/bold]  Abort launch")
+    console.print()
+
+    choice = Prompt.ask("Choose", choices=["1", "2", "3"], default="1", console=console)
+    if choice == "3":
+        console.print("[yellow]Launch cancelled.[/yellow]")
+        return False
+    if choice == "2":
+        path = mark_setup_completed(home_dir=home)
+        console.print(
+            f"[dim]Skipped. Flag saved to {path}. "
+            "Run [bold]remedy setup[/bold] when ready.[/dim]"
+        )
+        return True
+
+    run_wizard()
+    # Ensure flag even if older wizard paths forgot it
+    mark_setup_completed(home_dir=home)
+    return True
 
 
 def run_wizard(
@@ -133,6 +215,8 @@ def run_wizard(
     # -- Gateway & execution defaults -----------------------------------------
     config["gateway"] = {"heartbeat_interval": 60, "rate_limit": 120}
     config["execution"] = {"default_timeout": 30, "max_retries": 3, "retry_backoff": 1.0}
+    # First-run gate: completed wizard (or quick) must not re-prompt on next launch
+    config["setup_completed"] = True
 
     # -- Review and confirm ---------------------------------------------------
     console.rule("[bold]Review")
@@ -272,6 +356,21 @@ LLM_PROVIDERS: dict[str, dict[str, str]] = {
         "model": "deepseek-chat",
         "base_url": "https://api.deepseek.com/v1",
     },
+    "xai": {
+        "label": "xAI (Grok) — OAuth or API key",
+        "model": "grok-3-mini",
+        "base_url": "https://api.x.ai/v1",
+    },
+    "groq": {
+        "label": "Groq",
+        "model": "llama-3.3-70b-versatile",
+        "base_url": "https://api.groq.com/openai/v1",
+    },
+    "mistral": {
+        "label": "Mistral",
+        "model": "mistral-small-latest",
+        "base_url": "https://api.mistral.ai/v1",
+    },
     "openrouter": {
         "label": "OpenRouter",
         "model": "openrouter/auto",
@@ -283,7 +382,7 @@ LLM_PROVIDERS: dict[str, dict[str, str]] = {
         "base_url": "http://localhost:11434/v1",
     },
     "custom": {
-        "label": "Custom OpenAI-compatible",
+        "label": "Custom OpenAI-compatible (advanced)",
         "model": "",
         "base_url": "",
     },
@@ -482,13 +581,25 @@ def _write_config(config: dict) -> Path:
     lines = ["# Remedy AI Configuration", "# Generated by remedy setup wizard", ""]
 
     for key, value in config.items():
-        if key in ("home_dir",):
+        if key in ("home_dir", "project_path"):
             # Normalize Windows backslashes to forward slashes for TOML safety
-            safe = value.replace("\\", "/")
-            lines.append(f'{key} = "{safe}"')
-        elif key in ("name", "persona", "log_level", "llm_model", "llm_base_url") or key == "llm_api_key":
             if value:
-                lines.append(f'{key} = "{value}"')
+                safe = str(value).replace("\\", "/")
+                lines.append(f'{key} = "{safe}"')
+        elif key in (
+            "name",
+            "persona",
+            "log_level",
+            "llm_provider",
+            "llm_model",
+            "llm_base_url",
+            "llm_api_key",
+        ):
+            if value:
+                safe = str(value).replace("\\", "\\\\").replace('"', '\\"')
+                lines.append(f'{key} = "{safe}"')
+        elif key == "setup_completed":
+            lines.append(f"{key} = {'true' if value else 'false'}")
         elif key == "auto_approve_threshold":
             lines.append(f"{key} = {value}")
         elif key == "allow_skill_creation":

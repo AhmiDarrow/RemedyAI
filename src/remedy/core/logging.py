@@ -51,7 +51,7 @@ class StructuredFormatter(logging.Formatter):
 
     def __init__(self, fmt: str | None = None, color: bool = True) -> None:
         super().__init__()
-        self.color = color and sys.stderr.isatty()
+        self.color = bool(color and sys.stderr is not None and sys.stderr.isatty())
 
     def format(self, record: logging.LogRecord) -> str:
         ts = datetime.now(UTC).isoformat()

@@ -25,9 +25,25 @@ uv sync
 ### Verify
 
 ```bash
-remedy --version   # remedy 0.7.0
+remedy --version   # remedy 0.10.25 (or current package version)
 remedy --help      # Lists all commands
 ```
+
+### Desktop: tool process visibility
+
+In **Settings → Tool process** (or status bar **Proc**):
+
+| Mode | What you see |
+|------|----------------|
+| **Off** (default) | Progress only — clean chat |
+| **Medium** | Human labels + status + short results |
+| **Full** | Complete raw tool args and stdout (safety cap ~500k chars) |
+
+After a turn, process stays under the assistant message, **collapsed** until you expand it. The feed (and the process frame while live) auto-scrolls unless you scroll up; **↓** resumes follow.
+
+### Desktop: your name
+
+**Settings → You & Agent → Your name** is what Remedy calls you (synced to profile). Set during setup or when prompted after first run.
 
 ---
 
@@ -46,6 +62,34 @@ remedy config show
 remedy config path
 ```
 
+### 1b. Connect a provider (xAI example)
+
+**Desktop:** Settings or first-run wizard → choose **xAI (Grok)** → **Sign in with xAI**
+(or paste a console API key). Known providers do not need a manual base URL.
+
+**CLI OAuth (device code):**
+
+```bash
+remedy auth login xai      # Opens browser / shows user code; polls until approved
+remedy auth status xai
+remedy auth logout xai
+```
+
+**CLI / env API key:**
+
+```bash
+remedy auth apikey xai xai-your-console-key
+# or:
+set XAI_API_KEY=xai-your-console-key   # Windows
+export XAI_API_KEY=xai-your-console-key  # Unix
+# Clean configs with XAI_API_KEY set preselect the xAI provider automatically.
+```
+
+Tokens live in `~/.remedy/auth/xai.json` (mode 600 when the OS allows).
+Other key-only brands: set `llm_provider` / `llm_api_key` in config, or use
+`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`, `GROQ_API_KEY`,
+`MISTRAL_API_KEY`, `OPENROUTER_API_KEY`, etc.
+
 ### 2. Discover skills
 
 Remedy ships with bundled skills in the `skills/` directory:
@@ -62,6 +106,21 @@ remedy skill info memory-backup
 remedy memory add "start" "Remedy initial setup complete"
 remedy memory list --limit 5
 ```
+
+### Desktop partner commands
+
+In chat (desktop or `POST /api/sessions/{id}/command`):
+
+| Command | Purpose |
+|---------|---------|
+| `/remember …` | Save a durable fact |
+| `/whoami` | Show profile facts |
+| `/goal …` / `/goals` | Goals checklist |
+| `/compact` / `/harness` | Memory Harness |
+| `/approve` / `/deny` | High-impact shell approvals |
+| `/import <folder>` | Import markdown/text notes into memory |
+
+Composer: **↑** previous prompt, **↓** next (stored locally).
 
 ---
 
@@ -485,6 +544,12 @@ remedy migrate openclaw ~/openclaw/skills --no-copy
 | `allow_skill_creation` | bool | `true` | Permit learning-generated skills |
 | `auto_approve_threshold` | float | `0.8` | Confidence threshold for auto-approval |
 | `log_level` | string | `"INFO"` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+| `llm_provider` | string | `"openai"` | `openai`, `anthropic`, `google`, `deepseek`, `xai`, `groq`, `mistral`, `openrouter`, `ollama`, `custom` |
+| `llm_model` | string | provider default | Model id for the provider |
+| `llm_base_url` | string | provider default | Usually auto-filled; required mainly for `custom` |
+| `llm_api_key` | string | `""` | Cloud API key (xAI may use OAuth instead) |
+| `project_path` | string | `""` | Default workspace for tools / `@file` |
+| `setup_completed` | bool | `false` | First-run wizard gate |
 
 ### Gateway section `[gateway]`
 
@@ -516,7 +581,22 @@ Any config key can be overridden with `REMEDY_<key>`:
 REMEDY_LOG_LEVEL=DEBUG          # Simple key
 REMEDY_EXECUTION__MAX_RETRIES=5 # Nested key (double underscore)
 REMEDY_TELEGRAM__BOT_TOKEN=abc  # Channel config
+REMEDY_LLM_PROVIDER=xai
+REMEDY_LLM_MODEL=grok-3-mini
+XAI_API_KEY=xai-…               # Also accepted (preselects xAI)
+REMEDY_XAI_OAUTH_CLIENT_ID=…    # Optional override for device OAuth client
 ```
+
+---
+
+## Auth commands
+
+| Command | Description |
+|---------|-------------|
+| `remedy auth login xai` | Device-code OAuth (Sign in with xAI) |
+| `remedy auth status xai` | Show connected method / expiry |
+| `remedy auth apikey xai [key]` | Store console API key |
+| `remedy auth logout xai` | Clear `~/.remedy/auth/xai.json` |
 
 ---
 
@@ -625,3 +705,51 @@ def teardown_plugin():
 ```
 
 Available hooks: `on_startup`, `on_shutdown`, `pre_tool_exec`, `post_tool_exec`, `on_event`, `on_memory_save`, `on_skill_loaded`.
+
+---
+
+## Troubleshooting
+
+### `[LLM ERROR — HTTP 400] … tool_calls must be followed by tool messages`
+
+OpenAI-compatible providers require every assistant `tool_calls` entry to have a matching
+`role: tool` message with the same `tool_call_id` before the next model request.
+
+Remedy’s ReAct loop (v0.10.4+) always pairs results for every call id, even when:
+
+- many tools run in parallel (over the concurrency cap),
+- identical calls are fingerprint-deduped,
+- a tool raises an exception mid-batch.
+
+If you still see this on an older install, upgrade (`pip install -U remedy-ai` or install
+the latest desktop release), restart the app/server, and prefer a new chat session for
+large multi-tool turns such as “review project”.
+
+### Long answers cut off mid-stream
+
+The stream loop auto-continues when the provider returns `finish_reason=length` /
+`max_tokens` (up to a few continuations). If answers still stop early, check provider
+token limits and model `max_tokens` settings in `~/.remedy/config.toml`.
+
+### Check for Updates / one-click install
+
+In Settings → About, **Check for Updates** should always show a result:
+
+- **Current / Latest** versions
+- **You’re up to date**, or **Update & Relaunch**
+- Or a red **error** (network, GitHub, permissions)
+
+**Update & Relaunch** (one click):
+
+1. Downloads the NSIS installer (progress UI)
+2. Installs silently (`/S`)
+3. App exits; installer finishes; **Remedy reopens** on the new version
+
+Windows may show a single UAC/elevation prompt — approve it, then the rest is automatic.
+
+The desktop shell checks GitHub Releases (`latest.json`, then the Releases API)
+from the Rust side with a 15s timeout. If that fails, it falls back to
+`GET /api/updates/check` on the local sidecar.
+
+If you’re on an older build that swallowed errors, download the latest installer
+from [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases/latest).

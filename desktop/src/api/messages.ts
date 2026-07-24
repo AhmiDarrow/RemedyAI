@@ -23,6 +23,32 @@ export async function sendMessage(
   })
 }
 
+export type StreamHandlers = {
+  onToken: (text: string) => void
+  onDone: (data: { request_id: string }) => void
+  onError: (message: string) => void
+  onThinking?: (text: string) => void
+  onToolCall?: (name: string, args?: Record<string, unknown>) => void
+  onToolResult?: (name: string, preview?: string, ok?: boolean) => void
+}
+
+export type AttachmentPayload = {
+  path: string
+  name?: string
+  mime?: string
+  size?: number
+  is_image?: boolean
+  is_text?: boolean
+}
+
+export type StreamProgress = {
+  percent?: number | null
+  label?: string
+  eta?: string | null
+  step?: number | null
+  total?: number | null
+}
+
 export function streamMessage(
   sessionId: string,
   message: string,
@@ -31,6 +57,10 @@ export function streamMessage(
   onError: (message: string) => void,
   model?: string,
   onThinking?: (text: string) => void,
+  onToolCall?: (name: string, args?: Record<string, unknown>) => void,
+  onToolResult?: (name: string, preview?: string, ok?: boolean) => void,
+  attachments?: AttachmentPayload[],
+  onProgress?: (info: StreamProgress) => void,
 ): AbortController {
   const controller = new AbortController()
 
@@ -39,43 +69,99 @@ export function streamMessage(
       const res = await fetch(`${getApiBase()}/sessions/${sessionId}/messages/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message, model }),
+        body: JSON.stringify({
+          message,
+          model,
+          attachments: attachments?.length ? attachments : undefined,
+        }),
         signal: controller.signal,
       })
 
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        onError(
+          (body as { detail?: string; message?: string; error?: string })?.detail
+            || (body as { message?: string })?.message
+            || (body as { error?: string })?.error
+            || res.statusText
+            || `HTTP ${res.status}`,
+        )
+        return
+      }
+
       const reader = res.body?.getReader()
-      if (!reader) return
+      if (!reader) {
+        onError('No response body from server')
+        return
+      }
 
       const decoder = new TextDecoder()
       let buffer = ''
       let currentEvent = ''
+      let finished = false
+
+      function handlePayload(payload: Record<string, unknown>) {
+        if (finished) return
+        switch (currentEvent) {
+          case 'token':
+            if (typeof payload.text === 'string' && payload.text) onToken(payload.text)
+            break
+          case 'thinking':
+            if (typeof payload.text === 'string' && payload.text) onThinking?.(payload.text)
+            break
+          case 'tool_call':
+            if (typeof payload.name === 'string' && payload.name) {
+              const args =
+                payload.args && typeof payload.args === 'object' && !Array.isArray(payload.args)
+                  ? (payload.args as Record<string, unknown>)
+                  : undefined
+              onToolCall?.(payload.name, args)
+            }
+            break
+          case 'tool_result':
+            if (typeof payload.name === 'string' && payload.name) {
+              onToolResult?.(
+                payload.name,
+                typeof payload.preview === 'string' ? payload.preview : undefined,
+                typeof payload.ok === 'boolean' ? payload.ok : true,
+              )
+            }
+            break
+          case 'progress':
+            onProgress?.({
+              percent: typeof payload.percent === 'number' ? payload.percent : null,
+              label: typeof payload.label === 'string' ? payload.label : undefined,
+              eta: typeof payload.eta === 'string' ? payload.eta : null,
+              step: typeof payload.step === 'number' ? payload.step : null,
+              total: typeof payload.total === 'number' ? payload.total : null,
+            })
+            break
+          case 'done':
+            finished = true
+            onDone(payload as { request_id: string })
+            break
+          case 'error':
+            finished = true
+            onError(String(payload.message || 'Unknown error'))
+            break
+        }
+      }
 
       function processEvents() {
+        // Keep incomplete trailing line in buffer (critical for correct SSE framing).
         const lines = buffer.split('\n')
-        buffer = ''
+        buffer = lines.pop() ?? ''
 
-        for (const line of lines) {
+        for (const raw of lines) {
+          const line = raw.replace(/\r$/, '')
           if (line.startsWith('event: ')) {
             currentEvent = line.slice(7).trim()
             continue
           }
           if (line.startsWith('data: ')) {
             try {
-              const payload = JSON.parse(line.slice(6))
-              switch (currentEvent) {
-                case 'token':
-                  if (payload.text) onToken(payload.text)
-                  break
-                case 'thinking':
-                  if (payload.text) onThinking?.(payload.text)
-                  break
-                case 'done':
-                  onDone(payload)
-                  break
-                case 'error':
-                  onError(payload.message || 'Unknown error')
-                  break
-              }
+              const payload = JSON.parse(line.slice(6)) as Record<string, unknown>
+              handlePayload(payload)
             } catch {
               // skip unparseable lines
             }
@@ -91,7 +177,15 @@ export function streamMessage(
         processEvents()
       }
       buffer += decoder.decode()
-      processEvents()
+      if (buffer.trim()) {
+        buffer += '\n'
+        processEvents()
+      }
+      // If stream closed without a done/error event, still complete cleanly.
+      if (!finished) {
+        finished = true
+        onDone({ request_id: '' })
+      }
     } catch (err: unknown) {
       if (err instanceof Error && err.name !== 'AbortError') {
         onError(err.message)
@@ -135,13 +229,22 @@ export async function searchFiles(query: string): Promise<{
   return apiFetch(`/files/search?query=${encodeURIComponent(query)}`)
 }
 
+/** Soft-delete a user message and all later messages; returns text for edit+resend. */
+export async function editFromMessageApi(
+  sessionId: string,
+  msgId: string,
+): Promise<{ status: string; content: string; reverted_count: number }> {
+  return apiFetch(`/sessions/${sessionId}/messages/${msgId}/edit`, {
+    method: 'POST',
+  })
+}
+
+/** @deprecated use editFromMessageApi — kept for older call sites */
 export async function revertMessageApi(
   sessionId: string,
   msgId: string,
-): Promise<{ status: string }> {
-  return apiFetch(`/sessions/${sessionId}/messages/${msgId}/revert`, {
-    method: 'POST',
-  })
+): Promise<{ status: string; content?: string }> {
+  return editFromMessageApi(sessionId, msgId)
 }
 
 export async function exportSession(sessionId: string): Promise<{ markdown: string; filename: string }> {

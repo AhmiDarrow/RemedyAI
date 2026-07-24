@@ -193,6 +193,13 @@ class MemoryStore:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(str(self._db_path), check_same_thread=False)
         self._db.row_factory = sqlite3.Row
+        # Speed-oriented pragmas (safe for single-writer desktop agent use).
+        self._db.execute("PRAGMA journal_mode=WAL")
+        self._db.execute("PRAGMA synchronous=NORMAL")
+        self._db.execute("PRAGMA temp_store=MEMORY")
+        self._db.execute("PRAGMA cache_size=-65536")  # ~64 MiB page cache
+        self._db.execute("PRAGMA mmap_size=268435456")  # 256 MiB mmap when OS allows
+        self._db.execute("PRAGMA busy_timeout=5000")
         self._db.executescript(_SCHEMA)
         self._db.commit()
 
@@ -265,6 +272,119 @@ class MemoryStore:
         db.commit()
         return entry
 
+    # Threshold: disable per-row FTS triggers and rebuild once after bulk write.
+    _BULK_FTS_THRESHOLD = 50
+
+    _FTS_TRIGGER_SQL = (
+        """
+        CREATE TRIGGER IF NOT EXISTS memory_fts_insert AFTER INSERT ON memory_entries BEGIN
+            INSERT INTO memory_fts(rowid, title, content, tags)
+            VALUES (new.rowid, new.title, new.content, new.tags);
+        END;
+        """,
+        """
+        CREATE TRIGGER IF NOT EXISTS memory_fts_delete AFTER DELETE ON memory_entries BEGIN
+            INSERT INTO memory_fts(memory_fts, rowid, title, content, tags)
+            VALUES ('delete', old.rowid, old.title, old.content, old.tags);
+        END;
+        """,
+        """
+        CREATE TRIGGER IF NOT EXISTS memory_fts_update AFTER UPDATE ON memory_entries BEGIN
+            INSERT INTO memory_fts(memory_fts, rowid, title, content, tags)
+            VALUES ('delete', old.rowid, old.title, old.content, old.tags);
+            INSERT INTO memory_fts(rowid, title, content, tags)
+            VALUES (new.rowid, new.title, new.content, new.tags);
+        END;
+        """,
+    )
+
+    def _drop_fts_triggers(self, db: sqlite3.Connection) -> None:
+        for name in ("memory_fts_insert", "memory_fts_delete", "memory_fts_update"):
+            db.execute(f"DROP TRIGGER IF EXISTS {name}")
+
+    def _create_fts_triggers(self, db: sqlite3.Connection) -> None:
+        for sql in self._FTS_TRIGGER_SQL:
+            db.execute(sql)
+
+    async def upsert_many(self, entries: list[MemoryEntry]) -> int:
+        """Batch upsert in a single transaction (faster under high write volume).
+
+        For batches larger than ``_BULK_FTS_THRESHOLD``, FTS triggers are dropped
+        for the write, then the FTS index is rebuilt once (avoids N trigger
+        updates). Smaller batches keep normal per-row triggers.
+        Returns the number of entries written.
+        """
+        if not entries:
+            return 0
+        db = self._ensure_db()
+        now = datetime.now(UTC)
+        rows = []
+        for entry in entries:
+            entry.updated_at = now
+            rows.append(
+                (
+                    str(entry.id),
+                    entry.entry_type.value,
+                    entry.title,
+                    entry.content,
+                    json.dumps(entry.tags),
+                    json.dumps(entry.metadata),
+                    entry.created_at.isoformat(),
+                    entry.updated_at.isoformat(),
+                    entry.session_id,
+                    entry.importance,
+                )
+            )
+        bulk = len(rows) >= self._BULK_FTS_THRESHOLD
+        try:
+            if bulk:
+                self._drop_fts_triggers(db)
+            db.executemany(
+                """
+                INSERT INTO memory_entries (id, entry_type, title, content, tags, metadata,
+                                            created_at, updated_at, session_id, importance)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    entry_type = excluded.entry_type,
+                    title = excluded.title,
+                    content = excluded.content,
+                    tags = excluded.tags,
+                    metadata = excluded.metadata,
+                    updated_at = excluded.updated_at,
+                    session_id = excluded.session_id,
+                    importance = excluded.importance
+                """,
+                rows,
+            )
+            if bulk:
+                db.execute("INSERT INTO memory_fts(memory_fts) VALUES('rebuild')")
+                self._create_fts_triggers(db)
+            db.commit()
+        except Exception:
+            db.rollback()
+            # Always try to restore triggers after a failed bulk path.
+            if bulk:
+                try:
+                    self._create_fts_triggers(db)
+                    db.commit()
+                except Exception:
+                    pass
+            raise
+        return len(rows)
+
+    async def rebuild_fts(self) -> int:
+        """Rebuild the FTS5 index from ``memory_entries`` (recovery / batch reindex).
+
+        Useful after bulk imports or if the external-content FTS index drifts.
+        Returns the number of rows re-indexed.
+        """
+        db = self._ensure_db()
+        # FTS5 external-content rebuild from the content table.
+        db.execute("INSERT INTO memory_fts(memory_fts) VALUES('rebuild')")
+        db.commit()
+        row = db.execute("SELECT COUNT(*) FROM memory_entries").fetchone()
+        return int(row[0]) if row else 0
+
     async def get(self, entry_id: str | UUID) -> MemoryEntry | None:
         db = self._ensure_db()
         row = db.execute(
@@ -325,8 +445,14 @@ class MemoryStore:
     async def search(
         self, query: str, limit: int = 20, entry_type: MemoryEntryType | None = None
     ) -> list[MemoryEntry]:
-        """Full-text search across title, content, and tags."""
+        """Full-text search across title, content, and tags.
+
+        Falls back to :meth:`search_simple` when FTS5 MATCH rejects the query
+        (e.g. special characters) so callers always get a safe result set.
+        """
         query = sanitize_search_query(query, max_length=500)
+        if not query.strip():
+            return []
         db = self._ensure_db()
         type_filter = ""
         params: list[Any] = []
@@ -337,28 +463,63 @@ class MemoryStore:
         else:
             params = [query, limit]
 
-        rows = db.execute(
-            f"""
-            SELECT memory_entries.* FROM memory_entries
-            JOIN memory_fts ON memory_entries.rowid = memory_fts.rowid
-            WHERE memory_fts MATCH ? {type_filter}
-            ORDER BY rank
-            LIMIT ?
-            """,
-            params,
-        ).fetchall()
-        return [self._row_to_entry(r) for r in rows]
+        try:
+            rows = db.execute(
+                f"""
+                SELECT memory_entries.* FROM memory_entries
+                JOIN memory_fts ON memory_entries.rowid = memory_fts.rowid
+                WHERE memory_fts MATCH ? {type_filter}
+                ORDER BY rank
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+            return [self._row_to_entry(r) for r in rows]
+        except sqlite3.OperationalError as exc:
+            # Invalid MATCH syntax or missing FTS — degrade gracefully (no recursion).
+            logger = __import__("logging").getLogger(__name__)
+            logger.debug(
+                "FTS MATCH failed (%s); falling back to LIKE for query=%r",
+                exc,
+                query[:80],
+            )
+            hits = await self._search_like(query, limit=limit)
+            if entry_type is None:
+                return hits
+            return [h for h in hits if h.entry_type == entry_type]
 
-    async def search_simple(self, query: str, limit: int = 20) -> list[MemoryEntry]:
-        """Simple LIKE-based search when FTS5 match syntax may fail."""
+    async def _search_like(self, query: str, limit: int = 20) -> list[MemoryEntry]:
+        """Parameterized LIKE fallback (escapes % and _). Never uses FTS."""
+        q = (query or "").strip()
+        if not q:
+            return []
         db = self._ensure_db()
-        like_q = f"%{query}%"
+        safe = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        like_q = f"%{safe}%"
         rows = db.execute(
-            "SELECT * FROM memory_entries WHERE title LIKE ? OR content LIKE ? "
+            "SELECT * FROM memory_entries WHERE title LIKE ? ESCAPE '\\' "
+            "OR content LIKE ? ESCAPE '\\' "
             "ORDER BY created_at DESC LIMIT ?",
             (like_q, like_q, limit),
         ).fetchall()
         return [self._row_to_entry(r) for r in rows]
+
+    async def search_simple(self, query: str, limit: int = 20) -> list[MemoryEntry]:
+        """Tolerant search: try FTS MATCH, then parameterized LIKE.
+
+        Prefer :meth:`search` when you want FTS ranking; this is the safe
+        fallback path used by older callers.
+        """
+        q = (query or "").strip()
+        if not q:
+            return []
+        try:
+            hits = await self.search(q, limit=limit)
+            if hits:
+                return hits
+        except Exception:
+            pass
+        return await self._search_like(q, limit=limit)
 
     # -- handoff notes -------------------------------------------------------
 
@@ -388,8 +549,10 @@ class MemoryStore:
         )
         db.commit()
 
+        # Stable memory id = handoff id so re-saving the same note does not
+        # duplicate rows in memory_entries.
         memory_entry = MemoryEntry(
-            id=uuid4(),
+            id=note.id if getattr(note, "id", None) is not None else uuid4(),
             entry_type=MemoryEntryType.HANDOFF,
             title=f"Handoff: {note.title}",
             content=note.content,
@@ -733,15 +896,36 @@ class MemoryStore:
         return msg
 
     async def get_chat_messages(
-        self, session_id: str, limit: int = 50, offset: int = 0
+        self,
+        session_id: str,
+        limit: int = 50,
+        offset: int = 0,
+        *,
+        include_reverted: bool = False,
     ) -> list[ChatMessage]:
         db = self._ensure_db()
-        rows = db.execute(
-            "SELECT * FROM chat_messages WHERE session_id = ? "
-            "ORDER BY created_at ASC LIMIT ? OFFSET ?",
-            (session_id, limit, offset),
-        ).fetchall()
+        if include_reverted:
+            rows = db.execute(
+                "SELECT * FROM chat_messages WHERE session_id = ? "
+                "ORDER BY created_at ASC LIMIT ? OFFSET ?",
+                (session_id, limit, offset),
+            ).fetchall()
+        else:
+            rows = db.execute(
+                "SELECT * FROM chat_messages WHERE session_id = ? AND reverted = 0 "
+                "ORDER BY created_at ASC LIMIT ? OFFSET ?",
+                (session_id, limit, offset),
+            ).fetchall()
         return [self._row_to_message(r) for r in rows]
+
+    async def get_chat_message(self, msg_id: str) -> ChatMessage | None:
+        db = self._ensure_db()
+        row = db.execute(
+            "SELECT * FROM chat_messages WHERE id = ?", (msg_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_message(row)
 
     async def revert_message(self, msg_id: str) -> bool:
         db = self._ensure_db()
@@ -752,15 +936,17 @@ class MemoryStore:
         return cursor.rowcount > 0
 
     async def revert_from(self, session_id: str, msg_id: str) -> int:
+        """Soft-delete this message and all later messages in the session."""
         db = self._ensure_db()
         target = db.execute(
-            "SELECT created_at FROM chat_messages WHERE id = ?", (msg_id,)
+            "SELECT created_at FROM chat_messages WHERE id = ? AND session_id = ?",
+            (msg_id, session_id),
         ).fetchone()
         if target is None:
             return 0
         cursor = db.execute(
             "UPDATE chat_messages SET reverted = 1 "
-            "WHERE session_id = ? AND created_at >= ?",
+            "WHERE session_id = ? AND created_at >= ? AND reverted = 0",
             (session_id, target["created_at"]),
         )
         db.commit()

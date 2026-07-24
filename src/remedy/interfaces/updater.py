@@ -13,7 +13,6 @@ Usage:
 
 from __future__ import annotations
 
-import subprocess
 import sys
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as importlib_version
@@ -22,6 +21,8 @@ from pathlib import Path
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Confirm
+
+from remedy.execution.process import run_hidden
 
 console = Console()
 
@@ -95,7 +96,7 @@ def _git_pull_and_reinstall(project_root: Path) -> bool:
 
     # git pull
     try:
-        result = subprocess.run(
+        result = run_hidden(
             [git, "pull"],
             cwd=project_root,
             capture_output=True,
@@ -112,7 +113,7 @@ def _git_pull_and_reinstall(project_root: Path) -> bool:
 
     # pip install -e .
     try:
-        result = subprocess.run(
+        result = run_hidden(
             [sys.executable, "-m", "pip", "install", "-e", "."],
             cwd=project_root,
             capture_output=True,
@@ -132,7 +133,7 @@ def _git_pull_and_reinstall(project_root: Path) -> bool:
 def _pip_upgrade() -> bool:
     """Upgrade remedy via pip."""
     try:
-        result = subprocess.run(
+        result = run_hidden(
             [sys.executable, "-m", "pip", "install", "--upgrade", "remedy-ai"],
             capture_output=True,
             text=True,
@@ -255,14 +256,14 @@ def run_update(check_only: bool = False) -> None:
             import shutil
             git = shutil.which("git")
             if git:
-                subprocess.run(
+                run_hidden(
                     [git, "fetch", "origin"],
                     cwd=project_root,
                     capture_output=True,
                     text=True,
                     timeout=30,
                 )
-                r2 = subprocess.run(
+                r2 = run_hidden(
                     [git, "rev-list", "--count", "HEAD..origin/master", "--"],
                     cwd=project_root,
                     capture_output=True,
@@ -299,7 +300,7 @@ def run_update(check_only: bool = False) -> None:
         return
 
     console.print()
-    if not sys.stdin.isatty():
+    if not (sys.stdin is not None and sys.stdin.isatty()):
         console.print("[yellow]Non-interactive terminal; use --check first, then re-run to apply.[/yellow]")
         return
     if not Confirm.ask("Apply update now?"):

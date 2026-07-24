@@ -29,6 +29,195 @@ CONFIG_PATHS = [
 
 ENV_PREFIX = "REMEDY_"
 
+# Env vars that can supply a key for a given provider (checked after provider_keys).
+_PROVIDER_ENV_KEYS: dict[str, tuple[str, ...]] = {
+    "openai": ("OPENAI_API_KEY", "REMEDY_LLM_API_KEY"),
+    "anthropic": ("ANTHROPIC_API_KEY",),
+    "google": ("GOOGLE_API_KEY", "GEMINI_API_KEY"),
+    "deepseek": ("DEEPSEEK_API_KEY",),
+    "xai": ("XAI_API_KEY", "REMEDY_XAI_API_KEY"),
+    "groq": ("GROQ_API_KEY",),
+    "mistral": ("MISTRAL_API_KEY",),
+    "openrouter": ("OPENROUTER_API_KEY",),
+}
+
+
+def looks_like_xai_credential(key: str | None) -> bool:
+    """True if the secret is an xAI console key or OAuth access JWT."""
+    k = (key or "").strip()
+    if not k:
+        return False
+    if k.startswith("xai-"):
+        return True
+    # OAuth access tokens are JWTs (header.payload.sig)
+    if k.startswith("eyJ") and k.count(".") >= 2:
+        return True
+    return False
+
+
+def infer_key_provider(key: str | None) -> str | None:
+    """Best-effort owner for a raw API key (used only for migration)."""
+    k = (key or "").strip()
+    if not k:
+        return None
+    if looks_like_xai_credential(k):
+        return "xai"
+    if k.startswith("sk-ant"):
+        return "anthropic"
+    if k.startswith("gsk_"):
+        return "groq"
+    if k.startswith("AIza"):
+        return "google"
+    if k.startswith("sk-or-"):
+        return "openrouter"
+    # DeepSeek console keys are sk-… (same prefix as OpenAI). Prefer deepseek when
+    # the key was incorrectly parked on xAI; OpenAI users can re-save once.
+    if k.startswith("sk-"):
+        return "deepseek"
+    return None
+
+
+def _home_from_cfg(cfg: dict[str, Any] | None, home: Path | str | None = None) -> Path | None:
+    if home is not None:
+        return Path(home).expanduser()
+    if cfg and cfg.get("home_dir"):
+        return Path(str(cfg["home_dir"])).expanduser()
+    return None
+
+
+def get_provider_keys(
+    cfg: dict[str, Any] | None = None,
+    *,
+    home: Path | str | None = None,
+) -> dict[str, str]:
+    """Return {provider: api_key} from the **secure store** (not config.toml).
+
+    Legacy plaintext ``cfg['provider_keys']`` is still read for one-shot
+    migration, then ignored for ongoing use.
+    """
+    from remedy.interfaces.secret_store import load_provider_keys
+
+    home_path = _home_from_cfg(cfg, home)
+    stored = load_provider_keys(home_path)
+    # Transient legacy table (only until migrate_provider_keys scrubs it)
+    raw = (cfg or {}).get("provider_keys") or {}
+    if isinstance(raw, dict):
+        for k, v in raw.items():
+            pk = str(k or "").strip().lower()
+            val = str(v or "").strip()
+            if pk and val and pk not in stored:
+                stored[pk] = val
+    return stored
+
+
+def set_provider_key(
+    cfg: dict[str, Any],
+    provider: str,
+    api_key: str | None,
+    *,
+    home: Path | str | None = None,
+) -> dict[str, Any]:
+    """Write/clear a per-provider API key in the secure store. Scrubs cfg secrets."""
+    from remedy.interfaces.secret_store import scrub_config_secrets, set_provider_secret
+
+    provider = str(provider or "").strip().lower()
+    if not provider:
+        return cfg
+    home_path = _home_from_cfg(cfg, home)
+    set_provider_secret(provider, api_key, home=home_path)
+    # Never keep secrets in the config dict destined for disk.
+    cfg = scrub_config_secrets(cfg)
+    cfg.pop("provider_keys", None)
+    cfg["llm_api_key"] = ""
+    return cfg
+
+
+def migrate_provider_keys(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Move secrets into the secure store; scrub config; unstick foreign xAI keys.
+
+    Legacy configs used a single ``llm_api_key`` shared across providers and/or a
+    plaintext ``[provider_keys]`` table. Both are migrated into
+    ``~/.remedy/auth/provider_keys.json`` (DPAPI-encrypted on Windows) and
+    removed from the config representation.
+    """
+    from remedy.interfaces.secret_store import migrate_secrets_from_config
+
+    cfg = dict(cfg or {})
+    home = _home_from_cfg(cfg)
+    # Pull plaintext secrets into secure store + scrub cfg
+    cfg = migrate_secrets_from_config(cfg, home=home)
+    # Ensure global key is never left populated (secrets live in the store / OAuth)
+    cfg["llm_api_key"] = ""
+    cfg.pop("provider_keys", None)
+    return cfg
+
+
+def resolve_provider_api_key(
+    cfg: dict[str, Any] | None = None,
+    provider: str | None = None,
+    *,
+    home: Path | str | None = None,
+) -> str:
+    """Resolve the API key/bearer for *this* provider only (never another provider's).
+
+    Order:
+      1. Secure store (``~/.remedy/auth/provider_keys.json``)
+      2. xAI OAuth / auth store via ``resolve_bearer``
+      3. Provider-specific env vars
+      4. Legacy ``llm_api_key`` / ``REMEDY_LLM_API_KEY`` only if plausible for provider
+         (and never written back to disk by this function)
+    """
+    cfg = dict(cfg or {})
+    home_path = _home_from_cfg(cfg, home)
+    provider = str(provider or cfg.get("llm_provider") or "").strip().lower()
+    if not provider:
+        return ""
+
+    # Secure store first (after optional lazy migration of any leftover plaintext)
+    if cfg.get("provider_keys") or str(cfg.get("llm_api_key") or "").strip():
+        cfg = migrate_provider_keys(cfg)
+
+    from remedy.interfaces.secret_store import get_provider_secret
+
+    mapped = (get_provider_secret(provider, home=home_path) or "").strip()
+    if mapped:
+        if provider == "xai" and not looks_like_xai_credential(mapped):
+            mapped = ""
+        else:
+            return mapped
+
+    if provider == "xai":
+        try:
+            from remedy.interfaces.xai_auth import resolve_bearer
+
+            token = resolve_bearer(home_path)
+            if token:
+                return token
+        except Exception:
+            pass
+
+    for env_name in _PROVIDER_ENV_KEYS.get(provider, ()):
+        val = os.environ.get(env_name, "").strip()
+        if val:
+            if provider == "xai" and env_name in ("XAI_API_KEY", "REMEDY_XAI_API_KEY"):
+                return val
+            if provider != "xai":
+                return val
+            if looks_like_xai_credential(val):
+                return val
+
+    # Legacy global / env — only when it matches this provider. Not persisted.
+    global_key = str(
+        cfg.get("llm_api_key") or os.environ.get("REMEDY_LLM_API_KEY") or ""
+    ).strip()
+    if not global_key:
+        return ""
+    if provider == "xai":
+        return global_key if looks_like_xai_credential(global_key) else ""
+    if looks_like_xai_credential(global_key):
+        return ""
+    return global_key
+
 
 def load_config(path: Path | None = None) -> dict[str, Any]:
     """Load config from a file, auto-detecting format (TOML or YAML)."""
@@ -109,13 +298,348 @@ def resolve_config(
     """Load and resolve full configuration.
 
     Priority: env vars > config file > defaults.
+
+    When ``home_dir`` is set and no explicit ``config_path`` is given, prefer
+    ``{home_dir}/config.toml`` so desktop ``--home`` and CLI share one file.
     """
+    if config_path is None and home_dir:
+        home_cfg = Path(home_dir).expanduser() / "config.toml"
+        if home_cfg.exists():
+            config_path = home_cfg
     config = load_config(config_path)
     if env_overrides:
         config = load_env_overrides(config)
+        # XAI_API_KEY / other env keys preselect provider on clean defaults.
+        config = apply_env_provider_bootstrap(config)
     if home_dir:
         config["home_dir"] = home_dir
     return config
+
+
+# -- Provider catalog (defaults + model ownership) ---------------------------
+
+PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
+    "openai": {
+        "label": "OpenAI",
+        "base_url": "https://api.openai.com/v1",
+        "auth": ["api_key"],
+        "env_keys": ["OPENAI_API_KEY", "REMEDY_LLM_API_KEY"],
+        "show_base_url": False,
+        "models": [
+            {"id": "gpt-4o-mini", "name": "GPT-4o Mini"},
+            {"id": "gpt-4o", "name": "GPT-4o"},
+            {"id": "gpt-4.1-mini", "name": "GPT-4.1 Mini"},
+            {"id": "o4-mini", "name": "o4-mini"},
+        ],
+    },
+    "anthropic": {
+        "label": "Anthropic",
+        "base_url": "https://api.anthropic.com/v1",
+        "auth": ["api_key"],
+        "env_keys": ["ANTHROPIC_API_KEY"],
+        "show_base_url": False,
+        "models": [
+            {"id": "claude-3-5-sonnet-latest", "name": "Claude 3.5 Sonnet"},
+            {"id": "claude-3-5-haiku-latest", "name": "Claude 3.5 Haiku"},
+            {"id": "claude-3-haiku-20240307", "name": "Claude 3 Haiku"},
+            {"id": "claude-3.5-sonnet", "name": "Claude 3.5 Sonnet (alias)"},
+            {"id": "claude-3-haiku", "name": "Claude 3 Haiku (alias)"},
+        ],
+    },
+    "google": {
+        "label": "Google AI",
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "auth": ["api_key"],
+        "env_keys": ["GOOGLE_API_KEY", "GEMINI_API_KEY"],
+        "show_base_url": False,
+        "models": [
+            {"id": "gemini-2.5-flash", "name": "Gemini 2.5 Flash"},
+            {"id": "gemini-2.0-flash", "name": "Gemini 2.0 Flash"},
+            {"id": "gemini-1.5-pro", "name": "Gemini 1.5 Pro"},
+        ],
+    },
+    "deepseek": {
+        "label": "DeepSeek",
+        "base_url": "https://api.deepseek.com/v1",
+        "auth": ["api_key"],
+        "env_keys": ["DEEPSEEK_API_KEY"],
+        "show_base_url": False,
+        "models": [
+            {"id": "deepseek-chat", "name": "DeepSeek Chat"},
+            {"id": "deepseek-reasoner", "name": "DeepSeek Reasoner"},
+        ],
+    },
+    "xai": {
+        "label": "xAI (Grok)",
+        "base_url": "https://api.x.ai/v1",
+        "auth": ["oauth", "api_key"],  # Sign in with xAI primary; console API key secondary
+        "env_keys": ["XAI_API_KEY", "REMEDY_XAI_API_KEY"],
+        "show_base_url": False,
+        "key_docs_url": "https://console.x.ai/team/default/api-keys",
+        "models": [
+            {"id": "grok-4", "name": "Grok 4"},
+            {"id": "grok-3", "name": "Grok 3"},
+            {"id": "grok-3-mini", "name": "Grok 3 Mini"},
+            {"id": "grok-2", "name": "Grok 2"},
+            {"id": "grok-2-vision-1212", "name": "Grok 2 Vision"},
+        ],
+    },
+    "groq": {
+        "label": "Groq",
+        "base_url": "https://api.groq.com/openai/v1",
+        "auth": ["api_key"],
+        "env_keys": ["GROQ_API_KEY"],
+        "show_base_url": False,
+        "models": [
+            {"id": "llama-3.3-70b-versatile", "name": "Llama 3.3 70B"},
+            {"id": "llama-3.1-8b-instant", "name": "Llama 3.1 8B Instant"},
+            {"id": "mixtral-8x7b-32768", "name": "Mixtral 8x7B"},
+        ],
+    },
+    "mistral": {
+        "label": "Mistral",
+        "base_url": "https://api.mistral.ai/v1",
+        "auth": ["api_key"],
+        "env_keys": ["MISTRAL_API_KEY"],
+        "show_base_url": False,
+        "models": [
+            {"id": "mistral-small-latest", "name": "Mistral Small"},
+            {"id": "mistral-large-latest", "name": "Mistral Large"},
+            {"id": "codestral-latest", "name": "Codestral"},
+        ],
+    },
+    "openrouter": {
+        "label": "OpenRouter",
+        "base_url": "https://openrouter.ai/api/v1",
+        "auth": ["api_key"],
+        "env_keys": ["OPENROUTER_API_KEY"],
+        "show_base_url": False,
+        "models": [
+            {"id": "openrouter/auto", "name": "OpenRouter Auto"},
+            {"id": "openai/gpt-4o-mini", "name": "GPT-4o Mini (via OpenRouter)"},
+            {"id": "anthropic/claude-3.5-sonnet", "name": "Claude 3.5 Sonnet (via OpenRouter)"},
+            {"id": "google/gemini-2.0-flash-001", "name": "Gemini 2.0 Flash (via OpenRouter)"},
+        ],
+    },
+    "ollama": {
+        "label": "Ollama (local)",
+        "base_url": "http://127.0.0.1:11434/v1",
+        "auth": ["none"],
+        "env_keys": [],
+        "show_base_url": False,
+        "models": [
+            {"id": "llama3.2", "name": "Llama 3.2"},
+            {"id": "qwen2.5", "name": "Qwen 2.5"},
+            {"id": "codellama", "name": "Code Llama"},
+        ],
+    },
+    "custom": {
+        "label": "Custom / OpenAI-compatible",
+        "base_url": "http://127.0.0.1:5001/api/v1",
+        "auth": ["api_key"],
+        "env_keys": [],
+        "show_base_url": True,
+        "advanced": True,  # hide under Advanced in desktop UI
+        "models": [
+            {"id": "default", "name": "Default (custom endpoint)"},
+        ],
+    },
+}
+
+# Providers that keep a closed model catalog (foreign model ids are snapped).
+_CLOSED_PROVIDERS = frozenset(
+    {"openai", "anthropic", "google", "deepseek", "xai", "groq", "mistral"}
+)
+
+
+def infer_provider_from_model(model_id: str) -> str | None:
+    """Guess which *native* provider owns a model id (not OpenRouter-prefixed)."""
+    mid = (model_id or "").strip().lower()
+    if not mid:
+        return None
+    # OpenRouter-style vendor/model is multi-provider; treat as openrouter only
+    # when the user already chose openrouter — do not force it here.
+    if mid.startswith("claude") or mid.startswith("anthropic/"):
+        return "anthropic"
+    if mid.startswith("gpt-") or mid.startswith("o1") or mid.startswith("o3") or mid.startswith("o4"):
+        return "openai"
+    if mid.startswith("gemini") or mid.startswith("models/gemini"):
+        return "google"
+    if mid.startswith("deepseek"):
+        return "deepseek"
+    if mid.startswith("grok") or mid.startswith("xai/"):
+        return "xai"
+    if mid.startswith("mistral") or mid.startswith("codestral") or mid.startswith("open-mistral"):
+        return "mistral"
+    # Groq hosts open models; only treat explicit groq/ prefix as owned.
+    if mid.startswith("groq/"):
+        return "groq"
+    # Common local / Ollama model family prefixes (not exhaustive).
+    if mid.startswith(
+        (
+            "llama",
+            "qwen",
+            "codellama",
+            "mistral",
+            "mixtral",
+            "phi",
+            "gemma",
+            "codegemma",
+            "tinyllama",
+            "wizard",
+            "nous",
+            "yi-",
+            "solar",
+            "orca",
+            "starcoder",
+            "deepseek-coder",
+            "deepseek-r1",
+        )
+    ):
+        return "ollama"
+    return None
+
+
+def infer_provider_from_base_url(base_url: str) -> str | None:
+    """Map a known host to a provider id."""
+    u = (base_url or "").lower()
+    if not u:
+        return None
+    if "anthropic.com" in u:
+        return "anthropic"
+    if "openai.com" in u:
+        return "openai"
+    if "deepseek.com" in u:
+        return "deepseek"
+    if "api.x.ai" in u or "x.ai" in u:
+        return "xai"
+    if "api.groq.com" in u or "groq.com" in u:
+        return "groq"
+    if "mistral.ai" in u:
+        return "mistral"
+    if "openrouter.ai" in u:
+        return "openrouter"
+    if "generativelanguage.googleapis.com" in u or "googleapis.com" in u:
+        return "google"
+    if "11434" in u or "ollama" in u:
+        return "ollama"
+    return None
+
+
+def normalize_llm_settings(
+    provider: str | None,
+    model: str | None,
+    base_url: str | None,
+) -> tuple[str, str, str]:
+    """Align provider, model, and base_url so they don't cross-wire.
+
+    Examples of bad states we fix:
+    - provider=deepseek, model=claude-3-haiku  → model=deepseek-chat
+    - provider=deepseek, base_url=api.openai.com → base_url=api.deepseek.com
+    """
+    prov = (provider or "openai").strip().lower() or "openai"
+    if prov not in PROVIDER_CATALOG:
+        # Unknown label → treat as custom OpenAI-compatible
+        if prov not in ("custom",):
+            # keep name but use custom defaults for missing pieces
+            pass
+    catalog = PROVIDER_CATALOG.get(prov) or PROVIDER_CATALOG["custom"]
+    default_url = str(catalog.get("base_url") or "")
+    default_models = list(catalog.get("models") or [])
+    default_model = str(default_models[0]["id"]) if default_models else "gpt-4o-mini"
+
+    url = (base_url or "").strip() or default_url
+    mid = (model or "").strip() or default_model
+
+    # If URL clearly belongs to another known provider, snap to this provider's URL.
+    url_owner = infer_provider_from_base_url(url)
+    if url_owner and url_owner != prov and prov in PROVIDER_CATALOG:
+        # OpenRouter intentionally hosts many vendors — only snap when *this*
+        # provider is not openrouter/custom.
+        if prov not in ("openrouter", "custom", "ollama"):
+            url = default_url
+
+    # Flexible providers can host any model id (Ollama pulls deepseek-*, etc.).
+    _FLEXIBLE = frozenset({"openrouter", "custom", "ollama"})
+
+    model_owner = infer_provider_from_model(mid)
+    if model_owner and model_owner != prov and prov not in _FLEXIBLE:
+        mid = default_model
+    elif prov in PROVIDER_CATALOG and default_models and prov not in _FLEXIBLE:
+        known = {m["id"] for m in default_models}
+        if not mid:
+            mid = default_model
+        # Closed catalogs: reject foreign model ids.
+        if prov == "deepseek" and mid not in known and model_owner not in (None, "deepseek"):
+            mid = default_model
+        if prov in _CLOSED_PROVIDERS and model_owner and model_owner != prov:
+            mid = default_model
+
+    if not url:
+        url = default_url
+    if not mid:
+        mid = default_model
+
+    return prov, mid, url
+
+
+# Canonical desktop personas (aligned with SetupWizard).
+PERSONA_PROMPTS: dict[str, str] = {
+    "default": "",
+    "balanced": (
+        "Communication style: balanced — helpful and adaptable to the task. "
+        "Match the user's depth; prefer clarity over verbosity."
+    ),
+    "efficient": (
+        "Communication style: efficient — concise, code-first, minimal explanation. "
+        "Prefer short answers and actionable output."
+    ),
+    "detailed": (
+        "Communication style: detailed — thorough explanations with context, "
+        "trade-offs, and clear structure."
+    ),
+    "playful": (
+        "Communication style: playful — casual tone with light humor while remaining accurate."
+    ),
+    # CLI wizard aliases
+    "concise": (
+        "Communication style: concise — short answers, minimal fluff."
+    ),
+    "verbose": (
+        "Communication style: verbose — thorough explanations with examples."
+    ),
+    "sarcastic": (
+        "Communication style: dry humor is allowed; stay helpful and accurate."
+    ),
+    "minimal": (
+        "Communication style: minimal — answer only what was asked."
+    ),
+}
+
+
+def persona_system_addendum(persona: str | None) -> str:
+    """Return system-prompt text for a persona id, or empty string."""
+    if not persona:
+        return ""
+    key = persona.strip().lower()
+    return PERSONA_PROMPTS.get(key, "")
+
+
+def catalog_models_for_provider(provider: str) -> list[dict[str, Any]]:
+    """Return built-in model entries tagged with provider."""
+    prov = (provider or "openai").lower()
+    cat = PROVIDER_CATALOG.get(prov) or PROVIDER_CATALOG.get("custom") or {}
+    out: list[dict[str, Any]] = []
+    for m in cat.get("models") or []:
+        out.append(
+            {
+                "id": m["id"],
+                "name": m.get("name", m["id"]),
+                "provider": prov,
+                "default": False,
+            }
+        )
+    return out
 
 
 def _resolve_str(config_value: str | None, env_var: str, default: str) -> str:
@@ -174,11 +698,14 @@ def config_to_agent_config(config: dict[str, Any]) -> AgentConfig:
         "https://api.openai.com/v1",
     )
 
-    llm_api_key = _resolve_str(
-        config.get("llm_api_key"),
-        "REMEDY_LLM_API_KEY",
-        "",
+    llm_provider = _resolve_str(
+        config.get("llm_provider"),
+        "REMEDY_LLM_PROVIDER",
+        "openai",
     )
+
+    # Per-provider keys (DeepSeek sk- never rides into xAI, etc.).
+    llm_api_key = resolve_provider_api_key(config, llm_provider)
 
     # Local servers (Ollama, Kobold.cpp, LM Studio, etc.) don't need a real
     # API key.  Supply a dummy value so the agent doesn't fall back to echo
@@ -199,11 +726,7 @@ def config_to_agent_config(config: dict[str, Any]) -> AgentConfig:
         auto_approve_threshold=config.get("auto_approve_threshold", 0.8),
         log_level=config.get("log_level", "INFO"),
         sarcasm_mode=config.get("sarcasm_mode", False),
-        llm_provider=_resolve_str(
-            config.get("llm_provider"),
-            "REMEDY_LLM_PROVIDER",
-            "openai",
-        ),
+        llm_provider=llm_provider,
         llm_api_key=llm_api_key,
         llm_model=_resolve_str(
             config.get("llm_model"),
@@ -211,6 +734,7 @@ def config_to_agent_config(config: dict[str, Any]) -> AgentConfig:
             "gpt-4o-mini",
         ),
         llm_base_url=llm_base_url,
+        project_path=config.get("project_path") or os.environ.get("REMEDY_PROJECT_PATH") or None,
     )
 
 
@@ -223,13 +747,21 @@ name = "Remedy"
 persona = "default"
 home_dir = "{home_dir.as_posix()}"
 
+# First-run setup: false until `remedy setup` / desktop wizard / --skip-setup
+setup_completed = false
+
+# Default project/workspace folder for the agent (file tools, shell cwd, @file UI)
+# project_path = "C:/Users/You/Projects/MyApp"
+
 # --- LLM Provider ---
-# Supported providers: openai, anthropic, google, deepseek, openrouter, ollama, custom
+# Supported: openai, anthropic, google, deepseek, xai, groq, mistral, openrouter, ollama, custom
+# xAI also supports OAuth (Sign in with xAI) via desktop Settings / `remedy auth login xai`
 llm_provider = "openai"
 llm_model = "gpt-4o-mini"
 llm_base_url = "https://api.openai.com/v1"
 # llm_api_key - set via REMEDY_LLM_API_KEY env var or uncomment below:
 # llm_api_key = "sk-..."
+# XAI_API_KEY auto-selects xAI on first run when present
 
 # Search paths for bundled + user skills
 skills_dir = []
@@ -280,3 +812,262 @@ def create_default_config(home_dir: Path | None = None) -> Path:
     if not config_path.exists():
         config_path.write_text(generate_default_config(hd), encoding="utf-8")
     return config_path
+
+
+def config_path_for_home(home_dir: str | Path | None = None) -> Path:
+    """Return the canonical config.toml path for a home directory."""
+    hd = Path(home_dir or Path.home() / ".remedy").expanduser()
+    return hd / "config.toml"
+
+
+def needs_first_run_setup(
+    config: dict[str, Any] | None = None,
+    *,
+    home_dir: str | Path | None = None,
+    config_path: Path | None = None,
+) -> bool:
+    """Return True when first-run setup should run before launch.
+
+    Rules:
+    - No config file → need setup
+    - ``setup_completed`` present → honor it (True skips, False forces)
+    - Legacy config without the flag → treat as already set up (do not re-wizard upgrades)
+
+    Skipping setup (desktop Skip, CLI --skip-setup) writes ``setup_completed = true``
+    so subsequent launches ignore the wizard.
+    """
+    path = config_path
+    if path is None and home_dir is not None:
+        path = config_path_for_home(home_dir)
+    if path is None:
+        path = config_path_for_home()
+
+    path = Path(path).expanduser()
+    if not path.exists():
+        return True
+
+    cfg = config if config is not None else load_config(path)
+    if "setup_completed" in cfg:
+        return not bool(cfg["setup_completed"])
+    # Pre-flag installs: config already exists → do not force wizard again.
+    return False
+
+
+def mark_setup_completed(
+    *,
+    home_dir: str | Path | None = None,
+    config_path: Path | None = None,
+    extra: dict[str, Any] | None = None,
+) -> Path:
+    """Persist ``setup_completed = true`` (optionally merging extra keys).
+
+    Creates a minimal config when none exists so first-launch skip is remembered.
+    """
+    path = config_path or config_path_for_home(home_dir)
+    path = Path(path).expanduser()
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    cfg: dict[str, Any] = load_config(path) if path.exists() else {}
+    if extra:
+        cfg.update(extra)
+    cfg["setup_completed"] = True
+    if "home_dir" not in cfg:
+        cfg["home_dir"] = path.parent.as_posix()
+
+    # Minimal TOML writer (top-level scalars only + nested dicts as sections).
+    lines = ["# Remedy AI Configuration", ""]
+    for key, value in cfg.items():
+        if value is None:
+            # Omit null keys instead of writing misleading empty strings.
+            continue
+        if isinstance(value, dict):
+            lines.append(f"[{key}]")
+            for k, v in value.items():
+                if v is None:
+                    continue
+                lines.append(f"{k} = {_toml_scalar(v)}")
+            lines.append("")
+        else:
+            lines.append(f"{key} = {_toml_scalar(value)}")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
+
+
+def _toml_scalar(value: Any) -> str:
+    if value is None:
+        # Callers should skip None; keep a defined encoding for list elements.
+        return '""'
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return str(value)
+    if isinstance(value, list):
+        items = ", ".join(_toml_scalar(v) for v in value if v is not None)
+        return f"[{items}]"
+    # Escape backslashes and quotes for TOML strings
+    text = str(value).replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{text}"'
+
+
+def provider_credentials_ready(config: dict[str, Any] | None = None) -> bool:
+    """True when an LLM key is configured (or local URL which needs none)."""
+    # Use a copy of the *input* mapping — migrate_provider_keys scrubs llm_api_key.
+    raw = dict(config) if config is not None else load_config()
+    provider = str(
+        raw.get("llm_provider") or os.environ.get("REMEDY_LLM_PROVIDER") or ""
+    ).lower()
+    base = str(
+        raw.get("llm_base_url")
+        or os.environ.get("REMEDY_LLM_BASE_URL")
+        or ""
+    ).strip()
+    if base and _is_local_url(base):
+        return True
+    if provider in ("ollama",):
+        return True
+    plain = str(raw.get("llm_api_key") or "").strip()
+    if not plain and config is None:
+        plain = str(os.environ.get("REMEDY_LLM_API_KEY") or "").strip()
+    if plain:
+        if provider == "xai":
+            return looks_like_xai_credential(plain) or plain.startswith("xai-")
+        return True
+    # Secure store / OAuth / env (may migrate leftovers as a side effect).
+    key = resolve_provider_api_key(raw, provider or "openai")
+    return bool(key)
+
+
+def public_provider_catalog() -> list[dict[str, Any]]:
+    """Catalog entries for GET /api/providers and desktop UI."""
+    items: list[dict[str, Any]] = []
+    for pid, meta in PROVIDER_CATALOG.items():
+        auth_modes = list(meta.get("auth") or ["api_key"])
+        if pid == "ollama":
+            auth_modes = ["none"]
+        models = list(meta.get("models") or [])
+        default_model = str(models[0]["id"]) if models else "default"
+        items.append(
+            {
+                "id": pid,
+                "name": meta.get("label") or pid,
+                "base_url": meta.get("base_url"),
+                "models": models,
+                "default_model": default_model,
+                "auth": auth_modes,
+                "oauth": "oauth" in auth_modes,
+                "env_keys": list(meta.get("env_keys") or []),
+                "show_base_url": bool(meta.get("show_base_url", pid in ("custom", "ollama"))),
+                "advanced": bool(meta.get("advanced", False)),
+                "key_docs_url": meta.get("key_docs_url"),
+            }
+        )
+    return items
+
+
+def detect_ollama(base_url: str | None = None, timeout: float = 1.5) -> dict[str, Any]:
+    """Probe local Ollama (tags API). Returns available flag + model names."""
+    import json
+    import urllib.error
+    import urllib.request
+
+    url = (base_url or PROVIDER_CATALOG["ollama"]["base_url"] or "").rstrip("/")
+    # Native tags endpoint (strip /v1 if present)
+    tags_url = url.removesuffix("/v1") + "/api/tags"
+    models: list[str] = []
+    try:
+        req = urllib.request.Request(
+            tags_url,
+            headers={"Accept": "application/json", "User-Agent": "Remedy/detect-ollama"},
+            method="GET",
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = json.loads(resp.read().decode("utf-8") or "{}")
+        for m in body.get("models") or []:
+            name = m.get("name") or m.get("model") or ""
+            if name:
+                # Prefer short name without :latest
+                short = name.rstrip(":latest") if name.endswith(":latest") else name
+                models.append(short)
+        return {
+            "available": True,
+            "base_url": PROVIDER_CATALOG["ollama"]["base_url"],
+            "models": models,
+            "tags_url": tags_url,
+        }
+    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError, ValueError):
+        return {
+            "available": False,
+            "base_url": PROVIDER_CATALOG["ollama"]["base_url"],
+            "models": [],
+            "tags_url": tags_url,
+        }
+
+
+def apply_env_provider_bootstrap(config: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Preselect provider from env keys on clean / default config.
+
+    Plan: if ``XAI_API_KEY`` is set and the config is still effectively default
+    (no explicit key, provider openai default or empty), switch to xAI.
+    Also honors provider-specific env keys when config has no API key yet.
+    Mutates a copy; does not write disk.
+    """
+    cfg = dict(config or {})
+    has_key = bool(str(cfg.get("llm_api_key") or "").strip())
+    if has_key:
+        return cfg
+
+    provider = str(cfg.get("llm_provider") or "").strip().lower()
+    # Only auto-switch when unset or still on the factory default openai.
+    allow_switch = provider in ("", "openai")
+
+    # Priority: xAI first (plan requirement), then other known env keys.
+    xai_key = (
+        os.environ.get("XAI_API_KEY", "").strip()
+        or os.environ.get("REMEDY_XAI_API_KEY", "").strip()
+    )
+    if xai_key and allow_switch:
+        prov, model, url = normalize_llm_settings("xai", cfg.get("llm_model"), cfg.get("llm_base_url"))
+        cfg["llm_provider"] = prov
+        cfg["llm_model"] = model
+        cfg["llm_base_url"] = url
+        # Do not persist raw key into config dict here; resolve_bearer/env handles auth.
+        return cfg
+
+    # Optional: if Ollama is running and no cloud keys, suggest ollama (detect only
+    # when still on default openai with empty key — non-blocking soft prefer).
+    if allow_switch and not os.environ.get("REMEDY_LLM_API_KEY", "").strip():
+        # Skip network probe unless explicitly requested via env (wizard/API call
+        # does active detect). Soft file-free bootstrap stays offline-safe.
+        if os.environ.get("REMEDY_PREFER_OLLAMA", "").strip() in ("1", "true", "yes"):
+            ollama = detect_ollama()
+            if ollama.get("available"):
+                models = ollama.get("models") or []
+                mid = models[0] if models else "llama3.2"
+                cfg["llm_provider"] = "ollama"
+                cfg["llm_model"] = mid
+                cfg["llm_base_url"] = PROVIDER_CATALOG["ollama"]["base_url"]
+                return cfg
+
+    # Map other env API keys → provider when still on default.
+    if allow_switch:
+        env_map = (
+            ("GROQ_API_KEY", "groq"),
+            ("MISTRAL_API_KEY", "mistral"),
+            ("DEEPSEEK_API_KEY", "deepseek"),
+            ("OPENROUTER_API_KEY", "openrouter"),
+            ("ANTHROPIC_API_KEY", "anthropic"),
+            ("OPENAI_API_KEY", "openai"),
+            ("GOOGLE_API_KEY", "google"),
+            ("GEMINI_API_KEY", "google"),
+        )
+        for env_name, pid in env_map:
+            if os.environ.get(env_name, "").strip():
+                prov, model, url = normalize_llm_settings(
+                    pid, cfg.get("llm_model"), cfg.get("llm_base_url")
+                )
+                cfg["llm_provider"] = prov
+                cfg["llm_model"] = model
+                cfg["llm_base_url"] = url
+                return cfg
+
+    return cfg

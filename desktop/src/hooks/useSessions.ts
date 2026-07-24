@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef } from 'react'
 import { listSessions, createSession, deleteSession, updateSession } from '../api/sessions'
+import { getSettings } from '../api/settings'
 import type { ChatSession } from '../types'
 
 export function useSessions() {
@@ -32,7 +33,17 @@ export function useSessions() {
     refresh,
     create: useCallback(async (title?: string) => {
       try {
-        const s = await createSession({ title })
+        // Stamp session with the configured default project folder.
+        let project_path: string | undefined
+        try {
+          const s = await getSettings()
+          if (s.project_path && s.project_path !== '.') {
+            project_path = s.project_path
+          }
+        } catch {
+          // server may omit; create still works — API also inherits from config
+        }
+        const s = await createSession({ title, project_path })
         setSessions((prev) => [s, ...prev])
         setActiveId(s.id)
         return s

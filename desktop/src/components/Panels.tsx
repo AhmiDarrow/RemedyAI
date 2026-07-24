@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 
 interface PanelProps {
   open: boolean
@@ -7,9 +7,52 @@ interface PanelProps {
   children: React.ReactNode
 }
 
+/** Side panel with basic focus trap + Escape to close (a11y). */
 export function Panel({ open, onClose, title, children }: PanelProps) {
+  const rootRef = useRef<HTMLDivElement>(null)
+  const closeRef = useRef<HTMLButtonElement>(null)
+  const prevFocus = useRef<HTMLElement | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+    prevFocus.current = document.activeElement as HTMLElement | null
+    closeRef.current?.focus()
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        onClose()
+        return
+      }
+      if (e.key !== 'Tab' || !rootRef.current) return
+      const focusables = rootRef.current.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      )
+      const list = [...focusables].filter((el) => !el.hasAttribute('disabled') && el.offsetParent !== null)
+      if (list.length === 0) return
+      const first = list[0]!
+      const last = list[list.length - 1]!
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault()
+        last.focus()
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault()
+        first.focus()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      prevFocus.current?.focus?.()
+    }
+  }, [open, onClose])
+
   return (
     <div
+      ref={rootRef}
+      role="complementary"
+      aria-label={title}
+      aria-hidden={!open}
       className="flex flex-col border-l transition-all overflow-hidden"
       style={{
         width: open ? 280 : 0,
@@ -25,9 +68,11 @@ export function Panel({ open, onClose, title, children }: PanelProps) {
       >
         <span>{title}</span>
         <button
+          ref={closeRef}
           onClick={onClose}
           className="px-1 rounded"
           style={{ color: 'var(--text-muted)' }}
+          aria-label={`Close ${title}`}
         >
           {'\u00D7'}
         </button>
@@ -109,7 +154,7 @@ export function SkillsPanel({
   }, [open])
 
   return (
-    <Panel open={open} onClose={onClose} title="Skills">
+    <Panel open={open} onClose={onClose} title="Skills (agent packs)">
       {loading ? (
         <div style={{ color: 'var(--text-muted)' }}>Loading...</div>
       ) : skills.length === 0 ? (

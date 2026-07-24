@@ -8,6 +8,8 @@ import pytest
 
 from remedy.core.providers import (
     AnthropicProvider,
+    DeepSeekProvider,
+    GoogleProvider,
     OpenAIProvider,
     get_provider,
     get_provider_for_base_url,
@@ -25,10 +27,26 @@ class TestProviderRegistry:
         assert isinstance(p, AnthropicProvider)
 
         p = get_provider("google")
+        assert isinstance(p, GoogleProvider)
         assert isinstance(p, OpenAIProvider)
+
+        p = get_provider("deepseek")
+        assert isinstance(p, DeepSeekProvider)
 
         p = get_provider("unknown")
         assert isinstance(p, OpenAIProvider)
+
+    def test_openai_compatible_providers_use_sse_stream(self):
+        """DeepSeek etc. return text/event-stream — must not be read via resp.json()."""
+        for name in ("openai", "deepseek", "google", "openrouter", "ollama", "custom"):
+            p = get_provider(name)
+            assert p.uses_openai_sse is True, name
+        assert get_provider("anthropic").uses_openai_sse is False
+
+    def test_google_strips_empty_tools(self):
+        p = GoogleProvider()
+        body = p.build_body("gemini-2.0-flash", [{"role": "user", "content": "hi"}], tools=None, stream=False)
+        assert "tools" not in body
 
     def test_detect_provider_from_url(self):
         p = get_provider_for_base_url("https://api.anthropic.com")
@@ -66,7 +84,8 @@ class TestOpenAIProvider:
         )
         assert body["model"] == "gpt-4o-mini"
         assert body["stream"] is False
-        assert body["temperature"] == 0.7
+        assert body["temperature"] == 0.6  # chat / no-tools path
+        assert body["max_tokens"] >= 16000  # long reviews must not hit 4k wall
         assert "tools" not in body
 
     def test_build_body_with_tools(self):
@@ -79,6 +98,8 @@ class TestOpenAIProvider:
         assert body["tools"] == tools
         assert body["tool_choice"] == "auto"
         assert body["stream"] is True
+        assert body["temperature"] == 0.4  # tool path — more decisive
+        assert body["max_tokens"] >= 4096
 
     def test_extract_response_text(self):
         p = OpenAIProvider()
@@ -295,7 +316,9 @@ class TestAnthropicProvider:
         )
         assert body["model"] == "claude-sonnet-4-20250514"
         assert body["stream"] is False
-        assert "system" not in body
+        # Default thinking_level injects a short system nudge when none provided.
+        assert "system" in body
+        assert "Thinking" in str(body["system"])
         assert "tools" not in body
 
     def test_build_body_with_system(self):
@@ -309,7 +332,8 @@ class TestAnthropicProvider:
             tools=None,
             stream=True,
         )
-        assert body["system"] == "You are helpful."
+        # User system retained; may be combined with thinking nudge.
+        assert "You are helpful." in str(body.get("system") or "")
         assert body["stream"] is True
         assert len(body["messages"]) == 1
         assert body["messages"][0]["role"] == "user"

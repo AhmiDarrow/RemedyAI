@@ -166,8 +166,13 @@ def validate_execution_command(command: list[str]) -> list[str]:
 
 
 _DANGEROUS_COMMANDS = {
+    # Unix privilege / disk
     "sudo", "su", "chmod", "chown", "mkfs", "dd", "fdisk",
     "passwd", "useradd", "usermod", "groupadd",
+    # Windows system / privilege
+    "reg", "takeown", "icacls", "net", "wmic", "sc", "schtasks",
+    "vssadmin", "bcdedit", "wevtutil", "diskpart", "cipher",
+    "format", "shutdown", "reboot",
 }
 
 
@@ -176,9 +181,15 @@ _DANGEROUS_PATTERNS = [
     (r"(^|[\s;&|])format(\s|$)", "Filesystem format"),
     (r"(^|[\s;&|])shutdown(\s|$)", "System shutdown"),
     (r"(^|[\s;&|])reboot(\s|$)", "System reboot"),
+    # Unix recursive wipe of root/home
+    (r"rm\s+(-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*|-[a-zA-Z]*f[a-zA-Z]*r[a-zA-Z]*)\s+(/|~|\$home)", "Recursive delete of system path"),
     (r"rm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+)*(/|~|\$home|c:\\)", "Recursive delete of system path"),
-    (r"2>/dev/null", "Error output suppression"),
-    (r"\|\s*(sh|bash|pwsh|powershell|cmd)", "Shell pipe injection"),
+    # Windows recursive wipe
+    (r"del\s+/[fqs]+\s+", "Windows forced recursive delete"),
+    (r"rmdir\s+/s(\s+/q)?\s+", "Windows recursive rmdir"),
+    (r"rd\s+/s(\s+/q)?\s+", "Windows recursive rd"),
+    # NOTE: bare `2>/dev/null` is common in dev scripts — not treated as dangerous alone.
+    (r"\|\s*(sh|bash|pwsh|powershell|cmd)(\s|$)", "Shell pipe injection"),
     (r">\s*/dev/", "Device write"),
     (r"`[^`]+`", "Command substitution"),
     (r"\$\([^)]+\)", "Command substitution"),

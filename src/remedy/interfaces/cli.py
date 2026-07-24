@@ -29,7 +29,7 @@ from remedy.interfaces.config import (
 )
 from remedy.interfaces.uninstaller import run_uninstall
 from remedy.interfaces.updater import run_update
-from remedy.interfaces.wizard import run_wizard
+from remedy.interfaces.wizard import ensure_setup_before_launch, run_wizard
 from remedy.memory.consolidator import MemoryConsolidator
 from remedy.memory.repair import MemoryRepair
 from remedy.memory.store import MemoryStore
@@ -55,6 +55,9 @@ def build_parser() -> argparse.ArgumentParser:
         prog="remedy",
         description="Remedy: The self-improving, multi-channel AI agent framework.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="For the best experience, download the desktop app:\n"
+               "  https://github.com/AhmiDarrow/RemedyAI/releases\n"
+               "Power users: use 'remedy serve' to run the API server.",
     )
     parser.add_argument("--version", action="version", version=f"remedy {__version__}")
     parser.add_argument(
@@ -211,6 +214,39 @@ def build_parser() -> argparse.ArgumentParser:
     config_sub.add_parser("show", help="Show current configuration")
     config_sub.add_parser("path", help="Show config file path")
 
+    # remedy auth login|logout|status xai
+    auth_cmd = sub.add_parser("auth", help="Provider authentication (OAuth / API keys)")
+    auth_sub = auth_cmd.add_subparsers(dest="auth_cmd")
+    auth_login = auth_sub.add_parser("login", help="Sign in to a provider (device-code OAuth)")
+    auth_login.add_argument(
+        "provider",
+        nargs="?",
+        default="xai",
+        help="Provider id (default: xai)",
+    )
+    auth_logout = auth_sub.add_parser("logout", help="Sign out / clear stored credentials")
+    auth_logout.add_argument(
+        "provider",
+        nargs="?",
+        default="xai",
+        help="Provider id (default: xai)",
+    )
+    auth_status = auth_sub.add_parser("status", help="Show auth status for a provider")
+    auth_status.add_argument(
+        "provider",
+        nargs="?",
+        default="xai",
+        help="Provider id (default: xai)",
+    )
+    auth_key = auth_sub.add_parser("apikey", help="Store a console API key for a provider")
+    auth_key.add_argument(
+        "provider",
+        nargs="?",
+        default="xai",
+        help="Provider id (default: xai)",
+    )
+    auth_key.add_argument("api_key", nargs="?", default=None, help="API key (prompted if omitted)")
+
     # remedy chat
     chat_cmd = sub.add_parser("chat", help="Launch interactive chat with the Remedy agent")
     chat_cmd.add_argument("--config", dest="config_file", default=None)
@@ -218,12 +254,32 @@ def build_parser() -> argparse.ArgumentParser:
                           help="Resume an existing session")
     chat_cmd.add_argument("--no-memory", action="store_true",
                           help="Don't persist conversation to memory")
+    chat_cmd.add_argument(
+        "--skip-setup",
+        action="store_true",
+        help="Skip first-run setup wizard and remember choice (won't ask again)",
+    )
+    chat_cmd.add_argument(
+        "--force-setup",
+        action="store_true",
+        help="Force the setup wizard even if setup was completed",
+    )
 
     # remedy serve
     serve_cmd = sub.add_parser("serve", help="Start the full API server (with config)")
     serve_cmd.add_argument("--host", default="127.0.0.1")
     serve_cmd.add_argument("--port", type=int, default=7400)
     serve_cmd.add_argument("--config", dest="config_file", default=None)
+    serve_cmd.add_argument(
+        "--skip-setup",
+        action="store_true",
+        help="Skip first-run setup wizard and remember choice (won't ask again)",
+    )
+    serve_cmd.add_argument(
+        "--force-setup",
+        action="store_true",
+        help="Force the setup wizard even if setup was completed",
+    )
 
     # remedy desktop
     desktop_cmd = sub.add_parser("desktop", help="Desktop app management")
@@ -232,6 +288,11 @@ def build_parser() -> argparse.ArgumentParser:
     desktop_dev = desktop_sub.add_parser("dev", help="Start desktop dev server")
     desktop_dev.add_argument("--open", action="store_true", help="Open browser")
     desktop_sub.add_parser("build", help="Build desktop for production")
+    desktop_sub.add_parser(
+        "launch",
+        help="Launch the installed desktop app (Windows only)",
+    )
+    desktop_sub.add_parser("status", help="Check if the desktop server is running")
 
     # remedy uninstall
     uninstall_cmd = sub.add_parser("uninstall", help="Uninstall Remedy")
@@ -572,15 +633,18 @@ def _print_exec_result(result) -> None:
 
 
 async def _cmd_tool(args) -> None:
-    registry = ToolRegistry()
+    """Tool CLI — uses BasicRuntime so file/shell tools stay workspace-jailed."""
+    from remedy.core.agent import BasicRuntime
 
-    registry.register_builtin("memory_search", "Search the memory store via FTS5")
-    registry.register_builtin("memory_add", "Add an entry to the memory store")
-    registry.register_builtin("skill_load", "Load a skill by name")
-    registry.register_builtin("skill_list", "List registered skills")
-    registry.register_builtin("file_read", "Read a file from disk")
-    registry.register_builtin("file_write", "Write content to a file")
-    registry.register_builtin("bash_exec", "Execute a shell command")
+    home = Path(getattr(args, "home", None) or "~/.remedy").expanduser()
+    cfg = config_to_agent_config(resolve_config(home_dir=str(home)))
+    if not getattr(cfg, "home_dir", None):
+        cfg.home_dir = str(home)
+    if not getattr(cfg, "memory_db_path", None):
+        cfg.memory_db_path = str(home / "memory.db")
+
+    rt = BasicRuntime(cfg)
+    registry = rt.tool_registry
 
     if args.tool_cmd == "list":
         table = Table(title="Registered Tools")
@@ -616,26 +680,22 @@ async def _cmd_tool(args) -> None:
         console.print(Panel(body, title="Tool Stats"))
 
     elif args.tool_cmd == "run":
-        sandbox = SubprocessSandbox()
-        runtime = ToolRuntime(sandbox=sandbox)
         tool_args = json.loads(args.tool_args)
-
         tool_call = ToolCall(
             tool_name=args.name,
             arguments=tool_args,
             source=ToolSource.BUILTIN,
         )
-
         console.print(f"[bold]Running:[/bold] {args.name}")
-        result = await runtime.execute(
-            tool_call,
-            timeout=args.timeout,
-        )
-
+        # Goes through BasicRuntime.call_tool → jailed workspace handlers.
+        result = await rt.call_tool(tool_call)
         if result.success:
             console.print("[green]Success[/green]")
-            if result.data:
-                console.print(json.dumps(result.data, indent=2))
+            if result.data is not None:
+                if isinstance(result.data, str):
+                    console.print(result.data)
+                else:
+                    console.print(json.dumps(result.data, indent=2, default=str))
         else:
             console.print(f"[red]Failed:[/red] {result.error}")
 
@@ -835,6 +895,96 @@ async def _cmd_exec(args) -> None:
     console.print(f"[dim]Exit code: {result.exit_code} ({result.duration_ms:.0f}ms)[/dim]")
 
 
+def _cmd_auth(args) -> None:
+    """Provider auth: login / logout / status / apikey (xAI device-code OAuth)."""
+    import time
+    import webbrowser
+    from pathlib import Path as _Path
+
+    provider = str(getattr(args, "provider", None) or "xai").strip().lower()
+    home = _Path(args.home).expanduser()
+    cmd = getattr(args, "auth_cmd", None)
+
+    if provider != "xai":
+        console.print(
+            f"[yellow]Auth for '{provider}' is not implemented yet. "
+            "Currently supported: xai[/yellow]"
+        )
+        return
+
+    from remedy.interfaces import xai_auth
+
+    if cmd == "status":
+        creds = xai_auth.load_credentials(home=home)
+        pub = creds.to_public_dict()
+        table = Table(title="xAI auth")
+        table.add_column("Field")
+        table.add_column("Value")
+        for k, v in pub.items():
+            table.add_row(str(k), str(v))
+        console.print(table)
+        return
+
+    if cmd == "logout":
+        xai_auth.clear_credentials(home=home)
+        console.print("[green]Signed out of xAI (cleared ~/.remedy/auth/xai.json).[/green]")
+        return
+
+    if cmd == "apikey":
+        key = getattr(args, "api_key", None)
+        if not key:
+            from rich.prompt import Prompt
+
+            key = Prompt.ask("xAI API key", password=True, console=console)
+        try:
+            creds = xai_auth.save_api_key(str(key), home=home)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            return
+        console.print(
+            f"[green]Saved xAI API key.[/green] connected={creds.connected}"
+        )
+        return
+
+    if cmd == "login":
+        console.print("[bold]Sign in with xAI[/bold] (device-code OAuth)…")
+        try:
+            start = xai_auth.start_device_login(home=home)
+        except Exception as exc:
+            console.print(f"[red]Failed to start OAuth: {exc}[/red]")
+            return
+        uri = start.get("verification_uri_complete") or start.get("verification_uri")
+        code = start.get("user_code")
+        console.print(f"User code: [bold cyan]{code}[/bold cyan]")
+        console.print(f"Open: [link={uri}]{uri}[/link]")
+        if uri:
+            try:
+                webbrowser.open(str(uri))
+            except Exception:
+                pass
+        session_id = start.get("session_id") or code
+        deadline = time.time() + int(start.get("expires_in") or 900)
+        interval = max(3, int(start.get("interval") or 5))
+        with console.status("Waiting for approval…"):
+            while time.time() < deadline:
+                time.sleep(interval)
+                status = xai_auth.login_status(session_id=session_id, home=home)
+                sess = status.get("session") or {}
+                st = sess.get("status")
+                if st == "connected":
+                    console.print("[green]Connected via xAI OAuth.[/green]")
+                    return
+                if st == "error":
+                    console.print(
+                        f"[red]Login failed: {sess.get('error') or 'unknown'}[/red]"
+                    )
+                    return
+        console.print("[red]Login timed out. Run `remedy auth login xai` again.[/red]")
+        return
+
+    console.print("[dim]Usage: remedy auth login|logout|status|apikey xai[/dim]")
+
+
 async def _cmd_config(args) -> None:
     from pathlib import Path as _Path
     home = _Path(args.home).expanduser()
@@ -858,6 +1008,7 @@ async def _cmd_config(args) -> None:
 
 
 def _cmd_serve(args) -> None:
+    import sys
     import uvicorn
 
     from remedy.core.agent import BasicRuntime
@@ -867,6 +1018,22 @@ def _cmd_serve(args) -> None:
 
     home = Path(args.home).expanduser()
     home.mkdir(parents=True, exist_ok=True)
+
+    # First-run setup before launch (TTY only). Desktop sidecar is non-TTY —
+    # its UI SetupWizard handles first run; do not block the server process.
+    # Packaged sidecars often have sys.stdin is None (no console).
+    skip = bool(getattr(args, "skip_setup", False))
+    force = bool(getattr(args, "force_setup", False))
+    is_tty = bool(sys.stdin is not None and sys.stdin.isatty())
+    if skip or force or is_tty:
+        ok = ensure_setup_before_launch(
+            home_dir=home,
+            skip_setup=skip,
+            force=force,
+            non_interactive=not is_tty,
+        )
+        if not ok:
+            return
 
     config = resolve_config(
         config_path=Path(args.config_file) if args.config_file else None,
@@ -884,18 +1051,21 @@ def _cmd_serve(args) -> None:
         runtime = BasicRuntime(agent_config, memory=memory)
         await runtime.start()
 
-        # Discover skills
-        skills_dir = Path(agent_config.home_dir).expanduser() / "skills"
-        if skills_dir.is_dir():
-            runtime.skills.discover(str(skills_dir), recurse=True)
+        # Bundled defaults + ~/.remedy/skills (seeded on first run)
+        n_skills = runtime.skills.discover_defaults(home_dir=agent_config.home_dir)
+        # Extra paths from config
+        for extra in agent_config.skills_dir or []:
+            p = Path(str(extra)).expanduser()
+            if p.is_dir():
+                n_skills += runtime.skills.discover(str(p), recurse=True)
 
         gateway = Gateway(runtime=runtime, memory_store=memory)
         gateway.register_handler(runtime.handle_event)
         await gateway.start()
 
-        return runtime, gateway, memory
+        return runtime, gateway, memory, n_skills
 
-    runtime, gateway, memory = asyncio.run(_start())
+    runtime, gateway, memory, n_skills = asyncio.run(_start())
 
     api_key = os.environ.get("REMEDY_API_KEY", config.get("api_key", ""))
     app = create_app(
@@ -913,11 +1083,18 @@ def _cmd_serve(args) -> None:
         console.print("  The server will run in [bold]fallback (echo)[/bold] mode without a real LLM.\n")
 
     console.print(f"[green]Starting Remedy API on http://{args.host}:{args.port}[/green]")
+    console.print(f"[dim]Skills:[/dim]    {n_skills} loaded (bundled + user)")
     console.print("[dim]Dashboard:[/dim] /dashboard")
     console.print("[dim]OpenAPI:[/dim]   /api/openapi.json  /api/openapi.yaml")
     console.print("[dim]Docs:[/dim]       /docs  /redoc")
 
     log_level = config.get("log_level", "INFO").upper()
+    # Access logs spam the desktop console (status polls every few seconds).
+    # Opt in with access_log=true in config or REMEDY_ACCESS_LOG=1.
+    access_log_enabled = bool(
+        config.get("access_log")
+        or str(os.environ.get("REMEDY_ACCESS_LOG", "")).lower() in ("1", "true", "yes")
+    )
     uvicorn_log_config = {
         "version": 1,
         "disable_existing_loggers": False,
@@ -933,13 +1110,26 @@ def _cmd_serve(args) -> None:
             },
         },
         "handlers": {
-            "default": {"class": "logging.StreamHandler", "formatter": "default", "stream": "ext://sys.stdout"},
-            "access": {"class": "logging.StreamHandler", "formatter": "access", "stream": "ext://sys.stdout"},
+            "default": {
+                "class": "logging.StreamHandler",
+                "formatter": "default",
+                "stream": "ext://sys.stdout",
+            },
+            "access": {
+                "class": "logging.StreamHandler",
+                "formatter": "access",
+                "stream": "ext://sys.stdout",
+            },
         },
         "loggers": {
             "uvicorn": {"handlers": ["default"], "level": log_level},
-            "uvicorn.error": {"level": log_level},
-            "uvicorn.access": {"handlers": ["access"], "level": log_level, "propagate": False},
+            "uvicorn.error": {"handlers": ["default"], "level": log_level, "propagate": False},
+            # Keep access logger quiet unless explicitly enabled.
+            "uvicorn.access": {
+                "handlers": ["access"] if access_log_enabled else [],
+                "level": "INFO" if access_log_enabled else "WARNING",
+                "propagate": False,
+            },
         },
     }
     uvicorn.run(
@@ -947,6 +1137,7 @@ def _cmd_serve(args) -> None:
         host=args.host,
         port=args.port,
         log_config=uvicorn_log_config,
+        access_log=access_log_enabled,
     )
 
 
@@ -960,6 +1151,15 @@ def _cmd_chat(args) -> None:
 
     home = Path(args.home).expanduser()
     home.mkdir(parents=True, exist_ok=True)
+
+    # Always gate interactive chat on first-run setup (or --skip-setup).
+    ok = ensure_setup_before_launch(
+        home_dir=home,
+        skip_setup=bool(getattr(args, "skip_setup", False)),
+        force=bool(getattr(args, "force_setup", False)),
+    )
+    if not ok:
+        return
 
     config = resolve_config(
         config_path=Path(args.config_file) if args.config_file else None,
@@ -975,10 +1175,7 @@ def _cmd_chat(args) -> None:
 
         runtime = BasicRuntime(agent_config, memory=memory)
         await runtime.start()
-
-        skills_dir = home / "skills"
-        if skills_dir.is_dir():
-            runtime.skills.discover(str(skills_dir), recurse=True)
+        n_skills = runtime.skills.discover_defaults(home_dir=home)
 
         gateway = Gateway(runtime=runtime, memory_store=memory)
         gateway.register_handler(runtime.handle_event)
@@ -994,7 +1191,7 @@ def _cmd_chat(args) -> None:
             f"[bold green]{agent_config.name}[/bold green] is ready.\n\n"
             f"Session: [dim]{sid}[/dim]\n"
             f"LLM:     [{'green' if llm_ready else 'red'}]{model}[/{'green' if llm_ready else 'red'}]\n"
-            f"Skills:  {len(runtime.skills.skills)} loaded\n"
+            f"Skills:  {n_skills} loaded\n"
             f"Memory:  {'enabled' if not args.no_memory else 'disabled'}\n\n"
             f"[dim]Type /help for commands, /exit to quit[/dim]",
             title="Remedy Chat",
@@ -1150,9 +1347,15 @@ def _cmd_desktop(parsed: argparse.Namespace) -> None:
         else:
             console.print("[red]Build failed.[/red]")
 
+    elif subcommand == "launch":
+        _desktop_launch()
+
+    elif subcommand == "status":
+        _desktop_status()
+
     else:
         console.print(f"[yellow]Unknown desktop subcommand: {subcommand}[/yellow]")
-        console.print("Available: install, dev, build")
+        console.print("Available: install, dev, build, launch, status")
 
 
 def _find_npm() -> str:
@@ -1164,6 +1367,75 @@ def _find_npm() -> str:
         console.print("[dim]Install Node.js from https://nodejs.org[/dim]")
         raise SystemExit(1)
     return npm
+
+
+def _desktop_launch() -> None:
+    """Find and launch the installed Remedy Desktop Tauri app (Windows only today)."""
+    import subprocess
+    import sys
+
+    if sys.platform != "win32":
+        console.print(
+            "[yellow]remedy desktop launch is currently Windows-only.[/yellow]"
+        )
+        console.print(
+            "[dim]On macOS/Linux, open the installed Remedy Desktop app from "
+            "your Applications menu or desktop entry.[/dim]"
+        )
+        console.print(
+            "[dim]Installer downloads: https://github.com/AhmiDarrow/RemedyAI/releases[/dim]"
+        )
+        return
+
+    candidate_paths: list[Path] = []
+    local = Path.home() / "AppData" / "Local"
+    if local.exists():
+        candidate_paths.extend(
+            local / "Programs" / p / "Remedy Desktop.exe"
+            for p in ("Remedy Desktop", "remedy-desktop")
+        )
+    prog = Path("C:/Program Files")
+    if prog.exists():
+        candidate_paths.append(prog / "Remedy Desktop" / "Remedy Desktop.exe")
+
+    # Detach from this console and never flash an extra console for the GUI app.
+    from remedy.execution.process import hidden_creationflags
+
+    create_flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+    create_flags |= hidden_creationflags()
+
+    for p in candidate_paths:
+        if p.exists():
+            console.print(f"[green]Launching: {p}[/green]")
+            kwargs: dict = {"close_fds": True}
+            if create_flags:
+                kwargs["creationflags"] = create_flags
+            subprocess.Popen([str(p)], **kwargs)
+            return
+
+    console.print("[yellow]Installed desktop app not found.[/yellow]")
+    console.print("[dim]Download the installer: https://github.com/AhmiDarrow/RemedyAI/releases[/dim]")
+
+
+def _desktop_status() -> None:
+    """Check if the Remedy server is running (sidecar on port 7400)."""
+    import socket
+
+    console.print("[bold]Desktop Server Status[/bold]")
+
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(2)
+        result = sock.connect_ex(("127.0.0.1", 7400))
+        sock.close()
+        if result == 0:
+            console.print("  Server:    [green]Online[/green]  (127.0.0.1:7400)")
+        else:
+            console.print("  Server:    [red]Offline[/red] (port 7400 not reachable)")
+    except Exception as e:
+        console.print(f"  Server:    [red]Error[/red] — {e}")
+
+    console.print("[dim]Use 'remedy serve' to start the server manually.[/dim]")
 
 
 def main(args: list[str] | None = None) -> None:
@@ -1198,6 +1470,8 @@ def main(args: list[str] | None = None) -> None:
         asyncio.run(_cmd_exec(parsed))
     elif parsed.command == "config":
         asyncio.run(_cmd_config(parsed))
+    elif parsed.command == "auth":
+        _cmd_auth(parsed)
     elif parsed.command == "chat":
         _cmd_chat(parsed)
     elif parsed.command == "serve":

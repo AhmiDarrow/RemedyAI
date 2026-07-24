@@ -6,16 +6,90 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Remedy Desktop</title>
     <script>
-      (function() {
-        var t = 'dark';
-        try { var s = localStorage.getItem('remedy-theme'); if (s) t = s; } catch(e) {}
-        document.documentElement.setAttribute('data-theme', t);
+      (function () {
+        // Theme for post-splash UI (system/light/dark). Boot splash is always dark.
+        var t = 'system';
+        try {
+          var s = localStorage.getItem('remedy-theme');
+          if (s) t = s;
+        } catch (e) {}
+        var resolved = t;
+        if (t === 'system' || !t) {
+          try {
+            resolved = window.matchMedia('(prefers-color-scheme: light)').matches
+              ? 'light'
+              : 'dark';
+          } catch (e2) {
+            resolved = 'dark';
+          }
+        }
+        document.documentElement.setAttribute('data-theme', resolved);
+        document.documentElement.setAttribute(
+          'data-theme-kind',
+          resolved === 'light' ? 'light' : 'dark',
+        );
+        document.documentElement.style.colorScheme =
+          resolved === 'light' ? 'light' : 'dark';
+        // Always dark first paint — never flash white during boot/splash.
+        document.documentElement.style.background = '#0a0a1a';
       })();
     </script>
+    <style>
+      html, body, #root {
+        height: 100%;
+        width: 100%;
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        background: #0a0a1a;
+        color: #e8e8f0;
+        font-family: system-ui, -apple-system, sans-serif;
+      }
+      /* After app leaves splash, light theme can take over via CSS vars */
+      html.app-ready[data-theme='light'],
+      html.app-ready[data-theme='light'] body,
+      html.app-ready[data-theme='light'] #root {
+        background: #f4f4f8;
+        color: #1a1a2e;
+      }
+      /* Static splash until React mounts — always dark */
+      #boot-splash {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 1.25rem;
+        background: #0a0a1a;
+        color: #e8e8f0;
+        z-index: 9999;
+      }
+      #boot-splash img {
+        width: 200px;
+        height: auto;
+        image-rendering: pixelated;
+      }
+      #boot-splash .boot-status {
+        font-size: 0.875rem;
+        opacity: 0.75;
+        letter-spacing: 0.02em;
+      }
+      #boot-splash.boot-hidden {
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.35s ease;
+      }
+    </style>
     <link rel="stylesheet" href="/src/index.css" />
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div id="boot-splash" aria-hidden="true">
+        <img src="/logo.png" alt="Remedy" />
+        <div class="boot-status">Starting Remedy…</div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

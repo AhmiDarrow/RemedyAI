@@ -1,13 +1,108 @@
 # Remedy
 
-**The self-improving, multi-channel AI agent framework that grows with you.**
+**Your personal AI partner — knowledge, design, code, and get-it-done on your machine.**
 
-Remedy is a standalone AI agent framework designed for autonomous, long-running projects. It combines:
+Remedy is a self-improving multi-channel agent for real work: research, writing,
+design, software engineering, and (with permission) tasks across your PC. It is
+**not** a medical, clinical, or healthcare product — the name means unsticking
+problems and finishing requests, not medicine.
+
+It combines:
 
 - **Depth** — A self-improving learning loop that distills task traces into reusable skills
 - **Memory** — Persistent SQLite+FTS5 knowledge store with structured handoff notes and session continuity
 - **Breadth** — Multi-channel gateway (CLI, REST API, Telegram, Discord, Slack, webhooks)
 - **Compatibility** — Native [agentskills.io](https://agentskills.io) support, plus adapters for Hermes and OpenClaw/ClawHub
+
+---
+
+## Download the Desktop App
+
+The recommended way to use Remedy is the native desktop application — no Python, Node, or Rust toolchain required.
+
+**[Download the latest installer](https://github.com/AhmiDarrow/RemedyAI/releases/latest)** (Windows)
+
+1. Download the `.exe` installer from GitHub Releases
+2. Run the installer — Remedy Desktop installs to your local app folder
+3. Launch from the Start Menu — the SetupWizard guides you through provider and model configuration
+4. Start chatting with `/help` to see available commands
+
+The desktop app bundles the full Remedy server as a sidecar, so everything runs locally on your machine.
+
+### Desktop Features
+
+| Feature | Description |
+|---------|-------------|
+| **Chat UI** | Streaming markdown bubbles (you right / Remedy left); shrink-wrap size; stick-to-bottom unless you scroll up (**↓** resumes) |
+| **Your name** | Settings + first-run: what Remedy calls you; avatar initials in chat |
+| **Tool process** | **Off / Medium / Full** — minimal progress, labeled steps, or full raw tool args/stdout (Settings + status bar **Proc**) |
+| **Icons** | Copy / edit / send / attach as icons (language-neutral); image lightbox |
+| **Prompt history** | **↑ / ↓** in the composer for previous prompts (shell-style) |
+| **Sessions** | Tabs; auto-title from first prompt; rename; search / pin / tags |
+| **Attachments** | Drag-and-drop, paste, or attach files/images |
+| **Plan/Build mode** | Toggle plan (no tools) vs build |
+| **@file / /** | `@` file search; `/` slash-command menu while typing |
+| **First-run setup** | Provider, workspace, persona, optional always-ready |
+| **xAI Sign-in** | Device-code OAuth for Grok + console API key (per-provider secure store) |
+| **Providers** | OpenAI, Anthropic, Google, DeepSeek, xAI, Groq, Mistral, OpenRouter, Ollama; Custom under Advanced |
+| **Settings** | Logo menu + panel: You & Agent, project, scope, harness, tool process, themes, density, accent |
+| **Access scope** | Project only / home / full user machine (opt-in) |
+| **Always ready** | Startup folder (not registry Run); tray Show / **Settings** / Updates / About / Quit; close-to-tray |
+| **Memory Harness** | Context prune + Session Brief + `/compact` |
+| **Approvals** | High-impact shell: Approve/Deny |
+| **Goals** | `/goal`, `/goals`, goal tools |
+| **ComfyUI skill** | Portable local discovery + image generation into chat |
+| **Themes** | System, Dark, **Neutral Dark**, Light, Emerald, Amethyst, Amber, Ocean |
+| **Side panels** | Memory · Skills · Settings (status bar) |
+| **Tray** | Circuit-R icon; right-click Settings and more |
+| **Auto-update** | Check → download → install → relaunch (signed releases) |
+
+### Slash commands (desktop & API)
+
+| Command | Purpose |
+|---------|---------|
+| `/help` | Commands + keyboard shortcuts |
+| `/new` | New session |
+| `/sessions` | Recent sessions |
+| `/models` | Model picker guidance |
+| `/memory <q>` | Search durable memory |
+| `/remember <fact>` | Store a fact in memory/profile |
+| `/whoami` | What Remedy knows about you |
+| `/goals` · `/goal <title>` | List / add goals |
+| `/compact` · `/harness` | Memory Harness compress / show Session Brief |
+| `/approve` · `/deny` | High-impact command approvals |
+| `/import <folder>` | Import `.md`/`.txt` knowledge pack into memory |
+| `/skills` · `/handoff` | Skills list · handoff notes |
+| `/init` | Project scan helpers |
+
+### Architecture
+
+```
+┌─────────────────────────────────┐
+│        Remedy Desktop            │
+│  ┌───────────────────────────┐  │
+│  │   Tauri 2 Shell (Rust)    │  │
+│  │   • Server lifecycle       │  │
+│  │   • System tray            │  │
+│  │   • Auto-updater           │  │
+│  └──────────┬────────────────┘  │
+│             │ spawn sidecar     │
+│  ┌──────────▼────────────────┐  │
+│  │   remedy serve (Python)   │  │
+│  │   FastAPI on :7400        │  │
+│  └──────────┬────────────────┘  │
+│  ┌──────────▼────────────────┐  │
+│  │   React 19 + Vite (JS)   │  │
+│  │   REST + SSE client       │  │
+│  └───────────────────────────┘  │
+└─────────────────────────────────┘
+```
+
+---
+
+## Advanced / Power Users
+
+For users who prefer CLI, custom deployments, or development:
 
 ```bash
 # PyPI name is remedy-ai (the name "remedy" is a different, unrelated package)
@@ -18,29 +113,45 @@ git clone https://github.com/AhmiDarrow/RemedyAI && cd RemedyAI && uv sync
 pip install -e .
 ```
 
----
-
-## Quick Start
+### CLI Quick Start
 
 ```bash
 remedy --help                    # See all commands
 remedy config init               # Create ~/.remedy/config.toml
 remedy skill discover ./skills   # Load bundled & custom skills
-remedy memory add "test" "Hello, Remedy!"
 
 # Launch interactive chat with the agent
 remedy chat
 # Type /help for commands, /exit to quit
+
+# xAI auth (OAuth device-code or console API key)
+remedy auth login xai          # Sign in with xAI (opens browser / shows code)
+remedy auth status xai
+remedy auth apikey xai xai-…   # Or store a console key
+remedy auth logout xai
+# XAI_API_KEY=… also preselects xAI on a clean config
 
 # Start the API server
 remedy serve --host 127.0.0.1 --port 7400
 # Dashboard at http://127.0.0.1:7400/dashboard
 # OpenAPI docs at http://127.0.0.1:7400/docs
 
-# Run the desktop app
-remedy desktop install          # Install Node deps (one-time)
-remedy desktop dev              # Start desktop dev server
-# Open http://localhost:5173
+# Desktop app management (for devs)
+remedy desktop launch            # Launch the installed desktop app
+remedy desktop status            # Check if the server is running
+remedy desktop install           # Install Node deps (for dev)
+remedy desktop dev               # Start desktop dev server
+```
+
+### Desktop Dev
+
+```bash
+remedy desktop install    # Install Node.js deps (one-time)
+remedy desktop dev        # Start dev server at http://localhost:5173
+# Requires: remedy serve running in another terminal
+
+# Or full Tauri desktop build (requires Rust toolchain):
+cd desktop && npm run tauri:dev
 ```
 
 ---
@@ -90,8 +201,9 @@ remedy desktop dev              # Start desktop dev server
 | `remedy user` | `show`, `facts` | User profile and traits |
 | `remedy gateway` | `start`, `status`, `serve`, `channels` | Multi-channel gateway |
 | `remedy config` | `init`, `show`, `path` | TOML/YAML configuration |
+| `remedy auth` | `login`, `logout`, `status`, `apikey` | Provider OAuth / API keys (xAI) |
 | `remedy serve` | | Full API server (config-aware) |
-| `remedy desktop` | `install`, `dev`, `build` | Desktop app management |
+| `remedy desktop` | `install`, `dev`, `build`, `launch`, `status` | Desktop app management |
 | `remedy migrate` | `hermes`, `openclaw` | Import from other frameworks |
 | `remedy exec` | | Execute commands in sandbox |
 
@@ -136,21 +248,25 @@ remedy skill export my-skill --format zip      # Portable archive
 
 ---
 
-## Memory & Handoff
+## Memory, Harness & Handoff
 
 Remedy's memory system provides companion continuity across sessions:
 
 - **Full-text search** (FTS5) with relevance scoring
-- **Structured handoff notes** with action items, decisions, and context summaries
-- **Session summaries** for tracking progress
-- **Importance scoring** for prioritized recall
-- **User profile** with persistent traits and facts
+- **User profile** with persistent traits and facts (injected into the agent)
+- **Memory Harness** — send-view prune + Session Brief so long chats stay sharp
+- **Knowledge packs** — import a folder of notes (`/import` or `POST /api/memory/import`)
+- **Structured handoff notes** with action items, decisions, and Session Brief context
+- **Session summaries** and importance scoring for prioritized recall
 
 ```bash
 remedy memory add "milestone" "Phase 3 learning loop shipped"
 remedy memory search "learning loop"
 remedy handoff create "Context Transfer" "Working on Phase 4. Next: gateway channels."
 ```
+
+Partner APIs (when `remedy serve` is running): `GET /api/partner/status`,  
+`GET /api/approvals`, `GET /api/goals`, `POST /api/memory/import`.
 
 ---
 
@@ -232,56 +348,6 @@ Full session management, streaming SSE events, file search, and command executio
 
 ---
 
-## Desktop App
-
-Remedy includes a native Tauri desktop application (Windows) with a React frontend.
-
-```bash
-remedy desktop install    # Install Node.js deps (one-time)
-remedy desktop dev        # Start dev server at http://localhost:5173
-# Requires: remedy serve running in another terminal
-npm run tauri:dev  # Full Tauri desktop (from desktop/ dir) — requires Rust toolchain
-```
-
-### Features
-
-| Feature | Description |
-|---------|-------------|
-| **Chat UI** | Streaming tokens, markdown rendering, syntax highlighting |
-| **Session tabs** | Multi-tab session management — open, switch, close tabs |
-| **Plan/Build mode** | Toggle between plan mode (no tools) and build mode |
-| **@file references** | Type `@` to search and autocomplete project files |
-| **Undo** | Hover any assistant message to revert it |
-| **Themes** | 6 themes — Dark, Light, Emerald, Amethyst, Amber, Ocean |
-| **Font** | Inter (open source, SIL license) |
-| **Side panels** | Memory browser and Skills viewer accessible from the status bar |
-| **Slash commands** | `/help`, `/new`, `/sessions`, `/models`, `/memory`, `/skills`, `/handoff` |
-| **Tray icon** | Minimize to system tray |
-
-### Stack
-
-| Layer | Technology |
-|-------|-----------|
-| Shell | Tauri 2 (Rust) |
-| UI | React 19 + Vite + Tailwind CSS |
-| Server | `remedy serve` (FastAPI) auto-launched as sidecar |
-| Persistence | SQLite via the memory store |
-
-### Architecture
-
-```
-desktop/
-  src/                # React frontend
-    api/              # Typed REST + SSE client
-    components/       # Sidebar, MessageFeed, Composer, StatusBar, etc.
-    hooks/            # useSessions, useMessages, useTheme
-  src-tauri/          # Rust shell
-    src/lib.rs        # Server lifecycle, tray icon
-    tauri.conf.json   # Window, tray, bundle config
-```
-
----
-
 ## Plugin System
 
 Plugins are Python modules that register hooks in the Remedy lifecycle:
@@ -312,10 +378,10 @@ def teardown_plugin():
 ## Development
 
 ```bash
-git clone https://github.com/AhmiDarrow/Remedy.git
-cd Remedy
+git clone https://github.com/AhmiDarrow/RemedyAI.git
+cd RemedyAI
 uv sync --group dev
-uv run pytest -q     # 307 tests
+uv run pytest -q     # 375 tests
 uv run remedy --help
 ```
 
@@ -328,27 +394,73 @@ uv run remedy --help
 ### Project structure
 
 ```
-Remedy/
+RemedyAI/
 ├── src/remedy/
-│   ├── core/           # Runtime, learning loop, security, metrics
+│   ├── core/           # Runtime, ReAct policy/stream helpers, providers, metrics
 │   ├── memory/         # SQLite+FTS5 store, handoff, profiles
 │   ├── skills/         # Loader, registry, executor, adapters
 │   ├── gateway/        # Event router, channels
 │   ├── tools/          # MCP client
-│   ├── execution/      # Sandbox, policy
-│   ├── interfaces/     # CLI, API, plugin system
+│   ├── execution/      # Sandbox, hidden process helpers, Docker
+│   ├── interfaces/     # CLI, API (models/support/routes/*), plugins
+│   ├── bundled_skills/ # Default skills shipped with the package
 │   └── migrate/        # Hermes/OpenClaw importers
 ├── desktop/
 │   ├── src/            # React + Vite frontend
 │   ├── src-tauri/      # Tauri 2 shell (Rust)
 │   └── package.json
+├── examples/           # demo_plugin and sample scripts
+├── scripts/            # build_desktop, sync_version, signing helpers
 ├── tests/
 ├── skills/
 └── docs/
 ```
 
+### Desktop release (maintainers)
+
+Signed Windows installers are built by GitHub Actions on version tags (`v*`):
+
+```bash
+# bump version across pyproject / package.json / tauri / Cargo / latest.json
+python scripts/sync_version.py patch   # or: 0.10.5 | minor | major
+
+git add -A && git commit -m "chore: release vX.Y.Z"
+git push origin desktop-primary
+git tag vX.Y.Z && git push origin vX.Y.Z
+# → .github/workflows/desktop-release.yml builds sidecar + NSIS, signs, publishes
+# Optional: publish Python package — uv build && uv publish
+```
+
+See [CHANGELOG.md](CHANGELOG.md) for release notes.
+
+**Signing (required for in-app auto-update):**
+
+| Item | Where |
+|------|--------|
+| Public key | `desktop/src-tauri/tauri.conf.json` → `plugins.updater.pubkey` (committed) |
+| Private key | Local only: `~/.tauri/remedy.key` — **never commit** (see `.gitignore`) |
+| CI secrets | `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` |
+| Artifacts flag | `bundle.createUpdaterArtifacts: true` in `tauri.conf.json` |
+
+Re-upload secrets after rotating a key:
+
+```bash
+uv run python scripts/set_tauri_signing_secrets.py
+```
+
+Local signed build (optional):
+
+```powershell
+$env:TAURI_SIGNING_PRIVATE_KEY = (Get-Content "$env:USERPROFILE\.tauri\remedy.key" -Raw).Trim()
+$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = ""
+python scripts/build_desktop.py --clean
+cd desktop; npm run tauri build
+```
+
+See [docs/DESKTOP.md](docs/DESKTOP.md) for API contract and full desktop notes.
+
 ---
 
 ## License
 
-MIT — see [LICENSE](./LICENSE).
+Custom proprietary license — see [LICENSE](./LICENSE). Non-commercial personal use only; commercial use and redistribution require written permission.

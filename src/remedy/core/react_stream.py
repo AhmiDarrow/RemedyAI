@@ -1,0 +1,392 @@
+"""Streaming ReAct helpers — SSE parse, tool-call accumulation, message build.
+
+Keeps :meth:`BasicRuntime._call_llm_stream` readable by isolating pure
+stream-processing logic that can be unit-tested without an HTTP session.
+"""
+
+from __future__ import annotations
+
+import json
+from collections.abc import AsyncIterator, Awaitable, Callable
+from dataclasses import dataclass, field
+from typing import Any
+
+from remedy.core.react_policy import (
+    looks_like_pseudo_tools,
+    message_wants_tools,
+    parse_pseudo_tool_calls,
+    strip_tool_markup,
+    tool_call_fingerprint,
+)
+
+# OpenAI-compatible finish reasons that mean "ran out of output budget".
+LENGTH_FINISH_REASONS = frozenset({"length", "max_tokens"})
+
+
+@dataclass
+class StreamRoundState:
+    """Mutable state for one LLM streaming round."""
+
+    content_parts: list[str] = field(default_factory=list)
+    reasoning_parts: list[str] = field(default_factory=list)
+    tool_call_acc: dict[int, dict[str, Any]] = field(default_factory=dict)
+    produced_user_text: bool = False
+    finish_reason: str | None = None
+    # True when we buffered content that looked like DSML / text tool-calls.
+    suppressed_tool_markup: bool = False
+
+    @property
+    def text_out(self) -> str:
+        return "".join(self.content_parts).strip()
+
+    @property
+    def reasoning_out(self) -> str:
+        return "".join(self.reasoning_parts).strip()
+
+    @property
+    def hit_length_limit(self) -> bool:
+        """True when the model stopped because max_tokens / length was hit."""
+        fr = (self.finish_reason or "").lower()
+        return fr in LENGTH_FINISH_REASONS
+
+    def tool_calls_list(self, collected: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        raw = (
+            list(self.tool_call_acc.values())
+            if self.tool_call_acc
+            else ((collected or {}).get("tool_calls") or [])
+        )
+        return [
+            tc
+            for tc in raw
+            if ((tc.get("function") or {}).get("name") or "").strip()
+        ]
+
+
+def accumulate_tool_call_delta(
+    acc: dict[int, dict[str, Any]],
+    tc: dict[str, Any],
+) -> None:
+    """Merge a streaming tool_call delta into *acc* by index."""
+    idx = tc.get("index", 0)
+    if idx not in acc:
+        acc[idx] = {
+            "id": tc.get("id") or "",
+            "type": "function",
+            "function": {
+                "name": ((tc.get("function") or {}).get("name") or ""),
+                "arguments": ((tc.get("function") or {}).get("arguments") or ""),
+            },
+        }
+        return
+    existing = acc[idx]
+    fn_args = ((tc.get("function") or {}).get("arguments") or "")
+    if fn_args:
+        existing["function"]["arguments"] += fn_args
+    fn_name = (tc.get("function") or {}).get("name")
+    if fn_name:
+        existing["function"]["name"] = fn_name
+    tc_id = tc.get("id")
+    if tc_id:
+        existing["id"] = tc_id
+
+
+def apply_openai_sse_chunk(
+    state: StreamRoundState,
+    chunk: dict[str, Any],
+    *,
+    stream_live: bool,
+) -> str | None:
+    """Apply one parsed OpenAI SSE JSON chunk. Returns content delta to yield live."""
+    choice = (chunk.get("choices") or [{}])[0]
+    # Final chunk usually carries finish_reason (stop | length | tool_calls | …).
+    fr = choice.get("finish_reason")
+    if fr:
+        state.finish_reason = str(fr)
+    delta = choice.get("delta") or {}
+    content_delta = delta.get("content")
+    live: str | None = None
+    if content_delta:
+        state.content_parts.append(content_delta)
+        # Never live-stream DSML / fake tool markup — it becomes chat spam.
+        acc = "".join(state.content_parts)
+        if stream_live and not looks_like_pseudo_tools(acc) and not looks_like_pseudo_tools(
+            str(content_delta)
+        ):
+            state.produced_user_text = True
+            live = content_delta
+        elif stream_live and looks_like_pseudo_tools(acc):
+            # Mark so callers know we suppressed junk (recovery will run later).
+            state.suppressed_tool_markup = True
+    # DeepSeek thinking mode streams reasoning_content alongside (or before) content.
+    # Must accumulate independently — not only in the no-content branch.
+    reason_delta = delta.get("reasoning_content") or delta.get("reasoning")
+    if reason_delta:
+        state.reasoning_parts.append(reason_delta)
+    for tc in delta.get("tool_calls") or []:
+        accumulate_tool_call_delta(state.tool_call_acc, tc)
+    return live
+
+
+def parse_sse_data_line(line_text: str) -> dict[str, Any] | None:
+    """Parse a single SSE line into a JSON object, or None if not data."""
+    line_text = (line_text or "").strip()
+    if not line_text or line_text.startswith(":"):
+        return None
+    if line_text == "data: [DONE]":
+        return None
+    if line_text.startswith("data: "):
+        line_text = line_text[6:]
+    try:
+        return json.loads(line_text)
+    except json.JSONDecodeError:
+        return None
+
+
+async def iter_openai_sse_content(
+    content: AsyncIterator[bytes],
+    state: StreamRoundState,
+    *,
+    stream_live: bool,
+    on_live: Callable[[str], Awaitable[None]] | None = None,
+) -> None:
+    """Consume OpenAI SSE byte lines into *state*, optionally invoking *on_live*."""
+    async for line in content:
+        line_text = line.decode("utf-8").strip()
+        if line_text == "data: [DONE]":
+            break
+        chunk = parse_sse_data_line(line_text)
+        if chunk is None:
+            continue
+        live = apply_openai_sse_chunk(state, chunk, stream_live=stream_live)
+        if live and on_live is not None:
+            await on_live(live)
+
+
+def build_runtime_system_block(
+    *,
+    system_prompt: str,
+    provider: str,
+    model: str,
+    base_url: str,
+    max_steps: int,
+    context: str,
+) -> str:
+    runtime_info = (
+        f"Connected provider: {provider}\n"
+        f"Connected model: {model}\n"
+        f"API base URL: {base_url}\n"
+        f"Tool budget this turn: up to {max_steps} model steps "
+        f"(final step always answers without tools; budget is dynamic).\n"
+        "When asked which provider/model you use, answer from this block — do not call tools."
+    )
+    return f"{system_prompt}\n\n{runtime_info}\n\n{context}"
+
+
+def should_enable_tools(
+    message: str,
+    all_tools: list[dict[str, Any]],
+    *,
+    has_attachments: bool,
+) -> bool:
+    return bool(all_tools) and (message_wants_tools(message) or has_attachments)
+
+
+def filter_fresh_tool_calls(
+    tool_calls_list: list[dict[str, Any]],
+    seen_fps: set[str],
+) -> list[dict[str, Any]]:
+    return [
+        tc
+        for tc in tool_calls_list
+        if tool_call_fingerprint(tc) not in seen_fps
+    ]
+
+
+def normalize_tool_calls(tool_calls_list: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return OpenAI-shaped tool_calls with stable non-empty ids and names.
+
+    Streaming providers sometimes omit ``id`` on early deltas; empty ids break
+    tool-result pairing on the next request (HTTP 400).
+    """
+    from uuid import uuid4
+
+    out: list[dict[str, Any]] = []
+    for tc in tool_calls_list or []:
+        if not isinstance(tc, dict):
+            continue
+        fn = tc.get("function") or {}
+        name = (fn.get("name") or "").strip()
+        if not name:
+            continue
+        args = fn.get("arguments")
+        if args is None:
+            args_s = "{}"
+        elif isinstance(args, str):
+            args_s = args
+        else:
+            try:
+                args_s = json.dumps(args, default=str)
+            except Exception:
+                args_s = "{}"
+        call_id = (tc.get("id") or "").strip() or f"call_{uuid4().hex[:24]}"
+        out.append(
+            {
+                "id": call_id,
+                "type": tc.get("type") or "function",
+                "function": {"name": name, "arguments": args_s},
+            }
+        )
+    return out
+
+
+def ensure_tool_call_pairings(
+    messages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Ensure every assistant ``tool_calls`` entry has a following tool result.
+
+    OpenAI-compatible APIs reject incomplete pairings with HTTP 400:
+    \"An assistant message with 'tool_calls' must be followed by tool messages…\".
+    """
+    if not messages:
+        return messages
+
+    out: list[dict[str, Any]] = []
+    i = 0
+    n = len(messages)
+    while i < n:
+        msg = messages[i]
+        if not isinstance(msg, dict):
+            out.append(msg)
+            i += 1
+            continue
+
+        role = msg.get("role")
+        tcs = msg.get("tool_calls") if role == "assistant" else None
+        if not tcs:
+            # Drop orphan tool messages (no preceding assistant tool_calls).
+            if role == "tool":
+                i += 1
+                continue
+            out.append(msg)
+            i += 1
+            continue
+
+        # Normalize ids on a shallow copy of the assistant message.
+        normalized = normalize_tool_calls(list(tcs))
+        assistant_msg = {**msg, "tool_calls": normalized}
+        out.append(assistant_msg)
+
+        needed: dict[str, dict[str, Any]] = {
+            tc["id"]: tc for tc in normalized if tc.get("id")
+        }
+        found: set[str] = set()
+        j = i + 1
+        while j < n and isinstance(messages[j], dict) and messages[j].get("role") == "tool":
+            tid = (messages[j].get("tool_call_id") or "").strip()
+            if tid and tid in needed and tid not in found:
+                out.append(messages[j])
+                found.add(tid)
+            j += 1
+
+        for cid, tc in needed.items():
+            if cid in found:
+                continue
+            name = ((tc.get("function") or {}).get("name") or "unknown").strip()
+            out.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": cid,
+                    "content": (
+                        f"(missing tool result for {name}; "
+                        "treated as empty so the conversation can continue)"
+                    ),
+                }
+            )
+        i = j
+
+    return out
+
+
+def finalize_round_text(
+    state: StreamRoundState,
+    tool_calls_list: list[dict[str, Any]],
+) -> str:
+    """Pick best text for the round (content, or reasoning if no tools)."""
+    text_out = state.text_out
+    if not text_out and state.reasoning_parts and not tool_calls_list:
+        text_out = state.reasoning_out
+    return text_out
+
+
+def build_assistant_api_message(
+    *,
+    content: str | None,
+    tool_calls: list[dict[str, Any]] | None = None,
+    reasoning_content: str | None = None,
+) -> dict[str, Any]:
+    """Build an assistant message for the next provider request.
+
+    DeepSeek thinking mode requires ``reasoning_content`` to be passed back
+    whenever the assistant turn included tool calls — otherwise HTTP 400:
+    "The reasoning_content in the thinking mode must be passed back to the API."
+    """
+    msg: dict[str, Any] = {
+        "role": "assistant",
+        "content": content if content is not None else None,
+    }
+    if tool_calls:
+        msg["tool_calls"] = tool_calls
+        # Always include the field on tool turns when we have any reasoning text
+        # (or empty string if the provider is in thinking mode but sent none —
+        # empty is safer than omitting for some DeepSeek variants).
+        if reasoning_content is not None:
+            msg["reasoning_content"] = reasoning_content
+        else:
+            msg["reasoning_content"] = ""
+    elif reasoning_content:
+        # Non-tool turns: optional; keep for continuity when present.
+        msg["reasoning_content"] = reasoning_content
+    return msg
+
+
+def repair_reasoning_content_in_messages(
+    messages: list[dict[str, Any]],
+) -> bool:
+    """Ensure every assistant tool_calls turn has reasoning_content.
+
+    Returns True if any message was modified (caller should retry the request).
+    """
+    changed = False
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        if msg.get("role") != "assistant":
+            continue
+        if not msg.get("tool_calls"):
+            continue
+        if "reasoning_content" not in msg:
+            msg["reasoning_content"] = ""
+            changed = True
+    return changed
+
+
+# Re-export policy helpers used by stream loop call sites.
+__all__ = [
+    "StreamRoundState",
+    "accumulate_tool_call_delta",
+    "apply_openai_sse_chunk",
+    "build_runtime_system_block",
+    "build_assistant_api_message",
+    "ensure_tool_call_pairings",
+    "filter_fresh_tool_calls",
+    "finalize_round_text",
+    "iter_openai_sse_content",
+    "looks_like_pseudo_tools",
+    "message_wants_tools",
+    "normalize_tool_calls",
+    "parse_pseudo_tool_calls",
+    "parse_sse_data_line",
+    "repair_reasoning_content_in_messages",
+    "should_enable_tools",
+    "tool_call_fingerprint",
+]

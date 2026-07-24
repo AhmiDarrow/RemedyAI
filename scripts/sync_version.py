@@ -26,6 +26,7 @@ PATHS = {
     "pyproject": ROOT / "pyproject.toml",
     "package": ROOT / "desktop" / "package.json",
     "tauri": ROOT / "desktop" / "src-tauri" / "tauri.conf.json",
+    "cargo": ROOT / "desktop" / "src-tauri" / "Cargo.toml",
     "latest_json": ROOT / "scripts" / "latest.json",
 }
 
@@ -50,16 +51,57 @@ def _bump_package_json(ver: str) -> None:
 
 def _bump_tauri_conf(ver: str) -> None:
     text = PATHS["tauri"].read_text(encoding="utf-8")
-    text = re.sub(r'"version":\s*"[^"]*"', f'"version": "{ver}"', text)
+    text = re.sub(r'"version":\s*"[^"]*"', f'"version": "{ver}"', text, count=1)
     PATHS["tauri"].write_text(text, encoding="utf-8")
+
+
+def _bump_cargo_toml(ver: str) -> None:
+    if not PATHS["cargo"].exists():
+        return
+    text = PATHS["cargo"].read_text(encoding="utf-8")
+    # Only the package version line under [package]
+    text = re.sub(
+        r'(?m)^(version\s*=\s*)"[^"]*"',
+        rf'\1"{ver}"',
+        text,
+        count=1,
+    )
+    PATHS["cargo"].write_text(text, encoding="utf-8")
 
 
 def _bump_latest_json(ver: str) -> None:
     if not PATHS["latest_json"].exists():
         return
+    from datetime import datetime, timezone
+
     data = json.loads(PATHS["latest_json"].read_text(encoding="utf-8"))
-    data["version"] = ver
-    data["pub_date"] = f"{sys.argv[1] if len(sys.argv) > 1 else ''}"
+    old_raw = str(data.get("version", "")).lstrip("v")
+    data["version"] = f"v{ver}"
+    data["notes"] = f"Remedy Desktop v{ver} — Windows installer"
+    data["pub_date"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    # Prefer rewriting known GitHub release URL shape so notes/URL/version stay aligned.
+    installer_name = f"Remedy_Desktop_{ver}_x64-setup.exe"
+    default_url = (
+        f"https://github.com/AhmiDarrow/RemedyAI/releases/download/v{ver}/{installer_name}"
+    )
+
+    for plat in data.get("platforms", {}).values():
+        url = str(plat.get("url") or "")
+        if old_raw and old_raw != ver and url:
+            # Replace tag (vX.Y.Z) first, then bare version in filenames.
+            url = url.replace(f"v{old_raw}", f"v{ver}")
+            url = re.sub(
+                rf"(?<![0-9]){re.escape(old_raw)}(?![0-9])",
+                ver,
+                url,
+            )
+            plat["url"] = url
+        else:
+            plat["url"] = default_url
+        # Preserve existing signature if present; empty means unsigned / not ready.
+        plat.setdefault("signature", "")
+
     PATHS["latest_json"].write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
 
@@ -76,18 +118,68 @@ def _bump_version(current: str, target: str) -> str:
     return target
 
 
+def _runtime_version() -> str:
+    """Import remedy.__version__ from the source tree (not a stale install)."""
+    src = str(ROOT / "src")
+    if src not in sys.path:
+        sys.path.insert(0, src)
+    try:
+        # Force re-read if already imported with a stale value
+        for name in list(sys.modules):
+            if name == "remedy" or name.startswith("remedy."):
+                del sys.modules[name]
+        from remedy import __version__ as v
+
+        return str(v)
+    except Exception as exc:
+        return f"? ({exc})"
+
+
+def _check_aligned(expected: str) -> int:
+    """Print all version surfaces; return 0 if aligned, 1 if mismatch."""
+    rows: list[tuple[str, str]] = []
+    rows.append(("pyproject.toml", expected))
+
+    pkg = json.loads(PATHS["package"].read_text(encoding="utf-8"))
+    rows.append(("package.json", str(pkg.get("version", "?"))))
+
+    taur = PATHS["tauri"].read_text(encoding="utf-8")
+    m = re.search(r'"version":\s*"([^"]*)"', taur)
+    rows.append(("tauri.conf.json", m.group(1) if m else "?"))
+
+    if PATHS["cargo"].exists():
+        cargo = PATHS["cargo"].read_text(encoding="utf-8")
+        cm = re.search(r'(?m)^version\s*=\s*"([^"]*)"', cargo)
+        rows.append(("Cargo.toml", cm.group(1) if cm else "?"))
+
+    if PATHS["latest_json"].exists():
+        latest = json.loads(PATHS["latest_json"].read_text(encoding="utf-8"))
+        lv = str(latest.get("version", "?")).lstrip("v")
+        rows.append(("scripts/latest.json", lv))
+
+    rows.append(("remedy.__version__", _runtime_version()))
+
+    print(f"Canonical version: {expected}")
+    bad = 0
+    for label, ver in rows:
+        ok = ver == expected
+        if not ok:
+            bad += 1
+        mark = "OK " if ok else "BAD"
+        print(f"  [{mark}] {label:22} = {ver}")
+    if bad:
+        print(f"\n{bad} mismatch(es). Run: python scripts/sync_version.py {expected}")
+        print("Then reinstall editable:  uv pip install -e .")
+        return 1
+    print("\nAll version surfaces aligned.")
+    return 0
+
+
 def main():
     current = _pyproject_version()
-    print(f"Current version: {current}")
 
-    if len(sys.argv) < 2:
-        print(f"  pyproject.toml   = {current}")
-        pkg = json.loads(PATHS["package"].read_text(encoding="utf-8"))
-        print(f"  package.json     = {pkg.get('version', '?')}")
-        taur = PATHS["tauri"].read_text(encoding="utf-8")
-        m = re.search(r'"version":\s*"([^"]*)"', taur)
-        print(f"  tauri.conf.json  = {m.group(1) if m else '?'}")
-        return
+    if len(sys.argv) < 2 or sys.argv[1] in ("check", "--check", "status"):
+        raise SystemExit(_check_aligned(current))
 
     new_ver = _bump_version(current, sys.argv[1])
     print(f"Bumping to: {new_ver}")
@@ -101,10 +193,18 @@ def main():
     _bump_tauri_conf(new_ver)
     print(f"  Updated tauri.conf.json")
 
+    _bump_cargo_toml(new_ver)
+    print(f"  Updated Cargo.toml")
+
     _bump_latest_json(new_ver)
     print(f"  Updated scripts/latest.json")
 
     print(f"\nDone! Version bumped from {current} -> {new_ver}")
+    print("Reinstall editable so dist-info matches:")
+    print("  uv pip install -e .")
+    print("  # or:  python -m pip install -e .")
+    # Re-check from source
+    raise SystemExit(_check_aligned(new_ver))
 
 
 if __name__ == "__main__":

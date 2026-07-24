@@ -1,0 +1,297 @@
+name: Desktop Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. 0.10.0 or v0.10.0). Required for manual runs.'
+        required: true
+        type: string
+
+env:
+  APP_NAME: Remedy Desktop
+  REPO_OWNER: AhmiDarrow
+  REPO_NAME: RemedyAI
+
+jobs:
+  build-sidecar:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Resolve and stamp release version
+        shell: bash
+        run: |
+          set -euo pipefail
+          INPUT="${{ inputs.version }}"
+          if [[ -n "${INPUT}" ]]; then
+            VER="${INPUT#v}"
+          elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            VER="${GITHUB_REF_NAME#v}"
+          else
+            echo "::error::Need a tag push (v*) or workflow_dispatch version input"
+            exit 1
+          fi
+          echo "Stamping version ${VER}"
+          python scripts/sync_version.py "${VER}"
+          echo "REMEDY_RELEASE_VERSION=${VER}" >> "$GITHUB_ENV"
+
+      - name: Build sidecar
+        run: python scripts/build_desktop.py --clean --ci
+        env:
+          REMEDY_RELEASE_VERSION: ${{ env.REMEDY_RELEASE_VERSION }}
+
+      - name: Upload sidecar artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: remedy-sidecar
+          path: desktop/bin/remedy-desktop*.exe
+          retention-days: 1
+
+  build-tauri:
+    needs: build-sidecar
+    runs-on: windows-latest
+    outputs:
+      installer_name: ${{ steps.extract.outputs.installer_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Download sidecar
+        uses: actions/download-artifact@v4
+        with:
+          name: remedy-sidecar
+          path: desktop/bin/
+
+      - name: Install Tauri CLI
+        run: npm install -g @tauri-apps/cli
+
+      - name: Setup Python
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.12'
+
+      - name: Stamp version (match sidecar job)
+        shell: bash
+        run: |
+          set -euo pipefail
+          INPUT="${{ inputs.version }}"
+          if [[ -n "${INPUT}" ]]; then
+            VER="${INPUT#v}"
+          elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            VER="${GITHUB_REF_NAME#v}"
+          else
+            echo "::error::Need a tag push (v*) or workflow_dispatch version input"
+            exit 1
+          fi
+          python scripts/sync_version.py "${VER}"
+
+      - name: Install frontend deps
+        run: npm ci
+        working-directory: desktop
+
+      - name: Build Tauri
+        run: npx tauri build --bundles nsis
+        working-directory: desktop
+        env:
+          # Optional: set these GitHub secrets to produce signed updates.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+      - name: Find installer and signature
+        id: extract
+        shell: bash
+        env:
+          HAS_SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+        run: |
+          set -euo pipefail
+          INSTALLER=$(ls desktop/src-tauri/target/release/bundle/nsis/*.exe | head -1)
+          # softprops/action-gh-release rewrites spaces to dots in asset names.
+          # Rename before upload so GitHub asset name matches what we put in latest.json
+          # (older clients failed when URL and local signed name diverged).
+          BASE_DIR=$(dirname "${INSTALLER}")
+          SAFE_NAME=$(basename "${INSTALLER}" | tr ' ' '.')
+          if [[ "$(basename "${INSTALLER}")" != "${SAFE_NAME}" ]]; then
+            mv -f "${INSTALLER}" "${BASE_DIR}/${SAFE_NAME}"
+            if [[ -f "${INSTALLER}.sig" ]]; then
+              mv -f "${INSTALLER}.sig" "${BASE_DIR}/${SAFE_NAME}.sig"
+            fi
+            INSTALLER="${BASE_DIR}/${SAFE_NAME}"
+          fi
+          echo "installer_path=${INSTALLER}" >> $GITHUB_OUTPUT
+          echo "installer_name=$(basename "${INSTALLER}")" >> $GITHUB_OUTPUT
+          # Tauri emits a .sig next to the installer when createUpdaterArtifacts + signing key are set.
+          SIG="${INSTALLER}.sig"
+          ls -la desktop/src-tauri/target/release/bundle/nsis/ || true
+          if [[ -f "$SIG" ]]; then
+            echo "signature_path=${SIG}" >> $GITHUB_OUTPUT
+            echo "Found updater signature: ${SIG}"
+          else
+            echo "signature_path=" >> $GITHUB_OUTPUT
+            if [[ "${HAS_SIGNING_KEY}" == "true" ]]; then
+              echo "::error::TAURI_SIGNING_PRIVATE_KEY is set but no .sig was produced. Ensure bundle.createUpdaterArtifacts=true and the key/password are valid."
+              exit 1
+            fi
+            echo "::warning::No .sig produced (signing secrets not configured)."
+          fi
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: remedy-installer
+          path: ${{ steps.extract.outputs.installer_path }}
+          retention-days: 7
+
+      - name: Upload signature artifact
+        if: steps.extract.outputs.signature_path != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: remedy-installer-sig
+          path: ${{ steps.extract.outputs.signature_path }}
+          retention-days: 7
+
+  release:
+    needs: build-tauri
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          INPUT="${{ inputs.version }}"
+          if [[ -n "${INPUT}" ]]; then
+            VER="${INPUT#v}"
+            TAG="v${VER}"
+          elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            TAG="${GITHUB_REF_NAME}"
+            VER="${TAG#v}"
+          else
+            echo "::error::Manual workflow_dispatch requires a version input (e.g. 0.10.0). Tag pushes use the tag name."
+            exit 1
+          fi
+          if [[ ! "${VER}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-].*)?$ ]]; then
+            echo "::error::Invalid version '${VER}'. Expected semver like 0.10.0 (got tag/ref that is not a version)."
+            exit 1
+          fi
+          echo "version=${VER}" >> $GITHUB_OUTPUT
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+
+      - name: Download installer
+        uses: actions/download-artifact@v4
+        with:
+          name: remedy-installer
+          path: dist/
+
+      - name: Download signature (optional)
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: remedy-installer-sig
+          path: dist/
+
+      - name: Get installer filename and signature
+        id: installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          INSTALLER=$(ls dist/*.exe | head -1)
+          NAME=$(basename "${INSTALLER}")
+          # softprops/GitHub turn spaces into dots in asset names
+          ASSET_NAME="${NAME// /.}"
+          echo "name=${NAME}" >> $GITHUB_OUTPUT
+          echo "asset_name=${ASSET_NAME}" >> $GITHUB_OUTPUT
+          SIG=""
+          if compgen -G "dist/*.sig" > /dev/null; then
+            SIG=$(cat dist/*.sig | tr -d '\r\n' | head -c 100000)
+          fi
+          printf '%s' "${SIG}" > dist/signature.txt
+          if [[ -z "${SIG}" ]]; then
+            echo "::error::No update signature found. Signed auto-update is required (createUpdaterArtifacts + TAURI_SIGNING_PRIVATE_KEY)."
+            exit 1
+          fi
+          echo "Signature length: ${#SIG}"
+
+      - name: Generate latest.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os
+          from datetime import datetime, timezone
+
+          ver = os.environ["VER"]
+          tag = os.environ["TAG"]
+          asset_name = os.environ["ASSET_NAME"]
+          sig = open("dist/signature.txt", encoding="utf-8").read().strip()
+          if not sig:
+              raise SystemExit("empty signature")
+          owner = os.environ["REPO_OWNER"]
+          repo = os.environ["REPO_NAME"]
+          payload = {
+              "version": f"v{ver}",
+              "notes": f"Remedy Desktop v{ver} — signed Windows installer",
+              "pub_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "platforms": {
+                  "windows-x86_64": {
+                      "signature": sig,
+                      "url": f"https://github.com/{owner}/{repo}/releases/download/{tag}/{asset_name}",
+                  }
+              },
+          }
+          with open("dist/latest.json", "w", encoding="utf-8") as f:
+              json.dump(payload, f, indent=2)
+              f.write("\n")
+          print("Wrote dist/latest.json for", asset_name, "sig_chars=", len(sig))
+          PY
+        env:
+          VER: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+          ASSET_NAME: ${{ steps.installer.outputs.asset_name }}
+          REPO_OWNER: ${{ env.REPO_OWNER }}
+          REPO_NAME: ${{ env.REPO_NAME }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Remedy Desktop v${{ steps.version.outputs.version }}
+          body: |
+            ## Remedy Desktop v${{ steps.version.outputs.version }}
+
+            Download the installer below to install Remedy Desktop on Windows.
+
+            ### Installation
+            1. Download the `.exe` installer
+            2. Run it — Remedy Desktop will install automatically
+            3. Launch from the Start Menu or desktop shortcut
+
+            No Python, Node, or Rust required.
+
+            ### Auto-update
+            This release is **minisign-signed**. Apps with the embedded updater pubkey (v0.10.2+) can check and install updates in-app.
+          files: |
+            dist/${{ steps.installer.outputs.name }}
+            dist/latest.json
+          generate_release_notes: true

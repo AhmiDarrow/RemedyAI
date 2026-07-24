@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import re
-import shutil
 import sys
 import tempfile
 from dataclasses import dataclass, field
@@ -37,14 +36,9 @@ class ExecutionResult:
 
 def _default_shell() -> list[str]:
     """Return argv prefix for running a shell command string safely (no shell=True)."""
-    if sys.platform == "win32":
-        pwsh = shutil.which("pwsh") or shutil.which("powershell")
-        if pwsh:
-            return [pwsh, "-NoProfile", "-NonInteractive", "-Command"]
-        cmd = shutil.which("cmd") or "cmd.exe"
-        return [cmd, "/c"]
-    sh = shutil.which("bash") or shutil.which("sh") or "/bin/sh"
-    return [sh, "-c"]
+    from remedy.execution.process import win_shell_prefix
+
+    return win_shell_prefix()
 
 
 class SkillExecutor:
@@ -84,7 +78,9 @@ class SkillExecutor:
             return result
 
         try:
-            proc = await asyncio.create_subprocess_exec(
+            from remedy.execution.process import create_hidden_subprocess_exec
+
+            proc = await create_hidden_subprocess_exec(
                 *command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -185,7 +181,9 @@ class SkillExecutor:
         cwd = str(skill_dir or self.sandbox_dir)
 
         try:
-            proc = await asyncio.create_subprocess_exec(
+            from remedy.execution.process import create_hidden_subprocess_exec
+
+            proc = await create_hidden_subprocess_exec(
                 *command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,

@@ -1,0 +1,14 @@
+[[permission]]
+identifier = "allow-launch-at-login"
+description = "Allow Startup-folder autostart, desktop prefs, show window (no registry Run)"
+commands.allow = [
+  "set_launch_at_login",
+  "get_launch_at_login",
+  "scrub_legacy_autostart",
+  "set_desktop_prefs",
+  "get_desktop_prefs",
+  "show_main_window",
+  "minimize_main_window",
+  "toggle_maximize_main_window",
+  "request_close_main_window",
+]

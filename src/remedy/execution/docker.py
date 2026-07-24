@@ -59,7 +59,9 @@ class DockerSandbox(Sandbox):
             return False
 
         try:
-            proc = await asyncio.create_subprocess_exec(
+            from remedy.execution.process import create_hidden_subprocess_exec
+
+            proc = await create_hidden_subprocess_exec(
                 "docker", "image", "inspect", self.image,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -68,7 +70,7 @@ class DockerSandbox(Sandbox):
             if proc.returncode == 0:
                 return True
 
-            proc = await asyncio.create_subprocess_exec(
+            proc = await create_hidden_subprocess_exec(
                 "docker", "pull", self.image,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -125,7 +127,9 @@ class DockerSandbox(Sandbox):
         docker_cmd += command
 
         try:
-            proc = await asyncio.create_subprocess_exec(
+            from remedy.execution.process import create_hidden_subprocess_exec
+
+            proc = await create_hidden_subprocess_exec(
                 *docker_cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -171,7 +175,9 @@ class DockerSandbox(Sandbox):
 
     async def sandbox_exists(self, name: str) -> bool:
         """Check if a sandbox label still exists."""
-        proc = await asyncio.create_subprocess_exec(
+        from remedy.execution.process import create_hidden_subprocess_exec
+
+        proc = await create_hidden_subprocess_exec(
             "docker", "ps", "-a", "--filter", f"label=remedy.sandbox={name}",
             "--format", "{{.ID}}",
             stdout=asyncio.subprocess.PIPE,
@@ -183,7 +189,9 @@ class DockerSandbox(Sandbox):
     async def cleanup(self) -> None:
         """Remove all stopped Remedy sandbox containers."""
         try:
-            proc = await asyncio.create_subprocess_exec(
+            from remedy.execution.process import create_hidden_subprocess_exec
+
+            proc = await create_hidden_subprocess_exec(
                 "docker", "container", "prune", "-f",
                 "--filter", "label=remedy.sandbox",
                 stdout=asyncio.subprocess.PIPE,

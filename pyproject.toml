@@ -3,10 +3,10 @@
 # unrelated package (remedy 0.0.6) that pulls ancient Jinja2/begins.
 # Import package and CLI entry point remain `remedy`.
 name = "remedy-ai"
-version = "0.9.3"
-description = "A self-improving, multi-channel AI agent framework with memory, learning, and extensibility"
+version = "0.10.25"
+description = "Self-improving multi-channel software coding agent framework (memory, learning, tools) — not a medical product"
 readme = "README.md"
-license = { text = "MIT" }
+license = { text = "LicenseRef-Proprietary" }
 authors = [
     { name = "Ahmi", email = "ahmitdarrow@gmail.com" }
 ]
@@ -14,7 +14,7 @@ keywords = ["ai", "agent", "framework", "skill", "memory", "learning", "llm", "t
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
+    "License :: Other/Proprietary License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -27,9 +27,21 @@ dependencies = [
     "fastapi>=0.139.2",
     "packaging>=24.0",
     "pydantic>=2.13.4",
+    "python-multipart>=0.0.9",
     "pyyaml>=6.0.3",
     "rich>=15.0.0",
     "uvicorn>=0.51.0",
+]
+
+# Optional install groups (core already includes server deps for `remedy serve`).
+[project.optional-dependencies]
+server = [
+    "fastapi>=0.139.2",
+    "uvicorn>=0.51.0",
+    "python-multipart>=0.0.9",
+]
+desktop-build = [
+    "pyinstaller>=6.21.0",
 ]
 
 [project.urls]
@@ -66,9 +78,31 @@ unsafe-fixes = false
 [tool.ruff.format]
 quote-style = "double"
 
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+warn_unused_ignores = true
+check_untyped_defs = true
+# Typed packages (expand as remaining modules are annotated).
+files = [
+    "src/remedy/core",
+    "src/remedy/execution",
+    "src/remedy/tools",
+    "src/remedy/models.py",
+    "src/remedy/interfaces/api_models.py",
+    "src/remedy/interfaces/api_support.py",
+    "src/remedy/interfaces/attachments.py",
+]
+exclude = [
+    "src/remedy/core/agent.py",  # large ReAct loop; type gradually
+    "src/remedy/core/learning_loop.py",
+    "src/remedy/core/learning",
+]
+
 [dependency-groups]
 dev = [
     "httpx>=0.28.1",
+    "mypy>=1.15.0",
     "pyinstaller>=6.21.0",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",

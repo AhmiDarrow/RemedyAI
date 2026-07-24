@@ -67,23 +67,29 @@ def poll_and_download(pid, dest_name, timeout=300):
         time.sleep(2)
     raise TimeoutError("Generation timed out")
 
+# Software/agent branding only — never medical, clinical, or healthcare imagery.
 ICON_PROMPT = (
-    "app icon for Remedy AI - a healing/medical AI brand, stylized caduceus "
-    "symbol integrated with digital circuit patterns, snake wrapped around a "
-    "glowing staff, geometric minimal vector style, dark navy background, "
-    "teal and gold accents, clean sharp lines, professional tech logo, "
-    "high quality, sharp focus, no text"
+    "app icon for Remedy, a software coding agent framework, abstract "
+    "geometric letter R monogram made of sharp circuit nodes and hexagonal "
+    "mesh, dark navy background, teal and gold accents, minimal vector tech "
+    "logo, clean professional developer tool branding, high quality, sharp "
+    "focus, no text, no snakes, no staff, no caduceus, no medical symbols"
 )
 
 LOGO_PROMPT = (
-    "horizontal wordmark logo for Remedy AI agent framework, bold modern "
-    "sans-serif typography reading 'REMEDY', small healing caduceus icon "
-    "beside the text, dark navy background, teal and gold gradient, "
-    "clean corporate style, high contrast, sharp vector quality, "
-    "no other text or words"
+    "horizontal wordmark logo for Remedy software agent framework, bold modern "
+    "sans-serif typography reading only the word REMEDY, small abstract tech "
+    "node or hexagon mark beside the text (not medical), dark navy background, "
+    "teal and gold gradient, clean corporate developer-tools style, high "
+    "contrast, sharp vector quality, no other text or words"
 )
 
-NEGATIVE = "blurry, low quality, distorted, ugly, deformed, watermark, signature, cropped, jpeg artifacts, bad anatomy, text"
+NEGATIVE = (
+    "blurry, low quality, distorted, ugly, deformed, watermark, signature, "
+    "cropped, jpeg artifacts, bad anatomy, extra text, medical, hospital, "
+    "caduceus, snake, staff of asclepius, pharmacy, doctor, clinical, "
+    "healthcare, cross, ambulance, stethoscope"
+)
 
 def main():
     print("=== Remedy Branding Generator ===\n")

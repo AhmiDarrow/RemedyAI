@@ -49,7 +49,9 @@ class MCPClient:
             await self.disconnect(server_name)
 
         try:
-            proc = await asyncio.create_subprocess_exec(
+            from remedy.execution.process import create_hidden_subprocess_exec
+
+            proc = await create_hidden_subprocess_exec(
                 command,
                 *(args or []),
                 stdin=asyncio.subprocess.PIPE,
@@ -95,7 +97,8 @@ class MCPClient:
         proc = self._processes.pop(server_name, None)
         if proc:
             try:
-                proc.stdin.close()
+                if proc.stdin is not None:
+                    proc.stdin.close()
                 proc.kill()
                 await proc.wait()
             except Exception:

@@ -64,6 +64,61 @@ class SecurityError(RemedyError):
         super().__init__(message, code="SECURITY_ERROR", details=dict(rule=rule, **kwargs))
 
 
+def tool_error_payload(
+    message: str,
+    *,
+    code: str = "TOOL_ERROR",
+    tool_name: str | None = None,
+    suggestion: str | None = None,
+    **details: Any,
+) -> dict[str, Any]:
+    """Standard structured error dict for tool / API boundaries.
+
+    Prefer this over ad-hoc ``{"error": "..."}`` strings so callers can branch
+    on ``code`` without parsing free-form text.
+    """
+    payload: dict[str, Any] = {
+        "ok": False,
+        "error": message,
+        "code": code,
+    }
+    if tool_name:
+        payload["tool_name"] = tool_name
+    if suggestion:
+        payload["suggestion"] = suggestion
+    if details:
+        payload["details"] = details
+    return payload
+
+
+def format_tool_error(
+    message: str,
+    *,
+    code: str = "TOOL_ERROR",
+    tool_name: str | None = None,
+    suggestion: str | None = None,
+) -> str:
+    """Human-readable tool error string (keeps chat transcript readable).
+
+    When ``suggestion`` is set, append a recovery hint the model can act on
+    (e.g. list_dir on parent after NOT_FOUND).
+    """
+    prefix = f"[{code}]"
+    if tool_name:
+        prefix = f"[{code}:{tool_name}]"
+    base = f"Error {prefix}: {message}"
+    if suggestion:
+        return f"{base}\nSuggestion: {suggestion}"
+    return base
+
+
+def as_remedy_error(exc: BaseException, *, default_code: str = "INTERNAL_ERROR") -> RemedyError:
+    """Normalize any exception into a :class:`RemedyError` at a system boundary."""
+    if isinstance(exc, RemedyError):
+        return exc
+    return RemedyError(str(exc) or exc.__class__.__name__, code=default_code)
+
+
 class APIRetryPolicy:
     def __init__(
         self,
