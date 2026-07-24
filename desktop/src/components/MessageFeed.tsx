@@ -204,12 +204,6 @@ function MessageBubble({
       ? `${text.slice(0, COLLAPSE_CHARS).trimEnd()}…`
       : text
 
-  const rowJustify = isSystem
-    ? 'justify-center'
-    : isUser
-      ? 'justify-end'
-      : 'justify-start'
-
   const bubbleBg = isUser
     ? 'var(--chat-user-bg)'
     : isSystem

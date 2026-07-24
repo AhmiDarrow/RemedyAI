@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { getSettings, updateSettings, type Settings, type SettingsUpdate } from '../api/settings'
-import { SettingsSection } from './SettingsSection'
 import {
   getXaiAuthStatus,
   startXaiLogin,
