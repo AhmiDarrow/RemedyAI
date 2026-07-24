@@ -114,15 +114,16 @@ async def handle_slash_command(
             "  Ctrl+P / Ctrl+K — Command palette\n"
             "  Ctrl+B — Toggle plan mode\n"
             "  Ctrl+, — Settings\n"
-            "  Ctrl+/ or F1 — This help / shortcuts\n"
-            "  Escape — Close panels and palette\n"
+            "  Ctrl+/ or F1 — Full Help wiki (owner's manual)\n"
+            "  Escape — Close panels, Help, and palette\n"
         )
         tips = (
             "\n**Tips**\n"
+            "  · **F1** opens the offline Help wiki (searchable owner's manual).\n"
             "  · Connect a provider in Settings to chat with models.\n"
             "  · Plan mode explores without changing files; Build mode can edit.\n"
             "  · Type @ to reference project files.\n"
-            "  · Your data stays in your Remedy folder on this machine.\n"
+            "  · Your data stays in ~/.remedy on this machine.\n"
         )
         return {
             "text": (

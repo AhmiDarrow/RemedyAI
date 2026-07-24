@@ -7,6 +7,7 @@ import { StatusBar, type ThinkingLevel, type ApprovalMode } from './components/S
 import { TabBar } from './components/TabBar'
 import { MemoryPanel, SkillsPanel } from './components/Panels'
 import { SettingsPanel } from './components/SettingsPanel'
+import { HelpPanel } from './components/HelpPanel'
 import { SplashScreen } from './components/SplashScreen'
 import { SetupWizard } from './components/SetupWizard'
 import { UpdateScreen } from './components/UpdateScreen'
@@ -47,11 +48,17 @@ function AppShell({
   version,
   updateAvailable,
   onMenuAction,
+  helpOpen,
+  helpArticleId,
+  onCloseHelp,
 }: {
   children: React.ReactNode
   version?: string
   updateAvailable?: boolean
   onMenuAction?: (action: AppMenuAction) => void
+  helpOpen?: boolean
+  helpArticleId?: string | null
+  onCloseHelp?: () => void
 }) {
   return (
     <div className="flex flex-col h-full min-h-0" style={{ background: 'var(--bg-primary)' }}>
@@ -61,6 +68,13 @@ function AppShell({
         onMenuAction={onMenuAction}
       />
       <div className="flex-1 min-h-0 flex flex-col">{children}</div>
+      {onCloseHelp && (
+        <HelpPanel
+          open={Boolean(helpOpen)}
+          onClose={onCloseHelp}
+          initialArticleId={helpArticleId}
+        />
+      )}
     </div>
   )
 }
@@ -132,6 +146,25 @@ export default function App() {
   const [askUserName, setAskUserName] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
   const [appVersion, setAppVersion] = useState('')
+  const [helpOpen, setHelpOpen] = useState(false)
+  const [helpArticleId, setHelpArticleId] = useState<string | null>(null)
+
+  const openHelp = useCallback((articleId?: string) => {
+    setHelpArticleId(articleId || null)
+    setHelpOpen(true)
+  }, [])
+
+  // Dev / browser review: open wiki with ?help=1 or ?help=09-troubleshooting
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search)
+      const h = params.get('help')
+      if (h === null) return
+      openHelp(h === '1' || h === '' || h === 'true' ? undefined : h)
+    } catch {
+      /* ignore */
+    }
+  }, [openHelp])
 
   /** Run update check with visible UI (settings About section), not a silent focus. */
   const runUpdateCheckVisible = useCallback(async () => {
@@ -154,6 +187,9 @@ export default function App() {
           break
         case 'skills':
           setPanel('skills')
+          break
+        case 'help':
+          openHelp()
           break
         case 'new_session':
           void (async () => {
@@ -180,7 +216,7 @@ export default function App() {
           break
       }
     },
-    [runUpdateCheckVisible, desktopInfo, create],
+    [runUpdateCheckVisible, desktopInfo, create, openHelp],
   )
 
   useEffect(() => {
@@ -629,14 +665,24 @@ export default function App() {
       { id: 'settings', label: 'Settings Panel', description: 'Toggle settings panel', category: 'panel', action: () => setPanel((p) => (p === 'settings' ? null : 'settings')) },
       {
         id: 'help',
-        label: 'Keyboard Shortcuts',
-        description: 'Show help and hotkeys (Ctrl+/)',
+        label: "Help / Owner's Manual",
+        description: 'Searchable offline wiki (F1 / Ctrl+/)',
         category: 'general',
-        action: () => {
-          setPanel('settings')
-          // Help section is in settings; also inject /help into chat if possible
-          void handleCommand('/help')
-        },
+        action: () => openHelp(),
+      },
+      {
+        id: 'help-troubleshoot',
+        label: 'Troubleshooting',
+        description: 'Open Help → Troubleshooting',
+        category: 'general',
+        action: () => openHelp('09-troubleshooting'),
+      },
+      {
+        id: 'help-commands',
+        label: 'Slash commands reference',
+        description: 'Open Help → Commands',
+        category: 'general',
+        action: () => openHelp('11-reference-commands'),
       },
       ...sessions.map((s) => ({
         id: `session-${s.id}`,
@@ -671,6 +717,7 @@ export default function App() {
     handleExport,
     handleImport,
     activeId,
+    openHelp,
   ])
 
   useKeyboardShortcuts([
@@ -683,23 +730,23 @@ export default function App() {
       key: '/',
       ctrl: true,
       allowInInput: true,
-      handler: () => {
-        void handleCommand('/help')
-      },
+      handler: () => openHelp(),
     },
     {
       key: 'F1',
       ctrl: false,
       allowInInput: true,
-      handler: () => {
-        void handleCommand('/help')
-      },
+      handler: () => openHelp(),
     },
     {
       key: 'Escape',
       ctrl: false,
       allowInInput: true,
       handler: () => {
+        if (helpOpen) {
+          setHelpOpen(false)
+          return
+        }
         setPaletteOpen(false)
         setPanel(null)
       },
@@ -710,6 +757,9 @@ export default function App() {
     version: appVersion || updateInfo?.current_version || desktopInfo?.current_version,
     updateAvailable,
     onMenuAction: handleMenuAction,
+    helpOpen,
+    helpArticleId,
+    onCloseHelp: () => setHelpOpen(false),
   }
 
   if (serverState === 'connecting') {
@@ -842,6 +892,18 @@ export default function App() {
             >
               Open data folder
             </button>
+            <button
+              type="button"
+              onClick={() => openHelp('09-troubleshooting')}
+              className="px-5 py-2 rounded-md text-sm"
+              style={{
+                background: 'var(--bg-tertiary)',
+                color: 'var(--text-secondary)',
+                border: '1px solid var(--border)',
+              }}
+            >
+              Troubleshooting help
+            </button>
           </div>
         </div>
       </AppShell>
@@ -954,6 +1016,7 @@ export default function App() {
           <SkillsPanel
             open={panel === 'skills'}
             onClose={() => setPanel(null)}
+            onOpenHelp={openHelp}
           />
           <SettingsPanel
             open={panel === 'settings'}
@@ -983,6 +1046,7 @@ export default function App() {
               setToolProcessMode(mode)
               updateSettings({ tool_process: mode }).catch(() => {})
             }}
+            onOpenHelp={openHelp}
             onSettingsSaved={() => {
               void getSettings()
                 .then((s) => {
@@ -1032,6 +1096,7 @@ export default function App() {
           onTogglePlanMode={() => setPlanMode((p) => !p)}
           panel={panel}
           onTogglePanel={(p) => setPanel((prev) => (prev === p ? null : p))}
+          onOpenHelp={() => openHelp()}
           updateAvailable={updateAvailable}
           onCheckUpdates={() => {
             void runUpdateCheckVisible()
@@ -1106,6 +1171,21 @@ export default function App() {
             {userName && <div>Signed in as {userName}</div>}
           </div>
           <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              className="px-3 py-1.5 rounded-lg text-xs"
+              style={{
+                background: 'var(--bg-tertiary)',
+                color: 'var(--text-secondary)',
+                border: '1px solid var(--border)',
+              }}
+              onClick={() => {
+                setAboutOpen(false)
+                openHelp('13-whats-new')
+              }}
+            >
+              Help
+            </button>
             <button
               type="button"
               className="px-3 py-1.5 rounded-lg text-xs"

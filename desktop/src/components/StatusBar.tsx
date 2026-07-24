@@ -27,6 +27,8 @@ interface StatusBarProps {
   onTogglePlanMode: () => void
   panel?: 'memory' | 'skills' | 'settings' | null
   onTogglePanel: (panel: 'memory' | 'skills' | 'settings') => void
+  /** Open offline Help wiki (owner's manual). */
+  onOpenHelp?: () => void
   updateAvailable: boolean
   onCheckUpdates: () => void
   onInstallUpdate?: () => void
@@ -57,6 +59,7 @@ export function StatusBar({
   onTogglePlanMode,
   panel,
   onTogglePanel,
+  onOpenHelp,
   updateAvailable,
   onCheckUpdates,
   onInstallUpdate,
@@ -171,6 +174,15 @@ export function StatusBar({
         >
           Settings
         </SegButton>
+        {onOpenHelp && (
+          <SegButton
+            active={false}
+            onClick={() => onOpenHelp()}
+            title="Help wiki — owner's manual (F1)"
+          >
+            Help
+          </SegButton>
+        )}
 
         {updateAvailable && (
           <button

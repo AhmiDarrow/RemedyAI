@@ -5,6 +5,7 @@ export type AppMenuAction =
   | 'settings'
   | 'memory'
   | 'skills'
+  | 'help'
   | 'check_updates'
   | 'install_update'
   | 'about'
@@ -215,6 +216,7 @@ export function TitleBar({
               <MenuItem label="Settings…" onClick={() => run('settings')} shortcut="Ctrl+," />
               <MenuItem label="Memory" onClick={() => run('memory')} />
               <MenuItem label="Skills" onClick={() => run('skills')} />
+              <MenuItem label="Help / Owner's Manual…" onClick={() => run('help')} shortcut="F1" />
               <MenuSep />
               {updateAvailable ? (
                 <MenuItem

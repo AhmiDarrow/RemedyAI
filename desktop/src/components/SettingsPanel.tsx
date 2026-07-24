@@ -60,6 +60,8 @@ interface SettingsPanelProps {
   onSettingsSaved?: () => void
   toolProcessMode?: ToolProcessMode
   onToolProcessChange?: (mode: ToolProcessMode) => void
+  /** Open Help wiki, optionally on a specific article id. */
+  onOpenHelp?: (articleId?: string) => void
 }
 
 export function SettingsPanel({
@@ -78,6 +80,7 @@ export function SettingsPanel({
   onInstallUpdate,
   models,
   onSettingsSaved,
+  onOpenHelp,
   toolProcessMode,
   onToolProcessChange,
 }: SettingsPanelProps) {
@@ -890,8 +893,47 @@ export function SettingsPanel({
                 Help &amp; shortcuts
               </div>
               <div className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>
-                Enter sends · Shift+Enter new line · type /help in chat for commands
+                Enter sends · Shift+Enter new line · /help for the command card · F1 full manual
               </div>
+              {onOpenHelp && (
+                <div className="flex flex-col gap-1.5 mb-2">
+                  <button
+                    type="button"
+                    onClick={() => onOpenHelp()}
+                    className="w-full py-1.5 rounded text-xs font-medium"
+                    style={{
+                      background: 'var(--accent)',
+                      color: '#fff',
+                    }}
+                  >
+                    Open Help wiki (owner&apos;s manual)
+                  </button>
+                  <div className="flex flex-wrap gap-1">
+                    {(
+                      [
+                        ['02-first-run', 'Setup'],
+                        ['03-providers-and-auth', 'Providers'],
+                        ['09-troubleshooting', 'Troubleshoot'],
+                        ['13-whats-new', "What's new"],
+                      ] as const
+                    ).map(([id, label]) => (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => onOpenHelp(id)}
+                        className="px-2 py-1 rounded text-[10px]"
+                        style={{
+                          background: 'var(--bg-tertiary)',
+                          color: 'var(--text-secondary)',
+                          border: '1px solid var(--border)',
+                        }}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div
                 className="rounded-md overflow-hidden text-xs"
                 style={{ border: '1px solid var(--border)' }}
@@ -939,7 +981,7 @@ export function SettingsPanel({
                 </div>
               </div>
 
-              <div className="mt-3 pt-3 border-t" style={{ borderColor: 'var(--border)' }}>
+              <div className="mt-3 pt-3 border-t space-y-1.5" style={{ borderColor: 'var(--border)' }}>
                 <button
                   type="button"
                   onClick={() => {
@@ -956,6 +998,62 @@ export function SettingsPanel({
                 >
                   {checkingUpdates ? 'Checking for updates…' : 'Check for Updates'}
                 </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const ver =
+                      updateInfo?.current_version
+                      || settings?.version
+                      || 'unknown'
+                    const body = encodeURIComponent(
+                      [
+                        '## What happened',
+                        '',
+                        '(Describe the issue…)',
+                        '',
+                        '## Steps to reproduce',
+                        '',
+                        '1. ',
+                        '',
+                        '## Expected vs actual',
+                        '',
+                        '',
+                        '## Environment',
+                        '',
+                        `- Remedy Desktop: v${ver}`,
+                        `- OS: Windows`,
+                        '',
+                      ].join('\n'),
+                    )
+                    const title = encodeURIComponent(`[Desktop v${ver}] `)
+                    void openExternalUrl(
+                      `https://github.com/AhmiDarrow/RemedyAI/issues/new?title=${title}&body=${body}&labels=bug`,
+                    )
+                  }}
+                  className="w-full py-1.5 rounded text-xs font-medium transition-colors"
+                  style={{
+                    background: 'var(--bg-tertiary)',
+                    color: 'var(--text-primary)',
+                    border: '1px solid var(--border)',
+                  }}
+                  title="Open GitHub Issues in your browser"
+                >
+                  Report an issue on GitHub…
+                </button>
+                <div className="text-[10px] px-0.5" style={{ color: 'var(--text-muted)' }}>
+                  Opens{' '}
+                  <button
+                    type="button"
+                    className="underline"
+                    style={{ color: 'var(--accent)' }}
+                    onClick={() =>
+                      void openExternalUrl('https://github.com/AhmiDarrow/RemedyAI/issues')
+                    }
+                  >
+                    github.com/AhmiDarrow/RemedyAI/issues
+                  </button>
+                  {' '}— include version and steps when you can.
+                </div>
                 {/* Always reserve status area so a check never looks like a no-op */}
                 <div className="mt-2 space-y-1 min-h-[2.5rem]">
                   {checkingUpdates && (

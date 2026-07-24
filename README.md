@@ -25,7 +25,7 @@ The recommended way to use Remedy is the native desktop application — no Pytho
 1. Download the `.exe` installer from GitHub Releases
 2. Run the installer — Remedy Desktop installs to your local app folder
 3. Launch from the Start Menu — the SetupWizard guides you through provider and model configuration
-4. Start chatting with `/help` to see available commands
+4. Press **F1** for the offline Help wiki (owner's manual), or type `/help` for the command card
 
 > **Windows SmartScreen?** Solo builds are not Authenticode-signed yet (costly for indie). If Windows says “Unknown publisher”, click **More info → Run anyway**. The download is from this GitHub repo only. In-app updates are still **minisign**-verified.
 

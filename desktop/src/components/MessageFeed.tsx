@@ -705,7 +705,8 @@ export function MessageFeed({
           </div>
           <div className="text-xs max-w-sm leading-relaxed">
             Ask anything, plan, research, or open a project to build.{' '}
-            <code style={{ color: 'var(--accent)' }}>/help</code> lists commands and shortcuts.
+            <code style={{ color: 'var(--accent)' }}>/help</code> lists commands ·{' '}
+            <code style={{ color: 'var(--accent)' }}>F1</code> opens the Help wiki.
           </div>
           {onQuickPrompt && (
             <div className="flex flex-wrap justify-center gap-2 mt-1 max-w-lg">

@@ -72,13 +72,13 @@ export const HOTKEYS: HotkeyDef[] = [
   {
     keys: 'Ctrl+/',
     scope: 'global',
-    action: 'Show keyboard shortcuts',
+    action: "Open Help wiki (owner's manual)",
     match: { key: '/', ctrl: true },
   },
   {
     keys: 'F1',
     scope: 'global',
-    action: 'Show keyboard shortcuts',
+    action: "Open Help wiki (owner's manual)",
     match: { key: 'F1', ctrl: false },
   },
   {

@@ -2,6 +2,16 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.10.37] — 2026-07-24
+
+### Feature: offline Help wiki + technical owner's manual
+
+- **`docs/manual/`** — full owner chapters (install → troubleshooting → CLI/API).
+- **In-app Help wiki** (`F1` / `Ctrl+/` / status bar **Help** / logo menu): searchable TOC, markdown articles, in-wiki navigation, Esc to close.
+- Product glue: Settings deep-links, Skills panel guide link, error-screen Troubleshooting, About → Help, command palette entries, `/help` points to the wiki.
+- **Settings → About: Report an issue on GitHub** (pre-fills version in the issue template); Help footer link too.
+- Vitest coverage for the help catalog.
+
 ## [0.10.36] — 2026-07-24
 
 ### Fix: first-run setup save + xAI OAuth + corrupt config.toml

@@ -1,0 +1,61 @@
+# Remedy — Owner’s Manual Overview
+
+**Remedy** is your personal AI partner for knowledge, design, code, and get-it-done work on **your machine**. It is **not** a medical or clinical product.
+
+This Help wiki is the full technical owner’s manual, available offline inside the desktop app (**F1** or **Ctrl+/**).
+
+## What you get
+
+| Area | What it means |
+|------|----------------|
+| **Desktop app** | Chat UI + local server (sidecar) — recommended for everyone |
+| **Local data** | Config, memory, skills, and auth under `~/.remedy` |
+| **Providers** | OpenAI, Anthropic, Google, DeepSeek, xAI, Groq, Mistral, OpenRouter, Ollama, Custom |
+| **Skills** | Portable instruction packs the agent can load on demand |
+| **Memory** | Durable facts, profile, session continuity, Session Brief |
+| **Safety** | Approvals for high-impact tools, access scope, local API auth |
+
+## Quick start (60 seconds)
+
+1. Install Remedy Desktop from [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases/latest).
+2. Finish the **Setup wizard** (provider + optional workspace).
+3. Type a question in chat, or try `/help` for the command card.
+4. Press **F1** anytime to return to this wiki.
+
+## How the pieces fit
+
+```
+You → Remedy Desktop (Tauri) → local API on 127.0.0.1:7400 → LLM provider
+                ↓
+         ~/.remedy (config, memory.db, skills, auth tokens)
+```
+
+Nothing in this architecture requires a Remedy cloud account. Chat content goes to **your chosen LLM provider** (or local Ollama). Secrets stay on disk (DPAPI-encrypted on Windows when available).
+
+## Manual map
+
+| Chapter | Topic |
+|---------|--------|
+| [Install (Windows)](01-install-windows) | Installer, paths, SmartScreen |
+| [First run](02-first-run) | Setup wizard, Skip, re-setup |
+| [Providers & auth](03-providers-and-auth) | Keys, xAI OAuth, Ollama |
+| [Security & data](04-security-and-data) | Tokens, scope, approvals |
+| [Chat & sessions](05-chat-and-sessions) | UI map, Plan/Build, export |
+| [Memory & harness](06-memory-and-harness) | `/remember`, `/compact` |
+| [Skills](07-skills) | Lifecycle, Trust, panel |
+| [Updates & uninstall](08-updates-and-uninstall) | Auto-update, wipe options |
+| [Troubleshooting](09-troubleshooting) | Server, OAuth, Defender |
+| [CLI & API](10-cli-and-api) | Power-user surfaces |
+| [Commands](11-reference-commands) | Full slash reference |
+| [Shortcuts](12-reference-shortcuts) | Keyboard map |
+| [What’s new](13-whats-new) | Recent product changes |
+
+## Day-1 tips
+
+- **Enter** sends · **Shift+Enter** new line · **↑/↓** prompt history  
+- **@** attach project files · **/** slash commands  
+- **Plan** mode explores without editing · **Build** can change files  
+- **Proc** on the status bar controls tool-process detail (Off / Medium / Full)  
+- Data lives under `C:\Users\<you>\.remedy` on Windows  
+
+Continue with [Install (Windows)](01-install-windows) or jump to [Troubleshooting](09-troubleshooting) if something already failed.

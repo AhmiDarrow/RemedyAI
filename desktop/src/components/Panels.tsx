@@ -171,9 +171,12 @@ function statusColor(status?: string): string {
 export function SkillsPanel({
   open,
   onClose,
+  onOpenHelp,
 }: {
   open: boolean
   onClose: () => void
+  /** Open Help wiki on the skills chapter. */
+  onOpenHelp?: (articleId?: string) => void
 }) {
   const [skills, setSkills] = useState<SkillRow[]>([])
   const [loading, setLoading] = useState(false)
@@ -236,6 +239,20 @@ export function SkillsPanel({
 
   return (
     <Panel open={open} onClose={onClose} title="Skills (agent packs)">
+      {onOpenHelp && (
+        <button
+          type="button"
+          onClick={() => onOpenHelp('07-skills')}
+          className="mb-2 w-full text-left text-[11px] px-2 py-1.5 rounded"
+          style={{
+            background: 'var(--bg-tertiary)',
+            border: '1px solid var(--border)',
+            color: 'var(--accent)',
+          }}
+        >
+          Skills guide in Help wiki →
+        </button>
+      )}
       <div className="mb-2 flex gap-1 items-center">
         <input
           value={filter}
