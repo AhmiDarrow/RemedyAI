@@ -650,6 +650,48 @@ fn minimize_main_window(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Hide desktop window to tray and open the browser Web UI (same chat app via local API).
+#[tauri::command]
+fn switch_to_web_ui(app: AppHandle) -> Result<String, String> {
+    // Prefer full SPA when sidecar serves it; fall back to API dashboard.
+    let url = std::env::var("REMEDY_WEB_UI_URL")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "http://127.0.0.1:7400/".to_string());
+
+    // Hide to tray (keep sidecar alive) — same as close-to-tray.
+    if let Some(w) = app.get_webview_window("main") {
+        w.hide().map_err(|e| format!("hide to tray failed: {e}"))?;
+        log::info!("switch_to_web_ui: desktop hidden to tray");
+    }
+
+    // Open default browser (Windows: start; shell plugin as secondary).
+    #[cfg(target_os = "windows")]
+    {
+        let status = Command::new("cmd")
+            .args(["/C", "start", "", &url])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status()
+            .map_err(|e| format!("open browser failed: {e}"))?;
+        if !status.success() {
+            return Err(format!("open browser exited with {status}"));
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let status = Command::new("xdg-open")
+            .arg(&url)
+            .status()
+            .or_else(|_| Command::new("open").arg(&url).status())
+            .map_err(|e| format!("open browser failed: {e}"))?;
+        if !status.success() {
+            return Err(format!("open browser exited with {status}"));
+        }
+    }
+
+    Ok(url)
+}
+
 /// Maximize / restore from the custom title bar.
 #[tauri::command]
 fn toggle_maximize_main_window(app: AppHandle) -> Result<bool, String> {
@@ -1490,6 +1532,7 @@ pub fn run() {
             minimize_main_window,
             toggle_maximize_main_window,
             request_close_main_window,
+            switch_to_web_ui,
             restart_server,
             check_desktop_update,
             start_desktop_update,

@@ -1003,6 +1003,37 @@ export function SettingsPanel({
                 <button
                   type="button"
                   onClick={() => {
+                    void (async () => {
+                      try {
+                        const { isTauri, tauriInvoke } = await import('../api/tauri')
+                        if (isTauri()) {
+                          await tauriInvoke('switch_to_web_ui')
+                          return
+                        }
+                      } catch (e) {
+                        console.warn('switch_to_web_ui:', e)
+                      }
+                      await openExternalUrl('http://127.0.0.1:7400/')
+                    })()
+                  }}
+                  className="w-full py-1.5 rounded text-xs font-medium transition-colors"
+                  style={{
+                    background: 'var(--bg-tertiary)',
+                    color: 'var(--text-primary)',
+                    border: '1px solid var(--border)',
+                  }}
+                  title="Minimize desktop to tray and open the chat UI in your default browser"
+                >
+                  Switch to Web UI…
+                </button>
+                <div className="text-[10px] px-0.5" style={{ color: 'var(--text-muted)' }}>
+                  Hides Remedy to the tray and opens{' '}
+                  <code style={{ color: 'var(--accent)' }}>http://127.0.0.1:7400/</code>
+                  {' '}(same local API + chat). Tray → Show Remedy returns to desktop.
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
                     void onCheckUpdates()
                   }}
                   disabled={checkingUpdates}

@@ -183,6 +183,26 @@ export function StatusBar({
             Help
           </SegButton>
         )}
+        <SegButton
+          active={false}
+          onClick={() => {
+            void (async () => {
+              try {
+                const { isTauri, tauriInvoke } = await import('../api/tauri')
+                if (isTauri()) {
+                  await tauriInvoke('switch_to_web_ui')
+                  return
+                }
+              } catch (e) {
+                console.warn('switch_to_web_ui:', e)
+              }
+              window.open('http://127.0.0.1:7400/', '_blank', 'noopener,noreferrer')
+            })()
+          }}
+          title="Hide desktop to tray and open chat in your browser"
+        >
+          Web
+        </SegButton>
 
         {updateAvailable && (
           <button

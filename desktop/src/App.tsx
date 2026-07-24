@@ -194,6 +194,35 @@ export default function App() {
         case 'help':
           openHelp()
           break
+        case 'switch_web_ui':
+          void (async () => {
+            if (!isTauri()) {
+              // Browser already — open API web UI in a new tab
+              window.open('http://127.0.0.1:7400/', '_blank', 'noopener,noreferrer')
+              return
+            }
+            try {
+              const { tauriInvoke } = await import('./api/tauri')
+              await tauriInvoke<string>('switch_to_web_ui')
+            } catch (e: unknown) {
+              const msg = e instanceof Error ? e.message : String(e)
+              console.warn('switch_to_web_ui failed:', msg)
+              // Fallback: hide-to-tray + open URL ourselves
+              try {
+                const { tauriInvoke } = await import('./api/tauri')
+                await tauriInvoke('request_close_main_window')
+              } catch {
+                /* ignore */
+              }
+              try {
+                const { openExternalUrl } = await import('./api/auth')
+                await openExternalUrl('http://127.0.0.1:7400/')
+              } catch {
+                window.open('http://127.0.0.1:7400/', '_blank', 'noopener,noreferrer')
+              }
+            }
+          })()
+          break
         case 'new_session':
           void (async () => {
             const s = await create()

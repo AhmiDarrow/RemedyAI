@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 import time
+from pathlib import Path
 
 import yaml
 from fastapi import (
@@ -125,7 +127,11 @@ def create_app(
         @app.middleware("http")
         async def require_auth(request: Request, call_next):
             path = request.url.path
+            # Public docs / health / bootstrap
             if path in _AUTH_PUBLIC or path.startswith("/docs") or path.startswith("/redoc"):
+                return await call_next(request)
+            # SPA / static Web UI (GET only) — browser loads shell then bootstraps token
+            if request.method in ("GET", "HEAD") and not path.startswith("/api"):
                 return await call_next(request)
             auth = request.headers.get("Authorization", "")
             if auth != f"Bearer {api_key}":
@@ -178,7 +184,95 @@ def create_app(
     from remedy.interfaces.routes import register_all_routes
 
     register_all_routes(app, runtime=runtime, gateway=gateway, memory=memory)
+
+    # Optional browser Web UI: same React app as Desktop, served by the local API.
+    # Prefer REMEDY_WEBUI_DIR, then repo desktop/dist (dev), then sidecar-adjacent ui/.
+    _mount_web_ui(app)
+
     return app
+
+
+def find_webui_dir() -> Path | None:
+    """Locate built desktop SPA assets for browser mode."""
+    env = (os.environ.get("REMEDY_WEBUI_DIR") or "").strip()
+    candidates: list[Path] = []
+    if env:
+        candidates.append(Path(env).expanduser())
+    # Repo layout: src/remedy/interfaces/api.py → parents[3] = repo root
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        candidates.append(parent / "desktop" / "dist")
+        candidates.append(parent / "ui")
+        candidates.append(parent / "webui")
+    # Next to frozen sidecar
+    if getattr(sys, "frozen", False):
+        exe_dir = Path(sys.executable).resolve().parent
+        candidates.extend(
+            [
+                exe_dir / "ui",
+                exe_dir / "webui",
+                exe_dir / "desktop" / "dist",
+            ]
+        )
+    seen: set[str] = set()
+    for c in candidates:
+        try:
+            key = str(c.resolve())
+        except OSError:
+            key = str(c)
+        if key in seen:
+            continue
+        seen.add(key)
+        if c.is_dir() and (c / "index.html").is_file():
+            return c
+    return None
+
+
+def _mount_web_ui(app: FastAPI) -> None:
+    """Serve the chat SPA at / when a built UI directory exists."""
+    from fastapi.responses import FileResponse
+    from fastapi.staticfiles import StaticFiles
+
+    web_dir = find_webui_dir()
+    if web_dir is None:
+        logger.info("Web UI assets not found — browser mode serves /dashboard only")
+        return
+
+    assets = web_dir / "assets"
+    if assets.is_dir():
+        app.mount("/assets", StaticFiles(directory=str(assets)), name="webui-assets")
+
+    index = web_dir / "index.html"
+
+    @app.get("/", include_in_schema=False)
+    async def webui_index():
+        return FileResponse(index)
+
+    # SPA deep-link fallback (exclude /api, /docs, /dashboard, files with extensions)
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def webui_spa(full_path: str):
+        if (
+            full_path.startswith("api")
+            or full_path.startswith("docs")
+            or full_path.startswith("redoc")
+            or full_path.startswith("dashboard")
+            or full_path.startswith("openapi")
+            or full_path.startswith("assets")
+        ):
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=404, detail="Not found")
+        # Prefer real static file (favicon, logo, etc.)
+        candidate = (web_dir / full_path).resolve()
+        try:
+            candidate.relative_to(web_dir.resolve())
+        except ValueError:
+            return FileResponse(index)
+        if candidate.is_file():
+            return FileResponse(candidate)
+        return FileResponse(index)
+
+    logger.info("Web UI mounted from %s (open http://127.0.0.1:7400/)", web_dir)
 
 
 def yaml_schema(app: FastAPI) -> str:
