@@ -171,6 +171,10 @@ def resolve_provider_api_key(
     if not provider:
         return ""
 
+    # Demo / guest gateways need a non-empty OpenAI-style bearer; no real secret.
+    if provider == "demo":
+        return DEMO_DUMMY_API_KEY
+
     # Secure store first (after optional lazy migration of any leftover plaintext)
     if cfg.get("provider_keys") or str(cfg.get("llm_api_key") or "").strip():
         cfg = migrate_provider_keys(cfg)
@@ -315,14 +319,39 @@ def resolve_config(
 
 
 # -- Provider catalog (defaults + model ownership) ---------------------------
+# free_tier: none | free_key | local | instant
+#   free_key = permanent free tier with free signup key (no card typical)
+#   local    = runs on-device (Ollama)
+#   instant  = no signup / no real key (guest demo)
+
+DEMO_DUMMY_API_KEY = "unused"
+DEMO_BASE_URL = "https://api.llm7.io/v1"
 
 PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
+    "demo": {
+        "label": "Demo (free, no signup)",
+        "base_url": DEMO_BASE_URL,
+        "auth": ["none"],
+        "env_keys": [],
+        "show_base_url": False,
+        "free_tier": "instant",
+        "badge": "No signup",
+        "limits_blurb": "Rate-limited guest gateway (third-party). Fine to try Remedy; add a real provider for serious work.",
+        "privacy_note": "Chat is sent to a free third-party API (not Remedy cloud). Prefer Ollama for private local use.",
+        "key_docs_url": "https://llm7.io/",
+        "models": [
+            {"id": "codestral-latest", "name": "Codestral (demo)", "vision": False},
+            {"id": "gpt-oss:20b", "name": "GPT-OSS 20B (demo)", "vision": False},
+        ],
+    },
     "openai": {
         "label": "OpenAI",
         "base_url": "https://api.openai.com/v1",
         "auth": ["api_key"],
         "env_keys": ["OPENAI_API_KEY", "REMEDY_LLM_API_KEY"],
         "show_base_url": False,
+        "free_tier": "none",
+        "key_docs_url": "https://platform.openai.com/api-keys",
         "models": [
             {"id": "gpt-4o-mini", "name": "GPT-4o Mini", "vision": True},
             {"id": "gpt-4o", "name": "GPT-4o", "vision": True},
@@ -336,6 +365,8 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
         "auth": ["api_key"],
         "env_keys": ["ANTHROPIC_API_KEY"],
         "show_base_url": False,
+        "free_tier": "none",
+        "key_docs_url": "https://console.anthropic.com/settings/keys",
         "models": [
             {"id": "claude-3-5-sonnet-latest", "name": "Claude 3.5 Sonnet", "vision": True},
             {"id": "claude-3-5-haiku-latest", "name": "Claude 3.5 Haiku", "vision": True},
@@ -345,11 +376,15 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
         ],
     },
     "google": {
-        "label": "Google AI",
+        "label": "Google AI (Gemini)",
         "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
         "auth": ["api_key"],
         "env_keys": ["GOOGLE_API_KEY", "GEMINI_API_KEY"],
         "show_base_url": False,
+        "free_tier": "free_key",
+        "badge": "Free key",
+        "limits_blurb": "Generous free tier via AI Studio (region limits may apply).",
+        "key_docs_url": "https://aistudio.google.com/app/apikey",
         "models": [
             {"id": "gemini-2.5-flash", "name": "Gemini 2.5 Flash", "vision": True},
             {"id": "gemini-2.0-flash", "name": "Gemini 2.0 Flash", "vision": True},
@@ -362,6 +397,8 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
         "auth": ["api_key"],
         "env_keys": ["DEEPSEEK_API_KEY"],
         "show_base_url": False,
+        "free_tier": "none",
+        "key_docs_url": "https://platform.deepseek.com/api_keys",
         "models": [
             {"id": "deepseek-chat", "name": "DeepSeek Chat", "vision": False},
             {"id": "deepseek-reasoner", "name": "DeepSeek Reasoner", "vision": False},
@@ -373,6 +410,7 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
         "auth": ["oauth", "api_key"],  # Sign in with xAI primary; console API key secondary
         "env_keys": ["XAI_API_KEY", "REMEDY_XAI_API_KEY"],
         "show_base_url": False,
+        "free_tier": "none",
         "key_docs_url": "https://console.x.ai/team/default/api-keys",
         "models": [
             {"id": "grok-4", "name": "Grok 4", "vision": True},
@@ -388,6 +426,10 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
         "auth": ["api_key"],
         "env_keys": ["GROQ_API_KEY"],
         "show_base_url": False,
+        "free_tier": "free_key",
+        "badge": "Free key",
+        "limits_blurb": "Very fast free tier — great for trying agent tools.",
+        "key_docs_url": "https://console.groq.com/keys",
         "models": [
             {"id": "llama-3.3-70b-versatile", "name": "Llama 3.3 70B", "vision": False},
             {"id": "llama-3.1-8b-instant", "name": "Llama 3.1 8B Instant", "vision": False},
@@ -400,6 +442,10 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
         "auth": ["api_key"],
         "env_keys": ["MISTRAL_API_KEY"],
         "show_base_url": False,
+        "free_tier": "free_key",
+        "badge": "Free key",
+        "limits_blurb": "Free Experiment plan (no card typical).",
+        "key_docs_url": "https://console.mistral.ai/api-keys",
         "models": [
             {"id": "mistral-small-latest", "name": "Mistral Small", "vision": False},
             {"id": "mistral-large-latest", "name": "Mistral Large", "vision": False},
@@ -412,11 +458,16 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
         "auth": ["api_key"],
         "env_keys": ["OPENROUTER_API_KEY"],
         "show_base_url": False,
+        "free_tier": "free_key",
+        "badge": "Free key",
+        "limits_blurb": "Many free models (ids ending in :free). One key, many backends.",
+        "key_docs_url": "https://openrouter.ai/keys",
         "models": [
             {"id": "openrouter/auto", "name": "OpenRouter Auto"},
+            {"id": "openai/gpt-oss-20b:free", "name": "GPT-OSS 20B (free)"},
+            {"id": "meta-llama/llama-3.3-70b-instruct:free", "name": "Llama 3.3 70B (free)"},
+            {"id": "google/gemma-3-27b-it:free", "name": "Gemma 3 27B (free)"},
             {"id": "openai/gpt-4o-mini", "name": "GPT-4o Mini (via OpenRouter)"},
-            {"id": "anthropic/claude-3.5-sonnet", "name": "Claude 3.5 Sonnet (via OpenRouter)"},
-            {"id": "google/gemini-2.0-flash-001", "name": "Gemini 2.0 Flash (via OpenRouter)"},
         ],
     },
     "ollama": {
@@ -425,6 +476,10 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
         "auth": ["none"],
         "env_keys": [],
         "show_base_url": False,
+        "free_tier": "local",
+        "badge": "Local",
+        "limits_blurb": "Fully free on your machine. Install Ollama and pull a model.",
+        "key_docs_url": "https://ollama.com/download",
         "models": [
             {"id": "llama3.2", "name": "Llama 3.2"},
             {"id": "qwen2.5", "name": "Qwen 2.5"},
@@ -438,11 +493,80 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
         "env_keys": [],
         "show_base_url": True,
         "advanced": True,  # hide under Advanced in desktop UI
+        "free_tier": "none",
         "models": [
             {"id": "default", "name": "Default (custom endpoint)"},
         ],
     },
 }
+
+# Ordered free options for Setup / Settings UI (provider id → display meta).
+FREE_PROVIDER_OPTIONS: list[dict[str, Any]] = [
+    {
+        "id": "demo",
+        "tier": "instant",
+        "title": "Start instantly (Demo)",
+        "blurb": "No account. Limited rate/quality. Chat leaves your PC to a free third-party gateway.",
+    },
+    {
+        "id": "google",
+        "tier": "free_key",
+        "title": "Google Gemini",
+        "blurb": "Free AI Studio key — strong free multimodal models.",
+    },
+    {
+        "id": "groq",
+        "tier": "free_key",
+        "title": "Groq",
+        "blurb": "Free key — very fast open models.",
+    },
+    {
+        "id": "openrouter",
+        "tier": "free_key",
+        "title": "OpenRouter free models",
+        "blurb": "Free key — pick models with :free suffix.",
+    },
+    {
+        "id": "mistral",
+        "tier": "free_key",
+        "title": "Mistral",
+        "blurb": "Free Experiment plan key.",
+    },
+    {
+        "id": "ollama",
+        "tier": "local",
+        "title": "Ollama (on this PC)",
+        "blurb": "Install locally for private, unlimited free use.",
+    },
+]
+
+
+def free_options_public() -> list[dict[str, Any]]:
+    """Public free-options list for desktop Setup/Settings."""
+    out: list[dict[str, Any]] = []
+    for item in FREE_PROVIDER_OPTIONS:
+        pid = str(item["id"])
+        meta = PROVIDER_CATALOG.get(pid) or {}
+        models = list(meta.get("models") or [])
+        out.append(
+            {
+                "id": pid,
+                "tier": item.get("tier"),
+                "title": item.get("title") or meta.get("label") or pid,
+                "blurb": item.get("blurb") or meta.get("limits_blurb") or "",
+                "badge": meta.get("badge"),
+                "name": meta.get("label") or pid,
+                "base_url": meta.get("base_url"),
+                "auth": list(meta.get("auth") or ["api_key"]),
+                "key_docs_url": meta.get("key_docs_url"),
+                "limits_blurb": meta.get("limits_blurb"),
+                "privacy_note": meta.get("privacy_note"),
+                "default_model": str(models[0]["id"]) if models else "default",
+                "models": models,
+                "free_tier": meta.get("free_tier") or item.get("tier"),
+            }
+        )
+    return out
 
 # Providers that keep a closed model catalog (foreign model ids are snapped).
 _CLOSED_PROVIDERS = frozenset(
@@ -558,7 +682,7 @@ def normalize_llm_settings(
             url = default_url
 
     # Flexible providers can host any model id (Ollama pulls deepseek-*, etc.).
-    _FLEXIBLE = frozenset({"openrouter", "custom", "ollama"})
+    _FLEXIBLE = frozenset({"openrouter", "custom", "ollama", "demo"})
 
     model_owner = infer_provider_from_model(mid)
     if model_owner and model_owner != prov and prov not in _FLEXIBLE:
@@ -949,7 +1073,16 @@ def provider_credentials_ready(config: dict[str, Any] | None = None) -> bool:
     ).strip()
     if base and _is_local_url(base):
         return True
-    if provider in ("ollama",):
+    if provider == "ollama":
+        return True
+    if provider == "demo":
+        # Air-gapped / enterprise builds can disable guest demo.
+        if os.environ.get("REMEDY_DEMO_DISABLED", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+        ):
+            return False
         return True
     plain = str(raw.get("llm_api_key") or "").strip()
     if not plain and config is None:
@@ -968,7 +1101,7 @@ def public_provider_catalog() -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     for pid, meta in PROVIDER_CATALOG.items():
         auth_modes = list(meta.get("auth") or ["api_key"])
-        if pid == "ollama":
+        if pid in ("ollama", "demo"):
             auth_modes = ["none"]
         models = list(meta.get("models") or [])
         default_model = str(models[0]["id"]) if models else "default"
@@ -985,6 +1118,10 @@ def public_provider_catalog() -> list[dict[str, Any]]:
                 "show_base_url": bool(meta.get("show_base_url", pid in ("custom", "ollama"))),
                 "advanced": bool(meta.get("advanced", False)),
                 "key_docs_url": meta.get("key_docs_url"),
+                "free_tier": meta.get("free_tier") or "none",
+                "badge": meta.get("badge"),
+                "limits_blurb": meta.get("limits_blurb"),
+                "privacy_note": meta.get("privacy_note"),
             }
         )
     return items
@@ -1095,5 +1232,23 @@ def apply_env_provider_bootstrap(config: dict[str, Any] | None = None) -> dict[s
                 cfg["llm_model"] = model
                 cfg["llm_base_url"] = url
                 return cfg
+
+    # Zero-setup demo so first run can chat without any keys (opt-out via env).
+    if (
+        allow_switch
+        and os.environ.get("REMEDY_DEMO_DISABLED", "").strip().lower()
+        not in ("1", "true", "yes")
+        and os.environ.get("REMEDY_PREFER_DEMO", "1").strip().lower()
+        not in ("0", "false", "no")
+    ):
+        prov, model, url = normalize_llm_settings(
+            "demo",
+            cfg.get("llm_model") if str(cfg.get("llm_provider") or "") == "demo" else None,
+            None,
+        )
+        cfg["llm_provider"] = prov
+        cfg["llm_model"] = model
+        cfg["llm_base_url"] = url
+        return cfg
 
     return cfg

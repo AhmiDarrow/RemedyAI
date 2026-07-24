@@ -252,7 +252,7 @@ def create_app(
 
 
 def find_webui_dir() -> Path | None:
-    """Locate built desktop SPA assets for browser mode."""
+    """Locate built desktop SPA assets for browser WebUI mode."""
     env = (os.environ.get("REMEDY_WEBUI_DIR") or "").strip()
     candidates: list[Path] = []
     if env:
@@ -263,7 +263,7 @@ def find_webui_dir() -> Path | None:
         candidates.append(parent / "desktop" / "dist")
         candidates.append(parent / "ui")
         candidates.append(parent / "webui")
-    # Next to frozen sidecar
+    # Next to frozen sidecar (packaged next to remedy-desktop.exe)
     if getattr(sys, "frozen", False):
         exe_dir = Path(sys.executable).resolve().parent
         candidates.extend(
@@ -271,8 +271,17 @@ def find_webui_dir() -> Path | None:
                 exe_dir / "ui",
                 exe_dir / "webui",
                 exe_dir / "desktop" / "dist",
+                # Tauri resource dir (sibling of externalBin on some layouts)
+                exe_dir / "resources" / "webui",
+                exe_dir.parent / "webui",
+                exe_dir.parent / "resources" / "webui",
             ]
         )
+    # Meipass / _MEIPASS bundle (PyInstaller onefile extract)
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        mp = Path(meipass)
+        candidates.extend([mp / "webui", mp / "ui", mp / "desktop" / "dist"])
     seen: set[str] = set()
     for c in candidates:
         try:
@@ -287,14 +296,50 @@ def find_webui_dir() -> Path | None:
     return None
 
 
+_WEBUI_MISSING_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Remedy WebUI</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #0a0a1a; color: #e0e0e0;
+           display: flex; min-height: 100vh; align-items: center; justify-content: center; margin: 0; }
+    .card { max-width: 420px; padding: 1.75rem; border: 1px solid #1e1e3e; border-radius: 12px;
+            background: #12122a; }
+    h1 { color: #7c3aed; font-size: 1.35rem; margin: 0 0 0.75rem; }
+    p { color: #aaa; font-size: 0.95rem; line-height: 1.45; margin: 0 0 0.75rem; }
+    a { color: #a78bfa; }
+    code { font-size: 0.85rem; color: #c4b5fd; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>WebUI assets not bundled</h1>
+    <p>The local API is running, but the chat WebUI files were not found next to the server.</p>
+    <p>Use the desktop app, or open the <a href="/dashboard">API dashboard</a>.</p>
+    <p>Dev: build with <code>cd desktop &amp;&amp; npm run build</code>, then restart serve.
+       Or set <code>REMEDY_WEBUI_DIR</code> to a folder that contains <code>index.html</code>.</p>
+  </div>
+</body>
+</html>
+"""
+
+
 def _mount_web_ui(app: FastAPI) -> None:
     """Serve the chat SPA at / when a built UI directory exists."""
-    from fastapi.responses import FileResponse
+    from fastapi.responses import FileResponse, HTMLResponse
     from fastapi.staticfiles import StaticFiles
 
     web_dir = find_webui_dir()
     if web_dir is None:
-        logger.info("Web UI assets not found — browser mode serves /dashboard only")
+        logger.info("WebUI assets not found — browser mode serves a helper page + /dashboard")
+
+        @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
+        async def webui_missing():
+            return HTMLResponse(_WEBUI_MISSING_HTML)
+
+        app.state.webui_dir = None  # type: ignore[attr-defined]
         return
 
     assets = web_dir / "assets"
@@ -338,7 +383,7 @@ def _mount_web_ui(app: FastAPI) -> None:
 
     # Stash for CLI banner
     app.state.webui_dir = str(web_dir)  # type: ignore[attr-defined]
-    logger.info("Web UI mounted from %s (open http://127.0.0.1:7400/)", web_dir)
+    logger.info("WebUI mounted from %s (open http://127.0.0.1:7400/)", web_dir)
 
 
 def yaml_schema(app: FastAPI) -> str:

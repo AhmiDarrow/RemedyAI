@@ -208,6 +208,52 @@ fn find_remedy() -> (String, String) {
     ("remedy-desktop.exe".to_string(), msg)
 }
 
+/// Locate built SPA assets so the Python sidecar can mount browser WebUI at /.
+fn find_webui_dir() -> Option<PathBuf> {
+    if let Ok(env_dir) = env::var("REMEDY_WEBUI_DIR") {
+        let p = PathBuf::from(env_dir.trim());
+        if p.join("index.html").is_file() {
+            return Some(p);
+        }
+    }
+
+    let mut candidates: Vec<PathBuf> = Vec::new();
+
+    // Next to main exe / sidecar (packaged: resources/webui or sibling webui)
+    if let Some(dir) = current_exe_dir() {
+        candidates.extend([
+            dir.join("webui"),
+            dir.join("ui"),
+            dir.join("resources").join("webui"),
+            dir.join("desktop").join("dist"),
+        ]);
+    }
+
+    // Dev: cwd is often desktop/ or repo root when running tauri dev
+    if let Ok(cwd) = env::current_dir() {
+        candidates.extend([
+            cwd.join("dist"),
+            cwd.join("desktop").join("dist"),
+            cwd.join("..").join("dist"),
+            cwd.join("webui"),
+        ]);
+    }
+
+    // Sidecar binary directory (externalBin lives next to main exe)
+    if let Some(dir) = current_exe_dir() {
+        candidates.push(dir.join("remedy-desktop").join("webui"));
+    }
+
+    for c in candidates {
+        if c.join("index.html").is_file() {
+            log::info!("WebUI assets found at {}", c.display());
+            return Some(c);
+        }
+    }
+    log::warn!("WebUI assets not found — browser WebUI will show helper page");
+    None
+}
+
 fn spawn_remedy(cmd: &str) -> Option<Child> {
     let home_dir = remedy_home();
     let home_str = home_dir.to_string_lossy();
@@ -224,26 +270,32 @@ fn spawn_remedy(cmd: &str) -> Option<Child> {
         "--skip-setup",
     ];
 
+    let webui = find_webui_dir();
+
     #[cfg(target_os = "windows")]
     {
-        Command::new(cmd)
-            .args(args)
+        let mut c = Command::new(cmd);
+        c.args(args)
             .env("REMEDY_DESKTOP_SIDECAR", "1")
             .creation_flags(CREATE_NO_WINDOW)
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .ok()
+            .stderr(Stdio::piped());
+        if let Some(ref dir) = webui {
+            c.env("REMEDY_WEBUI_DIR", dir);
+        }
+        c.spawn().ok()
     }
     #[cfg(not(target_os = "windows"))]
     {
-        Command::new(cmd)
-            .args(args)
+        let mut c = Command::new(cmd);
+        c.args(args)
             .env("REMEDY_DESKTOP_SIDECAR", "1")
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .ok()
+            .stderr(Stdio::piped());
+        if let Some(ref dir) = webui {
+            c.env("REMEDY_WEBUI_DIR", dir);
+        }
+        c.spawn().ok()
     }
 }
 
@@ -725,7 +777,7 @@ fn minimize_main_window(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Hide desktop window to tray and open the browser Web UI (same chat app via local API).
+/// Hide desktop window to tray and open the browser WebUI (same chat app via local API).
 #[tauri::command]
 fn switch_to_web_ui(app: AppHandle) -> Result<String, String> {
     // Prefer full SPA when sidecar serves it; fall back to API dashboard.
@@ -733,6 +785,15 @@ fn switch_to_web_ui(app: AppHandle) -> Result<String, String> {
         .ok()
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| "http://127.0.0.1:7400/".to_string());
+
+    // Brief wait so a just-started sidecar can answer before the browser loads.
+    let deadline = Instant::now() + Duration::from_secs(8);
+    while Instant::now() < deadline {
+        if TcpStream::connect_timeout(&status_addr(), Duration::from_millis(300)).is_ok() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(200));
+    }
 
     // Hide to tray (keep sidecar alive) — same as close-to-tray.
     if let Some(w) = app.get_webview_window("main") {
@@ -1826,6 +1887,22 @@ pub fn run() {
 
             log::info!("Starting remedy: {}", remedy_cmd);
             let _ = app_handle.emit("server-starting", ());
+
+            // Point the sidecar at packaged SPA assets (tauri resources → webui/).
+            if let Ok(resource) = app.path().resource_dir() {
+                let candidates = [
+                    resource.join("webui"),
+                    resource.join("dist"),
+                    resource.clone(),
+                ];
+                for c in candidates {
+                    if c.join("index.html").is_file() {
+                        env::set_var("REMEDY_WEBUI_DIR", &c);
+                        log::info!("REMEDY_WEBUI_DIR={}", c.display());
+                        break;
+                    }
+                }
+            }
 
             {
                 let state = app.state::<ServerState>();

@@ -138,6 +138,14 @@ const META: HelpArticleMeta[] = [
     tags: ['vision', 'image', 'ocr', 'llama', 'qwen', 'screenshot'],
     summary: 'Local image→text for text-only models (Qwen2.5-VL 3B).',
   },
+  {
+    id: '15-free-providers',
+    title: 'Free providers & demo',
+    category: 'Configuration',
+    order: 15,
+    tags: ['free', 'demo', 'gemini', 'groq', 'ollama', 'openrouter', 'no signup'],
+    summary: 'Demo mode, free API keys, and local Ollama — use Remedy without paying.',
+  },
 ]
 
 const rawModules = import.meta.glob('./articles/*.md', {

@@ -33,6 +33,7 @@ import { HOTKEYS } from '../hotkeys'
 import type { ModelInfo } from '../App'
 import type { Density } from '../utils/chatPrefs'
 import { normalizeToolProcess, TOOL_PROCESS_MODES, type ToolProcessMode } from '../utils/toolLabels'
+import { SettingsSection } from './SettingsSection'
 
 /** Matches SetupWizard personas (style overlay). */
 const PERSONAS = [
@@ -522,9 +523,15 @@ export function SettingsPanel({
         ) : (
           <>
             {/* Provider */}
-            <section>
-              <div className="font-semibold mb-2" style={{ color: 'var(--text-primary)', fontSize: '0.75rem' }}>
-                Provider
+            <SettingsSection
+              id="provider"
+              title="Provider"
+              summary="LLM, model, API key"
+              defaultOpen
+            >
+              <div className="text-[10px] mb-2 leading-snug" style={{ color: 'var(--text-muted)' }}>
+                Free options: <strong style={{ color: 'var(--text-secondary)' }}>Demo</strong> (no signup),
+                Gemini / Groq / OpenRouter / Mistral (free key), or Ollama (local).
               </div>
               <label className="block mb-1" style={{ color: 'var(--text-muted)' }}>Type</label>
               <select
@@ -538,7 +545,9 @@ export function SettingsPanel({
                 }}
               >
                 {primaryProviders.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
+                  <option key={p.id} value={p.id}>
+                    {p.badge ? `${p.name} · ${p.badge}` : p.name}
+                  </option>
                 ))}
                 {showAdvanced && advancedProviders.map((p) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
@@ -552,6 +561,25 @@ export function SettingsPanel({
                   onClick={() => setShowAdvanced(true)}
                 >
                   Show advanced (custom endpoint)…
+                </button>
+              )}
+              {provider === 'demo' && (
+                <div
+                  className="text-[10px] rounded px-2 py-1.5 mb-2 leading-snug"
+                  style={{ color: 'var(--text-muted)', border: '1px solid var(--border)' }}
+                >
+                  Demo mode is rate-limited and sends chat to a free third-party gateway.
+                  Add Gemini/Groq or run Ollama for better free use.
+                </div>
+              )}
+              {activeMeta?.key_docs_url && provider !== 'demo' && (
+                <button
+                  type="button"
+                  className="mb-2 text-[10px] underline block"
+                  style={{ color: 'var(--accent)' }}
+                  onClick={() => void openExternalUrl(String(activeMeta.key_docs_url))}
+                >
+                  {provider === 'ollama' ? 'Download Ollama…' : 'Get free API key / docs…'}
                 </button>
               )}
 
@@ -670,13 +698,14 @@ export function SettingsPanel({
                 }
                 password
               />
-            </section>
+            </SettingsSection>
 
             {/* You + Agent */}
-            <section>
-              <div className="font-semibold mb-2" style={{ color: 'var(--text-primary)', fontSize: '0.75rem' }}>
-                You &amp; Agent
-              </div>
+            <SettingsSection
+              id="you-agent"
+              title="You & Agent"
+              summary="Name, persona"
+            >
               <Field
                 label="Your name (what Remedy calls you)"
                 value={userName}
@@ -728,13 +757,14 @@ export function SettingsPanel({
               <div className="text-[10px] leading-snug" style={{ color: 'var(--text-muted)' }}>
                 Persona is a communication style. Identity stays your partner — change anytime.
               </div>
-            </section>
+            </SettingsSection>
 
             {/* Project */}
-            <section>
-              <div className="font-semibold mb-2" style={{ color: 'var(--text-primary)', fontSize: '0.75rem' }}>
-                Project workspace
-              </div>
+            <SettingsSection
+              id="workspace"
+              title="Project workspace"
+              summary="Default folder"
+            >
               <label className="block mb-0.5" style={{ color: 'var(--text-muted)' }}>
                 Default project folder
               </label>
@@ -779,13 +809,14 @@ export function SettingsPanel({
               <div className="text-[10px] leading-snug" style={{ color: 'var(--text-muted)' }}>
                 Type a path or browse. Save reloads the workspace (file tools, shell cwd, @file search).
               </div>
-            </section>
+            </SettingsSection>
 
             {/* Access */}
-            <section>
-              <div className="font-semibold mb-2" style={{ color: 'var(--text-primary)', fontSize: '0.75rem' }}>
-                Access &amp; permissions
-              </div>
+            <SettingsSection
+              id="access"
+              title="Access & permissions"
+              summary="Filesystem scope"
+            >
               <label className="block mb-0.5" style={{ color: 'var(--text-muted)' }}>
                 Filesystem scope
               </label>
@@ -807,13 +838,14 @@ export function SettingsPanel({
                 Full scope still runs as your Windows user — no silent admin elevation.
                 Prefer project-only unless Remedy needs files outside the workspace.
               </div>
-            </section>
+            </SettingsSection>
 
             {/* Always ready */}
-            <section>
-              <div className="font-semibold mb-2" style={{ color: 'var(--text-primary)', fontSize: '0.75rem' }}>
-                Always ready
-              </div>
+            <SettingsSection
+              id="always-ready"
+              title="Always ready"
+              summary="Startup & tray"
+            >
               <label className="flex items-center gap-2 mb-1.5 cursor-pointer">
                 <input
                   type="checkbox"
@@ -854,16 +886,17 @@ export function SettingsPanel({
               </label>
               <div className="text-[10px] leading-snug" style={{ color: 'var(--text-muted)' }}>
                 Opt-in only. Uses the Windows <strong>Startup folder</strong> (Settings → Apps → Startup) —
-                not the registry Run key. Quit fully stops the local API (browser Web UI dies);
-                use <strong>Switch to Web UI</strong> or hide-to-tray to keep the server running.
+                not the registry Run key. Quit fully stops the local API (browser WebUI dies);
+                use <strong>Switch to WebUI</strong> or hide-to-tray to keep the server running.
               </div>
-            </section>
+            </SettingsSection>
 
             {/* Tool process visibility */}
-            <section>
-              <div className="font-semibold mb-2" style={{ color: 'var(--text-primary)', fontSize: '0.75rem' }}>
-                Tool process
-              </div>
+            <SettingsSection
+              id="tool-process"
+              title="Tool process"
+              summary="Visibility of tool steps"
+            >
               <div className="text-[10px] leading-snug mb-2" style={{ color: 'var(--text-muted)' }}>
                 How much of the provider tool trail to show in chat. Default is Off (minimal).
               </div>
@@ -891,13 +924,14 @@ export function SettingsPanel({
               <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
                 {TOOL_PROCESS_MODES.find((m) => m.id === toolProcess)?.hint}
               </div>
-            </section>
+            </SettingsSection>
 
             {/* Visual decoder (local vision for text-only models) */}
-            <section>
-              <div className="font-semibold mb-2" style={{ color: 'var(--text-primary)', fontSize: '0.75rem' }}>
-                Visual decoder
-              </div>
+            <SettingsSection
+              id="vision"
+              title="Visual decoder"
+              summary="Local image understanding"
+            >
               <div className="text-[10px] leading-snug mb-2" style={{ color: 'var(--text-muted)' }}>
                 When your chat model cannot see images, Remedy can run a local{' '}
                 <strong style={{ color: 'var(--text-secondary)' }}>Qwen2.5-VL 3B</strong> decoder
@@ -1345,13 +1379,14 @@ export function SettingsPanel({
                   Help: visual decoder
                 </button>
               ) : null}
-            </section>
+            </SettingsSection>
 
             {/* Memory Harness */}
-            <section>
-              <div className="font-semibold mb-2" style={{ color: 'var(--text-primary)', fontSize: '0.75rem' }}>
-                Memory Harness
-              </div>
+            <SettingsSection
+              id="memory-harness"
+              title="Memory harness"
+              summary="Chat compression"
+            >
               <label className="block mb-0.5" style={{ color: 'var(--text-muted)' }}>
                 Mode
               </label>
@@ -1374,13 +1409,14 @@ export function SettingsPanel({
                 <code style={{ color: 'var(--accent)' }}>/compact</code> or{' '}
                 <code style={{ color: 'var(--accent)' }}>/harness</code>.
               </div>
-            </section>
+            </SettingsSection>
 
             {/* Theme */}
-            <section>
-              <div className="font-semibold mb-2" style={{ color: 'var(--text-primary)', fontSize: '0.75rem' }}>
-                Theme
-              </div>
+            <SettingsSection
+              id="theme"
+              title="Theme"
+              summary="Appearance"
+            >
               <div className="flex flex-col gap-1">
                 {THEME_LIST.map((t) => (
                   <button
@@ -1464,13 +1500,14 @@ export function SettingsPanel({
                   )}
                 </div>
               </div>
-            </section>
+            </SettingsSection>
 
             {/* Help / Keyboard */}
-            <section>
-              <div className="font-semibold mb-2" style={{ color: 'var(--text-primary)', fontSize: '0.75rem' }}>
-                Help &amp; shortcuts
-              </div>
+            <SettingsSection
+              id="help"
+              title="Help & shortcuts"
+              summary="Manual & keys"
+            >
               <div className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>
                 Enter sends · Shift+Enter new line · /help for the command card · F1 full manual
               </div>
@@ -1538,13 +1575,14 @@ export function SettingsPanel({
                 Connect a provider above to chat. Plan mode explores without editing files;
                 Build mode can change your project. Data stays in ~/.remedy on this machine.
               </div>
-            </section>
+            </SettingsSection>
 
             {/* About */}
-            <section>
-              <div className="font-semibold mb-2" style={{ color: 'var(--text-primary)', fontSize: '0.75rem' }}>
-                About
-              </div>
+            <SettingsSection
+              id="about"
+              title="About"
+              summary="Version & WebUI"
+            >
               <div className="space-y-1" style={{ color: 'var(--text-secondary)' }}>
                 <div className="flex justify-between">
                   <span style={{ color: 'var(--text-muted)' }}>Version</span>
@@ -1584,14 +1622,14 @@ export function SettingsPanel({
                     color: 'var(--text-primary)',
                     border: '1px solid var(--border)',
                   }}
-                  title="Minimize desktop to tray and open the chat UI in your default browser"
+                  title="Minimize desktop to tray and open the WebUI chat in your default browser"
                 >
-                  Switch to Web UI…
+                  Switch to WebUI…
                 </button>
                 <div className="text-[10px] px-0.5" style={{ color: 'var(--text-muted)' }}>
-                  Hides Remedy to the tray and opens{' '}
+                  Hides Remedy to the tray and opens the local WebUI at{' '}
                   <code style={{ color: 'var(--accent)' }}>http://127.0.0.1:7400/</code>
-                  {' '}(same local API + chat). Tray → Show Remedy returns to desktop.
+                  . Tray → Show Remedy returns to desktop.
                 </div>
                 <button
                   type="button"
@@ -1733,7 +1771,7 @@ export function SettingsPanel({
                   )}
                 </div>
               </div>
-            </section>
+            </SettingsSection>
           </>
         )}
       </div>

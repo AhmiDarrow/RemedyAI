@@ -9,8 +9,8 @@ export interface QuitServerWarningProps {
 }
 
 /**
- * Warn that full quit stops the local API (and browser Web UI).
- * Prefer Switch to Web UI / tray hide to keep the server running.
+ * Warn that full quit stops the local API (and browser WebUI).
+ * Prefer Switch to WebUI / tray hide to keep the server running.
  */
 export function QuitServerWarning({ open, onCancel, onConfirmQuit }: QuitServerWarningProps) {
   const [dontWarn, setDontWarn] = useState(false)
@@ -50,10 +50,10 @@ export function QuitServerWarning({ open, onCancel, onConfirmQuit }: QuitServerW
           <p className="mb-2">
             Quitting fully <strong>stops the local API</strong> on{' '}
             <code style={{ color: 'var(--accent)' }}>127.0.0.1:7400</code>.
-            Any browser Web UI will disconnect and stop working.
+            Any browser WebUI will disconnect and stop working.
           </p>
           <p className="mb-2">
-            To keep chatting in the browser, use <strong>Switch to Web UI</strong> instead —
+            To keep chatting in the browser, use <strong>Switch to WebUI</strong> instead —
             that hides the desktop window to the tray and leaves the server running.
           </p>
           <p style={{ color: 'var(--text-muted)' }}>
@@ -104,7 +104,7 @@ export function QuitServerWarning({ open, onCancel, onConfirmQuit }: QuitServerW
               }
             }}
           >
-            Switch to Web UI
+            Switch to WebUI
           </button>
           <button
             type="button"

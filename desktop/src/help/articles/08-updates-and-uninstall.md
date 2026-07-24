@@ -13,15 +13,15 @@ The app queries **GitHub Releases** for this project only. Installs use the sign
 `latest.json` asset URL (must match) and a non-empty release signature field.
 Published desktop builds are **minisign**-signed in CI.
 
-## Switch to Web UI (not an uninstall)
+## Switch to WebUI (not an uninstall)
 
-Logo menu / status bar **Web** / Settings → **Switch to Web UI**:
+Logo menu / status bar **WebUI** / Settings → **Switch to WebUI**:
 
 1. Desktop window hides to the **tray** (server keeps running).  
 2. Browser opens `http://127.0.0.1:7400/` (same chat + local API).  
 3. Tray → **Show Remedy** returns to the desktop shell.  
 
-Full **Quit** stops the server — the Web UI will stop working.
+Full **Quit** stops the server — the WebUI will stop working.
 
 ## Install an update
 

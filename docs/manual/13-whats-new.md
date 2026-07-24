@@ -2,7 +2,15 @@
 
 High-level product notes for owners. Full detail lives in repo `CHANGELOG.md`.
 
-Ship **one** installer/tag for the current series (**v0.10.40**).
+Ship **one** installer/tag for the current series (**v0.10.41**).
+
+## 0.10.41 — Setup UX, free try, WebUI, status dock
+
+- **Setup** decluttered (larger UI, free-provider chips).
+- **Settings** sections expand/collapse.
+- **WebUI** button (was “Web”) opens the browser chat; SPA packaging + bootstrap fixes for *Failed to fetch*.
+- **Status dock** (bottom): server online + **visual model download progress** after you opt in.
+- **Demo / free providers** — try Remedy with no API key (rate-limited gateway) or free Gemini/Groq/etc keys; see Free providers chapter.
 
 ## 0.10.40 — Visual decoder
 

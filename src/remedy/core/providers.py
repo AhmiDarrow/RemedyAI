@@ -165,8 +165,10 @@ class OpenAIProvider(ProviderAdapter):
     default_base_url = "https://api.openai.com/v1"
 
     def auth_headers(self, api_key: str) -> dict[str, str]:
+        # OpenAI-compat clients (and some guest gateways) require a non-empty bearer.
+        key = (api_key or "").strip() or "unused"
         return {
-            "Authorization": f"Bearer {api_key}",
+            "Authorization": f"Bearer {key}",
             "Content-Type": "application/json",
         }
 
@@ -671,6 +673,7 @@ class MistralProvider(OpenAIProvider):
 
 
 _PROVIDERS: dict[str, type[ProviderAdapter]] = {
+    "demo": OpenAIProvider,           # LLM7 guest OpenAI-compatible
     "openai": OpenAIProvider,
     "anthropic": AnthropicProvider,
     "google": GoogleProvider,

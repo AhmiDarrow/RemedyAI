@@ -48,16 +48,35 @@ export async function ensureApiToken(): Promise<string | null> {
     } catch {
       /* command may be missing on older builds — fall through to HTTP */
     }
-    // Browser Web UI / dev: loopback-only bootstrap (same Windows user boundary).
+    // Browser WebUI / dev: loopback-only bootstrap (same Windows user boundary).
+    // Prefer same-origin when the SPA is served by the local API (avoids
+    // localhost vs 127.0.0.1 cross-origin "Failed to fetch" surprises).
     try {
-      const r = await fetch(`${SERVER_URL}/api/auth/local-bootstrap`, {
-        headers: { Accept: 'application/json' },
-      })
-      if (r.ok) {
-        const data = (await r.json()) as { token?: string }
-        if (data.token) {
-          _apiToken = data.token
-          return _apiToken
+      const bootstrapUrls: string[] = []
+      if (typeof window !== 'undefined') {
+        const origin = window.location.origin || ''
+        if (
+          origin.includes('127.0.0.1:7400')
+          || origin.includes('localhost:7400')
+        ) {
+          bootstrapUrls.push(`${origin}/api/auth/local-bootstrap`)
+        }
+      }
+      bootstrapUrls.push(`${SERVER_URL}/api/auth/local-bootstrap`)
+      for (const url of bootstrapUrls) {
+        try {
+          const r = await fetch(url, {
+            headers: { Accept: 'application/json' },
+          })
+          if (r.ok) {
+            const data = (await r.json()) as { token?: string }
+            if (data.token) {
+              _apiToken = data.token
+              return _apiToken
+            }
+          }
+        } catch {
+          /* try next URL */
         }
       }
     } catch {

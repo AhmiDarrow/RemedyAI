@@ -9,7 +9,7 @@ import {
 
 describe('help catalog', () => {
   it('bundles all expected chapters with non-empty bodies', () => {
-    expect(HELP_ARTICLES.length).toBeGreaterThanOrEqual(15)
+    expect(HELP_ARTICLES.length).toBeGreaterThanOrEqual(16)
     for (const a of HELP_ARTICLES) {
       expect(a.body.length).toBeGreaterThan(80)
       expect(a.body).toMatch(/^#\s/)

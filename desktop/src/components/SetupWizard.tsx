@@ -7,9 +7,11 @@ import {
 } from '../api/auth'
 import {
   listProviders,
+  listFreeProviders,
   detectOllama,
   FALLBACK_PROVIDERS,
   type ProviderInfo,
+  type FreeProviderOption,
 } from '../api/providers'
 import {
   getVisionStatus,
@@ -36,7 +38,8 @@ const STEPS: Step[] = ['welcome', 'provider', 'workspace', 'persona', 'vision', 
 export function SetupWizard({ open, onComplete }: SetupWizardProps) {
   const [step, setStep] = useState<Step>('welcome')
   const [catalog, setCatalog] = useState<ProviderInfo[]>(FALLBACK_PROVIDERS)
-  const [provider, setProvider] = useState('openai')
+  const [freeOptions, setFreeOptions] = useState<FreeProviderOption[]>([])
+  const [provider, setProvider] = useState('demo')
   const [apiKey, setApiKey] = useState('')
   const [model, setModel] = useState('gpt-4o-mini')
   const [baseUrl, setBaseUrl] = useState('https://api.openai.com/v1')
@@ -105,9 +108,13 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
     if (!open) return
     let cancelled = false
     ;(async () => {
-      const providers = await listProviders()
+      const [providers, free] = await Promise.all([
+        listProviders(),
+        listFreeProviders(),
+      ])
       if (cancelled) return
       setCatalog(providers)
+      setFreeOptions(free)
       try {
         const s = await getSettings()
         if (cancelled) return
@@ -117,9 +124,17 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
           if (meta?.advanced) setShowAdvanced(true)
           if (s.llm_model) setModel(s.llm_model)
           if (s.llm_base_url) setBaseUrl(s.llm_base_url)
+        } else {
+          // Default zero-setup demo when nothing configured
+          const demo = providers.find((p) => p.id === 'demo')
+          if (demo) {
+            setProvider('demo')
+            setModel(demo.default_model)
+            setBaseUrl(demo.base_url)
+          }
         }
       } catch {
-        // offline
+        // offline — keep demo default
       }
       try {
         const ollama = await detectOllama()
@@ -226,17 +241,18 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
 
   const handleNext = useCallback(() => {
     if (step === 'provider') {
-      // Local providers (Ollama, custom / localhost) need no key.
-      const isLocal =
+      // Local / demo providers need no key.
+      const noKeyOk =
         provider === 'ollama' ||
+        provider === 'demo' ||
         provider === 'custom' ||
         /^(https?:\/\/)?(127\.0\.0\.1|localhost|\[::1\])/i.test(baseUrl)
       const xaiOk = provider === 'xai' && (xaiConnected || !!apiKey.trim())
-      if (!isLocal && !apiKey.trim() && !xaiOk) {
+      if (!noKeyOk && !apiKey.trim() && !xaiOk) {
         setError(
           provider === 'xai'
-            ? 'Sign in with xAI or enter an API key. Use Skip setup to configure later.'
-            : 'Enter an API key, or choose Ollama for local models. Use Skip setup to configure later.',
+            ? 'Sign in with xAI or enter an API key. Or pick Demo / Ollama for free use.'
+            : 'Enter an API key, or choose Demo (no signup) / Ollama for free use.',
         )
         return
       }
@@ -301,7 +317,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
           setVisionInstallMsg('Starting visual decoder download…')
           await installVision({ prefer_cuda: false })
           // Non-blocking: install continues in background after wizard closes
-          setVisionInstallMsg('Download started — check Settings → Visual decoder for progress.')
+          setVisionInstallMsg('Download started — watch progress in the bottom status dock.')
         } catch (ve) {
           console.warn('Vision install start failed', ve)
         }
@@ -344,7 +360,14 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
       } catch {
         /* best effort */
       }
-      await updateSettings({ setup_completed: true })
+      // Zero-setup: skip lands on Demo so chat works without a key.
+      const demo = catalog.find((p) => p.id === 'demo') || FALLBACK_PROVIDERS.find((p) => p.id === 'demo')
+      await updateSettings({
+        setup_completed: true,
+        llm_provider: 'demo',
+        llm_model: demo?.default_model || 'codestral-latest',
+        llm_base_url: demo?.base_url || 'https://api.llm7.io/v1',
+      })
       onComplete()
     } catch (e: unknown) {
       // Still enter the app if the server briefly fails — avoid lockout.
@@ -364,7 +387,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
     } finally {
       setSaving(false)
     }
-  }, [onComplete])
+  }, [onComplete, catalog])
 
   if (!open) return null
 
@@ -384,30 +407,39 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
 
   const progressPct = ((stepIndex) / (STEPS.length - 1)) * 100
 
+  const stepLabels: Record<Step, string> = {
+    welcome: 'Welcome',
+    provider: 'Provider',
+    workspace: 'Folder',
+    persona: 'Style',
+    vision: 'Vision',
+    finish: 'Ready',
+  }
+
   return (
     <div
-      className="flex items-center justify-center h-full"
+      className="flex items-center justify-center h-full p-4"
       style={{ background: 'var(--bg-primary)' }}
     >
       <div
-        className="rounded-xl shadow-2xl overflow-hidden"
-        style={{ width: 480, ...cardStyles }}
+        className="rounded-2xl shadow-2xl overflow-hidden w-full"
+        style={{ maxWidth: 520, ...cardStyles }}
       >
-        <div className="px-6 pt-6 pb-3 text-center">
+        <div className="px-7 pt-7 pb-3 text-center">
           <div
-            className="text-2xl font-bold mb-1"
+            className="text-3xl font-bold tracking-tight mb-1"
             style={{ color: 'var(--accent)' }}
           >
             Remedy AI
           </div>
-          <div className="text-xs" style={mutedStyles}>
-            Self-improving software coding agent
+          <div className="text-sm" style={mutedStyles}>
+            Local coding agent
           </div>
         </div>
 
-        <div className="px-6 pb-2">
+        <div className="px-7 pb-2">
           <div
-            className="h-1 rounded-full overflow-hidden"
+            className="h-1.5 rounded-full overflow-hidden"
             style={{ background: 'var(--bg-tertiary)' }}
           >
             <div
@@ -419,45 +451,34 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
             />
           </div>
           <div
-            className="flex justify-between mt-1.5 text-xs"
+            className="flex justify-between mt-2 text-[11px] font-medium tracking-wide"
             style={mutedStyles}
           >
             {STEPS.map((s, i) => (
               <span
                 key={s}
-                className={i <= stepIndex ? 'font-medium' : ''}
                 style={i <= stepIndex ? { color: 'var(--accent)' } : undefined}
               >
-                {s === 'welcome' && 'Welcome'}
-                {s === 'provider' && 'Provider'}
-                {s === 'workspace' && 'Workspace'}
-                {s === 'persona' && 'Persona'}
-                {s === 'vision' && 'Vision'}
-                {s === 'finish' && 'Ready'}
+                {stepLabels[s]}
               </span>
             ))}
           </div>
         </div>
 
-        <div className="px-6 pb-6 pt-3 space-y-4">
+        <div className="px-7 pb-7 pt-4 space-y-4">
 
           {step === 'welcome' && (
-            <div className="space-y-4">
-              <div className="text-center space-y-3">
-                <div className="text-sm" style={{ color: 'var(--text-primary)' }}>
-                  Welcome to <strong>Remedy AI</strong> — a software coding agent for
-                  projects and tools. Configure your LLM provider before chat starts.
-                </div>
-                <div className="text-xs space-y-1" style={mutedStyles}>
-                  <p>Skills, memory, and multi-model support for engineering work</p>
-                  <p>OpenAI, Anthropic, Google, DeepSeek, xAI, Groq, Mistral, OpenRouter, Ollama</p>
-                  <p>Not a medical or clinical product — you can skip and set this later in Settings.</p>
-                </div>
-              </div>
+            <div className="space-y-5">
+              <p
+                className="text-center text-base leading-snug"
+                style={{ color: 'var(--text-primary)' }}
+              >
+                Set up a provider and start chatting. Takes about a minute.
+              </p>
               <button
                 onClick={handleNext}
                 disabled={saving}
-                className="w-full py-2.5 rounded text-sm font-medium transition-colors"
+                className="w-full py-3 rounded-lg text-base font-semibold transition-colors"
                 style={{ background: 'var(--accent)', color: '#fff' }}
               >
                 Get Started
@@ -465,29 +486,68 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
               <button
                 onClick={handleSkip}
                 disabled={saving}
-                className="w-full py-2 rounded text-xs transition-colors"
+                className="w-full py-2 rounded text-sm transition-colors"
                 style={{ background: 'transparent', color: 'var(--text-muted)' }}
                 title="Skip setup for now — won't show again on next launch"
               >
-                {saving ? 'Saving…' : 'Skip setup (configure later)'}
+                {saving ? 'Saving…' : 'Skip for now'}
               </button>
             </div>
           )}
 
           {step === 'provider' && (
             <>
-              <div className="text-xs" style={mutedStyles}>
-                Connect a provider now so chat is not stuck in fallback mode.
-                xAI supports Sign in with account; Ollama / local need no key.
-              </div>
+              {freeOptions.length > 0 && (
+                <div className="space-y-2">
+                  <div className="text-sm font-medium" style={labelStyles}>
+                    Free to try
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {freeOptions.map((opt) => {
+                      const selected = provider === opt.id
+                      return (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => handleProviderChange(opt.id)}
+                          title={opt.blurb}
+                          className="rounded-lg px-3 py-2 text-sm font-medium transition-colors"
+                          style={{
+                            border: selected
+                              ? '1.5px solid var(--accent)'
+                              : '1px solid var(--border)',
+                            background: selected
+                              ? 'color-mix(in srgb, var(--accent) 14%, var(--bg-primary))'
+                              : 'var(--bg-tertiary)',
+                            color: 'var(--text-primary)',
+                          }}
+                        >
+                          {opt.title}
+                          {opt.badge ? (
+                            <span
+                              className="ml-1.5 text-[10px] opacity-80"
+                              style={{ color: 'var(--accent)' }}
+                            >
+                              {opt.badge}
+                            </span>
+                          ) : null}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
               {ollamaHint && (
-                <div className="text-xs rounded px-2 py-1.5" style={{ ...mutedStyles, border: '1px solid var(--border)' }}>
+                <div
+                  className="text-sm rounded-lg px-3 py-2"
+                  style={{ ...mutedStyles, border: '1px solid var(--border)' }}
+                >
                   {ollamaHint}
                 </div>
               )}
               <div>
                 <label
-                  className="block mb-1 text-xs font-medium"
+                  className="block mb-1.5 text-sm font-medium"
                   style={labelStyles}
                 >
                   Provider
@@ -495,13 +555,15 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                 <select
                   value={provider}
                   onChange={(e) => handleProviderChange(e.target.value)}
-                  className="w-full rounded px-3 py-2 text-sm outline-none"
+                  className="w-full rounded-lg px-3 py-2.5 text-base outline-none"
                   style={inputStyles}
                   onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--accent)')}
                   onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--border)')}
                 >
                   {primaryProviders.map((p) => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
+                    <option key={p.id} value={p.id}>
+                      {p.badge ? `${p.name} · ${p.badge}` : p.name}
+                    </option>
                   ))}
                   {showAdvanced && advancedProviders.map((p) => (
                     <option key={p.id} value={p.id}>{p.name}</option>
@@ -510,46 +572,55 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                 {!showAdvanced && advancedProviders.length > 0 && (
                   <button
                     type="button"
-                    className="mt-1 text-xs underline"
+                    className="mt-1.5 text-sm underline"
                     style={mutedStyles}
                     onClick={() => setShowAdvanced(true)}
                   >
-                    Show advanced (custom endpoint)…
+                    Custom endpoint…
                   </button>
                 )}
               </div>
+              {provider === 'demo' && (
+                <div className="text-sm" style={mutedStyles}>
+                  Demo needs no key (rate-limited). For private use, pick Ollama.
+                </div>
+              )}
+              {activeMeta?.key_docs_url && provider !== 'demo' && provider !== 'ollama' && (
+                <button
+                  type="button"
+                  className="text-sm underline"
+                  style={{ color: 'var(--accent)' }}
+                  onClick={() => void openExternalUrl(String(activeMeta.key_docs_url))}
+                >
+                  Get API key…
+                </button>
+              )}
 
               {provider === 'xai' && (
                 <div
-                  className="rounded-md p-3 space-y-2"
+                  className="rounded-lg p-3 space-y-2"
                   style={{ border: '1px solid var(--border)', background: 'var(--bg-tertiary)' }}
                 >
-                  <div className="text-xs font-medium" style={labelStyles}>
-                    Sign in with xAI
-                  </div>
-                  <div className="text-xs" style={mutedStyles}>
-                    Recommended for SuperGrok / X Premium+. Or paste a console API key below.
-                  </div>
                   {xaiConnected ? (
-                    <div className="text-xs" style={{ color: 'var(--success)' }}>
-                      Connected via xAI account
+                    <div className="text-sm" style={{ color: 'var(--success)' }}>
+                      Signed in with xAI
                     </div>
                   ) : (
                     <button
                       type="button"
                       onClick={() => void handleXaiSignIn()}
                       disabled={xaiLoginBusy}
-                      className="w-full py-2 rounded text-sm font-semibold"
+                      className="w-full py-2.5 rounded-lg text-base font-semibold"
                       style={{
                         background: xaiLoginBusy ? 'var(--bg-secondary)' : 'var(--accent)',
                         color: '#fff',
                       }}
                     >
-                      {xaiLoginBusy ? 'Waiting for approval…' : 'Sign in with xAI'}
+                      {xaiLoginBusy ? 'Waiting…' : 'Sign in with xAI'}
                     </button>
                   )}
                   {xaiUserCode && (
-                    <div className="text-xs" style={labelStyles}>
+                    <div className="text-sm" style={labelStyles}>
                       Code: <code style={{ color: 'var(--accent)' }}>{xaiUserCode}</code>
                       {xaiVerifyUrl && (
                         <button
@@ -564,54 +635,41 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                     </div>
                   )}
                   {xaiLoginMsg && (
-                    <div className="text-xs" style={mutedStyles}>{xaiLoginMsg}</div>
+                    <div className="text-sm" style={mutedStyles}>{xaiLoginMsg}</div>
                   )}
+                </div>
+              )}
+
+              {provider !== 'demo' && provider !== 'ollama' && (
+                <div>
+                  <label
+                    className="block mb-1.5 text-sm font-medium"
+                    style={labelStyles}
+                  >
+                    {provider === 'xai' ? 'API key (optional if signed in)' : 'API key'}
+                  </label>
+                  <input
+                    type="password"
+                    value={apiKey}
+                    onChange={(e) => {
+                      setApiKey(e.target.value)
+                      setError('')
+                    }}
+                    placeholder={provider === 'xai' ? 'xai-…' : 'sk-…'}
+                    className="w-full rounded-lg px-3 py-2.5 text-base outline-none"
+                    style={inputStyles}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--accent)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--border)')}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleNext()
+                    }}
+                  />
                 </div>
               )}
 
               <div>
                 <label
-                  className="block mb-1 text-xs font-medium"
-                  style={labelStyles}
-                >
-                  {provider === 'ollama'
-                    ? 'API Key (optional for local)'
-                    : provider === 'xai'
-                      ? 'API Key (optional if signed in)'
-                      : 'API Key'}
-                </label>
-                <input
-                  type="password"
-                  value={apiKey}
-                  onChange={(e) => {
-                    setApiKey(e.target.value)
-                    setError('')
-                  }}
-                  placeholder={
-                    provider === 'ollama'
-                      ? 'Leave blank for local'
-                      : provider === 'xai'
-                        ? 'xai-… from console.x.ai'
-                        : 'sk-...'
-                  }
-                  className="w-full rounded px-3 py-2 text-sm outline-none"
-                  style={inputStyles}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--accent)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--border)')}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleNext()
-                  }}
-                />
-                {provider === 'ollama' && (
-                  <div className="mt-1 text-xs" style={mutedStyles}>
-                    Make sure Ollama is running locally with your preferred model pulled.
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <label
-                  className="block mb-1 text-xs font-medium"
+                  className="block mb-1.5 text-sm font-medium"
                   style={labelStyles}
                 >
                   Model
@@ -619,7 +677,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                 <select
                   value={model}
                   onChange={(e) => setModel(e.target.value)}
-                  className="w-full rounded px-3 py-2 text-sm outline-none"
+                  className="w-full rounded-lg px-3 py-2.5 text-base outline-none"
                   style={inputStyles}
                   onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--accent)')}
                   onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--border)')}
@@ -637,7 +695,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                     value={model}
                     onChange={(e) => setModel(e.target.value)}
                     placeholder="Or type a model name"
-                    className="w-full rounded px-3 py-1.5 mt-1 text-xs outline-none"
+                    className="w-full rounded-lg px-3 py-2 mt-1.5 text-sm outline-none"
                     style={inputStyles}
                     onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--accent)')}
                     onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--border)')}
@@ -648,7 +706,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
               {showBaseUrl && (
                 <div>
                   <label
-                    className="block mb-1 text-xs font-medium"
+                    className="block mb-1.5 text-sm font-medium"
                     style={labelStyles}
                   >
                     Base URL
@@ -657,7 +715,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                     type="text"
                     value={baseUrl}
                     onChange={(e) => setBaseUrl(e.target.value)}
-                    className="w-full rounded px-3 py-2 text-sm outline-none font-mono text-xs"
+                    className="w-full rounded-lg px-3 py-2.5 text-sm outline-none font-mono"
                     style={inputStyles}
                     onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--accent)')}
                     onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--border)')}
@@ -669,92 +727,67 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
 
           {step === 'workspace' && (
             <div className="space-y-3">
-              <div className="text-sm" style={{ color: 'var(--text-primary)' }}>
-                <p>
-                  Set a default project folder. The agent uses it as the working directory for tools and
-                  shell commands, and for <code style={mutedStyles}>@file</code> / <code style={mutedStyles}>@folder</code> search.
-                </p>
-              </div>
-              <div>
-                <label
-                  className="block mb-1 text-xs font-medium"
-                  style={labelStyles}
-                >
-                  Default project folder (optional)
-                </label>
-                <input
-                  type="text"
-                  value={projectPath}
-                  onChange={(e) => setProjectPath(e.target.value)}
-                  placeholder="e.g. C:\Users\You\Projects\MyApp or leave empty"
-                  className="w-full rounded px-3 py-2 text-sm outline-none"
-                  style={inputStyles}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--accent)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--border)')}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleNext()
-                  }}
-                />
-              </div>
+              <p className="text-base" style={{ color: 'var(--text-primary)' }}>
+                Default project folder for tools and shell (optional).
+              </p>
+              <input
+                type="text"
+                value={projectPath}
+                onChange={(e) => setProjectPath(e.target.value)}
+                placeholder="e.g. C:\Users\You\Projects\MyApp"
+                className="w-full rounded-lg px-3 py-2.5 text-base outline-none"
+                style={inputStyles}
+                onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--accent)')}
+                onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--border)')}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleNext()
+                }}
+              />
             </div>
           )}
 
           {step === 'persona' && (
-            <div className="space-y-3">
+            <div className="space-y-4">
               <div>
-                <label className="block mb-1 text-xs font-medium" style={labelStyles}>
-                  Your name (what Remedy calls you)
+                <label className="block mb-1.5 text-sm font-medium" style={labelStyles}>
+                  Your name
                 </label>
                 <input
                   value={userName}
                   onChange={(e) => setUserName(e.target.value)}
-                  placeholder="e.g. Alex"
-                  className="w-full rounded-lg px-3 py-2 text-sm outline-none mb-1"
-                  style={{
-                    background: 'var(--bg-primary)',
-                    border: '1px solid var(--border)',
-                    color: 'var(--text-primary)',
-                  }}
+                  placeholder="Optional"
+                  className="w-full rounded-lg px-3 py-2.5 text-base outline-none"
+                  style={inputStyles}
                 />
-                <div className="text-[10px] mb-2" style={mutedStyles}>
-                  Optional now — you can set this later in Settings.
-                </div>
               </div>
               <div>
                 <label
-                  className="block mb-1 text-xs font-medium"
+                  className="block mb-1.5 text-sm font-medium"
                   style={labelStyles}
                 >
-                  Communication style
+                  Style
                 </label>
-                <div className="space-y-1.5">
+                <div className="grid grid-cols-2 gap-2">
                   {PERSONAS.map((p) => (
-                    <label
+                    <button
                       key={p.id}
-                      className="flex items-center gap-3 px-3 py-2.5 rounded cursor-pointer transition-colors"
+                      type="button"
+                      onClick={() => setPersona(p.id)}
+                      className="text-left px-3 py-3 rounded-lg transition-colors"
                       style={{
-                        background: persona === p.id ? 'var(--accent-subtle, rgba(var(--accent-rgb, 99, 102, 241), 0.1))' : 'var(--bg-tertiary)',
-                        border: persona === p.id ? '1px solid var(--accent)' : '1px solid var(--border)',
+                        background: persona === p.id
+                          ? 'color-mix(in srgb, var(--accent) 14%, var(--bg-primary))'
+                          : 'var(--bg-tertiary)',
+                        border: persona === p.id ? '1.5px solid var(--accent)' : '1px solid var(--border)',
                       }}
                     >
-                      <input
-                        type="radio"
-                        name="persona"
-                        value={p.id}
-                        checked={persona === p.id}
-                        onChange={() => setPersona(p.id)}
-                        className="accent-current"
-                        style={{ accentColor: 'var(--accent)' }}
-                      />
-                      <div>
-                        <div className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-                          {p.name}
-                        </div>
-                        <div className="text-xs" style={mutedStyles}>
-                          {p.description}
-                        </div>
+                      <div className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+                        {p.name}
                       </div>
-                    </label>
+                      <div className="text-xs mt-0.5" style={mutedStyles}>
+                        {p.description}
+                      </div>
+                    </button>
                   ))}
                 </div>
               </div>
@@ -762,51 +795,50 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
           )}
 
           {step === 'vision' && (
-            <div className="space-y-3">
+            <div className="space-y-4">
               <div>
-                <div className="text-sm font-medium mb-1" style={{ color: 'var(--text-primary)' }}>
-                  Local visual decoder (optional)
+                <div className="text-base font-semibold mb-1" style={{ color: 'var(--text-primary)' }}>
+                  See images locally?
                 </div>
-                <p className="text-xs leading-relaxed" style={mutedStyles}>
-                  If your chat model cannot see images (e.g. DeepSeek, many Ollama models),
-                  Remedy can install a local <strong style={{ color: 'var(--text-secondary)' }}>Qwen2.5-VL 3B</strong>{' '}
-                  decoder via llama.cpp. It runs only on this PC (loopback).
-                  Download is about {formatDownloadGb(visionStatus?.model?.approx_download_bytes)} for the model
-                  plus the llama-server runtime.
+                <p className="text-sm leading-snug" style={mutedStyles}>
+                  Optional ~{formatDownloadGb(visionStatus?.model?.approx_download_bytes)} local
+                  decoder for chat models that can&apos;t see images. Runs on this PC only.
                 </p>
               </div>
               <label
-                className="flex items-start gap-2 px-3 py-2.5 rounded cursor-pointer text-left"
+                className="flex items-start gap-3 px-4 py-3.5 rounded-lg cursor-pointer text-left"
                 style={{
-                  background: enableVision ? 'var(--accent-subtle, rgba(99,102,241,0.1))' : 'var(--bg-tertiary)',
-                  border: enableVision ? '1px solid var(--accent)' : '1px solid var(--border)',
+                  background: enableVision
+                    ? 'color-mix(in srgb, var(--accent) 12%, var(--bg-primary))'
+                    : 'var(--bg-tertiary)',
+                  border: enableVision ? '1.5px solid var(--accent)' : '1px solid var(--border)',
                 }}
               >
                 <input
                   type="checkbox"
                   checked={enableVision}
                   onChange={(e) => setEnableVision(e.target.checked)}
-                  className="mt-0.5"
+                  className="mt-1 w-4 h-4"
                   style={{ accentColor: 'var(--accent)' }}
                 />
                 <span>
-                  <span className="block text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-                    Enable visual decoder
+                  <span className="block text-base font-semibold" style={{ color: 'var(--text-primary)' }}>
+                    {visionStatus?.installed ? 'Keep visual decoder on' : 'Install visual decoder'}
                   </span>
-                  <span className="block text-xs" style={mutedStyles}>
+                  <span className="block text-sm mt-0.5" style={mutedStyles}>
                     {visionStatus?.installed
-                      ? 'Already installed on this machine — will stay enabled.'
-                      : 'Install starts when you finish setup (no further clicks). Skip to leave off.'}
+                      ? 'Already on this machine.'
+                      : 'Download starts after setup — progress in the bottom status dock.'}
                   </span>
                 </span>
               </label>
               {visionInstallMsg ? (
-                <div className="text-[10px]" style={mutedStyles}>
+                <div className="text-sm" style={{ color: 'var(--accent)' }}>
                   {visionInstallMsg}
                 </div>
               ) : null}
               {visionInstalling ? (
-                <div className="text-[10px]" style={{ color: 'var(--accent)' }}>
+                <div className="text-sm" style={{ color: 'var(--accent)' }}>
                   Install running in background…
                 </div>
               ) : null}
@@ -814,20 +846,20 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
           )}
 
           {step === 'finish' && (
-            <div className="space-y-4">
-              <div className="text-center space-y-3">
-                <div className="text-xl font-semibold" style={{ color: 'var(--accent)' }}>
-                  Your partner is ready
+            <div className="space-y-5">
+              <div className="text-center space-y-2">
+                <div className="text-2xl font-semibold" style={{ color: 'var(--accent)' }}>
+                  You&apos;re ready
                 </div>
-                <div className="text-xs space-y-2" style={mutedStyles}>
-                  <p><strong>Enter</strong> send · <strong>Shift+Enter</strong> new line</p>
-                  <p><strong>↑</strong> previous prompt · <strong>↓</strong> next</p>
-                  <p><strong>/help</strong> · <strong>/remember</strong> · <strong>/compact</strong></p>
-                  <p><strong>F1</strong> / <strong>Ctrl+/</strong> — Help wiki (owner&apos;s manual)</p>
-                </div>
+                <p className="text-sm" style={mutedStyles}>
+                  Enter to send · F1 for help
+                  {enableVision && !visionStatus?.installed
+                    ? ' · Vision download shows bottom-left'
+                    : ''}
+                </p>
               </div>
               <label
-                className="flex items-start gap-2 px-3 py-2.5 rounded cursor-pointer text-left"
+                className="flex items-start gap-3 px-4 py-3 rounded-lg cursor-pointer text-left"
                 style={{
                   background: 'var(--bg-tertiary)',
                   border: '1px solid var(--border)',
@@ -837,36 +869,36 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                   type="checkbox"
                   checked={launchAtLogin}
                   onChange={(e) => setLaunchAtLogin(e.target.checked)}
-                  className="mt-0.5"
+                  className="mt-1 w-4 h-4"
                   style={{ accentColor: 'var(--accent)' }}
                 />
                 <span>
-                  <span className="block text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-                    Keep Remedy ready (Start with Windows)
+                  <span className="block text-base font-medium" style={{ color: 'var(--text-primary)' }}>
+                    Start with Windows
                   </span>
-                  <span className="block text-xs" style={mutedStyles}>
-                    Optional. Launches at login, tray presence, warm local server. Change anytime in Settings.
+                  <span className="block text-sm" style={mutedStyles}>
+                    Optional tray + warm server
                   </span>
                 </span>
               </label>
               <button
                 onClick={handleFinish}
                 disabled={saving}
-                className="w-full py-2.5 rounded text-sm font-medium transition-colors"
+                className="w-full py-3 rounded-lg text-base font-semibold transition-colors"
                 style={{
                   background: saving ? 'var(--bg-tertiary)' : 'var(--accent)',
                   color: saving ? 'var(--text-muted)' : '#fff',
                   cursor: saving ? 'not-allowed' : 'pointer',
                 }}
               >
-                {saving ? 'Saving...' : 'Start Chatting'}
+                {saving ? 'Saving…' : 'Start Chatting'}
               </button>
             </div>
           )}
 
           {error && (
             <div
-              className="px-3 py-2 rounded text-xs"
+              className="px-3 py-2.5 rounded-lg text-sm"
               style={{
                 background: 'var(--error-bg, rgba(239,68,68,0.1))',
                 color: 'var(--error)',
@@ -878,22 +910,20 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
           )}
 
           {step !== 'welcome' && step !== 'finish' && (
-            <div className="space-y-2 pt-2">
+            <div className="space-y-2 pt-1">
               <div className="flex gap-2">
                 <button
                   onClick={handleBack}
                   disabled={saving}
-                  className="flex-1 py-2 rounded text-sm font-medium transition-colors"
+                  className="flex-1 py-2.5 rounded-lg text-base font-medium transition-colors"
                   style={{ background: 'var(--bg-tertiary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-primary)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = 'var(--bg-tertiary)')}
                 >
                   Back
                 </button>
                 <button
                   onClick={handleNext}
                   disabled={saving}
-                  className="flex-1 py-2 rounded text-sm font-medium transition-colors"
+                  className="flex-1 py-2.5 rounded-lg text-base font-semibold transition-colors"
                   style={{ background: 'var(--accent)', color: '#fff' }}
                 >
                   Next
@@ -902,11 +932,11 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
               <button
                 onClick={handleSkip}
                 disabled={saving}
-                className="w-full py-1.5 rounded text-xs transition-colors"
+                className="w-full py-2 rounded text-sm transition-colors"
                 style={{ background: 'transparent', color: 'var(--text-muted)' }}
                 title="Skip remaining setup — won't show again on next launch"
               >
-                {saving ? 'Saving…' : 'Skip remaining setup (won\'t ask again)'}
+                {saving ? 'Saving…' : 'Skip remaining'}
               </button>
             </div>
           )}

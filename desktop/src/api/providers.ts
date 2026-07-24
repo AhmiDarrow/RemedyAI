@@ -17,6 +17,26 @@ export interface ProviderInfo {
   show_base_url: boolean
   advanced: boolean
   key_docs_url?: string | null
+  free_tier?: string
+  badge?: string | null
+  limits_blurb?: string | null
+  privacy_note?: string | null
+}
+
+export interface FreeProviderOption {
+  id: string
+  tier: string
+  title: string
+  blurb: string
+  badge?: string | null
+  name: string
+  base_url?: string
+  auth: string[]
+  key_docs_url?: string | null
+  limits_blurb?: string | null
+  privacy_note?: string | null
+  default_model: string
+  free_tier?: string
 }
 
 export interface OllamaDetect {
@@ -28,6 +48,25 @@ export interface OllamaDetect {
 
 /** Fallback when server is offline — keep aligned with backend PROVIDER_CATALOG. */
 export const FALLBACK_PROVIDERS: ProviderInfo[] = [
+  {
+    id: 'demo',
+    name: 'Demo (free, no signup)',
+    base_url: 'https://api.llm7.io/v1',
+    models: [
+      { id: 'codestral-latest', name: 'Codestral (demo)' },
+      { id: 'gpt-oss:20b', name: 'GPT-OSS 20B (demo)' },
+    ],
+    default_model: 'codestral-latest',
+    auth: ['none'],
+    oauth: false,
+    env_keys: [],
+    show_base_url: false,
+    advanced: false,
+    free_tier: 'instant',
+    badge: 'No signup',
+    limits_blurb: 'Rate-limited guest gateway. Add a real provider for serious work.',
+    privacy_note: 'Chat goes to a third-party free API (not Remedy cloud).',
+  },
   {
     id: 'openai',
     name: 'OpenAI',
@@ -42,6 +81,7 @@ export const FALLBACK_PROVIDERS: ProviderInfo[] = [
     env_keys: ['OPENAI_API_KEY'],
     show_base_url: false,
     advanced: false,
+    free_tier: 'none',
   },
   {
     id: 'anthropic',
@@ -57,7 +97,7 @@ export const FALLBACK_PROVIDERS: ProviderInfo[] = [
   },
   {
     id: 'google',
-    name: 'Google AI',
+    name: 'Google AI (Gemini)',
     base_url: 'https://generativelanguage.googleapis.com/v1beta/openai',
     models: [{ id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' }],
     default_model: 'gemini-2.5-flash',
@@ -66,6 +106,9 @@ export const FALLBACK_PROVIDERS: ProviderInfo[] = [
     env_keys: ['GOOGLE_API_KEY'],
     show_base_url: false,
     advanced: false,
+    free_tier: 'free_key',
+    badge: 'Free key',
+    key_docs_url: 'https://aistudio.google.com/app/apikey',
   },
   {
     id: 'deepseek',
@@ -109,6 +152,9 @@ export const FALLBACK_PROVIDERS: ProviderInfo[] = [
     env_keys: ['GROQ_API_KEY'],
     show_base_url: false,
     advanced: false,
+    free_tier: 'free_key',
+    badge: 'Free key',
+    key_docs_url: 'https://console.groq.com/keys',
   },
   {
     id: 'mistral',
@@ -121,18 +167,27 @@ export const FALLBACK_PROVIDERS: ProviderInfo[] = [
     env_keys: ['MISTRAL_API_KEY'],
     show_base_url: false,
     advanced: false,
+    free_tier: 'free_key',
+    badge: 'Free key',
+    key_docs_url: 'https://console.mistral.ai/api-keys',
   },
   {
     id: 'openrouter',
     name: 'OpenRouter',
     base_url: 'https://openrouter.ai/api/v1',
-    models: [{ id: 'openrouter/auto', name: 'OpenRouter Auto' }],
+    models: [
+      { id: 'openrouter/auto', name: 'OpenRouter Auto' },
+      { id: 'openai/gpt-oss-20b:free', name: 'GPT-OSS 20B (free)' },
+    ],
     default_model: 'openrouter/auto',
     auth: ['api_key'],
     oauth: false,
     env_keys: ['OPENROUTER_API_KEY'],
     show_base_url: false,
     advanced: false,
+    free_tier: 'free_key',
+    badge: 'Free key',
+    key_docs_url: 'https://openrouter.ai/keys',
   },
   {
     id: 'ollama',
@@ -148,6 +203,9 @@ export const FALLBACK_PROVIDERS: ProviderInfo[] = [
     env_keys: [],
     show_base_url: false,
     advanced: false,
+    free_tier: 'local',
+    badge: 'Local',
+    key_docs_url: 'https://ollama.com/download',
   },
   {
     id: 'custom',
@@ -171,6 +229,32 @@ export async function listProviders(): Promise<ProviderInfo[]> {
     // offline
   }
   return FALLBACK_PROVIDERS
+}
+
+export async function listFreeProviders(): Promise<FreeProviderOption[]> {
+  try {
+    const res = await apiFetch<{ options: FreeProviderOption[] }>('/providers/free')
+    if (res?.options?.length) return res.options
+  } catch {
+    // offline — derive from fallback catalog
+  }
+  return FALLBACK_PROVIDERS.filter(
+    (p) => p.free_tier && p.free_tier !== 'none',
+  ).map((p) => ({
+    id: p.id,
+    tier: p.free_tier || 'free_key',
+    title: p.name,
+    blurb: p.limits_blurb || '',
+    badge: p.badge,
+    name: p.name,
+    base_url: p.base_url,
+    auth: p.auth,
+    key_docs_url: p.key_docs_url,
+    limits_blurb: p.limits_blurb,
+    privacy_note: p.privacy_note,
+    default_model: p.default_model,
+    free_tier: p.free_tier,
+  }))
 }
 
 export async function detectOllama(): Promise<OllamaDetect> {

@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { getPartnerStatus } from '../api/partner'
+import { getVisionStatus, type VisionStatus } from '../api/vision'
 import { ThemeSwitcher } from './ThemeSwitcher'
 import type { ThemeId, Theme } from '../themes'
 import type { ModelInfo } from '../App'
@@ -41,6 +42,65 @@ const THINKING_OPTIONS: { id: ThinkingLevel; label: string }[] = [
   { id: 'high', label: 'High' },
 ]
 
+const INSTALL_PHASES = new Set([
+  'downloading',
+  'download',
+  'extracting',
+  'extract',
+  'installing',
+  'install',
+  'starting',
+  'testing',
+  'verifying',
+  'unpacking',
+  'preparing',
+])
+
+function visionIsBusy(vs: VisionStatus | null): boolean {
+  if (!vs) return false
+  const phase = (vs.progress?.phase || '').toLowerCase()
+  if (INSTALL_PHASES.has(phase)) return true
+  if (phase === 'error' || phase === 'cancelled') return true
+  // Active download with partial bytes
+  const done = vs.progress?.bytes_done || 0
+  const total = vs.progress?.bytes_total || 0
+  if (total > 0 && done < total && phase !== 'ready' && phase !== 'idle') return true
+  return false
+}
+
+function visionPct(vs: VisionStatus | null): number | null {
+  if (!vs?.progress) return null
+  const done = vs.progress.bytes_done || 0
+  const total = vs.progress.bytes_total || 0
+  if (total > 0) return Math.min(100, Math.round((done / total) * 100))
+  return null
+}
+
+function visionLine(vs: VisionStatus | null): string {
+  if (!vs) return ''
+  const phase = (vs.progress?.phase || '').toLowerCase()
+  const msg = (vs.progress?.message || '').trim()
+  const pct = visionPct(vs)
+
+  if (phase === 'error') {
+    return msg || vs.progress?.error || 'Vision install failed'
+  }
+  if (phase === 'cancelled') {
+    return msg || 'Vision install cancelled'
+  }
+  if (phase === 'ready' && vs.ready) {
+    return 'Vision ready'
+  }
+  if (INSTALL_PHASES.has(phase) || visionIsBusy(vs)) {
+    const label = msg || `Vision ${phase || 'installing'}…`
+    return pct != null ? `${label} ${pct}%` : label
+  }
+  if (vs.enabled && vs.running) return 'Vision server on'
+  if (vs.enabled && vs.installed && !vs.running) return 'Vision installed'
+  if (vs.enabled && !vs.installed) return 'Vision pending'
+  return ''
+}
+
 export function StatusBar({
   streaming,
   model,
@@ -67,6 +127,7 @@ export function StatusBar({
   const [version, setVersion] = useState('')
   const [status, setStatus] = useState<'connected' | 'disconnected' | 'checking'>('checking')
   const [alerts, setAlerts] = useState('')
+  const [vision, setVision] = useState<VisionStatus | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -110,114 +171,165 @@ export function StatusBar({
     }
   }, [])
 
+  // Poll visual decoder so setup opt-in progress is visible in the dock (faster while busy).
+  useEffect(() => {
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    async function tick() {
+      let busy = false
+      try {
+        const vs = await getVisionStatus()
+        if (!cancelled) setVision(vs)
+        busy = visionIsBusy(vs)
+      } catch {
+        if (!cancelled) setVision(null)
+      }
+      if (!cancelled) {
+        timer = setTimeout(() => void tick(), busy ? 1500 : 8000)
+      }
+    }
+    void tick()
+    return () => {
+      cancelled = true
+      if (timer) clearTimeout(timer)
+    }
+  }, [])
+
   const dotColor =
     status === 'connected' ? 'var(--success)' : status === 'checking' ? 'var(--warning)' : 'var(--error)'
   const autoApprove = approvalMode === 'auto'
 
+  const dockVision = useMemo(() => {
+    const line = visionLine(vision)
+    const pct = visionPct(vision)
+    const phase = (vision?.progress?.phase || '').toLowerCase()
+    const busy = visionIsBusy(vision)
+    const show =
+      busy
+      || phase === 'error'
+      || phase === 'cancelled'
+      || (vision?.enabled && !vision.ready)
+      || (vision?.enabled && vision.running)
+      || (phase === 'ready' && vision?.ready)
+    return { line, pct, phase, busy, show }
+  }, [vision])
+
+  const openWebUi = () => {
+    void (async () => {
+      try {
+        const { isTauri, tauriInvoke } = await import('../api/tauri')
+        if (isTauri()) {
+          await tauriInvoke('switch_to_web_ui')
+          return
+        }
+      } catch (e) {
+        console.warn('switch_to_web_ui:', e)
+      }
+      window.open('http://127.0.0.1:7400/', '_blank', 'noopener,noreferrer')
+    })()
+  }
+
   return (
     <div
-      className="flex items-center justify-between px-3 py-1 text-xs border-t gap-2"
+      className="flex flex-col border-t"
       style={{
         background: 'var(--bg-secondary)',
         borderColor: 'var(--border)',
         color: 'var(--text-muted)',
       }}
     >
-      {/* Left: status + mode + panels */}
-      <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+      {/* Status dock — vision progress, server, alerts */}
+      <div
+        className="flex items-center gap-3 px-3 py-1.5 text-xs border-b"
+        style={{
+          borderColor: 'var(--border)',
+          background: 'var(--bg-tertiary)',
+          minHeight: 32,
+        }}
+      >
         <div
-          className="flex items-center gap-1.5 px-1.5 py-0.5 rounded"
+          className="flex items-center gap-1.5 flex-shrink-0"
           title={status === 'connected' ? `Remedy ${version || ''}`.trim() : 'Server offline'}
-          style={{ background: 'var(--bg-tertiary)' }}
         >
-          <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: dotColor }} />
-          <span className="truncate max-w-[7rem]">
-            {status === 'connected' ? (version ? `v${version}` : 'Online') : status === 'checking' ? '…' : 'Offline'}
+          <span className="inline-block w-2 h-2 rounded-full" style={{ background: dotColor }} />
+          <span className="font-medium" style={{ color: 'var(--text-secondary)' }}>
+            {status === 'connected'
+              ? version
+                ? `Server v${version}`
+                : 'Server online'
+              : status === 'checking'
+                ? 'Server…'
+                : 'Server offline'}
           </span>
         </div>
 
         {streaming && (
-          <span className="px-1.5 py-0.5 rounded font-medium" style={{ color: 'var(--accent)', background: 'color-mix(in srgb, var(--accent) 12%, transparent)' }}>
+          <span
+            className="px-1.5 py-0.5 rounded font-medium flex-shrink-0"
+            style={{
+              color: 'var(--accent)',
+              background: 'color-mix(in srgb, var(--accent) 12%, transparent)',
+            }}
+          >
             Streaming
           </span>
         )}
 
         {alerts && (
-          <span className="px-1.5 py-0.5 rounded truncate max-w-[10rem]" style={{ color: 'var(--warning)' }} title={alerts}>
+          <span
+            className="px-1.5 py-0.5 rounded truncate max-w-[10rem] flex-shrink-0"
+            style={{ color: 'var(--warning)' }}
+            title={alerts}
+          >
             ⚠ {alerts}
           </span>
         )}
 
-        <SegButton active={planMode} onClick={onTogglePlanMode} title="Plan mode (Ctrl+B)">
-          {planMode ? 'Plan' : 'Build'}
-        </SegButton>
-
-        {/* Separate labeled buttons — not MemSkillsSet jammed together */}
-        <SegButton
-          active={panel === 'memory'}
-          onClick={() => onTogglePanel('memory')}
-          title="Memory panel"
-        >
-          Memory
-        </SegButton>
-        <SegButton
-          active={panel === 'skills'}
-          onClick={() => onTogglePanel('skills')}
-          title="Skills (agent skill packs)"
-        >
-          Skills
-        </SegButton>
-        <SegButton
-          active={panel === 'settings'}
-          onClick={() => onTogglePanel('settings')}
-          title="Settings — provider, project, theme, account"
-        >
-          Settings
-        </SegButton>
-        {onOpenHelp && (
-          <SegButton
-            active={false}
-            onClick={() => onOpenHelp()}
-            title="Help wiki — owner's manual (F1)"
-          >
-            Help
-          </SegButton>
-        )}
-        <SegButton
-          active={false}
-          onClick={() => {
-            void (async () => {
-              try {
-                const { isTauri, tauriInvoke } = await import('../api/tauri')
-                if (isTauri()) {
-                  await tauriInvoke('switch_to_web_ui')
-                  return
-                }
-              } catch (e) {
-                console.warn('switch_to_web_ui:', e)
-              }
-              window.open('http://127.0.0.1:7400/', '_blank', 'noopener,noreferrer')
-            })()
-          }}
-          title="Hide desktop to tray and open chat in your browser"
-        >
-          Web
-        </SegButton>
-
-        {updateAvailable && (
-          <button
-            onClick={() => (onInstallUpdate ? onInstallUpdate() : onCheckUpdates())}
-            className="px-2 py-0.5 rounded text-xs font-medium"
-            style={{ background: 'var(--accent)', color: '#fff' }}
-          >
-            Update
-          </button>
+        {dockVision.show && dockVision.line ? (
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <span
+              className="truncate font-medium"
+              style={{
+                color:
+                  dockVision.phase === 'error'
+                    ? 'var(--error)'
+                    : dockVision.busy
+                      ? 'var(--accent)'
+                      : 'var(--text-secondary)',
+              }}
+              title={dockVision.line}
+            >
+              {dockVision.line}
+            </span>
+            {dockVision.pct != null && dockVision.busy ? (
+              <div
+                className="flex-shrink-0 rounded-full overflow-hidden"
+                style={{
+                  width: 72,
+                  height: 6,
+                  background: 'var(--bg-secondary)',
+                  border: '1px solid var(--border)',
+                }}
+                aria-label={`Vision download ${dockVision.pct}%`}
+              >
+                <div
+                  className="h-full rounded-full transition-all duration-300"
+                  style={{
+                    width: `${dockVision.pct}%`,
+                    background: 'var(--accent)',
+                  }}
+                />
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <div className="flex-1 min-w-0" />
         )}
 
         {status === 'disconnected' && (
           <button
             onClick={() => window.location.reload()}
-            className="px-2 py-0.5 rounded text-xs"
+            className="px-2 py-0.5 rounded text-xs flex-shrink-0"
             style={{ background: 'var(--error)', color: '#fff' }}
           >
             Reconnect
@@ -225,107 +337,162 @@ export function StatusBar({
         )}
       </div>
 
-      {/* Right: model · think · approve · theme */}
-      <div className="flex items-center gap-1.5 flex-shrink-0">
-        {models.length > 0 && onModelChange ? (
+      {/* Controls row */}
+      <div className="flex items-center justify-between px-3 py-1 text-xs gap-2">
+        <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+          <SegButton active={planMode} onClick={onTogglePlanMode} title="Plan mode (Ctrl+B)">
+            {planMode ? 'Plan' : 'Build'}
+          </SegButton>
+
+          <SegButton
+            active={panel === 'memory'}
+            onClick={() => onTogglePanel('memory')}
+            title="Memory panel"
+          >
+            Memory
+          </SegButton>
+          <SegButton
+            active={panel === 'skills'}
+            onClick={() => onTogglePanel('skills')}
+            title="Skills (agent skill packs)"
+          >
+            Skills
+          </SegButton>
+          <SegButton
+            active={panel === 'settings'}
+            onClick={() => onTogglePanel('settings')}
+            title="Settings — provider, project, theme, account"
+          >
+            Settings
+          </SegButton>
+          {onOpenHelp && (
+            <SegButton
+              active={false}
+              onClick={() => onOpenHelp()}
+              title="Help wiki — owner's manual (F1)"
+            >
+              Help
+            </SegButton>
+          )}
+          <SegButton
+            active={false}
+            onClick={openWebUi}
+            title="Hide desktop to tray and open the WebUI chat in your browser"
+          >
+            WebUI
+          </SegButton>
+
+          {updateAvailable && (
+            <button
+              onClick={() => (onInstallUpdate ? onInstallUpdate() : onCheckUpdates())}
+              className="px-2 py-0.5 rounded text-xs font-medium"
+              style={{ background: 'var(--accent)', color: '#fff' }}
+            >
+              Update
+            </button>
+          )}
+        </div>
+
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          {models.length > 0 && onModelChange ? (
+            <select
+              value={model}
+              onChange={(e) => onModelChange(e.target.value)}
+              className="text-xs rounded px-1.5 py-0.5 outline-none"
+              title="Active model"
+              style={{
+                background: 'var(--bg-tertiary)',
+                color: 'var(--text-primary)',
+                border: '1px solid var(--border)',
+                maxWidth: 140,
+              }}
+            >
+              {models.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <span className="truncate max-w-[8rem]" title={model}>
+              {model}
+            </span>
+          )}
+
           <select
-            value={model}
-            onChange={(e) => onModelChange(e.target.value)}
+            value={thinkingLevel}
+            onChange={(e) => onThinkingLevelChange?.(e.target.value as ThinkingLevel)}
             className="text-xs rounded px-1.5 py-0.5 outline-none"
-            title="Active model"
+            title="Thinking level"
             style={{
               background: 'var(--bg-tertiary)',
               color: 'var(--text-primary)',
               border: '1px solid var(--border)',
-              maxWidth: 140,
             }}
           >
-            {models.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name}
+            {THINKING_OPTIONS.map((o) => (
+              <option key={o.id} value={o.id}>
+                Think {o.label}
               </option>
             ))}
           </select>
-        ) : (
-          <span className="truncate max-w-[8rem]" title={model}>
-            {model}
-          </span>
-        )}
 
-        <select
-          value={thinkingLevel}
-          onChange={(e) => onThinkingLevelChange?.(e.target.value as ThinkingLevel)}
-          className="text-xs rounded px-1.5 py-0.5 outline-none"
-          title="Thinking level"
-          style={{
-            background: 'var(--bg-tertiary)',
-            color: 'var(--text-primary)',
-            border: '1px solid var(--border)',
-          }}
-        >
-          {THINKING_OPTIONS.map((o) => (
-            <option key={o.id} value={o.id}>
-              Think {o.label}
-            </option>
-          ))}
-        </select>
+          <button
+            type="button"
+            onClick={() => onApprovalModeChange?.(autoApprove ? 'ask' : 'auto')}
+            className="flex items-center justify-center rounded px-1.5 py-0.5 text-sm"
+            title={
+              autoApprove
+                ? 'Auto-approve on — click for Ask'
+                : 'Ask before risky tools — click for Auto'
+            }
+            aria-label={autoApprove ? 'Auto-approve' : 'Ask before risky actions'}
+            style={{
+              background: autoApprove
+                ? 'color-mix(in srgb, var(--success) 25%, var(--bg-tertiary))'
+                : 'var(--bg-tertiary)',
+              color: autoApprove ? 'var(--success)' : 'var(--text-secondary)',
+              border: `1px solid ${autoApprove ? 'var(--success)' : 'var(--border)'}`,
+              minWidth: 28,
+            }}
+          >
+            {autoApprove ? '👍' : '👎'}
+          </button>
 
-        <button
-          type="button"
-          onClick={() => onApprovalModeChange?.(autoApprove ? 'ask' : 'auto')}
-          className="flex items-center justify-center rounded px-1.5 py-0.5 text-sm"
-          title={
-            autoApprove
-              ? 'Auto-approve on — click for Ask'
-              : 'Ask before risky tools — click for Auto'
-          }
-          aria-label={autoApprove ? 'Auto-approve' : 'Ask before risky actions'}
-          style={{
-            background: autoApprove
-              ? 'color-mix(in srgb, var(--success) 25%, var(--bg-tertiary))'
-              : 'var(--bg-tertiary)',
-            color: autoApprove ? 'var(--success)' : 'var(--text-secondary)',
-            border: `1px solid ${autoApprove ? 'var(--success)' : 'var(--border)'}`,
-            minWidth: 28,
-          }}
-        >
-          {autoApprove ? '👍' : '👎'}
-        </button>
-
-        {/* Tool process: cycle off → medium → full */}
-        <button
-          type="button"
-          onClick={() => {
-            const order: ToolProcessMode[] = ['off', 'medium', 'full']
-            const i = order.indexOf(toolProcessMode)
-            const next = order[(i + 1) % order.length]!
-            onToolProcessChange?.(next)
-          }}
-          className="px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide"
-          title={
-            toolProcessMode === 'off'
-              ? 'Tool process: Off (minimal) — click for Medium'
-              : toolProcessMode === 'medium'
-                ? 'Tool process: Medium — click for Full'
-                : 'Tool process: Full — click for Off'
-          }
-          aria-label={`Tool process ${toolProcessMode}`}
-          style={{
-            background:
+          <button
+            type="button"
+            onClick={() => {
+              const order: ToolProcessMode[] = ['off', 'medium', 'full']
+              const i = order.indexOf(toolProcessMode)
+              const next = order[(i + 1) % order.length]!
+              onToolProcessChange?.(next)
+            }}
+            className="px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide"
+            title={
               toolProcessMode === 'off'
-                ? 'var(--bg-tertiary)'
+                ? 'Tool process: Off (minimal) — click for Medium'
                 : toolProcessMode === 'medium'
-                  ? 'color-mix(in srgb, var(--accent) 20%, var(--bg-tertiary))'
-                  : 'var(--accent)',
-            color: toolProcessMode === 'full' ? '#fff' : 'var(--text-secondary)',
-            border: `1px solid ${toolProcessMode === 'off' ? 'var(--border)' : 'var(--accent)'}`,
-            minWidth: 36,
-          }}
-        >
-          {toolProcessMode === 'off' ? 'Proc' : toolProcessMode === 'medium' ? 'Med' : 'Full'}
-        </button>
+                  ? 'Tool process: Medium — click for Full'
+                  : 'Tool process: Full — click for Off'
+            }
+            aria-label={`Tool process ${toolProcessMode}`}
+            style={{
+              background:
+                toolProcessMode === 'off'
+                  ? 'var(--bg-tertiary)'
+                  : toolProcessMode === 'medium'
+                    ? 'color-mix(in srgb, var(--accent) 20%, var(--bg-tertiary))'
+                    : 'var(--accent)',
+              color: toolProcessMode === 'full' ? '#fff' : 'var(--text-secondary)',
+              border: `1px solid ${toolProcessMode === 'off' ? 'var(--border)' : 'var(--accent)'}`,
+              minWidth: 36,
+            }}
+          >
+            {toolProcessMode === 'off' ? 'Proc' : toolProcessMode === 'medium' ? 'Med' : 'Full'}
+          </button>
 
-        <ThemeSwitcher currentId={themeId} currentTheme={theme} onChange={onThemeChange} />
+          <ThemeSwitcher currentId={themeId} currentTheme={theme} onChange={onThemeChange} />
+        </div>
       </div>
     </div>
   )

@@ -206,7 +206,7 @@ export function TitleBar({
               <MenuItem label="Help / Owner's Manual…" onClick={() => run('help')} shortcut="F1" />
               {isTauri() && (
                 <MenuItem
-                  label="Switch to Web UI…"
+                  label="Switch to WebUI…"
                   onClick={() => run('switch_web_ui')}
                 />
               )}

@@ -75,6 +75,13 @@ def register_auth_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
         """Known providers with base URL, models, and auth modes."""
         return {"providers": public_provider_catalog()}
 
+    @app.get("/api/providers/free")
+    async def list_free_providers():
+        """Curated free / local / demo options for Setup and Settings."""
+        from remedy.interfaces.config import free_options_public
+
+        return {"options": free_options_public()}
+
     @app.get("/api/providers/ollama/detect")
     async def ollama_detect():
         """Probe local Ollama for first-run / setup suggestions."""

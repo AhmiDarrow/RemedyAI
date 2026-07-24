@@ -2,6 +2,22 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.10.41] — 2026-07-24
+
+### UX: Setup declutter, collapsible Settings, status dock, WebUI
+
+- **Setup wizard** simplified: larger type, shorter copy, free-provider **chips** (not long cards), cleaner vision opt-in.
+- **Settings** categories expand/collapse via `SettingsSection` (Provider open by default).
+- Status bar **Web → WebUI**; quit/settings/title menu wording aligned.
+- **Bottom status dock**: server status + **visual decoder install progress** (bar + %) so opt-in downloads are visible without opening Settings.
+- **WebUI reliability**: package SPA as Tauri `webui` resource; sidecar `REMEDY_WEBUI_DIR`; same-origin local-bootstrap; friendly page when SPA missing; wait for :7400 before opening browser.
+
+### Feature: Free / zero-setup providers
+
+- Curated free options list + **Demo (LLM7)** guest path so first chat needs no API key.
+- `GET /api/providers/free`; Setup free chips; bootstrap can land on demo when nothing configured.
+- Help/manual: `15-free-providers`; tests: `tests/test_free_providers.py`.
+
 ## [0.10.40] — 2026-07-24
 
 ### Feature: Local visual decoder (image → text for text-only models)
