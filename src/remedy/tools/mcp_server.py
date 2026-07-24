@@ -404,11 +404,11 @@ def run_stdio_server() -> int:
         try:
             msg = json.loads(line)
         except json.JSONDecodeError:
-            resp = server._error(None, -32700, "Parse error")
-            sys.stdout.write(json.dumps(resp) + "\n")
+            err = server._error(None, -32700, "Parse error")
+            sys.stdout.write(json.dumps(err) + "\n")
             sys.stdout.flush()
             continue
-        resp = server.handle(msg)
+        resp: dict[str, Any] | None = server.handle(msg)
         if resp is not None:
             sys.stdout.write(json.dumps(resp) + "\n")
             sys.stdout.flush()

@@ -287,6 +287,6 @@ def register_workspace_tools(runtime: Any) -> None:
     runtime._register_local_discover_tools()
     runtime._register_skill_tools()
     # Per-turn tool trace for auto-learn (reset each stream_response)
-    runtime._turn_tool_steps: list[dict[str, Any]] = []
-    runtime._learning_loop = None  # lazy LearningLoop
+    runtime._turn_tool_steps = []
+    runtime._learning_loop = None
 

@@ -366,9 +366,11 @@ async def handle_slash_command(
                 plan = plan[0] if plan else None
             if plan is None:
                 return {"text": "No plan to approve. Save one first."}
-            plan = store.set_status(plan.id, "approved")
+            approved = store.set_status(plan.id, "approved")
+            if approved is None:
+                return {"text": "Failed to approve plan."}
             return {
-                "text": f"Plan **approved**: {plan.title} (`{plan.id}`)\n\n"
+                "text": f"Plan **approved**: {approved.title} (`{approved.id}`)\n\n"
                 "Switch to **Build** mode to execute."
             }
         if rest.lower().startswith("new "):

@@ -22,9 +22,9 @@ def register_memory_tools(runtime: Any) -> None:
         if not hits:
             return f"No memory matches for: {q}"
         lines = []
-        for e in hits:
-            title = getattr(e, "title", "") or ""
-            content = (getattr(e, "content", None) or "")[:200]
+        for hit in hits:
+            title = getattr(hit, "title", "") or ""
+            content = (getattr(hit, "content", None) or "")[:200]
             lines.append(f"- {title}: {content}" if title else f"- {content}")
         return "Memory hits:\n" + "\n".join(lines)
 
