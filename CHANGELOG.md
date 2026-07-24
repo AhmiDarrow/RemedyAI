@@ -2,6 +2,14 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.10.29] — 2026-07-24
+
+### Fix: auto-update install + relaunch
+
+- Detach update PowerShell with `cmd /c start` + `CREATE_BREAKAWAY_FROM_JOB` so `app.exit()` no longer kills the installer script mid-flight.
+- Upgrade in place via NSIS `/D=<current install dir>`; discover binaries under both `%LOCALAPPDATA%\Programs\Remedy Desktop` and `%LOCALAPPDATA%\Remedy Desktop`.
+- Prefer relaunching a binary whose mtime advanced (detect real replace); log to `%TEMP%\RemedyDesktop-Update.log`.
+- POSTINSTALL relaunch via `cmd /c start` so the new app survives NSIS exit.
 ## [0.10.28] — 2026-07-24
 
 ### Fix: DeepSeek / long turns cut off mid-answer

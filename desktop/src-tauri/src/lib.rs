@@ -1083,42 +1083,128 @@ fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), Stri
 
             #[cfg(target_os = "windows")]
             {
-                // Schedule silent install AFTER this process exits so Windows
-                // releases locks on app.exe / Remedy Desktop.exe / sidecar.
-                // PowerShell: wait longer, kill again, run NSIS /S, relaunch if
-                // POSTINSTALL did not (belt-and-suspenders for failed hooks).
-                // DETACHED_PROCESS keeps the scheduler alive after we exit.
+                // Schedule silent install AFTER this process fully exits so
+                // Windows releases locks on the main EXE + sidecar.
+                // Critical: break away from the parent Job Object, otherwise
+                // app.exit() kills the update script and install never runs
+                // (user sees "updated" but still on the old binary).
                 const DETACHED_PROCESS: u32 = 0x00000008;
                 const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
+                const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x01000000;
                 let install_path = temp.to_string_lossy().replace('\'', "''");
-                // Prefer LocalAppData\Programs install path used by Tauri NSIS.
+                // Current install dir (best-effort) for /D= upgrade-in-place.
+                let current_exe = std::env::current_exe().ok();
+                let current_dir = current_exe
+                    .as_ref()
+                    .and_then(|p| p.parent())
+                    .map(|p| p.to_string_lossy().replace('\'', "''"))
+                    .unwrap_or_default();
+                let current_exe_s = current_exe
+                    .as_ref()
+                    .map(|p| p.to_string_lossy().replace('\'', "''"))
+                    .unwrap_or_default();
+                let log_path = env::temp_dir()
+                    .join("RemedyDesktop-Update.log")
+                    .to_string_lossy()
+                    .replace('\'', "''");
                 let ps = format!(
                     r#"
-$ErrorActionPreference = 'SilentlyContinue'
-Start-Sleep -Seconds 4
+$ErrorActionPreference = 'Continue'
+$log = '{log_path}'
+function Log($m) {{
+  $line = ("{{0:u}} {{1}}" -f (Get-Date), $m)
+  Add-Content -LiteralPath $log -Value $line -ErrorAction SilentlyContinue
+}}
+Log 'Update script started'
+Log ("Installer: {install_path}")
+Log ("Prior exe: {current_exe_s}")
+Log ("Prior dir: {current_dir}")
+
+# Wait for the app process tree to die (file locks).
+Start-Sleep -Seconds 5
 Get-Process -ErrorAction SilentlyContinue | Where-Object {{
   $_.ProcessName -match '^(app|remedy-desktop|Remedy Desktop)$' -or
-  ($_.Path -and $_.Path -like '*Remedy Desktop*')
-}} | Stop-Process -Force -ErrorAction SilentlyContinue
-Start-Sleep -Seconds 2
+  ($_.Path -and ($_.Path -like '*Remedy Desktop*' -or $_.Path -like '*remedy-desktop*'))
+}} | ForEach-Object {{
+  Log ("Killing leftover PID $($_.Id) $($_.ProcessName)")
+  Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
+}}
+Start-Sleep -Seconds 3
+
 $installer = '{install_path}'
 if (-not (Test-Path -LiteralPath $installer)) {{
+  Log 'ERROR: installer missing'
   exit 2
 }}
-$p = Start-Process -FilePath $installer -ArgumentList '/S','/NCRC' -PassThru -WindowStyle Hidden
-if ($p) {{ Wait-Process -Id $p.Id -Timeout 300 -ErrorAction SilentlyContinue }}
-Start-Sleep -Seconds 2
+
+# Snapshot mtime of known install targets (detect successful replace).
 $candidates = @(
   (Join-Path $env:LOCALAPPDATA 'Programs\Remedy Desktop\Remedy Desktop.exe'),
   (Join-Path $env:LOCALAPPDATA 'Programs\Remedy Desktop\app.exe'),
-  (Join-Path $env:LOCALAPPDATA 'Programs\remedy-desktop\Remedy Desktop.exe')
-)
+  (Join-Path $env:LOCALAPPDATA 'Remedy Desktop\Remedy Desktop.exe'),
+  (Join-Path $env:LOCALAPPDATA 'Remedy Desktop\app.exe'),
+  (Join-Path $env:LOCALAPPDATA 'Programs\remedy-desktop\Remedy Desktop.exe'),
+  '{current_exe_s}'
+) | Where-Object {{ $_ -and $_.Trim().Length -gt 0 }} | Select-Object -Unique
+
+$before = @{{}}
 foreach ($c in $candidates) {{
   if (Test-Path -LiteralPath $c) {{
-    Start-Process -FilePath $c
+    try {{ $before[$c] = (Get-Item -LiteralPath $c).LastWriteTimeUtc.Ticks }} catch {{}}
+  }}
+}}
+
+# Silent install. /D= must be last and unquoted (NSIS rule) when forcing dir.
+$args = @('/S', '/NCRC')
+$priorDir = '{current_dir}'
+if ($priorDir -and (Test-Path -LiteralPath $priorDir)) {{
+  $args += "/D=$priorDir"
+  Log "Using /D=$priorDir"
+}}
+Log ("Starting NSIS: $installer $($args -join ' ')")
+$p = Start-Process -FilePath $installer -ArgumentList $args -PassThru -WindowStyle Hidden
+if (-not $p) {{
+  Log 'ERROR: Start-Process returned null'
+  exit 3
+}}
+try {{
+  Wait-Process -Id $p.Id -Timeout 420 -ErrorAction Stop
+}} catch {{
+  Log "Wait-Process: $($_.Exception.Message)"
+}}
+$exitCode = 0
+try {{ $exitCode = $p.ExitCode }} catch {{ $exitCode = -1 }}
+Log "NSIS exit code: $exitCode"
+Start-Sleep -Seconds 2
+
+# Prefer a binary that is new or newly written.
+$launch = $null
+foreach ($c in $candidates) {{
+  if (-not (Test-Path -LiteralPath $c)) {{ continue }}
+  $ticks = 0
+  try {{ $ticks = (Get-Item -LiteralPath $c).LastWriteTimeUtc.Ticks }} catch {{ continue }}
+  $old = $before[$c]
+  if (-not $old -or $ticks -gt $old) {{
+    $launch = $c
+    Log "Selected updated binary: $c"
     break
   }}
 }}
+if (-not $launch) {{
+  foreach ($c in $candidates) {{
+    if (Test-Path -LiteralPath $c) {{ $launch = $c; Log "Fallback binary: $c"; break }}
+  }}
+}}
+
+if ($launch) {{
+  Log "Relaunching: $launch"
+  Start-Process -FilePath $launch
+  Log 'Relaunch issued'
+  exit 0
+}}
+
+Log 'ERROR: no Remedy Desktop.exe found after install — not relaunching old build'
+exit 4
 "#
                 );
                 // Write a temp .ps1 so quoting of the installer path is reliable.
@@ -1129,29 +1215,54 @@ foreach ($c in $candidates) {{
                 std::fs::write(&ps1, ps.trim()).map_err(|e| {
                     format!("Cannot write update script: {e}")
                 })?;
-                let ps1_path = ps1.to_string_lossy().replace('"', "");
-                Command::new("powershell")
-                    .args([
-                        "-NoProfile",
-                        "-ExecutionPolicy",
-                        "Bypass",
-                        "-WindowStyle",
-                        "Hidden",
-                        "-File",
-                        &ps1_path,
-                    ])
-                    .creation_flags(
-                        DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW,
-                    )
-                    .stdin(Stdio::null())
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .spawn()
-                    .map_err(|e| {
+                let ps1_path = ps1.to_string_lossy().to_string();
+                // `cmd /c start` + BREAKAWAY_FROM_JOB: script outlives app.exit().
+                // Empty title after `start` is required so the path is not treated as title.
+                let schedule = |flags: u32| -> Result<(), String> {
+                    Command::new("cmd")
+                        .args([
+                            "/C",
+                            "start",
+                            "",
+                            "/MIN",
+                            "powershell.exe",
+                            "-NoProfile",
+                            "-ExecutionPolicy",
+                            "Bypass",
+                            "-WindowStyle",
+                            "Hidden",
+                            "-File",
+                            &ps1_path,
+                        ])
+                        .creation_flags(flags)
+                        .stdin(Stdio::null())
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null())
+                        .spawn()
+                        .map(|_| ())
+                        .map_err(|e| e.to_string())
+                };
+                let flags_breakaway = DETACHED_PROCESS
+                    | CREATE_NEW_PROCESS_GROUP
+                    | CREATE_NO_WINDOW
+                    | CREATE_BREAKAWAY_FROM_JOB;
+                let flags_basic =
+                    DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW;
+                if let Err(e1) = schedule(flags_breakaway) {
+                    log::warn!(
+                        "breakaway schedule failed ({e1}); retrying without BREAKAWAY_FROM_JOB"
+                    );
+                    schedule(flags_basic).map_err(|e2| {
                         format!(
-                            "Failed to schedule installer (try running the .exe from the release page): {e}"
+                            "Failed to schedule installer (try the .exe from GitHub Releases): {e1} / {e2}"
                         )
                     })?;
+                }
+                log::info!(
+                    "Update scheduled via detached script {}; log={}",
+                    ps1_path,
+                    log_path
+                );
             }
             #[cfg(not(target_os = "windows"))]
             {
@@ -1160,8 +1271,8 @@ foreach ($c in $candidates) {{
                     .map_err(|e| format!("Failed to launch installer: {e}"))?;
             }
 
-            // Exit immediately so file locks clear before the delayed installer runs.
-            thread::sleep(Duration::from_millis(250));
+            // Give the scheduler a beat to start, then exit so file locks clear.
+            thread::sleep(Duration::from_millis(600));
             app_for_thread.exit(0);
             Ok(())
         })();

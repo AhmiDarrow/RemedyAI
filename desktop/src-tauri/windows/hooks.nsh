@@ -36,14 +36,16 @@
   ; Autostart (if user enables) uses Startup folder only — never registry Run.
   DetailPrint "Removing legacy autostart registry entries if present..."
   nsExec::ExecToLog 'powershell -NoProfile -ExecutionPolicy Bypass -Command "foreach ($n in @(''RemedyDesktop'',''Remedy Desktop'',''remedy-desktop'')) { Remove-ItemProperty -Path ''HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'' -Name $n -ErrorAction SilentlyContinue }"'
-  ; One-click update: relaunch after files are written (normal for updaters; not silent persistence).
+  ; One-click update: relaunch after files are written.
+  ; Use `cmd /c start` so launch is independent of the installer process tree
+  ; (silent /S installs sometimes tear down children when NSIS exits).
   DetailPrint "Launching Remedy Desktop after install/update..."
   IfFileExists "$INSTDIR\Remedy Desktop.exe" 0 try_app_exe
-    Exec '"$INSTDIR\Remedy Desktop.exe"'
+    nsExec::ExecToLog 'cmd /c start "" "$INSTDIR\Remedy Desktop.exe"'
     Goto launch_done
   try_app_exe:
   IfFileExists "$INSTDIR\app.exe" 0 launch_done
-    Exec '"$INSTDIR\app.exe"'
+    nsExec::ExecToLog 'cmd /c start "" "$INSTDIR\app.exe"'
   launch_done:
 !macroend
 
