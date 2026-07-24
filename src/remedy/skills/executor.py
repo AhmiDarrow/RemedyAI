@@ -80,12 +80,15 @@ class SkillExecutor:
 
         try:
             from remedy.execution.process import create_hidden_subprocess_exec
+            from remedy.execution.sandbox import scrub_subprocess_env
 
+            # Never pass provider keys / REMEDY_* into skill scripts (same as bash sandbox).
+            child_env = scrub_subprocess_env(env)
             proc = await create_hidden_subprocess_exec(
                 *command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                env=env,
+                env=child_env,
                 cwd=str(script_path.parent),
             )
             result.started_at = datetime.now(UTC)

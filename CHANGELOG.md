@@ -4,6 +4,17 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [0.10.37] — 2026-07-24
 
+### Security (power preserved, outsiders hardened)
+
+- CORS `*` refused while API auth is on (blocks browser token theft).
+- Constant-time Bearer compare; optional `REMEDY_HTTP_BOOTSTRAP=0` for desktop-only tokens.
+- Refuse **auth-off + non-loopback bind** unless `REMEDY_ALLOW_INSECURE_BIND=1` (owner escape hatch).
+- Quarantined skills cannot `skill_activate` (prompt injection) until Trust; scripts already blocked.
+- Skill script env scrubbed of provider keys (same as bash sandbox).
+- Telegram ignores chats when allowlist empty unless `REMEDY_TELEGRAM_ALLOW_ALL=1`.
+- Desktop prefers Tauri IPC token before HTTP bootstrap; updater requires signed `latest.json` URL match.
+- **Auto-approve and full shell remain available** for the owner — no capability removed.
+
 ### Feature: Grok-style diff colors in chat
 
 - Unified diffs in chat code fences (`diff`/`patch` or auto-detected) show **red removals** and **green additions**, with muted meta/hunk lines.

@@ -1090,6 +1090,30 @@ def _cmd_serve(args) -> None:
         home,
         explicit=os.environ.get("REMEDY_API_KEY") or config.get("api_key") or None,
     )
+    host = str(getattr(args, "host", "127.0.0.1") or "127.0.0.1")
+    non_loopback = host not in ("127.0.0.1", "localhost", "::1", "0.0.0.0")
+    # 0.0.0.0 / non-loopback: owner power preserved only with explicit danger flag.
+    bind_all = host in ("0.0.0.0", "::", "[::]")
+    insecure_ok = str(os.environ.get("REMEDY_ALLOW_INSECURE_BIND", "")).strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    if (bind_all or non_loopback) and not api_key and not insecure_ok:
+        console.print(
+            "[bold red]Refusing to serve without auth on a non-loopback bind.[/bold red]\n"
+            f"  host={host!r} and API auth is disabled.\n"
+            "  Fix: leave auth on (default), or bind 127.0.0.1, or set\n"
+            "  REMEDY_ALLOW_INSECURE_BIND=1 if you really want an open LAN agent."
+        )
+        raise SystemExit(2)
+    if (bind_all or non_loopback) and not insecure_ok:
+        console.print(
+            f"[bold yellow]WARNING:[/yellow] Binding {host!r} exposes the agent on the network.\n"
+            "  Only processes with your API token can call tools — keep the token secret.\n"
+            "  Set REMEDY_ALLOW_INSECURE_BIND=1 to allow auth-off on that bind (not recommended)."
+        )
     app = create_app(
         runtime=runtime,
         gateway=gateway,
@@ -1104,7 +1128,7 @@ def _cmd_serve(args) -> None:
         )
     else:
         console.print(
-            "[yellow]API auth:[/yellow]  disabled (REMEDY_API_AUTH=0) — not recommended"
+            "[yellow]API auth:[/yellow]  disabled (REMEDY_API_AUTH=0) — loopback only recommended"
         )
 
     if not agent_config.llm_api_key:

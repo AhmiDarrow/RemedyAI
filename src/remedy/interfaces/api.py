@@ -8,6 +8,7 @@ Models: api_models.py  |  Helpers: api_support.py  |  Routes: create_app() below
 
 from __future__ import annotations
 
+import hmac
 import logging
 import os
 import sys
@@ -72,6 +73,7 @@ def create_app(
     )
 
     # CORS: REMEDY_CORS_ORIGINS env wins, then config.toml `cors_origins`, else safe defaults.
+    # NEVER allow "*" when API auth is enabled — any website could read loopback bootstrap.
     cors_origins_env = os.environ.get("REMEDY_CORS_ORIGINS", "").strip()
     if cors_origins_env == "*":
         cors_origins = ["*"]
@@ -98,9 +100,26 @@ def create_app(
                 "http://127.0.0.1:3000",
                 "http://localhost:5173",
                 "http://127.0.0.1:5173",
+                "http://127.0.0.1:7400",
+                "http://localhost:7400",
                 "tauri://localhost",
                 "http://tauri.localhost",
             ]
+    # Owner power: they may still set explicit origin lists. Star is blocked when
+    # api_key is set (browser could otherwise steal the bootstrap token).
+    if api_key and cors_origins == ["*"]:
+        logger.error(
+            "CORS '*' refused while API auth is enabled (would expose local-bootstrap). "
+            "Using loopback defaults. Set REMEDY_CORS_ORIGINS to explicit origins if needed."
+        )
+        cors_origins = [
+            "http://127.0.0.1:7400",
+            "http://localhost:7400",
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "tauri://localhost",
+            "http://tauri.localhost",
+        ]
     app.add_middleware(
         CORSMiddleware,
         allow_origins=cors_origins,
@@ -134,32 +153,57 @@ def create_app(
             if request.method in ("GET", "HEAD") and not path.startswith("/api"):
                 return await call_next(request)
             auth = request.headers.get("Authorization", "")
-            if auth != f"Bearer {api_key}":
-                # Also accept X-Remedy-Token for simple clients
-                alt = request.headers.get("X-Remedy-Token", "")
-                if alt != api_key:
-                    return JSONResponse(
-                        status_code=401,
-                        content={
-                            "error": "Unauthorized",
-                            "detail": "Missing or invalid Bearer token. "
-                            "Desktop loads it automatically; CLI: REMEDY_API_KEY.",
-                        },
-                    )
+            expected = f"Bearer {api_key}"
+            # Constant-time compare for Bearer
+            bearer_ok = hmac.compare_digest(auth.encode("utf-8"), expected.encode("utf-8"))
+            alt = request.headers.get("X-Remedy-Token", "")
+            alt_ok = bool(alt) and hmac.compare_digest(
+                alt.encode("utf-8"), api_key.encode("utf-8")
+            )
+            if not (bearer_ok or alt_ok):
+                return JSONResponse(
+                    status_code=401,
+                    content={
+                        "error": "Unauthorized",
+                        "detail": "Missing or invalid Bearer token. "
+                        "Desktop loads it automatically; CLI: REMEDY_API_KEY.",
+                    },
+                )
             return await call_next(request)
 
         @app.get("/api/auth/local-bootstrap")
         async def local_bootstrap(request: Request):
-            """Loopback-only: return the local API token for desktop/dev clients.
+            """Loopback-only: return the local API token for desktop/web clients.
 
             Not a remote auth endpoint — only 127.0.0.1 / ::1 may call this.
-            Token file is also user-ACL protected on disk.
+            Prefer Tauri ``get_local_api_token`` when available (no HTTP).
+            Same-user processes on this machine can always reach loopback; that is
+            the owner-power boundary (malware as your user already owns the box).
             """
             client = (request.client.host if request.client else "") or ""
             # Starlette TestClient uses host "testclient"
             if client not in ("127.0.0.1", "::1", "localhost", "testclient"):
                 return JSONResponse(status_code=403, content={"error": "loopback only"})
-            return {"token": api_key, "auth_required": True}
+            # Optional owner opt-out of HTTP bootstrap (desktop-only token channel)
+            if str(os.environ.get("REMEDY_HTTP_BOOTSTRAP", "1")).strip().lower() in (
+                "0",
+                "false",
+                "no",
+                "off",
+            ):
+                return JSONResponse(
+                    status_code=403,
+                    content={
+                        "error": "http_bootstrap_disabled",
+                        "detail": "Set REMEDY_HTTP_BOOTSTRAP=1 or use desktop IPC token.",
+                    },
+                )
+            logger.info("local-bootstrap issued to %s", client)
+            return {
+                "token": api_key,
+                "auth_required": True,
+                "note": "loopback-only; same Windows user can call this",
+            }
 
     @app.middleware("http")
     async def log_requests(request: Request, call_next):

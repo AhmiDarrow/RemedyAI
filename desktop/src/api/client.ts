@@ -35,6 +35,20 @@ export async function ensureApiToken(): Promise<string | null> {
   if (_tokenPromise) return _tokenPromise
 
   _tokenPromise = (async () => {
+    // Prefer OS/desktop IPC (no HTTP bootstrap) when running inside Tauri.
+    try {
+      if (inTauriShell()) {
+        const { invoke } = await import('@tauri-apps/api/core')
+        const t = await invoke<string>('get_local_api_token')
+        if (t) {
+          _apiToken = t
+          return _apiToken
+        }
+      }
+    } catch {
+      /* command may be missing on older builds — fall through to HTTP */
+    }
+    // Browser Web UI / dev: loopback-only bootstrap (same Windows user boundary).
     try {
       const r = await fetch(`${SERVER_URL}/api/auth/local-bootstrap`, {
         headers: { Accept: 'application/json' },
@@ -48,18 +62,6 @@ export async function ensureApiToken(): Promise<string | null> {
       }
     } catch {
       /* server may still be starting */
-    }
-    try {
-      if (inTauriShell()) {
-        const { invoke } = await import('@tauri-apps/api/core')
-        const t = await invoke<string>('get_local_api_token')
-        if (t) {
-          _apiToken = t
-          return _apiToken
-        }
-      }
-    } catch {
-      /* command may be missing on older builds */
     }
     // Allow retry on next call (do not cache permanent failure)
     _tokenPromise = null

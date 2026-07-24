@@ -45,8 +45,7 @@ The desktop app bundles the full Remedy server as a sidecar, so everything runs 
 | **Plan/Build mode** | Toggle plan (no tools) vs build |
 | **@file / /** | `@` file search; `/` slash-command menu while typing |
 | **First-run setup** | Provider, workspace, persona, optional always-ready |
-| **xAI Sign-in** | Device-code OAuth for Grok + console API key (per-provider secure store) |
-| **Providers** | OpenAI, Anthropic, Google, DeepSeek, xAI, Groq, Mistral, OpenRouter, Ollama; Custom under Advanced |
+| **Providers** | OpenAI, Anthropic, Google, DeepSeek, xAI, Groq, Mistral, OpenRouter, Ollama; Custom under Advanced. **OAuth** (device code) and/or API keys where supported; keys in the secure store (not plaintext config) |
 | **Settings** | Logo menu + panel: You & Agent, project, scope, harness, tool process, themes, density, accent |
 | **Access scope** | Project only / home / full user machine (opt-in) |
 | **Always ready** | Startup folder (not registry Run); tray Show / **Settings** / Updates / About / Quit; close-to-tray |

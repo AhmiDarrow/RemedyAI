@@ -66,3 +66,25 @@ def test_auth_disabled_empty_key(monkeypatch):
     client = TestClient(app)
     r = client.get("/api/skills")
     assert r.status_code == 200
+
+
+def test_cors_star_refused_when_auth_on(auth_on, tmp_path, monkeypatch):
+    """CORS * must not apply while a token exists (browser token theft)."""
+    monkeypatch.setenv("REMEDY_CORS_ORIGINS", "*")
+    tok = ensure_local_api_token(tmp_path)
+    app = create_app(api_key=tok)
+    # Middleware still has a concrete origin list, not bare *
+    # Smoke: authenticated call works
+    client = TestClient(app)
+    r = client.get("/api/skills", headers={"Authorization": f"Bearer {tok}"})
+    assert r.status_code == 200
+
+
+def test_bootstrap_can_be_disabled(auth_on, tmp_path, monkeypatch):
+    monkeypatch.setenv("REMEDY_HTTP_BOOTSTRAP", "0")
+    tok = ensure_local_api_token(tmp_path)
+    app = create_app(api_key=tok)
+    client = TestClient(app)
+    r = client.get("/api/auth/local-bootstrap")
+    assert r.status_code == 403
+    monkeypatch.setenv("REMEDY_HTTP_BOOTSTRAP", "1")

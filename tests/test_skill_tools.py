@@ -108,6 +108,17 @@ async def test_skill_run_quarantine_blocked(runtime):
 
 
 @pytest.mark.asyncio
+async def test_skill_activate_quarantine_blocked(runtime):
+    """Untrusted packs must not inject SKILL.md until the owner Trusts them."""
+    _reg_skill(runtime, "bad-import", quarantine=True)
+    res = await runtime.call_tool(
+        ToolCall(tool_name="skill_activate", arguments={"skill": "bad-import"})
+    )
+    text = str(res.data or res.error or "")
+    assert "quarantine" in text.lower() or "QUARANTINE" in text
+
+
+@pytest.mark.asyncio
 async def test_skill_run_requires_approval(runtime):
     _reg_skill(runtime, "runner", scripts=["scripts/run.py"])
     APPROVALS.set_mode("ask")

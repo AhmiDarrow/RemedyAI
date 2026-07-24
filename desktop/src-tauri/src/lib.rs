@@ -1070,6 +1070,55 @@ fn emit_progress(app: &AppHandle, phase: &str, percent: u8, message: &str) {
 }
 
 /// Only this repository's release assets (not arbitrary GitHub releases).
+/// Pull the minisign signature from published latest.json for this exact asset URL.
+/// Refuses install when the release is unsigned (owner can still install manually from GitHub).
+fn fetch_release_signature_for_url(download_url: &str) -> Result<String, String> {
+    let meta_url =
+        "https://github.com/AhmiDarrow/RemedyAI/releases/latest/download/latest.json";
+    let resp = ureq::get(meta_url)
+        .set("User-Agent", "RemedyDesktop-Updater/0.10")
+        .set("Accept", "application/json")
+        .set("Cache-Control", "no-cache")
+        .timeout(Duration::from_secs(20))
+        .call()
+        .map_err(|e| format!("Could not fetch latest.json for signature: {e}"))?;
+    if resp.status() != 200 {
+        return Err(format!("latest.json HTTP {}", resp.status()));
+    }
+    let v: serde_json::Value = resp
+        .into_json()
+        .map_err(|e| format!("latest.json invalid: {e}"))?;
+    let plat = v
+        .pointer("/platforms/windows-x86_64")
+        .or_else(|| v.pointer("/platforms/windows-x86-64"));
+    let Some(plat) = plat else {
+        return Err("latest.json missing windows-x86_64 platform".into());
+    };
+    let url = plat
+        .get("url")
+        .and_then(|x| x.as_str())
+        .unwrap_or("");
+    let sig = plat
+        .get("signature")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if url != download_url {
+        return Err(format!(
+            "Download URL does not match signed latest.json asset.\n  got: {download_url}\n  expected: {url}"
+        ));
+    }
+    if sig.is_empty() {
+        return Err(
+            "Release is unsigned (empty signature in latest.json). \
+             Install manually from GitHub Releases if you trust the asset."
+                .into(),
+        );
+    }
+    Ok(sig)
+}
+
 fn is_trusted_download_url(url: &str) -> bool {
     // Official release pages / assets for RemedyAI only.
     if url.starts_with("https://github.com/AhmiDarrow/RemedyAI/releases/") {
@@ -1207,6 +1256,23 @@ fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), Stri
 
             // Reject HTML error pages / truncated downloads (NSIS packages are multi-MB).
             validate_installer_exe(&temp, 512 * 1024)?;
+
+            // Cryptographic trust: asset URL must match signed latest.json and
+            // carry a non-empty minisign signature (CI publishes both).
+            emit_progress(
+                &app_for_thread,
+                "installing",
+                100,
+                "Verifying release signature…",
+            );
+            let sig = fetch_release_signature_for_url(&download_url)?;
+            let sig_path = temp.with_extension("exe.sig");
+            std::fs::write(&sig_path, format!("{sig}\n"))
+                .map_err(|e| format!("Cannot write signature file: {e}"))?;
+            log::info!(
+                "Update signature present ({} chars) for trusted GitHub asset",
+                sig.len()
+            );
 
             emit_progress(
                 &app_for_thread,

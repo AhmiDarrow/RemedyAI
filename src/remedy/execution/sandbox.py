@@ -14,6 +14,48 @@ from pathlib import Path
 from remedy.core.security import check_dangerous_command
 
 
+def scrub_subprocess_env(env: dict[str, str] | None = None) -> dict[str, str]:
+    """Copy env for child processes without provider keys / injection vectors.
+
+    Owner power is unchanged (tools still run); secrets are not leaked into
+    skill scripts or shell children.
+    """
+    import os as _os
+
+    safe_env = dict(env) if env is not None else dict(_os.environ)
+    drop_prefixes = (
+        "REMEDY_",
+        "OPENAI_",
+        "ANTHROPIC_",
+        "XAI_",
+        "DEEPSEEK_",
+        "GEMINI_",
+        "GOOGLE_",
+        "AWS_",
+        "AZURE_",
+    )
+    drop_exact = {
+        "LD_PRELOAD",
+        "LD_LIBRARY_PATH",
+        "PYTHONPATH",
+        "PYTHONSTARTUP",
+        "API_KEY",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "XAI_API_KEY",
+    }
+    for key in list(safe_env):
+        upper = key.upper()
+        if upper in drop_exact or any(upper.startswith(p) for p in drop_prefixes):
+            safe_env.pop(key, None)
+        elif (
+            ("API_KEY" in upper or "SECRET" in upper or "TOKEN" in upper)
+            and upper not in ("TERM", "TEMP", "TMP", "TMPDIR")
+        ):
+            safe_env.pop(key, None)
+    return safe_env
+
+
 @dataclass
 class ExecutionResult:
     exit_code: int
@@ -106,40 +148,7 @@ class SubprocessSandbox(Sandbox):
                 )
 
         # Always scrub secrets / injection vectors from child env.
-        # Start from parent env when caller did not pass a custom map.
-        import os as _os
-
-        safe_env = dict(env) if env is not None else dict(_os.environ)
-        drop_prefixes = (
-            "REMEDY_",
-            "OPENAI_",
-            "ANTHROPIC_",
-            "XAI_",
-            "DEEPSEEK_",
-            "GEMINI_",
-            "GOOGLE_",
-            "AWS_",
-            "AZURE_",
-        )
-        drop_exact = {
-            "LD_PRELOAD",
-            "LD_LIBRARY_PATH",
-            "PYTHONPATH",
-            "PYTHONSTARTUP",
-            "API_KEY",
-            "OPENAI_API_KEY",
-            "ANTHROPIC_API_KEY",
-            "XAI_API_KEY",
-        }
-        for key in list(safe_env):
-            upper = key.upper()
-            if upper in drop_exact or any(upper.startswith(p) for p in drop_prefixes):
-                safe_env.pop(key, None)
-            elif (
-                ("API_KEY" in upper or "SECRET" in upper or "TOKEN" in upper)
-                and upper not in ("TERM", "TEMP", "TMP", "TMPDIR")
-            ):
-                safe_env.pop(key, None)
+        safe_env = scrub_subprocess_env(env)
 
         try:
             from remedy.execution.process import create_hidden_subprocess_exec

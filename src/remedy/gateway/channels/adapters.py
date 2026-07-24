@@ -164,6 +164,18 @@ class TelegramChannel(ChannelAdapter):
 
         chat = msg.get("chat") or {}
         chat_id = str(chat.get("id", ""))
+        # Owner power: set chat_ids to your chats, or REMEDY_TELEGRAM_ALLOW_ALL=1
+        # for a deliberate open bot. Empty allowlist no longer accepts the world.
+        import os as _os
+
+        allow_all = str(_os.environ.get("REMEDY_TELEGRAM_ALLOW_ALL", "")).strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        )
+        if not self.chat_ids and not allow_all:
+            return
         if self.chat_ids and chat_id not in self.chat_ids:
             return
 

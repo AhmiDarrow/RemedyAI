@@ -512,6 +512,21 @@ class BasicRuntime(AgentRuntime):
                 ranked = reg.match_skills("", limit=10)
                 names = ", ".join(s.manifest.name for s, _ in ranked) or "(none)"
                 return f"Pass skill=. Available (top): {names}"
+            # Quarantine: do not inject untrusted SKILL.md into the model (prompt injection).
+            # Owner still has full power after Skills panel → Trust.
+            sk_obj = reg.get(nm)
+            if sk_obj is not None:
+                meta_q = sk_obj.manifest.metadata or {}
+                if meta_q.get("quarantine"):
+                    return format_tool_error(
+                        f"Skill '{nm}' is quarantined (imported pack)",
+                        code="QUARANTINE",
+                        tool_name="skill_activate",
+                        suggestion=(
+                            "Open Skills panel → Trust this skill first. "
+                            "Instruction load is blocked until then (scripts already blocked)."
+                        ),
+                    )
             body = reg.skill_body(nm, include_references=bool(include_references))
             if body is None:
                 # fuzzy match
