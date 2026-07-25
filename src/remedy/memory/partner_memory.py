@@ -44,7 +44,7 @@ _PREF_PATTERNS: list[tuple[re.Pattern[str], str, float]] = [
     ),
     (
         re.compile(
-            r"(?:please )?(?:always|never)\s+(.+?)(?:[.!?\n]|$)",
+            r"(?:please )?(?:always|never)\s+(?:use|prefer|do|run|deploy|commit|push|force-?push|merge|delete|share|store|save|open|install)\s+(.+?)(?:[.!?\n]|$)",
             re.I,
         ),
         "constraint",
@@ -52,7 +52,7 @@ _PREF_PATTERNS: list[tuple[re.Pattern[str], str, float]] = [
     ),
     (
         re.compile(
-            r"(?:don'?t|do not|never)\s+(?:ever\s+)?(.+?)(?:[.!?\n]|$)",
+            r"(?:don'?t|do not|never)\s+(?:ever\s+)?(use|prefer|run|deploy|commit|push|force-?push|merge|delete|share|store|save)\s+(.+?)(?:[.!?\n]|$)",
             re.I,
         ),
         "constraint",
@@ -130,8 +130,19 @@ def is_stable_fact_text(text: str) -> bool:
         return False
     if looks_like_secret(t):
         return False
+    # One-off task imperatives — not durable partner memory
+    if re.search(
+        r"(?i)\b(always|never)\s+(run|do|try|check|look|open|start)\s+(the\s+)?(tests?|build|server|app|this|that|it)\b",
+        t,
+    ):
+        return False
+    if re.search(r"(?i)\b(right now|this turn|in this session|for now)\b", t):
+        return False
     # Avoid pure paths as identity (unless preference-shaped)
     if re.fullmatch(r"[A-Za-z]:\\[^\n]{0,200}|/[^\s]{8,}", t):
+        return False
+    # Prefer multi-word durable statements
+    if len(t.split()) < 3 and not re.search(r"(?i)\b(prefer|typescript|python|rust)\b", t):
         return False
     # Avoid huge code dumps
     return not (t.count("\n") > 3 or t.count("{") > 2)
@@ -149,6 +160,9 @@ def extract_heuristic_facts(user_text: str) -> list[ExtractedFact]:
     for pattern, category, conf in _PREF_PATTERNS:
         for m in pattern.finditer(text):
             raw = (m.group(1) if m.lastindex else m.group(0)).strip()
+            # Prefer full match for multi-group patterns (e.g. never X Y)
+            if m.lastindex and m.lastindex >= 2:
+                raw = re.sub(r"\s+", " ", m.group(0).strip())
             raw = re.sub(r"\s+", " ", raw).strip(" \t\"'")
             if not is_stable_fact_text(raw):
                 # Store fuller phrase when capture is too short
@@ -163,6 +177,9 @@ def extract_heuristic_facts(user_text: str) -> list[ExtractedFact]:
                     fact_text = re.sub(r"\s+", " ", m.group(0).strip())[:MAX_FACT_LEN]
                 else:
                     fact_text = raw[:MAX_FACT_LEN]
+            # Final gate — reject ephemeral task chatter even if capture looked fine
+            if not is_stable_fact_text(fact_text):
+                continue
             key = normalize_fact_key(fact_text)
             if key in seen:
                 continue

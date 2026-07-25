@@ -2,6 +2,25 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.12.1] — 2026-07-25
+
+### Feature / UX: update & setup progress
+
+- **In-app update:** out-of-process progress host (`remedy-update-ui`) stays visible through silent NSIS install and relaunch (no blank desktop gap).
+- **First-run local model:** finish step shows live download %; **Use app while downloading** enters the app without waiting.
+
+### Feature / UX: comfort & safety
+
+- **Token ticker:** click the **$** amount to hide estimated cost (tokens remain); preference persists.
+- **Full access** amber chip in the status bar when scope is full / untrusted.
+- System note when tools run without a project jail.
+
+### Hardening
+
+- Partner Memory: stricter always/never gates; ignore one-off “always run the tests now” chatter.
+- Shell hard-block list: allow common Windows/dev inspection (`Select-String`, `git`, `rg`); soft-risk helpers for Start-Process / `$()`.
+- Docs/series strings **0.12.x**; update manual describes progress host.
+
 ## [0.12.0] — 2026-07-25
 
 ### Feature: Partner Memory — toward an AI that never forgets

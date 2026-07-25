@@ -150,6 +150,7 @@ export function StatusBar({
   const [status, setStatus] = useState<'connected' | 'disconnected' | 'checking'>('checking')
   const [alerts, setAlerts] = useState('')
   const [providerHealthTip, setProviderHealthTip] = useState<string | null>(null)
+  const [accessScope, setAccessScope] = useState<string>('')
   const [vision, setVision] = useState<VisionStatus | null>(null)
   const [hasCheckpoint, setHasCheckpoint] = useState(false)
 
@@ -204,6 +205,7 @@ export function StatusBar({
             if (p.pending_approvals > 0) bits.push(`${p.pending_approvals} approve`)
             if (p.open_goals > 0) bits.push(`${p.open_goals} goals`)
             setAlerts(bits.join(' · '))
+            setAccessScope(String(p.access_scope || ''))
             const ph = p.provider_health
             if (ph?.flaky || ph?.suggest_switch) {
               setProviderHealthTip(
@@ -219,6 +221,7 @@ export function StatusBar({
             if (!cancelled) {
               setAlerts('')
               setProviderHealthTip(null)
+              setAccessScope('')
             }
           }
         } else {
@@ -407,6 +410,29 @@ export function StatusBar({
             title="Time Travel — restore chat & files to an earlier step"
           >
             ⏱ Time travel
+          </button>
+        )}
+
+        {(accessScope === 'full' || accessScope === 'untrusted') && (
+          <button
+            type="button"
+            className="px-1.5 py-0.5 rounded flex-shrink-0 text-[10px] font-medium"
+            style={{
+              color: accessScope === 'full' ? '#92400e' : 'var(--warning)',
+              background:
+                accessScope === 'full'
+                  ? 'color-mix(in srgb, #f59e0b 22%, transparent)'
+                  : 'transparent',
+              border: '1px solid var(--border)',
+            }}
+            title={
+              accessScope === 'full'
+                ? 'No project folder — tools can reach your user home / full scope. Pick a project for a safer jail.'
+                : 'Untrusted scope — project-only tools + always ask.'
+            }
+            onClick={() => onTogglePanel('settings')}
+          >
+            {accessScope === 'full' ? 'Full access' : 'Untrusted'}
           </button>
         )}
 

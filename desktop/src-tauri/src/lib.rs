@@ -1230,7 +1230,33 @@ async fn check_desktop_update(app: AppHandle) -> Result<DesktopUpdateInfo, Strin
         .map_err(|e| format!("Update check task failed: {e}"))
 }
 
+fn update_status_path() -> PathBuf {
+    env::temp_dir().join("RemedyDesktop-Update-status.json")
+}
+
+/// Persist update phase for the out-of-process progress host (survives app.exit).
+fn write_update_status(phase: &str, percent: u8, message: &str, from: &str, to: &str) {
+    let path = update_status_path();
+    let body = format!(
+        "{{\n  \"phase\": {},\n  \"percent\": {},\n  \"message\": {},\n  \"from\": {},\n  \"to\": {},\n  \"updated_at\": {}\n}}\n",
+        serde_json::to_string(phase).unwrap_or_else(|_| "\"\"".into()),
+        percent,
+        serde_json::to_string(message).unwrap_or_else(|_| "\"\"".into()),
+        serde_json::to_string(from).unwrap_or_else(|_| "\"\"".into()),
+        serde_json::to_string(to).unwrap_or_else(|_| "\"\"".into()),
+        serde_json::to_string(
+            &std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs().to_string())
+                .unwrap_or_else(|_| "0".into())
+        )
+        .unwrap_or_else(|_| "\"0\"".into()),
+    );
+    let _ = std::fs::write(&path, body);
+}
+
 fn emit_progress(app: &AppHandle, phase: &str, percent: u8, message: &str) {
+    write_update_status(phase, percent, message, "", "");
     let _ = app.emit(
         "update-progress",
         UpdateProgress {
@@ -1240,6 +1266,103 @@ fn emit_progress(app: &AppHandle, phase: &str, percent: u8, message: &str) {
         },
     );
 }
+
+fn emit_progress_ver(
+    app: &AppHandle,
+    phase: &str,
+    percent: u8,
+    message: &str,
+    from: &str,
+    to: &str,
+) {
+    write_update_status(phase, percent, message, from, to);
+    let _ = app.emit(
+        "update-progress",
+        UpdateProgress {
+            phase: phase.to_string(),
+            percent,
+            message: message.to_string(),
+        },
+    );
+}
+
+/// Launch I-A progress host in TEMP (WinForms via packaged PS1). Breakaway so it
+/// survives app.exit(); never loads from install dir during NSIS overwrite.
+#[cfg(target_os = "windows")]
+fn launch_update_progress_ui(from: &str, to: &str) {
+    let status = update_status_path();
+    write_update_status("downloading", 0, "Starting update…", from, to);
+
+    // Prefer resource next to resources/ or from resource_dir; copy into TEMP.
+    let temp_ps1 = env::temp_dir().join("remedy-update-ui.ps1");
+    let candidates = [
+        // Dev / resource layout
+        PathBuf::from("windows/remedy-update-ui.ps1"),
+        PathBuf::from("src-tauri/windows/remedy-update-ui.ps1"),
+        env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.join("windows").join("remedy-update-ui.ps1")))
+            .unwrap_or_default(),
+        env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.join("remedy-update-ui.ps1")))
+            .unwrap_or_default(),
+        remedy_home()
+            .join("desktop")
+            .join("remedy-update-ui.ps1"),
+    ];
+    for c in candidates {
+        if c.as_os_str().is_empty() {
+            continue;
+        }
+        if c.is_file() {
+            let _ = std::fs::copy(&c, &temp_ps1);
+            break;
+        }
+    }
+    // If still missing, write embedded minimal host
+    if !temp_ps1.is_file() {
+        let _ = std::fs::write(
+            &temp_ps1,
+            include_str!("../windows/remedy-update-ui.ps1"),
+        );
+    }
+
+    let DETACHED_PROCESS: u32 = 0x00000008;
+    let CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
+    let CREATE_BREAKAWAY_FROM_JOB: u32 = 0x01000000;
+    let flags = DETACHED_PROCESS
+        | CREATE_NEW_PROCESS_GROUP
+        | CREATE_BREAKAWAY_FROM_JOB;
+    let status_s = status.to_string_lossy().to_string();
+    let ps1_s = temp_ps1.to_string_lossy().to_string();
+    let from_s = from.to_string();
+    let to_s = to.to_string();
+    let _ = Command::new("powershell.exe")
+        .args([
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-WindowStyle",
+            "Normal",
+            "-File",
+            &ps1_s,
+            "-StatusPath",
+            &status_s,
+            "-From",
+            &from_s,
+            "-To",
+            &to_s,
+        ])
+        .creation_flags(flags)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn();
+}
+
+#[cfg(not(target_os = "windows"))]
+fn launch_update_progress_ui(_from: &str, _to: &str) {}
 
 /// Only this repository's release assets (not arbitrary GitHub releases).
 /// Pull the minisign signature from published latest.json for this exact asset URL.
@@ -1338,7 +1461,7 @@ static UPDATE_IN_FLIGHT: std::sync::atomic::AtomicBool = std::sync::atomic::Atom
 /// Download the NSIS installer, run it silently (/S /UPDATE), exit so files can be replaced.
 /// NSIS POSTINSTALL relaunches only for silent/passive/update installs; this script also
 /// relaunches a binary whose mtime advanced as a belt-and-suspenders path.
-/// Progress is streamed to the UI via `update-progress` events.
+/// Progress: in-app events + out-of-process I-A host (status JSON) through install/relaunch.
 #[tauri::command]
 fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), String> {
     if download_url.is_empty() {
@@ -1352,15 +1475,23 @@ fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), Stri
     }
 
     let app_for_thread = app.clone();
+    let ver_from = app_version(&app);
+    let ver_to = desktop_update_result(ver_from.clone())
+        .latest_version
+        .clone();
     // Clone Arc before spawn — State<'_, T> cannot be borrowed inside the worker.
     let process_slot = app.state::<ServerState>().process.clone();
+    // I-A: progress host outlives this process (breakaway).
+    launch_update_progress_ui(&ver_from, &ver_to);
     thread::spawn(move || {
         let result = (|| -> Result<(), String> {
-            emit_progress(
+            emit_progress_ver(
                 &app_for_thread,
                 "downloading",
                 0,
                 "Connecting to update server…",
+                &ver_from,
+                &ver_to,
             );
 
             // Large installers: allow up to 10 minutes; still fail if connection stalls.
@@ -1471,11 +1602,13 @@ fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), Stri
             //    Then the detached installer can overwrite install-dir files.
             //    (Launching NSIS while we still hold the main EXE caused
             //    "Can't write …\remedy-desktop.exe" / partial aborts.)
-            emit_progress(
+            emit_progress_ver(
                 &app_for_thread,
                 "relaunch",
                 100,
                 "Closing Remedy and running installer…",
+                &ver_from,
+                &ver_to,
             );
 
             #[cfg(target_os = "windows")]
@@ -1504,18 +1637,39 @@ fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), Stri
                     .join("RemedyDesktop-Update.log")
                     .to_string_lossy()
                     .replace('\'', "''");
+                let status_path = env::temp_dir()
+                    .join("RemedyDesktop-Update-status.json")
+                    .to_string_lossy()
+                    .replace('\'', "''");
+                let ver_from_esc = ver_from.replace('\'', "''");
+                let ver_to_esc = ver_to.replace('\'', "''");
                 let ps = format!(
                     r#"
 $ErrorActionPreference = 'Continue'
 $log = '{log_path}'
+$statusPath = '{status_path}'
+$verFrom = '{ver_from_esc}'
+$verTo = '{ver_to_esc}'
 function Log($m) {{
   $line = ("{{0:u}} {{1}}" -f (Get-Date), $m)
   Add-Content -LiteralPath $log -Value $line -ErrorAction SilentlyContinue
+}}
+function Set-UpdateStatus($phase, $percent, $message) {{
+  $obj = [ordered]@{{
+    phase = $phase
+    percent = [int]$percent
+    message = $message
+    from = $verFrom
+    to = $verTo
+    updated_at = [string][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+  }}
+  ($obj | ConvertTo-Json -Compress) | Set-Content -LiteralPath $statusPath -Encoding UTF8 -ErrorAction SilentlyContinue
 }}
 Log 'Update script started'
 Log ("Installer: {install_path}")
 Log ("Prior exe: {current_exe_s}")
 Log ("Prior dir: {current_dir}")
+Set-UpdateStatus 'closing' 92 'Closing Remedy so files can update…'
 
 # Wait for the app process tree to die (file locks).
 Start-Sleep -Seconds 5
@@ -1531,6 +1685,7 @@ Start-Sleep -Seconds 3
 $installer = '{install_path}'
 if (-not (Test-Path -LiteralPath $installer)) {{
   Log 'ERROR: installer missing'
+  Set-UpdateStatus 'error' 0 'Installer file missing — try GitHub Releases.'
   exit 2
 }}
 
@@ -1559,10 +1714,12 @@ if ($priorDir -and (Test-Path -LiteralPath $priorDir)) {{
   $args += "/D=$priorDir"
   Log "Using /D=$priorDir"
 }}
+Set-UpdateStatus 'installing' 95 'Installing update (silent)…'
 Log ("Starting NSIS: $installer $($args -join ' ')")
 $p = Start-Process -FilePath $installer -ArgumentList $args -PassThru -WindowStyle Hidden
 if (-not $p) {{
   Log 'ERROR: Start-Process returned null'
+  Set-UpdateStatus 'error' 0 'Could not start installer.'
   exit 3
 }}
 try {{
@@ -1573,6 +1730,7 @@ try {{
 $exitCode = 0
 try {{ $exitCode = $p.ExitCode }} catch {{ $exitCode = -1 }}
 Log "NSIS exit code: $exitCode"
+Set-UpdateStatus 'verifying' 98 'Verifying install…'
 Start-Sleep -Seconds 2
 
 # Prefer a binary that is new or newly written.
@@ -1596,12 +1754,15 @@ if (-not $launch) {{
 
 if ($launch) {{
   Log "Relaunching: $launch"
+  Set-UpdateStatus 'relaunch' 100 'Relaunching Remedy…'
   Start-Process -FilePath $launch
   Log 'Relaunch issued'
+  Set-UpdateStatus 'done' 100 'Update complete'
   exit 0
 }}
 
 Log 'ERROR: no Remedy Desktop.exe found after install — not relaunching old build'
+Set-UpdateStatus 'error' 0 'Install finished but Remedy.exe was not found. Install from GitHub Releases.'
 exit 4
 "#
                 );

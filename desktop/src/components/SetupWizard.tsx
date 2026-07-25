@@ -61,7 +61,9 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
   const [visionStatus, setVisionStatus] = useState<VisionStatus | null>(null)
   const [visionInstallMsg, setVisionInstallMsg] = useState('')
   const [visionInstalling, setVisionInstalling] = useState(false)
+  const [visionInstallPct, setVisionInstallPct] = useState<number | null>(null)
   const visionPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const finishAbortRef = useRef(false)
 
   const stepIndex = STEPS.indexOf(step)
   const primaryProviders = useMemo(() => catalog.filter((p) => !p.advanced), [catalog])
@@ -280,125 +282,153 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
     }
   }, [step])
 
+  const saveSetupCore = useCallback(async () => {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core')
+      await invoke('set_launch_at_login', { enabled: launchAtLogin })
+      await invoke('set_desktop_prefs', {
+        close_to_tray: true,
+        start_in_tray: false,
+        skip_quit_server_warning: false,
+      })
+    } catch {
+      /* browser or missing command */
+    }
+    try {
+      const { clearApiToken, ensureApiToken } = await import('../api/client')
+      clearApiToken()
+      await ensureApiToken()
+    } catch {
+      /* updateSettings will surface the real error */
+    }
+    await updateSettings({
+      llm_provider: provider,
+      llm_model: model,
+      llm_base_url: baseUrl,
+      llm_api_key: apiKey || undefined,
+      project_path: projectPath || undefined,
+      persona: persona || undefined,
+      user_name: userName.trim() || undefined,
+      setup_completed: true,
+      launch_at_login: launchAtLogin,
+      start_in_tray: false,
+      close_to_tray: true,
+      vision_enabled: enableVision,
+      vision_model_id: 'qwen2.5-vl-3b',
+    })
+  }, [
+    apiKey,
+    provider,
+    model,
+    baseUrl,
+    projectPath,
+    persona,
+    userName,
+    launchAtLogin,
+    enableVision,
+  ])
+
+  /** Start vision download and poll with live UI; if backgroundOnly, return after start. */
+  const runVisionInstall = useCallback(
+    async (opts?: { backgroundOnly?: boolean }) => {
+      if (!enableVision || visionStatus?.installed) {
+        if (enableVision && visionStatus?.installed) {
+          setVisionInstallMsg('Local model ready — starts with Remedy.')
+          setVisionInstallPct(100)
+        }
+        return
+      }
+      setVisionInstalling(true)
+      setVisionInstallPct(0)
+      setVisionInstallMsg('Downloading local vision model (Qwen2.5-VL 3B)…')
+      finishAbortRef.current = false
+      try {
+        const preferCuda = Boolean(visionStatus?.health?.nvidia_detected)
+        const started = await installVision({ prefer_cuda: preferCuda })
+        if (
+          started.mode === 'already_installed'
+          || started.mode === 'local_files'
+          || (started.installed && started.ready)
+        ) {
+          setVisionInstallMsg('Local model ready — starts with Remedy.')
+          setVisionInstallPct(100)
+          setVisionInstalling(false)
+          return
+        }
+        if (opts?.backgroundOnly) {
+          setVisionInstallMsg(
+            'Download continues in the background — progress shows in the status bar.',
+          )
+          setVisionInstalling(false)
+          return
+        }
+        const deadline = Date.now() + 45 * 60 * 1000
+        while (Date.now() < deadline && !finishAbortRef.current) {
+          await new Promise((r) => setTimeout(r, 1500))
+          let vs: VisionStatus | null = null
+          try {
+            vs = await getVisionStatus()
+            setVisionStatus(vs)
+          } catch {
+            continue
+          }
+          const phase = (vs.progress?.phase || '').toLowerCase()
+          const pct =
+            vs.progress?.bytes_total && vs.progress.bytes_total > 0
+              ? Math.round(
+                  (100 * (vs.progress.bytes_done || 0)) / vs.progress.bytes_total,
+                )
+              : null
+          if (pct != null) {
+            setVisionInstallPct(pct)
+            setVisionInstallMsg(
+              `Downloading local model… ${pct}% — server starts when finished.`,
+            )
+          } else if (vs.progress?.message) {
+            setVisionInstallMsg(vs.progress.message)
+          }
+          if (vs.ready && vs.installed) {
+            setVisionInstallMsg('Local model ready — starts with Remedy.')
+            setVisionInstallPct(100)
+            break
+          }
+          if (phase === 'error') {
+            setVisionInstallMsg(
+              vs.progress?.error
+                || 'Download failed — open Settings → Local vision to retry.',
+            )
+            break
+          }
+          if (phase === 'cancelled') {
+            setVisionInstallMsg(
+              'Download cancelled — open Settings → Local vision to resume.',
+            )
+            break
+          }
+        }
+        if (Date.now() >= deadline) {
+          setVisionInstallMsg(
+            'Download still running in the background — you can use Remedy; local vision will activate when ready.',
+          )
+        }
+      } catch (ve) {
+        console.warn('Local model install start failed', ve)
+        setVisionInstallMsg(
+          'Could not start download — open Settings → Local vision to retry.',
+        )
+      } finally {
+        setVisionInstalling(false)
+      }
+    },
+    [enableVision, visionStatus?.installed, visionStatus?.health?.nvidia_detected],
+  )
+
   const handleFinish = useCallback(async () => {
     setSaving(true)
     setError('')
     try {
-      // Launch-at-login must NOT force start-in-tray (that made every boot look
-      // minimized even when the user never asked for tray-only startup).
-      try {
-        const { invoke } = await import('@tauri-apps/api/core')
-        await invoke('set_launch_at_login', { enabled: launchAtLogin })
-        await invoke('set_desktop_prefs', {
-          // Close-to-tray is fine default for always-ready; start visible by default.
-          close_to_tray: true,
-          start_in_tray: false,
-          skip_quit_server_warning: false,
-        })
-      } catch {
-        /* browser or missing command */
-      }
-      // Re-bootstrap auth then save — corrupt/wiped installs often need a fresh token.
-      try {
-        const { clearApiToken, ensureApiToken } = await import('../api/client')
-        clearApiToken()
-        await ensureApiToken()
-      } catch {
-        /* updateSettings will surface the real error */
-      }
-      await updateSettings({
-        llm_provider: provider,
-        llm_model: model,
-        llm_base_url: baseUrl,
-        llm_api_key: apiKey || undefined,
-        project_path: projectPath || undefined,
-        persona: persona || undefined,
-        user_name: userName.trim() || undefined,
-        setup_completed: true,
-        launch_at_login: launchAtLogin,
-        start_in_tray: false,
-        close_to_tray: true,
-        vision_enabled: enableVision,
-        vision_model_id: 'qwen2.5-vl-3b',
-      })
-      // First-run: download pinned Qwen (not in installer). Wait until ready (or error/timeout).
-      if (enableVision && !visionStatus?.installed) {
-        try {
-          setVisionInstalling(true)
-          setVisionInstallMsg(
-            'Downloading local vision model (Qwen2.5-VL 3B)…',
-          )
-          const preferCuda = Boolean(visionStatus?.health?.nvidia_detected)
-          const started = await installVision({ prefer_cuda: preferCuda })
-          if (
-            started.mode === 'already_installed'
-            || started.mode === 'local_files'
-            || (started.installed && started.ready)
-          ) {
-            setVisionInstallMsg('Local model ready — starts with Remedy.')
-          } else {
-            // Poll until ready / error / cancelled / timeout (~45 min for slow links)
-            const deadline = Date.now() + 45 * 60 * 1000
-            let lastPct = -1
-            while (Date.now() < deadline) {
-              await new Promise((r) => setTimeout(r, 2000))
-              let vs: VisionStatus | null = null
-              try {
-                vs = await getVisionStatus()
-                setVisionStatus(vs)
-              } catch {
-                continue
-              }
-              const phase = (vs.progress?.phase || '').toLowerCase()
-              const pct =
-                vs.progress?.bytes_total && vs.progress.bytes_total > 0
-                  ? Math.round(
-                      (100 * (vs.progress.bytes_done || 0)) / vs.progress.bytes_total,
-                    )
-                  : null
-              if (pct != null && pct !== lastPct) {
-                lastPct = pct
-                setVisionInstallMsg(
-                  `Downloading local model… ${pct}% — server starts when finished.`,
-                )
-              } else if (vs.progress?.message) {
-                setVisionInstallMsg(vs.progress.message)
-              }
-              if (vs.ready && vs.installed) {
-                setVisionInstallMsg('Local model ready — starts with Remedy.')
-                break
-              }
-              if (phase === 'error') {
-                setVisionInstallMsg(
-                  vs.progress?.error
-                    || 'Download failed — open Settings → Local vision to retry.',
-                )
-                break
-              }
-              if (phase === 'cancelled') {
-                setVisionInstallMsg(
-                  'Download cancelled — open Settings → Local vision to resume.',
-                )
-                break
-              }
-            }
-            if (Date.now() >= deadline) {
-              setVisionInstallMsg(
-                'Download still running in the background — you can use Remedy; local vision will activate when ready.',
-              )
-            }
-          }
-        } catch (ve) {
-          console.warn('Local model install start failed', ve)
-          setVisionInstallMsg(
-            'Could not start download — open Settings → Local vision to retry.',
-          )
-        } finally {
-          setVisionInstalling(false)
-        }
-      } else if (enableVision && visionStatus?.installed) {
-        setVisionInstallMsg('Local model ready — starts with Remedy.')
-      }
+      await saveSetupCore()
+      await runVisionInstall()
       onComplete()
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e)
@@ -410,19 +440,28 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
     } finally {
       setSaving(false)
     }
-  }, [
-    apiKey,
-    provider,
-    model,
-    baseUrl,
-    projectPath,
-    persona,
-    userName,
-    launchAtLogin,
-    enableVision,
-    visionStatus?.installed,
-    onComplete,
-  ])
+  }, [saveSetupCore, runVisionInstall, onComplete])
+
+  /** Save + start vision in background + enter app immediately. */
+  const handleUseAppNow = useCallback(async () => {
+    setSaving(true)
+    setError('')
+    try {
+      await saveSetupCore()
+      finishAbortRef.current = true
+      void runVisionInstall({ backgroundOnly: true })
+      onComplete()
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e)
+      setError(
+        msg && msg !== 'Failed to fetch'
+          ? `Failed to save settings: ${msg}`
+          : 'Failed to save settings. Is the local server running?',
+      )
+    } finally {
+      setSaving(false)
+    }
+  }, [saveSetupCore, runVisionInstall, onComplete])
 
   const handleSkip = useCallback(async () => {
     // Mark setup done so the wizard never blocks launch again.
@@ -965,54 +1004,115 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
 
           {step === 'finish' && (
             <div className="space-y-5">
-              <div className="text-center space-y-2">
-                <div className="text-2xl font-semibold" style={{ color: 'var(--accent)' }}>
-                  You&apos;re ready
+              {(saving || visionInstalling) && enableVision && !visionStatus?.installed ? (
+                <div className="space-y-4">
+                  <div className="text-center space-y-1">
+                    <div className="text-xl font-semibold" style={{ color: 'var(--accent)' }}>
+                      {visionInstalling ? 'Installing local model' : 'Saving setup…'}
+                    </div>
+                    <p className="text-sm" style={mutedStyles}>
+                      Qwen2.5-VL downloads once — progress stays visible (not frozen).
+                    </p>
+                  </div>
+                  <div
+                    className="h-2.5 rounded-full overflow-hidden"
+                    style={{ background: 'var(--bg-tertiary)' }}
+                  >
+                    <div
+                      className="h-full rounded-full transition-all duration-300"
+                      style={{
+                        width: `${Math.min(100, Math.max(2, visionInstallPct ?? (visionInstalling ? 8 : 2)))}%`,
+                        background: 'var(--accent)',
+                      }}
+                    />
+                  </div>
+                  <p className="text-sm text-center" style={{ color: 'var(--text-secondary)' }}>
+                    {visionInstallMsg
+                      || (saving && !visionInstalling ? 'Saving settings…' : 'Starting download…')}
+                    {visionInstallPct != null ? ` · ${visionInstallPct}%` : ''}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => void handleUseAppNow()}
+                    disabled={saving && !visionInstalling}
+                    className="w-full py-2.5 rounded-lg text-sm font-medium"
+                    style={{
+                      background: 'var(--bg-tertiary)',
+                      color: 'var(--text-primary)',
+                      border: '1px solid var(--border)',
+                    }}
+                  >
+                    Use app while downloading
+                  </button>
                 </div>
-                <p className="text-sm" style={mutedStyles}>
-                  Enter to send · F1 for help
-                  {enableVision
-                    ? visionStatus?.installed
-                      ? ' · Local model starts with Remedy'
-                      : ' · Local model download runs after finish'
-                    : ''}
-                </p>
-              </div>
-              <label
-                className="flex items-start gap-3 px-4 py-3 rounded-lg cursor-pointer text-left"
-                style={{
-                  background: 'var(--bg-tertiary)',
-                  border: '1px solid var(--border)',
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={launchAtLogin}
-                  onChange={(e) => setLaunchAtLogin(e.target.checked)}
-                  className="mt-1 w-4 h-4"
-                  style={{ accentColor: 'var(--accent)' }}
-                />
-                <span>
-                  <span className="block text-base font-medium" style={{ color: 'var(--text-primary)' }}>
-                    Start with Windows
-                  </span>
-                  <span className="block text-sm" style={mutedStyles}>
-                    Optional tray + warm server
-                  </span>
-                </span>
-              </label>
-              <button
-                onClick={handleFinish}
-                disabled={saving}
-                className="w-full py-3 rounded-lg text-base font-semibold transition-colors"
-                style={{
-                  background: saving ? 'var(--bg-tertiary)' : 'var(--accent)',
-                  color: saving ? 'var(--text-muted)' : '#fff',
-                  cursor: saving ? 'not-allowed' : 'pointer',
-                }}
-              >
-                {saving ? 'Saving…' : 'Start Chatting'}
-              </button>
+              ) : (
+                <>
+                  <div className="text-center space-y-2">
+                    <div className="text-2xl font-semibold" style={{ color: 'var(--accent)' }}>
+                      You&apos;re ready
+                    </div>
+                    <p className="text-sm" style={mutedStyles}>
+                      Enter to send · F1 for help
+                      {enableVision
+                        ? visionStatus?.installed
+                          ? ' · Local model starts with Remedy'
+                          : ' · Local model download shows progress on finish'
+                        : ''}
+                    </p>
+                  </div>
+                  {visionInstallMsg ? (
+                    <p className="text-sm text-center" style={{ color: 'var(--accent)' }}>
+                      {visionInstallMsg}
+                    </p>
+                  ) : null}
+                  <label
+                    className="flex items-start gap-3 px-4 py-3 rounded-lg cursor-pointer text-left"
+                    style={{
+                      background: 'var(--bg-tertiary)',
+                      border: '1px solid var(--border)',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={launchAtLogin}
+                      onChange={(e) => setLaunchAtLogin(e.target.checked)}
+                      className="mt-1 w-4 h-4"
+                      style={{ accentColor: 'var(--accent)' }}
+                    />
+                    <span>
+                      <span className="block text-base font-medium" style={{ color: 'var(--text-primary)' }}>
+                        Start with Windows
+                      </span>
+                      <span className="block text-sm" style={mutedStyles}>
+                        Optional tray + warm server
+                      </span>
+                    </span>
+                  </label>
+                  <button
+                    onClick={() => void handleFinish()}
+                    disabled={saving}
+                    className="w-full py-3 rounded-lg text-base font-semibold transition-colors"
+                    style={{
+                      background: saving ? 'var(--bg-tertiary)' : 'var(--accent)',
+                      color: saving ? 'var(--text-muted)' : '#fff',
+                      cursor: saving ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    {saving ? 'Working…' : 'Start Chatting'}
+                  </button>
+                  {enableVision && !visionStatus?.installed ? (
+                    <button
+                      type="button"
+                      onClick={() => void handleUseAppNow()}
+                      disabled={saving}
+                      className="w-full py-2 rounded-lg text-sm"
+                      style={{ color: 'var(--text-muted)' }}
+                    >
+                      Use app now — download model in background
+                    </button>
+                  ) : null}
+                </>
+              )}
             </div>
           )}
 

@@ -175,34 +175,45 @@ _DANGEROUS_COMMANDS = {
     "format", "shutdown", "reboot",
 }
 
-
-_DANGEROUS_PATTERNS = [
-    (r"(^|[\s;&|])(rm|del|erase|rmdir|rd)(\s|$)", "File deletion detected"),
+# Hard block — true wipe / privilege / injection class (always deny)
+_HARD_DANGEROUS_PATTERNS = [
     (r"(^|[\s;&|])format(\s|$)", "Filesystem format"),
     (r"(^|[\s;&|])shutdown(\s|$)", "System shutdown"),
     (r"(^|[\s;&|])reboot(\s|$)", "System reboot"),
     # Unix recursive wipe of root/home
-    (r"rm\s+(-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*|-[a-zA-Z]*f[a-zA-Z]*r[a-zA-Z]*)\s+(/|~|\$home)", "Recursive delete of system path"),
+    (
+        r"rm\s+(-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*|-[a-zA-Z]*f[a-zA-Z]*r[a-zA-Z]*)\s+(/|~|\$home)",
+        "Recursive delete of system path",
+    ),
     (r"rm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+)*(/|~|\$home|c:\\)", "Recursive delete of system path"),
-    # Windows recursive wipe
+    # Windows recursive wipe (forced flags)
     (r"del\s+/[fqs]+\s+", "Windows forced recursive delete"),
     (r"rmdir\s+/s(\s+/q)?\s+", "Windows recursive rmdir"),
     (r"rd\s+/s(\s+/q)?\s+", "Windows recursive rd"),
-    # NOTE: bare `2>/dev/null` is common in dev scripts — not treated as dangerous alone.
     (r"\|\s*(sh|bash|pwsh|powershell|cmd)(\s|$)", "Shell pipe injection"),
     (r">\s*/dev/", "Device write"),
+    (r"invoke-expression|iex\s+", "PowerShell Invoke-Expression"),
+    (r"remove-item\s+.*-recurse", "PowerShell recursive delete"),
+    # Bare delete tools only when clearly recursive/forced — not every "del" substring in prose
+    (r"(^|[\s;&|])(rm|del|erase)\s+(-[a-zA-Z]*[rf][a-zA-Z]*\s+)+", "Forced file deletion"),
+]
+
+# Soft signals — used by callers that want ask-mode hints; not hard-blocked here
+# (start-process, $(), backticks are common in legitimate Windows/dev scripts)
+_SOFT_DANGEROUS_PATTERNS = [
+    (r"start-process\s+", "Process launch"),
     (r"`[^`]+`", "Command substitution"),
     (r"\$\([^)]+\)", "Command substitution"),
-    (r"invoke-expression|iex\s+", "PowerShell Invoke-Expression"),
-    (r"start-process\s+", "Process launch"),
-    (r"remove-item\s+.*-recurse", "PowerShell recursive delete"),
+    (r"(^|[\s;&|])(rm|del|erase|rmdir|rd)(\s|$)", "File deletion detected"),
 ]
 
 
 def check_dangerous_command(command: list[str]) -> str | None:
-    """Check a command list for dangerous operations.
+    """Hard security gate for destructive / privilege operations.
 
-    Returns a warning string if dangerous, None if safe.
+    Returns a warning string if the command must be blocked, else None.
+    Soft risks (Start-Process, $(), simple del) are intentionally not hard-blocked
+    so normal Windows/dev inspection works; approval mode still covers bash_exec.
     """
     if not command:
         return None
@@ -215,8 +226,21 @@ def check_dangerous_command(command: list[str]) -> str | None:
         return f"Dangerous command: {base}"
 
     full = " ".join(str(a) for a in command).lower()
-    for pattern, reason in _DANGEROUS_PATTERNS:
+    for pattern, reason in _HARD_DANGEROUS_PATTERNS:
         if re.search(pattern, full, flags=re.IGNORECASE):
             return f"{reason}: {full[:100]}"
 
+    return None
+
+
+def check_soft_dangerous_command(command: list[str]) -> str | None:
+    """Advisory risk signal (not a hard block). For logging / future ask-mode."""
+    if not command:
+        return None
+    if check_dangerous_command(command):
+        return None  # hard already covers it
+    full = " ".join(str(a) for a in command).lower()
+    for pattern, reason in _SOFT_DANGEROUS_PATTERNS:
+        if re.search(pattern, full, flags=re.IGNORECASE):
+            return f"{reason}: {full[:100]}"
     return None

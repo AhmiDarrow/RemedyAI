@@ -73,10 +73,12 @@ You should not need to manage this. For philosophy, see
 Remedy quietly keeps a small **Partner Memory** block so it feels like the same
 partner next session:
 
-- Prefer / always / never phrasing in chat is distilled automatically when safe.  
+- Prefer / always / never phrasing in chat is distilled automatically when safe
+  (one-off “always run the tests now” chatter is ignored).  
 - High-confidence facts are injected every turn (size-capped so the model stays sharp).  
-- `/whoami` lists what it knows; `/forget <text>` removes a mistake.  
-- Secrets (API keys, passwords) are **never** auto-stored.
+- `/whoami` lists what it knows; `/forget <text>` removes a mistake; `/pin` keeps a fact always ready.  
+- Secrets (API keys, passwords) are **never** auto-stored.  
+- Click the **$** on the usage ticker to hide estimated cost (tokens stay visible).
 
 You do not need to configure anything. `/remember` is still the explicit pin when
 you want certainty.

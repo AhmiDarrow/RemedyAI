@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Remedy Desktop",
-  "version": "0.12.0",
+  "version": "0.12.1",
   "identifier": "com.remedy.desktop",
   "build": {
     "frontendDist": "../dist",
@@ -60,7 +60,8 @@
       "../bin/remedy-desktop.exe": "remedy-desktop.exe",
       "../dist": "webui",
       "windows/uninstall_options.ps1": "windows/uninstall_options.ps1",
-      "windows/uninstall_wipe.ps1": "windows/uninstall_wipe.ps1"
+      "windows/uninstall_wipe.ps1": "windows/uninstall_wipe.ps1",
+      "windows/remedy-update-ui.ps1": "windows/remedy-update-ui.ps1"
     },
     "windows": {
       "nsis": {

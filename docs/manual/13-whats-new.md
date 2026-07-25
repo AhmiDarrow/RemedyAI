@@ -2,7 +2,14 @@
 
 High-level product notes for owners. Full detail lives in repo `CHANGELOG.md`.
 
-Ship **one** installer/tag for the current series (**v0.12.0**).
+Ship **one** installer/tag for the current series (**v0.12.1**).
+
+## 0.12.1 — Progress that doesn’t disappear
+
+- Update install keeps a **Remedy Update** progress window through silent install + relaunch.
+- First-run vision download shows **live %** on finish; use the app while it downloads.
+- Click ticker **$** to hide cost; **Full access** chip when no project jail.
+- Safer shell hard-blocks for normal Windows greps; tighter Partner Memory gates.
 
 ## 0.12.0 — Partner Memory · work alone
 

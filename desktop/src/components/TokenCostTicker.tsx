@@ -3,6 +3,7 @@ import type { UsageSnapshot } from '../utils/tokenCost'
 import { formatCost, formatTokens } from '../utils/tokenCost'
 
 const HIDE_KEY = 'remedy.tokenTicker.hidden'
+const HIDE_COST_KEY = 'remedy.tokenTicker.hideCost'
 
 interface TokenCostTickerProps {
   /** Live run usage (current stream). */
@@ -22,6 +23,7 @@ interface TokenCostTickerProps {
 /**
  * Subtle, hideable live ticker for tokens + estimated API cost.
  * Preference persists in localStorage.
+ * Click the $ amount to hide cost only (tokens stay visible).
  */
 export function TokenCostTicker({
   run,
@@ -38,6 +40,13 @@ export function TokenCostTicker({
       return false
     }
   })
+  const [hideCost, setHideCost] = useState(() => {
+    try {
+      return localStorage.getItem(HIDE_COST_KEY) === '1'
+    } catch {
+      return false
+    }
+  })
   const [expanded, setExpanded] = useState(false)
 
   useEffect(() => {
@@ -48,6 +57,14 @@ export function TokenCostTicker({
     }
   }, [hidden])
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(HIDE_COST_KEY, hideCost ? '1' : '0')
+    } catch {
+      /* */
+    }
+  }, [hideCost])
+
   const runTok = run?.total_tokens ?? 0
   const runCost = run?.estimated_cost_usd ?? 0
   const sessTok = session?.total_tokens ?? 0
@@ -55,6 +72,8 @@ export function TokenCostTicker({
   const src = run?.source === 'provider' ? 'API' : 'est.'
   const hasData = runTok > 0 || sessTok > 0 || streaming
   const isSidebar = placement === 'sidebar'
+  const displayTok = streaming ? runTok : sessTok || runTok
+  const displayCost = streaming ? runCost : sessCost || runCost
 
   if (hidden) {
     return (
@@ -117,7 +136,7 @@ export function TokenCostTicker({
           type="button"
           className="flex-1 text-left min-w-0"
           onClick={() => setExpanded((e) => !e)}
-          title="Usage & cost details"
+          title="Usage details"
         >
           <div className="flex items-center gap-1.5 flex-wrap">
             <span
@@ -133,11 +152,39 @@ export function TokenCostTicker({
             </span>
             {hasData ? (
               <>
-                <span>{formatTokens(streaming ? runTok : sessTok || runTok)} tok</span>
-                <span style={{ color: 'var(--text-muted)' }}>·</span>
-                <span style={{ color: 'var(--accent)' }}>
-                  {formatCost(streaming ? runCost : sessCost || runCost)}
-                </span>
+                <span>{formatTokens(displayTok)} tok</span>
+                {hideCost ? (
+                  <button
+                    type="button"
+                    className="px-1 rounded"
+                    style={{ color: 'var(--text-muted)', fontSize: 10 }}
+                    title="Show estimated cost"
+                    aria-label="Show estimated cost"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setHideCost(false)
+                    }}
+                  >
+                    $·
+                  </button>
+                ) : (
+                  <>
+                    <span style={{ color: 'var(--text-muted)' }}>·</span>
+                    <button
+                      type="button"
+                      className="rounded px-0.5"
+                      style={{ color: 'var(--accent)', fontWeight: 500 }}
+                      title="Hide cost (tokens stay visible)"
+                      aria-label="Hide estimated cost"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setHideCost(true)
+                      }}
+                    >
+                      {formatCost(displayCost)}
+                    </button>
+                  </>
+                )}
                 {streaming && (
                   <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>{src}</span>
                 )}
@@ -168,24 +215,35 @@ export function TokenCostTicker({
             <span className="text-right">
               in {formatTokens(run?.prompt_tokens ?? 0)} · out{' '}
               {formatTokens(run?.completion_tokens ?? 0)}
-              <br />
-              {formatCost(runCost)}
+              {!hideCost && (
+                <>
+                  <br />
+                  {formatCost(runCost)}
+                </>
+              )}
             </span>
           </div>
           <div className="flex justify-between gap-2">
             <span style={{ color: 'var(--text-muted)' }}>Session</span>
             <span>
-              {formatTokens(sessTok)} · {formatCost(sessCost)}
+              {formatTokens(sessTok)}
+              {!hideCost && <> · {formatCost(sessCost)}</>}
             </span>
           </div>
           {(model || provider) && (
-            <div style={{ color: 'var(--text-muted)' }} className="truncate" title={[provider, model].filter(Boolean).join(' / ')}>
+            <div
+              style={{ color: 'var(--text-muted)' }}
+              className="truncate"
+              title={[provider, model].filter(Boolean).join(' / ')}
+            >
               {[provider, model].filter(Boolean).join(' / ')}
               {run?.source === 'provider' ? ' · API' : ' · est.'}
             </div>
           )}
           <div style={{ color: 'var(--text-muted)', lineHeight: 1.35 }}>
-            Estimates use list prices — not a billing invoice.
+            {hideCost
+              ? 'Cost hidden — click $· to show estimates. Not a billing invoice.'
+              : 'Estimates use list prices — not a billing invoice. Click $ to hide.'}
           </div>
         </div>
       )}

@@ -126,6 +126,25 @@ class TestSecurity:
         warn = check_dangerous_command(["echo", "hi", "2>/dev/null"])
         assert warn is None or "Error output suppression" not in warn
 
+    def test_allows_select_string_and_git_inspection(self):
+        # Dev workflows must not hard-block (soft risks only)
+        assert check_dangerous_command(
+            ["powershell", "-Command", "Select-String -Path .\\*.py -Pattern danger"]
+        ) is None
+        assert check_dangerous_command(["git", "status"]) is None
+        assert check_dangerous_command(["rg", "TODO", "src"]) is None
+
+    def test_soft_flags_start_process(self):
+        from remedy.core.security import check_soft_dangerous_command
+
+        soft = check_soft_dangerous_command(
+            ["powershell", "-Command", "Start-Process notepad"]
+        )
+        assert soft is not None
+        assert check_dangerous_command(
+            ["powershell", "-Command", "Start-Process notepad"]
+        ) is None
+
     def test_safe_path_blocks_traversal(self, tmp_path):
         with pytest.raises(SecurityError):
             safe_path("..", base_dir=tmp_path)

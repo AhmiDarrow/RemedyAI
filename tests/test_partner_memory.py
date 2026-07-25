@@ -40,6 +40,11 @@ def test_extract_prefer_and_never():
     assert any(f.confidence >= 0.85 for f in facts)
 
 
+def test_noisy_always_run_tests_not_stored():
+    facts = extract_heuristic_facts("always run the tests now")
+    assert facts == []
+
+
 def test_extract_name():
     facts = extract_heuristic_facts("Hi, my name is Alex.")
     assert facts

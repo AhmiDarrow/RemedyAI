@@ -4,7 +4,7 @@
 
 **Remedy Desktop** is the recommended way to use Remedy — your personal AI
 partner for knowledge, design, code, and get-it-done work (not a medical or
-clinical product). Current package series: **0.11.x** (see root `CHANGELOG.md`).
+clinical product). Current package series: **0.12.x** (see root `CHANGELOG.md`).
 
 ### Local model packaging (0.11+)
 

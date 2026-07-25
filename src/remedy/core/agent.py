@@ -2611,6 +2611,14 @@ class BasicRuntime(AgentRuntime):
                 )
                 if block:
                     parts.append(block)
+                # Full-scope reminder (no project jail) — once per context build
+                if self.project_path_is_unset() or self.access_scope() == "full":
+                    parts.append(
+                        "Access scope: full (no project folder). "
+                        "Tools are not limited to a project jail — prefer "
+                        "asking the user to pick a folder for focused coding, "
+                        "and avoid broad writes outside the active task."
+                    )
 
         # Session Brief (Memory Harness L2) when present on agent
         with suppress(Exception):

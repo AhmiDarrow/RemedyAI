@@ -530,7 +530,7 @@ git tag vX.Y.Z && git push origin vX.Y.Z
 # Optional: publish Python package — uv build && uv publish
 ```
 
-See [CHANGELOG.md](CHANGELOG.md) for release notes. Current desktop series: **0.11.x**.
+See [CHANGELOG.md](CHANGELOG.md) for release notes. Current desktop series: **0.12.x**.
 
 **Signing (required for in-app auto-update):**
 
@@ -562,4 +562,4 @@ See [docs/DESKTOP.md](docs/DESKTOP.md) for API contract and full desktop notes.
 
 ## License
 
-Custom proprietary license — see [LICENSE](./LICENSE). Non-commercial personal use only; commercial use and redistribution require written permission.
+Custom proprietary license — see [LICENSE](./LICENSE). Non-commercial personal use only; commercial use and redistribution require written permission. The GitHub source is published for transparency and issue tracking; contributions are welcome under the same license terms unless otherwise agreed in writing.
