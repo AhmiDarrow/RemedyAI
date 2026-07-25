@@ -370,6 +370,16 @@ const MessageBubble = memo(function MessageBubble({
           <div className="message-body chat-bubble-body">
             {displayText ? (
               <>
+                {/* Plain text while streaming — markdown only after finalize (snappier). */}
+                {isStreamingPartial && !isUser && !isSystem ? (
+                  <div
+                    className="whitespace-pre-wrap break-words"
+                    style={{ fontFamily: 'inherit', lineHeight: 1.5 }}
+                  >
+                    {displayText}
+                    <span className="stream-caret opacity-60">▍</span>
+                  </div>
+                ) : (
                 <ReactMarkdown
                   remarkPlugins={[remarkGfm]}
                   components={{
@@ -428,7 +438,7 @@ const MessageBubble = memo(function MessageBubble({
                 >
                   {displayText}
                 </ReactMarkdown>
-                {isStreamingPartial && <span className="stream-caret" aria-hidden />}
+                )}
               </>
             ) : (
               <span style={{ color: 'var(--text-muted)' }}>

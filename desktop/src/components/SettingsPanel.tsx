@@ -146,6 +146,8 @@ export function SettingsPanel({
   const [connectedList, setConnectedList] = useState<ConnectedProvider[]>([])
   const [providerSearch, setProviderSearch] = useState('')
   const [enabledProviders, setEnabledProviders] = useState<string[] | null>(null)
+  const [enabledModels, setEnabledModels] = useState<Record<string, string[]>>({})
+  const [catalogExpand, setCatalogExpand] = useState<string | null>(null)
   const [skillsBudget, setSkillsBudget] = useState(80)
 
   const primaryProviders = useMemo(
@@ -247,6 +249,9 @@ export function SettingsPanel({
       if (connected?.providers) setConnectedList(connected.providers)
       if (s.enabled_providers !== undefined) {
         setEnabledProviders(s.enabled_providers)
+      }
+      if (s.enabled_models && typeof s.enabled_models === 'object') {
+        setEnabledModels(s.enabled_models as Record<string, string[]>)
       }
       if (s.skills_active_budget) setSkillsBudget(s.skills_active_budget)
       setSettings(s)
@@ -486,6 +491,9 @@ export function SettingsPanel({
     }
     if (enabledProviders !== null) {
       updates.enabled_providers = enabledProviders
+    }
+    if (Object.keys(enabledModels).length > 0) {
+      updates.enabled_models = enabledModels
     }
     if (apiKey) {
       updates.llm_api_key = apiKey
@@ -809,41 +817,98 @@ export function SettingsPanel({
                       enabledProviders === null
                         ? true
                         : enabledProviders.includes(p.id)
+                    const models = p.models || []
+                    const modelAllow = enabledModels[p.id]
+                    const expanded = catalogExpand === p.id
                     return (
-                      <label
+                      <div
                         key={p.id}
-                        className="flex items-center gap-2 rounded px-2 py-1.5"
+                        className="rounded px-2 py-1.5"
                         style={{
                           background: 'var(--bg-secondary)',
                           border: '1px solid var(--border)',
                           opacity: conn ? 1 : 0.65,
                         }}
                       >
-                        <input
-                          type="checkbox"
-                          checked={isEnabled}
-                          onChange={(e) => {
-                            const on = e.target.checked
-                            setEnabledProviders((prev) => {
-                              const base =
-                                prev
-                                ?? (connectedList.length
-                                  ? connectedList.map((x) => x.id)
-                                  : catalog.map((x) => x.id))
-                              if (on) return [...new Set([...base, p.id])]
-                              return base.filter((id) => id !== p.id)
-                            })
-                          }}
-                        />
-                        <span className="flex-1 min-w-0">
-                          <span className="font-medium">{p.name}</span>
-                          <span className="block text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                            {conn ? 'connected' : 'not connected'}
-                            {' · '}
-                            {(p.models || []).length} models
-                          </span>
-                        </span>
-                      </label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={isEnabled}
+                            onChange={(e) => {
+                              const on = e.target.checked
+                              setEnabledProviders((prev) => {
+                                const base =
+                                  prev
+                                  ?? (connectedList.length
+                                    ? connectedList.map((x) => x.id)
+                                    : catalog.map((x) => x.id))
+                                if (on) return [...new Set([...base, p.id])]
+                                return base.filter((id) => id !== p.id)
+                              })
+                            }}
+                          />
+                          <button
+                            type="button"
+                            className="flex-1 min-w-0 text-left"
+                            onClick={() =>
+                              setCatalogExpand((cur) => (cur === p.id ? null : p.id))
+                            }
+                          >
+                            <span className="font-medium">{p.name}</span>
+                            <span className="block text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                              {conn ? 'connected' : 'not connected'}
+                              {' · '}
+                              {models.length} models
+                              {modelAllow ? ` · ${modelAllow.length} enabled` : ''}
+                              {expanded ? ' · hide models' : ' · models'}
+                            </span>
+                          </button>
+                        </div>
+                        {expanded && models.length > 0 && (
+                          <div className="mt-1.5 ml-5 space-y-0.5 max-h-28 overflow-y-auto">
+                            {models.map((m) => {
+                              const mid = m.id
+                              const checked =
+                                !modelAllow || modelAllow.length === 0
+                                  ? true
+                                  : modelAllow.includes(mid)
+                              return (
+                                <label
+                                  key={mid}
+                                  className="flex items-center gap-1.5 text-[10px]"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={(e) => {
+                                      const on = e.target.checked
+                                      setEnabledModels((prev) => {
+                                        const allIds = models.map((x) => x.id)
+                                        const cur =
+                                          prev[p.id] && prev[p.id]!.length > 0
+                                            ? [...prev[p.id]!]
+                                            : [...allIds]
+                                        let next: string[]
+                                        if (on) next = [...new Set([...cur, mid])]
+                                        else next = cur.filter((id) => id !== mid)
+                                        // empty list means "all" — store full set minus unchecked
+                                        const out = { ...prev }
+                                        if (next.length === allIds.length) {
+                                          delete out[p.id]
+                                        } else {
+                                          out[p.id] = next
+                                        }
+                                        return out
+                                      })
+                                    }}
+                                  />
+                                  <span className="truncate">{m.name || mid}</span>
+                                </label>
+                              )
+                            })}
+                          </div>
+                        )}
+                      </div>
                     )
                   })}
               </div>

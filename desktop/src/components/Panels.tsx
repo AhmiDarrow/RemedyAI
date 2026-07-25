@@ -409,6 +409,10 @@ export function SkillsPanel({
   const [learning, setLearning] = useState<LearningSummary | null>(null)
   const [loading, setLoading] = useState(false)
   const [filter, setFilter] = useState('')
+  /** all | active | learned | quarantine | archived */
+  const [statusFilter, setStatusFilter] = useState<
+    'all' | 'active' | 'learned' | 'quarantine' | 'archived'
+  >('all')
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -485,6 +489,33 @@ export function SkillsPanel({
       setBusy(null)
     }
   }
+
+  const archiveSkill = async (name: string, archive: boolean) => {
+    setBusy(name)
+    setError(null)
+    try {
+      const { setSkillStatus } = await import('../api/skills')
+      await setSkillStatus(name, archive ? 'archived' : 'active', {
+        force_promote: !archive,
+        quarantine: false,
+      })
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Archive update failed')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const visibleSkills = skills.filter((s) => {
+    const st = (s.status || '').toLowerCase()
+    if (statusFilter === 'all') return st !== 'archived' // hide archived from default list
+    if (statusFilter === 'active') return st === 'active' && !s.quarantine
+    if (statusFilter === 'learned') return Boolean(s.auto_generated)
+    if (statusFilter === 'quarantine') return Boolean(s.quarantine)
+    if (statusFilter === 'archived') return st === 'archived'
+    return true
+  })
 
   const toggleQuarantine = async (name: string, on: boolean) => {
     setBusy(name)
@@ -667,9 +698,34 @@ export function SkillsPanel({
           {packMsg}
         </div>
       )}
+      <div className="mb-2 flex flex-wrap gap-1">
+        {(
+          [
+            ['all', 'Active set'],
+            ['active', 'Promoted'],
+            ['learned', 'Learned'],
+            ['quarantine', 'Quarantine'],
+            ['archived', 'Archived'],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setStatusFilter(id)}
+            className="text-[10px] px-2 py-0.5 rounded"
+            style={{
+              background: statusFilter === id ? 'var(--accent)' : 'var(--bg-tertiary)',
+              color: statusFilter === id ? '#fff' : 'var(--text-secondary)',
+              border: '1px solid var(--border)',
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
       <p className="mb-2" style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>
-        Human overrides: force-promote early skills or quarantine failing ones.
-        Edit SKILL.md in the CodeMirror editor. Export packs for sharing.
+        Human overrides: force-promote, quarantine, or archive for large libraries (100+).
+        Archived skills stay on disk but leave the hot catalog.
       </p>
       {learning && (
         <div
@@ -755,10 +811,12 @@ export function SkillsPanel({
       )}
       {loading ? (
         <div style={{ color: 'var(--text-muted)' }}>Loading...</div>
-      ) : skills.length === 0 ? (
-        <div style={{ color: 'var(--text-muted)' }}>No skills loaded</div>
+      ) : visibleSkills.length === 0 ? (
+        <div style={{ color: 'var(--text-muted)' }}>
+          {skills.length === 0 ? 'No skills loaded' : 'No skills in this filter'}
+        </div>
       ) : (
-        skills.map((s) => (
+        visibleSkills.map((s) => (
           <div
             key={s.name}
             className="mb-2 p-2 rounded"
@@ -801,6 +859,25 @@ export function SkillsPanel({
               className="mt-1.5 flex flex-wrap gap-1 items-center"
               style={{ fontSize: '0.7rem' }}
             >
+              <button
+                type="button"
+                disabled={busy === s.name}
+                onClick={() =>
+                  void archiveSkill(
+                    s.name,
+                    (s.status || '').toLowerCase() !== 'archived',
+                  )
+                }
+                className="text-[10px] px-1.5 py-0.5 rounded"
+                style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
+                title={
+                  (s.status || '').toLowerCase() === 'archived'
+                    ? 'Restore to active set'
+                    : 'Archive (leave hot catalog, keep on disk)'
+                }
+              >
+                {(s.status || '').toLowerCase() === 'archived' ? 'Unarchive' : 'Archive'}
+              </button>
               <label
                 className="flex items-center gap-1 cursor-pointer"
                 style={{ color: 'var(--text-secondary)' }}

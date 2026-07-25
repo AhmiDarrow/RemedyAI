@@ -180,6 +180,31 @@ def build_context_snapshot(
     except Exception:
         pass
 
+    # Pack nanobot — silent hint when context is heavy
+    try:
+        pack_out = swarm.pack.pack_for_turn(
+            messages=msgs,
+            brief=brief if apply_brief_touch else None,
+            context_window=context_window,
+            fill_pct=fill,
+            pattern_recent=recent,
+            intent=intent,
+        )
+        snap.signals["pack"] = {
+            "keep_recent_tool_pairs": pack_out.get("keep_recent_tool_pairs"),
+            "aggressive": pack_out.get("aggressive"),
+            "pins": len(pack_out.get("pins") or []),
+        }
+        hint = str(pack_out.get("system_hint") or "").strip()
+        if hint:
+            # Fold into remedy_system so one system inject carries both
+            if snap.remedy_system:
+                snap.remedy_system = snap.remedy_system + "\n" + hint
+            else:
+                snap.remedy_system = hint
+    except Exception as e:
+        snap.signals["pack_error"] = str(e)
+
     # Swarm status counters (shared coordinator — locked API, no private races)
     try:
         swarm.note_event("message_added")

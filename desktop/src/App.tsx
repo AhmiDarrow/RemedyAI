@@ -29,7 +29,7 @@ import { apiFetch } from './api/client'
 import { getSettings, updateSettings } from './api/settings'
 import {
   listConnectedProviders,
-  setSessionLlm,
+  setSessionLlm as applySessionLlm,
   type ConnectedProvider,
 } from './api/providers'
 import { UsageDashboard } from './components/UsageDashboard'
@@ -125,6 +125,7 @@ export default function App() {
   useEffect(() => {
     setEditDraft(null)
   }, [activeId])
+
   const {
     themeId,
     theme,
@@ -168,6 +169,20 @@ export default function App() {
   const [timeTravelOpen, setTimeTravelOpen] = useState(false)
   const [usageOpen, setUsageOpen] = useState(false)
   const [connectedProviders, setConnectedProviders] = useState<ConnectedProvider[]>([])
+  /** Per-session provider/model overrides (tabs stay independent). */
+  const [sessionLlmMap, setSessionLlmMap] = useState<
+    Record<string, { provider: string; model: string }>
+  >({})
+
+  // Restore per-session provider/model when switching tabs
+  useEffect(() => {
+    if (!activeId) return
+    const ov = sessionLlmMap[activeId]
+    if (ov) {
+      setLlmProvider(ov.provider)
+      setModel(ov.model)
+    }
+  }, [activeId, sessionLlmMap])
 
   const sessionUsage: UsageSnapshot = useMemo(() => {
     let prompt = 0
@@ -1270,10 +1285,17 @@ export default function App() {
             if (streaming) return
             setLlmProvider(prov)
             setModel(mid)
+            if (activeId) {
+              setSessionLlmMap((prev) => ({
+                ...prev,
+                [activeId]: { provider: prov, model: mid },
+              }))
+            }
             const apply = async () => {
               if (activeId) {
                 try {
-                  const r = await setSessionLlm(activeId, prov, mid, true)
+                  // Session override by default — does not rewrite global default
+                  const r = await applySessionLlm(activeId, prov, mid, false)
                   if (r.provider) setLlmProvider(r.provider)
                   if (r.model) setModel(r.model)
                   return

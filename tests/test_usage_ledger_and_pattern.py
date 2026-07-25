@@ -47,6 +47,21 @@ def test_token_remeasure_on_provider_change():
     assert estimate_text_tokens("abc") > 0
 
 
+def test_pack_nanobot_aggressive_when_full():
+    from remedy.nanoswarm.pack_nanobot import PackNanobot
+
+    pack = PackNanobot()
+    out = pack.pack_for_turn(
+        messages=[{"role": "tool", "content": "x"} for _ in range(8)],
+        fill_pct=0.9,
+        pattern_recent=["file_read", "bash_exec"],
+        intent="tool",
+    )
+    assert out["aggressive"] is True
+    assert out["keep_recent_tool_pairs"] <= 3
+    assert "Pack" in (out.get("system_hint") or "")
+
+
 def test_usage_ledger_summary(tmp_path: Path):
     home = tmp_path / "remedy-home"
     home.mkdir()

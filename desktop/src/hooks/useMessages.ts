@@ -27,6 +27,85 @@ export function useMessages(sessionId: string | null) {
   const streamingRef = useRef(false)
   const sendLockRef = useRef(false)
   const processStepsRef = useRef<ProcessStep[]>([])
+  /** RAF-batched stream text (avoids re-render every token). */
+  const partialBufRef = useRef('')
+  const partialRafRef = useRef<number | null>(null)
+  const thinkingBufRef = useRef('')
+  const thinkingRafRef = useRef<number | null>(null)
+
+  const flushPartialText = useCallback(() => {
+    partialRafRef.current = null
+    const chunk = partialBufRef.current
+    if (!chunk) return
+    partialBufRef.current = ''
+    setPartialText((prev) => prev + chunk)
+  }, [])
+
+  const appendPartialToken = useCallback(
+    (token: string) => {
+      if (!token) return
+      partialBufRef.current += token
+      if (partialRafRef.current == null) {
+        partialRafRef.current =
+          typeof requestAnimationFrame === 'function'
+            ? requestAnimationFrame(flushPartialText)
+            : (window.setTimeout(flushPartialText, 32) as unknown as number)
+      }
+    },
+    [flushPartialText],
+  )
+
+  const flushPartialThinking = useCallback(() => {
+    thinkingRafRef.current = null
+    const chunk = thinkingBufRef.current
+    if (!chunk) return
+    thinkingBufRef.current = ''
+    setPartialThinking((prev) => prev + chunk)
+  }, [])
+
+  const appendPartialThinking = useCallback(
+    (thought: string) => {
+      if (!thought) return
+      thinkingBufRef.current += thought
+      if (thinkingRafRef.current == null) {
+        thinkingRafRef.current =
+          typeof requestAnimationFrame === 'function'
+            ? requestAnimationFrame(flushPartialThinking)
+            : (window.setTimeout(flushPartialThinking, 32) as unknown as number)
+      }
+    },
+    [flushPartialThinking],
+  )
+
+  const resetStreamBuffers = useCallback(() => {
+    if (partialRafRef.current != null) {
+      if (typeof cancelAnimationFrame === 'function') {
+        cancelAnimationFrame(partialRafRef.current)
+      } else {
+        clearTimeout(partialRafRef.current)
+      }
+      partialRafRef.current = null
+    }
+    if (thinkingRafRef.current != null) {
+      if (typeof cancelAnimationFrame === 'function') {
+        cancelAnimationFrame(thinkingRafRef.current)
+      } else {
+        clearTimeout(thinkingRafRef.current)
+      }
+      thinkingRafRef.current = null
+    }
+    // Flush any leftover so finish/load sees complete text
+    if (partialBufRef.current) {
+      const left = partialBufRef.current
+      partialBufRef.current = ''
+      setPartialText((prev) => prev + left)
+    }
+    if (thinkingBufRef.current) {
+      const left = thinkingBufRef.current
+      thinkingBufRef.current = ''
+      setPartialThinking((prev) => prev + left)
+    }
+  }, [])
 
   const load = useCallback(async () => {
     if (!sessionId) {
@@ -97,6 +176,8 @@ export function useMessages(sessionId: string | null) {
       setMessages((prev) => [...prev, userMsg])
 
       setStreaming(true)
+      partialBufRef.current = ''
+      thinkingBufRef.current = ''
       setPartialText('')
       setPartialThinking('')
       setActiveTools([])
@@ -110,6 +191,7 @@ export function useMessages(sessionId: string | null) {
       const finishOk = async () => {
         if (doneReceived) return
         doneReceived = true
+        resetStreamBuffers()
         const stepsSnapshot = [...processStepsRef.current]
         setStreaming(false)
         setStreamCtrl(null)
@@ -150,6 +232,7 @@ export function useMessages(sessionId: string | null) {
       const finishErr = async (errMsg: string) => {
         if (doneReceived) return
         doneReceived = true
+        resetStreamBuffers()
         setStreaming(false)
         setStreamCtrl(null)
         setPartialText('')
@@ -186,7 +269,7 @@ export function useMessages(sessionId: string | null) {
       const ctrl = streamMessage(
         targetId,
         text.trim() || '(see attached files)',
-        (token) => setPartialText((prev) => prev + token),
+        (token) => appendPartialToken(token),
         () => {
           void finishOk()
         },
@@ -194,7 +277,7 @@ export function useMessages(sessionId: string | null) {
           void finishErr(errMsg)
         },
         model,
-        (thought) => setPartialThinking((prev) => prev + thought),
+        (thought) => appendPartialThinking(thought),
         (name, args) => {
           setActiveTools((prev) => {
             if (prev.some((t) => t.name === name && t.status === 'running')) return prev
@@ -272,11 +355,12 @@ export function useMessages(sessionId: string | null) {
 
       setStreamCtrl(ctrl)
     },
-    [sessionId],
+    [sessionId, appendPartialToken, appendPartialThinking, resetStreamBuffers],
   )
 
   const stop = useCallback(() => {
     streamCtrl?.abort()
+    resetStreamBuffers()
     setStreaming(false)
     setStreamCtrl(null)
     setActiveTools([])
@@ -313,7 +397,7 @@ export function useMessages(sessionId: string | null) {
     })
     setProcessSteps([])
     processStepsRef.current = []
-  }, [streamCtrl])
+  }, [streamCtrl, resetStreamBuffers])
 
   const beginEdit = useCallback(
     async (msgId: string, fallbackContent?: string): Promise<string | null> => {

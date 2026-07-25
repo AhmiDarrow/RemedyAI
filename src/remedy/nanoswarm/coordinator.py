@@ -9,6 +9,7 @@ from typing import Any
 from remedy.nanoswarm.events import SwarmEvent
 from remedy.nanoswarm.helper_nanobot import HelperNanobot
 from remedy.nanoswarm.memory_nanobot import MemoryNanobot
+from remedy.nanoswarm.pack_nanobot import PackNanobot
 from remedy.nanoswarm.pattern_nanobot import PatternNanobot
 from remedy.nanoswarm.router_nanobot import RouterNanobot
 from remedy.nanoswarm.skill_nanobot import SkillNanobot
@@ -25,6 +26,7 @@ class NanoSwarm:
         self.skill = SkillNanobot()
         self.router = RouterNanobot()
         self.helper = HelperNanobot()
+        self.pack = PackNanobot()
         self._lock = threading.Lock()
         self._event_count = 0
         self._last_event: str | None = None
@@ -153,6 +155,7 @@ class NanoSwarm:
                 "skill": self.skill.status(),
                 "router": self.router.status(),
                 "helper": self.helper.status(),
+                "pack": self.pack.status(),
             },
         }
 
