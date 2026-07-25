@@ -2,6 +2,17 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.10.45] — 2026-07-25
+
+### Fix: setup free UX, tray start, usage placement, vision uninstall
+
+- **Setup free path**: Demo + Ollama cards and a free-key dropdown (no chip flea market).
+- **Start hidden in tray** decoupled from “Start with Windows”; `desktop.json` is authoritative;
+  window is shown/focused when tray-start is off (fixes always-minimized launches).
+- **Usage & cost ticker** lives in the session sidebar footer (bottom-left).
+- **Uninstall**: stops `llama-server` and removes `~/.remedy/vision` (llama.cpp + GGUF) on
+  config wipe and full wipe (NSIS scripts + `remedy uninstall`).
+
 ## [0.10.44] — 2026-07-25
 
 ### Feature: Skills HITL overrides, pack export, Time Travel, token cost ticker

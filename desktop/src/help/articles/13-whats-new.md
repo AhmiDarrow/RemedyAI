@@ -2,7 +2,14 @@
 
 High-level product notes for owners. Full detail lives in repo `CHANGELOG.md`.
 
-Ship **one** installer/tag for the current series (**v0.10.44**).
+Ship **one** installer/tag for the current series (**v0.10.45**).
+
+## 0.10.45 — Setup free UX, tray start, usage sidebar, vision wipe
+
+- Setup free providers simplified (Demo / Ollama / free-key dropdown).
+- “Start with Windows” no longer forces tray-only startup; window opens normally unless “Start hidden in tray” is on.
+- Usage/cost stats sit in the session sidebar (bottom-left).
+- Uninstall config/full wipe removes visual decoder (llama.cpp + models).
 
 ## 0.10.44 — Skills HITL, Time Travel, token cost ticker, perf
 
