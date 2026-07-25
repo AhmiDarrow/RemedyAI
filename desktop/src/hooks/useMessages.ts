@@ -5,9 +5,11 @@ import {
   executeCommand,
   editFromMessageApi,
   type StreamProgress,
+  type UsagePayload,
 } from '../api/messages'
 import type { ChatMessage } from '../types'
 import { toolLabel, type ProcessStep } from '../utils/toolLabels'
+import { emptyUsage, type UsageSnapshot } from '../utils/tokenCost'
 
 export type ActiveTool = { name: string; status: 'running' | 'done' | 'error' }
 
@@ -20,6 +22,7 @@ export function useMessages(sessionId: string | null) {
   const [activeTools, setActiveTools] = useState<ActiveTool[]>([])
   const [processSteps, setProcessSteps] = useState<ProcessStep[]>([])
   const [taskProgress, setTaskProgress] = useState<StreamProgress | null>(null)
+  const [runUsage, setRunUsage] = useState<UsageSnapshot | null>(null)
   const [streamCtrl, setStreamCtrl] = useState<AbortController | null>(null)
   const streamingRef = useRef(false)
   const sendLockRef = useRef(false)
@@ -100,6 +103,7 @@ export function useMessages(sessionId: string | null) {
       setProcessSteps([])
       processStepsRef.current = []
       setTaskProgress(null)
+      setRunUsage(emptyUsage(model || null, null))
 
       let doneReceived = false
 
@@ -251,6 +255,19 @@ export function useMessages(sessionId: string | null) {
           setTaskProgress(info)
         },
         planMode,
+        (usage: UsagePayload) => {
+          setRunUsage({
+            prompt_tokens: usage.prompt_tokens ?? 0,
+            completion_tokens: usage.completion_tokens ?? 0,
+            total_tokens:
+              usage.total_tokens
+              ?? (usage.prompt_tokens ?? 0) + (usage.completion_tokens ?? 0),
+            estimated_cost_usd: usage.estimated_cost_usd ?? 0,
+            source: usage.source,
+            model: usage.model ?? model ?? null,
+            provider: usage.provider ?? null,
+          })
+        },
       )
 
       setStreamCtrl(ctrl)
@@ -378,6 +395,7 @@ export function useMessages(sessionId: string | null) {
     activeTools,
     processSteps,
     taskProgress,
+    runUsage,
     send,
     stop,
     runCommand,

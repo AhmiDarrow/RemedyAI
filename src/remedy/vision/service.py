@@ -29,6 +29,9 @@ logger = logging.getLogger(__name__)
 
 # Session-level cache: sha256 or path+mtime → brief text
 _decode_cache: dict[str, str] = {}
+# Host resource snapshot changes rarely; cache so Settings GETs stay snappy.
+_health_cache: dict[str, Any] = {"ts": 0.0, "key": "", "value": None}
+_HEALTH_CACHE_TTL_S = 30.0
 
 
 def _home_from_cfg(cfg: dict[str, Any] | None) -> Path | None:
@@ -39,8 +42,38 @@ def _home_from_cfg(cfg: dict[str, Any] | None) -> Path | None:
     return None
 
 
-def get_status(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Public status for Settings / API."""
+def _cached_system_health(
+    *,
+    model_id: str,
+    runtime_id: str,
+    home_dir: Path | None,
+) -> dict[str, Any]:
+    key = f"{model_id}|{runtime_id}|{home_dir}"
+    now = time.time()
+    if (
+        _health_cache.get("key") == key
+        and _health_cache.get("value") is not None
+        and (now - float(_health_cache.get("ts") or 0)) < _HEALTH_CACHE_TTL_S
+    ):
+        return dict(_health_cache["value"])  # type: ignore[arg-type]
+    health = system_health(model_id=model_id, runtime_id=runtime_id, home_dir=home_dir)
+    _health_cache["ts"] = now
+    _health_cache["key"] = key
+    _health_cache["value"] = health
+    return health
+
+
+def get_status(
+    cfg: dict[str, Any] | None = None,
+    *,
+    light: bool = False,
+) -> dict[str, Any]:
+    """Public status for Settings / API.
+
+    ``light=True`` skips catalog + host health (for embedding in GET /settings).
+    Running probe is always cheap (port/cache — never multi-second urlopen).
+    """
+    t0 = time.perf_counter()
     home = _home_from_cfg(cfg)
     vcfg = vision_section_from_config(cfg)
     side = load_vision_json(home)
@@ -63,9 +96,8 @@ def get_status(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
         or vcfg.get("runtime_id")
         or "win-cpu-x64"
     )
-    health = system_health(model_id=mid, runtime_id=rid, home_dir=home)
 
-    return {
+    out: dict[str, Any] = {
         "enabled": enabled,
         "installed": installed,
         "running": running,
@@ -80,9 +112,6 @@ def get_status(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
         "runtime_version": side.get("runtime_version"),
         "runtime_id": rid,
         "progress": progress,
-        "health": health,
-        "warnings": list(health.get("warnings") or []),
-        "catalog": catalog_public(),
         "not_ready_hint": (
             None
             if decode_ready
@@ -92,6 +121,35 @@ def get_status(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
             )
         ),
     }
+
+    if not light:
+        health = _cached_system_health(model_id=mid, runtime_id=rid, home_dir=home)
+        out["health"] = health
+        out["warnings"] = list(health.get("warnings") or [])
+        out["catalog"] = catalog_public()
+    else:
+        out["health"] = None
+        out["warnings"] = []
+        out["catalog"] = None
+
+    ms = (time.perf_counter() - t0) * 1000
+    if ms > 100:
+        logger.warning(
+            "vision get_status slow light=%s installed=%s running=%s (%.0fms)",
+            light,
+            installed,
+            running,
+            ms,
+        )
+    else:
+        logger.debug(
+            "vision get_status light=%s installed=%s running=%s (%.0fms)",
+            light,
+            installed,
+            running,
+            ms,
+        )
+    return out
 
 
 def start_install(

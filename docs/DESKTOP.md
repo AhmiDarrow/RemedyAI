@@ -6,15 +6,23 @@
 partner for knowledge, design, code, and get-it-done work (not a medical or
 clinical product). Current package series: **0.10.x** (see root `CHANGELOG.md`).
 
-### Skills panel (0.10.30+)
+### Skills panel (0.10.30+; HITL + packs in 0.10.44)
 
 The desktop **Skills** side panel lists packs with status chips (active / validated /
-discovered / disabled), **hard-won** badges, search, Activate/Disable/Trust
-(quarantine imports), and success/fail feedback. Full skill lifecycle docs:
-[SKILL_LIFECYCLE.md](SKILL_LIFECYCLE.md).
+discovered / disabled), **hard-won** badges, search, human overrides (**force promote**,
+**quarantine**), **Edit MD** (CodeMirror), **Export/Import Pack** (ZIP), and success/fail
+feedback. Full skill lifecycle docs: [SKILL_LIFECYCLE.md](SKILL_LIFECYCLE.md).
 
 Agent tools: `skill_activate`, `skill_search`, `skill_run` (progressive disclosure).
-Quarantined packs cannot load instructions or run scripts until **Trust**.
+Quarantined packs cannot load instructions or run scripts until you clear quarantine /
+force-promote.
+
+### Time Travel & usage ticker (0.10.44)
+
+- **⏱ Time travel** (status bar / palette): restore chat + best-effort `file_write` undo
+  + checkpoints to a chosen step.
+- **Token & cost ticker** (bottom-right, hideable): live run + session tokens and estimated
+  API cost (provider usage when available).
 
 ### Help wiki + Web UI (0.10.37)
 

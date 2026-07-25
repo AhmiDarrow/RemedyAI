@@ -48,6 +48,9 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
     # -- settings -----------------------------------------------------------
     @app.get("/api/settings")
     async def get_settings():
+        import time as _time
+
+        t0 = _time.perf_counter()
         cfg = load_config()
         config_path = _find_config_path()
         # First-run: show wizard when needs_first_run_setup says so.
@@ -83,10 +86,11 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         from remedy.interfaces.secret_store import public_secret_status
 
         # Migrate plaintext keys into the secure store in memory for this response.
-        # Disk rewrite is deferred to PUT/auth paths to avoid racing first-run setup.
-        cfg_migrated = migrate_provider_keys(cfg)
-        if cfg_migrated != cfg or cfg.get("provider_keys") or cfg.get("llm_api_key"):
-            cfg = cfg_migrated
+        # Disk rewrite is deferred to PUT/auth paths to avoid racing first-run setup
+        # AND to keep GET /settings fast (disk write + ACL harden is expensive).
+        needs_migrate = bool(cfg.get("provider_keys") or str(cfg.get("llm_api_key") or "").strip())
+        if needs_migrate:
+            cfg = migrate_provider_keys(cfg)
             # Best-effort async-safe write only when path exists and setup is already done
             # (never rewrite a partial first-run file from a GET).
             try:
@@ -157,7 +161,9 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             "needs_setup": not setup_completed,
             "config_path": str(config_path) if config_path else str(_default_config_path()),
         }
-        # Visual decoder summary (full detail via /api/vision/status)
+        # Visual decoder summary only (full detail via /api/vision/status).
+        # Always use light=True — full get_status used to block the event loop
+        # for seconds when llama-server was down, freezing /api/status polls.
         try:
             from remedy.vision.config import vision_section_from_config
             from remedy.vision.service import get_status as vision_get_status
@@ -166,7 +172,7 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             out["vision_enabled"] = bool(vsec.get("enabled"))
             out["vision_model_id"] = str(vsec.get("model_id") or "qwen2.5-vl-3b")
             out["vision_force_decode"] = bool(vsec.get("force_decode"))
-            vst = vision_get_status(cfg)
+            vst = vision_get_status(cfg, light=True)
             out["vision"] = {
                 "enabled": vst.get("enabled"),
                 "installed": vst.get("installed"),
@@ -176,12 +182,18 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                 "model_name": (vst.get("model") or {}).get("name"),
                 "force_decode": bool(vsec.get("force_decode")),
             }
-        except Exception:
+        except Exception as exc:
+            logger.debug("settings vision summary failed: %s", exc)
             out["vision_enabled"] = False
             out["vision_model_id"] = "qwen2.5-vl-3b"
             out["vision_force_decode"] = False
         if xai_auth is not None:
             out["xai_auth"] = xai_auth
+        ms = (_time.perf_counter() - t0) * 1000
+        if ms >= 250:
+            logger.warning("GET /api/settings slow (%.0fms) provider=%s", ms, provider)
+        else:
+            logger.debug("GET /api/settings (%.0fms) provider=%s", ms, provider)
         return out
 
     @app.put("/api/settings")

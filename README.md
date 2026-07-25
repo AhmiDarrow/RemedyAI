@@ -88,6 +88,9 @@ The desktop app bundles the full Remedy server as a sidecar, so everything runs 
 | **Visual decoder** | Opt-in local image→text (llama.cpp + Qwen2.5-VL 3B) so text-only chat models can use screenshots/OCR; prefer-local to save provider vision tokens |
 | **Themes** | System, Dark, **Neutral Dark**, Light, Emerald, Amethyst, Amber, Ocean |
 | **Side panels** | Memory · Skills · Settings (status bar) |
+| **Skills HITL** | Force-promote / quarantine toggles; CodeMirror `SKILL.md` editor; **Export/Import Pack** (ZIP) |
+| **Time Travel** | Status-bar timeline: restore chat + best-effort files to an earlier step |
+| **Token & cost ticker** | Hideable live run/session tokens + estimated API cost |
 | **Tray** | Circuit-R icon; right-click Settings and more |
 | **Auto-update** | Check → download → install → relaunch (signed `latest.json` releases) |
 | **Local-first security** | Loopback API + Bearer auth by default; power for the owner, not a LAN doorway |
@@ -446,7 +449,7 @@ def teardown_plugin():
 git clone https://github.com/AhmiDarrow/RemedyAI.git
 cd RemedyAI
 uv sync --group dev
-uv run pytest -q          # full suite (560+ tests; currently ~647)
+uv run pytest -q          # full suite (560+ tests; currently ~670)
 cd desktop && npm test    # frontend unit tests (vitest)
 python scripts/check_docs.py  # docs stay synced with code (help, cmds, versions)
 uv run remedy --help

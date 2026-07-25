@@ -45,7 +45,11 @@ def test_public_status_has_no_secrets(tmp_path: Path, monkeypatch: pytest.Monkey
     assert "sk-super-secret" not in blob
     assert status["provider_keys_set"]["deepseek"] is True
     assert "deepseek" in status["providers_with_keys"]
-    assert status["fingerprints"]["deepseek"]
+    # Fingerprints are opt-in (skip hash work on every Settings GET).
+    assert "fingerprints" not in status
+    status_fp = secret_store.public_secret_status(tmp_path, include_fingerprints=True)
+    assert status_fp["fingerprints"]["deepseek"]
+    assert "sk-super-secret" not in json.dumps(status_fp)
 
 
 def test_migrate_strips_config_plaintext(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

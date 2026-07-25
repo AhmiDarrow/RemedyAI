@@ -9,7 +9,27 @@ Work top-down: is the **local server** up, is **auth** loaded, is the **provider
 3. Confirm nothing else owns port **7400**.  
 4. Fully quit (tray → Quit) and relaunch.  
 5. Reinstall the latest desktop build.  
-6. **Open data folder** and check logs if available.
+6. **Open data folder** and read logs under `%USERPROFILE%\.remedy\logs\` (see below).
+
+## Status bar flips Connected ↔ Disconnected
+
+Usually the local API event loop was blocked (historically: visual decoder health checks against a dead `llama-server` port). Fixed builds use a cheap `/api/ping` probe and non-blocking vision status.
+
+If it still flaps:
+
+1. Open Settings → note whether Visual decoder is installed but not running.  
+2. Check `%USERPROFILE%\.remedy\logs\debug.log` for `SLOW GET` lines (requests ≥500ms).  
+3. Quit fully and relaunch so the sidecar reloads with file logging.
+
+## Where logs live
+
+| File | Contents |
+|------|----------|
+| `%USERPROFILE%\.remedy\logs\remedy.log` | Normal server log (INFO+, rotating) |
+| `%USERPROFILE%\.remedy\logs\errors.log` | ERROR+ only |
+| `%USERPROFILE%\.remedy\logs\debug.log` | DEBUG trail for perf / disconnect diagnosis |
+
+Set `REMEDY_LOG_LEVEL=DEBUG` or `log_level = "DEBUG"` in `config.toml` for more verbose console output. File `debug.log` is always written at DEBUG when the server starts.
 
 ## Failed to load server config / setup won’t open
 

@@ -22,6 +22,15 @@ def register_status_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
     # Cache COUNT(*) results briefly — status is polled often from the desktop UI.
     _status_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
 
+    @app.get("/api/ping")
+    async def ping():
+        """Ultra-light liveness for desktop connection indicator.
+
+        No DB, no gateway stats — must stay sub-ms even when other handlers are busy
+        with vision install / model discovery. Public (no auth).
+        """
+        return {"status": "ok", "version": _remedy_version, "ts": time.time()}
+
     @app.get("/api/metrics")
     async def get_metrics(
         request: Request,

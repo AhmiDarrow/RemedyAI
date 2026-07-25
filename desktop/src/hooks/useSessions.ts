@@ -8,6 +8,8 @@ export function useSessions() {
   const [activeId, setActiveId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const hasLoaded = useRef(false)
+  /** Avoid a full GET /settings on every New Session once we know project_path. */
+  const projectPathCache = useRef<string | undefined | null>(null)
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -35,13 +37,18 @@ export function useSessions() {
       try {
         // Stamp session with the configured default project folder.
         let project_path: string | undefined
-        try {
-          const s = await getSettings()
-          if (s.project_path && s.project_path !== '.') {
-            project_path = s.project_path
+        if (projectPathCache.current !== null) {
+          project_path = projectPathCache.current
+        } else {
+          try {
+            const s = await getSettings()
+            project_path =
+              s.project_path && s.project_path !== '.' ? s.project_path : undefined
+            projectPathCache.current = project_path
+          } catch {
+            // server may omit; create still works — API also inherits from config
+            projectPathCache.current = undefined
           }
-        } catch {
-          // server may omit; create still works — API also inherits from config
         }
         const s = await createSession({ title, project_path })
         setSessions((prev) => [s, ...prev])

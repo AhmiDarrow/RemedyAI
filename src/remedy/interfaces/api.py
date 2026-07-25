@@ -178,6 +178,7 @@ def create_app(
         "/openapi.json",
         "/dashboard",
         "/api/status",
+        "/api/ping",
         "/api/auth/local-bootstrap",
         "/api/openapi.json",
         "/api/openapi.yaml",
@@ -259,8 +260,26 @@ def create_app(
         duration = (time.time() - start) * 1000
         # Health polls are high-frequency — don't spam the desktop console.
         path = request.url.path
-        if path in ("/api/status",) or path.endswith("/api/status"):
-            logger.debug("%s %s -> %d (%.0fms)", request.method, path, response.status_code, duration)
+        quiet = path in ("/api/status", "/api/ping") or path.endswith(
+            ("/api/status", "/api/ping")
+        )
+        if duration >= 500:
+            # Always surface slow requests — these cause UI "disconnected" flaps.
+            logger.warning(
+                "SLOW %s %s -> %d (%.0fms)",
+                request.method,
+                path,
+                response.status_code,
+                duration,
+            )
+        elif quiet:
+            logger.debug(
+                "%s %s -> %d (%.0fms)",
+                request.method,
+                path,
+                response.status_code,
+                duration,
+            )
         else:
             logger.info(
                 "%s %s -> %d (%.0fms)",

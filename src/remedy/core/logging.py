@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
 from contextvars import ContextVar
 from datetime import UTC, datetime
@@ -122,6 +123,8 @@ def setup_logging(
     console_output: bool = True,
 ) -> None:
     """Configure root logger with structured output, optional file rotation, and context propagation."""
+    from logging.handlers import RotatingFileHandler
+
     root = logging.getLogger()
     root.setLevel(getattr(logging, level.upper(), logging.INFO))
     root.handlers.clear()
@@ -138,25 +141,99 @@ def setup_logging(
     if log_dir:
         p = Path(log_dir).expanduser().resolve()
         p.mkdir(parents=True, exist_ok=True)
-        fh = logging.FileHandler(
+        # Rotate so long desktop sessions don't grow unbounded.
+        fh = RotatingFileHandler(
             p / "remedy.log",
+            maxBytes=5 * 1024 * 1024,
+            backupCount=5,
             encoding="utf-8",
         )
         fh.setFormatter(StructuredFormatter(color=False))
         root.addHandler(fh)
 
-        # Error-only log
-        eh = logging.FileHandler(
+        # Error-only log (smaller, easy to skim for failures)
+        eh = RotatingFileHandler(
             p / "errors.log",
+            maxBytes=2 * 1024 * 1024,
+            backupCount=3,
             encoding="utf-8",
         )
         eh.setLevel(logging.ERROR)
         eh.setFormatter(StructuredFormatter(color=False))
         root.addHandler(eh)
 
+        # Debug ring — always captures DEBUG+ even when console is INFO.
+        # Enable via REMEDY_LOG_LEVEL=DEBUG or config log_level=DEBUG for console;
+        # this file is always DEBUG so perf issues leave a trail without spam.
+        dh = RotatingFileHandler(
+            p / "debug.log",
+            maxBytes=8 * 1024 * 1024,
+            backupCount=3,
+            encoding="utf-8",
+        )
+        dh.setLevel(logging.DEBUG)
+        dh.setFormatter(StructuredFormatter(color=False))
+        root.addHandler(dh)
+        # Ensure DEBUG records are emitted to the debug file even if root is INFO.
+        root.setLevel(min(root.level, logging.DEBUG))
+        # Console/file handlers keep their own levels; only dh is DEBUG.
+        for h in root.handlers:
+            if h is not dh and h.level == logging.NOTSET:
+                h.setLevel(getattr(logging, level.upper(), logging.INFO))
+
     # Shush noisy libraries
-    for noisy in ("httpx", "httpcore", "urllib3", "asyncio", "aiohttp"):
+    for noisy in ("httpx", "httpcore", "urllib3", "asyncio", "aiohttp", "multipart"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
+
+
+def resolve_log_level(config: dict | None = None) -> str:
+    """Pick log level from env then config (default INFO)."""
+    env = (os.environ.get("REMEDY_LOG_LEVEL") or "").strip().upper()
+    if env in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"):
+        return env
+    if isinstance(config, dict):
+        raw = config.get("log_level")
+        if isinstance(config.get("log"), dict) and not raw:
+            raw = config["log"].get("level")
+        lvl = str(raw or "INFO").strip().upper()
+        if lvl in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"):
+            return lvl
+    return "INFO"
+
+
+def setup_serve_logging(
+    home_dir: str | Path,
+    *,
+    level: str | None = None,
+    config: dict | None = None,
+) -> Path:
+    """Configure logging for ``remedy serve`` / desktop sidecar.
+
+    Always writes rotating files under ``{home}/logs/``:
+      - remedy.log  (level from config/env)
+      - errors.log  (ERROR+)
+      - debug.log   (DEBUG+, for diagnosing sluggish UI / disconnects)
+
+    Returns the log directory path.
+    """
+    home = Path(home_dir).expanduser().resolve()
+    log_dir = home / "logs"
+    lvl = level or resolve_log_level(config)
+    # Desktop sidecar: prefer human-readable console lines (Tauri captures them).
+    # File handlers stay JSON for tooling.
+    setup_logging(
+        level=lvl,
+        log_dir=str(log_dir),
+        json_output=False,
+        console_output=True,
+    )
+    log = get_logger("remedy.serve")
+    log.info(
+        "Logging initialized level=%s dir=%s (remedy.log, errors.log, debug.log)",
+        lvl,
+        log_dir,
+    )
+    return log_dir
 
 
 def get_logger(name: str) -> logging.Logger:

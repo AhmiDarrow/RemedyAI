@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useRef,
+  memo,
   type ReactNode,
   Fragment,
 } from 'react'
@@ -177,7 +178,7 @@ function ThinkingPanel({ text, openDefault = false }: { text: string; openDefaul
   )
 }
 
-function MessageBubble({
+const MessageBubble = memo(function MessageBubble({
   msg,
   partial,
   partialThinking,
@@ -498,7 +499,7 @@ function MessageBubble({
       )}
     </div>
   )
-}
+})
 
 export function MessageFeed({
   messages,

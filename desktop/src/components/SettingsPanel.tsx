@@ -214,7 +214,9 @@ export function SettingsPanel({
 
   const load = useCallback(async () => {
     setLoading(true)
+    const t0 = performance.now()
     try {
+      // Critical path first — do not wait on vision (was multi-second freezes).
       const [s, providers] = await Promise.all([getSettings(), listProviders()])
       setCatalog(providers)
       setSettings(s)
@@ -234,35 +236,13 @@ export function SettingsPanel({
       setLaunchAtLogin(Boolean(s.launch_at_login))
       setStartInTray(Boolean(s.start_in_tray))
       setCloseToTray(Boolean(s.close_to_tray))
-      try {
-        const prefs = await invoke<{ skip_quit_server_warning?: boolean }>('get_desktop_prefs')
-        setSkipQuitWarn(Boolean(prefs?.skip_quit_server_warning))
-      } catch {
-        try {
-          setSkipQuitWarn(localStorage.getItem('remedy.skipQuitServerWarning') === '1')
-        } catch {
-          setSkipQuitWarn(false)
-        }
-      }
       setHarnessMode(s.harness_mode || 'auto')
       {
         const tp = normalizeToolProcess(s.tool_process)
         setToolProcess(tp)
         onToolProcessChange?.(tp)
       }
-      try {
-        const vs = await getVisionStatus()
-        setVision(vs)
-      } catch {
-        setVision(null)
-      }
       setApiKey('')
-      try {
-        const osLogin = await invoke<boolean>('get_launch_at_login')
-        setLaunchAtLogin(Boolean(osLogin || s.launch_at_login))
-      } catch {
-        /* browser / missing permission */
-      }
       const isAdvanced = providers.some((p) => p.id === prov && p.advanced)
       if (isAdvanced) setShowAdvanced(true)
       if (prov === 'xai' || s.xai_auth) {
@@ -278,11 +258,55 @@ export function SettingsPanel({
       } else {
         setXaiAuth(null)
       }
-    } catch {
+      // Show the form immediately after settings — secondary work in parallel.
+      setLoading(false)
+      console.debug(
+        `[remedy:settings] core loaded in ${Math.round(performance.now() - t0)}ms`,
+      )
+
+      void Promise.allSettled([
+        (async () => {
+          try {
+            const prefs = await invoke<{ skip_quit_server_warning?: boolean }>(
+              'get_desktop_prefs',
+            )
+            setSkipQuitWarn(Boolean(prefs?.skip_quit_server_warning))
+          } catch {
+            try {
+              setSkipQuitWarn(localStorage.getItem('remedy.skipQuitServerWarning') === '1')
+            } catch {
+              setSkipQuitWarn(false)
+            }
+          }
+        })(),
+        (async () => {
+          try {
+            const osLogin = await invoke<boolean>('get_launch_at_login')
+            setLaunchAtLogin(Boolean(osLogin || s.launch_at_login))
+          } catch {
+            /* browser / missing permission */
+          }
+        })(),
+        (async () => {
+          try {
+            const vs = await getVisionStatus()
+            setVision(vs)
+          } catch {
+            setVision(null)
+          }
+        })(),
+      ]).then(() => {
+        console.debug(
+          `[remedy:settings] secondary loaded in ${Math.round(performance.now() - t0)}ms`,
+        )
+      })
+    } catch (e) {
+      console.warn('[remedy:settings] load failed', e)
       // server not ready
-    } finally {
       setLoading(false)
     }
+    // Intentionally stable: one load function; parent callbacks read from latest render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {

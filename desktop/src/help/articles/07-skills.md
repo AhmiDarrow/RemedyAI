@@ -12,11 +12,20 @@ Open **Skills** on the status bar:
 | Status chips | active / validated / discovered / disabled / quarantined |
 | **Hard-won** badge | Skill earned high effort / recovery value |
 | Search | Filter by name / description |
-| Activate / Disable | Lifecycle controls |
-| Trust | Allow a quarantined import to run |
+| **Force promote** | Manual override: promote a probation skill to **ACTIVE** now |
+| **Quarantine** | Manual override: lock a failing/untrusted skill (blocks script runs) |
+| **Edit MD** | Open an embedded CodeMirror editor for the skill’s `SKILL.md` body |
+| **Export Pack** | Bundle selected (or all) skills into a portable `.zip` |
+| **Import Pack** | Load a pack ZIP; imports stay quarantined until you promote |
 | Feedback | Success / fail signals for ranking |
 
-API: `GET /api/skills/learning/summary` returns the same “what I learned” snapshot.
+API highlights:
+
+- `GET /api/skills/learning/summary` — “what I learned” snapshot  
+- `POST /api/skills/{name}/status` — lifecycle + `force_promote`  
+- `POST /api/skills/{name}/quarantine` — human quarantine toggle  
+- `PUT /api/skills/{name}/body` — save edited instructions  
+- `POST /api/skills/export` / `POST /api/skills/import` — pack portability
 
 ## Lifecycle (simplified)
 

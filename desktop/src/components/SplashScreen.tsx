@@ -3,8 +3,8 @@ import { healthCheck } from '../api/client'
 import logoSrc from '/logo.png'
 
 /** Keep splash short — server health is the real gate, not a marketing delay. */
-const MIN_SPLASH_MS = 900
-const FADE_MS = 280
+const MIN_SPLASH_MS = 350
+const FADE_MS = 180
 
 /** Always-dark splash palette (never follow light system theme). */
 const SPLASH_BG = '#0a0a1a'

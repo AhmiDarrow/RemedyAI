@@ -256,14 +256,57 @@ export async function apiFetch<T = unknown>(
   }
 }
 
+/**
+ * Liveness probe for splash + status bar.
+ * Prefers ultra-light `/api/ping` (no DB); falls back to `/api/status`.
+ */
 export async function healthCheck(timeout = 2000): Promise<boolean> {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeout)
   try {
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), timeout)
-    const res = await fetch(`${SERVER_URL}/api/status`, { signal: controller.signal })
-    clearTimeout(timeoutId)
+    // Ping first — must stay responsive even if heavier handlers are busy.
+    try {
+      const ping = await fetch(`${SERVER_URL}/api/ping`, {
+        signal: controller.signal,
+        headers: { Accept: 'application/json' },
+      })
+      if (ping.ok) return true
+    } catch {
+      /* fall through to /api/status for older sidecars */
+    }
+    if (controller.signal.aborted) return false
+    const res = await fetch(`${SERVER_URL}/api/status`, {
+      signal: controller.signal,
+      headers: { Accept: 'application/json' },
+    })
     return res.ok
   } catch {
     return false
+  } finally {
+    clearTimeout(timeoutId)
   }
+}
+
+/** Lightweight client-side debug trail (console + optional ring for future UI). */
+const _debugRing: string[] = []
+const _DEBUG_RING_MAX = 200
+
+export function clientDebug(scope: string, message: string, extra?: unknown): void {
+  const ts = new Date().toISOString()
+  const line =
+    extra !== undefined
+      ? `[${ts}] [${scope}] ${message} ${typeof extra === 'string' ? extra : JSON.stringify(extra)}`
+      : `[${ts}] [${scope}] ${message}`
+  _debugRing.push(line)
+  if (_debugRing.length > _DEBUG_RING_MAX) _debugRing.shift()
+  // Always log — desktop users diagnose from DevTools / tauri log plugin.
+  if (extra !== undefined) {
+    console.debug(`[remedy:${scope}]`, message, extra)
+  } else {
+    console.debug(`[remedy:${scope}]`, message)
+  }
+}
+
+export function getClientDebugRing(): string[] {
+  return [..._debugRing]
 }

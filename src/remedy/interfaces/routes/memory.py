@@ -214,6 +214,21 @@ def register_memory_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
             "references": list(skill.references or []),
         }
 
+    def _skill_home() -> Path:
+        return Path(
+            getattr(getattr(runtime, "config", None), "home_dir", None) or "~/.remedy"
+        ).expanduser()
+
+    def _persist_skill(skill) -> None:
+        with suppress(Exception):
+            from remedy.core.learning_loop import LearningLoop
+
+            home = _skill_home()
+            loop = LearningLoop(
+                skills_dir=home / "skills", memory=None, registry=runtime.skills
+            )
+            loop._write_skill_md(skill)  # noqa: SLF001
+
     @app.post("/api/skills/{name}/status")
     async def set_skill_status(name: str, request: Request):
         if runtime is None or not hasattr(runtime, "skills"):
@@ -239,17 +254,98 @@ def register_memory_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
             reg.set_status(name, st)
         else:
             skill.manifest.status = st
-        # Persist status into SKILL.md when on disk
-        with suppress(Exception):
-            from remedy.core.learning_loop import LearningLoop
+        meta = dict(skill.manifest.metadata or {})
+        # Human-in-the-loop force promote / clear quarantine
+        if (payload or {}).get("force_promote") or st == _SS.ACTIVE:
+            meta["lifecycle"] = "manual-promote"
+            meta["lifecycle_last"] = "Manually force-promoted by user"
+            meta["manual_override"] = "promote"
+            meta["quarantine"] = False
+        if "quarantine" in (payload or {}):
+            meta["quarantine"] = bool(payload.get("quarantine"))
+            if meta["quarantine"]:
+                meta["lifecycle"] = "manual-quarantine"
+                meta["lifecycle_last"] = "Manually quarantined by user"
+                meta["manual_override"] = "quarantine"
+                if st == _SS.ACTIVE:
+                    st = _SS.DISABLED
+                    if hasattr(reg, "set_status"):
+                        reg.set_status(name, st)
+                    else:
+                        skill.manifest.status = st
+        skill.manifest.metadata = meta
+        _persist_skill(skill)
+        return {
+            "name": name,
+            "status": st.value,
+            "quarantine": bool(meta.get("quarantine")),
+            "lifecycle": meta.get("lifecycle"),
+        }
 
-            home = Path(
-                getattr(getattr(runtime, "config", None), "home_dir", None)
-                or "~/.remedy"
-            ).expanduser()
-            loop = LearningLoop(skills_dir=home / "skills", memory=None, registry=reg)
-            loop._write_skill_md(skill)  # noqa: SLF001
-        return {"name": name, "status": st.value}
+    @app.post("/api/skills/{name}/quarantine")
+    async def set_skill_quarantine(name: str, request: Request):
+        """Toggle manual quarantine (blocks script activation until cleared)."""
+        if runtime is None or not hasattr(runtime, "skills"):
+            raise HTTPException(503, "Skills not available")
+        skill = runtime.skills.get(name)
+        if skill is None:
+            raise HTTPException(404, f"Skill not found: {name}")
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+        on = bool((payload or {}).get("quarantine", True))
+        meta = dict(skill.manifest.metadata or {})
+        meta["quarantine"] = on
+        meta["manual_override"] = "quarantine" if on else "clear-quarantine"
+        meta["lifecycle_last"] = (
+            "Manually quarantined by user" if on else "Quarantine cleared by user"
+        )
+        skill.manifest.metadata = meta
+        if on:
+            from remedy.models import SkillStatus as _SS
+
+            skill.manifest.status = _SS.DISABLED
+        _persist_skill(skill)
+        return {
+            "name": name,
+            "quarantine": on,
+            "status": skill.manifest.status.value,
+        }
+
+    @app.put("/api/skills/{name}/body")
+    async def update_skill_body(name: str, request: Request):
+        """Replace skill instructions / full SKILL.md body (human editor)."""
+        if runtime is None or not hasattr(runtime, "skills"):
+            raise HTTPException(503, "Skills not available")
+        skill = runtime.skills.get(name)
+        if skill is None:
+            raise HTTPException(404, f"Skill not found: {name}")
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+        body = (payload or {}).get("body")
+        instructions = (payload or {}).get("instructions")
+        if body is None and instructions is None:
+            raise HTTPException(400, "body or instructions required")
+        text = str(body if body is not None else instructions)
+        # If full SKILL.md with frontmatter, peel instructions after ---
+        if text.lstrip().startswith("---"):
+            parts = text.split("---", 2)
+            if len(parts) >= 3:
+                text = parts[2].lstrip("\n")
+        skill.instructions = text
+        meta = dict(skill.manifest.metadata or {})
+        meta["manual_edit"] = True
+        meta["lifecycle_last"] = "Instructions edited by user"
+        skill.manifest.metadata = meta
+        _persist_skill(skill)
+        return {
+            "name": name,
+            "status": "saved",
+            "chars": len(skill.instructions or ""),
+        }
 
     @app.post("/api/skills/{name}/feedback")
     async def skill_feedback(name: str, request: Request):

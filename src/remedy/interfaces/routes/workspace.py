@@ -6,7 +6,7 @@ import logging
 import os
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 
 from remedy.core.errors import SecurityError
 from remedy.interfaces.api_models import (
@@ -232,6 +232,117 @@ def register_workspace_routes(app: FastAPI, *, runtime=None, gateway=None, memor
     async def revert_message(session_id: str, msg_id: str):
         """Legacy alias → edit-from (user messages only, cascade to later msgs)."""
         return await edit_from_message(session_id, msg_id)
+
+    # -- interactive time travel ---------------------------------------------
+    @app.get("/api/sessions/{session_id}/timeline")
+    async def session_timeline(session_id: str):
+        """Visual timeline of user/assistant steps for the Time Travel browser."""
+        if memory is None:
+            raise HTTPException(503, "Memory store not available")
+        from remedy.core.time_travel import build_timeline
+
+        msgs = await memory.get_chat_messages(session_id, limit=500)
+        steps = build_timeline(msgs)
+        return {
+            "session_id": session_id,
+            "steps": steps,
+            "count": len(steps),
+        }
+
+    @app.post("/api/sessions/{session_id}/time-travel")
+    async def session_time_travel(session_id: str, request: Request):
+        """Roll chat + best-effort workspace files back to a timeline step.
+
+        Body: ``{ "message_id": "<id>" }`` — typically a user-step id. Restores
+        file_write undo log entries at/after that point and soft-deletes later
+        chat messages.
+        """
+        if memory is None:
+            raise HTTPException(503, "Memory store not available")
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+        msg_id = str((payload or {}).get("message_id") or "").strip()
+        if not msg_id:
+            raise HTTPException(400, "message_id required")
+
+        msg = await memory.get_chat_message(msg_id)
+        if msg is None or msg.session_id != session_id:
+            raise HTTPException(404, "Message not found")
+        if msg.reverted:
+            raise HTTPException(400, "Message already reverted")
+
+        # Assistant nodes restore from their parent user turn when possible
+        # so "step 3 bubble" rolls back to the start of that step.
+        target_id = msg_id
+        role = msg.role.value if hasattr(msg.role, "value") else str(msg.role)
+        if role == "assistant":
+            # Find nearest prior user message
+            all_msgs = await memory.get_chat_messages(session_id, limit=500)
+            prev_user = None
+            for m in all_msgs:
+                if m.id == msg_id:
+                    break
+                r = m.role.value if hasattr(m.role, "value") else str(m.role)
+                if r == "user" and not m.reverted:
+                    prev_user = m
+            if prev_user is not None:
+                target_id = prev_user.id
+                msg = prev_user
+
+        cut_at = msg.created_at.isoformat() if hasattr(msg.created_at, "isoformat") else str(msg.created_at or "")
+        original = msg.content if isinstance(msg.content, str) else str(msg.content or "")
+
+        # Workspace file restore (best-effort) before soft-delete markers
+        files = {"restored": 0, "deleted": 0, "skipped": 0, "paths": []}
+        try:
+            from remedy.core.time_travel import SessionUndoLog
+
+            home = None
+            if runtime is not None:
+                home = getattr(getattr(runtime, "config", None), "home_dir", None)
+            if not home:
+                cfg = load_config()
+                home = cfg.get("home_dir")
+            files = SessionUndoLog(home).restore_after(
+                session_id, cut_created_at=cut_at
+            )
+        except Exception as exc:
+            logger.debug("time-travel file restore: %s", exc)
+
+        # Drop mid-task checkpoints after the cut (session-scoped)
+        dropped_cp = 0
+        try:
+            from remedy.core.checkpoint import CheckpointStore
+
+            home = None
+            if runtime is not None:
+                home = getattr(getattr(runtime, "config", None), "home_dir", None)
+            store = CheckpointStore(home)
+            for cp in store.list_for_session(session_id, limit=100):
+                if cut_at and str(cp.created_at) >= cut_at:
+                    path = store._path(cp.id)  # noqa: SLF001
+                    if path.is_file():
+                        path.unlink(missing_ok=True)
+                        dropped_cp += 1
+        except Exception:
+            pass
+
+        # Clear session brief on runtime if present (context memory)
+        with contextlib.suppress(Exception):
+            if runtime is not None and hasattr(runtime, "_session_brief"):
+                runtime._session_brief = None
+
+        count = await memory.revert_from(session_id, target_id)
+        return {
+            "status": "restored",
+            "message_id": target_id,
+            "content": original,
+            "reverted_count": count,
+            "files": files,
+            "checkpoints_dropped": dropped_cp,
+        }
 
     # -- session export / import (plain text) ---------------------------------
     @app.get("/api/sessions/{session_id}/export")

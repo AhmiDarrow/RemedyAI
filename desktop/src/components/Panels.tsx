@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, type ComponentType } from 'react'
 
 interface PanelProps {
   open: boolean
@@ -369,7 +369,6 @@ type SkillRow = {
   success_rate?: number | null
   related?: string[]
   lifecycle?: string | null
-  /** Last lifecycle / creation gate reason from the learning loop */
   lifecycle_last?: string | null
 }
 
@@ -404,7 +403,6 @@ export function SkillsPanel({
 }: {
   open: boolean
   onClose: () => void
-  /** Open Help wiki on the skills chapter. */
   onOpenHelp?: (articleId?: string) => void
 }) {
   const [skills, setSkills] = useState<SkillRow[]>([])
@@ -413,6 +411,11 @@ export function SkillsPanel({
   const [filter, setFilter] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [editName, setEditName] = useState<string | null>(null)
+  const [editBody, setEditBody] = useState('')
+  const [editSaving, setEditSaving] = useState(false)
+  const [packMsg, setPackMsg] = useState<string | null>(null)
 
   const [reuse, setReuse] = useState<{
     total_activations: number
@@ -423,17 +426,17 @@ export function SkillsPanel({
   const load = () => {
     setLoading(true)
     setError(null)
-    const q = filter.trim() ? `?q=${encodeURIComponent(filter.trim())}` : ''
-    void import('../api/client')
-      .then(async ({ apiFetch }) => {
+    void import('../api/skills')
+      .then(async ({ listSkills }) => {
+        const { apiFetch } = await import('../api/client')
         const [list, summary, metrics] = await Promise.all([
-          apiFetch<SkillRow[]>(`/skills${q}`),
+          listSkills(filter),
           apiFetch<LearningSummary>('/skills/learning/summary').catch(() => null),
           import('../api/partner')
             .then(({ getSkillReuseMetrics }) => getSkillReuseMetrics())
             .catch(() => null),
         ])
-        setSkills(Array.isArray(list) ? list : [])
+        setSkills(list)
         setLearning(summary)
         setReuse(
           metrics
@@ -460,31 +463,123 @@ export function SkillsPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
-  const setStatus = async (name: string, status: string) => {
+  const toggleSelect = (name: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(name)) next.delete(name)
+      else next.add(name)
+      return next
+    })
+  }
+
+  const forcePromote = async (name: string) => {
     setBusy(name)
     setError(null)
     try {
-      const { apiFetch } = await import('../api/client')
-      await apiFetch(`/skills/${encodeURIComponent(name)}/status`, {
-        method: 'POST',
-        body: JSON.stringify({ status }),
-      })
+      const { setSkillStatus } = await import('../api/skills')
+      await setSkillStatus(name, 'active', { force_promote: true, quarantine: false })
       await load()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Status update failed')
+      setError(e instanceof Error ? e.message : 'Promote failed')
     } finally {
       setBusy(null)
+    }
+  }
+
+  const toggleQuarantine = async (name: string, on: boolean) => {
+    setBusy(name)
+    setError(null)
+    try {
+      const { setSkillQuarantine } = await import('../api/skills')
+      await setSkillQuarantine(name, on)
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Quarantine update failed')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const openEditor = async (name: string) => {
+    setBusy(name)
+    setError(null)
+    try {
+      const { getSkillDetail } = await import('../api/skills')
+      const d = await getSkillDetail(name)
+      setEditName(name)
+      setEditBody(
+        typeof d.body === 'string' && d.body
+          ? d.body
+          : (d.instructions_preview || ''),
+      )
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load skill body')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const saveEditor = async () => {
+    if (!editName) return
+    setEditSaving(true)
+    setError(null)
+    try {
+      const { saveSkillBody } = await import('../api/skills')
+      await saveSkillBody(editName, editBody)
+      setEditName(null)
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Save failed')
+    } finally {
+      setEditSaving(false)
+    }
+  }
+
+  const exportPack = async () => {
+    setPackMsg(null)
+    setError(null)
+    try {
+      const { exportSkillsPack } = await import('../api/skills')
+      const names = selected.size ? [...selected] : undefined
+      await exportSkillsPack(names)
+      setPackMsg(
+        names
+          ? `Exported ${names.length} skill(s) as ZIP`
+          : 'Exported all skills as ZIP',
+      )
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Export failed')
+    }
+  }
+
+  const importPack = async () => {
+    setPackMsg(null)
+    setError(null)
+    try {
+      const input = document.createElement('input')
+      input.type = 'file'
+      input.accept = '.zip,application/zip'
+      const file = await new Promise<File | null>((resolve) => {
+        input.onchange = () => resolve(input.files?.[0] ?? null)
+        input.click()
+      })
+      if (!file) return
+      const { importSkillsPack } = await import('../api/skills')
+      const r = await importSkillsPack(file)
+      setPackMsg(
+        `Imported ${r.imported} skill(s) in quarantine: ${r.names.join(', ')}`,
+      )
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Import failed')
     }
   }
 
   const feedback = async (name: string, success: boolean) => {
     setBusy(name)
     try {
-      const { apiFetch } = await import('../api/client')
-      await apiFetch(`/skills/${encodeURIComponent(name)}/feedback`, {
-        method: 'POST',
-        body: JSON.stringify({ success }),
-      })
+      const { skillFeedback } = await import('../api/skills')
+      await skillFeedback(name, success)
       await load()
     } catch {
       /* ignore */
@@ -531,9 +626,50 @@ export function SkillsPanel({
           Search
         </button>
       </div>
+      <div className="mb-2 flex flex-wrap gap-1">
+        <button
+          type="button"
+          onClick={() => void exportPack()}
+          className="text-[10px] px-2 py-1 rounded font-medium"
+          style={{
+            background: 'var(--accent)',
+            color: '#fff',
+          }}
+          title={
+            selected.size
+              ? `Export ${selected.size} selected`
+              : 'Export all skills as ZIP pack'
+          }
+        >
+          Export Pack{selected.size ? ` (${selected.size})` : ''}
+        </button>
+        <button
+          type="button"
+          onClick={() => void importPack()}
+          className="text-[10px] px-2 py-1 rounded"
+          style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
+        >
+          Import Pack
+        </button>
+        {selected.size > 0 && (
+          <button
+            type="button"
+            onClick={() => setSelected(new Set())}
+            className="text-[10px] px-2 py-1 rounded"
+            style={{ color: 'var(--text-muted)' }}
+          >
+            Clear selection
+          </button>
+        )}
+      </div>
+      {packMsg && (
+        <div className="mb-2 text-[10px]" style={{ color: 'var(--success, #3ecf8e)' }}>
+          {packMsg}
+        </div>
+      )}
       <p className="mb-2" style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>
-        Learned skills start on probation; hard-won ones are protected. Activate full
-        instructions in chat with the skill_activate tool.
+        Human overrides: force-promote early skills or quarantine failing ones.
+        Edit SKILL.md in the CodeMirror editor. Export packs for sharing.
       </p>
       {learning && (
         <div
@@ -576,11 +712,6 @@ export function SkillsPanel({
                 >
                   <span style={{ color: 'var(--accent)' }}>{s.name}</span>
                   <span style={{ color: statusColor(s.status) }}> · {s.status || '?'}</span>
-                  {s.lifecycle_last && (
-                    <div style={{ color: 'var(--text-muted)', fontSize: '0.65rem' }}>
-                      {s.lifecycle_last}
-                    </div>
-                  )}
                 </li>
               ))}
             </ul>
@@ -590,6 +721,36 @@ export function SkillsPanel({
       {error && (
         <div className="mb-2 text-xs" style={{ color: 'var(--danger, #f66)' }}>
           {error}
+        </div>
+      )}
+      {editName && (
+        <div
+          className="mb-3 p-2 rounded"
+          style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)' }}
+        >
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-xs font-medium" style={{ color: 'var(--accent)' }}>
+              Edit {editName}
+            </span>
+            <button
+              type="button"
+              onClick={() => setEditName(null)}
+              className="text-xs"
+              style={{ color: 'var(--text-muted)' }}
+            >
+              Close
+            </button>
+          </div>
+          <SkillMarkdownEditorLazy value={editBody} onChange={setEditBody} />
+          <button
+            type="button"
+            disabled={editSaving}
+            onClick={() => void saveEditor()}
+            className="mt-2 w-full text-xs py-1.5 rounded font-medium"
+            style={{ background: 'var(--accent)', color: '#fff' }}
+          >
+            {editSaving ? 'Saving…' : 'Save SKILL.md'}
+          </button>
         </div>
       )}
       {loading ? (
@@ -604,6 +765,13 @@ export function SkillsPanel({
             style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}
           >
             <div className="flex items-center gap-2 flex-wrap">
+              <input
+                type="checkbox"
+                checked={selected.has(s.name)}
+                onChange={() => toggleSelect(s.name)}
+                title="Select for export pack"
+                aria-label={`Select ${s.name}`}
+              />
               <span className="font-medium" style={{ color: 'var(--accent)' }}>
                 {s.name}
               </span>
@@ -617,79 +785,78 @@ export function SkillsPanel({
               >
                 {s.status || 'unknown'}
               </span>
-              {(s.effort_weight ?? 0) >= 0.62 && (
-                <span
-                  className="text-xs px-1.5 rounded"
-                  style={{
-                    color: 'var(--warning, #e6b84d)',
-                    border: '1px solid var(--warning, #e6b84d)',
-                    fontSize: '0.65rem',
-                  }}
-                >
-                  hard-won
-                </span>
-              )}
-              {s.auto_generated && (
-                <span style={{ color: 'var(--text-muted)', fontSize: '0.65rem' }}>learned</span>
-              )}
               {s.quarantine && (
                 <span style={{ color: 'var(--danger, #f66)', fontSize: '0.65rem' }}>
                   quarantine
                 </span>
               )}
+              {s.auto_generated && (
+                <span style={{ color: 'var(--text-muted)', fontSize: '0.65rem' }}>learned</span>
+              )}
             </div>
             <div className="mt-0.5" style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
               {s.description}
             </div>
-            <div className="mt-1 flex flex-wrap gap-2" style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>
-              <span>v{s.version}</span>
-              {s.effort_band && <span>effort: {s.effort_band}</span>}
-              {s.success_rate != null && (
-                <span>rate: {Math.round(Number(s.success_rate) * 100)}%</span>
-              )}
-              {s.related && s.related.length > 0 && (
-                <span>related: {s.related.slice(0, 3).join(', ')}</span>
-              )}
+            <div
+              className="mt-1.5 flex flex-wrap gap-1 items-center"
+              style={{ fontSize: '0.7rem' }}
+            >
+              <label
+                className="flex items-center gap-1 cursor-pointer"
+                style={{ color: 'var(--text-secondary)' }}
+                title="Force-promote to ACTIVE (skip probation)"
+              >
+                <input
+                  type="checkbox"
+                  checked={(s.status || '').toLowerCase() === 'active' && !s.quarantine}
+                  disabled={busy === s.name}
+                  onChange={(e) => {
+                    if (e.target.checked) void forcePromote(s.name)
+                    else void toggleQuarantine(s.name, false)
+                  }}
+                />
+                Force promote
+              </label>
+              <label
+                className="flex items-center gap-1 cursor-pointer"
+                style={{ color: 'var(--text-secondary)' }}
+                title="Manually quarantine (blocks script activation)"
+              >
+                <input
+                  type="checkbox"
+                  checked={Boolean(s.quarantine)}
+                  disabled={busy === s.name}
+                  onChange={(e) => void toggleQuarantine(s.name, e.target.checked)}
+                />
+                Quarantine
+              </label>
             </div>
             <div className="mt-1.5 flex flex-wrap gap-1">
               <button
                 type="button"
                 disabled={busy === s.name}
-                onClick={() => setStatus(s.name, 'active')}
+                onClick={() => void openEditor(s.name)}
                 className="text-xs px-1.5 py-0.5 rounded"
-                style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
-                title="Force ACTIVE (trusted)"
+                style={{ border: '1px solid var(--border)', color: 'var(--accent)' }}
               >
-                Activate
+                Edit MD
               </button>
               <button
                 type="button"
                 disabled={busy === s.name}
-                onClick={() => setStatus(s.name, 'disabled')}
+                onClick={() => void forcePromote(s.name)}
                 className="text-xs px-1.5 py-0.5 rounded"
                 style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
+                title="Force ACTIVE now"
               >
-                Disable
+                Promote
               </button>
-              {s.quarantine && (
-                <button
-                  type="button"
-                  disabled={busy === s.name}
-                  onClick={() => setStatus(s.name, 'validated')}
-                  className="text-xs px-1.5 py-0.5 rounded"
-                  style={{ border: '1px solid var(--border)', color: 'var(--accent)' }}
-                  title="Leave quarantine (validated)"
-                >
-                  Trust
-                </button>
-              )}
               <button
                 type="button"
                 disabled={busy === s.name}
                 onClick={() => feedback(s.name, true)}
                 className="text-xs px-1.5 py-0.5 rounded"
                 style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
-                title="Record success feedback"
               >
                 ✓
               </button>
@@ -699,7 +866,6 @@ export function SkillsPanel({
                 onClick={() => feedback(s.name, false)}
                 className="text-xs px-1.5 py-0.5 rounded"
                 style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
-                title="Record failure feedback"
               >
                 ✗
               </button>
@@ -709,4 +875,38 @@ export function SkillsPanel({
       )}
     </Panel>
   )
+}
+
+/** Lazy-load CodeMirror so the panel shell stays light when unused. */
+function SkillMarkdownEditorLazy({
+  value,
+  onChange,
+}: {
+  value: string
+  onChange: (v: string) => void
+}) {
+  const [Comp, setComp] = useState<null | ComponentType<{
+    value: string
+    onChange: (v: string) => void
+    height?: string
+  }>>(null)
+  useEffect(() => {
+    void import('./SkillMarkdownEditor').then((m) => setComp(() => m.SkillMarkdownEditor))
+  }, [])
+  if (!Comp) {
+    return (
+      <textarea
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        rows={12}
+        className="w-full text-xs p-2 rounded font-mono"
+        style={{
+          background: 'var(--bg-primary)',
+          border: '1px solid var(--border)',
+          color: 'var(--text-primary)',
+        }}
+      />
+    )
+  }
+  return <Comp value={value} onChange={onChange} height="240px" />
 }

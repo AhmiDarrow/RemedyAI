@@ -1577,6 +1577,22 @@ class BasicRuntime(AgentRuntime):
                                 chunk = parse_sse_data_line(line_text)
                                 if chunk is None:
                                     continue
+                                # Provider usage (often only on final SSE chunk)
+                                try:
+                                    from remedy.core.usage import usage_from_provider_payload
+
+                                    u = usage_from_provider_payload(
+                                        chunk,
+                                        model=getattr(self, "_llm_model", None),
+                                        provider=getattr(self, "_llm_provider", None),
+                                    )
+                                    if u:
+                                        yield (
+                                            "@@usage:"
+                                            + json.dumps(u, separators=(",", ":"))
+                                        )
+                                except Exception:
+                                    pass
                                 r_before = len(''.join(round_state.reasoning_parts))
                                 live = apply_openai_sse_chunk(
                                     round_state, chunk, stream_live=stream_live
@@ -1589,6 +1605,21 @@ class BasicRuntime(AgentRuntime):
                                     yield live
                         else:
                             data = await resp.json()
+                            try:
+                                from remedy.core.usage import usage_from_provider_payload
+
+                                u = usage_from_provider_payload(
+                                    data,
+                                    model=getattr(self, "_llm_model", None),
+                                    provider=getattr(self, "_llm_provider", None),
+                                )
+                                if u:
+                                    yield (
+                                        "@@usage:"
+                                        + json.dumps(u, separators=(",", ":"))
+                                    )
+                            except Exception:
+                                pass
                             parsed = self._provider.extract_response(data)
                             content = parsed.get("content")
                             if content:

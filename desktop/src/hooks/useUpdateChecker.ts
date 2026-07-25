@@ -203,11 +203,16 @@ export function useUpdateChecker() {
   }, [])
 
   useEffect(() => {
-    void check()
+    // Defer first network check so it never races splash / settings / sessions.
+    // Manual "Check for updates" still calls check() immediately.
+    const startupDelay = window.setTimeout(() => {
+      void check()
+    }, 25_000)
     intervalRef.current = setInterval(() => {
       void check()
     }, CHECK_INTERVAL)
     return () => {
+      window.clearTimeout(startupDelay)
       if (intervalRef.current) clearInterval(intervalRef.current)
     }
   }, [check])

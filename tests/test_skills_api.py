@@ -85,3 +85,47 @@ def test_skills_learning_summary(tmp_path: Path):
     assert any(s["name"] == "auto-from-trace" for s in data["recent"])
     # Must not be captured as /api/skills/{name}
     assert "note" in data
+
+
+def test_force_promote_and_quarantine(tmp_path: Path):
+    rt = _FakeRuntime(tmp_path)
+    learned = Skill(
+        manifest=SkillManifest(
+            name="early-skill",
+            description="probation",
+            status=SkillStatus.DISCOVERED,
+            metadata={"auto_generated": True},
+        ),
+        instructions="# steps\n1. do thing\n",
+    )
+    rt.skills.register(learned)
+    app = create_app(runtime=rt, api_key="")
+    client = TestClient(app)
+    r = client.post(
+        "/api/skills/early-skill/status",
+        json={"status": "active", "force_promote": True},
+    )
+    assert r.status_code == 200
+    assert r.json()["status"] == "active"
+    assert r.json().get("quarantine") is False
+
+    r2 = client.post(
+        "/api/skills/early-skill/quarantine",
+        json={"quarantine": True},
+    )
+    assert r2.status_code == 200
+    assert r2.json()["quarantine"] is True
+    assert rt.skills.get("early-skill").manifest.metadata.get("quarantine") is True
+
+
+def test_skill_body_put(tmp_path: Path):
+    rt = _FakeRuntime(tmp_path)
+    app = create_app(runtime=rt, api_key="")
+    client = TestClient(app)
+    r = client.put(
+        "/api/skills/api-skill/body",
+        json={"instructions": "# Updated by human\n\nDo the thing carefully.\n"},
+    )
+    assert r.status_code == 200
+    assert r.json()["status"] == "saved"
+    assert "Updated by human" in (rt.skills.get("api-skill").instructions or "")

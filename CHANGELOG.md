@@ -2,6 +2,44 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.10.44] — 2026-07-25
+
+### Feature: Skills HITL overrides, pack export, Time Travel, token cost ticker
+
+- **Skills panel**: force-promote / quarantine toggles; CodeMirror markdown editor for
+  `SKILL.md`; multi-select **Export Pack** (ZIP) + import; APIs for quarantine + body PUT.
+- **Time Travel**: timeline panel (status bar / command palette); click a step to soft-revert
+  chat, restore best-effort `file_write` undo log, drop later checkpoints.
+- **Token & cost ticker** (hideable): live run + session tokens/cost; prefers provider usage
+  when present, else estimates; list-price breakdown in expand panel.
+
+### Perf: end-to-end speed (Settings, startup, chat UI, secrets)
+
+- **Secrets path**: Windows `icacls` harden no longer runs on every `auth_dir()` read (~90–100ms each);
+  harden only on create/write. mtime-cache for `load_provider_keys`; warm secrets at serve start.
+- **Config**: `load_config()` mtime-cached for all routes; invalidate/seed on write.
+- **Models**: skip live remote `/models` for closed cloud catalogs (use curated list + configured model);
+  live discovery kept for Ollama / OpenRouter / custom / local URLs; TTL 90s; shorter timeouts.
+  Override with `REMEDY_LIVE_MODELS=1`.
+- **Settings GET**: skip no-op migrate/write; no fingerprints unless requested; light vision only.
+- **Desktop**: shorter splash; parallel sessions+settings; keep splash token; defer update check 25s;
+  adaptive vision/checkpoint polling; project_path cache on new session; `memo` message bubbles.
+
+### Fix: Settings / connection stability + durable debug logs
+
+- **Root cause**: vision `is_running()` called `urlopen` with multi-second timeouts against a dead
+  `llama-server` port from **async** handlers, freezing the whole uvicorn event loop. Desktop
+  `/api/status` probes then timed out → status bar flipped Connected ↔ Disconnected; Settings
+  waited on the same path (~4–9s measured).
+- Vision probe: TCP port first, skip HTTP when closed, short timeouts, 2.5s cache; Settings uses
+  `get_status(light=True)`; `/api/vision/status` runs in a worker thread.
+- New public **`GET /api/ping`** for liveness; status bar prefers it + requires 2 failures before
+  showing offline.
+- Settings panel loads core config first, vision/desktop prefs in the background.
+- **`setup_serve_logging`**: rotating files under `~/.remedy/logs/` (`remedy.log`, `errors.log`,
+  always-on `debug.log`); request middleware logs `SLOW` for handlers ≥500ms.
+- Docs: troubleshooting section for disconnect flaps + log locations.
+
 ## [0.10.43] — 2026-07-24
 
 ### Fix: CI mypy + full rebuild of 0.10.42 features

@@ -403,6 +403,7 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                 full_thinking = ""
                 collected_tool_calls: list[dict] = []
                 collected_tool_results: list[dict] = []
+                usage_acc: dict | None = None
                 if not api_key:
                     status = "no_key"
                     msg = (
@@ -496,6 +497,21 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                         if thought:
                             full_thinking += thought
                             yield await _sse_stream_text(thought, event="thinking")
+                    elif token.startswith("@@usage:"):
+                        raw_u = token[len("@@usage:") :]
+                        try:
+                            from remedy.core.usage import merge_usage
+
+                            part = json.loads(raw_u) if raw_u else {}
+                            if isinstance(part, dict):
+                                usage_acc = merge_usage(usage_acc, part)
+                                yield (
+                                    "event: usage\ndata: "
+                                    + json.dumps({"type": "usage", **usage_acc})
+                                    + "\n\n"
+                                )
+                        except Exception:
+                            pass
                     elif token.startswith("@@image_markdown:"):
                         # ComfyUI (etc.): image markdown with data-URI — show immediately.
                         md = token[len("@@image_markdown:"):]
@@ -519,7 +535,34 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                         full_response += token
                         yield await _sse_stream_text(token, event="token")
 
+                # Final usage: prefer provider totals; fall back to char estimate.
+                final_usage: dict | None = None
+                try:
+                    from remedy.core.usage import estimate_turn_usage, merge_usage
+
+                    est = estimate_turn_usage(
+                        user_text=user_text or "",
+                        assistant_text=full_response or "",
+                        thinking_text=full_thinking or "",
+                        model=req.model or getattr(runtime, "_llm_model", None),
+                        provider=getattr(runtime, "_llm_provider", None),
+                    )
+                    if usage_acc and usage_acc.get("source") == "provider":
+                        final_usage = merge_usage(usage_acc)
+                    else:
+                        final_usage = merge_usage(est, usage_acc)
+                    yield (
+                        "event: usage\ndata: "
+                        + json.dumps({"type": "usage", **final_usage})
+                        + "\n\n"
+                    )
+                except Exception:
+                    final_usage = None
+
                 if full_response and memory:
+                    tok = None
+                    if isinstance(final_usage, dict):
+                        tok = int(final_usage.get("total_tokens") or 0) or None
                     await memory.add_chat_message(ChatMessage(
                         session_id=session_id,
                         role=ChatMessageRole.ASSISTANT,
@@ -528,11 +571,13 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                         tool_calls=collected_tool_calls,
                         tool_results=collected_tool_results,
                         model=req.model or getattr(runtime, "_llm_model", None),
+                        tokens=tok,
                     ))
 
-                yield (
-                    f"event: done\ndata: {json.dumps({'type': 'done', 'request_id': request_id})}\n\n"
-                )
+                done_payload: dict = {"type": "done", "request_id": request_id}
+                if isinstance(final_usage, dict):
+                    done_payload["usage"] = final_usage
+                yield f"event: done\ndata: {json.dumps(done_payload)}\n\n"
 
             except asyncio.CancelledError:
                 status = "cancelled"

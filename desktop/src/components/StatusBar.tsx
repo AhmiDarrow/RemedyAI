@@ -33,6 +33,9 @@ interface StatusBarProps {
   updateAvailable: boolean
   onCheckUpdates: () => void
   onInstallUpdate?: () => void
+  /** Toggle interactive Time Travel timeline panel. */
+  timeTravelOpen?: boolean
+  onToggleTimeTravel?: () => void
 }
 
 const THINKING_OPTIONS: { id: ThinkingLevel; label: string }[] = [
@@ -124,6 +127,8 @@ export function StatusBar({
   updateAvailable,
   onCheckUpdates,
   onInstallUpdate,
+  timeTravelOpen = false,
+  onToggleTimeTravel,
 }: StatusBarProps) {
   const [version, setVersion] = useState('')
   const [status, setStatus] = useState<'connected' | 'disconnected' | 'checking'>('checking')
@@ -133,20 +138,48 @@ export function StatusBar({
 
   useEffect(() => {
     let cancelled = false
+    let failStreak = 0
     async function check() {
       try {
-        const res = await fetch('http://127.0.0.1:7400/api/status', {
-          signal: AbortSignal.timeout(3000),
-        })
-        if (cancelled) return
-        if (res.ok) {
-          setStatus('connected')
-          try {
-            const data = await res.json()
-            if (data?.version) setVersion(String(data.version))
-          } catch {
-            /* */
+        // Prefer /api/ping (sub-ms). Fall back to /api/status for version + older builds.
+        let ok = false
+        let ver = ''
+        try {
+          const ping = await fetch('http://127.0.0.1:7400/api/ping', {
+            signal: AbortSignal.timeout(2500),
+            headers: { Accept: 'application/json' },
+          })
+          if (ping.ok) {
+            ok = true
+            try {
+              const data = (await ping.json()) as { version?: string }
+              if (data?.version) ver = String(data.version)
+            } catch {
+              /* */
+            }
           }
+        } catch {
+          /* try status */
+        }
+        if (!ok) {
+          const res = await fetch('http://127.0.0.1:7400/api/status', {
+            signal: AbortSignal.timeout(4000),
+          })
+          ok = res.ok
+          if (res.ok) {
+            try {
+              const data = await res.json()
+              if (data?.version) ver = String(data.version)
+            } catch {
+              /* */
+            }
+          }
+        }
+        if (cancelled) return
+        if (ok) {
+          failStreak = 0
+          setStatus('connected')
+          if (ver) setVersion(ver)
           try {
             const p = await getPartnerStatus()
             if (cancelled) return
@@ -158,15 +191,20 @@ export function StatusBar({
             if (!cancelled) setAlerts('')
           }
         } else {
-          setStatus('disconnected')
+          // Hysteresis: one blip must not flip the dock to "Server offline".
+          failStreak += 1
+          if (failStreak >= 2) setStatus('disconnected')
         }
       } catch {
-        if (!cancelled) setStatus('disconnected')
+        if (!cancelled) {
+          failStreak += 1
+          if (failStreak >= 2) setStatus('disconnected')
+        }
       }
     }
 
     check()
-    const interval = setInterval(check, 30000)
+    const interval = setInterval(check, 15000)
     return () => {
       cancelled = true
       clearInterval(interval)
@@ -177,6 +215,10 @@ export function StatusBar({
   useEffect(() => {
     let cancelled = false
     async function tick() {
+      if (!sessionId) {
+        if (!cancelled) setHasCheckpoint(false)
+        return
+      }
       try {
         const d = await getLatestCheckpoint(sessionId)
         if (!cancelled) setHasCheckpoint(Boolean(d.checkpoint))
@@ -185,7 +227,13 @@ export function StatusBar({
       }
     }
     void tick()
-    const interval = setInterval(() => void tick(), streaming ? 4000 : 15000)
+    // No session → no polling. Idle sessions: slow poll; streaming: faster.
+    if (!sessionId) {
+      return () => {
+        cancelled = true
+      }
+    }
+    const interval = setInterval(() => void tick(), streaming ? 4000 : 20000)
     return () => {
       cancelled = true
       clearInterval(interval)
@@ -196,17 +244,33 @@ export function StatusBar({
   useEffect(() => {
     let cancelled = false
     let timer: ReturnType<typeof setTimeout> | undefined
+    let idleMisses = 0
     async function tick() {
-      let busy = false
+      let nextMs = 12_000
       try {
         const vs = await getVisionStatus()
         if (!cancelled) setVision(vs)
-        busy = visionIsBusy(vs)
+        if (visionIsBusy(vs)) {
+          idleMisses = 0
+          nextMs = 1500
+        } else if (!vs?.enabled && !vs?.installed) {
+          // Not opted in — barely poll.
+          idleMisses = 0
+          nextMs = 45_000
+        } else if (!vs?.running) {
+          idleMisses += 1
+          nextMs = idleMisses >= 3 ? 30_000 : 12_000
+        } else {
+          idleMisses = 0
+          nextMs = 15_000
+        }
       } catch {
         if (!cancelled) setVision(null)
+        idleMisses += 1
+        nextMs = idleMisses >= 2 ? 45_000 : 15_000
       }
       if (!cancelled) {
-        timer = setTimeout(() => void tick(), busy ? 1500 : 8000)
+        timer = setTimeout(() => void tick(), nextMs)
       }
     }
     void tick()
@@ -294,6 +358,24 @@ export function StatusBar({
           >
             Streaming
           </span>
+        )}
+
+        {onToggleTimeTravel && (
+          <button
+            type="button"
+            onClick={onToggleTimeTravel}
+            className="px-1.5 py-0.5 rounded font-medium flex-shrink-0"
+            style={{
+              color: timeTravelOpen ? 'var(--accent)' : 'var(--text-secondary)',
+              background: timeTravelOpen
+                ? 'color-mix(in srgb, var(--accent) 14%, transparent)'
+                : 'transparent',
+              border: '1px solid var(--border)',
+            }}
+            title="Time Travel — restore chat & files to an earlier step"
+          >
+            ⏱ Time travel
+          </button>
         )}
 
         {alerts && (

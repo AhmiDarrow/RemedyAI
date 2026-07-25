@@ -92,7 +92,7 @@ def register_catalog_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
         if not api_key:
             api_key = str(cfg.get("llm_api_key") or os.environ.get("REMEDY_LLM_API_KEY") or "")
 
-        # Short-lived discovery cache (process-local) to avoid latency on every UI refresh.
+        # Discovery cache (process-local). Longer TTL — model lists rarely change mid-session.
         cache_key = f"{configured_provider}|{base_url}|{bool(api_key)}"
         cache = getattr(app.state, "_model_discovery_cache", None)
         if cache is None:
@@ -100,16 +100,43 @@ def register_catalog_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
             cache = app.state._model_discovery_cache
         now = time.time()
         cached = cache.get(cache_key)
-        from_cache = bool(cached and (now - cached[0]) < 30)
+        from_cache = bool(cached and (now - cached[0]) < 90)
         discovered = list(cached[1]) if from_cache else []
 
         verify_ssl = not _is_local_url(base_url)
 
+        # Live /models discovery is valuable for local/flexible hosts, but for
+        # closed cloud catalogs it often adds 200ms–4s of network with little UX
+        # gain (picker already has the curated list + configured model).
+        # Keep live discovery for: ollama, openrouter, custom, and any local URL.
+        live_providers = {"ollama", "openrouter", "custom"}
+        want_live = (
+            configured_provider in live_providers
+            or _is_local_url(base_url)
+            or str(os.environ.get("REMEDY_LIVE_MODELS", "")).strip().lower()
+            in ("1", "true", "yes", "on")
+        )
+        # Never hang startup: short timeout, and skip entirely without a key on
+        # remote hosts (would 401 and waste the full timeout budget).
+        can_live = bool(base_url) and (
+            configured_provider == "ollama"
+            or _is_local_url(base_url)
+            or (api_key and api_key != "local")
+        )
+
         # OpenAI-compatible /models (DeepSeek, OpenAI, Ollama /v1, OpenRouter, …)
         # Skip Anthropic here — its Messages API is not OpenAI /models compatible.
-        if not from_cache and configured_provider != "anthropic" and base_url:
+        if (
+            not from_cache
+            and want_live
+            and can_live
+            and configured_provider != "anthropic"
+            and base_url
+        ):
             try:
-                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=4)) as session:
+                async with aiohttp.ClientSession(
+                    timeout=aiohttp.ClientTimeout(total=1.8)
+                ) as session:
                     models_url = base_url.rstrip("/") + "/models"
                     headers: dict[str, str] = {}
                     if api_key and api_key != "local":
@@ -136,7 +163,9 @@ def register_catalog_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
         if not from_cache and (configured_provider == "ollama" or "11434" in (base_url or "")):
             try:
                 ollama_url = base_url.rstrip("/").removesuffix("/v1") + "/api/tags"
-                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3)) as session:
+                async with aiohttp.ClientSession(
+                    timeout=aiohttp.ClientTimeout(total=1.5)
+                ) as session:
                     async with session.get(ollama_url) as resp:
                         if resp.ok:
                             body = await resp.json()

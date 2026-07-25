@@ -21,16 +21,23 @@ logger = logging.getLogger(__name__)
 _proc: subprocess.Popen[Any] | None = None
 _last_used: float = 0.0
 
+# Short-lived probe cache — Settings + status poll this often; never block the
+# asyncio event loop for multi-second urlopen timeouts on a dead vision port.
+_running_cache: dict[str, Any] = {"ts": 0.0, "value": False, "key": ""}
+_RUNNING_CACHE_TTL_S = 2.5
+_HEALTH_TIMEOUT_S = 0.35
 
-def _port_open(host: str, port: int) -> bool:
+
+def _port_open(host: str, port: int, timeout: float = 0.15) -> bool:
     try:
-        with socket.create_connection((host, port), timeout=0.5):
+        with socket.create_connection((host, port), timeout=timeout):
             return True
     except OSError:
         return False
 
 
-def _health(base_url: str, timeout: float = 2.0) -> bool:
+def _health(base_url: str, timeout: float = _HEALTH_TIMEOUT_S) -> bool:
+    """HTTP probe of llama-server. Keep timeouts tiny — callers poll often."""
     url = base_url.rstrip("/") + "/models"
     try:
         req = Request(url, headers={"User-Agent": "RemedyAI-vision/1.0"})
@@ -39,27 +46,78 @@ def _health(base_url: str, timeout: float = 2.0) -> bool:
     except Exception:
         # Some builds only expose /v1/models
         try:
-            req = Request(
+            alt = (
                 base_url.rstrip("/") + "/v1/models"
                 if not base_url.rstrip("/").endswith("/v1")
-                else base_url.rstrip("/") + "/models",
-                headers={"User-Agent": "RemedyAI-vision/1.0"},
+                else base_url.rstrip("/") + "/models"
             )
+            req = Request(alt, headers={"User-Agent": "RemedyAI-vision/1.0"})
             with urlopen(req, timeout=timeout) as resp:
                 return 200 <= getattr(resp, "status", 200) < 300
         except Exception:
             return False
 
 
-def is_running(home_dir: str | Path | None = None) -> bool:
+def is_running(
+    home_dir: str | Path | None = None,
+    *,
+    force: bool = False,
+    require_http: bool = False,
+) -> bool:
+    """Return whether the vision decoder appears to be accepting connections.
+
+    Fast path: in-process child alive + TCP port open (sub-ms).
+    HTTP /models is only used when the port is open and we need a stronger
+    signal, or when ``require_http=True`` (e.g. right after start_server).
+    Results are cached briefly so Settings/status polls cannot freeze the API.
+    """
     global _proc
     state = load_vision_json(home_dir)
     host = str(state.get("host") or DEFAULT_HOST)
     port = int(state.get("port") or DEFAULT_PORT)
     base = str(state.get("base_url") or f"http://{host}:{port}/v1")
-    if _proc is not None and _proc.poll() is None:
-        return _health(base) or _port_open(host, port)
-    return _health(base)
+    cache_key = f"{host}:{port}:{base}"
+    now = time.time()
+    if (
+        not force
+        and _running_cache.get("key") == cache_key
+        and (now - float(_running_cache.get("ts") or 0)) < _RUNNING_CACHE_TTL_S
+    ):
+        return bool(_running_cache.get("value"))
+
+    child_alive = _proc is not None and _proc.poll() is None
+    port_up = _port_open(host, port)
+
+    if child_alive and port_up:
+        # Child we own + port open → treat as running without HTTP (avoids
+        # stalling the desktop while the model is still loading weights).
+        ok = True if not require_http else _health(base)
+    elif port_up:
+        # External/orphan llama-server — cheap HTTP, only because port is open.
+        ok = _health(base) if require_http or not child_alive else True
+        if not require_http and not child_alive:
+            # Port open is enough for UI "running"; full health on demand.
+            ok = True
+    elif child_alive:
+        # Process exists but not listening yet (still starting).
+        ok = False
+    else:
+        # Nothing listening — do NOT urlopen a dead port (was ~4s of freezes).
+        ok = False
+
+    _running_cache["ts"] = now
+    _running_cache["value"] = ok
+    _running_cache["key"] = cache_key
+    if not ok:
+        logger.debug("vision not running host=%s port=%s child=%s port_up=%s", host, port, child_alive, port_up)
+    return ok
+
+
+def invalidate_running_cache() -> None:
+    """Clear probe cache after start/stop so the next read is fresh."""
+    _running_cache["ts"] = 0.0
+    _running_cache["value"] = False
+    _running_cache["key"] = ""
 
 
 def mark_used() -> None:
@@ -89,7 +147,7 @@ def start_server(
     if not mmproj_path or not Path(str(mmproj_path)).is_file():
         return {"ok": False, "error": f"mmproj file missing: {mmproj_path}"}
 
-    if is_running(home_dir):
+    if is_running(home_dir, force=True, require_http=True):
         mark_used()
         return {"ok": True, "already_running": True, "base_url": base, "pid": _pid()}
 
@@ -140,27 +198,34 @@ def start_server(
     except OSError as e:
         return {"ok": False, "error": f"Failed to start llama-server: {e}"}
 
+    invalidate_running_cache()
     deadline = time.time() + wait_s
     while time.time() < deadline:
         if _proc.poll() is not None:
+            invalidate_running_cache()
             return {
                 "ok": False,
                 "error": f"llama-server exited early (code {_proc.returncode})",
             }
-        if _health(base) or _port_open(host, port):
-            # Prefer HTTP health; port open is weak but better than hang
-            if _health(base, timeout=1.0) or time.time() > deadline - 2:
-                mark_used()
-                state["pid"] = _proc.pid
-                save_vision_json(state, home_dir)
-                return {
-                    "ok": True,
-                    "already_running": False,
-                    "base_url": base,
-                    "pid": _proc.pid,
-                }
+        # Port first (cheap); then a short HTTP probe once listening.
+        if _port_open(host, port) and (
+            _health(base, timeout=0.6) or time.time() > deadline - 2
+        ):
+            mark_used()
+            state["pid"] = _proc.pid
+            save_vision_json(state, home_dir)
+            invalidate_running_cache()
+            # Seed cache as running so status polls stay cheap after start.
+            is_running(home_dir, force=True)
+            return {
+                "ok": True,
+                "already_running": False,
+                "base_url": base,
+                "pid": _proc.pid,
+            }
         time.sleep(0.4)
 
+    invalidate_running_cache()
     return {"ok": False, "error": f"llama-server did not become healthy within {wait_s}s"}
 
 
@@ -258,6 +323,7 @@ def stop_server(home_dir: str | Path | None = None) -> dict[str, Any]:
     global _proc
     killed = False
     pids: list[int] = []
+    invalidate_running_cache()
 
     if _proc is not None:
         with contextlib.suppress(Exception):

@@ -90,6 +90,15 @@ def register_workspace_tools(runtime: Any) -> None:
                 f"(or /approve {item.id}). After they approve, retry file_write."
             )
         target = runtime.resolve_tool_path(path)
+        # Capture prior content for time-travel undo (best-effort).
+        existed = False
+        previous: str | None = None
+        try:
+            if target.is_file():
+                existed = True
+                previous = target.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            previous = None
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(content, encoding="utf-8")
@@ -106,6 +115,20 @@ def register_workspace_tools(runtime: Any) -> None:
                 ),
             )
         runtime._track_artifact(str(target))
+        try:
+            from remedy.core.time_travel import SessionUndoLog
+
+            home = getattr(getattr(runtime, "config", None), "home_dir", None)
+            SessionUndoLog(home).record_file_write(
+                session_id=str(sid or getattr(runtime, "_session_id", "") or ""),
+                path=target,
+                previous_content=previous,
+                existed=existed,
+                new_size=len(content or ""),
+                message_id=getattr(runtime, "_active_message_id", None),
+            )
+        except Exception:
+            pass
         return f"Wrote {len(content)} bytes to {path}"
 
     async def list_dir(path: str = ".") -> str:

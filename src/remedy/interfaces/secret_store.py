@@ -31,6 +31,13 @@ logger = logging.getLogger(__name__)
 STORE_VERSION = 2
 STORE_FILENAME = "provider_keys.json"
 
+# Harden (icacls on Windows) is ~80–120ms per path. Only do it when creating
+# the auth dir or writing the store — never on every secrets read.
+_hardened_paths: set[str] = set()
+
+# mtime-cached decrypted key map (process-local).
+_keys_cache: dict[str, Any] = {"path": None, "mtime": None, "size": None, "data": None}
+
 
 # ---------------------------------------------------------------------------
 # Paths + filesystem hardening
@@ -40,8 +47,13 @@ STORE_FILENAME = "provider_keys.json"
 def auth_dir(home: Path | str | None = None) -> Path:
     base = Path(home or os.environ.get("REMEDY_HOME", "~/.remedy")).expanduser()
     d = base / "auth"
+    existed = d.is_dir()
     d.mkdir(parents=True, exist_ok=True)
-    _harden_path(d, is_dir=True)
+    # Harden only on first create or once per process (not every GET /settings).
+    key = str(d.resolve()) if d.exists() else str(d)
+    if not existed or key not in _hardened_paths:
+        _harden_path(d, is_dir=True)
+        _hardened_paths.add(key)
     return d
 
 
@@ -290,14 +302,39 @@ def _encode_store_file(keys: dict[str, str]) -> bytes:
     return (json.dumps(outer, indent=2) + "\n").encode("utf-8")
 
 
+def invalidate_provider_keys_cache() -> None:
+    """Drop cached secrets (call after writes or tests)."""
+    _keys_cache["path"] = None
+    _keys_cache["mtime"] = None
+    _keys_cache["size"] = None
+    _keys_cache["data"] = None
+
+
 def load_provider_keys(home: Path | str | None = None) -> dict[str, str]:
-    """Return {provider: api_key} from the secure store (empty if missing)."""
+    """Return {provider: api_key} from the secure store (empty if missing).
+
+    Cached by path mtime/size so Settings / chat key resolution stays cheap.
+    Returns a shallow copy so callers cannot mutate the cache entry.
+    """
     path = store_path(home)
     if not path.exists():
         return {}
     try:
+        st = path.stat()
+        mtime, size = st.st_mtime, st.st_size
+        if (
+            _keys_cache["path"] == str(path)
+            and _keys_cache["mtime"] == mtime
+            and _keys_cache["size"] == size
+            and isinstance(_keys_cache["data"], dict)
+        ):
+            return dict(_keys_cache["data"])
         raw = path.read_bytes()
-        return _decode_store_file(raw)
+        data = _decode_store_file(raw)
+        _keys_cache.update(
+            {"path": str(path), "mtime": mtime, "size": size, "data": data}
+        )
+        return dict(data)
     except Exception as exc:
         logger.warning("Failed to load provider secret store: %s", exc)
         return {}
@@ -314,7 +351,24 @@ def save_provider_keys(keys: dict[str, str], home: Path | str | None = None) -> 
     _harden_path(tmp, is_dir=False)
     tmp.replace(path)
     _harden_path(path, is_dir=False)
+    parent_key = str(path.parent.resolve()) if path.parent.exists() else str(path.parent)
     _harden_path(path.parent, is_dir=True)
+    _hardened_paths.add(parent_key)
+    _hardened_paths.add(str(path.resolve()) if path.exists() else str(path))
+    invalidate_provider_keys_cache()
+    # Seed cache with what we just wrote (avoids immediate re-decrypt).
+    try:
+        st = path.stat()
+        _keys_cache.update(
+            {
+                "path": str(path),
+                "mtime": st.st_mtime,
+                "size": st.st_size,
+                "data": dict(cleaned),
+            }
+        )
+    except OSError:
+        pass
     return path
 
 
@@ -374,24 +428,36 @@ def fingerprint_key(api_key: str | None) -> str | None:
     return digest[:12]
 
 
-def public_secret_status(home: Path | str | None = None) -> dict[str, Any]:
-    """Safe status blob for GET /api/settings (no raw secrets)."""
+def public_secret_status(
+    home: Path | str | None = None,
+    *,
+    include_fingerprints: bool = False,
+) -> dict[str, Any]:
+    """Safe status blob for GET /api/settings (no raw secrets).
+
+    Fingerprints are opt-in — desktop UI only needs booleans, and hashing every
+    key on each Settings open is pure overhead.
+    """
     keys = load_provider_keys(home)
     path = store_path(home)
     encoding = "missing"
     if path.exists():
         try:
-            outer = json.loads(path.read_text(encoding="utf-8"))
+            # Outer envelope is plaintext JSON even when payload is DPAPI.
+            # Avoid a second full decrypt path.
+            outer = json.loads(path.read_bytes().decode("utf-8"))
             encoding = str(outer.get("encoding") or "unknown")
         except Exception:
             encoding = "unknown"
-    return {
+    out: dict[str, Any] = {
         "providers_with_keys": sorted(keys.keys()),
         "provider_keys_set": dict.fromkeys(keys, True),
         "store_path": str(path),
         "encoding": encoding,
-        "fingerprints": {k: fingerprint_key(v) for k, v in keys.items()},
     }
+    if include_fingerprints:
+        out["fingerprints"] = {k: fingerprint_key(v) for k, v in keys.items()}
+    return out
 
 
 # ---------------------------------------------------------------------------

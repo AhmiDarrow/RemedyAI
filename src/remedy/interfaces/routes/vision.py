@@ -44,10 +44,13 @@ def register_vision_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
 
     @app.get("/api/vision/status")
     async def vision_status() -> dict[str, Any]:
+        import asyncio
+
         from remedy.vision.service import get_status
 
         cfg = load_config()
-        return get_status(cfg)
+        # Offload sync FS/port probes so concurrent /api/status stays responsive.
+        return await asyncio.to_thread(get_status, cfg)
 
     @app.get("/api/vision/catalog")
     async def vision_catalog() -> dict[str, Any]:

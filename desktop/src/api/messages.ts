@@ -23,13 +23,24 @@ export async function sendMessage(
   })
 }
 
+export type UsagePayload = {
+  prompt_tokens?: number
+  completion_tokens?: number
+  total_tokens?: number
+  estimated_cost_usd?: number
+  source?: string
+  model?: string | null
+  provider?: string | null
+}
+
 export type StreamHandlers = {
   onToken: (text: string) => void
-  onDone: (data: { request_id: string }) => void
+  onDone: (data: { request_id: string; usage?: UsagePayload }) => void
   onError: (message: string) => void
   onThinking?: (text: string) => void
   onToolCall?: (name: string, args?: Record<string, unknown>) => void
   onToolResult?: (name: string, preview?: string, ok?: boolean) => void
+  onUsage?: (usage: UsagePayload) => void
 }
 
 export type AttachmentPayload = {
@@ -53,7 +64,7 @@ export function streamMessage(
   sessionId: string,
   message: string,
   onToken: (text: string) => void,
-  onDone: (data: { request_id: string }) => void,
+  onDone: (data: { request_id: string; usage?: UsagePayload }) => void,
   onError: (message: string) => void,
   model?: string,
   onThinking?: (text: string) => void,
@@ -62,6 +73,7 @@ export function streamMessage(
   attachments?: AttachmentPayload[],
   onProgress?: (info: StreamProgress) => void,
   planMode?: boolean,
+  onUsage?: (usage: UsagePayload) => void,
 ): AbortController {
   const controller = new AbortController()
 
@@ -142,9 +154,25 @@ export function streamMessage(
               total: typeof payload.total === 'number' ? payload.total : null,
             })
             break
+          case 'usage':
+            onUsage?.({
+              prompt_tokens: typeof payload.prompt_tokens === 'number' ? payload.prompt_tokens : 0,
+              completion_tokens:
+                typeof payload.completion_tokens === 'number' ? payload.completion_tokens : 0,
+              total_tokens: typeof payload.total_tokens === 'number' ? payload.total_tokens : 0,
+              estimated_cost_usd:
+                typeof payload.estimated_cost_usd === 'number' ? payload.estimated_cost_usd : 0,
+              source: typeof payload.source === 'string' ? payload.source : undefined,
+              model: typeof payload.model === 'string' ? payload.model : null,
+              provider: typeof payload.provider === 'string' ? payload.provider : null,
+            })
+            break
           case 'done':
             finished = true
-            onDone(payload as { request_id: string })
+            if (payload.usage && typeof payload.usage === 'object') {
+              onUsage?.(payload.usage as UsagePayload)
+            }
+            onDone(payload as { request_id: string; usage?: UsagePayload })
             break
           case 'error':
             finished = true

@@ -2,7 +2,14 @@
 
 High-level product notes for owners. Full detail lives in repo `CHANGELOG.md`.
 
-Ship **one** installer/tag for the current series (**v0.10.43**).
+Ship **one** installer/tag for the current series (**v0.10.44**).
+
+## 0.10.44 — Skills HITL, Time Travel, token cost ticker, perf
+
+- **Skills**: force-promote / quarantine overrides; CodeMirror `SKILL.md` editor; **Export/Import Pack** ZIP.
+- **Time Travel**: timeline UI to restore chat + best-effort workspace files to an earlier step.
+- **Token & cost ticker**: hideable live run/session usage and estimated API cost.
+- **Perf**: vision/status freezes fixed; secrets/config caching; faster Settings and splash; durable logs under `~/.remedy/logs/`.
 
 ## 0.10.43 — Rebuild (CI mypy + package)
 

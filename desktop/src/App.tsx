@@ -7,6 +7,9 @@ import { StatusBar, type ThinkingLevel, type ApprovalMode } from './components/S
 import { TabBar } from './components/TabBar'
 import { MemoryPanel, SkillsPanel } from './components/Panels'
 import { SettingsPanel } from './components/SettingsPanel'
+import { TokenCostTicker } from './components/TokenCostTicker'
+import { TimeTravelTimeline } from './components/TimeTravelTimeline'
+import { estimateCostUsd, type UsageSnapshot } from './utils/tokenCost'
 import { HelpPanel } from './components/HelpPanel'
 import { QuitServerWarning } from './components/QuitServerWarning'
 import { SplashScreen } from './components/SplashScreen'
@@ -102,11 +105,13 @@ export default function App() {
     activeTools,
     processSteps,
     taskProgress,
+    runUsage,
     send,
     stop,
     runCommand,
     addCommandMessage,
     beginEdit,
+    load: reloadMessages,
   } = useMessages(activeId)
   /** Prefill for edit-and-resend; `key` forces re-apply even for identical text. */
   const [editDraft, setEditDraft] = useState<{ text: string; key: number } | null>(null)
@@ -154,6 +159,39 @@ export default function App() {
   const [helpOpen, setHelpOpen] = useState(false)
   const [helpArticleId, setHelpArticleId] = useState<string | null>(null)
   const [quitWarnOpen, setQuitWarnOpen] = useState(false)
+  const [timeTravelOpen, setTimeTravelOpen] = useState(false)
+
+  const sessionUsage: UsageSnapshot = useMemo(() => {
+    let prompt = 0
+    let completion = 0
+    for (const m of messages) {
+      if (m.reverted) continue
+      if (m.role === 'user') {
+        prompt += Math.ceil((m.content || '').length / 4)
+      } else if (m.role === 'assistant') {
+        if (typeof m.tokens === 'number' && m.tokens > 0) {
+          completion += m.tokens
+        } else {
+          completion += Math.ceil(
+            ((m.content || '') + (m.thinking || '')).length / 4,
+          )
+        }
+      }
+    }
+    // Prefer live run totals when they include provider prompt counts
+    if (runUsage && runUsage.total_tokens > 0 && !streaming) {
+      /* keep session sum of stored messages */
+    }
+    return {
+      prompt_tokens: prompt,
+      completion_tokens: completion,
+      total_tokens: prompt + completion,
+      estimated_cost_usd: estimateCostUsd(prompt, completion, model, llmProvider),
+      source: 'estimate',
+      model,
+      provider: llmProvider,
+    }
+  }, [messages, model, llmProvider, runUsage, streaming])
 
   const openHelp = useCallback((articleId?: string) => {
     setHelpArticleId(articleId || null)
@@ -391,10 +429,9 @@ export default function App() {
     if (serverState !== 'ready') return
     let cancelled = false
     ;(async () => {
-      // Auth first — models/settings need Bearer after wipe/reinstall.
+      // Prefer the token splash already warmed — do not force-clear (extra IPC/HTTP).
       try {
-        const { ensureApiToken, clearApiToken } = await import('./api/client')
-        clearApiToken()
+        const { ensureApiToken } = await import('./api/client')
         await ensureApiToken()
       } catch {
         /* continue — settings may still work offline later */
@@ -402,7 +439,9 @@ export default function App() {
       if (cancelled) return
 
       // Settings first: first-run wizard must not depend on models/agents succeeding.
+      // Sessions load in parallel — sidebar should not wait on models.
       let settings: Awaited<ReturnType<typeof getSettings>> | null = null
+      const sessionsPromise = refreshSessions()
       try {
         settings = await getSettings()
       } catch (e: unknown) {
@@ -417,6 +456,7 @@ export default function App() {
         }
       }
       if (cancelled) return
+      void sessionsPromise
 
       if (!settings) {
         // Fresh / wiped installs: still open setup so the user is not stuck on
@@ -486,7 +526,7 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [serverState, refreshModels])
+  }, [serverState, refreshModels, refreshSessions])
 
   const handleNewSession = useCallback(async () => {
     const s = await create()
@@ -494,12 +534,6 @@ export default function App() {
       setOpenTabs((prev) => new Set([...prev, s.id]))
     }
   }, [create])
-
-  useEffect(() => {
-    if (serverState === 'ready') {
-      refreshSessions()
-    }
-  }, [serverState, refreshSessions])
 
   const handleSelect = useCallback(
     (id: string) => {
@@ -755,6 +789,13 @@ export default function App() {
   const paletteCommands: CommandItem[] = useMemo(() => {
     const items: CommandItem[] = [
       { id: 'new', label: 'New Session', description: 'Start a new chat session', category: 'session', action: handleNewSession },
+      {
+        id: 'time-travel',
+        label: 'Time Travel',
+        description: 'Timeline: restore chat & files to an earlier step',
+        category: 'session',
+        action: () => setTimeTravelOpen(true),
+      },
       {
         id: 'export',
         label: 'Export Session',
@@ -1104,6 +1145,13 @@ export default function App() {
               onRegenerate={(id) => void handleRegenerate(id)}
               userName={userName}
             />
+            <TokenCostTicker
+              run={runUsage}
+              session={sessionUsage}
+              streaming={streaming}
+              model={model}
+              provider={llmProvider}
+            />
 
             <Composer
               onSend={handleSend}
@@ -1130,6 +1178,15 @@ export default function App() {
             />
           </div>
 
+          <TimeTravelTimeline
+            open={timeTravelOpen}
+            onClose={() => setTimeTravelOpen(false)}
+            sessionId={activeId}
+            onRestored={() => {
+              void reloadMessages()
+              void refreshSessions()
+            }}
+          />
           <MemoryPanel
             open={panel === 'memory'}
             onClose={() => setPanel(null)}
@@ -1231,6 +1288,8 @@ export default function App() {
               void runUpdateCheckVisible()
             }
           }}
+          timeTravelOpen={timeTravelOpen}
+          onToggleTimeTravel={() => setTimeTravelOpen((v) => !v)}
         />
       </div>
     </div>

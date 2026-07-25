@@ -56,6 +56,29 @@ Status bar toggle or **Ctrl+B**. Desktop sends `plan_mode` to the local API so t
 
 API: `GET/POST /api/plans`, `GET /api/plans/latest`, `POST /api/plans/{id}/status`.
 
+## Time Travel (undo browser)
+
+Long multi-step runs can go wrong mid-way. Use **⏱ Time travel** on the status bar
+(or Command Palette → *Time Travel*):
+
+1. Open the timeline of user/assistant steps for this session.  
+2. Click the step you want to return to (e.g. step 3 of 6).  
+3. Confirm **Restore here**.
+
+Remedy soft-deletes later chat messages, best-effort restores workspace files
+touched via `file_write` (undo log under `~/.remedy/undo/`), drops mid-task
+checkpoints after that point, and clears the live session brief.
+
+API: `GET /api/sessions/{id}/timeline`, `POST /api/sessions/{id}/time-travel`
+with `{ "message_id": "…" }`.
+
+## Token & cost ticker
+
+A small **Usage** chip (bottom-right) tracks tokens and estimated API cost for
+the current run and the session. Expand for in/out breakdown and model. Hide
+with **×** (re-open from the `$ tokens` chip). Prefers provider-reported usage
+when available; otherwise estimates from text + published list prices.
+
 ## Mid-task checkpoints (Build)
 
 On long tool runs, Remedy auto-saves **checkpoints** under `~/.remedy/checkpoints/` (every few tool steps, after recovery, and at turn end). Tools: `checkpoint_save`, `checkpoint_show`. API: `GET /api/checkpoints`, `GET /api/checkpoints/latest`.

@@ -1067,6 +1067,16 @@ def _cmd_serve(args) -> None:
         config_path=Path(args.config_file) if args.config_file else None,
         home_dir=str(home),
     )
+
+    # Durable logs under ~/.remedy/logs (debug.log always DEBUG for perf diagnosis).
+    try:
+        from remedy.core.logging import setup_serve_logging
+
+        log_dir = setup_serve_logging(home, config=config)
+        console.print(f"[dim]Logs:[/dim]      {log_dir}")
+    except Exception as exc:
+        console.print(f"[yellow]Logging setup failed:[/yellow] {exc}")
+
     agent_config = config_to_agent_config(config)
 
     async def _start():
@@ -1094,6 +1104,15 @@ def _cmd_serve(args) -> None:
         return runtime, gateway, memory, n_skills
 
     runtime, gateway, memory, n_skills = asyncio.run(_start())
+
+    # Warm secret-store / ACL path once so the first Settings GET is not paying
+    # Windows icacls (~100ms) on the critical UI path.
+    try:
+        from remedy.interfaces.secret_store import load_provider_keys
+
+        load_provider_keys(home)
+    except Exception:
+        pass
 
     from remedy.interfaces.local_auth import ensure_local_api_token
 

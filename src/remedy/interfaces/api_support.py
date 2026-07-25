@@ -576,10 +576,11 @@ def _find_config_path() -> Path | None:
 
 
 def load_config() -> dict[str, Any]:
-    path = _find_config_path()
-    if path is None:
-        return {}
-    return _load_toml_config(path)
+    """Load config.toml with mtime cache (routes hit this constantly).
+
+    Returns a shallow copy so callers can mutate without poisoning the cache.
+    """
+    return _load_config_cached()
 
 
 def _apply_llm_to_runtime(
@@ -655,35 +656,42 @@ def _apply_llm_to_runtime(
 _config_cache: dict[str, Any] = {"path": None, "mtime": None, "size": None, "data": None}
 
 
-def _load_config_cached() -> dict[str, Any]:
-    """load_config() with a cheap mtime/size cache to avoid re-reading every message."""
-    from pathlib import Path
+def invalidate_config_cache() -> None:
+    """Force next load_config() to re-read from disk."""
+    _config_cache["path"] = None
+    _config_cache["mtime"] = None
+    _config_cache["size"] = None
+    _config_cache["data"] = None
 
-    candidates = [
-        Path("~/.remedy/config.toml").expanduser(),
-        Path("~/.remedy/config.yaml").expanduser(),
-        Path("remedy.toml"),
-        Path("remedy.yaml"),
-    ]
-    path = next((p for p in candidates if p.exists()), None)
+
+def _load_config_cached() -> dict[str, Any]:
+    """load_config() with a cheap mtime/size cache to avoid re-reading every request.
+
+    Always returns a shallow copy so route handlers can mutate safely.
+    """
+    path = _find_config_path()
     if path is None:
-        return load_config()
+        return {}
     try:
         st = path.stat()
         mtime, size = st.st_mtime, st.st_size
     except OSError:
-        return load_config()
+        try:
+            return dict(_load_toml_config(path) or {})
+        except Exception:
+            return {}
     if (
         _config_cache["path"] == str(path)
         and _config_cache["mtime"] == mtime
         and _config_cache["size"] == size
         and isinstance(_config_cache["data"], dict)
     ):
-        return _config_cache["data"]
-    # Prefer explicit path when known; load_config() also scans defaults.
-    data = _load_toml_config(path) if path else load_config()
+        return dict(_config_cache["data"])
+    data = _load_toml_config(path) or {}
+    if not isinstance(data, dict):
+        data = {}
     _config_cache.update({"path": str(path), "mtime": mtime, "size": size, "data": data})
-    return data
+    return dict(data)
 
 
 def _sync_runtime_llm_from_config(
@@ -800,6 +808,21 @@ def _write_config(path: Path, cfg: dict[str, Any]) -> None:
     path.write_text(content, encoding="utf-8")
     with contextlib.suppress(OSError):
         path.chmod(0o600)
+    # Drop mtime cache so the next GET sees the write immediately.
+    invalidate_config_cache()
+    # Seed cache with what we wrote (skip another parse).
+    try:
+        st = path.stat()
+        _config_cache.update(
+            {
+                "path": str(path),
+                "mtime": st.st_mtime,
+                "size": st.st_size,
+                "data": dict(safe),
+            }
+        )
+    except OSError:
+        pass
 
 
 def _serialize_toml(value: Any) -> str:

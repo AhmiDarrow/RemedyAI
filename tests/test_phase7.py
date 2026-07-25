@@ -168,6 +168,7 @@ class TestLoggingSetup:
         setup_logging(level="INFO", log_dir=str(log_dir), json_output=False, console_output=False)
         assert (log_dir / "remedy.log").exists()
         assert (log_dir / "errors.log").exists()
+        assert (log_dir / "debug.log").exists()
 
     def test_clear_log_context(self):
         set_log_context(session_id="x", channel="y", request_id="z")
