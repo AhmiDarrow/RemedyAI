@@ -80,6 +80,10 @@ Hard wipe/privilege blocks (`check_dangerous_command`) still apply in every mode
 
 Commands: `/approve`, `/deny` (when an id is shown). Status bar thumbs toggle Ask/Auto.
 
+## License (not a security control)
+
+Remedy is **source-available** (see repo `LICENSE` / `COMMERCIAL.md`). Free for solo and small indies under the published threshold; larger commercial use needs written permission. This is **not** enforced by license keys in the app — ownership and terms live in the license text.
+
 ## Skills security
 
 - Imported skill zips are checked for **Zip Slip**, path escape, and **streamed size caps** (decompression bombs).  

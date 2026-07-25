@@ -182,6 +182,11 @@ class SettingsUpdateRequest(BaseModel):
     # Loopback HTTP may hand out the local API token (browser Web UI). Desktop
     # always prefers IPC. Default True; set False for IPC-only (safer).
     http_bootstrap: bool | None = None
+    # Learning / advanced (safe defaults; never strips owner power)
+    allow_skill_creation: bool | None = None
+    auto_approve_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
+    log_level: str | None = None  # DEBUG | INFO | WARNING | ERROR
+    sarcasm_mode: bool | None = None
     # Provider picker catalog
     enabled_providers: list[str] | None = None
     enabled_models: dict[str, list[str]] | None = None

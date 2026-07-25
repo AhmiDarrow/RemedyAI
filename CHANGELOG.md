@@ -2,14 +2,15 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
-## [Unreleased]
+## [0.13.3] — 2026-07-25
 
-### Docs: source-available license (solo / small indie free)
+### Polish: Settings completeness, search, docs sync
 
-- **LICENSE** rewritten: free use/modify for individuals and orgs under **&lt;$1M revenue and &lt;20 FTE**; personal/education/research always free under the grant.
-- Larger orgs, multi-tenant SaaS, and commercial resale require written permission — contact **Ahmi Darrow** (`ahmitdarrow@gmail.com`).
-- **COMMERCIAL.md** plain-language summary; no runtime license keys or phone-home.
-- Copyright public line remains **Ahmi Darrow** (no change to package author identity).
+- Settings **search**, last-section remember, **lazy vision** status fetch.
+- New / completed knobs: harness min/max %, thinking level, allow_skill_creation, auto_approve_threshold, log_level, sarcasm_mode; **License** + **Channels** honesty sections.
+- Default config template lists modern keys; Help overview/security include license summary.
+- Cargo.toml license → `LicenseRef-Proprietary`; desktop unit tests for settings search / build kick.
+- LICENSE/COMMERCIAL source-available terms (from prior unreleased docs) included in this series.
 
 ## [0.13.2] — 2026-07-25
 

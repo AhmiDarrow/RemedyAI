@@ -36,6 +36,7 @@ import { UsageDashboard } from './components/UsageDashboard'
 import { isPlaceholderTitle, titleFromPrompt } from './utils/sessionTitle'
 import { tauriInvoke, tauriListen } from './api/tauri'
 import { normalizeToolProcess, type ToolProcessMode } from './utils/toolLabels'
+import { looksLikeBuildKick } from './utils/buildKick'
 import { HOTKEYS } from './hotkeys'
 import type { ShortcutDef } from './hooks/useKeyboardShortcuts'
 
@@ -47,28 +48,6 @@ export interface ModelInfo {
 }
 
 type ServerState = 'connecting' | 'ready' | 'error'
-
-/** True when the user is clearly asking to leave Plan and/or start Build work. */
-function looksLikeBuildKick(text: string): boolean {
-  const t = (text || '').trim()
-  if (!t) return false
-  return (
-    /\bproceed\b/i.test(t)
-    || /\bcontinue\b/i.test(t)
-    || /\bgo\s+ahead\b/i.test(t)
-    || /\bdo\s+it\b/i.test(t)
-    || /\bkeep\s+going\b/i.test(t)
-    || /\bimplement\b/i.test(t)
-    || /\bfixes?\b/i.test(t)
-    || /\bswitch\s+to\s+build\b/i.test(t)
-    || /\bleave\s+plan(?:\s+mode)?\b/i.test(t)
-    || /\bout\s+of\s+plan(?:\s+mode)?\b/i.test(t)
-    || /\benter\s+build(?:\s+mode)?\b/i.test(t)
-    || /\bbuild\s+mode\b/i.test(t)
-    || /\bstart\s+(?:working|implementing|coding|building)\b/i.test(t)
-    || /\bnot\s+doing\s+anything\b/i.test(t)
-  )
-}
 
 function isTauri(): boolean {
   if (typeof window === 'undefined') return false

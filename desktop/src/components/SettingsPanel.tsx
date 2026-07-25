@@ -42,7 +42,13 @@ import {
   TOOL_PROCESS_MODES,
   type ToolProcessMode,
 } from '../utils/toolLabels'
-import { SettingsSection } from './SettingsSection'
+import { SettingsSection, sectionMatchesSearch } from './SettingsSection'
+import {
+  SETTINGS_SECTION_META,
+  loadLastSettingsSection,
+  saveLastSettingsSection,
+  type SettingsSectionId,
+} from '../utils/settingsSearch'
 
 /** Matches SetupWizard personas (style overlay). */
 const PERSONAS = [
@@ -129,6 +135,16 @@ export function SettingsPanel({
   const [httpBootstrap, setHttpBootstrap] = useState(true)
   const [approvalMode, setApprovalMode] = useState<'ask' | 'auto'>('ask')
   const [harnessMode, setHarnessMode] = useState('auto')
+  const [harnessMinPct, setHarnessMinPct] = useState(0.75)
+  const [harnessMaxPct, setHarnessMaxPct] = useState(0.92)
+  const [thinkingLevel, setThinkingLevel] = useState<'off' | 'low' | 'medium' | 'high'>('high')
+  const [allowSkillCreation, setAllowSkillCreation] = useState(true)
+  const [autoApproveThreshold, setAutoApproveThreshold] = useState(0.8)
+  const [logLevel, setLogLevel] = useState('INFO')
+  const [sarcasmMode, setSarcasmMode] = useState(false)
+  const [settingsSearch, setSettingsSearch] = useState('')
+  const [forceSection, setForceSection] = useState<string | null>(null)
+  const [visionSectionOpen, setVisionSectionOpen] = useState(false)
   const [toolProcess, setToolProcess] = useState<ToolProcessMode>(
     () => toolProcessMode || 'off',
   )
@@ -276,6 +292,25 @@ export function SettingsPanel({
       setStartInTray(Boolean(s.start_in_tray))
       setCloseToTray(Boolean(s.close_to_tray))
       setHarnessMode(s.harness_mode || 'auto')
+      {
+        const mn = Number(s.harness_min_context_pct)
+        setHarnessMinPct(Number.isFinite(mn) ? Math.min(0.95, Math.max(0.05, mn)) : 0.75)
+        const mx = Number(s.harness_max_context_pct)
+        setHarnessMaxPct(Number.isFinite(mx) ? Math.min(0.99, Math.max(0.1, mx)) : 0.92)
+      }
+      {
+        const tl = String(s.thinking_level || 'high').toLowerCase()
+        setThinkingLevel(
+          tl === 'off' || tl === 'low' || tl === 'medium' || tl === 'high' ? tl : 'high',
+        )
+      }
+      setAllowSkillCreation(s.allow_skill_creation !== false)
+      {
+        const th = Number(s.auto_approve_threshold)
+        setAutoApproveThreshold(Number.isFinite(th) ? Math.min(1, Math.max(0, th)) : 0.8)
+      }
+      setLogLevel(String(s.log_level || 'INFO').toUpperCase())
+      setSarcasmMode(Boolean(s.sarcasm_mode))
       setWebToolsEnabled(Boolean(s.web_tools_enabled))
       setHttpBootstrap(s.http_bootstrap !== false)
       {
@@ -341,14 +376,6 @@ export function SettingsPanel({
             /* browser / missing permission */
           }
         })(),
-        (async () => {
-          try {
-            const vs = await getVisionStatus()
-            setVision(vs)
-          } catch {
-            setVision(null)
-          }
-        })(),
       ]).then(() => {
         console.debug(
           `[remedy:settings] secondary loaded in ${Math.round(performance.now() - t0)}ms`,
@@ -371,12 +398,55 @@ export function SettingsPanel({
       setXaiLoginMsg('')
       setXaiUserCode('')
       setXaiVerifyUrl('')
+      // Deep-link / remember last section
+      const last = loadLastSettingsSection()
+      if (last) setForceSection(last)
     } else {
       stopXaiPoll()
       setXaiLoginBusy(false)
+      setVisionSectionOpen(false)
+      setSettingsSearch('')
     }
     return () => stopXaiPoll()
   }, [open, load, stopXaiPoll])
+
+  // Lazy-load vision status only when Local vision is expanded (faster Settings open).
+  useEffect(() => {
+    if (!open || !visionSectionOpen) return
+    void refreshVision()
+  }, [open, visionSectionOpen, refreshVision])
+
+  const matchSec = useCallback(
+    (id: SettingsSectionId) => {
+      const meta = SETTINGS_SECTION_META[id]
+      return sectionMatchesSearch(
+        settingsSearch,
+        meta.title,
+        meta.summary,
+        meta.keywords,
+      )
+    },
+    [settingsSearch],
+  )
+
+  const sectionProps = useCallback(
+    (id: SettingsSectionId) => ({
+      id,
+      title: SETTINGS_SECTION_META[id].title,
+      summary: SETTINGS_SECTION_META[id].summary,
+      keywords: SETTINGS_SECTION_META[id].keywords,
+      forceOpen: forceSection === id || (settingsSearch.trim().length > 0 && matchSec(id)),
+      hidden: settingsSearch.trim().length > 0 && !matchSec(id),
+      onOpenChange: (isOpen: boolean) => {
+        if (isOpen) {
+          setForceSection(id)
+          saveLastSettingsSection(id)
+          if (id === 'vision') setVisionSectionOpen(true)
+        }
+      },
+    }),
+    [forceSection, matchSec, settingsSearch],
+  )
 
   const handleXaiSignIn = async () => {
     setXaiLoginBusy(true)
@@ -495,11 +565,18 @@ export function SettingsPanel({
       start_in_tray: startInTray,
       close_to_tray: closeToTray,
       harness_mode: harnessMode,
+      harness_min_context_pct: harnessMinPct,
+      harness_max_context_pct: Math.max(harnessMaxPct, harnessMinPct + 0.01),
+      thinking_level: thinkingLevel,
       tool_process: toolProcess,
       skills_active_budget: skillsBudget,
       web_tools_enabled: webToolsEnabled,
       http_bootstrap: httpBootstrap,
       approval_mode: approvalMode,
+      allow_skill_creation: allowSkillCreation,
+      auto_approve_threshold: autoApproveThreshold,
+      log_level: logLevel,
+      sarcasm_mode: sarcasmMode,
     }
     if (enabledProviders !== null) {
       updates.enabled_providers = enabledProviders
@@ -605,6 +682,22 @@ export function SettingsPanel({
         </button>
       </div>
 
+      <div className="px-3 pt-2 pb-1 border-b" style={{ borderColor: 'var(--border)' }}>
+        <input
+          type="search"
+          value={settingsSearch}
+          onChange={(e) => setSettingsSearch(e.target.value)}
+          placeholder="Search settings…"
+          className="w-full rounded px-2 py-1 text-xs outline-none"
+          style={{
+            background: 'var(--bg-tertiary)',
+            color: 'var(--text-primary)',
+            border: '1px solid var(--border)',
+          }}
+          aria-label="Search settings"
+        />
+      </div>
+
       <div className="flex-1 overflow-y-auto p-3 text-xs space-y-4">
         {loading ? (
           <div style={{ color: 'var(--text-muted)' }}>Loading...</div>
@@ -612,9 +705,7 @@ export function SettingsPanel({
           <>
             {/* Provider */}
             <SettingsSection
-              id="provider"
-              title="Provider"
-              summary="LLM, model, API key"
+              {...sectionProps('provider')}
               defaultOpen
             >
               <div className="text-[10px] mb-2 leading-snug" style={{ color: 'var(--text-muted)' }}>
@@ -790,9 +881,7 @@ export function SettingsPanel({
 
             {/* Provider catalog — enable for main-screen picker */}
             <SettingsSection
-              id="provider-catalog"
-              title="Provider catalog"
-              summary="Search, enable providers for the status-bar picker"
+              {...sectionProps('provider-catalog')}
             >
               <div className="text-[10px] mb-2" style={{ color: 'var(--text-muted)' }}>
                 Connected providers with a key, OAuth, Demo, or local Ollama appear in the
@@ -947,9 +1036,7 @@ export function SettingsPanel({
 
             {/* You + Agent */}
             <SettingsSection
-              id="you-agent"
-              title="You & Agent"
-              summary="Name, persona"
+              {...sectionProps('you-agent')}
             >
               <Field
                 label="Your name (what Remedy calls you)"
@@ -1006,9 +1093,7 @@ export function SettingsPanel({
 
             {/* Project */}
             <SettingsSection
-              id="workspace"
-              title="Project workspace"
-              summary="Default folder"
+              {...sectionProps('workspace')}
             >
               <label className="block mb-0.5" style={{ color: 'var(--text-muted)' }}>
                 Default project folder
@@ -1072,9 +1157,7 @@ export function SettingsPanel({
 
             {/* Access */}
             <SettingsSection
-              id="access"
-              title="Access & permissions"
-              summary="Filesystem scope"
+              {...sectionProps('access')}
             >
               <label className="block mb-0.5" style={{ color: 'var(--text-muted)' }}>
                 Filesystem scope
@@ -1113,9 +1196,7 @@ export function SettingsPanel({
 
             {/* Security & power (owner keeps full capability; defaults stay safe) */}
             <SettingsSection
-              id="security-power"
-              title="Security & power"
-              summary="Approvals, web tools, browser token"
+              {...sectionProps('security-power')}
             >
               <div className="text-[10px] leading-snug mb-2" style={{ color: 'var(--text-muted)' }}>
                 Defaults are safe. <strong style={{ color: 'var(--text-secondary)' }}>Auto</strong>{' '}
@@ -1159,6 +1240,31 @@ export function SettingsPanel({
                     : 'Ask: high-impact tools show Approve/Deny. Soft-risk patterns are labeled on the banner.'}
                 </div>
               </div>
+              <div className="mb-2">
+                <div className="text-xs font-medium mb-1" style={{ color: 'var(--text-primary)' }}>
+                  Thinking level
+                </div>
+                <div className="flex gap-1 mb-1 flex-wrap">
+                  {(['off', 'low', 'medium', 'high'] as const).map((lvl) => (
+                    <button
+                      key={lvl}
+                      type="button"
+                      onClick={() => setThinkingLevel(lvl)}
+                      className="flex-1 min-w-[3rem] py-1.5 rounded text-xs font-medium capitalize"
+                      style={{
+                        background: thinkingLevel === lvl ? 'var(--accent)' : 'var(--bg-tertiary)',
+                        color: thinkingLevel === lvl ? '#fff' : 'var(--text-secondary)',
+                        border: '1px solid var(--border)',
+                      }}
+                    >
+                      {lvl}
+                    </button>
+                  ))}
+                </div>
+                <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                  Also on the status bar. High = more deliberation when the model supports it.
+                </div>
+              </div>
               <label className="flex items-center gap-2 mb-1.5 cursor-pointer">
                 <input
                   type="checkbox"
@@ -1193,9 +1299,7 @@ export function SettingsPanel({
 
             {/* Always ready */}
             <SettingsSection
-              id="always-ready"
-              title="Always ready"
-              summary="Startup & tray"
+              {...sectionProps('always-ready')}
             >
               <label className="flex items-center gap-2 mb-1.5 cursor-pointer">
                 <input
@@ -1250,9 +1354,7 @@ export function SettingsPanel({
 
             {/* Tool process visibility */}
             <SettingsSection
-              id="tool-process"
-              title="Tool process"
-              summary="Visibility of tool steps"
+              {...sectionProps('tool-process')}
             >
               <div className="text-[10px] leading-snug mb-2" style={{ color: 'var(--text-muted)' }}>
                 Controls the <em>tool trail</em> only — the model&apos;s chat answer is always
@@ -1331,9 +1433,7 @@ export function SettingsPanel({
 
             {/* Local vision — user-facing; no swarm branding */}
             <SettingsSection
-              id="vision"
-              title="Local vision"
-              summary="Screenshots & OCR on this PC"
+              {...sectionProps('vision')}
             >
               <div className="text-[10px] leading-snug mb-2" style={{ color: 'var(--text-muted)' }}>
                 Optional local <strong style={{ color: 'var(--text-secondary)' }}>Qwen2.5-VL 3B</strong>{' '}
@@ -1762,9 +1862,7 @@ export function SettingsPanel({
 
             {/* Memory Harness */}
             <SettingsSection
-              id="memory-harness"
-              title="Memory harness"
-              summary="Chat compression"
+              {...sectionProps('memory-harness')}
             >
               <label className="block mb-0.5" style={{ color: 'var(--text-muted)' }}>
                 Mode
@@ -1783,18 +1881,150 @@ export function SettingsPanel({
                 <option value="manual">Manual — /compact only</option>
                 <option value="off">Off</option>
               </select>
-              <div className="text-[10px] leading-snug" style={{ color: 'var(--text-muted)' }}>
+              <div className="text-[10px] leading-snug mb-2" style={{ color: 'var(--text-muted)' }}>
                 Keeps long chats lean without deleting your transcript. Use{' '}
                 <code style={{ color: 'var(--accent)' }}>/compact</code> or{' '}
                 <code style={{ color: 'var(--accent)' }}>/harness</code>.
+              </div>
+              <label className="block mb-0.5" style={{ color: 'var(--text-muted)' }}>
+                Auto min context % ({Math.round(harnessMinPct * 100)}%)
+              </label>
+              <input
+                type="range"
+                min={5}
+                max={90}
+                step={1}
+                value={Math.round(harnessMinPct * 100)}
+                onChange={(e) => setHarnessMinPct(Number(e.target.value) / 100)}
+                className="w-full mb-2"
+                style={{ accentColor: 'var(--accent)' }}
+              />
+              <label className="block mb-0.5" style={{ color: 'var(--text-muted)' }}>
+                Auto max context % ({Math.round(harnessMaxPct * 100)}%)
+              </label>
+              <input
+                type="range"
+                min={10}
+                max={99}
+                step={1}
+                value={Math.round(harnessMaxPct * 100)}
+                onChange={(e) => setHarnessMaxPct(Number(e.target.value) / 100)}
+                className="w-full mb-1"
+                style={{ accentColor: 'var(--accent)' }}
+              />
+              <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                In Auto mode, prune starts near min and compress is nudged by max. Defaults 75% / 92%.
+              </div>
+            </SettingsSection>
+
+            {/* Advanced */}
+            <SettingsSection
+              {...sectionProps('advanced')}
+            >
+              <label className="flex items-center gap-2 mb-1.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={allowSkillCreation}
+                  onChange={(e) => setAllowSkillCreation(e.target.checked)}
+                  style={{ accentColor: 'var(--accent)' }}
+                />
+                <span style={{ color: 'var(--text-primary)' }}>Allow skill creation (learning loop)</span>
+              </label>
+              <label className="block mb-0.5" style={{ color: 'var(--text-muted)' }}>
+                Learning auto-approve threshold ({autoApproveThreshold.toFixed(2)})
+              </label>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={5}
+                value={Math.round(autoApproveThreshold * 100)}
+                onChange={(e) => setAutoApproveThreshold(Number(e.target.value) / 100)}
+                className="w-full mb-2"
+                style={{ accentColor: 'var(--accent)' }}
+              />
+              <label className="block mb-0.5" style={{ color: 'var(--text-muted)' }}>
+                Log level
+              </label>
+              <select
+                value={logLevel}
+                onChange={(e) => setLogLevel(e.target.value)}
+                className="w-full rounded px-2 py-1 text-xs mb-2 outline-none"
+                style={{
+                  background: 'var(--bg-tertiary)',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--border)',
+                }}
+              >
+                {['DEBUG', 'INFO', 'WARNING', 'ERROR'].map((l) => (
+                  <option key={l} value={l}>{l}</option>
+                ))}
+              </select>
+              <label className="flex items-center gap-2 mb-1 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={sarcasmMode}
+                  onChange={(e) => setSarcasmMode(e.target.checked)}
+                  style={{ accentColor: 'var(--accent)' }}
+                />
+                <span style={{ color: 'var(--text-primary)' }}>Sarcasm mode (tone flag)</span>
+              </label>
+              <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                Advanced knobs only — defaults keep full owner power. Skill creation stays on so Remedy can improve.
+              </div>
+            </SettingsSection>
+
+            {/* Messaging channels honesty */}
+            <SettingsSection
+              {...sectionProps('channels')}
+            >
+              <div className="text-[10px] leading-snug space-y-1" style={{ color: 'var(--text-muted)' }}>
+                <p style={{ margin: 0 }}>
+                  Desktop chat uses the <strong style={{ color: 'var(--text-secondary)' }}>local API</strong>.
+                  Telegram / Discord / Slack gateways are <strong style={{ color: 'var(--text-secondary)' }}>CLI / config only</strong> today
+                  (<code>enabled_channels</code> + bot tokens in <code>config.toml</code>).
+                </p>
+                <p style={{ margin: 0 }}>
+                  Not a first-class Settings surface yet — see Help → CLI &amp; API if you wire messengers.
+                </p>
+              </div>
+            </SettingsSection>
+
+            {/* License */}
+            <SettingsSection
+              {...sectionProps('license')}
+            >
+              <div className="text-[10px] leading-snug space-y-1.5" style={{ color: 'var(--text-secondary)' }}>
+                <p style={{ margin: 0 }}>
+                  <strong style={{ color: 'var(--text-primary)' }}>Source-available</strong> —
+                  free for solo developers and small indies (&lt;$1M revenue and &lt;20 FTE).
+                  Personal / education / research free.
+                </p>
+                <p style={{ margin: 0 }}>
+                  Larger orgs, multi-tenant SaaS, or commercial resale: email{' '}
+                  <code style={{ color: 'var(--accent)' }}>ahmitdarrow@gmail.com</code>
+                  {' '}(subject: RemedyAI commercial license).
+                </p>
+                <p style={{ margin: 0, color: 'var(--text-muted)' }}>
+                  Copyright (c) 2025–2026 Ahmi Darrow. Binding terms in repo LICENSE; summary in COMMERCIAL.md.
+                  No license keys or phone-home in the app.
+                </p>
+                {onOpenHelp ? (
+                  <button
+                    type="button"
+                    className="text-xs underline"
+                    style={{ color: 'var(--accent)', background: 'none', border: 0, padding: 0 }}
+                    onClick={() => onOpenHelp('04-security-and-data')}
+                  >
+                    Open Security &amp; data (includes bootstrap / power notes) →
+                  </button>
+                ) : null}
               </div>
             </SettingsSection>
 
             {/* Theme */}
             <SettingsSection
-              id="theme"
-              title="Theme"
-              summary="Appearance"
+              {...sectionProps('theme')}
             >
               <div className="flex flex-col gap-1">
                 {THEME_LIST.map((t) => (
@@ -1883,9 +2113,7 @@ export function SettingsPanel({
 
             {/* Help / Keyboard */}
             <SettingsSection
-              id="help"
-              title="Help & shortcuts"
-              summary="Manual & keys"
+              {...sectionProps('help')}
             >
               <div className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>
                 Enter sends · Shift+Enter new line · /help for the command card · F1 full manual
@@ -1958,9 +2186,7 @@ export function SettingsPanel({
 
             {/* MCP host — export skills to Cursor / Claude Desktop */}
             <SettingsSection
-              id="mcp"
-              title="MCP host"
-              summary="Expose skills to other apps"
+              {...sectionProps('mcp')}
             >
               <div className="text-xs space-y-2" style={{ color: 'var(--text-secondary)' }}>
                 <p style={{ margin: 0, fontSize: '0.75rem' }}>
@@ -2035,9 +2261,7 @@ export function SettingsPanel({
 
             {/* About */}
             <SettingsSection
-              id="about"
-              title="About"
-              summary="Version & WebUI"
+              {...sectionProps('about')}
             >
               <div className="space-y-1" style={{ color: 'var(--text-secondary)' }}>
                 <div className="flex justify-between">

@@ -41,6 +41,10 @@ export interface Settings {
    * Desktop prefers IPC. Default true; set false for IPC-only.
    */
   http_bootstrap?: boolean
+  allow_skill_creation?: boolean
+  auto_approve_threshold?: number
+  log_level?: string
+  sarcasm_mode?: boolean
   /** Local visual decoder enabled in config */
   vision_enabled?: boolean
   vision_model_id?: string
@@ -89,6 +93,10 @@ export interface SettingsUpdate {
   tool_process?: string
   web_tools_enabled?: boolean
   http_bootstrap?: boolean
+  allow_skill_creation?: boolean
+  auto_approve_threshold?: number
+  log_level?: string
+  sarcasm_mode?: boolean
   vision_enabled?: boolean
   vision_model_id?: string
   vision_force_decode?: boolean

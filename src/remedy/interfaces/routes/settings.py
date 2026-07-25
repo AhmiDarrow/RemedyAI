@@ -171,6 +171,10 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             "tool_process": _normalize_tool_process(cfg),
             "web_tools_enabled": bool(cfg.get("web_tools_enabled", False)),
             "http_bootstrap": _effective_http_bootstrap(cfg),
+            "allow_skill_creation": bool(cfg.get("allow_skill_creation", True)),
+            "auto_approve_threshold": float(cfg.get("auto_approve_threshold", 0.8)),
+            "log_level": str(cfg.get("log_level") or "INFO").upper(),
+            "sarcasm_mode": bool(cfg.get("sarcasm_mode", False)),
             "enabled_providers": cfg.get("enabled_providers"),
             "enabled_models": cfg.get("enabled_models") or {},
             "last_model_by_provider": cfg.get("last_model_by_provider") or {},
@@ -344,6 +348,39 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
 
         if "http_bootstrap" in updates and updates["http_bootstrap"] is not None:
             updates["http_bootstrap"] = bool(updates["http_bootstrap"])
+
+        if "allow_skill_creation" in updates and updates["allow_skill_creation"] is not None:
+            updates["allow_skill_creation"] = bool(updates["allow_skill_creation"])
+
+        if "sarcasm_mode" in updates and updates["sarcasm_mode"] is not None:
+            updates["sarcasm_mode"] = bool(updates["sarcasm_mode"])
+
+        if "auto_approve_threshold" in updates and updates["auto_approve_threshold"] is not None:
+            try:
+                t = float(updates["auto_approve_threshold"])
+                updates["auto_approve_threshold"] = max(0.0, min(1.0, t))
+            except (TypeError, ValueError):
+                updates["auto_approve_threshold"] = 0.8
+
+        if "log_level" in updates and updates["log_level"] is not None:
+            ll = str(updates["log_level"]).strip().upper()
+            updates["log_level"] = (
+                ll if ll in ("DEBUG", "INFO", "WARNING", "ERROR") else "INFO"
+            )
+
+        if "harness_min_context_pct" in updates and updates["harness_min_context_pct"] is not None:
+            try:
+                v = float(updates["harness_min_context_pct"])
+                updates["harness_min_context_pct"] = max(0.05, min(0.95, v))
+            except (TypeError, ValueError):
+                updates.pop("harness_min_context_pct", None)
+
+        if "harness_max_context_pct" in updates and updates["harness_max_context_pct"] is not None:
+            try:
+                v = float(updates["harness_max_context_pct"])
+                updates["harness_max_context_pct"] = max(0.1, min(0.99, v))
+            except (TypeError, ValueError):
+                updates.pop("harness_max_context_pct", None)
 
         # tool_process: off | medium | full (legacy show_tool_calls bool → full/off)
         if "tool_process" in updates and updates["tool_process"] is not None:

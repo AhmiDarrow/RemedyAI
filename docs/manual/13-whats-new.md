@@ -2,7 +2,15 @@
 
 High-level product notes for owners. Full detail lives in repo `CHANGELOG.md`.
 
-Ship **one** installer/tag for the current series (**v0.13.2**).
+Ship **one** installer/tag for the current series (**v0.13.3**).
+
+## 0.13.3 — Settings polish · docs sync · license in Help
+
+- Settings **search**, deep-link / last section, lazy vision load.
+- Harness min/max %, thinking level, advanced (skills learning, log level, sarcasm), channels honesty, **License** section.
+- Default `config.toml` template documents modern keys.
+- Source-available license (solo/small free) reflected in Help overview; Cargo license metadata aligned.
+- Faster chat stream already plain-text until finalize; build-kick helper extracted + tests.
 
 ## 0.13.2 — Security hardening (power preserved)
 

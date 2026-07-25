@@ -37,6 +37,16 @@ feeling like a swarm of agents. See [How Remedy works (continuity)](16-continuit
 
 Nothing in this architecture requires a Remedy cloud account. Chat content goes to **your chosen LLM provider** (or local Ollama). Secrets stay on disk (DPAPI-encrypted on Windows when available).
 
+## License (source-available)
+
+| Who | Terms |
+|-----|--------|
+| **Solo / small indies** (&lt; $1M revenue **and** &lt; 20 FTE) | Free to use and modify |
+| **Personal / education / research** | Free |
+| **Larger orgs, SaaS hosting, commercial resale** | Written license — email **ahmitdarrow@gmail.com** |
+
+Copyright **Ahmi Darrow**. Binding text: repo `LICENSE`; summary: `COMMERCIAL.md`. No license keys or phone-home in the app. Settings → **License** shows the same summary offline.
+
 ## Manual map
 
 | Chapter | Topic |
