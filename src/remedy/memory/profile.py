@@ -36,6 +36,10 @@ class UserFact(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     last_referenced: datetime = Field(default_factory=lambda: datetime.now(UTC))
     reference_count: int = Field(default=1)
+    # Optional project scope (empty = global partner fact)
+    project_path: str | None = Field(default=None)
+    # Pinned facts always inject when budget allows
+    pinned: bool = Field(default=False)
 
 
 class UserProfile(BaseModel):

@@ -12,6 +12,8 @@ Type `/` in the composer for autocomplete. Commands also work via
 | `/thinking` | | Toggle thinking visibility |
 | `/memory` | `query` | Search durable memory |
 | `/remember` | `text` | Save a durable fact |
+| `/forget` | `text` | Remove a matching Partner Memory fact |
+| `/pin` | `text` | Pin a fact so it always injects |
 | `/whoami` | | Profile / known facts |
 | `/goals` | | List open goals |
 | `/goal` | `title` | Add a goal |
@@ -32,7 +34,7 @@ Type `/` in the composer for autocomplete. Commands also work via
 ## Tips
 
 - Prefer **F1** for the full owner’s manual; `/help` is the quick card.  
-- `/remember` is better than hoping the model stores facts in chat alone.  
+- Prefer natural language (“I prefer TypeScript”); `/remember` pins hard; `/forget` fixes mistakes.  
 - `/compact` before huge pastes or long tool traces.  
 
 ## Related

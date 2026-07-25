@@ -51,6 +51,8 @@ _BUILTIN_COMMANDS: list[dict] = [
     {"name": "/thinking", "description": "Toggle thinking visibility", "aliases": [], "arguments": None},
     {"name": "/memory", "description": "Search memory", "aliases": [], "arguments": "query"},
     {"name": "/remember", "description": "Save a durable fact to memory", "aliases": [], "arguments": "text"},
+    {"name": "/forget", "description": "Remove a remembered fact: /forget <text>", "aliases": [], "arguments": "text"},
+    {"name": "/pin", "description": "Pin a fact so it always injects: /pin <text>", "aliases": [], "arguments": "text"},
     {"name": "/whoami", "description": "Show what Remedy knows about you", "aliases": [], "arguments": None},
     {"name": "/goals", "description": "List open goals", "aliases": [], "arguments": None},
     {"name": "/goal", "description": "Add a goal: /goal <title>", "aliases": [], "arguments": "title"},
@@ -334,7 +336,16 @@ async def handle_slash_command(
         if memory is None:
             return {"text": "Memory store not available."}
         try:
+            from remedy.memory.partner_memory import looks_like_secret, upsert_profile_fact
             from remedy.models import MemoryEntry, MemoryEntryType
+
+            if looks_like_secret(text):
+                return {
+                    "text": (
+                        "That looks like a secret (API key/password). "
+                        "I won’t store it in Partner Memory — use a secret store or env var."
+                    )
+                }
 
             await memory.upsert(
                 MemoryEntry(
@@ -346,29 +357,87 @@ async def handle_slash_command(
             )
             with suppress(Exception):
                 profile = await memory.get_or_create_profile()
-                profile.add_fact(text, category="general", confidence=0.9)
+                upsert_profile_fact(
+                    profile,
+                    text,
+                    category="general",
+                    confidence=0.95,
+                    source="explicit",
+                    force=True,
+                )
                 await memory.save_user_profile(profile)
             return {"text": f"Remembered: {text[:300]}"}
         except Exception as e:
             return {"text": f"Could not save: {e}"}
 
+    if stripped.startswith("/forget"):
+        text = raw[len("/forget") :].strip()
+        if not text:
+            return {"text": "Usage: /forget <text matching a fact to remove>"}
+        if memory is None:
+            return {"text": "Memory store not available."}
+        try:
+            from remedy.memory.partner_memory import forget_facts
+
+            profile = await memory.get_or_create_profile()
+            removed = forget_facts(profile, text)
+            await memory.save_user_profile(profile)
+            if not removed:
+                return {
+                    "text": (
+                        f"No matching facts for “{text[:120]}”. "
+                        "Try `/whoami` to see what I know."
+                    )
+                }
+            lines = [f"Forgot {len(removed)} fact(s):"]
+            for f in removed[:8]:
+                lines.append(f"- {f.fact}")
+            return {"text": "\n".join(lines)}
+        except Exception as e:
+            return {"text": f"Could not forget: {e}"}
+
+    if stripped.startswith("/pin"):
+        text = raw[len("/pin") :].strip()
+        if not text:
+            return {"text": "Usage: /pin <text matching a fact to keep always ready>"}
+        if memory is None:
+            return {"text": "Memory store not available."}
+        try:
+            from remedy.memory.partner_memory import pin_facts, upsert_profile_fact
+
+            profile = await memory.get_or_create_profile()
+            touched = pin_facts(profile, text, pinned=True)
+            if not touched:
+                # Create + pin if no match
+                uf, _ = upsert_profile_fact(
+                    profile,
+                    text,
+                    category="general",
+                    confidence=0.95,
+                    source="explicit",
+                    force=True,
+                    pinned=True,
+                )
+                if uf is not None:
+                    touched = [uf]
+            await memory.save_user_profile(profile)
+            if not touched:
+                return {"text": f"Could not pin “{text[:120]}”."}
+            return {
+                "text": "Pinned:\n"
+                + "\n".join(f"- {f.fact}" for f in touched[:8])
+            }
+        except Exception as e:
+            return {"text": f"Could not pin: {e}"}
+
     if stripped in ("/whoami", "/who-am-i"):
         if memory is None:
             return {"text": "Memory store not available."}
         try:
+            from remedy.memory.partner_memory import format_whoami
+
             profile = await memory.get_or_create_profile()
-            lines = ["**What I know about you**"]
-            if profile.display_name:
-                lines.append(f"- Name: {profile.display_name}")
-            for key, trait in list(profile.traits.items())[:20]:
-                lines.append(f"- {key}: {trait.value}")
-            for fact in profile.facts[-15:]:
-                lines.append(f"- ({fact.category}) {fact.fact}")
-            if len(lines) == 1:
-                lines.append(
-                    "_Nothing stored yet. Use_ `/remember …` _or tell me preferences to save._"
-                )
-            return {"text": "\n".join(lines)}
+            return {"text": format_whoami(profile)}
         except Exception as e:
             return {"text": f"Profile error: {e}"}
 

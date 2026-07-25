@@ -1,12 +1,14 @@
 """Memory consolidation -- periodic summarization, deduplication, and
 importance boosting for long-term memory health.
 
-Inspired by Hermes' memory reflection and compaction patterns.
+Also quiet Partner Memory distillation (preferences → user_facts) so Remedy
+remembers what matters without user ceremony.
 """
 
 from __future__ import annotations
 
 from collections import Counter
+from typing import Any
 
 from remedy.memory.store import MemoryStore
 from remedy.models import MemoryEntry, MemoryEntryType
@@ -18,6 +20,23 @@ class MemoryConsolidator:
 
     def __init__(self, store: MemoryStore) -> None:
         self.store = store
+
+    async def distill_partner_memory(
+        self,
+        user_text: str = "",
+        *,
+        brief: Any | None = None,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Quiet heuristic distillation into the user profile (safe auto only)."""
+        from remedy.memory.partner_memory import distill_user_text
+
+        return await distill_user_text(
+            self.store,
+            user_text,
+            brief=brief,
+            session_id=session_id,
+        )
 
     async def consolidate_session(
         self, session_id: str, max_entries: int = 100
@@ -63,7 +82,18 @@ class MemoryConsolidator:
                 "topics": topics[:5],
             },
         )
-        return await self.store.upsert(consolidated)
+        saved = await self.store.upsert(consolidated)
+
+        # Partner Memory: distill preference-like highlights from session text
+        try:
+            blob = "\n".join(
+                f"{e.title}: {e.content}" for e in session_entries[:40]
+            )
+            await self.distill_partner_memory(blob, session_id=session_id)
+        except Exception:
+            pass
+
+        return saved
 
     async def boost_importance(self, threshold: int = 3) -> int:
         """Boost importance on entries referenced multiple times."""

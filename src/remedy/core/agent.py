@@ -1278,6 +1278,9 @@ class BasicRuntime(AgentRuntime):
         try:
             from remedy.interfaces.attachments import build_multimodal_user_content
 
+            # For Partner Memory ranking + quiet distillation hooks
+            with suppress(Exception):
+                self._last_user_text = (message or "")[:4000]
             context = await self._build_context()
             # Surface active plan + plan-mode instructions
             with suppress(Exception):
@@ -2573,43 +2576,41 @@ class BasicRuntime(AgentRuntime):
                 )
             )
 
-        # User profile (companion personalization)
+        # Partner Memory (durable identity + preferences — default on, budget-capped)
         with suppress(Exception):
-            user_name = ""
             if self.memory is not None:
+                from remedy.memory.partner_memory import build_partner_memory_block
+
                 profile = await self.memory.get_or_create_profile()
-                profile_lines: list[str] = []
-                user_name = (profile.display_name or "").strip()
                 # Config user_name is the settings field; prefer live profile, fall back to config.
-                if not user_name:
+                if not (profile.display_name or "").strip():
                     try:
                         from remedy.interfaces.config import load_config
 
                         user_name = str(load_config().get("user_name") or "").strip()
-                        if user_name and not profile.display_name:
+                        if user_name:
                             profile.display_name = user_name
                             await self.memory.save_user_profile(profile)
                     except Exception:
                         pass
-                if user_name:
-                    profile_lines.append(f"- Call the user: {user_name}")
-                    profile_lines.append(f"- Name: {user_name}")
-                for key, trait in list(profile.traits.items())[:12]:
-                    if trait.confidence >= 0.4:
-                        profile_lines.append(f"- {key}: {trait.value}")
-                for fact in profile.facts[-8:]:
-                    if fact.confidence >= 0.5:
-                        profile_lines.append(f"- ({fact.category}) {fact.fact}")
-                if profile_lines:
-                    parts.append(
-                        "User profile (remember across sessions):\n"
-                        + "\n".join(profile_lines)
-                        + (
-                            f"\nAddress the user as {user_name} when natural."
-                            if user_name
-                            else ""
-                        )
-                    )
+                # Prefer query-aware ranking when last user message is known
+                q = str(getattr(self, "_last_user_text", "") or "")
+                project_path = str(
+                    getattr(self.config, "project_path", None)
+                    or getattr(self, "_project_path", None)
+                    or ""
+                ) or None
+                # Light reinforce of matching facts (same session continuity)
+                with suppress(Exception):
+                    from remedy.memory.partner_memory import reinforce_matching
+
+                    if q and reinforce_matching(profile, q):
+                        await self.memory.save_user_profile(profile)
+                block = build_partner_memory_block(
+                    profile, query=q, project_path=project_path
+                )
+                if block:
+                    parts.append(block)
 
         # Session Brief (Memory Harness L2) when present on agent
         with suppress(Exception):

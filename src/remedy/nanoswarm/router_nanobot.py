@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-_LABELS = ("memory", "skill", "chat", "plan", "tool")
+_LABELS = ("memory", "skill", "chat", "plan", "tool", "autonomous")
 
 
 class RouterNanobot:
@@ -26,6 +26,15 @@ class RouterNanobot:
         label = "chat"
         if not text:
             label = "chat"
+        elif re.search(
+            r"\b("
+            r"work alone|on your own|handle this on your own|"
+            r"i need to go|step away|don'?t wait for me|do not wait for me|"
+            r"unattended|fully autonomous|finish without me|take it from here"
+            r")\b",
+            text,
+        ):
+            label = "autonomous"
         elif (
             text.startswith("/memory")
             or "remember that" in text

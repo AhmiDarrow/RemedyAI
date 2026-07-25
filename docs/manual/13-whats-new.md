@@ -2,7 +2,13 @@
 
 High-level product notes for owners. Full detail lives in repo `CHANGELOG.md`.
 
-Ship **one** installer/tag for the current series (**v0.11.7**).
+Ship **one** installer/tag for the current series (**v0.12.0**).
+
+## 0.12.0 — Partner Memory · work alone
+
+- **Partner Memory**: quietly remembers preferences/identity across sessions (inject + distill); `/whoami`, `/forget`, `/pin`.
+- Hybrid memory search (facts + notes); project-scoped facts; skill rank cost signal.
+- **Work alone**: say “handle this on your own” / step away — Remedy keeps going until done or a hard blocker.
 
 ## 0.11.7 — Session tree power tools
 

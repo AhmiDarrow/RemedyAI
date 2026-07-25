@@ -2,6 +2,25 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.12.0] — 2026-07-25
+
+### Feature: Partner Memory — toward an AI that never forgets
+
+- **Partner Memory** injects a budget-capped durable block every turn (identity, preferences, constraints).
+- **Quiet distillation** learns safe high-confidence preferences from natural chat (heuristics first; no setup).
+- **`/forget`**, **`/pin`**, improved **`/whoami`** for transparent fix/inspect.
+- Project-scoped facts, pin, gentle decay, hybrid fact+FTS search with token re-rank.
+- Secrets (API keys/passwords) refused for auto-store and `/remember`.
+- Skills rank with cost (duration) signal; duration tracked on skill feedback.
+
+### Feature: Work alone (autonomous continuity)
+
+- When the user says they are stepping away or asks Remedy to handle work end-to-end, continuity injects an **autonomous** policy pack: high agency, finish tests/docs, only stop on hard blockers.
+
+### Docs
+
+- Memory manual: Partner Memory just-works section; commands `/forget` `/pin`.
+
 ## [0.11.7] — 2026-07-25
 
 ### Feature: session project = tool jail (turn binding)

@@ -115,6 +115,8 @@ In chat (desktop or `POST /api/sessions/{id}/command`):
 | Command | Purpose |
 |---------|---------|
 | `/remember …` | Save a durable fact |
+| `/forget …` | Remove a matching Partner Memory fact |
+| `/pin …` | Pin a fact so it always injects |
 | `/whoami` | Show profile facts |
 | `/goal …` / `/goals` | Goals checklist |
 | `/compact` / `/harness` | Memory Harness |

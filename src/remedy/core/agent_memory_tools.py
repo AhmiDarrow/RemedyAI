@@ -16,16 +16,29 @@ def register_memory_tools(runtime: Any) -> None:
         if not q:
             return "Provide a search query."
         try:
-            hits = await runtime.memory.search(q, limit=max(1, min(int(limit), 20)))
+            from remedy.memory.partner_memory import search_partner_and_entries
+
+            project_path = str(
+                getattr(runtime, "_project_path", None)
+                or getattr(getattr(runtime, "config", None), "project_path", None)
+                or ""
+            ) or None
+            merged = await search_partner_and_entries(
+                runtime.memory,
+                q,
+                limit=max(1, min(int(limit), 20)),
+                project_path=project_path,
+            )
         except Exception as e:
             return f"Memory search failed: {e}"
-        if not hits:
+        if not merged:
             return f"No memory matches for: {q}"
         lines = []
-        for hit in hits:
-            title = getattr(hit, "title", "") or ""
-            content = (getattr(hit, "content", None) or "")[:200]
-            lines.append(f"- {title}: {content}" if title else f"- {content}")
+        for hit in merged:
+            kind = hit.get("kind") or "entry"
+            title = hit.get("title") or kind
+            content = (hit.get("content") or "")[:200]
+            lines.append(f"- [{kind}] {title}: {content}")
         return "Memory hits:\n" + "\n".join(lines)
 
     async def memory_save(
@@ -39,7 +52,14 @@ def register_memory_tools(runtime: Any) -> None:
         if not text:
             return "Nothing to save — provide content."
         try:
+            from remedy.memory.partner_memory import looks_like_secret, upsert_profile_fact
             from remedy.models import MemoryEntry, MemoryEntryType
+
+            if looks_like_secret(text):
+                return (
+                    "Refused: content looks like a secret (API key/password). "
+                    "Do not store credentials in Partner Memory."
+                )
 
             await runtime.memory.upsert(
                 MemoryEntry(
@@ -53,8 +73,13 @@ def register_memory_tools(runtime: Any) -> None:
             if len(text) < 400:
                 with suppress(Exception):
                     profile = await runtime.memory.get_or_create_profile()
-                    profile.add_fact(
-                        text, category=category or "general", confidence=0.85
+                    upsert_profile_fact(
+                        profile,
+                        text,
+                        category=category or "general",
+                        confidence=0.9,
+                        source="explicit",
+                        force=True,
                     )
                     await runtime.memory.save_user_profile(profile)
             return f"Saved to memory: {(title or 'Remembered')[:80]}"

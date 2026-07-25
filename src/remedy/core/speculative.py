@@ -100,16 +100,36 @@ def _prep(
         except Exception:
             pass
 
-    # 2) Stage memory candidates (FTS) for next turn injection if store available
+    # 2) Quiet Partner Memory distillation (preferences → durable profile)
     if memory is not None and (user_text or "").strip():
         try:
+            from remedy.memory.partner_memory import distill_user_text_sync
+
+            distill_user_text_sync(
+                memory,
+                user_text,
+                brief=brief,
+                session_id=session_id,
+                project_path=project_path,
+            )
+        except Exception:
+            logger.debug("partner memory distill failed", exc_info=True)
+
+    # 2b) Stage memory candidates (FTS) for next turn injection if store available
+    if memory is not None and (user_text or "").strip():
+        try:
+            import asyncio
+            import inspect
+
             q = (user_text or "").strip()[:200]
+            hits: Any = None
             if hasattr(memory, "search"):
-                hits = memory.search(q, limit=5)
-            elif hasattr(memory, "search_entries"):
-                hits = memory.search_entries(q, limit=5)
-            else:
-                hits = None
+                res = memory.search(q, limit=5)
+                hits = (
+                    asyncio.run(res)  # type: ignore[arg-type]
+                    if inspect.isawaitable(res)
+                    else res
+                )
             if hits:
                 # Stash on brief notes lightly (bounded)
                 if brief is not None and hasattr(brief, "notes"):

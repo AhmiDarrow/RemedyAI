@@ -63,12 +63,21 @@ Skills are **how you and Remedy agree to do a class of work**. They graduate fro
 
 Screenshots and OCR use an optional **local** model on this PC (first-run download). That is infrastructure for seeing images when the chat model cannot — not a second personality.
 
+## Work alone
+
+If you say you are stepping away or ask Remedy to **handle this on its own**,
+continuity injects an autonomous focus: finish the work with tools, tests, and
+docs; only pause for hard blockers (secrets, paid APIs, irreversible destroy).
+You should return to progress, not a queue of clarifying questions.
+
 ## What to do as a human partner
 
-- Store stable facts with `/remember`  
+- Natural preferences (“I prefer TypeScript”) are learned; `/remember` / `/pin` for hard pins  
+- `/whoami` / `/forget` to inspect and correct  
 - Use `/compact` when switching big tasks  
 - Prefer project folders so workspace continuity compounds  
 - Leave Tool process on **Off** unless debugging  
+- Say “work alone” / “handle this on your own” when you need unattended progress 
 
 ## Related
 

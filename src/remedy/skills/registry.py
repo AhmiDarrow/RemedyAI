@@ -384,13 +384,30 @@ class SkillRegistry:
 
             act_boost = 0.05 * min(1.0, self._activation_counts.get(m.name, 0) / 5.0)
 
+            # Cost signal: prefer skills that finish faster when quality is similar
+            # (avg_duration_ms or last_duration_ms in metadata; lower is better)
+            cost_boost = 0.0
+            try:
+                dur = float(
+                    meta.get("avg_duration_ms")
+                    or meta.get("last_duration_ms")
+                    or meta.get("duration_ms")
+                    or 0.0
+                )
+                if dur > 0:
+                    # 0–30s → small positive; multi-minute → tiny penalty
+                    cost_boost = max(-0.06, 0.05 - (dur / 60_000.0) * 0.08)
+            except (TypeError, ValueError):
+                cost_boost = 0.0
+
             score = (
-                0.32 * status_s
-                + 0.38 * text_score
-                + 0.15 * min(1.0, effort)
+                0.30 * status_s
+                + 0.36 * text_score
+                + 0.14 * min(1.0, effort)
                 + 0.10 * min(1.0, rate)
                 + ws_boost
                 + act_boost
+                + cost_boost
             )
             # Hard-won slight preference when equally relevant
             if effort >= 0.62:

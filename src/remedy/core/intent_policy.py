@@ -52,6 +52,19 @@ _PACKS: dict[str, dict[str, Any]] = {
         ),
         "prefer_tools": True,
     },
+    "autonomous": {
+        "id": "autonomous",
+        "system": (
+            "[Continuity · Work alone] The user stepped away or asked you to handle "
+            "this end-to-end without check-ins. Act with high agency: plan briefly, "
+            "use tools, implement, test, fix failures, and continue until the request "
+            "is complete or a hard blocker needs them (secrets, paid APIs, destructive "
+            "irreversible actions). Do not stop at a question when you can make a "
+            "reasonable default and document it. Prefer durable progress: write files, "
+            "run tests, update docs. Summarize what you did when finished."
+        ),
+        "prefer_tools": True,
+    },
 }
 
 
@@ -61,8 +74,28 @@ def policy_for_intent(intent: str, *, user_text: str = "") -> dict[str, Any]:
     pack = dict(_PACKS.get(key) or _PACKS["chat"])
     # Light boosts from raw text when classifier is generic
     ut = (user_text or "").lower()
+    # Autonomous / work-alone always wins when phrased clearly
+    if any(
+        p in ut
+        for p in (
+            "work alone",
+            "on your own",
+            "handle this on your own",
+            "i need to go",
+            "be with my kids",
+            "step away",
+            "don't wait for me",
+            "do not wait for me",
+            "unattended",
+            "fully autonomous",
+            "finish without me",
+            "take it from here",
+            "you got this",
+        )
+    ):
+        return dict(_PACKS["autonomous"])
     if key == "chat":
-        if any(w in ut for w in ("remember", "what do you know", "/memory")):
+        if any(w in ut for w in ("remember", "what do you know", "/memory", "/whoami", "/forget")):
             return dict(_PACKS["memory"])
         if any(w in ut for w in ("skill", "/skills", "procedure")):
             return dict(_PACKS["skill"])
@@ -82,6 +115,10 @@ def policy_for_intent(intent: str, *, user_text: str = "") -> dict[str, Any]:
             )
         ):
             return dict(_PACKS["tool"])
+    if key == "tool" and any(
+        p in ut for p in ("alone", "on your own", "without me", "end-to-end", "end to end")
+    ):
+        return dict(_PACKS["autonomous"])
     return pack
 
 

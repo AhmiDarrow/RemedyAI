@@ -126,6 +126,8 @@ The desktop app bundles the full Remedy server as a sidecar, so everything runs 
 | `/thinking` | Toggle thinking visibility |
 | `/memory <q>` | Search durable memory |
 | `/remember <fact>` | Store a fact in memory/profile |
+| `/forget <text>` | Remove a matching Partner Memory fact |
+| `/pin <text>` | Pin a fact so it always injects |
 | `/whoami` | What Remedy knows about you |
 | `/goals` · `/goal <title>` | List / add goals |
 | `/plans` · `/plan` · `/plan new <title>` · `/plan approve` | Structured task plans (Plan mode) |

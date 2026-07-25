@@ -7,7 +7,8 @@ Remedy keeps durable knowledge so it can remember facts, goals, and session cont
 | Piece | Role |
 |-------|------|
 | **Memory entries** | Searchable facts / notes (FTS5) |
-| **User profile** | Display name and durable profile fields |
+| **Partner Memory** | Durable identity + preferences injected every turn (budget-capped) |
+| **User profile** | Display name, traits, and facts that back Partner Memory |
 | **Handoff notes** | Structured “what was done / next” |
 | **Session Brief** | Compressed summary of the current chat (Harness) |
 | **Goals** | Lightweight checklist (`/goal`, `/goals`) |
@@ -28,6 +29,7 @@ Remedy keeps durable knowledge so it can remember facts, goals, and session cont
 | Command | Purpose |
 |---------|---------|
 | `/remember <fact>` | Store a durable fact |
+| `/forget <text>` | Remove a matching Partner Memory fact |
 | `/memory <query>` | Search memory |
 | `/whoami` | Show what Remedy knows about you |
 | `/goal <title>` | Add a goal |
@@ -66,9 +68,23 @@ snapshot. Background continuity also:
 You should not need to manage this. For philosophy, see
 [How Remedy works (continuity)](16-continuity-philosophy).
 
+## Partner Memory (just works)
+
+Remedy quietly keeps a small **Partner Memory** block so it feels like the same
+partner next session:
+
+- Prefer / always / never phrasing in chat is distilled automatically when safe.  
+- High-confidence facts are injected every turn (size-capped so the model stays sharp).  
+- `/whoami` lists what it knows; `/forget <text>` removes a mistake.  
+- Secrets (API keys, passwords) are **never** auto-stored.
+
+You do not need to configure anything. `/remember` is still the explicit pin when
+you want certainty.
+
 ## Best practices
 
-- Store stable facts with `/remember` (“I prefer TypeScript”, “Deploy host is …”).  
+- Natural language is enough (“I prefer TypeScript”); `/remember` for hard pins.  
+- Use `/forget …` if something was mis-learned.  
 - Use `/compact` before a big context switch.  
 - Import project notes with `/import` rather than pasting megabytes into chat.  
 - Treat memory as **local** — back up `memory.db` if it matters (CLI: `remedy memory backup`).  

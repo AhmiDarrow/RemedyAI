@@ -21,6 +21,18 @@ class SkillNanobot:
         skill: Any | None = None,
     ) -> dict[str, Any]:
         out: dict[str, Any] = {"bot": "skill", "skill": skill_name, "success": success}
+        # Always track duration on skill metadata when object is available (rank cost signal)
+        if skill is not None and duration_ms > 0:
+            try:
+                m = skill.manifest
+                meta = dict(m.metadata or {})
+                prev = float(meta.get("avg_duration_ms") or duration_ms)
+                meta["avg_duration_ms"] = round(0.7 * prev + 0.3 * float(duration_ms), 1)
+                meta["last_duration_ms"] = float(duration_ms)
+                m.metadata = meta
+                out["duration_tracked"] = True
+            except Exception:
+                pass
         if learning_loop is None:
             out["skipped"] = "no_learning_loop"
             return out
