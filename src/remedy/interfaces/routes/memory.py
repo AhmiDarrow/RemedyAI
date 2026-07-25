@@ -5,6 +5,8 @@ import logging
 from contextlib import suppress
 from pathlib import Path
 
+# suppress used by archive-unused / packs
+
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 
@@ -275,6 +277,10 @@ def register_memory_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                         skill.manifest.status = st
         skill.manifest.metadata = meta
         _persist_skill(skill)
+        with suppress(Exception):
+            from remedy.skills.shared import invalidate_shared_registry
+
+            invalidate_shared_registry()
         return {
             "name": name,
             "status": st.value,
@@ -557,6 +563,11 @@ def register_memory_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
             except Exception:
                 continue
 
+        if archived and not dry_run:
+            with suppress(Exception):
+                from remedy.skills.shared import invalidate_shared_registry
+
+                invalidate_shared_registry()
         return {
             "days": days,
             "dry_run": dry_run,
@@ -564,6 +575,64 @@ def register_memory_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
             "archived": archived,
             "count": len(archived) if not dry_run else len(candidates),
         }
+
+    @app.get("/api/skills/packs")
+    async def get_skill_packs():
+        """List skill packs (power-user grouping)."""
+        from pathlib import Path
+
+        from remedy.skills.shared import load_skill_packs
+
+        home = Path(
+            getattr(getattr(runtime, "config", None), "home_dir", None) or "~/.remedy"
+        ).expanduser()
+        data = load_skill_packs(home)
+        budget = 80
+        try:
+            from remedy.interfaces.api_support import load_config
+
+            budget = int((load_config() or {}).get("skills_active_budget") or 80)
+        except Exception:
+            pass
+        active_count = 0
+        if runtime is not None and hasattr(runtime, "skills"):
+            for s in runtime.skills.skills:
+                st = s.manifest.status
+                stv = st.value if hasattr(st, "value") else str(st)
+                if stv not in ("archived", "disabled", "deprecated"):
+                    if not (s.manifest.metadata or {}).get("quarantine"):
+                        active_count += 1
+        return {
+            **data,
+            "active_count": active_count,
+            "active_budget": budget,
+            "budget_banner": (
+                f"{active_count} / {budget} in active set — archive or pack to stay sharp"
+                if active_count >= int(budget * 0.85)
+                else None
+            ),
+        }
+
+    @app.put("/api/skills/packs")
+    async def put_skill_packs(request: Request):
+        """Save skill packs definition + enabled pack list."""
+        from pathlib import Path
+
+        from remedy.skills.shared import save_skill_packs
+
+        try:
+            payload = await request.json()
+        except Exception:
+            raise HTTPException(400, "JSON body required") from None
+        home = Path(
+            getattr(getattr(runtime, "config", None), "home_dir", None) or "~/.remedy"
+        ).expanduser()
+        data = {
+            "packs": payload.get("packs") if isinstance(payload.get("packs"), dict) else {},
+            "enabled": list(payload.get("enabled") or []),
+        }
+        path = save_skill_packs(data, home)
+        return {"status": "ok", "path": str(path), **data}
 
     # -- webhook -------------------------------------------------------------
     @app.post("/api/webhook/{source}")

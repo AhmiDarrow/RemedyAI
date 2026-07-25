@@ -50,6 +50,26 @@ export async function setSkillQuarantine(
   })
 }
 
+export async function getSkillPacks(): Promise<{
+  packs: Record<string, { skills?: string[]; project_path?: string }>
+  enabled: string[]
+  active_count?: number
+  active_budget?: number
+  budget_banner?: string | null
+}> {
+  return apiFetch('/skills/packs')
+}
+
+export async function saveSkillPacks(data: {
+  packs: Record<string, { skills?: string[]; project_path?: string }>
+  enabled: string[]
+}): Promise<unknown> {
+  return apiFetch('/skills/packs', {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  })
+}
+
 export async function archiveUnusedSkills(opts?: {
   days?: number
   dry_run?: boolean

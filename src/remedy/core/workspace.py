@@ -74,12 +74,18 @@ def jail_path(user_path: str, project_root: Path) -> Path:
 
 
 def normalize_access_scope(raw: str | None) -> str:
-    """Return project | home | full."""
+    """Return project | home | full | untrusted.
+
+    ``untrusted`` — project root only (no Desktop/Documents/Downloads auto-roots);
+    pair with Ask approvals for downloaded/untrusted folders.
+    """
     s = (raw or "project").strip().lower()
     if s in ("home", "user", "project+home", "project_home"):
         return "home"
     if s in ("full", "machine", "all", "unrestricted"):
         return "full"
+    if s in ("untrusted", "sandbox", "strict", "download"):
+        return "untrusted"
     return "project"
 
 
@@ -119,10 +125,12 @@ def allowed_roots_for_scope(
     except Exception:
         roots.append(resolve_project_path(str(project_root)))
     scope = normalize_access_scope(scope)
-    # Always allow standard user work folders (Desktop/Documents/Downloads).
-    for folder in user_profile_work_folders(home=home):
-        if folder not in roots:
-            roots.append(folder)
+    # Untrusted: project root only (no Desktop/Documents/Downloads).
+    if scope != "untrusted":
+        # Always allow standard user work folders (Desktop/Documents/Downloads).
+        for folder in user_profile_work_folders(home=home):
+            if folder not in roots:
+                roots.append(folder)
     if scope in ("home", "full"):
         h = (home or Path.home()).expanduser()
         try:

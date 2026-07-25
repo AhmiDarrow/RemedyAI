@@ -300,6 +300,8 @@ class ChatSession(BaseModel):
     model: str | None = Field(default=None)
     agent: str | None = Field(default=None)
     project_path: str | None = Field(default=None)
+    # Per-session LLM override (tabs stay independent)
+    llm_provider: str | None = Field(default=None)
     message_count: int = Field(default=0)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

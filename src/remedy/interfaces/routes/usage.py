@@ -33,6 +33,37 @@ def register_usage_routes(app: FastAPI, *, runtime=None, gateway=None, memory=No
 
         return session_usage(session_id)
 
+    @app.get("/api/usage/export")
+    async def usage_export(
+        range_days: float = Query(default=30.0, ge=0.01, le=3650.0),
+        format: str = Query(default="csv"),
+    ):
+        """Export usage events as CSV (or JSON summary)."""
+        from fastapi.responses import PlainTextResponse
+
+        from remedy.core.usage_ledger import series, summary
+
+        if str(format).lower() == "json":
+            return {
+                "summary": summary(range_days=range_days),
+                "series": series(range_days=range_days, group="provider"),
+            }
+        # CSV of daily series by provider
+        ser = series(range_days=range_days, group="provider")
+        lines = ["day,provider,total_tokens,estimated_cost_usd,events"]
+        for p in ser.get("points") or []:
+            lines.append(
+                f"{p.get('day')},{p.get('group')},{p.get('total_tokens')},"
+                f"{p.get('estimated_cost_usd')},{p.get('events')}"
+            )
+        return PlainTextResponse(
+            "\n".join(lines) + "\n",
+            media_type="text/csv",
+            headers={
+                "Content-Disposition": f'attachment; filename="remedy-usage-{int(range_days)}d.csv"'
+            },
+        )
+
     @app.get("/api/nanoswarm/token/status")
     async def token_nanobot_status():
         from remedy.nanoswarm.token_nanobot import get_token_nanobot

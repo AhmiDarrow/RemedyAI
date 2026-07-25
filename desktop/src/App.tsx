@@ -173,6 +173,22 @@ export default function App() {
   const [sessionLlmMap, setSessionLlmMap] = useState<
     Record<string, { provider: string; model: string }>
   >({})
+  const [switchToast, setSwitchToast] = useState<string | null>(null)
+
+  // Hydrate session LLM map from server session records
+  useEffect(() => {
+    setSessionLlmMap((prev) => {
+      const next = { ...prev }
+      for (const s of sessions) {
+        if (s.llm_provider && s.model) {
+          next[s.id] = { provider: s.llm_provider, model: s.model }
+        } else if (s.model && !next[s.id]) {
+          // model-only legacy sessions keep map empty until first switch
+        }
+      }
+      return next
+    })
+  }, [sessions])
 
   // Restore per-session provider/model when switching tabs
   useEffect(() => {
@@ -181,8 +197,14 @@ export default function App() {
     if (ov) {
       setLlmProvider(ov.provider)
       setModel(ov.model)
+      return
     }
-  }, [activeId, sessionLlmMap])
+    const sess = sessions.find((s) => s.id === activeId)
+    if (sess?.llm_provider) {
+      setLlmProvider(sess.llm_provider)
+      if (sess.model) setModel(sess.model)
+    }
+  }, [activeId, sessionLlmMap, sessions])
 
   const sessionUsage: UsageSnapshot = useMemo(() => {
     let prompt = 0
@@ -1298,6 +1320,10 @@ export default function App() {
                   const r = await applySessionLlm(activeId, prov, mid, false)
                   if (r.provider) setLlmProvider(r.provider)
                   if (r.model) setModel(r.model)
+                  if (r.toast) {
+                    setSwitchToast(r.toast)
+                    window.setTimeout(() => setSwitchToast(null), 4200)
+                  }
                   return
                 } catch {
                   /* fall through to settings */
@@ -1306,15 +1332,44 @@ export default function App() {
               await updateSettings({ llm_provider: prov, llm_model: mid })
             }
             void apply()
-              .then(() => listConnectedProviders())
-              .then((conn) => {
-                setConnectedProviders(conn.picker?.length ? conn.picker : conn.connected || [])
+              .then(() =>
+                Promise.all([
+                  listConnectedProviders(),
+                  apiFetch<{ models: ModelInfo[]; default: string; provider?: string }>(
+                    '/models',
+                  ).catch(() => null),
+                ]),
+              )
+              .then(([conn, modelsData]) => {
+                setConnectedProviders(
+                  conn.picker?.length ? conn.picker : conn.connected || [],
+                )
+                if (modelsData?.models?.length) setModels(modelsData.models)
               })
               .catch(() => {})
           }}
           onModelChange={(id) => {
             setModel(id)
-            // Persist + hot-apply on server so it survives restarts and chat uses it now.
+            if (activeId) {
+              setSessionLlmMap((prev) => ({
+                ...prev,
+                [activeId]: {
+                  provider: prev[activeId]?.provider || llmProvider,
+                  model: id,
+                },
+              }))
+              void applySessionLlm(activeId, llmProvider, id, false)
+                .then((r) => {
+                  if (r.toast) {
+                    setSwitchToast(r.toast)
+                    window.setTimeout(() => setSwitchToast(null), 4200)
+                  }
+                })
+                .catch(() => {
+                  updateSettings({ llm_model: id }).catch(() => {})
+                })
+              return
+            }
             updateSettings({ llm_model: id })
               .then((r) => {
                 if (r.llm_model) setModel(r.llm_model)
@@ -1367,6 +1422,20 @@ export default function App() {
           provider={llmProvider}
           model={model}
         />
+
+        {switchToast && (
+          <div
+            className="fixed bottom-16 left-1/2 -translate-x-1/2 z-50 px-3 py-2 rounded-lg text-xs shadow-lg max-w-[90vw]"
+            style={{
+              background: 'var(--bg-secondary)',
+              border: '1px solid var(--accent)',
+              color: 'var(--text-primary)',
+            }}
+            role="status"
+          >
+            {switchToast}
+          </div>
+        )}
       </div>
     </div>
 

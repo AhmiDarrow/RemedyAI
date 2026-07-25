@@ -122,6 +122,7 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
     model TEXT,
     agent TEXT,
     project_path TEXT,
+    llm_provider TEXT,
     message_count INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -201,7 +202,21 @@ class MemoryStore:
         self._db.execute("PRAGMA mmap_size=268435456")  # 256 MiB mmap when OS allows
         self._db.execute("PRAGMA busy_timeout=5000")
         self._db.executescript(_SCHEMA)
+        self._migrate_schema()
         self._db.commit()
+
+    def _migrate_schema(self) -> None:
+        """Best-effort additive migrations for existing desktop DBs."""
+        if self._db is None:
+            return
+        cols = {
+            r[1]
+            for r in self._db.execute("PRAGMA table_info(chat_sessions)").fetchall()
+        }
+        if "llm_provider" not in cols:
+            self._db.execute(
+                "ALTER TABLE chat_sessions ADD COLUMN llm_provider TEXT"
+            )
 
     async def close(self) -> None:
         if self._db is not None:
@@ -786,12 +801,14 @@ class MemoryStore:
     # -- chat sessions --------------------------------------------------------
 
     def _row_to_session(self, row: sqlite3.Row) -> ChatSession:
+        keys = row.keys()
         return ChatSession(
             id=row["id"],
             title=row["title"],
             model=row["model"],
             agent=row["agent"],
             project_path=row["project_path"],
+            llm_provider=row["llm_provider"] if "llm_provider" in keys else None,
             message_count=row["message_count"],
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"]),
@@ -819,11 +836,11 @@ class MemoryStore:
         session.updated_at = datetime.now(UTC)
         db.execute(
             """INSERT INTO chat_sessions (id, title, model, agent, project_path,
-               message_count, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+               llm_provider, message_count, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 session.id, session.title, session.model, session.agent,
-                session.project_path, session.message_count,
+                session.project_path, session.llm_provider, session.message_count,
                 session.created_at.isoformat(), session.updated_at.isoformat(),
             ),
         )
@@ -841,7 +858,14 @@ class MemoryStore:
 
     async def update_chat_session(self, session_id: str, **fields: Any) -> ChatSession | None:
         db = self._ensure_db()
-        allowed = {"title", "model", "agent", "project_path", "message_count"}
+        allowed = {
+            "title",
+            "model",
+            "agent",
+            "project_path",
+            "llm_provider",
+            "message_count",
+        }
         updates = {k: v for k, v in fields.items() if k in allowed and v is not None}
         if not updates:
             return await self.get_chat_session(session_id)

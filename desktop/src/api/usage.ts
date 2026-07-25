@@ -90,3 +90,14 @@ export async function getContinuityDashboard(sessionId?: string | null) {
 export async function getTokenNanobotStatus() {
   return apiFetch<Record<string, unknown>>('/nanoswarm/token/status')
 }
+
+export async function exportUsageCsv(rangeDays = 30): Promise<string> {
+  const { ensureApiToken, authHeaders, getApiBase } = await import('./client')
+  await ensureApiToken()
+  const r = await fetch(
+    `${getApiBase()}/usage/export?range_days=${rangeDays}&format=csv`,
+    { headers: { ...authHeaders(), Accept: 'text/csv' } },
+  )
+  if (!r.ok) throw new Error(`Export failed (${r.status})`)
+  return r.text()
+}

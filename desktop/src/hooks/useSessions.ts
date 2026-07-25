@@ -16,16 +16,19 @@ export function useSessions() {
     try {
       const list = await listSessions()
       setSessions(list)
-      if (list.length > 0 && !activeId) {
-        setActiveId(list[0].id)
-      }
+      // Only set initial active when none selected (do not depend on activeId
+      // identity for the callback — avoids re-fetch loops on tab switch).
+      setActiveId((cur) => {
+        if (cur) return cur
+        return list.length > 0 ? list[0]!.id : null
+      })
     } catch {
       // server not ready
     } finally {
       setLoading(false)
       hasLoaded.current = true
     }
-  }, [activeId])
+  }, [])
 
   return {
     sessions,

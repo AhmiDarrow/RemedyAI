@@ -27,6 +27,17 @@ def auth_enabled() -> bool:
     return flag not in ("0", "false", "no", "off", "disable", "disabled")
 
 
+def http_bootstrap_enabled() -> bool:
+    """Whether loopback HTTP may hand out the local API token.
+
+    Desktop prefers IPC (``get_local_api_token``). Set ``REMEDY_HTTP_BOOTSTRAP=0``
+    to require IPC-only (harder for other local processes to steal the token).
+    Default remains on for Web UI / first-run browser access.
+    """
+    flag = str(os.environ.get("REMEDY_HTTP_BOOTSTRAP", "1")).strip().lower()
+    return flag not in ("0", "false", "no", "off", "disable", "disabled")
+
+
 def token_path(home: Path | str | None = None) -> Path:
     from remedy.interfaces.secret_store import auth_dir
 

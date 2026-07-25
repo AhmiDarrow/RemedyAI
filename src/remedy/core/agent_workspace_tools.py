@@ -131,7 +131,11 @@ def register_workspace_tools(runtime: Any) -> None:
             pass
         return f"Wrote {len(content)} bytes to {path}"
 
-    async def list_dir(path: str = ".") -> str:
+    async def list_dir(
+        path: str = ".",
+        limit: int = 200,
+        offset: int = 0,
+    ) -> str:
         root = runtime.effective_project_path()
         target = runtime.resolve_tool_path(path)
         if not target.exists():
@@ -152,20 +156,30 @@ def register_workspace_tools(runtime: Any) -> None:
                 tool_name="list_dir",
                 suggestion=f'Use file_read("{path}") for file contents instead.',
             )
-        lines: list[str] = []
+        # Default page size 200; hard safety cap 2000 per call
         try:
-            for p in sorted(target.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
-                if p.name.startswith("."):
-                    continue
+            lim = max(1, min(2000, int(limit or 200)))
+        except (TypeError, ValueError):
+            lim = 200
+        try:
+            off = max(0, int(offset or 0))
+        except (TypeError, ValueError):
+            off = 0
+        lines: list[str] = []
+        total = 0
+        try:
+            entries = sorted(
+                target.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())
+            )
+            visible = [p for p in entries if not p.name.startswith(".")]
+            total = len(visible)
+            page = visible[off : off + lim]
+            for p in page:
                 try:
                     rel = p.relative_to(root).as_posix()
                 except ValueError:
                     rel = str(p)
                 lines.append(f"{'dir ' if p.is_dir() else 'file'} {rel}")
-                # Generous listing (no short 200-entry wall).
-                if len(lines) >= 50_000:
-                    lines.append(f"... ({len(lines)}+ entries; listing safety stop)")
-                    break
         except OSError as e:
             return format_tool_error(
                 f"cannot list {path}: {e}",
@@ -173,7 +187,18 @@ def register_workspace_tools(runtime: Any) -> None:
                 tool_name="list_dir",
                 suggestion="Retry with project root '.' or a known subdirectory.",
             )
-        return "\n".join(lines) if lines else "(empty)"
+        if not lines:
+            return "(empty)"
+        footer = ""
+        shown = off + len(lines)
+        if shown < total:
+            footer = (
+                f"\n… showing {off + 1}-{shown} of {total}; "
+                f'list_dir(path="{path}", limit={lim}, offset={shown}) for more'
+            )
+        elif off > 0:
+            footer = f"\n… showing {off + 1}-{shown} of {total}"
+        return "\n".join(lines) + footer
 
     async def bash_exec(command: str = "") -> str:
         """Run a shell command through SubprocessSandbox (hidden console on Windows)."""
@@ -280,7 +305,8 @@ def register_workspace_tools(runtime: Any) -> None:
     )
     runtime.tool_registry.register_builtin_handler(
         "list_dir",
-        "List files and directories under allowed roots (see access scope).",
+        "List files and directories under allowed roots (see access scope). "
+        "Default limit=200; use offset for the next page.",
         list_dir,
         {
             "type": "object",
@@ -288,6 +314,14 @@ def register_workspace_tools(runtime: Any) -> None:
                 "path": {
                     "type": "string",
                     "description": "Relative directory (default: project root)",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max entries to return (default 200, max 2000)",
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "Skip this many entries (pagination)",
                 },
             },
         },

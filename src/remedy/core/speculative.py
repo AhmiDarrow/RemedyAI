@@ -15,6 +15,9 @@ logger = logging.getLogger(__name__)
 
 _lock = threading.Lock()
 _pending: dict[str, bool] = {}
+# Single worker queue — one background prep at a time (avoid registry thrash)
+_queue: list[dict[str, Any]] = []
+_worker_running = False
 
 
 def schedule_speculative_prep(
@@ -26,31 +29,58 @@ def schedule_speculative_prep(
     project_path: str | None = None,
     memory: Any | None = None,
 ) -> None:
-    """Fire-and-forget prep. Debounced per session."""
+    """Fire-and-forget prep. Debounced per session; single worker queue."""
     sid = (session_id or "").strip() or "_default"
     with _lock:
         if _pending.get(sid):
             return
         _pending[sid] = True
+        _queue.append(
+            {
+                "session_id": sid,
+                "brief": brief,
+                "messages": messages,
+                "user_text": user_text,
+                "project_path": project_path,
+                "memory": memory,
+            }
+        )
+        start = not _worker_running
 
-    def _run() -> None:
-        try:
-            _prep(
-                session_id=sid,
-                brief=brief,
-                messages=messages,
-                user_text=user_text,
-                project_path=project_path,
-                memory=memory,
-            )
-        except Exception:
-            logger.debug("speculative prep failed", exc_info=True)
-        finally:
+    if start:
+        t = threading.Thread(target=_worker_loop, name="remedy-speculative-worker", daemon=True)
+        t.start()
+
+
+def _worker_loop() -> None:
+    global _worker_running
+    with _lock:
+        _worker_running = True
+    try:
+        while True:
             with _lock:
-                _pending[sid] = False
-
-    t = threading.Thread(target=_run, name=f"remedy-speculative-{sid[:8]}", daemon=True)
-    t.start()
+                if not _queue:
+                    _worker_running = False
+                    return
+                job = _queue.pop(0)
+            sid = job["session_id"]
+            try:
+                _prep(
+                    session_id=sid,
+                    brief=job.get("brief"),
+                    messages=job.get("messages"),
+                    user_text=job.get("user_text") or "",
+                    project_path=job.get("project_path"),
+                    memory=job.get("memory"),
+                )
+            except Exception:
+                logger.debug("speculative prep failed", exc_info=True)
+            finally:
+                with _lock:
+                    _pending[sid] = False
+    finally:
+        with _lock:
+            _worker_running = False
 
 
 def _prep(
@@ -110,14 +140,12 @@ def _prep(
         except Exception:
             pass
 
-    # 4) Warm skill ranking cache for next skill-intent turn (nano skill bot)
+    # 4) Warm skill ranking cache (shared registry — no re-discover thrash)
     try:
         from remedy.nanoswarm import get_swarm
-        from remedy.skills.registry import SkillRegistry
+        from remedy.skills.shared import get_shared_registry
 
-        reg = SkillRegistry()
-        with suppress(Exception):
-            reg.discover_defaults()
+        reg = get_shared_registry()
         get_swarm().skill.rank_catalog_lines(reg, limit=24)
     except Exception:
         logger.debug("speculative skill rank failed", exc_info=True)

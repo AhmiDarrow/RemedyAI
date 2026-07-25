@@ -1063,13 +1063,14 @@ export function SettingsPanel({
                   border: '1px solid var(--border)',
                 }}
               >
-                <option value="project">Project only (safest)</option>
-                <option value="home">Project + home folder</option>
+                <option value="untrusted">Untrusted project (strict)</option>
+                <option value="project">Project + Desktop/Docs/Downloads</option>
+                <option value="home">Project + full home folder</option>
                 <option value="full">Full user machine (you grant)</option>
               </select>
               <div className="text-[10px] leading-snug" style={{ color: 'var(--text-muted)' }}>
-                Full scope still runs as your Windows user — no silent admin elevation.
-                Prefer project-only unless Remedy needs files outside the workspace.
+                <strong>Untrusted</strong> = project root only + always Ask for shell/write
+                (use for downloaded folders). Full still runs as your Windows user.
               </div>
             </SettingsSection>
 

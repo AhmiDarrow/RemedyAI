@@ -77,13 +77,24 @@ class ApprovalQueue:
         When mode is ``auto`` (status-bar thumbs-up), skip prompts for pattern
         matches only — callers may still force ask for skill quarantine etc.
         """
+        # Untrusted workspace: never skip asks even in auto mode
+        untrusted = False
+        try:
+            from remedy.interfaces.api_support import load_config
+
+            scope = str((load_config() or {}).get("access_scope") or "").lower()
+            untrusted = scope in ("untrusted", "sandbox", "strict", "download")
+        except Exception:
+            untrusted = False
         with self._lock:
-            if self._mode == "auto":
+            if self._mode == "auto" and not untrusted:
                 return None
         tool = (tool_name or "").strip()
         c = (command or "").strip()
         reason: str | None = None
-        if tool in self.HIGH_IMPACT_TOOLS:
+        if untrusted and tool in self.HIGH_IMPACT_TOOLS:
+            reason = "Untrusted workspace — approval required"
+        if tool in self.HIGH_IMPACT_TOOLS and not reason:
             if tool == "bash_exec":
                 reason = "Shell execution requires approval (bash_exec)"
             elif tool == "file_write":

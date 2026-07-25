@@ -301,6 +301,8 @@ export async function setSessionLlm(
   provider: string
   model: string
   remeasure?: Record<string, unknown> | null
+  context_window?: number | null
+  toast?: string
 }> {
   return apiFetch(`/sessions/${sessionId}/llm`, {
     method: 'PUT',

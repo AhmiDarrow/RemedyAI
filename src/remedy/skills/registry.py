@@ -265,9 +265,19 @@ class SkillRegistry:
         effective_limit = min(limit, budget)
         ranked = self.match_skills(
             query or "",
-            limit=effective_limit,
+            limit=max(effective_limit * 2, effective_limit),
             include_disabled=include_disabled,
         )
+        # Optional pack filter (enabled skill packs)
+        try:
+            from remedy.skills.shared import skills_in_enabled_packs
+
+            pack_names = skills_in_enabled_packs()
+            if pack_names is not None:
+                ranked = [(s, sc) for s, sc in ranked if s.manifest.name in pack_names]
+        except Exception:
+            pass
+        ranked = ranked[:effective_limit]
         lines: list[str] = []
         for skill, _score in ranked:
             m = skill.manifest
@@ -314,13 +324,16 @@ class SkillRegistry:
         limit: int = 20,
         include_disabled: bool = False,
         workspace_hint: str = "",
+        project_path: str | None = None,
     ) -> list[tuple[Skill, float]]:
         """Rank skills for retrieval (status + description + tags + effort).
 
         Returns (skill, score) sorted descending. Empty query ranks by trust/effort.
+        Prefer skills tagged/bound to project_path when provided.
         """
         q_tokens = _tokenize(query)
         w_tokens = _tokenize(workspace_hint)
+        proj = (project_path or "").strip().lower()
         scored: list[tuple[Skill, float]] = []
         for skill in self._skills.values():
             m = skill.manifest
@@ -382,6 +395,16 @@ class SkillRegistry:
             # Hard-won slight preference when equally relevant
             if effort >= 0.62:
                 score += 0.03
+            # Project-scoped skills: metadata.project_path or tag matching folder name
+            if proj:
+                bound = str(meta.get("project_path") or meta.get("project") or "").lower()
+                if bound and (bound in proj or proj in bound):
+                    score += 0.12
+                else:
+                    # tag like project:foo or folder name in tags
+                    folder = proj.replace("\\", "/").rstrip("/").split("/")[-1]
+                    if folder and folder in tag_tokens:
+                        score += 0.06
             scored.append((skill, score))
 
         scored.sort(key=lambda x: (-x[1], x[0].manifest.name.lower()))

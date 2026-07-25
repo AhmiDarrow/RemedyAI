@@ -4,6 +4,8 @@ export interface ChatSession {
   model: string | null
   agent: string | null
   project_path?: string | null
+  /** Per-session provider override */
+  llm_provider?: string | null
   message_count: number
   created_at: string
   updated_at: string

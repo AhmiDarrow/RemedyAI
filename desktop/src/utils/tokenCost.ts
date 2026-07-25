@@ -26,9 +26,21 @@ const PRICE: Array<{ re: RegExp; pin: number; pout: number }> = [
   { re: /demo|ollama/i, pin: 0, pout: 0 },
 ]
 
+/** Align with NanoToken class-weighted heuristic (~4 chars/token prose baseline). */
 export function estimateTokensText(text: string): number {
   if (!text) return 0
-  return Math.max(0, Math.ceil(text.length / 4))
+  let w = 0
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]!
+    const code = ch.charCodeAt(0)
+    if (/\s/.test(ch)) w += 0.15
+    else if (code > 0x2e80) w += 1.0 // rough CJK
+    else if (/\d/.test(ch)) w += 0.3
+    else if (/[a-zA-Z]/.test(ch)) w += 0.25
+    else if (code < 128) w += 0.45 // punct/code
+    else w += 0.35
+  }
+  return Math.max(0, Math.round(w))
 }
 
 export function pricePerMtok(model?: string | null, provider?: string | null): [number, number] {

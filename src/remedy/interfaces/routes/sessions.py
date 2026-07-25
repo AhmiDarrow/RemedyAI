@@ -88,6 +88,7 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             "model": saved.model,
             "agent": saved.agent,
             "project_path": saved.project_path,
+            "llm_provider": getattr(saved, "llm_provider", None),
             "message_count": saved.message_count,
             "created_at": saved.created_at.isoformat() if saved.created_at else None,
             "updated_at": saved.updated_at.isoformat() if saved.updated_at else None,
@@ -106,6 +107,7 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             "model": session.model,
             "agent": session.agent,
             "project_path": session.project_path,
+            "llm_provider": getattr(session, "llm_provider", None),
             "message_count": session.message_count,
             "created_at": session.created_at.isoformat() if session.created_at else None,
             "updated_at": session.updated_at.isoformat() if session.updated_at else None,
@@ -134,6 +136,7 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             "model": session.model,
             "agent": session.agent,
             "project_path": session.project_path,
+            "llm_provider": getattr(session, "llm_provider", None),
             "updated_at": session.updated_at.isoformat() if session.updated_at else None,
         }
 
@@ -233,16 +236,24 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         except Exception as exc:
             logger.warning("session llm config write failed: %s", exc)
 
-        # Update session model label when memory supports it
+        # Persist per-session provider/model (tabs independent)
         if memory is not None:
             with contextlib.suppress(Exception):
-                await memory.update_chat_session(session_id, model=model)
+                await memory.update_chat_session(
+                    session_id, model=model, llm_provider=provider
+                )
 
         remeasure = None
         with contextlib.suppress(Exception):
             from remedy.nanoswarm.token_nanobot import get_token_nanobot
 
             remeasure = get_token_nanobot().last_remeasure(session_id)
+
+        window = None
+        with contextlib.suppress(Exception):
+            from remedy.nanoswarm.token_nanobot import resolve_context_window
+
+            window = resolve_context_window(provider, model)
 
         return {
             "status": "ok",
@@ -252,6 +263,12 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             "base_url": base_url,
             "make_default": req.make_default,
             "remeasure": remeasure,
+            "context_window": window,
+            "toast": (
+                f"Now using {provider} · {model}"
+                + (f" · window {window}" if window else "")
+                + (" · remeasured history" if remeasure else "")
+            ),
         }
 
     # -- messages ------------------------------------------------------------

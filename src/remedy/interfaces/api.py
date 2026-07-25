@@ -262,12 +262,9 @@ def create_app(
             if client not in ("127.0.0.1", "::1", "localhost", "testclient"):
                 return JSONResponse(status_code=403, content={"error": "loopback only"})
             # Optional owner opt-out of HTTP bootstrap (desktop-only token channel)
-            if str(os.environ.get("REMEDY_HTTP_BOOTSTRAP", "1")).strip().lower() in (
-                "0",
-                "false",
-                "no",
-                "off",
-            ):
+            from remedy.interfaces.local_auth import http_bootstrap_enabled
+
+            if not http_bootstrap_enabled():
                 return JSONResponse(
                     status_code=403,
                     content={

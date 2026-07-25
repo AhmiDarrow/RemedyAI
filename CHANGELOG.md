@@ -2,6 +2,18 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.11.3] — 2026-07-25
+
+### Feature: finish continuity expansion plan
+
+- **Session LLM**: per-session `llm_provider` + model in SQLite; status-bar switch toast; models refresh after switch; tabs restore provider independently.
+- **NanoToken**: family weight packs (`token_tables`), message cache, multiprovider usage ledger + CSV export.
+- **Nanoswarm**: Guard, Helper, Pack, Goal, Scout (warm-up), Health (failover chip); shared SkillRegistry + single speculative worker.
+- **Skills at scale**: active budget, archive/unarchive, archive unused 90d, packs API, budget banner, project-scoped ranking boost.
+- **list_dir**: default page size 200 + offset pagination.
+- **Security**: untrusted access scope (project-only + always-ask); webhook constant-time; vision Zip Slip; `REMEDY_HTTP_BOOTSTRAP` helper.
+- **UI**: provider catalog enable/models, Usage & Continuity dashboard, stream RAF + plain-text streaming.
+
 ## [0.11.2] — 2026-07-25
 
 ### Fix: restore live provider model discovery (DeepSeek / xAI / cloud)

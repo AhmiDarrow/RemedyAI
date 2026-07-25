@@ -159,6 +159,14 @@ class NanoSwarm:
                 status_code=event.payload.get("status_code"),
             )
 
+        elif event.name == "skill_library_changed":
+            # Drop rank cache so next skill intent re-ranks
+            try:
+                self.skill._rank_cache = []  # noqa: SLF001
+            except Exception:
+                pass
+            results["signals"]["skill"] = {"rank_cache_cleared": True}
+
         return results
 
     def status(self) -> dict[str, Any]:

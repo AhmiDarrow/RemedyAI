@@ -420,6 +420,7 @@ export function SkillsPanel({
   const [editBody, setEditBody] = useState('')
   const [editSaving, setEditSaving] = useState(false)
   const [packMsg, setPackMsg] = useState<string | null>(null)
+  const [budgetBanner, setBudgetBanner] = useState<string | null>(null)
 
   const [reuse, setReuse] = useState<{
     total_activations: number
@@ -433,15 +434,19 @@ export function SkillsPanel({
     void import('../api/skills')
       .then(async ({ listSkills }) => {
         const { apiFetch } = await import('../api/client')
-        const [list, summary, metrics] = await Promise.all([
+        const [list, summary, metrics, packs] = await Promise.all([
           listSkills(filter),
           apiFetch<LearningSummary>('/skills/learning/summary').catch(() => null),
           import('../api/partner')
             .then(({ getSkillReuseMetrics }) => getSkillReuseMetrics())
             .catch(() => null),
+          import('../api/skills')
+            .then(({ getSkillPacks }) => getSkillPacks())
+            .catch(() => null),
         ])
         setSkills(list)
         setLearning(summary)
+        setBudgetBanner(packs?.budget_banner || null)
         setReuse(
           metrics
             ? {
@@ -732,6 +737,18 @@ export function SkillsPanel({
       {packMsg && (
         <div className="mb-2 text-[10px]" style={{ color: 'var(--success, #3ecf8e)' }}>
           {packMsg}
+        </div>
+      )}
+      {budgetBanner && (
+        <div
+          className="mb-2 text-[10px] px-2 py-1.5 rounded"
+          style={{
+            background: 'color-mix(in srgb, var(--warning, #e6a23c) 15%, var(--bg-tertiary))',
+            border: '1px solid var(--warning, #e6a23c)',
+            color: 'var(--text-primary)',
+          }}
+        >
+          {budgetBanner}
         </div>
       )}
       <div className="mb-2 flex flex-wrap gap-1">

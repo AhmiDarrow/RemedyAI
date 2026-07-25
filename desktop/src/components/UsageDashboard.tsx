@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
+  exportUsageCsv,
   getContinuityDashboard,
   getUsageSeries,
   getUsageSummary,
@@ -160,21 +161,43 @@ export function UsageDashboard({
             </button>
           ))}
           {tab === 'usage' && (
-            <select
-              className="ml-auto text-xs rounded px-2 py-1"
-              value={range}
-              onChange={(e) => setRange(Number(e.target.value))}
-              style={{
-                background: 'var(--bg-tertiary)',
-                border: '1px solid var(--border)',
-                color: 'var(--text-primary)',
-              }}
-            >
-              <option value={1}>1 day</option>
-              <option value={7}>7 days</option>
-              <option value={30}>30 days</option>
-              <option value={90}>90 days</option>
-            </select>
+            <>
+              <select
+                className="ml-auto text-xs rounded px-2 py-1"
+                value={range}
+                onChange={(e) => setRange(Number(e.target.value))}
+                style={{
+                  background: 'var(--bg-tertiary)',
+                  border: '1px solid var(--border)',
+                  color: 'var(--text-primary)',
+                }}
+              >
+                <option value={1}>1 day</option>
+                <option value={7}>7 days</option>
+                <option value={30}>30 days</option>
+                <option value={90}>90 days</option>
+              </select>
+              <button
+                type="button"
+                className="text-xs px-2 py-1 rounded"
+                style={{ border: '1px solid var(--border)' }}
+                onClick={() => {
+                  void exportUsageCsv(range)
+                    .then((csv) => {
+                      const blob = new Blob([csv], { type: 'text/csv' })
+                      const url = URL.createObjectURL(blob)
+                      const a = document.createElement('a')
+                      a.href = url
+                      a.download = `remedy-usage-${range}d.csv`
+                      a.click()
+                      URL.revokeObjectURL(url)
+                    })
+                    .catch((e) => setErr(e instanceof Error ? e.message : 'Export failed'))
+                }}
+              >
+                Export CSV
+              </button>
+            </>
           )}
         </div>
 
