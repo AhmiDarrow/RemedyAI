@@ -109,7 +109,7 @@ async def test_execute_tool_calls_emits_result_for_every_id_beyond_parallel_cap(
     seen: set[str] = set()
     cache: dict[str, str] = {}
 
-    with patch("remedy.core.agent._MAX_PARALLEL_TOOLS", 2):
+    with patch("remedy.core.agent_tool_batch._MAX_PARALLEL_TOOLS", 2):
         events: list[tuple[str, dict]] = []
         async for event, msg in rt._execute_tool_calls(
             calls, seen_fps=seen, result_cache=cache

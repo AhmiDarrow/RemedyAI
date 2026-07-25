@@ -2,7 +2,14 @@
 
 High-level product notes for owners. Full detail lives in repo `CHANGELOG.md`.
 
-Ship **one** installer/tag for the current series (**v0.13.3**).
+Ship **one** installer/tag for the current series (**v0.14.0**).
+
+## 0.14.0 — Maintainability: ReAct peel + Settings modules
+
+- Same product behavior; safer internals for agency and Settings work.
+- Agent stream/tool-batch split into dedicated modules (faster fixes, more tests).
+- Settings UI split into shell + form sections (search/sections unchanged).
+- CI: Windows path-sensitive tests + desktop unit build gate.
 
 ## 0.13.3 — Settings polish · docs sync · license in Help
 

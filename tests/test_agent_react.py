@@ -196,7 +196,7 @@ async def test_react_loop_executes_tool_then_final_answer():
 
     # Force tools on even though the prompt is short math.
     with (
-        patch("remedy.core.agent.aiohttp.ClientSession", return_value=session),
+        patch("remedy.core.agent_react_loop.aiohttp.ClientSession", return_value=session),
         patch("remedy.core.agent._message_wants_tools", return_value=True),
     ):
         text = await rt._call_llm("run add tool a=2 b=3")
@@ -268,7 +268,7 @@ async def test_react_loop_dedups_identical_tool_calls():
     )
 
     with (
-        patch("remedy.core.agent.aiohttp.ClientSession", return_value=session),
+        patch("remedy.core.agent_react_loop.aiohttp.ClientSession", return_value=session),
         patch("remedy.core.agent._message_wants_tools", return_value=True),
     ):
         text = await rt._call_llm("run counter twice")
@@ -346,7 +346,7 @@ async def test_react_loop_recovery_nudge_on_tool_error():
     session = _FakeSession([_FakeResp(tool_sse), _FakeResp(final_sse)])
 
     with (
-        patch("remedy.core.agent.aiohttp.ClientSession", return_value=session),
+        patch("remedy.core.agent_react_loop.aiohttp.ClientSession", return_value=session),
         patch("remedy.core.agent._message_wants_tools", return_value=True),
     ):
         text = await rt._call_llm("read missing.py")

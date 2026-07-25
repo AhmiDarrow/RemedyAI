@@ -2,6 +2,20 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.14.0] — 2026-07-25
+
+### Refactor: ReAct peel + Settings modularization
+
+- Extract **`agent_tool_batch`** (`execute_tool_calls`, `progress_marker`) and
+  **`agent_react_loop`** (`call_llm_stream`) from `agent.py` — orchestrator is
+  ~700 lines; stream/batch are independently unit-tested.
+- Split desktop Settings: **`SettingsPanel`** (state/save) +
+  **`settings/FormSections`** + **`settings/shared`** (Field, personas).
+- Agency battery tests (file_edit uniqueness, mission prefix ids, plan-mode
+  tool filter, pairing) without live LLM.
+- CI: Windows pytest subset for path/shell-sensitive modules; desktop
+  `npm test` + production build on Ubuntu.
+
 ## [0.13.3] — 2026-07-25
 
 ### Polish: Settings completeness, search, docs sync

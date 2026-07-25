@@ -3,7 +3,7 @@
 # unrelated package (remedy 0.0.6) that pulls ancient Jinja2/begins.
 # Import package and CLI entry point remain `remedy`.
 name = "remedy-ai"
-version = "0.13.3"
+version = "0.14.0"
 description = "Self-improving multi-channel software coding agent framework (memory, learning, tools) — not a medical product"
 readme = "README.md"
 license = { text = "LicenseRef-Proprietary" }
@@ -106,7 +106,8 @@ files = [
     "src/remedy/interfaces/local_auth.py",
 ]
 exclude = [
-    "src/remedy/core/agent.py",  # large ReAct loop; type gradually
+    "src/remedy/core/agent.py",  # orchestrator; type gradually
+    "src/remedy/core/agent_react_loop.py",  # large stream loop; type gradually
     "src/remedy/core/learning_loop.py",
     "src/remedy/core/learning",
 ]

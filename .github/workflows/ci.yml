@@ -37,3 +37,56 @@ jobs:
 
       - name: Test
         run: uv run pytest -q --tb=short
+
+  # Windows-first product: path/shell/secret-store regressions.
+  test-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Import smoke
+        run: uv run python -c "import remedy; from remedy.interfaces.api import create_app; create_app(); print('import OK')"
+
+      - name: Test (agency + security + windows-sensitive)
+        run: >
+          uv run pytest -q --tb=short
+          tests/test_agent_tool_batch.py
+          tests/test_agency_battery.py
+          tests/test_tool_call_pairing.py
+          tests/test_file_edit.py
+          tests/test_repo_search.py
+          tests/test_web_fetch_ssrf.py
+          tests/test_secret_store.py
+          tests/test_hidden_process.py
+          tests/test_react_stream.py
+          tests/test_react_policy.py
+
+  desktop:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Typecheck + production build
+        run: npm run build
