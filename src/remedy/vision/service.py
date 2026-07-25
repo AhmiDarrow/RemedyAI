@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,11 @@ _decode_cache: dict[str, str] = {}
 # Host resource snapshot changes rarely; cache so Settings GETs stay snappy.
 _health_cache: dict[str, Any] = {"ts": 0.0, "key": "", "value": None}
 _HEALTH_CACHE_TTL_S = 30.0
+# Soft-activate / idle-check throttles (status is polled often by desktop)
+_activate_attempt: dict[str, float] = {"ts": 0.0, "ok": False}
+_ACTIVATE_RETRY_S = 60.0
+_idle_check_ts: float = 0.0
+_IDLE_CHECK_MIN_S = 15.0
 
 
 def _home_from_cfg(cfg: dict[str, Any] | None) -> Path | None:
@@ -84,8 +90,42 @@ def get_status(
     except KeyError:
         model_public = {"id": mid, "name": mid}
 
+    # Soft-activate existing files at most once per minute (status is polled often)
+    need_activate = not is_installed(mid, home) or not side.get("model_path")
+    now = time.time()
+    if need_activate and (now - float(_activate_attempt.get("ts") or 0)) >= _ACTIVATE_RETRY_S:
+        _activate_attempt["ts"] = now
+        try:
+            from remedy.runtime.bundle import activate_local_bundle
+
+            act = activate_local_bundle(home, enabled=bool(vcfg.get("enabled", True)))
+            _activate_attempt["ok"] = bool(act.get("ok"))
+            if act.get("ok"):
+                side = load_vision_json(home)
+                mid = str(side.get("model_id") or mid)
+        except Exception:
+            _activate_attempt["ok"] = False
+
     installed = is_installed(mid, home)
     running = is_running(home) if installed else False
+    # Idle stop: background watcher handles it; only sample here every N seconds
+    global _idle_check_ts
+    if running and (now - _idle_check_ts) >= _IDLE_CHECK_MIN_S:
+        _idle_check_ts = now
+        with suppress(Exception):
+            from remedy.vision.runtime import ensure_idle_watcher, maybe_idle_stop
+
+            ensure_idle_watcher(home)
+            idle_res = maybe_idle_stop(
+                home, idle_stop_s=int(vcfg.get("idle_stop_s") or 600)
+            )
+            if idle_res.get("stopped"):
+                running = False
+    elif running:
+        with suppress(Exception):
+            from remedy.vision.runtime import ensure_idle_watcher
+
+            ensure_idle_watcher(home)
     progress = prog.snapshot()
     enabled = bool(vcfg.get("enabled") or side.get("enabled"))
 
@@ -116,10 +156,21 @@ def get_status(
             None
             if decode_ready
             else (
-                "Visual decoder not installed. Enable it in Settings to download "
-                f"{model_public.get('name', 'Qwen2.5-VL 3B')} (llama.cpp) for local image understanding."
+                "Local model is off. Enable Vision & nano swarm in Settings — "
+                f"{model_public.get('name', 'Qwen2.5-VL 3B')} starts with Remedy when ready."
+                if installed
+                else (
+                    "Local model not installed yet. Open Settings → Vision & nano swarm "
+                    f"to download pinned {model_public.get('name', 'Qwen2.5-VL 3B')} "
+                    "(one-time; then starts with Remedy)."
+                )
             )
         ),
+        "bundled": bool(side.get("bundled")),
+        "local_roles": ["vision", "nano", "helper"],
+        "bundle_policy": "cpu_and_cuda",
+        "auto_start": bool(vcfg.get("auto_start", True)),
+        "delivery": "first_run_download",
     }
 
     if not light:
@@ -152,6 +203,66 @@ def get_status(
     return out
 
 
+def activate_bundle(
+    *,
+    cfg: dict[str, Any] | None = None,
+    enabled: bool = True,
+    start: bool = True,
+) -> dict[str, Any]:
+    """Point vision.json at existing files (user install or optional product bundle)."""
+    home = _home_from_cfg(cfg)
+    from remedy.runtime.bundle import activate_local_bundle, bundle_available
+
+    result = activate_local_bundle(home, enabled=enabled)
+    status = get_status(cfg, light=True)
+    out = {**status}
+    out["ok"] = bool(result.get("ok"))
+    if result.get("error"):
+        out["error"] = result["error"]
+    if result.get("state"):
+        out["state"] = result["state"]
+    out["mode"] = "local_files" if result.get("ok") else "missing"
+    if not result.get("ok"):
+        out["diagnostic"] = result.get("diagnostic") or bundle_available()
+    else:
+        out["message"] = "Local model files activated."
+        if start and enabled:
+            started = ensure_server(cfg)
+            out["server"] = started
+            if started.get("ok"):
+                out["message"] = "Local model activated and server started."
+            out["running"] = bool(started.get("ok"))
+    return out
+
+
+def maybe_autostart_local_model(
+    cfg: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """If installed + enabled + auto_start, start llama-server (starts with Remedy)."""
+    home = _home_from_cfg(cfg)
+    vcfg = vision_section_from_config(cfg)
+    mid = str(vcfg.get("model_id") or DEFAULT_MODEL_ID)
+    if not bool(vcfg.get("enabled", True)):
+        return {"ok": False, "skipped": True, "reason": "disabled"}
+    if not bool(vcfg.get("auto_start", True)):
+        return {"ok": False, "skipped": True, "reason": "auto_start_off"}
+    if not is_installed(mid, home):
+        # Soft-activate user files if present (no download)
+        try:
+            from remedy.runtime.bundle import activate_local_bundle
+
+            act = activate_local_bundle(home, enabled=True)
+            if not act.get("ok") and not is_installed(mid, home):
+                return {"ok": False, "skipped": True, "reason": "not_installed"}
+        except Exception:
+            return {"ok": False, "skipped": True, "reason": "not_installed"}
+    try:
+        return ensure_server(cfg)
+    except Exception as e:
+        logger.warning("maybe_autostart_local_model failed: %s", e)
+        return {"ok": False, "error": str(e)}
+
+
 def start_install(
     *,
     cfg: dict[str, Any] | None = None,
@@ -159,14 +270,39 @@ def start_install(
     runtime_id: str | None = None,
     prefer_cuda: bool = False,
 ) -> dict[str, Any]:
+    """Install pinned Qwen (first-run download) or activate existing files.
+
+    Primary path for new PCs: network download of catalog-pinned assets.
+    If files already present: activate + start server (no re-download).
+    """
     home = _home_from_cfg(cfg)
     vcfg = vision_section_from_config(cfg)
     mid = model_id or vcfg.get("model_id") or DEFAULT_MODEL_ID
     rid = runtime_id or vcfg.get("runtime_id")
     if prefer_cuda and not rid:
         rid = "win-cuda-12.4-x64"
-    # Preflight warnings (still allow install)
+
+    # Already on disk (previous download or rare product bundle) — activate + start
+    if is_installed(mid, home):
+        act = activate_bundle(cfg=cfg, enabled=True, start=True)
+        act["mode"] = "already_installed"
+        act["message"] = act.get("message") or (
+            "Local model already present — activated and starting with Remedy."
+        )
+        return act
+
+    act = activate_bundle(cfg=cfg, enabled=True, start=True)
+    if act.get("ok") and is_installed(mid, home):
+        act["mode"] = "already_installed"
+        return act
+
+    # First-run / recovery: download the same pinned catalog model
     health = system_health(model_id=mid, runtime_id=rid, home_dir=home)
+    if prefer_cuda is False and not rid:
+        # Prefer CUDA when host has NVIDIA (option B runtime pick, same Qwen weights)
+        if health.get("nvidia_detected"):
+            prefer_cuda = True
+            rid = "win-cuda-12.4-x64"
     result = _start_install(
         model_id=mid,
         runtime_id=rid,
@@ -176,6 +312,11 @@ def start_install(
     )
     result["health"] = health
     result["warnings"] = list(health.get("warnings") or [])
+    result["mode"] = "download"
+    result["message"] = (
+        "Downloading pinned Qwen2.5-VL 3B + llama-server (same files on every PC). "
+        "Server starts automatically when install finishes."
+    )
     return result
 
 
@@ -232,11 +373,64 @@ def uninstall(
 def ensure_server(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     home = _home_from_cfg(cfg)
     vcfg = vision_section_from_config(cfg)
-    return start_server(home_dir=home, n_gpu_layers=int(vcfg.get("n_gpu_layers", -1)))
+    # Wake from idle: starting counts as use
+    result = start_server(home_dir=home, n_gpu_layers=int(vcfg.get("n_gpu_layers", -1)))
+    return result
 
 
 def stop(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     return stop_server(home_dir=_home_from_cfg(cfg))
+
+
+def _decode_images_queued(
+    paths: list[Path],
+    *,
+    base_url: str,
+    timeout_s: float,
+    max_image_bytes: int,
+) -> list[dict[str, Any]]:
+    """Run each decode as a LocalJob so nano/vision share one llama-server."""
+    try:
+        from remedy.runtime.jobs import LocalJob, default_queue
+        from remedy.runtime.local_infer import ensure_handlers_registered
+        from remedy.runtime.roles import LocalRole
+
+        ensure_handlers_registered()
+        q = default_queue()
+        results: list[dict[str, Any]] = []
+        for p in paths:
+            job = LocalJob(
+                role=LocalRole.VISION,
+                kind="vision_decode",
+                payload={
+                    "path": str(p),
+                    "base_url": base_url,
+                    "timeout_s": timeout_s,
+                    "max_image_bytes": max_image_bytes,
+                },
+                priority=10,  # vision slightly ahead of nano classify
+            )
+            out = q.submit(job, wait=True, timeout=float(timeout_s) + 30)
+            if out.get("ok") and isinstance(out.get("result"), dict):
+                results.append(out["result"])
+            else:
+                results.append(
+                    {
+                        "ok": False,
+                        "path": str(p),
+                        "error": out.get("error") or "queue failed",
+                        "text": "",
+                    }
+                )
+        return results
+    except Exception as e:
+        logger.warning("Queued decode failed (%s); falling back direct", e)
+        return decode_images(
+            paths,
+            base_url=base_url,
+            timeout_s=timeout_s,
+            max_image_bytes=max_image_bytes,
+        )
 
 
 def _cache_key(path: Path) -> str:
@@ -384,7 +578,8 @@ def decode_for_turn(
 
     if paths_to_decode:
         t0 = time.time()
-        results = decode_images(
+        # Serialize through shared job queue (vision | nano exclusive on one server)
+        results = _decode_images_queued(
             paths_to_decode,
             base_url=base,
             timeout_s=float(vcfg.get("timeout_s") or 90),

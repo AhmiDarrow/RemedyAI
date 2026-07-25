@@ -91,6 +91,35 @@ def create_app(
         if not _vision_atexit_registered:
             atexit.register(_shutdown_vision_decoder)
             _vision_atexit_registered = True
+        # Local model starts with Remedy when installed + enabled (vision + nano).
+        try:
+            import asyncio
+
+            from remedy.vision.service import maybe_autostart_local_model
+
+            cfg0 = load_config()
+
+            def _bg_autostart() -> None:
+                try:
+                    r = maybe_autostart_local_model(cfg0)
+                    if r.get("ok"):
+                        logger.info("Local model auto-started with Remedy")
+                    elif not r.get("skipped"):
+                        logger.info(
+                            "Local model auto-start: %s",
+                            r.get("error") or r.get("reason") or r,
+                        )
+                except Exception:
+                    logger.exception("Local model auto-start background task failed")
+
+            # Non-blocking: model load can take tens of seconds
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = asyncio.get_event_loop()
+            loop.run_in_executor(None, _bg_autostart)
+        except Exception:
+            logger.debug("Local model auto-start schedule skipped", exc_info=True)
         try:
             yield
         finally:

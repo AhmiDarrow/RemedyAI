@@ -194,6 +194,19 @@ def register_skill_tools(runtime: Any) -> None:
                         error=result.error,
                     )
                     loop.auto_refine_skill(sk)
+                    with suppress(Exception):
+                        from remedy.nanoswarm import get_swarm
+                        from remedy.nanoswarm.events import SwarmEvent
+
+                        get_swarm().dispatch(
+                            SwarmEvent.skill_result(
+                                nm,
+                                success=ok,
+                                duration_ms=float(result.duration_ms or 0),
+                            ),
+                            learning_loop=loop,
+                            skill=sk,
+                        )
             if ok:
                 out = (result.stdout or "")[:12000]
                 return out or f"Script {chosen} exited 0 (no stdout)."

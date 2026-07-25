@@ -255,6 +255,31 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
             brief = getattr(runtime, "_session_brief", None)
             if brief is not None:
                 brief_intent = getattr(brief, "intent", "") or ""
+        swarm: dict = {}
+        try:
+            from remedy.nanoswarm import get_swarm
+
+            st = get_swarm().status()
+            swarm = {
+                "active": True,
+                "event_count": st.get("event_count"),
+                "local_model_id": st.get("local_model_id"),
+                "last_event": st.get("last_event"),
+                "fill_pct": (st.get("bots") or {}).get("memory", {}).get("last_fill_pct"),
+                "token_method": (st.get("bots") or {}).get("token", {}).get("last_method"),
+            }
+        except Exception:
+            swarm = {"active": False}
+
+        quality: dict = {}
+        try:
+            from remedy.core.session_quality import get_session_quality
+
+            sid = getattr(runtime, "_session_id", None) if runtime is not None else None
+            quality = get_session_quality(str(sid or "")).snapshot()
+        except Exception:
+            quality = {}
+
         return {
             "pending_approvals": len(pending),
             "open_goals": goals_open,
@@ -262,4 +287,7 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
             "harness_mode": harness,
             "brief_intent": brief_intent[:200],
             "approvals": [APPROVALS.to_public(i) for i in pending[:5]],
+            # Advanced: only meaningful when user opted into Full+ in the UI
+            "nanoswarm": swarm,
+            "session_quality": quality,
         }

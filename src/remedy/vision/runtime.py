@@ -7,6 +7,7 @@ import logging
 import os
 import socket
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -125,17 +126,130 @@ def mark_used() -> None:
     _last_used = time.time()
 
 
+def last_used_age_s() -> float | None:
+    """Seconds since last vision/nano use of llama-server, or None if never."""
+    if _last_used <= 0:
+        return None
+    return max(0.0, time.time() - _last_used)
+
+
+def maybe_idle_stop(
+    home_dir: str | Path | None = None,
+    *,
+    idle_stop_s: int | float | None = None,
+) -> dict[str, Any]:
+    """Stop llama-server after idle_stop_s without use (saves RAM/GPU).
+
+    Next ensure_server / decode / nano local call wakes it again.
+    idle_stop_s <= 0 disables. Default from vision.json / config (600).
+    """
+    if idle_stop_s is None:
+        try:
+            state = load_vision_json(home_dir)
+            idle_stop_s = int(state.get("idle_stop_s") or 600)
+        except Exception:
+            idle_stop_s = 600
+    try:
+        idle_stop_s = int(idle_stop_s or 0)
+    except (TypeError, ValueError):
+        idle_stop_s = 600
+    if idle_stop_s <= 0:
+        return {"ok": True, "stopped": False, "reason": "disabled"}
+    if not is_running(home_dir, force=False):
+        return {"ok": True, "stopped": False, "reason": "not_running"}
+    age = last_used_age_s()
+    # If never marked, use start time approximation: don't stop immediately
+    if age is None:
+        mark_used()
+        return {"ok": True, "stopped": False, "reason": "first_mark"}
+    if age < float(idle_stop_s):
+        return {
+            "ok": True,
+            "stopped": False,
+            "reason": "active",
+            "idle_s": round(age, 1),
+            "limit_s": idle_stop_s,
+        }
+    logger.info(
+        "Local model idle for %.0fs (limit %ss) — stopping llama-server",
+        age,
+        idle_stop_s,
+    )
+    result = stop_server(home_dir=home_dir)
+    result["reason"] = "idle_timeout"
+    result["idle_s"] = round(age, 1)
+    return result
+
+
+_idle_thread_started = False
+_idle_lock = threading.Lock()
+
+
+def ensure_idle_watcher(home_dir: str | Path | None = None) -> None:
+    """Background poller: stop server after idle_stop_s. Safe to call often."""
+    global _idle_thread_started
+    with _idle_lock:
+        if _idle_thread_started:
+            return
+        _idle_thread_started = True
+
+    def _loop() -> None:
+        while True:
+            try:
+                time.sleep(30.0)
+                idle_s = 600
+                try:
+                    from remedy.interfaces.api_support import load_config
+                    from remedy.vision.config import vision_section_from_config
+
+                    cfg = load_config()
+                    vcfg = vision_section_from_config(cfg if isinstance(cfg, dict) else {})
+                    idle_s = int(vcfg.get("idle_stop_s") or 600)
+                    hd = None
+                    if isinstance(cfg, dict) and cfg.get("home_dir"):
+                        hd = cfg.get("home_dir")
+                    maybe_idle_stop(hd, idle_stop_s=idle_s)
+                except Exception:
+                    maybe_idle_stop(home_dir, idle_stop_s=idle_s)
+            except Exception:
+                logger.debug("idle watcher tick failed", exc_info=True)
+
+    t = threading.Thread(target=_loop, name="remedy-local-idle-stop", daemon=True)
+    t.start()
+
+
 def start_server(
     *,
     home_dir: str | Path | None = None,
     n_gpu_layers: int = -1,
     wait_s: float = 60.0,
 ) -> dict[str, Any]:
-    """Start llama-server if not already healthy."""
+    """Start llama-server if not already healthy.
+
+    Auto-activates the prebundled (or legacy) pinned Qwen stack when
+    ``vision.json`` is missing or points at missing files — no network.
+    """
     global _proc
     state = load_vision_json(home_dir)
+    if not state or not Path(str(state.get("model_path") or "")).is_file():
+        try:
+            from remedy.runtime.bundle import activate_local_bundle
+
+            act = activate_local_bundle(home_dir, enabled=True)
+            if act.get("ok"):
+                state = load_vision_json(home_dir)
+            elif not state:
+                return {
+                    "ok": False,
+                    "error": act.get("error")
+                    or "Local model not activated (no vision.json / bundle)",
+                }
+        except Exception as e:
+            if not state:
+                return {"ok": False, "error": f"Bundle activate failed: {e}"}
+
     if not state:
-        return {"ok": False, "error": "Vision decoder not installed (no vision.json)"}
+        return {"ok": False, "error": "Local model not ready (no vision.json)"}
 
     host = str(state.get("host") or DEFAULT_HOST)
     port = int(state.get("port") or DEFAULT_PORT)
@@ -149,9 +263,23 @@ def start_server(
 
     if is_running(home_dir, force=True, require_http=True):
         mark_used()
+        ensure_idle_watcher(home_dir)
         return {"ok": True, "already_running": True, "base_url": base, "pid": _pid()}
 
-    binary = runtime_binary_path(home_dir)
+    binary = None
+    # Prefer explicit path written by activate_local_bundle
+    rb = state.get("runtime_binary")
+    if rb and Path(str(rb)).is_file():
+        binary = Path(str(rb))
+    if binary is None:
+        binary = runtime_binary_path(home_dir)
+    if binary is None:
+        try:
+            from remedy.runtime.bundle import runtime_binary_from_bundle
+
+            binary = runtime_binary_from_bundle(str(state.get("runtime_id") or ""))
+        except Exception:
+            binary = None
     if binary is None:
         return {"ok": False, "error": "llama-server binary not found"}
 
@@ -212,6 +340,7 @@ def start_server(
             _health(base, timeout=0.6) or time.time() > deadline - 2
         ):
             mark_used()
+            ensure_idle_watcher(home_dir)
             state["pid"] = _proc.pid
             save_vision_json(state, home_dir)
             invalidate_running_cache()
@@ -392,14 +521,3 @@ def _pid() -> int | None:
     if _proc is not None and _proc.poll() is None:
         return _proc.pid
     return None
-
-
-def maybe_idle_stop(idle_stop_s: int, home_dir: str | Path | None = None) -> None:
-    global _last_used
-    if idle_stop_s <= 0 or _last_used <= 0:
-        return
-    if time.time() - _last_used < idle_stop_s:
-        return
-    if is_running(home_dir):
-        logger.info("Vision decoder idle timeout — stopping llama-server")
-        stop_server(home_dir=home_dir)

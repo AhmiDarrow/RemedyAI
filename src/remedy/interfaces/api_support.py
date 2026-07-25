@@ -240,7 +240,7 @@ async def handle_slash_command(
             )
         }
 
-    if stripped in ("/harness", "/brief"):
+    if stripped in ("/harness", "/brief", "/nanoswarm", "/swarm"):
         agent = runtime
         brief = getattr(agent, "_session_brief", None) if agent is not None else None
         if brief is None:
@@ -254,10 +254,52 @@ async def handle_slash_command(
             from remedy.memory.harness.brief import brief_to_context_block
 
             block = brief_to_context_block(brief) or "(empty brief)"
+            quality_line = ""
+            try:
+                from remedy.core.session_quality import get_session_quality
+
+                sid = getattr(agent, "_session_id", None) if agent is not None else None
+                q = get_session_quality(str(sid or "")).snapshot()
+                last = q.get("last_compress") or {}
+                quality_line = (
+                    f"\n\n**Session quality** · turns {q.get('turns')} · "
+                    f"tokens in/out {q.get('tokens_in')}/{q.get('tokens_out')} · "
+                    f"saved by compress ~{q.get('tokens_saved_by_compress')} · "
+                    f"stuck rate {q.get('stuck_rate')} · "
+                    f"re-explain rate {q.get('re_explain_rate')}"
+                )
+                if last:
+                    quality_line += (
+                        f"\nLast compress: {last.get('tokens_before')}→{last.get('tokens_after')} "
+                        f"(quality {last.get('quality_score')}, "
+                        f"paths kept {last.get('paths_kept')}, lost {last.get('paths_lost')})"
+                    )
+                if q.get("avg_compress_quality") is not None:
+                    quality_line += f"\nAvg compress quality: {q.get('avg_compress_quality')}"
+            except Exception:
+                pass
+            # Advanced internals only when tool process is full+
+            advanced = ""
+            try:
+                from remedy.interfaces.api_support import load_config
+
+                tp = str((load_config() or {}).get("tool_process") or "off").lower()
+                if tp in ("full+", "fullplus", "debug"):
+                    from remedy.nanoswarm import get_swarm
+
+                    st = get_swarm().status()
+                    advanced = (
+                        f"\n\n**Advanced (Full+)** · continuity events {st.get('event_count')} · "
+                        f"local model `{st.get('local_model_id')}`"
+                    )
+            except Exception:
+                pass
             return {
                 "text": (
-                    f"**Memory Harness** · compress passes: {brief.compress_count}\n\n"
+                    f"**Memory** · compress passes: {brief.compress_count}\n\n"
                     f"{block}"
+                    f"{quality_line}"
+                    f"{advanced}"
                 )
             }
         except Exception as e:

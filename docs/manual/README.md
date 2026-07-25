@@ -11,6 +11,7 @@ Open **Help** ( **F1** or **Ctrl+/** ) for a searchable wiki UI that loads these
 | File | Title |
 |------|--------|
 | [00-overview.md](00-overview.md) | Overview |
+| [16-continuity-philosophy.md](16-continuity-philosophy.md) | How Remedy works (continuity) |
 | [01-install-windows.md](01-install-windows.md) | Install (Windows) |
 | [02-first-run.md](02-first-run.md) | First run & setup |
 | [03-providers-and-auth.md](03-providers-and-auth.md) | Providers & auth |
@@ -24,6 +25,8 @@ Open **Help** ( **F1** or **Ctrl+/** ) for a searchable wiki UI that loads these
 | [11-reference-commands.md](11-reference-commands.md) | Slash commands |
 | [12-reference-shortcuts.md](12-reference-shortcuts.md) | Shortcuts |
 | [13-whats-new.md](13-whats-new.md) | What’s new |
+| [14-visual-decoder.md](14-visual-decoder.md) | Local vision |
+| [15-free-providers.md](15-free-providers.md) | Free providers & demo |
 
 ## Keeping docs in sync
 

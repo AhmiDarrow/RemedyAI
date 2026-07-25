@@ -212,7 +212,8 @@ def test_vision_section_defaults():
     sec = vision_section_from_config({})
     assert sec["model_id"] == DEFAULT_MODEL_ID
     assert sec["port"] == 8740
-    assert sec["enabled"] is False
+    # Bundled local model: enabled by default (no download-first UX)
+    assert sec["enabled"] is True
 
 
 def test_save_vision_json(tmp_path: Path):
@@ -308,18 +309,23 @@ def test_decode_for_turn_force_decode_uses_mock_when_ready(tmp_path: Path):
         "not_ready_hint": None,
     }
 
+    mock_results = [
+        {
+            "ok": True,
+            "path": meta["path"],
+            "text": "### Visual decode: dot.png\n- **Scene:** pixel\n",
+        }
+    ]
     with (
         patch("remedy.vision.service.get_status", return_value=fake_status),
         patch("remedy.vision.service.is_running", return_value=True),
         patch(
+            "remedy.vision.service._decode_images_queued",
+            return_value=mock_results,
+        ),
+        patch(
             "remedy.vision.service.decode_images",
-            return_value=[
-                {
-                    "ok": True,
-                    "path": meta["path"],
-                    "text": "### Visual decode: dot.png\n- **Scene:** pixel\n",
-                }
-            ],
+            return_value=mock_results,
         ),
     ):
         res = decode_for_turn(

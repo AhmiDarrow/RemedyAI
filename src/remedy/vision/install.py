@@ -77,8 +77,49 @@ def is_installed(
     model_id: str | None = None,
     home_dir: str | Path | None = None,
 ) -> bool:
+    """True if pinned model + runtime are available (this home or product bundle).
+
+    Does **not** treat another user's/home's ``~/.remedy/vision`` as installed
+    when a different ``home_dir`` is passed (keeps tests and multi-profile correct).
+    Product bundles: ``REMEDY_LOCAL_BUNDLE`` / app ``resources/local`` only.
+    """
     mid = model_id or DEFAULT_MODEL_ID
-    return model_files_present(mid, home_dir) and runtime_binary_path(home_dir) is not None
+    if model_files_present(mid, home_dir) and runtime_binary_path(home_dir) is not None:
+        return True
+    try:
+        from remedy.runtime.bundle import (
+            model_paths_from_bundle,
+            runtime_binary_from_bundle,
+        )
+
+        paths = model_paths_from_bundle(mid)
+        if not paths:
+            return False
+        # Product bundle only (resources/local or REMEDY_LOCAL_BUNDLE) — not user-data
+        root = paths["bundle_root"]
+        root_s = str(root).replace("\\", "/").lower()
+        is_product = (
+            root.name == "local"
+            or "/resources/local" in root_s
+            or "/bundled/local" in root_s
+        )
+        env_b = __import__("os").environ.get("REMEDY_LOCAL_BUNDLE")
+        if env_b:
+            try:
+                is_product = is_product or Path(env_b).resolve() in root.resolve().parents or Path(
+                    env_b
+                ).resolve() == root.resolve()
+            except OSError:
+                pass
+        if not is_product:
+            return False
+        if runtime_binary_from_bundle() is not None:
+            return True
+        if runtime_binary_path(home_dir) is not None:
+            return True
+    except Exception:
+        pass
+    return False
 
 
 def _sha256_file(path: Path, chunk: int = 1024 * 1024) -> str:
@@ -302,18 +343,35 @@ def _run_install(
                 "mmproj_path": str((mdir / model.mmproj_file).resolve()),
                 "runtime_id": runtime_id,
                 "runtime_version": runtime.tag,
-                "runtime_binary": str(runtime_binary_path(home_dir)),
+                "runtime_binary": str(runtime_binary_path(home_dir) or ""),
                 "host": DEFAULT_HOST,
                 "port": DEFAULT_PORT,
                 "base_url": f"http://{DEFAULT_HOST}:{DEFAULT_PORT}/v1",
+                "auto_start": True,
             },
             home_dir,
         )
         # Final progress fill
         prog.update(bytes_done=total)
         prog.succeed(
-            f"Installed {model.name} visual decoder (llama.cpp {runtime.tag})"
+            f"Installed {model.name} (llama.cpp {runtime.tag}) — starts with Remedy"
         )
+        # Start with Remedy: launch llama-server as soon as install finishes
+        if enable:
+            try:
+                from remedy.vision.runtime import start_server
+
+                prog.update(message="Starting local model server…")
+                started = start_server(home_dir=home_dir, n_gpu_layers=-1, wait_s=90.0)
+                if started.get("ok"):
+                    logger.info("Local model server started after install")
+                else:
+                    logger.warning(
+                        "Install ok but server start deferred: %s",
+                        started.get("error"),
+                    )
+            except Exception:
+                logger.exception("Post-install auto-start failed (will retry on next launch)")
     except InstallCancelled:
         logger.info("Vision install cancelled")
         prog.cancelled()

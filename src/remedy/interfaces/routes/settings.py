@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 
 def _normalize_tool_process(cfg: dict | None = None, raw: object = None) -> str:
-    """off | medium | full — default off. Legacy show_tool_calls bool maps to full."""
+    """off | medium | full | full+ — default off. Legacy show_tool_calls → full."""
     if raw is None and isinstance(cfg, dict):
         raw = cfg.get("tool_process")
         if raw is None and cfg.get("show_tool_calls") is True:
@@ -36,6 +36,8 @@ def _normalize_tool_process(cfg: dict | None = None, raw: object = None) -> str:
     s = str(raw or "off").strip().lower()
     if s in ("medium", "med"):
         return "medium"
+    if s in ("full+", "fullplus", "full_plus", "debug"):
+        return "full+"
     if s in ("full", "on", "true", "1", "yes"):
         return "full"
     if raw is True:
@@ -280,6 +282,7 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         # tool_process: off | medium | full (legacy show_tool_calls bool → full/off)
         if "tool_process" in updates and updates["tool_process"] is not None:
             updates["tool_process"] = _normalize_tool_process(raw=updates["tool_process"])
+            # full+ is valid (advanced diagnostics)
         elif "show_tool_calls" in updates and updates["show_tool_calls"] is not None:
             updates["tool_process"] = (
                 "full" if updates["show_tool_calls"] else "off"

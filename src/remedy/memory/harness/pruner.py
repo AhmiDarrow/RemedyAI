@@ -26,6 +26,12 @@ def prune_messages_for_send(
     *,
     max_tool_chars: int = 0,
     dedupe_tools: bool = True,
+    token_budget: int | None = None,
+    reserve_tokens: int = 0,
+    provider: str | None = None,
+    model: str | None = None,
+    collapse_completed_tools: bool = False,
+    keep_recent_tool_pairs: int = 4,
 ) -> list[dict[str, Any]]:
     """Return a pruned *copy* of messages for the provider request.
 
@@ -34,6 +40,10 @@ def prune_messages_for_send(
     - **No truncation by default** (max_tool_chars=0): full answers/thinking/tools
     - Optional truncate only when max_tool_chars > 0 (legacy/tests)
     - Deduplicate identical tool results (keep latest; keeps one full copy)
+    - Optional collapse_completed_tools: structural prune of older tool spans
+      (keep last N assistant+tool pairs full; earlier tool bodies → short outcomes)
+    - Optional token_budget: shrink older tool bodies until under budget
+      (reserve_tokens held for Session Brief / reply headroom)
     """
     if not messages:
         return []
@@ -59,23 +69,107 @@ def prune_messages_for_send(
         trimmed.append(m)
 
     if not dedupe_tools:
-        return trimmed
+        out = trimmed
+    else:
+        # Second pass: keep only latest of each tool fingerprint (scan newest→oldest)
+        seen: set[str] = set()
+        out_rev: list[dict[str, Any]] = []
+        for msg in reversed(trimmed):
+            fp = _tool_fingerprint(msg)
+            if fp is not None:
+                if fp in seen:
+                    # Replace with short placeholder so tool_call pairing can still work
+                    placeholder = dict(msg)
+                    placeholder["content"] = (
+                        "(duplicate tool result removed by Memory Harness — see latest occurrence)"
+                    )
+                    out_rev.append(placeholder)
+                    continue
+                seen.add(fp)
+            out_rev.append(msg)
+        out_rev.reverse()
+        out = out_rev
 
-    # Second pass: keep only latest of each tool fingerprint (scan newest→oldest)
-    seen: set[str] = set()
-    out_rev: list[dict[str, Any]] = []
-    for msg in reversed(trimmed):
-        fp = _tool_fingerprint(msg)
-        if fp is not None:
-            if fp in seen:
-                # Replace with short placeholder so tool_call pairing can still work
-                placeholder = dict(msg)
-                placeholder["content"] = (
-                    "(duplicate tool result removed by Memory Harness — see latest occurrence)"
-                )
-                out_rev.append(placeholder)
+    if collapse_completed_tools:
+        out = _collapse_old_tool_spans(
+            out, keep_recent_pairs=max(1, int(keep_recent_tool_pairs))
+        )
+
+    if token_budget is not None and token_budget > 0:
+        out = _shrink_to_token_budget(
+            out,
+            budget=max(256, int(token_budget) - max(0, int(reserve_tokens))),
+            provider=provider,
+            model=model,
+        )
+    return out
+
+
+def _collapse_old_tool_spans(
+    messages: list[dict[str, Any]],
+    *,
+    keep_recent_pairs: int = 4,
+) -> list[dict[str, Any]]:
+    """Structural prune: older tool results → short outcome lines; keep recent full.
+
+    Preserves role/tool_call_id pairing so providers still accept the history.
+    """
+    # Index of tool messages from oldest to newest
+    tool_idxs = [i for i, m in enumerate(messages) if m.get("role") == "tool"]
+    if len(tool_idxs) <= keep_recent_pairs:
+        return messages
+    protect = set(tool_idxs[-keep_recent_pairs:])
+    out: list[dict[str, Any]] = []
+    for i, msg in enumerate(messages):
+        if i in protect or msg.get("role") != "tool":
+            out.append(msg)
+            continue
+        content = msg.get("content")
+        if not isinstance(content, str) or len(content) < 200:
+            out.append(msg)
+            continue
+        m = dict(msg)
+        # Keep first line + error signal
+        first = content.strip().split("\n", 1)[0][:160]
+        errish = "error" in content[:400].lower() or "failed" in content[:400].lower()
+        m["content"] = (
+            f"{first}\n…[completed tool span collapsed — outcome retained"
+            + ("; had errors" if errish else "")
+            + "; re-run tool if full output needed]"
+        )
+        out.append(m)
+    return out
+
+
+def _shrink_to_token_budget(
+    messages: list[dict[str, Any]],
+    *,
+    budget: int,
+    provider: str | None = None,
+    model: str | None = None,
+) -> list[dict[str, Any]]:
+    """Progressively cap tool/assistant bodies from oldest until under budget."""
+    try:
+        from remedy.memory.harness.compressor import estimate_tokens
+    except Exception:
+        return messages
+
+    msgs = [dict(m) for m in messages]
+    est = estimate_tokens(msgs, provider=provider, model=model)
+    if est <= budget:
+        return msgs
+
+    caps = (8000, 4000, 2000, 800, 200)
+    for cap in caps:
+        for i, m in enumerate(msgs):
+            if m.get("role") not in ("tool", "assistant"):
                 continue
-            seen.add(fp)
-        out_rev.append(msg)
-    out_rev.reverse()
-    return out_rev
+            # Prefer trimming older tool noise first
+            content = m.get("content")
+            if isinstance(content, str) and len(content) > cap:
+                msgs[i] = dict(m)
+                msgs[i]["content"] = content[:cap] + "\n…[budget trim]"
+        est = estimate_tokens(msgs, provider=provider, model=model)
+        if est <= budget:
+            break
+    return msgs

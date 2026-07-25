@@ -276,6 +276,20 @@ fn spawn_remedy(cmd: &str) -> Option<Child> {
     ];
 
     let webui = find_webui_dir();
+    // Packaged local Qwen + llama-server (resource dir/local) for vision + nano swarm.
+    let local_bundle = env::var_os("REMEDY_LOCAL_BUNDLE")
+        .map(PathBuf::from)
+        .filter(|p| p.is_dir())
+        .or_else(|| {
+            env::var_os("REMEDY_RESOURCES").map(|r| {
+                let p = PathBuf::from(r);
+                if p.ends_with("local") {
+                    p
+                } else {
+                    p.join("local")
+                }
+            })
+        });
 
     #[cfg(target_os = "windows")]
     {
@@ -288,6 +302,9 @@ fn spawn_remedy(cmd: &str) -> Option<Child> {
         if let Some(ref dir) = webui {
             c.env("REMEDY_WEBUI_DIR", dir);
         }
+        if let Some(ref lb) = local_bundle {
+            c.env("REMEDY_LOCAL_BUNDLE", lb);
+        }
         c.spawn().ok()
     }
     #[cfg(not(target_os = "windows"))]
@@ -299,6 +316,9 @@ fn spawn_remedy(cmd: &str) -> Option<Child> {
             .stderr(Stdio::piped());
         if let Some(ref dir) = webui {
             c.env("REMEDY_WEBUI_DIR", dir);
+        }
+        if let Some(ref lb) = local_bundle {
+            c.env("REMEDY_LOCAL_BUNDLE", lb);
         }
         c.spawn().ok()
     }
@@ -1981,8 +2001,10 @@ pub fn run() {
             log::info!("Starting remedy: {}", remedy_cmd);
             let _ = app_handle.emit("server-starting", ());
 
-            // Point the sidecar at packaged SPA assets (tauri resources → webui/).
+            // Point the sidecar at packaged SPA + local model bundle (resources/).
             if let Ok(resource) = app.path().resource_dir() {
+                env::set_var("REMEDY_RESOURCES", &resource);
+                log::info!("REMEDY_RESOURCES={}", resource.display());
                 let candidates = [
                     resource.join("webui"),
                     resource.join("dist"),
@@ -1994,6 +2016,12 @@ pub fn run() {
                         log::info!("REMEDY_WEBUI_DIR={}", c.display());
                         break;
                     }
+                }
+                // Optional offline override only (prod: first-run download into ~/.remedy/vision)
+                let local = resource.join("local");
+                if local.join("models").is_dir() {
+                    env::set_var("REMEDY_LOCAL_BUNDLE", &local);
+                    log::info!("REMEDY_LOCAL_BUNDLE={}", local.display());
                 }
             }
 

@@ -1,0 +1,12 @@
+# Production installers do NOT ship this tree.
+# First-run downloads the pinned Qwen into ~/.remedy/vision/.
+#
+# This folder is only for optional air-gap / offline staging:
+#   python scripts/stage_local_bundle.py --from-vision-home
+# then point REMEDY_LOCAL_BUNDLE at this path for a one-off run.
+#
+# Never commit multi-GB weights or llama-server binaries.
+
+*
+!.gitignore
+!README.md

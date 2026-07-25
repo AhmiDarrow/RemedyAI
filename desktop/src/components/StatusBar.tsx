@@ -86,21 +86,21 @@ function visionLine(vs: VisionStatus | null): string {
   const pct = visionPct(vs)
 
   if (phase === 'error') {
-    return msg || vs.progress?.error || 'Vision install failed'
+    return msg || vs.progress?.error || 'Local model install failed'
   }
   if (phase === 'cancelled') {
-    return msg || 'Vision install cancelled'
-  }
-  if (phase === 'ready' && vs.ready) {
-    return 'Vision ready'
+    return msg || 'Local model install cancelled'
   }
   if (INSTALL_PHASES.has(phase) || visionIsBusy(vs)) {
-    const label = msg || `Vision ${phase || 'installing'}…`
+    const label = msg || `Local model ${phase || 'installing'}…`
     return pct != null ? `${label} ${pct}%` : label
   }
-  if (vs.enabled && vs.running) return 'Vision server on'
-  if (vs.enabled && vs.installed && !vs.running) return 'Vision installed'
-  if (vs.enabled && !vs.installed) return 'Vision pending'
+  if (vs.enabled && vs.running) return 'Vision ready'
+  if (vs.enabled && vs.installed && !vs.running) {
+    return 'Vision idle'
+  }
+  if (vs.enabled && !vs.installed) return 'Vision setup pending'
+  if (phase === 'ready' && vs.ready) return 'Vision ready'
   return ''
 }
 
@@ -294,6 +294,7 @@ export function StatusBar({
       || phase === 'error'
       || phase === 'cancelled'
       || (vision?.enabled && !vision.ready)
+      || (vision?.enabled && vision.installed) // show idle or running
       || (vision?.enabled && vision.running)
       || (phase === 'ready' && vision?.ready)
     return { line, pct, phase, busy, show }

@@ -1,12 +1,22 @@
 /** Human labels for built-in tools — language-agnostic icons pair with these. */
 
-export type ToolProcessMode = 'off' | 'medium' | 'full'
+export type ToolProcessMode = 'off' | 'medium' | 'full' | 'full+'
 
 export const TOOL_PROCESS_MODES: { id: ToolProcessMode; label: string; hint: string }[] = [
   { id: 'off', label: 'Off', hint: 'Minimal — progress only' },
   { id: 'medium', label: 'Medium', hint: 'Labels + status + short results' },
   { id: 'full', label: 'Full', hint: 'Complete raw args + every tool stdout/result' },
+  {
+    id: 'full+',
+    label: 'Full+',
+    hint: 'Full raw tools + advanced diagnostics (session quality, local model internals)',
+  },
 ]
+
+/** Advanced diagnostics (session quality / internal continuity) only in Full+. */
+export function showsAdvancedDiagnostics(mode: ToolProcessMode | string | undefined): boolean {
+  return String(mode || '').toLowerCase() === 'full+'
+}
 
 const LABELS: Record<string, string> = {
   comfyui: 'Generating image',
@@ -36,6 +46,7 @@ export function toolLabel(name: string | undefined | null): string {
 export function normalizeToolProcess(raw: unknown): ToolProcessMode {
   const s = String(raw ?? 'off').trim().toLowerCase()
   if (s === 'medium' || s === 'med') return 'medium'
+  if (s === 'full+' || s === 'fullplus' || s === 'full_plus' || s === 'debug') return 'full+'
   if (s === 'full' || s === 'on' || s === 'true' || s === '1') return 'full'
   // legacy show_tool_calls true
   if (raw === true) return 'full'

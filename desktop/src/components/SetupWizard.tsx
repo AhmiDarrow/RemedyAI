@@ -57,7 +57,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
   const [xaiVerifyUrl, setXaiVerifyUrl] = useState('')
   const [xaiLoginMsg, setXaiLoginMsg] = useState('')
   const xaiPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const [enableVision, setEnableVision] = useState(false)
+  const [enableVision, setEnableVision] = useState(true)
   const [visionStatus, setVisionStatus] = useState<VisionStatus | null>(null)
   const [visionInstallMsg, setVisionInstallMsg] = useState('')
   const [visionInstalling, setVisionInstalling] = useState(false)
@@ -321,16 +321,83 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
         vision_enabled: enableVision,
         vision_model_id: 'qwen2.5-vl-3b',
       })
+      // First-run: download pinned Qwen (not in installer). Wait until ready (or error/timeout).
       if (enableVision && !visionStatus?.installed) {
         try {
           setVisionInstalling(true)
-          setVisionInstallMsg('Starting visual decoder download…')
-          await installVision({ prefer_cuda: false })
-          // Non-blocking: install continues in background after wizard closes
-          setVisionInstallMsg('Download started — watch progress in the bottom status dock.')
+          setVisionInstallMsg(
+            'Downloading local vision model (Qwen2.5-VL 3B)…',
+          )
+          const preferCuda = Boolean(visionStatus?.health?.nvidia_detected)
+          const started = await installVision({ prefer_cuda: preferCuda })
+          if (
+            started.mode === 'already_installed'
+            || started.mode === 'local_files'
+            || (started.installed && started.ready)
+          ) {
+            setVisionInstallMsg('Local model ready — starts with Remedy.')
+          } else {
+            // Poll until ready / error / cancelled / timeout (~45 min for slow links)
+            const deadline = Date.now() + 45 * 60 * 1000
+            let lastPct = -1
+            while (Date.now() < deadline) {
+              await new Promise((r) => setTimeout(r, 2000))
+              let vs: VisionStatus | null = null
+              try {
+                vs = await getVisionStatus()
+                setVisionStatus(vs)
+              } catch {
+                continue
+              }
+              const phase = (vs.progress?.phase || '').toLowerCase()
+              const pct =
+                vs.progress?.bytes_total && vs.progress.bytes_total > 0
+                  ? Math.round(
+                      (100 * (vs.progress.bytes_done || 0)) / vs.progress.bytes_total,
+                    )
+                  : null
+              if (pct != null && pct !== lastPct) {
+                lastPct = pct
+                setVisionInstallMsg(
+                  `Downloading local model… ${pct}% — server starts when finished.`,
+                )
+              } else if (vs.progress?.message) {
+                setVisionInstallMsg(vs.progress.message)
+              }
+              if (vs.ready && vs.installed) {
+                setVisionInstallMsg('Local model ready — starts with Remedy.')
+                break
+              }
+              if (phase === 'error') {
+                setVisionInstallMsg(
+                  vs.progress?.error
+                    || 'Download failed — open Settings → Local vision to retry.',
+                )
+                break
+              }
+              if (phase === 'cancelled') {
+                setVisionInstallMsg(
+                  'Download cancelled — open Settings → Local vision to resume.',
+                )
+                break
+              }
+            }
+            if (Date.now() >= deadline) {
+              setVisionInstallMsg(
+                'Download still running in the background — you can use Remedy; local vision will activate when ready.',
+              )
+            }
+          }
         } catch (ve) {
-          console.warn('Vision install start failed', ve)
+          console.warn('Local model install start failed', ve)
+          setVisionInstallMsg(
+            'Could not start download — open Settings → Local vision to retry.',
+          )
+        } finally {
+          setVisionInstalling(false)
         }
+      } else if (enableVision && visionStatus?.installed) {
+        setVisionInstallMsg('Local model ready — starts with Remedy.')
       }
       onComplete()
     } catch (e: unknown) {
@@ -844,11 +911,14 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
             <div className="space-y-4">
               <div>
                 <div className="text-base font-semibold mb-1" style={{ color: 'var(--text-primary)' }}>
-                  See images locally?
+                  Local vision
                 </div>
                 <p className="text-sm leading-snug" style={mutedStyles}>
-                  Optional ~{formatDownloadGb(visionStatus?.model?.approx_download_bytes)} local
-                  decoder for chat models that can&apos;t see images. Runs on this PC only.
+                  One-time download of pinned{' '}
+                  <strong style={{ color: 'var(--text-secondary)' }}>Qwen2.5-VL 3B</strong> (~
+                  {formatDownloadGb(visionStatus?.model?.approx_download_bytes)}) for screenshots and
+                  OCR. Same files on every PC. After install, the local server{' '}
+                  <strong style={{ color: 'var(--text-secondary)' }}>starts with Remedy</strong>.
                 </p>
               </div>
               <label
@@ -869,12 +939,14 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                 />
                 <span>
                   <span className="block text-base font-semibold" style={{ color: 'var(--text-primary)' }}>
-                    {visionStatus?.installed ? 'Keep visual decoder on' : 'Install visual decoder'}
+                    {visionStatus?.installed
+                      ? 'Keep local model on (starts with Remedy)'
+                      : 'Install local model on finish'}
                   </span>
                   <span className="block text-sm mt-0.5" style={mutedStyles}>
                     {visionStatus?.installed
-                      ? 'Already on this machine.'
-                      : 'Download starts after setup — progress in the bottom status dock.'}
+                      ? 'Already on this machine — auto-starts when Remedy launches.'
+                      : 'Download starts after setup · progress in the status dock · then auto-starts every launch.'}
                   </span>
                 </span>
               </label>
@@ -885,7 +957,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
               ) : null}
               {visionInstalling ? (
                 <div className="text-sm" style={{ color: 'var(--accent)' }}>
-                  Install running in background…
+                  Starting download…
                 </div>
               ) : null}
             </div>
@@ -899,8 +971,10 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                 </div>
                 <p className="text-sm" style={mutedStyles}>
                   Enter to send · F1 for help
-                  {enableVision && !visionStatus?.installed
-                    ? ' · Vision download shows bottom-left'
+                  {enableVision
+                    ? visionStatus?.installed
+                      ? ' · Local model starts with Remedy'
+                      : ' · Local model download runs after finish'
                     : ''}
                 </p>
               </div>

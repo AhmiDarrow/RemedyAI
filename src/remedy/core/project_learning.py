@@ -1,0 +1,186 @@
+"""Project-level compound learning — cross-session fingerprint under ~/.remedy.
+
+Stores lightweight stats so Remedy compresses earlier / pins patterns for
+this workspace without a cloud brain.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import threading
+import time
+from pathlib import Path
+from typing import Any
+
+_lock = threading.Lock()
+
+
+def _home() -> Path:
+    import os
+
+    env = os.environ.get("REMEDY_HOME")
+    if env:
+        return Path(env).expanduser()
+    return Path.home() / ".remedy"
+
+
+def project_id(project_path: str | None) -> str:
+    p = str(project_path or "").strip()
+    if not p:
+        return "default"
+    try:
+        resolved = str(Path(p).expanduser().resolve()).lower()
+    except Exception:
+        resolved = p.lower()
+    return hashlib.sha256(resolved.encode("utf-8")).hexdigest()[:16]
+
+
+def _store_path() -> Path:
+    d = _home() / "project_learning"
+    d.mkdir(parents=True, exist_ok=True)
+    return d / "profiles.json"
+
+
+def load_all() -> dict[str, Any]:
+    path = _store_path()
+    if not path.is_file():
+        return {"version": 1, "projects": {}}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict) and "projects" in data:
+            return data
+    except Exception:
+        pass
+    return {"version": 1, "projects": {}}
+
+
+def save_all(data: dict[str, Any]) -> None:
+    path = _store_path()
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    tmp.replace(path)
+
+
+def load_project_profile(project_path: str | None) -> dict[str, Any]:
+    pid = project_id(project_path)
+    with _lock:
+        all_data = load_all()
+        proj = all_data.get("projects", {}).get(pid)
+        if not isinstance(proj, dict):
+            proj = {
+                "id": pid,
+                "path": str(project_path or ""),
+                "sessions": 0,
+                "turns": 0,
+                "compress_count": 0,
+                "tokens_saved": 0,
+                "re_explain_total": 0,
+                "stuck_total": 0,
+                "avg_quality": None,
+                "prefer_earlier_compress": False,
+                "pinned_constraints": [],
+                "updated_at": 0,
+            }
+        proj["id"] = pid
+        return dict(proj)
+
+
+def record_session_end(
+    project_path: str | None,
+    quality_snapshot: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Merge a finished session's quality into the project fingerprint."""
+    q = quality_snapshot or {}
+    pid = project_id(project_path)
+    with _lock:
+        all_data = load_all()
+        projects = all_data.setdefault("projects", {})
+        proj = projects.get(pid) if isinstance(projects.get(pid), dict) else {}
+        if not proj:
+            # Inline default — do not call load_project_profile (same lock → deadlock)
+            proj = {
+                "id": pid,
+                "path": str(project_path or ""),
+                "sessions": 0,
+                "turns": 0,
+                "compress_count": 0,
+                "tokens_saved": 0,
+                "re_explain_total": 0,
+                "stuck_total": 0,
+                "avg_quality": None,
+                "prefer_earlier_compress": False,
+                "pinned_constraints": [],
+                "updated_at": 0,
+            }
+        proj["path"] = str(project_path or proj.get("path") or "")
+        proj["sessions"] = int(proj.get("sessions") or 0) + 1
+        proj["turns"] = int(proj.get("turns") or 0) + int(q.get("turns") or 0)
+        proj["compress_count"] = int(proj.get("compress_count") or 0) + int(
+            q.get("compress_count") or 0
+        )
+        proj["tokens_saved"] = int(proj.get("tokens_saved") or 0) + int(
+            q.get("tokens_saved_by_compress") or 0
+        )
+        proj["re_explain_total"] = int(proj.get("re_explain_total") or 0) + int(
+            q.get("re_explain_count") or 0
+        )
+        proj["stuck_total"] = int(proj.get("stuck_total") or 0) + int(
+            q.get("stuck_signal_count") or 0
+        )
+        aq = q.get("avg_compress_quality")
+        if aq is not None:
+            prev = proj.get("avg_quality")
+            if prev is None:
+                proj["avg_quality"] = float(aq)
+            else:
+                proj["avg_quality"] = round(0.7 * float(prev) + 0.3 * float(aq), 3)
+        # Prefer earlier compress if this project often hits strong nudges
+        strong = int(q.get("strong_nudge_count") or 0)
+        turns = max(1, int(q.get("turns") or 1))
+        if strong / turns >= 0.15 or int(q.get("tokens_estimated_peak") or 0) > 80_000:
+            proj["prefer_earlier_compress"] = True
+        # Pin constraints from high re-explain sessions
+        if int(q.get("re_explain_count") or 0) >= 2:
+            pins = list(proj.get("pinned_constraints") or [])
+            note = "User restates constraints often — trust Session Brief + /remember facts."
+            if note not in pins:
+                pins.append(note)
+            proj["pinned_constraints"] = pins[-8:]
+        proj["updated_at"] = time.time()
+        projects[pid] = proj
+        # Cap stored projects
+        if len(projects) > 80:
+            ordered = sorted(
+                projects.items(),
+                key=lambda kv: float(kv[1].get("updated_at") or 0),
+            )
+            for k, _ in ordered[: len(projects) - 80]:
+                projects.pop(k, None)
+        save_all(all_data)
+        return dict(proj)
+
+
+def suggest_harness_pct(
+    profile: dict[str, Any] | None,
+    default_min: float,
+    default_max: float,
+) -> tuple[float, float]:
+    """Slightly earlier compress for chatty/long projects."""
+    if not profile or not profile.get("prefer_earlier_compress"):
+        return default_min, default_max
+    # Soften thresholds ~8–10%
+    mn = max(0.55, float(default_min) - 0.08)
+    mx = max(mn + 0.05, float(default_max) - 0.06)
+    return mn, mx
+
+
+def pinned_constraints_block(project_path: str | None) -> str:
+    prof = load_project_profile(project_path)
+    pins = prof.get("pinned_constraints") or []
+    if not pins:
+        return ""
+    lines = ["[Project continuity notes]"]
+    for p in pins[:5]:
+        lines.append(f"- {p}")
+    return "\n".join(lines)

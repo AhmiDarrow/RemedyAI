@@ -1,4 +1,4 @@
-/** Local visual decoder API (llama.cpp + Qwen2.5-VL 3B). */
+/** Local model API — vision + nano swarm (bundled Qwen2.5-VL 3B). */
 
 import { apiFetch } from './client'
 
@@ -13,6 +13,8 @@ export interface VisionModelInfo {
   min_ram_gb?: number
   notes?: string
   is_default?: boolean
+  bundled?: boolean
+  roles?: string[]
 }
 
 export interface VisionProgress {
@@ -56,12 +58,40 @@ export interface VisionStatus {
   health?: VisionHealth
   warnings?: string[]
   not_ready_hint?: string | null
-  /** Prefer local decode even for vision-capable chat models */
   force_decode?: boolean
+  bundled?: boolean
+  local_roles?: string[]
+  bundle_policy?: string
+  mode?: string
+  message?: string
+  ok?: boolean
+  error?: string
   catalog?: {
     default_model_id?: string
     models?: VisionModelInfo[]
     llama_cpp_tag?: string
+    bundle_policy?: string
+    roles?: string[]
+  }
+}
+
+export interface NanoSwarmStatus {
+  name?: string
+  active?: boolean
+  event_count?: number
+  last_event?: string | null
+  local_model_id?: string
+  roles?: string[]
+  bots?: Record<string, Record<string, unknown>>
+  bundle?: {
+    model_present?: boolean
+    model_path?: string | null
+    bundle_root?: string | null
+  }
+  catalog?: {
+    default_model_id?: string
+    roles?: string[]
+    bundle_policy?: string
   }
 }
 
@@ -77,11 +107,20 @@ export async function getVisionCatalog(): Promise<{
   return apiFetch('/vision/catalog')
 }
 
+/** Activate prebundled/legacy files — preferred path (no download). */
+export async function activateVisionBundle(): Promise<VisionStatus> {
+  return apiFetch('/vision/activate', { method: 'POST', body: '{}' })
+}
+
+/**
+ * Activate bundle first; only downloads pinned catalog if files missing
+ * (recovery — not the normal path).
+ */
 export async function installVision(opts?: {
   model_id?: string
   runtime_id?: string
   prefer_cuda?: boolean
-}): Promise<VisionStatus & { ok?: boolean; error?: string; warnings?: string[] }> {
+}): Promise<VisionStatus & { ok?: boolean; error?: string; warnings?: string[]; mode?: string }> {
   return apiFetch('/vision/install', {
     method: 'POST',
     body: JSON.stringify(opts || {}),
@@ -123,6 +162,10 @@ export async function startVisionServer(): Promise<{ ok?: boolean; error?: strin
 
 export async function stopVisionServer(): Promise<{ ok?: boolean }> {
   return apiFetch('/vision/stop', { method: 'POST', body: '{}' })
+}
+
+export async function getNanoSwarmStatus(): Promise<NanoSwarmStatus> {
+  return apiFetch<NanoSwarmStatus>('/nanoswarm/status')
 }
 
 /** Rough client-side mirror of backend supports_vision for UI banners. */

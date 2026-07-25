@@ -63,8 +63,13 @@ def register_memory_tools(runtime: Any) -> None:
 
     async def compress_context(focus: str = "") -> str:
         """Memory Harness L1: merge history into Session Brief (send-view stays lean)."""
+        from remedy.core.session_quality import get_session_quality
         from remedy.memory.harness.brief import SessionBrief
-        from remedy.memory.harness.compressor import heuristic_merge_from_history
+        from remedy.memory.harness.compressor import (
+            estimate_tokens,
+            heuristic_merge_from_history,
+        )
+        from remedy.memory.harness.quality import review_compress_quality
 
         if runtime._session_brief is None:
             runtime._session_brief = SessionBrief(
@@ -75,17 +80,56 @@ def register_memory_tools(runtime: Any) -> None:
         if sid and runtime.memory is not None:
             with suppress(Exception):
                 history = await runtime._load_session_history(sid, "")
+        tokens_before = 0
+        with suppress(Exception):
+            tokens_before = estimate_tokens(history)
         runtime._session_brief = heuristic_merge_from_history(
             runtime._session_brief,
             history,
             intent_hint=(focus or None),
         )
         brief = runtime._session_brief
+        tokens_after = 0
+        with suppress(Exception):
+            from remedy.memory.harness.brief import brief_to_context_block
+
+            # Post-compress send view ≈ brief + recent tail estimate
+            tokens_after = max(
+                1,
+                estimate_tokens(
+                    [{"role": "system", "content": brief_to_context_block(brief) or ""}]
+                )
+                + min(tokens_before // 4, 4000),
+            )
+        quality: dict = {}
+        with suppress(Exception):
+            quality = review_compress_quality(
+                messages_before=history,
+                brief=brief,
+                tokens_before=tokens_before,
+                tokens_after=tokens_after,
+            )
+            get_session_quality(str(sid or "")).record_compress(
+                tokens_before=tokens_before,
+                tokens_after=tokens_after,
+                quality=quality,
+                source="compress_context",
+            )
+        qline = ""
+        if quality:
+            qline = (
+                f" Continuity check: {quality.get('summary')} "
+                f"(score {quality.get('score')})."
+            )
+            if quality.get("paths_lost_sample"):
+                lost = ", ".join(str(p) for p in quality["paths_lost_sample"][:3])
+                qline += f" Watch paths: {lost}."
         return (
-            f"Memory Harness compressed (pass #{brief.compress_count}). "
+            f"Context compressed (pass #{brief.compress_count}). "
             f"Intent: {brief.intent or '(set)'}. "
-            f"Artifacts: {len(brief.artifacts)}. "
+            f"Files: {len(brief.artifacts)}. "
             f"Decisions: {len(brief.decisions)}."
+            f"{qline}"
         )
 
     runtime.tool_registry.register_builtin_handler(

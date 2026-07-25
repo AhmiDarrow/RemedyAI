@@ -40,10 +40,33 @@ _DEFAULT_OUT = 3.0
 
 
 def estimate_tokens_text(text: str | None) -> int:
-    """Rough ~4 chars/token estimate."""
+    """In-house class-weighted token estimate (TokenNanobot); char fallback."""
     if not text:
         return 0
-    return max(0, (len(text) + 3) // 4)
+    try:
+        from remedy.nanoswarm.token_nanobot import estimate_text_tokens
+
+        return estimate_text_tokens(text)
+    except Exception:
+        return max(0, (len(text) + 3) // 4)
+
+
+def observe_provider_usage(
+    estimated: int,
+    actual: int,
+    *,
+    provider: str | None = None,
+    model: str | None = None,
+) -> None:
+    """Feed provider usage into TokenNanobot calibrator when available."""
+    try:
+        from remedy.nanoswarm.token_nanobot import get_token_nanobot
+
+        get_token_nanobot().observe_usage(
+            estimated, actual, provider=provider, model=model
+        )
+    except Exception:
+        pass
 
 
 def price_per_mtok(model: str | None, provider: str | None = None) -> tuple[float, float]:

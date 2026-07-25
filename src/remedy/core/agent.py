@@ -1014,6 +1014,36 @@ class BasicRuntime(AgentRuntime):
                             "duration_ms": float(getattr(result, "duration_ms", 0) or 0),
                         }
                     )
+            # Background continuity: pattern observation + stuck signals
+            with suppress(Exception):
+                from remedy.core.session_quality import get_session_quality
+                from remedy.core.speculative import schedule_speculative_prep
+                from remedy.nanoswarm import get_swarm
+                from remedy.nanoswarm.events import SwarmEvent
+
+                get_session_quality(
+                    str(getattr(self, "_session_id", "") or "")
+                ).record_tool_result(success=bool(result.success))
+                get_swarm().dispatch(
+                    SwarmEvent.tool_step(
+                        name or "unknown",
+                        success=bool(result.success),
+                        duration_ms=float(getattr(result, "duration_ms", 0) or 0),
+                    )
+                )
+                # Speculative prep while more tools / model continue
+                schedule_speculative_prep(
+                    session_id=str(getattr(self, "_session_id", "") or ""),
+                    brief=getattr(self, "_session_brief", None),
+                    messages=getattr(self, "_last_send_messages", None),
+                    project_path=str(
+                        getattr(self.config, "project_path", None)
+                        or getattr(self, "_project_path", None)
+                        or ""
+                    )
+                    or None,
+                    memory=getattr(self, "memory", None),
+                )
             return content_str
 
         def _progress_marker(
@@ -1289,35 +1319,109 @@ class BasicRuntime(AgentRuntime):
                 *history,
                 {"role": "user", "content": user_content},
             ]
-            # Memory Harness auto: soft nudge; strong = drop stale tool payloads + brief merge
+            # Continuity layer: single ContextSnapshot (tokens, policy, remedies, brief)
             with suppress(Exception):
                 if self._harness_mode == "auto":
+                    from remedy.core.context_snapshot import build_context_snapshot
                     from remedy.memory.harness.compressor import (
                         compression_nudge_message,
                         estimate_tokens,
                         heuristic_merge_from_history,
-                        should_nudge_compress,
                     )
                     from remedy.memory.harness.pruner import prune_messages_for_send
 
-                    est = estimate_tokens(messages)
-                    level = should_nudge_compress(
-                        est,
+                    provider = str(
+                        getattr(self.config, "provider", None)
+                        or getattr(self.config, "llm_provider", "")
+                        or ""
+                    )
+                    model = str(
+                        getattr(self.config, "model", None)
+                        or getattr(self.config, "llm_model", "")
+                        or ""
+                    )
+                    project_path = str(
+                        getattr(self.config, "project_path", None)
+                        or getattr(self, "_project_path", None)
+                        or ""
+                    ) or None
+                    sid = str(getattr(self, "_session_id", "") or "")
+                    snap = build_context_snapshot(
+                        messages=messages,
+                        user_text=message or "",
+                        brief=getattr(self, "_session_brief", None),
+                        session_id=sid,
+                        provider=provider or None,
+                        model=model or None,
                         min_pct=self._harness_min_pct,
                         max_pct=self._harness_max_pct,
+                        project_path=project_path,
                     )
+                    self._last_context_snapshot = snap
+                    self._last_send_messages = list(messages)
+                    est = snap.token_estimate
+                    level = snap.nudge
+
+                    # Inject policy + quality remedies + project pins as system notes
+                    injects: list[str] = []
+                    if snap.policy_system:
+                        injects.append(snap.policy_system)
+                    if snap.remedy_system:
+                        injects.append(snap.remedy_system)
+                    with suppress(Exception):
+                        from remedy.core.project_learning import pinned_constraints_block
+
+                        pin = pinned_constraints_block(project_path)
+                        if pin:
+                            injects.append(pin)
+                    if injects:
+                        messages.insert(
+                            -1,
+                            {
+                                "role": "system",
+                                "content": "\n\n".join(injects),
+                            },
+                        )
+
                     if level == "strong":
-                        # Force shrink: hard-cap old tool bodies so the turn can continue
+                        tokens_before = est
                         messages[:] = prune_messages_for_send(
                             messages,
-                            max_tool_chars=max(4_000, (_TOOL_RESULT_CHAR_CAP or 64_000) // 4),
+                            max_tool_chars=max(
+                                4_000, (_TOOL_RESULT_CHAR_CAP or 64_000) // 4
+                            ),
                             dedupe_tools=True,
+                            collapse_completed_tools=True,
+                            keep_recent_tool_pairs=4,
                         )
                         with suppress(Exception):
                             brief = getattr(self, "_session_brief", None)
                             if brief is not None:
+                                from remedy.core.session_quality import get_session_quality
+                                from remedy.memory.harness.quality import (
+                                    review_compress_quality,
+                                )
+
+                                pre_hist = list(messages)
                                 self._session_brief = heuristic_merge_from_history(
                                     brief, messages, intent_hint=message
+                                )
+                                tokens_after = estimate_tokens(
+                                    messages,
+                                    provider=provider or None,
+                                    model=model or None,
+                                )
+                                q = review_compress_quality(
+                                    messages_before=pre_hist,
+                                    brief=self._session_brief,
+                                    tokens_before=tokens_before,
+                                    tokens_after=tokens_after,
+                                )
+                                get_session_quality(sid).record_compress(
+                                    tokens_before=tokens_before,
+                                    tokens_after=tokens_after,
+                                    quality=q,
+                                    source="auto_strong",
                                 )
                         messages.insert(-1, compression_nudge_message("strong"))
                         with suppress(Exception):
@@ -1327,6 +1431,14 @@ class BasicRuntime(AgentRuntime):
                                 "remedy_context_auto_compress_total", level="strong"
                             ).inc()
                     elif level == "soft":
+                        # Soft: structural collapse of old tools without hard cap first
+                        with suppress(Exception):
+                            messages[:] = prune_messages_for_send(
+                                messages,
+                                dedupe_tools=True,
+                                collapse_completed_tools=True,
+                                keep_recent_tool_pairs=6,
+                            )
                         messages.insert(-1, compression_nudge_message(level))
                     with suppress(Exception):
                         from remedy.core.metrics import default_registry
@@ -1587,6 +1699,39 @@ class BasicRuntime(AgentRuntime):
                                         provider=getattr(self, "_llm_provider", None),
                                     )
                                     if u:
+                                        try:
+                                            from remedy.core.usage import observe_provider_usage
+                                            from remedy.nanoswarm.token_nanobot import (
+                                                get_token_nanobot,
+                                            )
+
+                                            pt = int(u.get("prompt_tokens") or 0)
+                                            ct = int(u.get("completion_tokens") or 0)
+                                            est = int(get_token_nanobot().last_estimate or 0)
+                                            if pt > 0 and est > 0:
+                                                observe_provider_usage(
+                                                    est,
+                                                    pt,
+                                                    provider=getattr(self, "_llm_provider", None),
+                                                    model=getattr(self, "_llm_model", None),
+                                                )
+                                            if pt or ct:
+                                                with suppress(Exception):
+                                                    from remedy.core.session_quality import (
+                                                        get_session_quality,
+                                                    )
+
+                                                    get_session_quality(
+                                                        str(
+                                                            getattr(self, "_session_id", "")
+                                                            or ""
+                                                        )
+                                                    ).record_turn(
+                                                        prompt_tokens=pt,
+                                                        completion_tokens=ct,
+                                                    )
+                                        except Exception:
+                                            pass
                                         yield (
                                             "@@usage:"
                                             + json.dumps(u, separators=(",", ":"))
@@ -2046,6 +2191,32 @@ class BasicRuntime(AgentRuntime):
                     "I finished the tool loop but still have no final model text. "
                     "Ask me to **continue** or restate the request and I will resume "
                     "from the context already gathered."
+                )
+            # Compound learning + speculative warm for next turn
+            with suppress(Exception):
+                from remedy.core.project_learning import record_session_end
+                from remedy.core.session_quality import get_session_quality
+                from remedy.core.speculative import schedule_speculative_prep
+
+                sid = str(getattr(self, "_session_id", "") or "")
+                qsnap = get_session_quality(sid).snapshot()
+                project_path = str(
+                    getattr(self.config, "project_path", None)
+                    or getattr(self, "_project_path", None)
+                    or ""
+                ) or None
+                # Light touch each turn (not only true session end)
+                if project_path and int(qsnap.get("turns") or 0) > 0:
+                    # Only merge full profile every few turns to limit disk IO
+                    if int(qsnap.get("turns") or 0) % 5 == 0:
+                        record_session_end(project_path, qsnap)
+                schedule_speculative_prep(
+                    session_id=sid,
+                    brief=getattr(self, "_session_brief", None),
+                    messages=getattr(self, "_last_send_messages", None),
+                    user_text=message or "",
+                    project_path=project_path,
+                    memory=getattr(self, "memory", None),
                 )
         except Exception as e:
             logger.exception("LLM stream failed")

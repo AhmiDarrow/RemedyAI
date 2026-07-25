@@ -27,6 +27,15 @@ const META: HelpArticleMeta[] = [
     summary: 'What Remedy is, architecture sketch, and manual map.',
   },
   {
+    id: '16-continuity-philosophy',
+    title: 'How Remedy works (continuity)',
+    category: 'Start here',
+    order: 0.5,
+    tags: ['continuity', 'philosophy', 'memory', 'partner', 'vision'],
+    summary:
+      'Why Remedy feels like one partner on any model — silent continuity, not a bot farm.',
+  },
+  {
     id: '01-install-windows',
     title: 'Install (Windows)',
     category: 'Start here',

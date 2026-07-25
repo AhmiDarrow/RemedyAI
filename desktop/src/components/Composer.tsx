@@ -824,8 +824,8 @@ export function Composer({
               <>
                 This chat model may not see images.
                 {visionStatus?.installed
-                  ? ' Enable the visual decoder in Settings.'
-                  : ' Install the local visual decoder (Qwen2.5-VL 3B) in Settings for screenshots & OCR.'}
+                  ? ' Turn on local vision in Settings — starts with Remedy when enabled.'
+                  : ' Install local vision in Settings (one-time Qwen2.5-VL 3B download).'}
               </>
             )}
           </div>

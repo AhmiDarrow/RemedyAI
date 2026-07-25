@@ -1,0 +1,110 @@
+"""Speculative continuity prep — background brief/memory work off the hot path.
+
+While the frontier model streams or tools run, we can refresh the Session Brief
+and rank memory candidates so the *next* turn already has a warm envelope.
+"""
+
+from __future__ import annotations
+
+import logging
+import threading
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+_lock = threading.Lock()
+_pending: dict[str, bool] = {}
+
+
+def schedule_speculative_prep(
+    *,
+    session_id: str | None,
+    brief: Any | None,
+    messages: list[dict[str, Any]] | None,
+    user_text: str = "",
+    project_path: str | None = None,
+    memory: Any | None = None,
+) -> None:
+    """Fire-and-forget prep. Debounced per session."""
+    sid = (session_id or "").strip() or "_default"
+    with _lock:
+        if _pending.get(sid):
+            return
+        _pending[sid] = True
+
+    def _run() -> None:
+        try:
+            _prep(
+                session_id=sid,
+                brief=brief,
+                messages=messages,
+                user_text=user_text,
+                project_path=project_path,
+                memory=memory,
+            )
+        except Exception:
+            logger.debug("speculative prep failed", exc_info=True)
+        finally:
+            with _lock:
+                _pending[sid] = False
+
+    t = threading.Thread(target=_run, name=f"remedy-speculative-{sid[:8]}", daemon=True)
+    t.start()
+
+
+def _prep(
+    *,
+    session_id: str,
+    brief: Any | None,
+    messages: list[dict[str, Any]] | None,
+    user_text: str,
+    project_path: str | None,
+    memory: Any | None,
+) -> None:
+    # 1) Refresh brief from recent messages (cheap)
+    if brief is not None and messages:
+        try:
+            from remedy.memory.harness.compressor import heuristic_merge_from_history
+
+            heuristic_merge_from_history(brief, messages[-24:], intent_hint=user_text or None)
+        except Exception:
+            pass
+
+    # 2) Stage memory candidates (FTS) for next turn injection if store available
+    if memory is not None and (user_text or "").strip():
+        try:
+            q = (user_text or "").strip()[:200]
+            if hasattr(memory, "search"):
+                hits = memory.search(q, limit=5)
+            elif hasattr(memory, "search_entries"):
+                hits = memory.search_entries(q, limit=5)
+            else:
+                hits = None
+            if hits:
+                # Stash on brief notes lightly (bounded)
+                if brief is not None and hasattr(brief, "notes"):
+                    titles = []
+                    for h in list(hits)[:3]:
+                        t = getattr(h, "title", None) or (
+                            h.get("title") if isinstance(h, dict) else None
+                        )
+                        if t:
+                            titles.append(str(t)[:80])
+                    if titles:
+                        note = "Related memory: " + "; ".join(titles)
+                        prev = (brief.notes or "")[:1500]
+                        if note not in prev:
+                            brief.notes = (prev + "\n" + note).strip()[:2000]
+                            if hasattr(brief, "touch"):
+                                brief.touch()
+        except Exception:
+            logger.debug("speculative memory search failed", exc_info=True)
+
+    # 3) Touch project profile lightly (session still open — just heartbeat)
+    if project_path:
+        try:
+            from remedy.core.project_learning import load_project_profile
+
+            load_project_profile(project_path)  # ensure file exists
+        except Exception:
+            pass

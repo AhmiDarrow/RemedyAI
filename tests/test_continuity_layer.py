@@ -1,0 +1,122 @@
+"""Continuity layer: ContextSnapshot, intent policy, remedies, structural prune, project learning."""
+
+from __future__ import annotations
+
+from remedy.core.context_snapshot import build_context_snapshot
+from remedy.core.intent_policy import policy_for_intent
+from remedy.core.project_learning import (
+    load_project_profile,
+    record_session_end,
+    suggest_harness_pct,
+)
+from remedy.core.quality_remedies import remedies_from_quality
+from remedy.core.session_quality import reset_session_quality
+from remedy.memory.harness.brief import SessionBrief
+from remedy.memory.harness.pruner import prune_messages_for_send
+
+
+def test_policy_packs_for_intents():
+    assert policy_for_intent("memory")["id"] == "memory"
+    assert "memory" in policy_for_intent("memory")["system"].lower() or "Session" in policy_for_intent("memory")["system"]
+    tool = policy_for_intent("chat", user_text="please implement a fix for login")
+    assert tool["id"] == "tool"
+
+
+def test_remedies_trigger_on_re_explain():
+    rem = remedies_from_quality(
+        {"re_explain_count": 2, "re_explain_rate": 0.3, "stuck_signal_count": 0, "turns": 5},
+        fill_pct=0.4,
+    )
+    assert rem["triggered"]
+    assert "re_explain_anchor" in rem["actions"]
+    assert rem["system"]
+
+
+def test_remedies_stuck():
+    rem = remedies_from_quality(
+        {
+            "re_explain_count": 0,
+            "re_explain_rate": 0,
+            "stuck_signal_count": 3,
+            "stuck_rate": 0.25,
+            "max_tool_fail_streak": 4,
+            "turns": 10,
+        }
+    )
+    assert "stuck_recovery" in rem["actions"]
+
+
+def test_context_snapshot_single_pass(tmp_path, monkeypatch):
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    reset_session_quality("cs1")
+    brief = SessionBrief(intent="")
+    msgs = [
+        {"role": "user", "content": "remember that we use TypeScript"},
+        {"role": "assistant", "content": "Got it."},
+        {"role": "user", "content": "what do you know about my stack?"},
+    ]
+    snap = build_context_snapshot(
+        messages=msgs,
+        user_text="what do you know about my stack?",
+        brief=brief,
+        session_id="cs1",
+        context_window=100_000,
+        min_pct=0.75,
+        max_pct=0.92,
+    )
+    assert snap.token_estimate >= 1
+    assert snap.intent in ("memory", "chat", "skill", "plan", "tool")
+    assert snap.fill_pct >= 0
+    pub = snap.to_public()
+    assert "token_estimate" in pub
+
+
+def test_structural_collapse_old_tools():
+    messages = []
+    for i in range(8):
+        messages.append(
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{"id": f"c{i}", "function": {"name": "bash_exec", "arguments": "{}"}}],
+            }
+        )
+        messages.append(
+            {
+                "role": "tool",
+                "tool_call_id": f"c{i}",
+                "content": ("x" * 500) + f" result {i}",
+            }
+        )
+    out = prune_messages_for_send(
+        messages,
+        dedupe_tools=False,
+        collapse_completed_tools=True,
+        keep_recent_tool_pairs=2,
+    )
+    tool_bodies = [m["content"] for m in out if m.get("role") == "tool"]
+    assert any("collapsed" in str(c) for c in tool_bodies)
+    # Recent ones still long
+    assert any(len(str(c)) > 400 for c in tool_bodies[-2:])
+
+
+def test_project_learning_earlier_compress(tmp_path, monkeypatch):
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    path = str(tmp_path / "myproj")
+    q = {
+        "turns": 20,
+        "compress_count": 3,
+        "tokens_saved_by_compress": 5000,
+        "re_explain_count": 3,
+        "stuck_signal_count": 1,
+        "strong_nudge_count": 5,
+        "tokens_estimated_peak": 90_000,
+        "avg_compress_quality": 0.8,
+    }
+    prof = record_session_end(path, q)
+    assert prof["prefer_earlier_compress"] is True
+    mn, mx = suggest_harness_pct(prof, 0.75, 0.92)
+    assert mn < 0.75
+    assert mx < 0.92
+    loaded = load_project_profile(path)
+    assert loaded["sessions"] >= 1

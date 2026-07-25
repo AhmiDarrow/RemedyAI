@@ -13,16 +13,31 @@ _PATH_RE = re.compile(
 )
 
 
-def estimate_tokens(messages: list[dict[str, Any]]) -> int:
-    """Rough token estimate (~4 chars/token) for threshold checks."""
-    total = 0
-    for m in messages:
-        c = m.get("content")
-        if isinstance(c, str):
-            total += len(c)
-        elif c is not None:
-            total += len(str(c))
-    return max(1, total // 4)
+def estimate_tokens(
+    messages: list[dict[str, Any]],
+    *,
+    provider: str | None = None,
+    model: str | None = None,
+) -> int:
+    """Token estimate for threshold checks (in-house TokenNanobot).
+
+    Falls back to ~4 chars/token if nanoswarm is unavailable.
+    """
+    try:
+        from remedy.nanoswarm.token_nanobot import get_token_nanobot
+
+        return get_token_nanobot().measure_messages(
+            messages, provider=provider, model=model
+        )
+    except Exception:
+        total = 0
+        for m in messages:
+            c = m.get("content")
+            if isinstance(c, str):
+                total += len(c)
+            elif c is not None:
+                total += len(str(c))
+        return max(1, total // 4)
 
 
 def should_nudge_compress(
@@ -31,20 +46,32 @@ def should_nudge_compress(
     context_window: int = 200_000,
     min_pct: float = 0.75,
     max_pct: float = 0.92,
+    brief_tokens: int = 0,
 ) -> str | None:
     """Return 'soft', 'strong', or None based on fill percentage.
 
     Defaults stay out of the way until context is genuinely full — early
     compress nudges made the agent feel stuck mid-task.
     """
-    if context_window <= 0:
+    try:
+        from remedy.nanoswarm.token_nanobot import get_token_nanobot
+
+        return get_token_nanobot().should_nudge_compress(
+            token_estimate,
+            context_window=context_window,
+            min_pct=min_pct,
+            max_pct=max_pct,
+            brief_tokens=brief_tokens,
+        )
+    except Exception:
+        if context_window <= 0:
+            return None
+        pct = (token_estimate + max(0, brief_tokens)) / context_window
+        if pct >= max_pct:
+            return "strong"
+        if pct >= min_pct:
+            return "soft"
         return None
-    pct = token_estimate / context_window
-    if pct >= max_pct:
-        return "strong"
-    if pct >= min_pct:
-        return "soft"
-    return None
 
 
 def compression_nudge_message(level: str) -> dict[str, str]:

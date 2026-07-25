@@ -2,7 +2,15 @@
 
 High-level product notes for owners. Full detail lives in repo `CHANGELOG.md`.
 
-Ship **one** installer/tag for the current series (**v0.10.45**).
+Ship **one** installer/tag for the current series (**v0.11.0**).
+
+## 0.11.0 — Continuity layer, local vision download, session quality
+
+- **Continuity**: silent context budget, Session Brief, intent policy packs, quality remedies, project learning — feels like one partner on any model (not a bot farm). See F1 → *How Remedy works (continuity)*.
+- **Session quality**: tokens saved by compress, stuck/re-explain rates; `/harness` snapshot.
+- **Local vision**: first-run download of pinned Qwen2.5-VL 3B (not in installer); starts with Remedy; idle stop.
+- **Tool process Full+**: only advanced view for continuity internals; normal UI is “Local vision”.
+- Installer stays small; optional offline stage via `scripts/stage_local_bundle.py`.
 
 ## 0.10.45 — Setup free UX, tray start, usage sidebar, vision wipe
 

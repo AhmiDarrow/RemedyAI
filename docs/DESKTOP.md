@@ -4,7 +4,20 @@
 
 **Remedy Desktop** is the recommended way to use Remedy — your personal AI
 partner for knowledge, design, code, and get-it-done work (not a medical or
-clinical product). Current package series: **0.10.x** (see root `CHANGELOG.md`).
+clinical product). Current package series: **0.11.x** (see root `CHANGELOG.md`).
+
+### Local model packaging (0.11+)
+
+| Item | Policy |
+|------|--------|
+| Installer | **Does not** include Qwen GGUF / multi‑GB weights |
+| First run | Setup downloads pinned `qwen2.5-vl-3b` into `~/.remedy/vision/` |
+| After install | llama-server **auto-starts with Remedy** |
+| Offline (optional) | `python scripts/stage_local_bundle.py --from-vision-home` then `REMEDY_LOCAL_BUNDLE=…` |
+
+`desktop/resources/local/` is a **staging area only** (gitignored weights). It is
+**not** listed in `tauri.conf.json` `bundle.resources` — so normal NSIS builds stay small.
+
 
 ### Skills panel (0.10.30+; HITL + packs in 0.10.44)
 

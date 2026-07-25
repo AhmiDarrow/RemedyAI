@@ -76,7 +76,8 @@ def vision_section_from_config(cfg: dict[str, Any] | None) -> dict[str, Any]:
     model_id = str(raw.get("model_id") or DEFAULT_MODEL_ID).strip() or DEFAULT_MODEL_ID
     base_url = str(raw.get("base_url") or f"http://{host}:{port}/v1").strip()
     return {
-        "enabled": bool(raw.get("enabled", False)),
+        # Bundled local model: on by default when [vision] present without explicit flag
+        "enabled": bool(raw.get("enabled", True)),
         "model_id": model_id,
         "host": host,
         "port": port,
@@ -94,9 +95,11 @@ def vision_section_from_config(cfg: dict[str, Any] | None) -> dict[str, Any]:
 
 def default_vision_toml_block() -> str:
     return f"""
-# Local visual decoder (llama-server + Qwen2.5-VL 3B) — opt-in install
+# Local model (Qwen2.5-VL 3B) — vision + nano swarm (+ helper later)
+# First-run download of pinned files (not in installer). Same model on every PC.
+# auto_start: llama-server starts with Remedy once installed.
 [vision]
-enabled = false
+enabled = true
 model_id = "{DEFAULT_MODEL_ID}"
 host = "{DEFAULT_HOST}"
 port = {DEFAULT_PORT}

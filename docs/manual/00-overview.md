@@ -27,8 +27,13 @@ This Help wiki is the full technical owner’s manual, available offline inside 
 ```
 You → Remedy Desktop (Tauri) → local API on 127.0.0.1:7400 → LLM provider
                 ↓
-         ~/.remedy (config, memory.db, skills, auth tokens)
+         Continuity (Session Brief, memory, skills, context budget)
+                ↓
+         ~/.remedy (config, memory.db, skills, auth, project learning)
 ```
+
+The **continuity layer** is silent: it keeps long work coherent and cheaper without
+feeling like a swarm of agents. See [How Remedy works (continuity)](16-continuity-philosophy).
 
 Nothing in this architecture requires a Remedy cloud account. Chat content goes to **your chosen LLM provider** (or local Ollama). Secrets stay on disk (DPAPI-encrypted on Windows when available).
 
@@ -36,6 +41,7 @@ Nothing in this architecture requires a Remedy cloud account. Chat content goes 
 
 | Chapter | Topic |
 |---------|--------|
+| [How Remedy works](16-continuity-philosophy) | Continuity philosophy (partner, not bot farm) |
 | [Install (Windows)](01-install-windows) | Installer, paths, SmartScreen |
 | [First run](02-first-run) | Setup wizard, Skip, re-setup |
 | [Providers & auth](03-providers-and-auth) | Keys, xAI OAuth, Ollama |

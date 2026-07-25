@@ -21,7 +21,8 @@ const MEDIUM_PREVIEW = 400
 
 function previewText(text: string | undefined, mode: ToolProcessMode): string {
   if (!text) return ''
-  if (mode === 'full') return text
+  const m = mode === 'full+' ? 'full' : mode
+  if (m === 'full') return text
   if (text.length <= MEDIUM_PREVIEW) return text
   return `${text.slice(0, MEDIUM_PREVIEW)}…`
 }
@@ -67,7 +68,9 @@ export function ProcessTrace({
     return map
   }, [steps, stepSig])
 
-  if (mode === 'off' || steps.length === 0) return null
+  // full+ includes full raw dumps; advanced diagnostics live in Settings/harness
+  const viewMode = mode === 'full+' ? 'full' : mode
+  if (viewMode === 'off' || steps.length === 0) return null
 
   const running = steps.filter((s) => s.status === 'running').length
   const done = steps.filter((s) => s.status === 'done').length
@@ -79,7 +82,7 @@ export function ProcessTrace({
         ? `${done} done · ${failed} error`
         : `${done} step${done === 1 ? '' : 's'}`
 
-  const allOpen = mode === 'full'
+  const allOpen = viewMode === 'full'
 
   const toggleStep = (id: string) => {
     if (allOpen) return
@@ -107,7 +110,7 @@ export function ProcessTrace({
       style={{
         border: '1px solid var(--border)',
         background: 'var(--bg-primary)',
-        maxWidth: mode === 'full' ? '100%' : 'min(var(--chat-max-width), 100%)',
+        maxWidth: viewMode === 'full' ? '100%' : 'min(var(--chat-max-width), 100%)',
       }}
     >
       <button
@@ -127,7 +130,7 @@ export function ProcessTrace({
           Process
           <span className="font-normal ml-1.5" style={{ color: 'var(--text-muted)' }}>
             {summary}
-            {mode === 'full' ? ' · full raw' : mode === 'medium' ? ' · medium' : ''}
+            {viewMode === 'full' ? ' · full raw' : mode === 'medium' ? ' · medium' : ''}
           </span>
         </span>
         {collapsed ? <IconChevronDown size={12} /> : <IconChevronUp size={12} />}
@@ -138,7 +141,7 @@ export function ProcessTrace({
           <ul
             ref={setScroller}
             className="px-2 py-1.5 overflow-y-auto"
-            style={{ maxHeight: mode === 'full' ? 'min(70vh, 40rem)' : '20rem' }}
+            style={{ maxHeight: viewMode === 'full' ? 'min(70vh, 40rem)' : '20rem' }}
           >
             <div ref={setContent} className="space-y-2">
               {steps.map((s) => {
@@ -147,13 +150,13 @@ export function ProcessTrace({
                   || openIds.has(s.id)
                   || (live && s.status === 'running')
                 const hasDetail = Boolean(s.argsText || s.resultText || s.error)
-                const showArgs = (mode === 'full' || mode === 'medium') && s.argsText
+                const showArgs = (viewMode === 'full' || mode === 'medium') && s.argsText
                 const argsShown =
-                  mode === 'full'
+                  viewMode === 'full'
                     ? showArgs
                     : showArgs && (s.argsText?.length || 0) <= 800
                 const showResult =
-                  (mode === 'medium' || mode === 'full') && (s.resultText || s.error)
+                  (mode === 'medium' || viewMode === 'full') && (s.resultText || s.error)
                 const statusIcon =
                   s.status === 'running' ? '…' : s.status === 'error' ? '!' : '✓'
                 const statusColor =
@@ -213,14 +216,14 @@ export function ProcessTrace({
                               {Math.max(0, (s.endedAt - s.startedAt) / 1000).toFixed(1)}s
                             </span>
                           )}
-                          {mode === 'full' && s.resultText && (
+                          {viewMode === 'full' && s.resultText && (
                             <span className="ml-1.5" style={{ color: 'var(--text-muted)' }}>
                               {s.resultText.length.toLocaleString()} chars
                             </span>
                           )}
                         </span>
                       </button>
-                      {mode === 'full' && rawDump && (
+                      {viewMode === 'full' && rawDump && (
                         <IconBtn
                           title={copiedId === s.id ? 'Copied' : 'Copy full raw'}
                           onClick={() => void copyBlock(s.id, rawDump)}
@@ -251,7 +254,7 @@ export function ProcessTrace({
                                 style={{
                                   background: 'var(--bg-primary)',
                                   border: '1px solid var(--border)',
-                                  maxHeight: mode === 'full' ? 'none' : '14rem',
+                                  maxHeight: viewMode === 'full' ? 'none' : '14rem',
                                 }}
                               >
                                 <DiffCode
@@ -278,7 +281,7 @@ export function ProcessTrace({
                                 style={{
                                   background: 'var(--bg-primary)',
                                   border: '1px solid var(--border)',
-                                  maxHeight: mode === 'full' ? 'none' : '14rem',
+                                  maxHeight: viewMode === 'full' ? 'none' : '14rem',
                                 }}
                               >
                                 {s.error ? (

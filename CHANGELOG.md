@@ -2,6 +2,36 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.11.0] — 2026-07-24
+
+### Feature: Continuity layer (ContextSnapshot + remedies + project learning)
+
+- **ContextSnapshot**: single-pass tokens, fill, intent policy, brief touch, quality remedies.
+- **Intent → policy packs**: silent system focus for memory / skill / plan / tool turns.
+- **Quality remedies**: auto recovery guidance when re-explain or stuck rates rise.
+- **Structural prune**: collapse old completed tool spans; keep recent pairs full.
+- **Speculative prep**: background brief/memory warm between tools and after turns.
+- **Project learning**: `~/.remedy/project_learning/` fingerprints (earlier compress, pinned notes).
+- **Session quality**: tokens saved, stuck/re-explain rates; `/harness` + partner status.
+- **Full+** tool process: only place for advanced continuity activity; UI is “Local vision”.
+- **Docs**: continuity philosophy in README, F1 wiki (`16-continuity-philosophy`), manual.
+
+### Feature: Session quality baselines + Full+ diagnostics (earlier in 0.11)
+
+### Feature: Remedy Nano Swarm + local Qwen (first-run download, auto-start)
+
+- **Nano swarm** (`remedy.nanoswarm`): Token, Pattern, Memory, Skill, Router, Helper (reserved) + coordinator.
+- **In-house TokenNanobot**: class-weighted estimates + usage calibration (no third-party tokenizer).
+- **Shared runtime catalog** (`remedy.runtime`): one pinned **Qwen2.5-VL 3B** for vision, nano, helper.
+- **Delivery**: Qwen **not** in the installer (size). **First-run download** of pinned files (Setup Wizard / Settings); same SHA catalog on every PC.
+- **Packaging policy**: `tauri.conf.json` does **not** embed `resources/local`; that folder is offline staging only (gitignored weights + README).
+- **Starts with Remedy**: `auto_start` + API lifespan + post-install start; no manual Start for normal use.
+- **Runtime**: CPU default; CUDA when NVIDIA detected (same Qwen weights). Optional `REMEDY_LOCAL_BUNDLE` for dev/airgap only.
+- **APIs**: `GET /api/nanoswarm/status`, `POST /api/vision/activate`, install = download-or-activate; partner status includes swarm.
+- **Desktop**: Setup Wizard download on finish; Settings install + swarm panel; Composer hints updated.
+- **Agent**: tool steps → PatternNanobot; harness → TokenNanobot; `/harness` shows swarm.
+- Manual: `docs/manual/14-visual-decoder.md`.
+
 ## [0.10.45] — 2026-07-25
 
 ### Fix: setup free UX, tray start, usage placement, vision uninstall

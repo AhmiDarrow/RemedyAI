@@ -292,7 +292,7 @@ const MessageBubble = memo(function MessageBubble({
   )
 
   const histSteps =
-    !isUser && !isSystem && !isStreamingPartial && toolProcessMode !== 'off'
+    !isUser && !isSystem && !isStreamingPartial && toolProcessMode !== 'off' // full+ included
       ? stepsFromMessageTools(msg.tool_calls || [], msg.tool_results || [])
       : []
 
@@ -490,7 +490,10 @@ const MessageBubble = memo(function MessageBubble({
         <div
           className="w-full mt-0.5"
           style={{
-            maxWidth: toolProcessMode === 'full' ? '100%' : 'min(var(--chat-max-width), 100%)',
+            maxWidth:
+              toolProcessMode === 'full' || toolProcessMode === 'full+'
+                ? '100%'
+                : 'min(var(--chat-max-width), 100%)',
             paddingLeft: 'calc(var(--chat-avatar) + 0.35rem)',
           }}
         >

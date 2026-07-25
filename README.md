@@ -7,10 +7,29 @@ design, software engineering, and (with permission) tasks across your PC. It is
 **not** a medical, clinical, or healthcare product — the name means unsticking
 problems and finishing requests, not medicine.
 
+## Continuity (the product idea)
+
+Remedy is **not** a thin wrapper around a chat API and **not** a cast of competing bots.
+It is a **local continuity system**: silent workers keep context lean, memory accurate,
+and skills improving so **you + this PC + any model you choose** feel like one partner.
+
+```text
+You  →  Remedy continuity (brief, memory, skills, budget)  →  Provider model  →  Tools
+              ↑________________ learn / compress / remember ________________|
+```
+
+- **Fast** — hot path stays cheap; heavy work runs in the background  
+- **Cheaper** — less re-sending of tool sludge; compress with fidelity checks  
+- **Same Remedy on any provider** — continuity lives on your machine  
+
+Read more: [`docs/manual/16-continuity-philosophy.md`](docs/manual/16-continuity-philosophy.md)  
+(In-app: **F1** → *How Remedy works (continuity)*.)
+
 It combines:
 
 - **Depth** — A self-improving learning loop that distills task traces into reusable skills
 - **Memory** — Persistent SQLite+FTS5 knowledge store with structured handoff notes and session continuity
+- **Continuity layer** — Session Brief, context budget, quality remedies, project-level learning (silent)
 - **Breadth** — Multi-channel gateway (CLI, REST API, Telegram, Discord, Slack, webhooks)
 - **Compatibility** — Native [agentskills.io](https://agentskills.io) support, plus adapters for Hermes and OpenClaw/ClawHub
 - **Security** — Local-first by design: full power for you on this PC, not an open doorway for others
@@ -449,7 +468,7 @@ def teardown_plugin():
 git clone https://github.com/AhmiDarrow/RemedyAI.git
 cd RemedyAI
 uv sync --group dev
-uv run pytest -q          # full suite (560+ tests; currently ~671)
+uv run pytest -q          # full suite (560+ tests; currently ~707)
 cd desktop && npm test    # frontend unit tests (vitest)
 python scripts/check_docs.py  # docs stay synced with code (help, cmds, versions)
 uv run remedy --help
@@ -507,7 +526,7 @@ git tag vX.Y.Z && git push origin vX.Y.Z
 # Optional: publish Python package — uv build && uv publish
 ```
 
-See [CHANGELOG.md](CHANGELOG.md) for release notes. Current desktop series: **0.10.x**.
+See [CHANGELOG.md](CHANGELOG.md) for release notes. Current desktop series: **0.11.x**.
 
 **Signing (required for in-app auto-update):**
 

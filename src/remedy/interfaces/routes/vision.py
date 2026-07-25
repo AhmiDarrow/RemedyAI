@@ -58,13 +58,12 @@ def register_vision_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
 
         return catalog_public()
 
-    @app.post("/api/vision/install")
-    async def vision_install(body: VisionInstallRequest | None = None) -> dict[str, Any]:
-        from remedy.vision.service import start_install
+    @app.post("/api/vision/activate")
+    async def vision_activate() -> dict[str, Any]:
+        """Activate prebundled/legacy pinned Qwen (no download)."""
+        from remedy.vision.service import activate_bundle
 
-        body = body or VisionInstallRequest()
         cfg = load_config()
-        # Persist enabled=true so decode path activates after install
         try:
             from remedy.interfaces.api_support import _find_config_path, _write_config
 
@@ -72,8 +71,29 @@ def register_vision_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
             if path is not None:
                 vision = dict(cfg.get("vision") or {}) if isinstance(cfg.get("vision"), dict) else {}
                 vision["enabled"] = True
-                if body.model_id:
-                    vision["model_id"] = body.model_id
+                vision["model_id"] = vision.get("model_id") or "qwen2.5-vl-3b"
+                cfg["vision"] = vision
+                _write_config(path, cfg)
+        except Exception:
+            logger.exception("Failed to set vision.enabled in config")
+        return activate_bundle(cfg=cfg, enabled=True)
+
+    @app.post("/api/vision/install")
+    async def vision_install(body: VisionInstallRequest | None = None) -> dict[str, Any]:
+        """Activate bundle first; network download only as recovery for missing files."""
+        from remedy.vision.service import start_install
+
+        body = body or VisionInstallRequest()
+        cfg = load_config()
+        try:
+            from remedy.interfaces.api_support import _find_config_path, _write_config
+
+            path = _find_config_path()
+            if path is not None:
+                vision = dict(cfg.get("vision") or {}) if isinstance(cfg.get("vision"), dict) else {}
+                vision["enabled"] = True
+                # Always pin to single product model id (ignore alternate models)
+                vision["model_id"] = "qwen2.5-vl-3b"
                 if body.runtime_id:
                     vision["runtime_id"] = body.runtime_id
                 elif body.prefer_cuda:
@@ -84,7 +104,7 @@ def register_vision_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
             logger.exception("Failed to set vision.enabled in config")
         return start_install(
             cfg=cfg,
-            model_id=body.model_id,
+            model_id="qwen2.5-vl-3b",
             runtime_id=body.runtime_id,
             prefer_cuda=body.prefer_cuda,
         )

@@ -3,14 +3,15 @@ import { invoke } from '@tauri-apps/api/core'
 import { getSettings, updateSettings, type Settings, type SettingsUpdate } from '../api/settings'
 import {
   getVisionStatus,
+  activateVisionBundle,
   installVision,
   cancelVisionInstall,
   reinstallVisionRuntime,
-  uninstallVision,
   startVisionServer,
   stopVisionServer,
-  formatDownloadGb,
+  getNanoSwarmStatus,
   type VisionStatus,
+  type NanoSwarmStatus,
 } from '../api/vision'
 import {
   getXaiAuthStatus,
@@ -32,7 +33,12 @@ import { ThemeColorDot } from './ThemeSwitcher'
 import { HOTKEYS } from '../hotkeys'
 import type { ModelInfo } from '../App'
 import type { Density } from '../utils/chatPrefs'
-import { normalizeToolProcess, TOOL_PROCESS_MODES, type ToolProcessMode } from '../utils/toolLabels'
+import {
+  normalizeToolProcess,
+  showsAdvancedDiagnostics,
+  TOOL_PROCESS_MODES,
+  type ToolProcessMode,
+} from '../utils/toolLabels'
 import { SettingsSection } from './SettingsSection'
 
 /** Matches SetupWizard personas (style overlay). */
@@ -130,6 +136,7 @@ export function SettingsPanel({
   const [xaiLoginMsg, setXaiLoginMsg] = useState('')
   const xaiPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [vision, setVision] = useState<VisionStatus | null>(null)
+  const [swarm, setSwarm] = useState<NanoSwarmStatus | null>(null)
   const [visionBusy, setVisionBusy] = useState(false)
   const [visionMsg, setVisionMsg] = useState('')
   const visionPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -180,11 +187,18 @@ export function SettingsPanel({
     try {
       const vs = await getVisionStatus()
       setVision(vs)
+      // Internal continuity metrics only when Tool process is Full+
+      if (showsAdvancedDiagnostics(toolProcess)) {
+        const sw = await getNanoSwarmStatus().catch(() => null)
+        if (sw) setSwarm(sw)
+      } else {
+        setSwarm(null)
+      }
       return vs
     } catch {
       return null
     }
-  }, [])
+  }, [toolProcess])
 
   const startVisionInstallPoll = useCallback(() => {
     stopVisionPoll()
@@ -938,9 +952,11 @@ export function SettingsPanel({
               summary="Visibility of tool steps"
             >
               <div className="text-[10px] leading-snug mb-2" style={{ color: 'var(--text-muted)' }}>
-                How much of the provider tool trail to show in chat. Default is Off (minimal).
+                How much of the tool trail to show in chat. Default is Off (minimal).
+                <strong style={{ color: 'var(--text-secondary)' }}> Full+</strong> also shows
+                advanced continuity diagnostics (session quality, internal activity).
               </div>
-              <div className="flex gap-1 mb-1">
+              <div className="flex gap-1 mb-1 flex-wrap">
                 {TOOL_PROCESS_MODES.map((m) => (
                   <button
                     key={m.id}
@@ -949,7 +965,7 @@ export function SettingsPanel({
                       setToolProcess(m.id)
                       onToolProcessChange?.(m.id)
                     }}
-                    className="flex-1 py-1.5 rounded text-xs font-medium"
+                    className="flex-1 min-w-[3.5rem] py-1.5 rounded text-xs font-medium"
                     title={m.hint}
                     style={{
                       background: toolProcess === m.id ? 'var(--accent)' : 'var(--bg-tertiary)',
@@ -964,18 +980,59 @@ export function SettingsPanel({
               <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
                 {TOOL_PROCESS_MODES.find((m) => m.id === toolProcess)?.hint}
               </div>
+              {showsAdvancedDiagnostics(toolProcess) && swarm?.bots ? (
+                <div
+                  className="rounded-md px-2 py-1.5 mt-2 text-[10px] space-y-0.5"
+                  style={{
+                    background: 'var(--bg-tertiary)',
+                    border: '1px solid var(--border)',
+                    color: 'var(--text-secondary)',
+                  }}
+                >
+                  <div
+                    className="flex justify-between gap-2 font-medium"
+                    style={{ color: 'var(--text-primary)' }}
+                  >
+                    <span>Advanced · continuity activity</span>
+                    <span>{swarm.event_count ?? 0} events</span>
+                  </div>
+                  <div style={{ color: 'var(--text-muted)' }}>
+                    Internal: context measure · patterns · memory brief · skills · router
+                    {swarm.local_model_id ? ` · local ${swarm.local_model_id}` : ''}
+                  </div>
+                  {typeof (swarm.bots.memory as { last_fill_pct?: number })?.last_fill_pct ===
+                  'number' ? (
+                    <div>
+                      Context fill ~
+                      {Math.round(
+                        Number(
+                          (swarm.bots.memory as { last_fill_pct?: number }).last_fill_pct || 0,
+                        ) * 100,
+                      )}
+                      % · estimate{' '}
+                      {String(
+                        (swarm.bots.token as { last_method?: string })?.last_method || 'heuristic',
+                      )}
+                    </div>
+                  ) : null}
+                  <div style={{ color: 'var(--text-muted)' }}>
+                    Use /harness in chat for session quality baselines (tokens saved, stuck /
+                    re-explain rates, compress quality).
+                  </div>
+                </div>
+              ) : null}
             </SettingsSection>
 
-            {/* Visual decoder (local vision for text-only models) */}
+            {/* Local vision — user-facing; no swarm branding */}
             <SettingsSection
               id="vision"
-              title="Visual decoder"
-              summary="Local image understanding"
+              title="Local vision"
+              summary="Screenshots & OCR on this PC"
             >
               <div className="text-[10px] leading-snug mb-2" style={{ color: 'var(--text-muted)' }}>
-                When your chat model cannot see images, Remedy can run a local{' '}
-                <strong style={{ color: 'var(--text-secondary)' }}>Qwen2.5-VL 3B</strong> decoder
-                (llama.cpp) on this PC. Nothing downloads until you install.
+                Optional local <strong style={{ color: 'var(--text-secondary)' }}>Qwen2.5-VL 3B</strong>{' '}
+                (llama.cpp) for image understanding when your chat model is text-only. One-time
+                download (~2.8 GB), same model on every PC. Starts with Remedy when enabled.
               </div>
               {(vision?.warnings?.length || 0) > 0 && (
                 <div
@@ -1157,35 +1214,35 @@ export function SettingsPanel({
                 </span>
               </label>
               <div className="flex flex-wrap gap-1.5">
-                {!vision?.installed ||
-                vision.progress?.phase === 'cancelled' ||
-                vision.progress?.phase === 'error' ? (
+                {!vision?.installed ? (
                   <>
                     <button
                       type="button"
-                      disabled={
-                        visionBusy
-                        && (vision?.progress?.phase === 'downloading'
-                          || vision?.progress?.phase === 'extracting'
-                          || vision?.progress?.phase === 'verifying')
-                      }
+                      disabled={visionBusy}
                       className="px-2 py-1 rounded text-[10px] font-medium"
                       style={{ background: 'var(--accent)', color: '#fff' }}
                       onClick={() => {
                         void (async () => {
                           setVisionBusy(true)
-                          setVisionMsg('Starting install…')
+                          setVisionMsg('Downloading pinned local model…')
                           try {
-                            const r = await installVision({ prefer_cuda: false })
-                            if (r.warnings?.length) {
-                              setVisionMsg(r.warnings[0] || 'Installing…')
+                            const preferCuda = Boolean(vision?.health?.nvidia_detected)
+                            const r = await installVision({ prefer_cuda: preferCuda })
+                            if (
+                              r.mode === 'already_installed'
+                              || r.mode === 'local_files'
+                              || r.mode === 'bundled'
+                            ) {
+                              setVisionMsg(r.message || 'Local model ready — starts with Remedy')
+                              setVisionBusy(false)
+                            } else {
+                              startVisionInstallPoll()
+                              setVisionMsg(
+                                r.message
+                                  || 'Downloading Qwen2.5-VL 3B — server starts when finished.',
+                              )
                             }
-                            startVisionInstallPoll()
-                            setVisionMsg(
-                              `Downloading Qwen2.5-VL 3B + llama-server (${formatDownloadGb(
-                                vision?.model?.approx_download_bytes,
-                              )}+). Leave this open — Cancel keeps partials for resume.`,
-                            )
+                            await refreshVision()
                           } catch (err) {
                             setVisionBusy(false)
                             setVisionMsg(err instanceof Error ? err.message : String(err))
@@ -1193,13 +1250,41 @@ export function SettingsPanel({
                         })()
                       }}
                     >
-                      {visionBusy
-                        && (vision?.progress?.phase === 'downloading'
-                          || vision?.progress?.phase === 'extracting')
-                        ? 'Installing…'
-                        : vision?.progress?.phase === 'cancelled' || vision?.progress?.phase === 'error'
-                          ? 'Resume install'
-                          : 'Install visual decoder'}
+                      Download &amp; install local model
+                    </button>
+                    <button
+                      type="button"
+                      disabled={visionBusy}
+                      className="px-2 py-1 rounded text-[10px]"
+                      style={{
+                        background: 'var(--bg-tertiary)',
+                        color: 'var(--text-muted)',
+                        border: '1px solid var(--border)',
+                      }}
+                      title="If files already exist under ~/.remedy/vision"
+                      onClick={() => {
+                        void (async () => {
+                          setVisionBusy(true)
+                          setVisionMsg('Looking for existing files…')
+                          try {
+                            const r = await activateVisionBundle()
+                            if (r.ok === false || r.error) {
+                              setVisionMsg(
+                                r.error || 'No local files found — use Download & install.',
+                              )
+                            } else {
+                              setVisionMsg(r.message || 'Activated — starts with Remedy')
+                            }
+                            await refreshVision()
+                          } catch (err) {
+                            setVisionMsg(err instanceof Error ? err.message : String(err))
+                          } finally {
+                            setVisionBusy(false)
+                          }
+                        })()
+                      }}
+                    >
+                      Use existing files
                     </button>
                     {(vision?.progress?.phase === 'downloading'
                       || vision?.progress?.phase === 'extracting'
@@ -1224,7 +1309,7 @@ export function SettingsPanel({
                           })()
                         }}
                       >
-                        Cancel install
+                        Cancel
                       </button>
                     )}
                   </>
@@ -1246,7 +1331,7 @@ export function SettingsPanel({
                             try {
                               const r = await startVisionServer()
                               if (!r.ok) setVisionMsg(r.error || 'Start failed')
-                              else setVisionMsg('Server started')
+                              else setVisionMsg('Local server started')
                               await refreshVision()
                             } catch (err) {
                               setVisionMsg(err instanceof Error ? err.message : String(err))
@@ -1296,25 +1381,14 @@ export function SettingsPanel({
                           color: 'var(--text-primary)',
                           border: '1px solid var(--border)',
                         }}
-                        title="Download CUDA llama-server; keeps Qwen model files"
+                        title="Use CUDA llama-server (same Qwen weights)"
                         onClick={() => {
-                          if (
-                            !window.confirm(
-                              'Reinstall the visual decoder runtime with CUDA (NVIDIA)? '
-                              + 'Model weights are kept. Downloads the CUDA llama-server package.',
-                            )
-                          ) {
-                            return
-                          }
                           void (async () => {
                             setVisionBusy(true)
-                            setVisionMsg('Reinstalling CUDA runtime…')
+                            setVisionMsg('Switching to CUDA runtime…')
                             try {
                               await reinstallVisionRuntime(true)
                               startVisionInstallPoll()
-                              setVisionMsg(
-                                'Downloading CUDA llama-server — models kept. Leave this open.',
-                              )
                             } catch (err) {
                               setVisionBusy(false)
                               setVisionMsg(err instanceof Error ? err.message : String(err))
@@ -1322,7 +1396,7 @@ export function SettingsPanel({
                           })()
                         }}
                       >
-                        Switch to CUDA
+                        Use CUDA
                       </button>
                     ) : null}
                     {vision.health && !vision.health.cpu_runtime ? (
@@ -1336,16 +1410,9 @@ export function SettingsPanel({
                           border: '1px solid var(--border)',
                         }}
                         onClick={() => {
-                          if (
-                            !window.confirm(
-                              'Reinstall the CPU llama-server runtime? Model weights are kept.',
-                            )
-                          ) {
-                            return
-                          }
                           void (async () => {
                             setVisionBusy(true)
-                            setVisionMsg('Reinstalling CPU runtime…')
+                            setVisionMsg('Switching to CPU runtime…')
                             try {
                               await reinstallVisionRuntime(false)
                               startVisionInstallPoll()
@@ -1356,43 +1423,9 @@ export function SettingsPanel({
                           })()
                         }}
                       >
-                        Switch to CPU
+                        Use CPU
                       </button>
                     ) : null}
-                    <button
-                      type="button"
-                      disabled={visionBusy}
-                      className="px-2 py-1 rounded text-[10px]"
-                      style={{
-                        background: 'var(--bg-tertiary)',
-                        color: 'var(--text-muted)',
-                        border: '1px solid var(--border)',
-                      }}
-                      onClick={() => {
-                        if (
-                          !window.confirm(
-                            'Remove the visual decoder runtime and model files from ~/.remedy/vision?',
-                          )
-                        ) {
-                          return
-                        }
-                        void (async () => {
-                          setVisionBusy(true)
-                          try {
-                            await uninstallVision(false)
-                            await updateSettings({ vision_enabled: false })
-                            setVisionMsg('Uninstalled')
-                            await refreshVision()
-                          } catch (err) {
-                            setVisionMsg(err instanceof Error ? err.message : String(err))
-                          } finally {
-                            setVisionBusy(false)
-                          }
-                        })()
-                      }}
-                    >
-                      Uninstall
-                    </button>
                   </>
                 )}
                 <button
@@ -1416,7 +1449,7 @@ export function SettingsPanel({
                   style={{ color: 'var(--accent)' }}
                   onClick={() => onOpenHelp('14-visual-decoder')}
                 >
-                  Help: visual decoder
+                  Help: local vision
                 </button>
               ) : null}
             </SettingsSection>

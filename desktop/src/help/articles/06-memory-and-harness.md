@@ -53,6 +53,19 @@ Long chats fill the model context window. The harness:
 | **Manual** | Only when you `/compact` |
 | **Off** | No harness compression |
 
+## Continuity quality
+
+Remedy tracks **session quality** quietly: tokens saved by compress, stuck signals,
+and whether compress kept important files/decisions. Type **`/harness`** for a
+snapshot. Background continuity also:
+
+- Collapses old completed tool spans when context grows  
+- Injects short recovery guidance if you re-explain or loops appear  
+- Learns lightly per project folder (e.g. compress a bit earlier next time)  
+
+You should not need to manage this. For philosophy, see
+[How Remedy works (continuity)](16-continuity-philosophy).
+
 ## Best practices
 
 - Store stable facts with `/remember` (“I prefer TypeScript”, “Deploy host is …”).  
@@ -72,4 +85,4 @@ remedy handoff create "title" "content"
 
 ## Related
 
-- [Chat & sessions](05-chat-and-sessions) · [CLI & API](10-cli-and-api) · [Security & data](04-security-and-data)
+- [How Remedy works](16-continuity-philosophy) · [Chat & sessions](05-chat-and-sessions) · [CLI & API](10-cli-and-api) · [Security & data](04-security-and-data)
