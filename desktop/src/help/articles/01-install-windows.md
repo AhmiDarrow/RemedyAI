@@ -12,8 +12,9 @@
 2. Download the **`Remedy.Desktop_*_x64-setup.exe`** installer (not source zips).
 3. Prefer the latest **v0.10.x** signed release when available.
 
-> **SmartScreen / “Unknown publisher”**  
-> Solo builds may not be Authenticode-signed. Click **More info → Run anyway** if Windows warns. Always download only from this GitHub repo. In-app updates are still **minisign**-verified.
+> **SmartScreen / Windows Security**  
+> Solo builds may not be Authenticode-signed yet. If Windows says **Unknown publisher**, use **More info → Run anyway**.  
+> Rarely, Defender’s ML may mislabel a **new** install (e.g. generic “trojan” names used on many unsigned apps). That is a **false positive** — download **only** from this GitHub repo’s Releases, then **Protection history → Allow on this device** if needed. In-app updates are **minisign**-verified.
 
 ## Install steps
 

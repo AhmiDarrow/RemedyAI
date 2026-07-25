@@ -2,6 +2,15 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.11.1] — 2026-07-25
+
+### Fix: Windows Defender / SmartScreen posture (hardening)
+
+- **Persistence.A!ml (legacy):** still never writes `HKCU\…\Run`; scrub uses Rust **`winreg`** and NSIS **`DeleteRegValue`** (no hidden PowerShell Bypass on every launch/Settings poll).
+- **Wacatac / Bearfoos class:** PyInstaller sidecar gets a real **PE version resource** + **icon** (Company/Product/FileVersion); bundle **publisher/copyright/descriptions** set; Cargo package identity filled; UPX remains off.
+- Docs: Defender threat inventory in `docs/DESKTOP.md`, install/troubleshooting, `WINDOWS_SIGNING.md`.
+- Tests: `tests/test_build_desktop_version.py` for PE version resource content.
+
 ## [0.11.0] — 2026-07-24
 
 ### Feature: Continuity layer (ContextSnapshot + remedies + project learning)

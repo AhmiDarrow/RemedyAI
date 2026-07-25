@@ -62,6 +62,29 @@ Even with OV:
 - Download volume gradually improves SmartScreen reputation.
 - Host downloads on `github.com/AhmiDarrow/RemedyAI` (already).
 
+## Defender ML false positives (not SmartScreen)
+
+Separate from SmartScreen, **Windows Defender** ML may label unsigned
+PyInstaller/Tauri builds as:
+
+- `Trojan:Win32/Wacatac.B!ml`
+- `Trojan:Win32/Bearfoos.A!ml`
+- (legacy) `Behavior:Win32/Persistence.A!ml` when apps write `HKCU\…\Run`
+
+**Code mitigations already in-tree** (see also `docs/DESKTOP.md`):
+
+| Area | Mitigation |
+|------|------------|
+| Persistence | Startup folder `.lnk` only; never write Run; delete legacy Run names |
+| Scrub implementation | Rust `winreg` + NSIS `DeleteRegValue` (no hidden PowerShell Bypass on launch) |
+| Sidecar PE identity | PyInstaller `--version-file` + `--icon` (Company/Product/FileVersion filled) |
+| Packing | `--noupx` always |
+| Bundle metadata | `publisher`, `copyright`, descriptions in `tauri.conf.json`; Cargo authors/repo |
+
+**What still requires a certificate:** Authenticode on the NSIS installer and
+main EXE remains the strongest fix for SmartScreen and many ML FPs. Until then,
+submit each release binary to Microsoft WDSI if users report quarantines.
+
 ## Related files
 
 | File | Role |

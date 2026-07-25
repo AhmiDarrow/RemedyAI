@@ -46,10 +46,13 @@
 !macroend
 
 !macro NSIS_HOOK_POSTINSTALL
-  ; Scrub legacy HKCU Run keys from older builds (Defender Persistence.A!ml false positive).
+  ; Scrub legacy HKCU Run keys from older builds (Defender Persistence.A!ml).
+  ; Use NSIS DeleteRegValue — not PowerShell Bypass (ML treats hidden PS+Run as suspicious).
   ; Autostart (if user enables) uses Startup folder only — never registry Run.
   DetailPrint "Removing legacy autostart registry entries if present..."
-  nsExec::ExecToLog 'powershell -NoProfile -ExecutionPolicy Bypass -Command "foreach ($n in @(''RemedyDesktop'',''Remedy Desktop'',''remedy-desktop'')) { Remove-ItemProperty -Path ''HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'' -Name $n -ErrorAction SilentlyContinue }"'
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "RemedyDesktop"
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Remedy Desktop"
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "remedy-desktop"
 
   ; ---- Launch policy ----
   ; Interactive GUI installers show the finish page with:
@@ -86,7 +89,9 @@
   !insertmacro _REMEDY_KILL_ALL
   ; Remove optional Startup shortcut + any leftover Run keys (always on uninstall)
   Delete "$APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\Remedy Desktop.lnk"
-  nsExec::ExecToLog 'powershell -NoProfile -ExecutionPolicy Bypass -Command "foreach ($n in @(''RemedyDesktop'',''Remedy Desktop'',''remedy-desktop'')) { Remove-ItemProperty -Path ''HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'' -Name $n -ErrorAction SilentlyContinue }"'
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "RemedyDesktop"
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Remedy Desktop"
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "remedy-desktop"
 
   ; Default: keep user data unless the options dialog successfully says otherwise.
   !insertmacro _REMEDY_WRITE_KEEP_CHOICES

@@ -70,24 +70,33 @@ That refreshes `desktop/src-tauri/icons/*` (including multi-size `icon.ico` for
 Windows taskbar) and public favicons. **Rebuild the desktop app** after running
 the script so the new ICO is embedded in the EXE.
 
-### Windows Defender: `Behavior:Win32/Persistence.A!ml`
+### Windows Defender — known signals and how Remedy addresses them
 
-Older builds (0.10.19–0.10.21) used the **HKCU Run** registry key for “Start with Windows”.
-Defender’s ML model often flags that pattern as malware-style persistence.
+Remedy is **not** malware. Defender’s **ML** signatures sometimes mislabel
+unsigned or newly published desktop apps (especially PyInstaller sidecars).
+We treat every known trigger as a product defect and mitigate it in code.
 
-**Fix (0.10.22+):**
-- Autostart uses only the **Startup folder** shortcut  
-  (`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\Remedy Desktop.lnk`)
+| Defender name | What triggered it | Mitigation in current builds |
+|---------------|-------------------|------------------------------|
+| `Behavior:Win32/Persistence.A!ml` | Writing **HKCU\…\Run** for “Start with Windows” (0.10.19–0.10.21) | **Never write Run.** Autostart = **Startup folder** `.lnk` only. Launch/install/uninstall **delete** legacy values. |
+| Hidden PowerShell + Run key (related) | Launch/Settings polled and scrubbed Run via `powershell -ExecutionPolicy Bypass` | Scrub uses **`winreg` in Rust** (no PowerShell). NSIS uses **`DeleteRegValue`**. PowerShell only for optional `.lnk` create when the user toggles Start with Windows. |
+| `Trojan:Win32/Wacatac.B!ml` / `Bearfoos.A!ml` | Unsigned **PyInstaller onefile** with empty PE identity (Company/Product/FileVersion blank) | Sidecar build stamps **version resource** + **icon** (`scripts/build_desktop.py`). Bundle metadata: publisher, copyright, descriptions in `tauri.conf.json` / Cargo.toml. **No UPX.** |
+| SmartScreen “Unknown publisher” | No **Authenticode** on first browser download | Expected until OV/EV code signing. In-app updates still **minisign**-verified. See [WINDOWS_SIGNING.md](./WINDOWS_SIGNING.md). |
+
+**Autostart policy (Persistence):**
+- Enable path: `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\Remedy Desktop.lnk`
 - Visible under **Settings → Apps → Startup**
-- Registry Run entries are **never written**; install/launch **remove** any legacy ones
+- Registry Run entries are **never written**
 
 **If Defender already blocked an older install:**
-1. Update to 0.10.22+ (or reinstall the new installer).
-2. Windows Security → Virus & threat protection → Protection history → allow Remedy if listed.
-3. Optional: Windows Security → Manage settings → Add exclusion for  
-   `%LOCALAPPDATA%\Remedy Desktop\` (only if you trust the signed release).
-4. Confirm no `RemedyDesktop` value under  
-   `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`.
+1. Install the latest release from [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases) only.
+2. Windows Security → Virus & threat protection → **Protection history** → **Allow** on device if Remedy was quarantined.
+3. Optional (only if you trust that release): exclusions for  
+   `%LOCALAPPDATA%\Remedy Desktop\`
+4. Confirm no leftover value under  
+   `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` named `RemedyDesktop` / `Remedy Desktop` / `remedy-desktop`.
+
+**Reporting false positives (maintainers):** submit the installer + `remedy-desktop.exe` to Microsoft’s [//www.microsoft.com/wdsi/filesubmission](https://www.microsoft.com/en-us/wdsi/filesubmission) portal after each release that changes PE layout.
 
 ### Taskbar still shows an old (medical) icon?
 

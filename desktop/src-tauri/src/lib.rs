@@ -664,21 +664,34 @@ fn windows_startup_lnk_path() -> PathBuf {
     windows_startup_dir().join("Remedy Desktop.lnk")
 }
 
-/// Remove legacy HKCU Run entries left by older Remedy builds (Defender false-positive source).
+/// Names written by Remedy 0.10.19–0.10.21 under HKCU\...\Run (legacy only).
+#[cfg(target_os = "windows")]
+const LEGACY_RUN_VALUE_NAMES: &[&str] = &["RemedyDesktop", "Remedy Desktop", "remedy-desktop"];
+
+/// Remove legacy HKCU Run entries left by older Remedy builds.
+///
+/// Uses the Windows registry API directly — **no** hidden PowerShell with
+/// `-ExecutionPolicy Bypass` (that pattern itself looks like malware to ML).
+/// We only **delete** values; Remedy never writes the Run key.
 #[cfg(target_os = "windows")]
 fn remove_legacy_run_key() {
-    use std::os::windows::process::CommandExt;
-    // Names used in 0.10.19–0.10.21
-    let ps = r#"
-$names = @('RemedyDesktop','Remedy Desktop','remedy-desktop')
-foreach ($n in $names) {
-  Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name $n -ErrorAction SilentlyContinue
-}
-"#;
-    let _ = Command::new("powershell")
-        .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps])
-        .creation_flags(CREATE_NO_WINDOW)
-        .status();
+    use winreg::enums::{HKEY_CURRENT_USER, KEY_SET_VALUE};
+    use winreg::RegKey;
+
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let Ok(key) = hkcu.open_subkey_with_flags(
+        r"Software\Microsoft\Windows\CurrentVersion\Run",
+        KEY_SET_VALUE,
+    ) else {
+        return;
+    };
+    for name in LEGACY_RUN_VALUE_NAMES {
+        // Missing values are normal on clean installs; any other error is non-fatal.
+        match key.delete_value(name) {
+            Ok(()) => log::info!("Removed legacy HKCU Run value '{name}'"),
+            Err(e) => log::debug!("HKCU Run delete '{name}': {e}"),
+        }
+    }
 }
 
 /// Windows: enable/disable "Start with Windows" via **Startup folder shortcut only**.
@@ -688,7 +701,7 @@ fn set_launch_at_login(enabled: bool) -> Result<bool, String> {
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
-        // Always scrub legacy Run keys when toggling.
+        // Scrub any leftover Run keys when the user toggles autostart (not on every poll).
         remove_legacy_run_key();
 
         let exe = env::current_exe().map_err(|e| e.to_string())?;
@@ -705,6 +718,7 @@ fn set_launch_at_login(enabled: bool) -> Result<bool, String> {
             std::fs::create_dir_all(&startup)
                 .map_err(|e| format!("create Startup folder: {e}"))?;
             // User-visible shortcut only — shows under Settings → Apps → Startup.
+            // PowerShell is used only on explicit user toggle (not every launch).
             let ps = format!(
                 r#"
 $ErrorActionPreference = 'Stop'
@@ -752,8 +766,8 @@ $s.Save()
 fn get_launch_at_login() -> Result<bool, String> {
     #[cfg(target_os = "windows")]
     {
-        // Migrate away from registry Run (one-shot cleanup on every status check).
-        remove_legacy_run_key();
+        // Read-only: presence of the Startup folder shortcut.
+        // Do **not** spawn PowerShell or touch the registry on every Settings poll.
         let lnk = windows_startup_lnk_path();
         return Ok(lnk.is_file());
     }
@@ -763,7 +777,7 @@ fn get_launch_at_login() -> Result<bool, String> {
     }
 }
 
-/// One-shot cleanup for Defender: remove legacy Run keys without enabling autostart.
+/// Cleanup for Defender: remove legacy Run keys without enabling autostart.
 #[tauri::command]
 fn scrub_legacy_autostart() -> Result<String, String> {
     #[cfg(target_os = "windows")]
@@ -1953,7 +1967,8 @@ pub fn run() {
                 }
             }
 
-            // Scrub legacy HKCU Run keys on every launch (Defender Persistence.A!ml mitigation).
+            // One-time-per-session scrub of legacy HKCU Run keys via winreg (no PowerShell).
+            // Writing Run was Persistence.A!ml; we only delete leftovers from 0.10.19–0.10.21.
             #[cfg(target_os = "windows")]
             {
                 remove_legacy_run_key();

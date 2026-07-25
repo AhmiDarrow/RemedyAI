@@ -2,7 +2,13 @@
 
 High-level product notes for owners. Full detail lives in repo `CHANGELOG.md`.
 
-Ship **one** installer/tag for the current series (**v0.11.0**).
+Ship **one** installer/tag for the current series (**v0.11.1**).
+
+## 0.11.1 — Windows Defender posture
+
+- **No registry Run** for Start with Windows (Startup folder only); legacy Run scrub via Rust `winreg` + NSIS `DeleteRegValue` (no hidden PowerShell on launch).
+- Sidecar PE **product identity** (Company/Product/FileVersion + icon) to reduce Wacatac/Bearfoos-class ML false positives.
+- Installer/bundle publisher metadata filled. See F1 → Troubleshooting if Windows Security still mislabels a new unsigned build.
 
 ## 0.11.0 — Continuity layer, local vision download, session quality
 

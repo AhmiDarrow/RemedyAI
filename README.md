@@ -74,7 +74,7 @@ The recommended way to use Remedy is the native desktop application — no Pytho
 3. Launch from the Start Menu — the SetupWizard guides you through provider and model configuration
 4. Press **F1** for the offline Help wiki (owner's manual), or type `/help` for the command card
 
-> **Windows SmartScreen?** Solo builds are not Authenticode-signed yet (costly for indie). If Windows says “Unknown publisher”, click **More info → Run anyway**. The download is from this GitHub repo only. In-app updates are still **minisign**-verified.
+> **Windows SmartScreen / Defender?** Solo builds are not Authenticode-signed yet (costly for indie). If Windows says “Unknown publisher”, click **More info → Run anyway**. Defender ML may rarely mislabel **new** unsigned desktop apps — install **only** from this GitHub repo’s Releases, then **Protection history → Allow** if needed. Autostart never uses the registry Run key (Startup folder only). In-app updates are **minisign**-verified.
 
 The desktop app bundles the full Remedy server as a sidecar, so everything runs locally on your machine.
 

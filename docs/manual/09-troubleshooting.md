@@ -77,17 +77,30 @@ so the webview reported a network error. **0.10.38+** lets OPTIONS through auth;
 
 ## SmartScreen / Unknown publisher
 
-- **More info → Run anyway** for GitHub-sourced installers.  
-- Prefer releases from `AhmiDarrow/RemedyAI` only.
+- Install **only** from [RemedyAI Releases](https://github.com/AhmiDarrow/RemedyAI/releases).  
+- If Windows says **Unknown publisher**: **More info → Run anyway**.  
+- In-app updates are **minisign**-verified even when the first installer is not Authenticode-signed yet.
 
-## Defender Persistence.A!ml (legacy)
+## Windows Defender false positives
 
-Older builds used HKCU Run for autostart. **0.10.22+** uses Startup folder only.
+Defender’s machine-learning names sometimes mislabel legitimate desktop apps
+(especially new releases). Remedy is local-first software from this repo — not a
+Trojan. Known historical / ML labels and status:
 
-1. Update to latest.  
-2. Protection history → allow if blocked.  
-3. Confirm no `RemedyDesktop` under  
-   `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`.
+| Name | Status |
+|------|--------|
+| `Behavior:Win32/Persistence.A!ml` | **Fixed** — old builds wrote `HKCU\…\Run`; current builds use **Startup folder** only and scrub legacy keys without PowerShell. |
+| `Trojan:Win32/Wacatac.B!ml` | **Mitigated** — sidecar PE now has product version/company/icon metadata; still improve further with Authenticode. |
+| `Trojan:Win32/Bearfoos.A!ml` | Same class of ML hit on unsigned PyInstaller-style binaries; same mitigations. |
+
+**If Windows Security quarantines Remedy after install or first run:**
+
+1. Open **Windows Security → Virus & threat protection → Protection history**.  
+2. Find the Remedy entry → **Actions → Allow on this device** (or Restore).  
+3. Relaunch from Start Menu → **Remedy Desktop**.  
+4. Prefer the **latest** installer from GitHub Releases (older 0.10.19–0.10.21 builds are more likely to trip Persistence).  
+5. Optional: confirm no value named `RemedyDesktop` / `Remedy Desktop` / `remedy-desktop` under  
+   `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (current builds never write these).
 
 ## Wrong / old taskbar icon
 

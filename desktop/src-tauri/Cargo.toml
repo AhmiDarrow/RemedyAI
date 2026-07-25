@@ -1,10 +1,11 @@
 [package]
 name = "app"
-version = "0.11.0"
-description = "A Tauri App"
-authors = ["you"]
-license = ""
-repository = ""
+version = "0.11.1"
+description = "Remedy Desktop — local AI partner for knowledge, design, and code"
+authors = ["Ahmi <ahmitdarrow@gmail.com>"]
+license = "MIT"
+repository = "https://github.com/AhmiDarrow/RemedyAI"
+homepage = "https://github.com/AhmiDarrow/RemedyAI"
 edition = "2021"
 rust-version = "1.77.2"
 
@@ -27,3 +28,5 @@ tauri-plugin-shell = "2"
 tauri-plugin-updater = "2.10.1"
 ureq = { version = "2.12", default-features = false, features = ["tls", "json"] }
 base64 = "0.22"
+# Direct registry access for legacy Run-key scrub (no PowerShell Bypass).
+winreg = "0.55"
