@@ -2,7 +2,12 @@
 
 High-level product notes for owners. Full detail lives in repo `CHANGELOG.md`.
 
-Ship **one** installer/tag for the current series (**v0.12.2**).
+Ship **one** installer/tag for the current series (**v0.12.3**).
+
+## 0.12.3 — Agent runtime peel
+
+- Agent core split further: post-turn, local tools, LLM HTTP, history, session binding modules.
+- Same product behavior; thinner `agent.py` for safer maintenance.
 
 ## 0.12.2 — Single relaunch · thinner agent context
 

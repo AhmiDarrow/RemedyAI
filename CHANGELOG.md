@@ -2,6 +2,15 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.12.3] — 2026-07-25
+
+### Refactor: agent.py peel (orchestrator thinner)
+
+- Extract modules (mypy-covered where new): `agent_context`, `agent_post_turn`,
+  `agent_local_tools`, `agent_llm`, `agent_history`, `agent_session`.
+- `BasicRuntime` keeps ReAct stream/tool loop; registration and HTTP helpers
+  are thin wrappers. ~2.4k → ~1.9k lines in `agent.py`.
+
 ## [0.12.2] — 2026-07-25
 
 ### Fix: autoupdate double relaunch
