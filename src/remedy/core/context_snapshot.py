@@ -180,6 +180,15 @@ def build_context_snapshot(
     except Exception:
         pass
 
+    def _append_remedy(text: str) -> None:
+        t = (text or "").strip()
+        if not t:
+            return
+        if snap.remedy_system:
+            snap.remedy_system = snap.remedy_system + "\n" + t
+        else:
+            snap.remedy_system = t
+
     # Pack nanobot — silent hint when context is heavy
     try:
         pack_out = swarm.pack.pack_for_turn(
@@ -195,15 +204,56 @@ def build_context_snapshot(
             "aggressive": pack_out.get("aggressive"),
             "pins": len(pack_out.get("pins") or []),
         }
-        hint = str(pack_out.get("system_hint") or "").strip()
-        if hint:
-            # Fold into remedy_system so one system inject carries both
-            if snap.remedy_system:
-                snap.remedy_system = snap.remedy_system + "\n" + hint
-            else:
-                snap.remedy_system = hint
+        _append_remedy(str(pack_out.get("system_hint") or ""))
     except Exception as e:
         snap.signals["pack_error"] = str(e)
+
+    # Scout — first-tool orientation for tool/plan work
+    try:
+        scout_out = swarm.scout.scout(
+            user_text or "",
+            intent=intent,
+            project_path=project_path,
+        )
+        snap.signals["scout"] = {
+            "active": scout_out.get("active"),
+            "suggest_tools": scout_out.get("suggest_tools") or [],
+        }
+        if scout_out.get("active"):
+            _append_remedy(str(scout_out.get("system_hint") or ""))
+            # Merge scout tools into policy signal
+            st = list(snap.signals.get("policy", {}).get("suggest_tools") or [])
+            for t in scout_out.get("suggest_tools") or []:
+                if t not in st:
+                    st.append(t)
+            if "policy" in snap.signals:
+                snap.signals["policy"]["suggest_tools"] = st[:12]
+    except Exception as e:
+        snap.signals["scout_error"] = str(e)
+
+    # Goal — open checklist stale detection
+    try:
+        swarm.goal.sync_from_brief(brief if apply_brief_touch else None, session_id=session_id)
+        gsnap = swarm.goal.snapshot(session_id)
+        snap.signals["goal"] = gsnap
+        _append_remedy(swarm.goal.system_hint(session_id))
+    except Exception as e:
+        snap.signals["goal_error"] = str(e)
+
+    # Health — flaky provider note (no network probe)
+    try:
+        h = swarm.health.snapshot(provider=provider, model=model)
+        snap.signals["health"] = {
+            "error_rate": h.get("error_rate"),
+            "rate_limit_hits": h.get("rate_limit_hits"),
+            "avg_latency_ms": h.get("avg_latency_ms"),
+            "flaky": h.get("flaky"),
+            "samples": h.get("samples"),
+        }
+        if h.get("flaky"):
+            _append_remedy(str(h.get("system_hint") or ""))
+    except Exception as e:
+        snap.signals["health_error"] = str(e)
 
     # Swarm status counters (shared coordinator — locked API, no private races)
     try:

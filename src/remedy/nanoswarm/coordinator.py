@@ -7,12 +7,15 @@ import time
 from typing import Any
 
 from remedy.nanoswarm.events import SwarmEvent
+from remedy.nanoswarm.goal_nanobot import GoalNanobot
 from remedy.nanoswarm.guard_nanobot import GuardNanobot
+from remedy.nanoswarm.health_nanobot import HealthNanobot
 from remedy.nanoswarm.helper_nanobot import HelperNanobot
 from remedy.nanoswarm.memory_nanobot import MemoryNanobot
 from remedy.nanoswarm.pack_nanobot import PackNanobot
 from remedy.nanoswarm.pattern_nanobot import PatternNanobot
 from remedy.nanoswarm.router_nanobot import RouterNanobot
+from remedy.nanoswarm.scout_nanobot import ScoutNanobot
 from remedy.nanoswarm.skill_nanobot import SkillNanobot
 from remedy.nanoswarm.token_nanobot import get_token_nanobot
 
@@ -29,6 +32,9 @@ class NanoSwarm:
         self.helper = HelperNanobot()
         self.pack = PackNanobot()
         self.guard = GuardNanobot()
+        self.goal = GoalNanobot()
+        self.scout = ScoutNanobot()
+        self.health = HealthNanobot()
         self._lock = threading.Lock()
         self._event_count = 0
         self._last_event: str | None = None
@@ -73,10 +79,17 @@ class NanoSwarm:
                 results["signals"]["router"] = self.router.classify_intent(content)
 
         elif event.name == "tool_step":
+            tname = str(event.payload.get("tool_name") or "unknown")
+            ok = bool(event.payload.get("success", True))
             results["signals"]["pattern"] = self.pattern.on_tool_step(
-                str(event.payload.get("tool_name") or "unknown"),
-                success=bool(event.payload.get("success", True)),
+                tname,
+                success=ok,
                 duration_ms=float(event.payload.get("duration_ms") or 0),
+                session_id=str(session_id) if session_id else None,
+            )
+            results["signals"]["goal"] = self.goal.on_tool_step(
+                tname,
+                success=ok,
                 session_id=str(session_id) if session_id else None,
             )
 
@@ -136,6 +149,16 @@ class NanoSwarm:
             except Exception as e:
                 results["signals"]["usage"] = {"error": str(e)}
 
+        elif event.name == "provider_health":
+            results["signals"]["health"] = self.health.report(
+                provider=event.payload.get("provider"),
+                model=event.payload.get("model"),
+                ok=bool(event.payload.get("ok", True)),
+                latency_ms=float(event.payload.get("latency_ms") or 0),
+                error=event.payload.get("error"),
+                status_code=event.payload.get("status_code"),
+            )
+
         return results
 
     def status(self) -> dict[str, Any]:
@@ -159,6 +182,9 @@ class NanoSwarm:
                 "helper": self.helper.status(),
                 "pack": self.pack.status(),
                 "guard": self.guard.status(),
+                "goal": self.goal.status(),
+                "scout": self.scout.status(),
+                "health": self.health.status(),
             },
         }
 

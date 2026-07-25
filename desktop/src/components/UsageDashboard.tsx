@@ -359,6 +359,40 @@ export function UsageDashboard({
                   </div>
                 </div>
               )}
+
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div
+                  className="rounded px-3 py-2"
+                  style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}
+                >
+                  <div className="font-medium mb-1">Goals</div>
+                  <div style={{ color: 'var(--text-muted)' }}>
+                    {(continuity.goal?.open || []).length
+                      ? (continuity.goal?.open || []).slice(0, 4).join(' · ')
+                      : 'No open goals tracked'}
+                    {continuity.goal?.stale ? ' · stale' : ''}
+                  </div>
+                </div>
+                <div
+                  className="rounded px-3 py-2"
+                  style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}
+                >
+                  <div className="font-medium mb-1">Provider health</div>
+                  <div style={{ color: 'var(--text-muted)' }}>
+                    samples {continuity.health?.samples ?? 0}
+                    {continuity.health?.error_rate != null
+                      ? ` · err ${(Number(continuity.health.error_rate) * 100).toFixed(0)}%`
+                      : ''}
+                    {continuity.health?.avg_latency_ms != null
+                      ? ` · ~${Math.round(Number(continuity.health.avg_latency_ms))}ms`
+                      : ''}
+                    {continuity.health?.flaky ? ' · flaky' : ''}
+                    {continuity.health?.rate_limit_hits
+                      ? ` · 429×${continuity.health.rate_limit_hits}`
+                      : ''}
+                  </div>
+                </div>
+              </div>
             </>
           )}
         </div>

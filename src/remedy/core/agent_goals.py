@@ -75,6 +75,13 @@ def register_goal_and_plan_tools(runtime: Any) -> None:
         task.completed_at = datetime.now(UTC)
         task.updated_at = datetime.now(UTC)
         with suppress(Exception):
+            from remedy.nanoswarm import get_swarm
+
+            get_swarm().goal.note_completed(
+                task.title,
+                session_id=str(getattr(runtime, "_session_id", "") or ""),
+            )
+        with suppress(Exception):
             if runtime._session_brief is not None:
                 runtime._session_brief.open_tasks = [
                     x

@@ -90,6 +90,35 @@ def test_helper_offline_help_and_error():
     assert any("key" in x.lower() or "auth" in x.lower() for x in err["hints"])
 
 
+def test_goal_scout_health_nanobots():
+    from remedy.nanoswarm.goal_nanobot import GoalNanobot
+    from remedy.nanoswarm.health_nanobot import HealthNanobot
+    from remedy.nanoswarm.scout_nanobot import ScoutNanobot
+
+    g = GoalNanobot()
+
+    class _Brief:
+        open_tasks = ["Ship provider switch", "Write tests"]
+
+    g.sync_from_brief(_Brief(), session_id="s1")
+    for _ in range(8):
+        g.on_tool_step("list_dir", success=True, session_id="s1")
+    snap = g.snapshot("s1")
+    assert snap["stale"] is True
+    assert "Ship" in g.system_hint("s1") or "goal" in g.system_hint("s1").lower()
+
+    scout = ScoutNanobot().scout("debug the pytest failure", intent="tool")
+    assert scout["active"] is True
+    assert scout["suggest_tools"]
+
+    health = HealthNanobot()
+    health.report(provider="xai", model="grok", ok=False, error="429 rate limit")
+    health.report(provider="xai", model="grok", ok=False, error="429 rate limit")
+    h = health.snapshot(provider="xai", model="grok")
+    assert h["rate_limit_hits"] >= 2
+    assert h["flaky"] is True
+
+
 def test_usage_ledger_summary(tmp_path: Path):
     home = tmp_path / "remedy-home"
     home.mkdir()

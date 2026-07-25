@@ -56,16 +56,23 @@ def register_usage_routes(app: FastAPI, *, runtime=None, gateway=None, memory=No
         remeasure = token.last_remeasure(sid or None)
         snap = getattr(runtime, "_last_context_snapshot", None) if runtime else None
         snap_pub = snap.to_public() if snap is not None and hasattr(snap, "to_public") else None
+        prov = token.active_provider or getattr(runtime, "_llm_provider", None)
+        mod = token.active_model or getattr(runtime, "_llm_model", None)
+        health = swarm.health.snapshot(provider=prov, model=mod)
+        goal = swarm.goal.snapshot(sid or None)
+        scout = swarm.scout.status()
         return {
             "session_id": sid or "_default",
             "session_quality": quality,
             "pattern": pat,
+            "goal": goal,
+            "scout": scout,
+            "health": health,
             "token": {
                 "last_method": token.last_method,
                 "last_estimate": token.last_estimate,
-                "active_provider": token.active_provider
-                or getattr(runtime, "_llm_provider", None),
-                "active_model": token.active_model or getattr(runtime, "_llm_model", None),
+                "active_provider": prov,
+                "active_model": mod,
                 "last_remeasure": remeasure,
                 "status": token.status(),
             },

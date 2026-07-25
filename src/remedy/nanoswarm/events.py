@@ -55,6 +55,30 @@ class SwarmEvent:
         )
 
     @staticmethod
+    def provider_health(
+        *,
+        provider: str | None = None,
+        model: str | None = None,
+        ok: bool = True,
+        latency_ms: float = 0.0,
+        error: str | None = None,
+        status_code: int | None = None,
+        **extra: Any,
+    ) -> SwarmEvent:
+        return SwarmEvent(
+            "provider_health",
+            {
+                "provider": provider,
+                "model": model,
+                "ok": ok,
+                "latency_ms": latency_ms,
+                "error": error,
+                "status_code": status_code,
+                **extra,
+            },
+        )
+
+    @staticmethod
     def usage_observed(
         *,
         provider: str | None = None,

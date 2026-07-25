@@ -11,6 +11,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 from collections.abc import AsyncIterator
 from contextlib import suppress
 from pathlib import Path
@@ -1578,14 +1579,30 @@ class BasicRuntime(AgentRuntime):
                     collected: dict[str, Any] = {"content": None, "tool_calls": None}
                     round_state = StreamRoundState()
 
+                    _llm_t0 = time.perf_counter()
                     async with http.post(
                         endpoint, headers=headers, json=body
                     ) as resp:
+                        _llm_ms = (time.perf_counter() - _llm_t0) * 1000.0
                         if resp.status != 200:
                             text = await resp.text()
                             logger.error(
                                 "LLM API error %d: %s", resp.status, text[:500]
                             )
+                            with suppress(Exception):
+                                from remedy.nanoswarm import get_swarm
+                                from remedy.nanoswarm.events import SwarmEvent
+
+                                get_swarm().dispatch(
+                                    SwarmEvent.provider_health(
+                                        provider=getattr(self, "_llm_provider", None),
+                                        model=getattr(self, "_llm_model", None),
+                                        ok=False,
+                                        latency_ms=_llm_ms,
+                                        error=text[:200],
+                                        status_code=int(resp.status),
+                                    )
+                                )
                             # xAI (and similar): expired OAuth → refresh once, retry.
                             if (
                                 resp.status in (401, 403)
@@ -1678,6 +1695,20 @@ class BasicRuntime(AgentRuntime):
                             tools = []
                             force_answer_sticky = True
                             continue
+
+                        with suppress(Exception):
+                            from remedy.nanoswarm import get_swarm
+                            from remedy.nanoswarm.events import SwarmEvent
+
+                            get_swarm().dispatch(
+                                SwarmEvent.provider_health(
+                                    provider=getattr(self, "_llm_provider", None),
+                                    model=getattr(self, "_llm_model", None),
+                                    ok=True,
+                                    latency_ms=_llm_ms,
+                                    status_code=200,
+                                )
+                            )
 
                         # Live-stream final-answer rounds (no tools this step).
                         # Buffer when tools are enabled — DeepSeek-class models

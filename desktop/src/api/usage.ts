@@ -37,6 +37,22 @@ export interface ContinuityDashboard {
     success_rate: number | null
     recent: string[]
   }
+  goal?: {
+    open?: string[]
+    stale?: boolean
+    tool_steps_since_sync?: number
+  }
+  health?: {
+    error_rate?: number
+    rate_limit_hits?: number
+    avg_latency_ms?: number | null
+    flaky?: boolean
+    samples?: number
+  }
+  scout?: {
+    last_tools?: string[]
+    last_active?: boolean
+  }
   token: {
     last_method: string
     last_estimate: number
