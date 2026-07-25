@@ -33,9 +33,17 @@ On Windows, `~` is your user profile (`C:\Users\<you>`).
 - Bound to **127.0.0.1** — not exposed to your LAN by default.  
 - Token file is ACL-hardened (no “Everyone” write).  
 - Desktop prefers OS/IPC token; browser WebUI uses loopback bootstrap only.  
-- Optional: `REMEDY_HTTP_BOOTSTRAP=0` disables HTTP bootstrap (desktop IPC only).  
+- **Browser token bootstrap** (Settings → Security & power, or `http_bootstrap` / `REMEDY_HTTP_BOOTSTRAP`):  
+  - **On** (default) — browser Web UI can obtain the loopback token (full Web UI power).  
+  - **Off** — desktop IPC only (safer against lesser local processes; desktop app power unchanged).  
 - CORS `*` is **refused** while auth is on.  
 - Auth-off + non-loopback bind requires `REMEDY_ALLOW_INSECURE_BIND=1` (owner escape hatch).  
+
+## Web tools (`web_fetch`)
+
+- **Off by default** (`web_tools_enabled = false`). Turn on in Settings when you want online fetch.  
+- **SSRF protection**: private/localhost/metadata hosts blocked; DNS is resolved once and the connection is **pinned** to a public IP (mitigates DNS rebinding). Redirects re-validated per hop.  
+- Does **not** remove public-web fetch power when enabled — only blocks non-public targets.  
 
 ## WebUI vs quit
 
@@ -59,20 +67,24 @@ Always prefer the narrowest scope that still works for your task.
 
 ## Approvals
 
-High-impact tools (e.g. shell) use **approval mode**:
+High-impact tools (shell, file write/edit, skill scripts) use **approval mode**.  
+**Power is never stripped for the owner** — only the default prompt surface changes:
 
 | Mode | Behavior |
 |------|----------|
-| **Ask** (default) | Banner: Approve / Deny for sensitive actions |
-| **Auto** | Fewer prompts — use only if you trust the workspace |
+| **Ask** (default, safe) | Banner: Approve / Deny for high-impact tools; soft-risk shell patterns are labeled |
+| **Auto** | **Work until done** — no prompts on trusted scopes (project/home/full). Remedy runs shell/write/skills to finish. |
 
-Commands: `/approve`, `/deny` (when an id is shown).
+**Untrusted** access scope still always asks, even in Auto (downloaded folders).  
+Hard wipe/privilege blocks (`check_dangerous_command`) still apply in every mode — those are safety rails, not “power stripped.”
+
+Commands: `/approve`, `/deny` (when an id is shown). Status bar thumbs toggle Ask/Auto.
 
 ## Skills security
 
-- Imported skill zips are checked for **Zip Slip** / unsafe paths.  
+- Imported skill zips are checked for **Zip Slip**, path escape, and **streamed size caps** (decompression bombs).  
 - Quarantined skills **cannot** run until you **Trust** them in the Skills panel.  
-- Prefer bundled / reviewed skills for production workflows.
+- Prefer bundled / reviewed skills for production workflows.  
 
 ## Secrets hygiene
 

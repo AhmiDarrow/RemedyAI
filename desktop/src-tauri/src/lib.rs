@@ -72,19 +72,15 @@ fn toml_bool(raw: &str, key: &str) -> Option<bool> {
     None
 }
 
-fn json_bool(raw: &str, key: &str) -> Option<bool> {
-    // Match "key": true/false with optional spaces
-    let true_pat = format!("\"{}\": true", key);
-    let true_pat2 = format!("\"{}\":true", key);
-    let false_pat = format!("\"{}\": false", key);
-    let false_pat2 = format!("\"{}\":false", key);
-    if raw.contains(&true_pat) || raw.contains(&true_pat2) {
-        return Some(true);
-    }
-    if raw.contains(&false_pat) || raw.contains(&false_pat2) {
-        return Some(false);
-    }
-    None
+/// Wire format for `~/.remedy/desktop.json` (serde — no brittle string contains).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+struct DesktopPrefsFile {
+    #[serde(default)]
+    close_to_tray: Option<bool>,
+    #[serde(default)]
+    start_in_tray: Option<bool>,
+    #[serde(default)]
+    skip_quit_server_warning: Option<bool>,
 }
 
 fn load_desktop_prefs() -> DesktopPrefs {
@@ -95,19 +91,22 @@ fn load_desktop_prefs() -> DesktopPrefs {
         skip_quit_server_warning: false,
     };
 
-    // 1) Prefer shell-owned desktop.json when present
+    // 1) Prefer shell-owned desktop.json when present (proper JSON via serde_json)
     let desk = desktop_prefs_path();
     if let Ok(raw) = std::fs::read_to_string(&desk) {
-        if let Some(v) = json_bool(&raw, "close_to_tray") {
-            prefs.close_to_tray = v;
+        if let Ok(file) = serde_json::from_str::<DesktopPrefsFile>(&raw) {
+            if let Some(v) = file.close_to_tray {
+                prefs.close_to_tray = v;
+            }
+            if let Some(v) = file.start_in_tray {
+                prefs.start_in_tray = v;
+            }
+            if let Some(v) = file.skip_quit_server_warning {
+                prefs.skip_quit_server_warning = v;
+            }
+            return prefs;
         }
-        if let Some(v) = json_bool(&raw, "start_in_tray") {
-            prefs.start_in_tray = v;
-        }
-        if let Some(v) = json_bool(&raw, "skip_quit_server_warning") {
-            prefs.skip_quit_server_warning = v;
-        }
-        return prefs;
+        log::warn!("desktop.json parse failed; using defaults + TOML fallback if any");
     }
 
     // 2) Fall back to config.toml (Settings writes here; desktop.json may be missing)
@@ -143,17 +142,13 @@ fn save_desktop_prefs(prefs: &DesktopPrefs) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    let body = format!(
-        "{{\n  \"close_to_tray\": {},\n  \"start_in_tray\": {},\n  \"skip_quit_server_warning\": {}\n}}\n",
-        if prefs.close_to_tray { "true" } else { "false" },
-        if prefs.start_in_tray { "true" } else { "false" },
-        if prefs.skip_quit_server_warning {
-            "true"
-        } else {
-            "false"
-        },
-    );
-    std::fs::write(&path, body).map_err(|e| e.to_string())
+    let file = DesktopPrefsFile {
+        close_to_tray: Some(prefs.close_to_tray),
+        start_in_tray: Some(prefs.start_in_tray),
+        skip_quit_server_warning: Some(prefs.skip_quit_server_warning),
+    };
+    let body = serde_json::to_string_pretty(&file).map_err(|e| e.to_string())?;
+    std::fs::write(&path, body + "\n").map_err(|e| e.to_string())
 }
 
 struct ServerState {

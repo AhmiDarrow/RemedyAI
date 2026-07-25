@@ -45,6 +45,18 @@ def _normalize_tool_process(cfg: dict | None = None, raw: object = None) -> str:
     return "off"
 
 
+def _effective_http_bootstrap(cfg: dict | None = None) -> bool:
+    """Whether loopback HTTP token bootstrap is on (env > config > default True)."""
+    try:
+        from remedy.interfaces.local_auth import http_bootstrap_enabled
+
+        return bool(http_bootstrap_enabled())
+    except Exception:
+        if isinstance(cfg, dict) and "http_bootstrap" in cfg:
+            return bool(cfg.get("http_bootstrap"))
+        return True
+
+
 def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory=None) -> None:
     """Register routes (closes over runtime/gateway/memory)."""
     # -- settings -----------------------------------------------------------
@@ -157,6 +169,8 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             "thinking_level": str(cfg.get("thinking_level") or "high").lower(),
             "approval_mode": str(cfg.get("approval_mode") or "ask").lower(),
             "tool_process": _normalize_tool_process(cfg),
+            "web_tools_enabled": bool(cfg.get("web_tools_enabled", False)),
+            "http_bootstrap": _effective_http_bootstrap(cfg),
             "enabled_providers": cfg.get("enabled_providers"),
             "enabled_models": cfg.get("enabled_models") or {},
             "last_model_by_provider": cfg.get("last_model_by_provider") or {},
@@ -324,6 +338,12 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                 APPROVALS.set_mode(updates["approval_mode"])
             except Exception:
                 pass
+
+        if "web_tools_enabled" in updates and updates["web_tools_enabled"] is not None:
+            updates["web_tools_enabled"] = bool(updates["web_tools_enabled"])
+
+        if "http_bootstrap" in updates and updates["http_bootstrap"] is not None:
+            updates["http_bootstrap"] = bool(updates["http_bootstrap"])
 
         # tool_process: off | medium | full (legacy show_tool_calls bool → full/off)
         if "tool_process" in updates and updates["tool_process"] is not None:

@@ -27,15 +27,45 @@ def auth_enabled() -> bool:
     return flag not in ("0", "false", "no", "off", "disable", "disabled")
 
 
+def _env_truthy(name: str) -> bool | None:
+    """Return True/False if env is set to a known flag, else None (unset)."""
+    if name not in os.environ:
+        return None
+    flag = str(os.environ.get(name, "")).strip().lower()
+    if flag in ("0", "false", "no", "off", "disable", "disabled"):
+        return False
+    if flag in ("1", "true", "yes", "on", "enable", "enabled"):
+        return True
+    return None
+
+
 def http_bootstrap_enabled() -> bool:
     """Whether loopback HTTP may hand out the local API token.
 
-    Desktop prefers IPC (``get_local_api_token``). Set ``REMEDY_HTTP_BOOTSTRAP=0``
-    to require IPC-only (harder for other local processes to steal the token).
-    Default remains on for Web UI / first-run browser access.
+    **Power model:** desktop prefers OS/IPC (``get_local_api_token``) — that
+    path never needs HTTP bootstrap. Browser Web UI needs bootstrap ON.
+
+    Priority:
+      1. ``REMEDY_HTTP_BOOTSTRAP`` env (explicit override, full owner control)
+      2. ``http_bootstrap`` in config.toml (Settings toggle)
+      3. Default **True** so Switch-to-WebUI and browser access keep working
+
+    Set env ``0`` or Settings → disable browser token bootstrap for IPC-only
+    (safer against lesser local processes; does not reduce desktop power).
     """
-    flag = str(os.environ.get("REMEDY_HTTP_BOOTSTRAP", "1")).strip().lower()
-    return flag not in ("0", "false", "no", "off", "disable", "disabled")
+    env = _env_truthy("REMEDY_HTTP_BOOTSTRAP")
+    if env is not None:
+        return env
+    try:
+        from remedy.interfaces.config import load_config
+
+        cfg = load_config() or {}
+        if "http_bootstrap" in cfg:
+            return bool(cfg.get("http_bootstrap"))
+    except Exception:
+        pass
+    # Default: allow loopback bootstrap (Web UI power preserved).
+    return True
 
 
 def token_path(home: Path | str | None = None) -> Path:

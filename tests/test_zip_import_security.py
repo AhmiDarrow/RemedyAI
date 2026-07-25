@@ -36,6 +36,21 @@ def test_safe_extract_ok(tmp_path: Path):
     assert (dest / "pack-me" / "SKILL.md").is_file()
 
 
+def test_zip_member_stream_cap(tmp_path: Path):
+    """Stream counter rejects members that exceed max_member_bytes while reading."""
+    zpath = tmp_path / "fat.zip"
+    payload = b"x" * 50_000
+    with zipfile.ZipFile(zpath, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("blob.bin", payload)
+    dest = tmp_path / "out"
+    dest.mkdir()
+    with zipfile.ZipFile(zpath, "r") as zf, pytest.raises(ValueError, match="size cap|too large"):
+        _safe_extract_zip(zf, dest, max_member_bytes=10_000)
+    # Partial file must not remain
+    leftovers = list(dest.rglob("*"))
+    assert not any(p.is_file() for p in leftovers)
+
+
 def test_import_quarantine_sets_flag(tmp_path: Path):
     # Build a clean pack via exporter
     src = tmp_path / "src" / "safe-skill"

@@ -125,6 +125,9 @@ export function SettingsPanel({
   const [startInTray, setStartInTray] = useState(false)
   const [closeToTray, setCloseToTray] = useState(false)
   const [skipQuitWarn, setSkipQuitWarn] = useState(false)
+  const [webToolsEnabled, setWebToolsEnabled] = useState(false)
+  const [httpBootstrap, setHttpBootstrap] = useState(true)
+  const [approvalMode, setApprovalMode] = useState<'ask' | 'auto'>('ask')
   const [harnessMode, setHarnessMode] = useState('auto')
   const [toolProcess, setToolProcess] = useState<ToolProcessMode>(
     () => toolProcessMode || 'off',
@@ -273,6 +276,12 @@ export function SettingsPanel({
       setStartInTray(Boolean(s.start_in_tray))
       setCloseToTray(Boolean(s.close_to_tray))
       setHarnessMode(s.harness_mode || 'auto')
+      setWebToolsEnabled(Boolean(s.web_tools_enabled))
+      setHttpBootstrap(s.http_bootstrap !== false)
+      {
+        const am = String(s.approval_mode || 'ask').toLowerCase()
+        setApprovalMode(am === 'auto' ? 'auto' : 'ask')
+      }
       {
         const tp = normalizeToolProcess(s.tool_process)
         setToolProcess(tp)
@@ -488,6 +497,9 @@ export function SettingsPanel({
       harness_mode: harnessMode,
       tool_process: toolProcess,
       skills_active_budget: skillsBudget,
+      web_tools_enabled: webToolsEnabled,
+      http_bootstrap: httpBootstrap,
+      approval_mode: approvalMode,
     }
     if (enabledProviders !== null) {
       updates.enabled_providers = enabledProviders
@@ -1096,6 +1108,86 @@ export function SettingsPanel({
                     (use for downloaded folders). Full still runs as your Windows user.
                   </>
                 )}
+              </div>
+            </SettingsSection>
+
+            {/* Security & power (owner keeps full capability; defaults stay safe) */}
+            <SettingsSection
+              id="security-power"
+              title="Security & power"
+              summary="Approvals, web tools, browser token"
+            >
+              <div className="text-[10px] leading-snug mb-2" style={{ color: 'var(--text-muted)' }}>
+                Defaults are safe. <strong style={{ color: 'var(--text-secondary)' }}>Auto</strong>{' '}
+                approvals and opt-in tools never remove your power — they let Remedy finish work
+                when you say so. Hard wipe/privilege blocks stay on for everyone.
+              </div>
+              <div className="mb-2">
+                <div className="text-xs font-medium mb-1" style={{ color: 'var(--text-primary)' }}>
+                  Approvals
+                </div>
+                <div className="flex gap-1 mb-1">
+                  {(
+                    [
+                      { id: 'ask' as const, label: 'Ask', hint: 'Safe default — confirm shell/write/skills' },
+                      {
+                        id: 'auto' as const,
+                        label: 'Auto',
+                        hint: 'Work until done — full owner power on trusted scope',
+                      },
+                    ] as const
+                  ).map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => setApprovalMode(m.id)}
+                      className="flex-1 py-1.5 rounded text-xs font-medium"
+                      title={m.hint}
+                      style={{
+                        background: approvalMode === m.id ? 'var(--accent)' : 'var(--bg-tertiary)',
+                        color: approvalMode === m.id ? '#fff' : 'var(--text-secondary)',
+                        border: '1px solid var(--border)',
+                      }}
+                    >
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                  {approvalMode === 'auto'
+                    ? 'Auto: shell, write, edit, and skills run without prompts (except Untrusted scope). Use when you want Remedy to finish the job.'
+                    : 'Ask: high-impact tools show Approve/Deny. Soft-risk patterns are labeled on the banner.'}
+                </div>
+              </div>
+              <label className="flex items-center gap-2 mb-1.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={webToolsEnabled}
+                  onChange={(e) => setWebToolsEnabled(e.target.checked)}
+                  style={{ accentColor: 'var(--accent)' }}
+                />
+                <span style={{ color: 'var(--text-primary)' }}>
+                  Enable web_fetch (public HTTP only)
+                </span>
+              </label>
+              <div className="text-[10px] leading-snug mb-1.5 pl-6" style={{ color: 'var(--text-muted)' }}>
+                Opt-in. Private/localhost/metadata hosts are blocked (SSRF + DNS pin). Public web stays available.
+              </div>
+              <label className="flex items-center gap-2 mb-1 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={httpBootstrap}
+                  onChange={(e) => setHttpBootstrap(e.target.checked)}
+                  style={{ accentColor: 'var(--accent)' }}
+                />
+                <span style={{ color: 'var(--text-primary)' }}>
+                  Allow browser token bootstrap
+                </span>
+              </label>
+              <div className="text-[10px] leading-snug pl-6" style={{ color: 'var(--text-muted)' }}>
+                On (default): browser Web UI can get the local token on loopback. Off: desktop IPC only
+                (still full power in the app). Override anytime with{' '}
+                <code className="text-[10px]">REMEDY_HTTP_BOOTSTRAP</code>.
               </div>
             </SettingsSection>
 

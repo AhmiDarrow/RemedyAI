@@ -2,6 +2,18 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.13.2] — 2026-07-25
+
+### Security & power (review fixes — owner power preserved)
+
+- **`web_fetch` SSRF**: pin-on-resolve (connect to public IP with Host/SNI); redirect re-validation; fail closed on mixed private DNS. Public web fetch power unchanged when `web_tools_enabled` is on.
+- **Skill ZIP import**: stream extract with per-member and total uncompressed caps (decompression bombs); Zip Slip unchanged.
+- **Approvals**: Ask remains default; Auto = work-until-done (no prompts on trusted scopes). Soft-risk shell patterns labeled on Ask banners. `file_edit` in high-impact set for Ask only.
+- **HTTP bootstrap**: Settings **Allow browser token bootstrap** + `http_bootstrap` config; env override; default on so Web UI keeps working; desktop still prefers IPC.
+- **Desktop prefs**: `desktop.json` load/save via `serde_json` (no brittle string contains).
+- **Docs**: security manual + minisign pubkey table in `WINDOWS_SIGNING.md` / README.
+- Settings UI section **Security & power** (approvals, web_fetch, bootstrap).
+
 ## [0.13.1] — 2026-07-25
 
 ### Fix: agency tool robustness

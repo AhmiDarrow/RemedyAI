@@ -48,14 +48,15 @@ Remedy is built so **you** can run shell, files, skills, and a full agent on you
 | **Local API** | Bound to **127.0.0.1** by default; **Bearer** auth on by default; constant-time token compare |
 | **No open CORS** | Wildcard CORS is **refused** while API auth is on (blocks browser token theft from other sites) |
 | **Hard bind rule** | Auth-off + non-loopback bind is refused unless you set an explicit owner escape hatch (`REMEDY_ALLOW_INSECURE_BIND=1`) |
-| **Desktop vs browser** | Desktop prefers OS/IPC token; optional `REMEDY_HTTP_BOOTSTRAP=0` disables HTTP bootstrap so only the app can hold the token |
+| **Desktop vs browser** | Desktop prefers OS/IPC token; Settings **Allow browser token bootstrap** (default on) for Web UI; set off or `REMEDY_HTTP_BOOTSTRAP=0` for IPC-only |
 | **Secrets** | Provider keys and local API token under `~/.remedy/auth/` — **DPAPI**-protected on Windows when available; `config.toml` is for non-secrets |
 | **Access scope** | Project / home / full machine (opt-in); Desktop · Documents · Downloads always usable for common work |
-| **Approvals** | High-impact shell / write / skill scripts: **Ask** by default; **Auto** remains an owner choice (power not removed) |
-| **Skills** | Imported packs land in **quarantine** (Zip Slip checks); cannot activate or run scripts until you **Trust**; skill script env is scrubbed of provider keys |
+| **Approvals** | **Ask** by default (safe); **Auto** = work-until-done full owner power on trusted scope (never stripped) |
+| **Web tools** | `web_fetch` opt-in; public HTTP only with DNS pin / SSRF guards (power kept for the open web) |
+| **Skills** | Imported packs land in **quarantine** (Zip Slip + stream size caps); cannot activate or run scripts until you **Trust**; skill script env is scrubbed of provider keys |
 | **Tool sandbox** | Subprocess environment scrubbed of secrets; Windows dangerous-command guards; clear security-blocked results |
 | **Messaging channels** | e.g. Telegram ignores chats when the allowlist is empty (unless you explicitly allow all) |
-| **Updates** | In-app updates use **minisign**-signed `latest.json` (publisher URL match); installers from this repo’s GitHub Releases |
+| **Updates** | In-app updates use **minisign**-signed `latest.json` (publisher URL match); installers from this repo’s GitHub Releases — see [`docs/WINDOWS_SIGNING.md`](docs/WINDOWS_SIGNING.md) for pubkey |
 | **Web UI quit** | Full quit warns that the local server (and browser Web UI) stop; hide-to-tray does not |
 
 Chat content still goes to **the LLM provider you configure** (or stays local with Ollama). There is **no** Remedy cloud account required for core desktop use.
@@ -473,7 +474,7 @@ def teardown_plugin():
 git clone https://github.com/AhmiDarrow/RemedyAI.git
 cd RemedyAI
 uv sync --group dev
-uv run pytest -q          # full suite (560+ tests; currently ~774)
+uv run pytest -q          # full suite (560+ tests; currently ~785)
 cd desktop && npm test    # frontend unit tests (vitest)
 python scripts/check_docs.py  # docs stay synced with code (help, cmds, versions)
 uv run remedy --help

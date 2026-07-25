@@ -15,6 +15,22 @@ install. That is expected for unsigned builds — not a bug in the app.
 minisign protects **updates between already-installed copies**. It does **not**
 replace Authenticode for the **first** download from the browser.
 
+### Publisher identity (verify in-app updates)
+
+| Item | Value |
+|------|--------|
+| Releases only from | `https://github.com/AhmiDarrow/RemedyAI/releases` |
+| Update metadata | `…/releases/latest/download/latest.json` (URL must match publisher) |
+| minisign public key (Tauri base64) | In `desktop/src-tauri/tauri.conf.json` → `plugins.updater.pubkey` |
+
+Current embedded pubkey (base64 minisign; also in `tauri.conf.json`):
+
+```
+dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQ2MDEwQzVERTNBQ0JDRTAKUldUZ3ZLempYUXdCMWdRNWl0UzlpSDVUamJQZXRvREFpNE9Mb2xJeGpQck5ubVJ5ZDNxSko0dTYK
+```
+
+Install **only** from this repository’s GitHub Releases. In-app updates refuse assets that fail signature or publisher URL checks.
+
 ## What removes the SmartScreen warning
 
 1. Buy an **Authenticode code-signing certificate**

@@ -269,7 +269,11 @@ def create_app(
                     status_code=403,
                     content={
                         "error": "http_bootstrap_disabled",
-                        "detail": "Set REMEDY_HTTP_BOOTSTRAP=1 or use desktop IPC token.",
+                        "detail": (
+                            "Browser token bootstrap is off. Desktop still uses IPC "
+                            "(full power). Enable Settings → Allow browser token "
+                            "bootstrap, or set REMEDY_HTTP_BOOTSTRAP=1 for Web UI."
+                        ),
                     },
                 )
             logger.info("local-bootstrap issued to %s", client)

@@ -252,14 +252,26 @@ def _safe_extract_zip(
     *,
     max_files: int = 500,
     max_member_bytes: int = 5_000_000,
+    max_total_bytes: int | None = None,
 ) -> None:
-    """Extract ZIP members with Zip-Slip protection (paths must stay under dest).
+    """Extract ZIP members with Zip-Slip + decompression-bomb protection.
+
+    Paths must stay under ``dest``. Stream-copy with a running byte counter so
+    lied ZIP metadata / high compression ratios cannot exhaust memory.
 
     ``max_member_bytes`` defaults to 5 MiB (skill packs). Vision/runtime
     extractors pass a much higher limit after SHA256 verification.
+    ``max_total_bytes`` defaults to ``max_files * max_member_bytes`` (capped).
     """
     dest = dest.resolve()
     count = 0
+    total_written = 0
+    if max_total_bytes is None:
+        # Reasonable archive budget: do not multiply unbounded when limits are huge.
+        if max_member_bytes <= 0:
+            max_total_bytes = 0  # unlimited members (still stream)
+        else:
+            max_total_bytes = min(max_files * max_member_bytes, max_member_bytes * 50)
     for info in zf.infolist():
         name = info.filename
         if not name or name.endswith("/"):
@@ -277,11 +289,34 @@ def _safe_extract_zip(
             target.relative_to(dest)
         except ValueError as exc:
             raise ValueError(f"Zip Slip blocked: {name}") from exc
+        # Metadata size is advisory only (can lie); stream counter is authoritative.
         if max_member_bytes > 0 and info.file_size > max_member_bytes:
             raise ValueError(f"Zip member too large: {name}")
         count += 1
         if count > max_files:
             raise ValueError(f"Zip has too many files (>{max_files})")
         target.parent.mkdir(parents=True, exist_ok=True)
-        with zf.open(info, "r") as src, open(target, "wb") as out:
-            out.write(src.read())
+        written = 0
+        try:
+            with zf.open(info, "r") as src, open(target, "wb") as out:
+                while True:
+                    chunk = src.read(65536)
+                    if not chunk:
+                        break
+                    written += len(chunk)
+                    total_written += len(chunk)
+                    if max_member_bytes > 0 and written > max_member_bytes:
+                        raise ValueError(f"Zip member exceeded size cap while extracting: {name}")
+                    if max_total_bytes > 0 and total_written > max_total_bytes:
+                        raise ValueError(
+                            f"Zip total uncompressed size exceeded cap ({max_total_bytes} bytes)"
+                        )
+                    out.write(chunk)
+        except Exception:
+            # Remove partial extract on bomb / I/O failure
+            try:
+                if target.is_file():
+                    target.unlink()
+            except OSError:
+                pass
+            raise

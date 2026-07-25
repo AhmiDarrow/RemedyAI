@@ -28,12 +28,19 @@ export interface Settings {
   harness_max_context_pct?: number
   /** Status bar: off | low | medium | high */
   thinking_level?: string
-  /** Status bar: ask (default) | auto */
+  /** Status bar: ask (default) | auto — auto = full owner power / work-until-done */
   approval_mode?: string
   /** Tool process: off | medium | full (default off) */
   tool_process?: string
   /** @deprecated use tool_process */
   show_tool_calls?: boolean
+  /** Opt-in web_fetch (public HTTP; SSRF-guarded) */
+  web_tools_enabled?: boolean
+  /**
+   * Loopback HTTP may hand out the local API token (browser Web UI).
+   * Desktop prefers IPC. Default true; set false for IPC-only.
+   */
+  http_bootstrap?: boolean
   /** Local visual decoder enabled in config */
   vision_enabled?: boolean
   vision_model_id?: string
@@ -80,6 +87,8 @@ export interface SettingsUpdate {
   thinking_level?: string
   approval_mode?: string
   tool_process?: string
+  web_tools_enabled?: boolean
+  http_bootstrap?: boolean
   vision_enabled?: boolean
   vision_model_id?: string
   vision_force_decode?: boolean

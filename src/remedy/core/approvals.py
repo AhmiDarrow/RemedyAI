@@ -69,13 +69,19 @@ class ApprovalQueue:
         return f"{tool_name}::{(command or '').strip()}"
 
     # Tools that always require approval in ``ask`` mode (not only pattern match).
-    HIGH_IMPACT_TOOLS = frozenset({"bash_exec", "file_write", "skill_run"})
+    # ``auto`` mode skips these on trusted scopes so "work until done" has full power.
+    HIGH_IMPACT_TOOLS = frozenset({"bash_exec", "file_write", "file_edit", "skill_run"})
 
     def needs_ask(self, command: str, *, tool_name: str = "") -> str | None:
         """Return reason string if action should require approval.
 
-        When mode is ``auto`` (status-bar thumbs-up), skip prompts for pattern
-        matches only — callers may still force ask for skill quarantine etc.
+        **Power model (never stripped for the owner):**
+        - ``ask`` (default, safe): high-impact tools + risk patterns prompt.
+        - ``auto`` (status-bar thumbs-up / work-until-done): no prompts on a
+          normal trusted scope — Remedy runs shell/write/skills to finish.
+        - ``untrusted`` access scope still always asks (downloaded folders).
+        Hard security blocks (wipe/privilege) live in ``check_dangerous_command``
+        and are separate from this partner-trust queue.
         """
         # Untrusted workspace: never skip asks even in auto mode
         untrusted = False
@@ -92,6 +98,14 @@ class ApprovalQueue:
         tool = (tool_name or "").strip()
         c = (command or "").strip()
         reason: str | None = None
+        soft: str | None = None
+        # Soft-risk signals (advisory) for clearer Ask banners — not hard blocks.
+        try:
+            from remedy.core.security import check_soft_dangerous_command
+
+            soft = check_soft_dangerous_command(["bash", "-c", c] if c else [])
+        except Exception:
+            soft = None
         if untrusted and tool in self.HIGH_IMPACT_TOOLS:
             reason = "Untrusted workspace — approval required"
         if tool in self.HIGH_IMPACT_TOOLS and not reason:
@@ -99,10 +113,17 @@ class ApprovalQueue:
                 reason = "Shell execution requires approval (bash_exec)"
             elif tool == "file_write":
                 reason = "File write requires approval (file_write)"
+            elif tool == "file_edit":
+                reason = "File edit requires approval (file_edit)"
             elif tool == "skill_run":
                 reason = "Skill script execution requires approval (skill_run)"
         if not reason and c and _ASK_PATTERNS.search(c):
             reason = "High-impact / destructive command pattern"
+        if reason and soft:
+            reason = f"{reason} · soft-risk: {soft}"
+        elif soft and not reason and tool == "bash_exec":
+            # Soft-only: still ask in ask-mode for bash with risk signals
+            reason = f"Soft-risk shell pattern — confirm to proceed ({soft})"
         # Guard nanobot: enrich reason with risk score (never hard-blocks here)
         try:
             from remedy.nanoswarm import get_swarm
@@ -182,14 +203,22 @@ class ApprovalQueue:
             return item
 
     def to_public(self, item: PendingApproval) -> dict[str, Any]:
+        soft_risk = None
+        if "soft-risk:" in (item.reason or "").lower() or "Soft-risk" in (item.reason or ""):
+            soft_risk = item.reason
         return {
             "id": item.id,
             "tool_name": item.tool_name,
             "command": item.command[:500],
             "reason": item.reason,
+            "soft_risk": soft_risk,
             "session_id": item.session_id,
             "status": item.status,
             "created_at": item.created_at,
+            "approval_mode_hint": (
+                "Approve for this session, or set Approvals → Auto to let Remedy "
+                "finish work without prompts (full owner power on trusted scope)."
+            ),
         }
 
 

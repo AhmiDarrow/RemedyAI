@@ -2,7 +2,14 @@
 
 High-level product notes for owners. Full detail lives in repo `CHANGELOG.md`.
 
-Ship **one** installer/tag for the current series (**v0.13.1**).
+Ship **one** installer/tag for the current series (**v0.13.2**).
+
+## 0.13.2 — Security hardening (power preserved)
+
+- Safer defaults: Ask approvals, opt-in web tools; **Auto** still = work-until-done full power.
+- `web_fetch` DNS pin / rebinding resistance; skill ZIP stream size caps.
+- Settings → **Security & power**: approvals, web_fetch, browser token bootstrap.
+- minisign pubkey documented for update trust.
 
 ## 0.13.1 — Agency tool fixes
 

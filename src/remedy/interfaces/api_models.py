@@ -167,7 +167,7 @@ class SettingsUpdateRequest(BaseModel):
     harness_max_context_pct: float | None = None
     # Status-bar controls
     thinking_level: str | None = None  # off | low | medium | high
-    approval_mode: str | None = None  # ask | auto
+    approval_mode: str | None = None  # ask | auto (auto = full owner power / work-until-done)
     show_tool_calls: bool | None = None  # legacy → maps to tool_process
     # off = minimal progress only; medium = labels+status; full = near-raw process
     tool_process: str | None = None
@@ -177,6 +177,11 @@ class SettingsUpdateRequest(BaseModel):
     # Prefer local image→text even when the chat model supports native vision
     # (saves provider image tokens / context when decoder is ready).
     vision_force_decode: bool | None = None
+    # Opt-in web_fetch tool (public HTTP only; SSRF-guarded)
+    web_tools_enabled: bool | None = None
+    # Loopback HTTP may hand out the local API token (browser Web UI). Desktop
+    # always prefers IPC. Default True; set False for IPC-only (safer).
+    http_bootstrap: bool | None = None
     # Provider picker catalog
     enabled_providers: list[str] | None = None
     enabled_models: dict[str, list[str]] | None = None
