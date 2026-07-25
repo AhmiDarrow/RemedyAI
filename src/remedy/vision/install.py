@@ -105,12 +105,10 @@ def is_installed(
         )
         env_b = __import__("os").environ.get("REMEDY_LOCAL_BUNDLE")
         if env_b:
-            try:
+            with contextlib.suppress(OSError):
                 is_product = is_product or Path(env_b).resolve() in root.resolve().parents or Path(
                     env_b
                 ).resolve() == root.resolve()
-            except OSError:
-                pass
         if not is_product:
             return False
         if runtime_binary_from_bundle() is not None:
