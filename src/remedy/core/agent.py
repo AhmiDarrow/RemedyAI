@@ -26,15 +26,6 @@ from remedy.core.react_policy import (
     HARD_SAFETY_CHARS as _HARD_SAFETY_CHARS,
 )
 from remedy.core.react_policy import (
-    HISTORY_CHAR_BUDGET as _HISTORY_CHAR_BUDGET,
-)
-from remedy.core.react_policy import (
-    HISTORY_MSG_LIMIT as _HISTORY_MSG_LIMIT,
-)
-from remedy.core.react_policy import (
-    HISTORY_MSG_SOFT_TRIM as _HISTORY_MSG_SOFT_TRIM,
-)
-from remedy.core.react_policy import (
     MAX_PARALLEL_TOOLS as _MAX_PARALLEL_TOOLS,
 )
 from remedy.core.react_policy import (
@@ -81,7 +72,6 @@ from remedy.core.workspace import (
 from remedy.memory.store import MemoryStore
 from remedy.models import (
     AgentConfig,
-    ChatMessageRole,
     GatewayEvent,
     ToolCall,
     ToolResult,
@@ -525,22 +515,9 @@ class BasicRuntime(AgentRuntime):
         )
 
     def _openai_tools(self) -> list[dict[str, Any]]:
-        tools: list[dict[str, Any]] = []
-        for t in self.tool_registry.tools:
-            params = t.parameters if t.parameters else {"type": "object", "properties": {}}
-            if "type" not in params:
-                params = {"type": "object", "properties": params}
-            tools.append(
-                {
-                    "type": "function",
-                    "function": {
-                        "name": t.name,
-                        "description": t.description or t.name,
-                        "parameters": params,
-                    },
-                }
-            )
-        return tools
+        from remedy.core.agent_llm import openai_tools_payload
+
+        return openai_tools_payload(self.tool_registry)
 
     async def _call_llm(self, message: str) -> str:
         """Call the LLM with ReAct tool-use loop (non-streaming)."""
@@ -559,53 +536,10 @@ class BasicRuntime(AgentRuntime):
         session_id: str | None,
         current_user: str,
     ) -> list[dict[str, Any]]:
-        """Load recent user/assistant turns for multi-turn continuity (OpenCode-style)."""
-        if not session_id or self.memory is None:
-            return []
-        try:
-            rows = await self.memory.get_chat_messages(
-                session_id, limit=_HISTORY_MSG_LIMIT
-            )
-        except Exception:
-            logger.debug("session history load failed", exc_info=True)
-            return []
+        """Load recent user/assistant turns for multi-turn continuity."""
+        from remedy.core.agent_history import load_session_history
 
-        # Drop trailing user message if API already persisted the current turn.
-        if rows and rows[-1].role == ChatMessageRole.USER:
-            last = (rows[-1].content or "").strip()
-            if last == (current_user or "").strip():
-                rows = rows[:-1]
-
-        budget = _HISTORY_CHAR_BUDGET
-        # Walk newest→oldest then reverse so we keep the most recent context.
-        selected: list[dict[str, Any]] = []
-        for msg in reversed(rows):
-            role = msg.role.value if hasattr(msg.role, "value") else str(msg.role)
-            if role not in ("user", "assistant"):
-                continue
-            content = (msg.content or "").strip()
-            if not content:
-                continue
-            # Strip internal tool markers from prior assistant bubbles.
-            if role == "assistant":
-                if content.startswith("@@") or "[LLM" in content[:40]:
-                    continue
-                # Soft-trim only when explicitly configured (>0). Default 0 = full text.
-                if _HISTORY_MSG_SOFT_TRIM > 0 and len(content) > _HISTORY_MSG_SOFT_TRIM:
-                    content = content[:_HISTORY_MSG_SOFT_TRIM] + "\n…[truncated]"
-            # Prefer dropping older turns over mid-message slicing.
-            if len(content) > budget:
-                if selected:
-                    break
-                # Newest message alone exceeds budget — keep full unless soft-trim on.
-                if _HISTORY_MSG_SOFT_TRIM > 0:
-                    content = content[:budget] + "\n…[truncated]"
-            budget -= len(content)
-            selected.append({"role": role, "content": content})
-            if budget <= 0:
-                break
-        selected.reverse()
-        return selected
+        return await load_session_history(self.memory, session_id, current_user)
 
     async def _execute_tool_calls(
         self,
@@ -1936,100 +1870,15 @@ class BasicRuntime(AgentRuntime):
     async def _post_chat(
         self, body: dict[str, Any]
     ) -> dict[str, Any] | str:
-        headers = self._provider.auth_headers(self._llm_api_key)
-        endpoint = self._provider.chat_endpoint(self._llm_base_url)
+        from remedy.core.agent_llm import post_chat
 
-        async with (
-            aiohttp.ClientSession() as session,
-            session.post(
-                endpoint,
-                headers=headers,
-                json=body,
-                timeout=aiohttp.ClientTimeout(total=60),
-            ) as resp,
-        ):
-            if resp.status != 200:
-                text = await resp.text()
-                # One refresh attempt for expired xAI OAuth tokens.
-                if (
-                    resp.status in (401, 403)
-                    and str(self._llm_provider or "").lower() == "xai"
-                ):
-                    try:
-                        from pathlib import Path
-
-                        from remedy.interfaces.xai_auth import (
-                            refresh_if_needed,
-                            resolve_bearer,
-                        )
-
-                        home = None
-                        if getattr(self, "config", None) is not None:
-                            hd = getattr(self.config, "home_dir", None)
-                            if hd:
-                                home = Path(hd).expanduser()
-                        refresh_if_needed(home)
-                        new_token = resolve_bearer(home)
-                        if new_token and new_token != self._llm_api_key:
-                            self._llm_api_key = new_token
-                            headers = self._provider.auth_headers(self._llm_api_key)
-                            async with session.post(
-                                endpoint,
-                                headers=headers,
-                                json=body,
-                                timeout=aiohttp.ClientTimeout(total=60),
-                            ) as resp2:
-                                if resp2.status == 200:
-                                    return await resp2.json()
-                                text = await resp2.text()
-                                logger.error(
-                                    "LLM API error %d after reauth: %s",
-                                    resp2.status,
-                                    text[:500],
-                                )
-                                return (
-                                    "\n[auth required] xAI session expired. "
-                                    "Sign in again (Settings or `remedy auth login xai`).\n"
-                                )
-                    except Exception as auth_exc:
-                        logger.debug("xAI re-auth in _post_chat failed: %s", auth_exc)
-                logger.error("LLM API error %d: %s", resp.status, text[:500])
-                return f"\n[LLM ERROR — HTTP {resp.status}]\n{text[:500]}\n[END LLM ERROR]"
-            return await resp.json()
+        return await post_chat(self, body)
 
     async def _apply_session_workspace(self, session_id: str | None) -> None:
-        """Bind tools/cwd to the **session** project for this turn.
+        """Bind tools/cwd to the **session** project for this turn."""
+        from remedy.core.agent_session import apply_session_workspace
 
-        Tree contract: a session under ``📁 RemedyAI`` uses that folder as the
-        tool jail; a **No project** session gets unset → full access. Global
-        Settings default is only used when there is no session row.
-        """
-        if session_id:
-            self._session_id = session_id
-        session_path: str | None = None
-        has_session_row = False
-        if session_id and self.memory is not None:
-            with suppress(Exception):
-                sess = await self.memory.get_chat_session(session_id)
-                if sess is not None:
-                    has_session_row = True
-                    session_path = getattr(sess, "project_path", None)
-        if has_session_row:
-            # Session owns workspace for this turn (do not keep prior session raw).
-            if session_path and not is_unset_project_path(session_path):
-                self.set_project_path(session_path, as_default=False)
-            else:
-                # Explicit no-project → full access for this turn
-                self.set_project_path(None, as_default=False)
-            return
-        # No session row: fall back to configured default project
-        cfg_path = None
-        if getattr(self, "config", None) is not None:
-            cfg_path = getattr(self.config, "project_path", None)
-        if is_unset_project_path(cfg_path):
-            self.set_project_path(None, as_default=False)
-        else:
-            self.set_project_path(str(cfg_path), as_default=False)
+        await apply_session_workspace(self, session_id)
 
     async def stream_response(
         self,
@@ -2170,24 +2019,7 @@ class BasicRuntime(AgentRuntime):
         return await build_turn_context(self)
 
     def _fallback_response(self, message: str, event: GatewayEvent) -> str:
-        msg_lower = message.lower().strip()
+        from remedy.core.agent_llm import fallback_response
 
-        greetings = {"hello", "hi", "hey", "greetings", "yo"}
-        words = set(msg_lower.rstrip("!.,?").split())
-        if msg_lower in greetings or words & greetings:
-            return f"Hello! I'm {self.config.name}. How can I help you?"
-
-        if "help" in msg_lower or "?" in msg_lower:
-            return (
-                "I'm a basic agent runtime. I can remember conversations in my "
-                "persistent store. Try using memory commands or tools if available."
-            )
-
-        if "remember" in msg_lower or "memory" in msg_lower:
-            return "I've stored our conversation in memory. I can recall it later if needed."
-
-        return (
-            f"Received: {message[:200]}. "
-            f"I'm running in fallback mode. Set an LLM API key (via config or "
-            f"REMEDY_LLM_API_KEY env var) for intelligent responses."
-        )
+        _ = event
+        return fallback_response(self, message)
