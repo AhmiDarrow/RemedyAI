@@ -50,3 +50,38 @@ def register_nanoswarm_routes(app: FastAPI, *, runtime=None, gateway=None, memor
         from remedy.runtime.jobs import default_queue
 
         return default_queue().status()
+
+    class HelperHelpRequest(BaseModel):
+        prompt: str = ""
+
+    class HelperErrorRequest(BaseModel):
+        error: str = ""
+
+    @app.post("/api/nanoswarm/helper/help")
+    async def nanoswarm_helper_help(body: HelperHelpRequest) -> dict[str, Any]:
+        """Offline help cards (Helper nanobot)."""
+        from remedy.nanoswarm import get_swarm
+
+        return get_swarm().helper.draft_help(body.prompt or "")
+
+    @app.post("/api/nanoswarm/helper/explain")
+    async def nanoswarm_helper_explain(body: HelperErrorRequest) -> dict[str, Any]:
+        """Offline explain-last-error (Helper nanobot)."""
+        from remedy.nanoswarm import get_swarm
+
+        return get_swarm().helper.explain_error(body.error or "")
+
+    class GuardAssessRequest(BaseModel):
+        tool_name: str = ""
+        command: str = ""
+        path: str = ""
+
+    @app.post("/api/nanoswarm/guard/assess")
+    async def nanoswarm_guard_assess(body: GuardAssessRequest) -> dict[str, Any]:
+        from remedy.nanoswarm import get_swarm
+
+        return get_swarm().guard.assess(
+            tool_name=body.tool_name,
+            command=body.command,
+            path=body.path,
+        )

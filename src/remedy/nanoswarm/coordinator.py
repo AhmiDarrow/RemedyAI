@@ -7,6 +7,7 @@ import time
 from typing import Any
 
 from remedy.nanoswarm.events import SwarmEvent
+from remedy.nanoswarm.guard_nanobot import GuardNanobot
 from remedy.nanoswarm.helper_nanobot import HelperNanobot
 from remedy.nanoswarm.memory_nanobot import MemoryNanobot
 from remedy.nanoswarm.pack_nanobot import PackNanobot
@@ -27,6 +28,7 @@ class NanoSwarm:
         self.router = RouterNanobot()
         self.helper = HelperNanobot()
         self.pack = PackNanobot()
+        self.guard = GuardNanobot()
         self._lock = threading.Lock()
         self._event_count = 0
         self._last_event: str | None = None
@@ -156,6 +158,7 @@ class NanoSwarm:
                 "router": self.router.status(),
                 "helper": self.helper.status(),
                 "pack": self.pack.status(),
+                "guard": self.guard.status(),
             },
         }
 

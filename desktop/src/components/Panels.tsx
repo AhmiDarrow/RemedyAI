@@ -682,6 +682,42 @@ export function SkillsPanel({
         >
           Import Pack
         </button>
+        <button
+          type="button"
+          onClick={() => {
+            void (async () => {
+              setError(null)
+              setPackMsg(null)
+              try {
+                const { archiveUnusedSkills } = await import('../api/skills')
+                const dry = await archiveUnusedSkills({ days: 90, dry_run: true })
+                if (!dry.count) {
+                  setPackMsg('No learned skills unused for 90+ days.')
+                  return
+                }
+                const ok = window.confirm(
+                  `Archive ${dry.count} unused learned skill(s) (idle >90 days)?\n\n` +
+                    dry.candidates
+                      .slice(0, 12)
+                      .map((c) => c.name)
+                      .join(', ') +
+                    (dry.candidates.length > 12 ? '…' : ''),
+                )
+                if (!ok) return
+                const r = await archiveUnusedSkills({ days: 90, dry_run: false })
+                setPackMsg(`Archived ${r.count} skill(s).`)
+                await load()
+              } catch (e) {
+                setError(e instanceof Error ? e.message : 'Archive unused failed')
+              }
+            })()
+          }}
+          className="text-[10px] px-2 py-1 rounded"
+          style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
+          title="Archive learned skills with no activity for 90 days"
+        >
+          Archive unused (90d)
+        </button>
         {selected.size > 0 && (
           <button
             type="button"

@@ -450,6 +450,121 @@ def register_memory_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
             "quarantine": True,
         }
 
+    @app.post("/api/skills/archive-unused")
+    async def archive_unused_skills(request: Request):
+        """Archive skills unused for N days (power-user 100+ library hygiene).
+
+        Does not delete packs. Skips bundled/quarantine unless include_quarantine.
+        Body: { days?: 90, dry_run?: false, include_quarantine?: false }
+        """
+        if runtime is None or not hasattr(runtime, "skills"):
+            raise HTTPException(503, "Skills not available")
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+        days = int((payload or {}).get("days") or 90)
+        dry_run = bool((payload or {}).get("dry_run", False))
+        include_q = bool((payload or {}).get("include_quarantine", False))
+        days = max(7, min(3650, days))
+
+        from datetime import UTC, datetime, timedelta
+        from pathlib import Path
+
+        from remedy.core.learning.refiner import SkillRefiner
+        from remedy.models import SkillStatus as _SS
+
+        home = Path(
+            getattr(getattr(runtime, "config", None), "home_dir", None) or "~/.remedy"
+        ).expanduser()
+        refiner = SkillRefiner(stats_path=home / "skill_stats.json")
+        cutoff = datetime.now(UTC) - timedelta(days=days)
+        candidates: list[dict] = []
+        archived: list[str] = []
+
+        for skill in list(runtime.skills.skills):
+            m = skill.manifest
+            st = m.status
+            stv = st.value if hasattr(st, "value") else str(st)
+            if stv in ("archived", "deprecated"):
+                continue
+            meta = m.metadata or {}
+            if meta.get("quarantine") and not include_q:
+                continue
+            # Prefer never archiving non-auto bundled packs that are active defaults
+            if not meta.get("auto_generated") and stv == "active" and not meta.get(
+                "user_installed"
+            ):
+                # still allow if truly unused for long — only auto/user-touched
+                if not meta.get("manual_override") and not meta.get("source"):
+                    # skip pure bundled unless executions exist and went cold
+                    pass
+
+            stats = refiner.get_stats(m.name) if hasattr(refiner, "get_stats") else None
+            last_dt = None
+            if stats is not None:
+                last_dt = getattr(stats, "last_activated", None) or getattr(
+                    stats, "last_executed", None
+                )
+            if last_dt is None and hasattr(refiner, "last_success_at"):
+                last_dt = refiner.last_success_at(m.name)
+
+            # Never used at all + not recently created: use zero activity
+            never = last_dt is None and (
+                not stats
+                or (
+                    int(getattr(stats, "total_executions", 0) or 0) == 0
+                    and int(getattr(stats, "activations", 0) or 0) == 0
+                )
+            )
+            cold = False
+            if last_dt is not None:
+                try:
+                    if last_dt.tzinfo is None:
+                        last_dt = last_dt.replace(tzinfo=UTC)
+                    cold = last_dt < cutoff
+                except Exception:
+                    cold = False
+
+            # Only archive auto-generated / learned or explicitly user-overridden when never used
+            is_learned = bool(meta.get("auto_generated"))
+            if not (cold or (never and is_learned)):
+                continue
+            if never and not is_learned:
+                # Bundled unused — leave alone
+                continue
+
+            row = {
+                "name": m.name,
+                "status": stv,
+                "last_activity": last_dt.isoformat() if last_dt else None,
+                "auto_generated": is_learned,
+            }
+            candidates.append(row)
+            if dry_run:
+                continue
+            try:
+                if hasattr(runtime.skills, "set_status"):
+                    runtime.skills.set_status(m.name, _SS.ARCHIVED)
+                else:
+                    skill.manifest.status = _SS.ARCHIVED
+                meta = dict(skill.manifest.metadata or {})
+                meta["lifecycle"] = "bulk-archive"
+                meta["lifecycle_last"] = f"Archived: unused >{days}d"
+                skill.manifest.metadata = meta
+                _persist_skill(skill)
+                archived.append(m.name)
+            except Exception:
+                continue
+
+        return {
+            "days": days,
+            "dry_run": dry_run,
+            "candidates": candidates,
+            "archived": archived,
+            "count": len(archived) if not dry_run else len(candidates),
+        }
+
     # -- webhook -------------------------------------------------------------
     @app.post("/api/webhook/{source}")
     async def receive_webhook(source: str, payload: WebhookPayload, request: Request):

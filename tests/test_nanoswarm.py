@@ -151,13 +151,17 @@ def test_activate_local_bundle_uses_legacy_vision_home(tmp_path, monkeypatch):
     assert Path(state["runtime_binary"]).is_file()
 
 
-def test_helper_bot_reserved():
+def test_helper_bot_offline_surface():
     from remedy.nanoswarm.helper_nanobot import HelperNanobot
 
     h = HelperNanobot()
     st = h.status()
     assert st["role_model"] == DEFAULT_LOCAL_MODEL_ID
-    assert st["enabled"] is False
+    # Offline FAQ/error drafts are on; neural assist still reserved
+    assert st["enabled"] is True
+    assert st.get("neural_enabled") is False
+    out = h.draft_help("approvals")
+    assert out.get("ok") is True
 
 
 def test_maybe_autostart_skips_when_not_installed(tmp_path, monkeypatch):

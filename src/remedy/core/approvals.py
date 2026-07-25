@@ -82,18 +82,28 @@ class ApprovalQueue:
                 return None
         tool = (tool_name or "").strip()
         c = (command or "").strip()
+        reason: str | None = None
         if tool in self.HIGH_IMPACT_TOOLS:
             if tool == "bash_exec":
-                return "Shell execution requires approval (bash_exec)"
-            if tool == "file_write":
-                return "File write requires approval (file_write)"
-            if tool == "skill_run":
-                return "Skill script execution requires approval (skill_run)"
-        if not c:
-            return None
-        if _ASK_PATTERNS.search(c):
-            return "High-impact / destructive command pattern"
-        return None
+                reason = "Shell execution requires approval (bash_exec)"
+            elif tool == "file_write":
+                reason = "File write requires approval (file_write)"
+            elif tool == "skill_run":
+                reason = "Skill script execution requires approval (skill_run)"
+        if not reason and c and _ASK_PATTERNS.search(c):
+            reason = "High-impact / destructive command pattern"
+        # Guard nanobot: enrich reason with risk score (never hard-blocks here)
+        try:
+            from remedy.nanoswarm import get_swarm
+
+            reason = get_swarm().guard.enrich_ask_reason(
+                reason,
+                tool_name=tool,
+                command=c,
+            )
+        except Exception:
+            pass
+        return reason
 
     def is_approved(self, tool_name: str, command: str, session_id: str | None = None) -> bool:
         fp = self.fingerprint(tool_name, command)

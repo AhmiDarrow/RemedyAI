@@ -72,6 +72,12 @@ _BUILTIN_COMMANDS: list[dict] = [
         "arguments": "path",
     },
     {"name": "/skills", "description": "List available skills", "aliases": [], "arguments": None},
+    {
+        "name": "/helper",
+        "description": "Offline help tips, or /helper error <text>",
+        "aliases": ["/tip"],
+        "arguments": "topic | error <text>",
+    },
     {"name": "/handoff", "description": "List handoff notes", "aliases": [], "arguments": None},
     {"name": "/init", "description": "Scan the project and generate AGENTS.md", "aliases": [], "arguments": "path"},
 ]
@@ -239,6 +245,22 @@ async def handle_slash_command(
                 + (f" Focus: {focus}" if focus else "")
             )
         }
+
+    if stripped.startswith("/helper") or stripped.startswith("/tip"):
+        try:
+            from remedy.nanoswarm import get_swarm
+
+            rest = raw.split(maxsplit=1)
+            arg = rest[1].strip() if len(rest) > 1 else ""
+            low = arg.lower()
+            if low.startswith("error ") or low.startswith("err "):
+                err = arg.split(maxsplit=1)[1] if " " in arg else arg
+                out = get_swarm().helper.explain_error(err)
+            else:
+                out = get_swarm().helper.draft_help(arg)
+            return {"text": out.get("markdown") or out.get("error") or "No help available."}
+        except Exception as e:
+            return {"text": f"Helper error: {e}"}
 
     if stripped in ("/harness", "/brief", "/nanoswarm", "/swarm"):
         agent = runtime

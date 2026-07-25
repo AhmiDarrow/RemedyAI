@@ -50,6 +50,27 @@ export async function setSkillQuarantine(
   })
 }
 
+export async function archiveUnusedSkills(opts?: {
+  days?: number
+  dry_run?: boolean
+  include_quarantine?: boolean
+}): Promise<{
+  days: number
+  dry_run: boolean
+  candidates: { name: string; status: string; last_activity?: string | null }[]
+  archived: string[]
+  count: number
+}> {
+  return apiFetch('/skills/archive-unused', {
+    method: 'POST',
+    body: JSON.stringify({
+      days: opts?.days ?? 90,
+      dry_run: opts?.dry_run ?? false,
+      include_quarantine: opts?.include_quarantine ?? false,
+    }),
+  })
+}
+
 export async function saveSkillBody(
   name: string,
   body: string,

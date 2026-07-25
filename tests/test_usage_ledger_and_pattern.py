@@ -62,6 +62,34 @@ def test_pack_nanobot_aggressive_when_full():
     assert "Pack" in (out.get("system_hint") or "")
 
 
+def test_guard_nanobot_scores_destructive_shell():
+    from remedy.nanoswarm.guard_nanobot import GuardNanobot
+
+    g = GuardNanobot()
+    low = g.assess(tool_name="file_read", command="README.md")
+    high = g.assess(tool_name="bash_exec", command="rm -rf / && shutdown -h now")
+    assert high["score"] > low["score"]
+    assert high["level"] in ("high", "critical")
+    reason = g.enrich_ask_reason(
+        "Shell execution requires approval",
+        tool_name="bash_exec",
+        command="git reset --hard",
+    )
+    assert reason and "Guard" in reason
+
+
+def test_helper_offline_help_and_error():
+    from remedy.nanoswarm.helper_nanobot import HelperNanobot
+
+    h = HelperNanobot()
+    help_out = h.draft_help("provider switch")
+    assert help_out["ok"] is True
+    assert "markdown" in help_out
+    err = h.explain_error("Error 401 Unauthorized from API")
+    assert err["ok"] is True
+    assert any("key" in x.lower() or "auth" in x.lower() for x in err["hints"])
+
+
 def test_usage_ledger_summary(tmp_path: Path):
     home = tmp_path / "remedy-home"
     home.mkdir()

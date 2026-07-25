@@ -42,25 +42,25 @@ _FAMILY_SCALES: dict[str, dict[str, float]] = {
         "emoji": 1.1,
         "other": 1.0,
     },
-    # Anthropic-ish (slightly denser punctuation / markup)
+    # Anthropic-ish (slightly denser punctuation / markup; code often more tokens)
     "anthropic": {
-        "ascii_word": 1.02,
-        "space": 1.0,
-        "code_punct": 1.12,
-        "digit": 1.0,
-        "cjk": 1.0,
-        "emoji": 1.05,
-        "other": 1.05,
+        "ascii_word": 1.04,
+        "space": 0.98,
+        "code_punct": 1.18,
+        "digit": 1.02,
+        "cjk": 1.05,
+        "emoji": 1.08,
+        "other": 1.08,
     },
     # DeepSeek / some code-heavy models
     "deepseek": {
-        "ascii_word": 0.98,
-        "space": 0.95,
-        "code_punct": 1.15,
+        "ascii_word": 0.97,
+        "space": 0.94,
+        "code_punct": 1.2,
         "digit": 1.0,
-        "cjk": 1.05,
+        "cjk": 1.08,
         "emoji": 1.0,
-        "other": 1.0,
+        "other": 1.02,
     },
     # Local / demo — keep neutral
     "local": {
@@ -195,6 +195,42 @@ def estimate_text_tokens(
     return max(0, int(total_w + 0.5))
 
 
+# Per-message framing overhead by family (tiktoken-class chat templates differ)
+_MSG_OVERHEAD: dict[str, int] = {
+    "cl100k": 4,
+    "anthropic": 5,
+    "deepseek": 4,
+    "local": 3,
+}
+
+# Simple LRU-ish cache for message-list estimates (switch/re-render snappiness)
+_msg_cache: dict[str, int] = {}
+_msg_cache_order: list[str] = []
+_MSG_CACHE_MAX = 64
+_msg_cache_lock = threading.Lock()
+
+
+def _messages_cache_key(
+    messages: list[dict[str, Any]],
+    provider: str | None,
+    model: str | None,
+) -> str:
+    # Cheap fingerprint: count + roles + content lengths + tail hash
+    parts: list[str] = [encoding_family(provider, model), str(len(messages))]
+    for m in messages[-12:]:
+        c = m.get("content")
+        clen = len(c) if isinstance(c, str) else len(str(c or ""))
+        parts.append(f"{m.get('role')}:{clen}")
+        tcs = m.get("tool_calls")
+        if tcs:
+            parts.append(f"tc{len(tcs)}")
+    if messages:
+        tail = messages[-1].get("content")
+        if isinstance(tail, str) and tail:
+            parts.append(tail[-80:])
+    return "|".join(parts)
+
+
 def estimate_messages_tokens(
     messages: list[dict[str, Any]] | None,
     *,
@@ -205,9 +241,15 @@ def estimate_messages_tokens(
     if not messages:
         return 0
     fam = encoding_family(provider, model)
+    key = _messages_cache_key(messages, provider, model)
+    with _msg_cache_lock:
+        if key in _msg_cache:
+            return _msg_cache[key]
+
+    overhead = _MSG_OVERHEAD.get(fam, 4)
     total = 0
     for m in messages:
-        total += 4  # role overhead
+        total += overhead
         content = m.get("content")
         if isinstance(content, str):
             total += estimate_text_tokens(content, family=fam)
@@ -224,7 +266,19 @@ def estimate_messages_tokens(
                 total += estimate_text_tokens(json.dumps(tcs, default=str), family=fam)
             except Exception:
                 total += 32
-    return max(1, total)
+        # reasoning_content / thinking when present
+        for k in ("reasoning_content", "thinking", "reasoning"):
+            rc = m.get(k)
+            if isinstance(rc, str) and rc:
+                total += estimate_text_tokens(rc, family=fam)
+    result = max(1, total)
+    with _msg_cache_lock:
+        _msg_cache[key] = result
+        _msg_cache_order.append(key)
+        while len(_msg_cache_order) > _MSG_CACHE_MAX:
+            old = _msg_cache_order.pop(0)
+            _msg_cache.pop(old, None)
+    return result
 
 
 @dataclass
