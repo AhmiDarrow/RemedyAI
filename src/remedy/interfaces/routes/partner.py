@@ -256,6 +256,7 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
             if brief is not None:
                 brief_intent = getattr(brief, "intent", "") or ""
         swarm: dict = {}
+        health_pub: dict = {}
         try:
             from remedy.nanoswarm import get_swarm
 
@@ -268,8 +269,36 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
                 "fill_pct": (st.get("bots") or {}).get("memory", {}).get("last_fill_pct"),
                 "token_method": (st.get("bots") or {}).get("token", {}).get("last_method"),
             }
+            # Proactive failover signal for status bar
+            prov = getattr(runtime, "_llm_provider", None) if runtime is not None else None
+            mod = getattr(runtime, "_llm_model", None) if runtime is not None else None
+            connected: list[str] = []
+            try:
+                from remedy.interfaces.api_support import load_config
+                from remedy.interfaces.config import get_provider_keys
+                from remedy.interfaces.secret_store import public_secret_status
+
+                cfg = load_config()
+                keys = get_provider_keys(cfg)
+                connected = list(keys.keys())
+                pub = public_secret_status()
+                for k in (pub.get("provider_keys_set") or {}):
+                    if k not in connected:
+                        connected.append(k)
+                # Always allow demo/ollama as soft fallbacks when flaky
+                for extra in ("demo", "ollama"):
+                    if extra not in connected:
+                        connected.append(extra)
+            except Exception:
+                connected = ["demo", "ollama"]
+            health_pub = get_swarm().health.failover_suggestion(
+                provider=str(prov) if prov else None,
+                model=str(mod) if mod else None,
+                connected_providers=connected,
+            )
         except Exception:
             swarm = {"active": False}
+            health_pub = {}
 
         quality: dict = {}
         try:
@@ -290,4 +319,5 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
             # Advanced: only meaningful when user opted into Full+ in the UI
             "nanoswarm": swarm,
             "session_quality": quality,
+            "provider_health": health_pub,
         }

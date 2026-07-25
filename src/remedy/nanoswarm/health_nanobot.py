@@ -112,6 +112,52 @@ class HealthNanobot:
             "system_hint": hint,
         }
 
+    def failover_suggestion(
+        self,
+        *,
+        provider: str | None = None,
+        model: str | None = None,
+        connected_providers: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """If current provider is flaky, suggest another connected provider."""
+        snap = self.snapshot(provider=provider, model=model)
+        out: dict[str, Any] = {
+            "flaky": bool(snap.get("flaky")),
+            "suggest_switch": False,
+            "suggested_provider": None,
+            "reason": None,
+            "health": snap,
+        }
+        if not snap.get("flaky"):
+            return out
+        cur = (provider or "").strip().lower()
+        connected = [
+            str(p).strip().lower()
+            for p in (connected_providers or [])
+            if str(p).strip()
+        ]
+        # Prefer free/local when flaky paid provider
+        preference = ["ollama", "demo", "openrouter", "groq", "google", "deepseek", "openai", "xai", "anthropic"]
+        candidates = [p for p in preference if p in connected and p != cur]
+        if not candidates:
+            candidates = [p for p in connected if p != cur]
+        if candidates:
+            out["suggest_switch"] = True
+            out["suggested_provider"] = candidates[0]
+            if snap.get("rate_limit_hits"):
+                out["reason"] = (
+                    f"Rate limits on {cur or 'current'} — try {candidates[0]}"
+                )
+            else:
+                out["reason"] = (
+                    f"Unstable responses from {cur or 'current'} — try {candidates[0]}"
+                )
+        else:
+            out["reason"] = (
+                "Provider looks flaky; add another provider in Settings or retry later."
+            )
+        return out
+
     def status(self) -> dict[str, Any]:
         with self._lock:
             keys = list(self._events.keys())

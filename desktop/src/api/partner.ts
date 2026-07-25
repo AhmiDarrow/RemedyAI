@@ -10,6 +10,19 @@ export interface PendingApproval {
   created_at?: number
 }
 
+export interface ProviderHealthHint {
+  flaky?: boolean
+  suggest_switch?: boolean
+  suggested_provider?: string | null
+  reason?: string | null
+  health?: {
+    error_rate?: number
+    rate_limit_hits?: number
+    avg_latency_ms?: number | null
+    samples?: number
+  }
+}
+
 export interface PartnerStatus {
   pending_approvals: number
   open_goals: number
@@ -17,6 +30,7 @@ export interface PartnerStatus {
   harness_mode: string
   brief_intent: string
   approvals: PendingApproval[]
+  provider_health?: ProviderHealthHint
 }
 
 export async function getPartnerStatus(): Promise<PartnerStatus> {

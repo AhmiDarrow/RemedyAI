@@ -130,3 +130,12 @@ def _prep(
             get_token_nanobot().measure_messages(messages[-16:])
     except Exception:
         pass
+
+    # 6) Scout warm-up: cheap list_dir + git for project (background, local only)
+    if project_path:
+        try:
+            from remedy.nanoswarm import get_swarm
+
+            get_swarm().scout.schedule_warm(project_path, user_text=user_text or "")
+        except Exception:
+            logger.debug("speculative scout warm failed", exc_info=True)

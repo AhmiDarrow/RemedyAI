@@ -17,62 +17,12 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-# Baseline weights: effective "token density" per char class.
-# Lower weight → fewer tokens counted per character (~4 chars/token for ascii_word).
-_WEIGHTS_DEFAULT = {
-    "ascii_word": 0.25,
-    "space": 0.15,
-    "code_punct": 0.45,
-    "digit": 0.30,
-    "cjk": 1.0,
-    "emoji": 0.8,
-    "other": 0.35,
-}
-
-# Encoding families (tiktoken/Gigatoken-class *heuristics*, not full BPE).
-# Scale factors multiply the default class weights to better match family tokenizers.
-_FAMILY_SCALES: dict[str, dict[str, float]] = {
-    # OpenAI cl100k / o200k-ish + many OpenAI-compat APIs (xAI, Groq, OpenRouter OpenAI models)
-    "cl100k": {
-        "ascii_word": 1.0,
-        "space": 1.0,
-        "code_punct": 1.05,
-        "digit": 1.0,
-        "cjk": 0.95,
-        "emoji": 1.1,
-        "other": 1.0,
-    },
-    # Anthropic-ish (slightly denser punctuation / markup; code often more tokens)
-    "anthropic": {
-        "ascii_word": 1.04,
-        "space": 0.98,
-        "code_punct": 1.18,
-        "digit": 1.02,
-        "cjk": 1.05,
-        "emoji": 1.08,
-        "other": 1.08,
-    },
-    # DeepSeek / some code-heavy models
-    "deepseek": {
-        "ascii_word": 0.97,
-        "space": 0.94,
-        "code_punct": 1.2,
-        "digit": 1.0,
-        "cjk": 1.08,
-        "emoji": 1.0,
-        "other": 1.02,
-    },
-    # Local / demo — keep neutral
-    "local": {
-        "ascii_word": 1.0,
-        "space": 1.0,
-        "code_punct": 1.0,
-        "digit": 1.0,
-        "cjk": 1.0,
-        "emoji": 1.0,
-        "other": 1.0,
-    },
-}
+from remedy.nanoswarm.token_tables import (
+    content_boost,
+    list_families,
+    msg_overhead,
+    resolved_weights,
+)
 
 _PROVIDER_FAMILY: dict[str, str] = {
     "openai": "cl100k",
@@ -80,7 +30,7 @@ _PROVIDER_FAMILY: dict[str, str] = {
     "groq": "cl100k",
     "openrouter": "cl100k",
     "mistral": "cl100k",
-    "google": "cl100k",
+    "google": "gemini",
     "anthropic": "anthropic",
     "deepseek": "deepseek",
     "ollama": "local",
@@ -149,8 +99,7 @@ def resolve_context_window(
 
 
 def _weights_for_family(family: str) -> dict[str, float]:
-    scales = _FAMILY_SCALES.get(family) or _FAMILY_SCALES["cl100k"]
-    return {k: _WEIGHTS_DEFAULT[k] * float(scales.get(k, 1.0)) for k in _WEIGHTS_DEFAULT}
+    return resolved_weights(family)
 
 
 def _class_weight(ch: str, weights: dict[str, float]) -> float:
@@ -181,9 +130,10 @@ def estimate_text_tokens(
         return 0
     fam = family or encoding_family(provider, model)
     weights = _weights_for_family(fam)
+    boost = content_boost(fam, text)
     n = len(text)
     if n <= _FULL_SCAN_MAX:
-        total_w = sum(_class_weight(ch, weights) for ch in text)
+        total_w = sum(_class_weight(ch, weights) for ch in text) * boost
         return max(0, int(total_w + 0.5))
     # Sample head + tail; scale by full length
     head = text[:_SAMPLE_HEAD]
@@ -191,17 +141,9 @@ def estimate_text_tokens(
     sample = head + tail
     sample_w = sum(_class_weight(ch, weights) for ch in sample)
     sample_len = len(sample) or 1
-    total_w = sample_w * (n / sample_len)
+    total_w = sample_w * (n / sample_len) * boost
     return max(0, int(total_w + 0.5))
 
-
-# Per-message framing overhead by family (tiktoken-class chat templates differ)
-_MSG_OVERHEAD: dict[str, int] = {
-    "cl100k": 4,
-    "anthropic": 5,
-    "deepseek": 4,
-    "local": 3,
-}
 
 # Simple LRU-ish cache for message-list estimates (switch/re-render snappiness)
 _msg_cache: dict[str, int] = {}
@@ -246,7 +188,7 @@ def estimate_messages_tokens(
         if key in _msg_cache:
             return _msg_cache[key]
 
-    overhead = _MSG_OVERHEAD.get(fam, 4)
+    overhead = msg_overhead(fam)
     total = 0
     for m in messages:
         total += overhead
@@ -555,6 +497,7 @@ class TokenNanobot:
             "active_model": self.active_model,
             "calibrator": self.calibrator.stats(),
             "buckets": buckets,
+            "families": list_families(),
         }
 
 

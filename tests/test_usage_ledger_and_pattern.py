@@ -90,10 +90,11 @@ def test_helper_offline_help_and_error():
     assert any("key" in x.lower() or "auth" in x.lower() for x in err["hints"])
 
 
-def test_goal_scout_health_nanobots():
+def test_goal_scout_health_nanobots(tmp_path: Path):
     from remedy.nanoswarm.goal_nanobot import GoalNanobot
     from remedy.nanoswarm.health_nanobot import HealthNanobot
     from remedy.nanoswarm.scout_nanobot import ScoutNanobot
+    from remedy.nanoswarm.token_tables import list_families, resolved_weights
 
     g = GoalNanobot()
 
@@ -107,9 +108,18 @@ def test_goal_scout_health_nanobots():
     assert snap["stale"] is True
     assert "Ship" in g.system_hint("s1") or "goal" in g.system_hint("s1").lower()
 
-    scout = ScoutNanobot().scout("debug the pytest failure", intent="tool")
-    assert scout["active"] is True
-    assert scout["suggest_tools"]
+    scout = ScoutNanobot()
+    out = scout.scout("debug the pytest failure", intent="tool")
+    assert out["active"] is True
+    assert out["suggest_tools"]
+    # warm project (cheap list_dir)
+    (tmp_path / "pyproject.toml").write_text("[project]\nname='t'\n", encoding="utf-8")
+    warm = scout.warm_project(str(tmp_path), user_text="run tests")
+    assert warm.get("ok") is True
+    assert "pyproject.toml" in " ".join(warm.get("top_entries") or [])
+    assert "python" in (warm.get("markers") or [])
+    scout2 = scout.scout("run pytest", intent="tool", project_path=str(tmp_path))
+    assert scout2.get("warm") is True
 
     health = HealthNanobot()
     health.report(provider="xai", model="grok", ok=False, error="429 rate limit")
@@ -117,6 +127,17 @@ def test_goal_scout_health_nanobots():
     h = health.snapshot(provider="xai", model="grok")
     assert h["rate_limit_hits"] >= 2
     assert h["flaky"] is True
+    fo = health.failover_suggestion(
+        provider="xai",
+        model="grok",
+        connected_providers=["xai", "ollama", "demo"],
+    )
+    assert fo["suggest_switch"] is True
+    assert fo["suggested_provider"] in ("ollama", "demo")
+
+    assert any(f["id"] == "cl100k" for f in list_families())
+    w = resolved_weights("anthropic")
+    assert "ascii_word" in w and w["ascii_word"] > 0
 
 
 def test_usage_ledger_summary(tmp_path: Path):

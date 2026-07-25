@@ -145,6 +145,7 @@ export function StatusBar({
   const [version, setVersion] = useState('')
   const [status, setStatus] = useState<'connected' | 'disconnected' | 'checking'>('checking')
   const [alerts, setAlerts] = useState('')
+  const [providerHealthTip, setProviderHealthTip] = useState<string | null>(null)
   const [vision, setVision] = useState<VisionStatus | null>(null)
   const [hasCheckpoint, setHasCheckpoint] = useState(false)
 
@@ -199,8 +200,22 @@ export function StatusBar({
             if (p.pending_approvals > 0) bits.push(`${p.pending_approvals} approve`)
             if (p.open_goals > 0) bits.push(`${p.open_goals} goals`)
             setAlerts(bits.join(' · '))
+            const ph = p.provider_health
+            if (ph?.flaky || ph?.suggest_switch) {
+              setProviderHealthTip(
+                ph.reason
+                  || (ph.suggested_provider
+                    ? `Provider flaky — try ${ph.suggested_provider}`
+                    : 'Provider flaky — switch model or retry'),
+              )
+            } else {
+              setProviderHealthTip(null)
+            }
           } catch {
-            if (!cancelled) setAlerts('')
+            if (!cancelled) {
+              setAlerts('')
+              setProviderHealthTip(null)
+            }
           }
         } else {
           // Hysteresis: one blip must not flip the dock to "Server offline".
@@ -399,6 +414,22 @@ export function StatusBar({
           >
             ⚠ {alerts}
           </span>
+        )}
+
+        {providerHealthTip && (
+          <button
+            type="button"
+            className="px-1.5 py-0.5 rounded truncate max-w-[12rem] flex-shrink-0 text-left text-[10px]"
+            style={{
+              color: 'var(--warning)',
+              border: '1px solid var(--border)',
+              background: 'transparent',
+            }}
+            title={providerHealthTip}
+            onClick={() => onOpenUsage?.()}
+          >
+            Provider: flaky
+          </button>
         )}
 
         {dockVision.show && dockVision.line ? (

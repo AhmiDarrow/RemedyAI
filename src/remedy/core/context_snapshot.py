@@ -7,6 +7,7 @@ Replaces scattered Token + Memory + quality double-work on the hot path.
 
 from __future__ import annotations
 
+from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -208,8 +209,12 @@ def build_context_snapshot(
     except Exception as e:
         snap.signals["pack_error"] = str(e)
 
-    # Scout — first-tool orientation for tool/plan work
+    # Scout — first-tool orientation for tool/plan work (+ warm cache if ready)
     try:
+        # Kick warm early (async); reuse cache when already filled
+        if project_path and intent in ("tool", "plan", "skill"):
+            with suppress(Exception):
+                swarm.scout.schedule_warm(project_path, user_text=user_text or "")
         scout_out = swarm.scout.scout(
             user_text or "",
             intent=intent,
@@ -218,6 +223,7 @@ def build_context_snapshot(
         snap.signals["scout"] = {
             "active": scout_out.get("active"),
             "suggest_tools": scout_out.get("suggest_tools") or [],
+            "warm": scout_out.get("warm"),
         }
         if scout_out.get("active"):
             _append_remedy(str(scout_out.get("system_hint") or ""))

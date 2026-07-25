@@ -85,3 +85,10 @@ def register_nanoswarm_routes(app: FastAPI, *, runtime=None, gateway=None, memor
             command=body.command,
             path=body.path,
         )
+
+    @app.get("/api/nanoswarm/token/families")
+    async def nanoswarm_token_families() -> dict[str, Any]:
+        """List NanoToken encoding-family weight packs (offline tables)."""
+        from remedy.nanoswarm.token_tables import list_families
+
+        return {"families": list_families()}
