@@ -1066,8 +1066,8 @@ class BasicRuntime(AgentRuntime):
                     )
             # Background continuity: pattern observation + stuck signals
             with suppress(Exception):
+                from remedy.core.agent_post_turn import schedule_mid_turn_warm
                 from remedy.core.session_quality import get_session_quality
-                from remedy.core.speculative import schedule_speculative_prep
                 from remedy.nanoswarm import get_swarm
                 from remedy.nanoswarm.events import SwarmEvent
 
@@ -1083,18 +1083,7 @@ class BasicRuntime(AgentRuntime):
                     )
                 )
                 # Speculative prep while more tools / model continue
-                schedule_speculative_prep(
-                    session_id=str(getattr(self, "_session_id", "") or ""),
-                    brief=getattr(self, "_session_brief", None),
-                    messages=getattr(self, "_last_send_messages", None),
-                    project_path=str(
-                        getattr(self.config, "project_path", None)
-                        or getattr(self, "_project_path", None)
-                        or ""
-                    )
-                    or None,
-                    memory=getattr(self, "memory", None),
-                )
+                schedule_mid_turn_warm(self)
             return content_str
 
         def _progress_marker(
@@ -2301,31 +2290,9 @@ class BasicRuntime(AgentRuntime):
                     "from the context already gathered."
                 )
             # Compound learning + speculative warm for next turn
-            with suppress(Exception):
-                from remedy.core.project_learning import record_session_end
-                from remedy.core.session_quality import get_session_quality
-                from remedy.core.speculative import schedule_speculative_prep
+            from remedy.core.agent_post_turn import schedule_post_turn_prep
 
-                sid = str(getattr(self, "_session_id", "") or "")
-                qsnap = get_session_quality(sid).snapshot()
-                project_path = str(
-                    getattr(self.config, "project_path", None)
-                    or getattr(self, "_project_path", None)
-                    or ""
-                ) or None
-                # Light touch each turn (not only true session end)
-                if project_path and int(qsnap.get("turns") or 0) > 0:
-                    # Only merge full profile every few turns to limit disk IO
-                    if int(qsnap.get("turns") or 0) % 5 == 0:
-                        record_session_end(project_path, qsnap)
-                schedule_speculative_prep(
-                    session_id=sid,
-                    brief=getattr(self, "_session_brief", None),
-                    messages=getattr(self, "_last_send_messages", None),
-                    user_text=message or "",
-                    project_path=project_path,
-                    memory=getattr(self, "memory", None),
-                )
+            schedule_post_turn_prep(self, message=message or "")
         except Exception as e:
             logger.exception("LLM stream failed")
             # Never leave the user with only a stack-looking error — give a path forward.
