@@ -1,35 +1,78 @@
-Custom Proprietary License
+RemedyAI Source-Available License
 
-Copyright (c) 2025 Ahmi Darrow
-
-All rights reserved.
+Copyright (c) 2025–2026 Ahmi Darrow. All rights reserved.
 
 This software and its associated files (the "Software") are the exclusive
-property of Ahmi Darrow. The Software is protected by copyright laws.
+property of Ahmi Darrow. The Software is protected by copyright law.
 
-Permission is granted solely to individuals to use the Software for
-non-commercial purposes only. "Non-commercial" means personal, educational,
-or research use that does not generate any revenue, profit, or commercial
-benefit.
+The name "Remedy", "RemedyAI", logos, and related marks are trademarks of the
+copyright holder and are not licensed under this agreement.
 
-The following are strictly prohibited without the express written permission
-of Ahmi Darrow:
-- Any commercial use, including but not limited to selling, licensing,
-  renting, or incorporating the Software into a product or service for sale
-- Modifying, adapting, translating, or creating derivative works based on
-  the Software
-- Distributing, sublicensing, or transferring copies of the Software to
-  any third party
-- Using the Software in any business, organization, or revenue-generating
-  activity
+------------------------------------------------------------------------
+1. Free grant (individuals, hobbyists, and small indies)
+------------------------------------------------------------------------
 
-No part of the Software may be reproduced, transmitted, or distributed in
-any form or by any means without the prior written permission of the
-copyright holder.
+Subject to this license, Ahmi Darrow grants you a worldwide, royalty-free,
+non-exclusive, non-transferable license to use, copy, and modify the Software
+for any purpose (including commercial use of the Software on your own machines
+or within your organization) if BOTH of the following are true:
+
+  (a) Your organization (together with all affiliates) has less than
+      USD $1,000,000 in gross annual revenue; AND
+  (b) Your organization (together with all affiliates) has fewer than
+      twenty (20) full-time equivalent (FTE) employees.
+
+Individuals using the Software for personal, educational, or research purposes
+are always covered by this free grant, regardless of any employer size, so long
+as the use is not on behalf of an organization that exceeds (a) or (b).
+
+You may share modifications and non-commercial forks that retain this license
+and copyright notice. You may not sell the Software (or a substantially
+similar product based on it) as a standalone product without written permission.
+
+------------------------------------------------------------------------
+2. Contact required (enterprise and restricted uses)
+------------------------------------------------------------------------
+
+You must obtain a separate written license from Ahmi Darrow before:
+
+  - Use by or on behalf of an organization that exceeds the revenue or FTE
+    limits in section 1;
+  - Offering the Software (or a hosted/managed service based on it) as a
+    multi-tenant SaaS or competing managed platform;
+  - Selling, renting, or commercially redistributing the Software or a
+    substantially similar product based on it;
+  - Any other use not covered by section 1.
+
+Commercial / enterprise inquiries:
+  Email: ahmitdarrow@gmail.com
+  Subject: RemedyAI commercial license — [Your organization]
+
+See COMMERCIAL.md for a short plain-language summary (this LICENSE controls
+if there is any conflict).
+
+------------------------------------------------------------------------
+3. Notice retention
+------------------------------------------------------------------------
+
+You must keep this copyright notice and license text in all copies or
+substantial portions of the Software that you distribute.
+
+------------------------------------------------------------------------
+4. Termination
+------------------------------------------------------------------------
+
+Any breach of this license automatically terminates your rights under it.
+Upon termination you must stop using and distributing the Software.
+
+------------------------------------------------------------------------
+5. Disclaimer of warranty and limitation of liability
+------------------------------------------------------------------------
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHOR BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
-ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
-WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+THE AUTHOR OR COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.

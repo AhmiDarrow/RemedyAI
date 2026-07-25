@@ -564,4 +564,14 @@ See [docs/DESKTOP.md](docs/DESKTOP.md) for API contract and full desktop notes.
 
 ## License
 
-Custom proprietary license — see [LICENSE](./LICENSE). Non-commercial personal use only; commercial use and redistribution require written permission. The GitHub source is published for transparency and issue tracking; contributions are welcome under the same license terms unless otherwise agreed in writing.
+**Source-available** — see [LICENSE](./LICENSE) (binding) and [COMMERCIAL.md](./COMMERCIAL.md) (summary).
+
+| Who | Terms |
+|-----|--------|
+| **Solo / small indies** (&lt; $1M revenue **and** &lt; 20 FTE) | Free to use and modify under the LICENSE |
+| **Personal / education / research** | Free |
+| **Larger orgs, SaaS hosting, commercial resale** | Contact for a written commercial license |
+
+**Copyright (c) 2025–2026 Ahmi Darrow.** Enterprise / commercial: `ahmitdarrow@gmail.com` (subject: `RemedyAI commercial license — [org]`).
+
+The GitHub source is published for transparency and issue tracking. Contributions are welcome under the LICENSE unless otherwise agreed in writing. There is no license-key or phone-home enforcement in the app today.

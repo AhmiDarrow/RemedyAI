@@ -2,6 +2,15 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [Unreleased]
+
+### Docs: source-available license (solo / small indie free)
+
+- **LICENSE** rewritten: free use/modify for individuals and orgs under **&lt;$1M revenue and &lt;20 FTE**; personal/education/research always free under the grant.
+- Larger orgs, multi-tenant SaaS, and commercial resale require written permission — contact **Ahmi Darrow** (`ahmitdarrow@gmail.com`).
+- **COMMERCIAL.md** plain-language summary; no runtime license keys or phone-home.
+- Copyright public line remains **Ahmi Darrow** (no change to package author identity).
+
 ## [0.13.2] — 2026-07-25
 
 ### Security & power (review fixes — owner power preserved)

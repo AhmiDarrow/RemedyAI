@@ -41,7 +41,7 @@
     "targets": "nsis",
     "createUpdaterArtifacts": true,
     "publisher": "Remedy",
-    "copyright": "Copyright (c) Remedy contributors",
+    "copyright": "Copyright (c) 2025-2026 Ahmi Darrow",
     "category": "DeveloperTool",
     "shortDescription": "Local AI partner for knowledge, design, and code",
     "longDescription": "Remedy Desktop is a local-first AI partner. The app and sidecar run on your PC; optional local vision downloads a pinned open model you control. Install only from the official GitHub Releases for this repository.",

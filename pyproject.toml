@@ -8,7 +8,7 @@ description = "Self-improving multi-channel software coding agent framework (mem
 readme = "README.md"
 license = { text = "LicenseRef-Proprietary" }
 authors = [
-    { name = "Ahmi", email = "ahmitdarrow@gmail.com" }
+    { name = "Ahmi Darrow", email = "ahmitdarrow@gmail.com" }
 ]
 keywords = ["ai", "agent", "framework", "skill", "memory", "learning", "llm", "tools"]
 # License is project.license (LicenseRef-Proprietary). Avoid deprecated
