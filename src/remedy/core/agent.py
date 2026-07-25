@@ -77,7 +77,6 @@ from remedy.core.workspace import (
     normalize_access_scope,
     resolve_project_path,
     resolve_under_roots,
-    workspace_context_block,
 )
 from remedy.memory.store import MemoryStore
 from remedy.models import (
@@ -2564,145 +2563,14 @@ class BasicRuntime(AgentRuntime):
         return cp.summary_markdown()
 
     async def _build_context(self) -> str:
-        parts = []
-        # Project workspace (OpenCode-style default directory for this session)
-        with suppress(Exception):
-            parts.append(
-                workspace_context_block(
-                    self.effective_project_path(),
-                    access_scope=self.access_scope(),
-                    extra_roots=self.allowed_roots(),
-                    project_unset=self.project_path_is_unset(),
-                )
-            )
+        """Assemble turn context (workspace, Partner Memory, brief, skills).
 
-        # Partner Memory (durable identity + preferences — default on, budget-capped)
-        with suppress(Exception):
-            if self.memory is not None:
-                from remedy.memory.partner_memory import build_partner_memory_block
+        Implementation lives in :mod:`remedy.core.agent_context` so this
+        module stays an orchestrator and context can be typed under mypy.
+        """
+        from remedy.core.agent_context import build_turn_context
 
-                profile = await self.memory.get_or_create_profile()
-                # Config user_name is the settings field; prefer live profile, fall back to config.
-                if not (profile.display_name or "").strip():
-                    try:
-                        from remedy.interfaces.config import load_config
-
-                        user_name = str(load_config().get("user_name") or "").strip()
-                        if user_name:
-                            profile.display_name = user_name
-                            await self.memory.save_user_profile(profile)
-                    except Exception:
-                        pass
-                # Prefer query-aware ranking when last user message is known
-                q = str(getattr(self, "_last_user_text", "") or "")
-                project_path = str(
-                    getattr(self.config, "project_path", None)
-                    or getattr(self, "_project_path", None)
-                    or ""
-                ) or None
-                # Light reinforce of matching facts (same session continuity)
-                with suppress(Exception):
-                    from remedy.memory.partner_memory import reinforce_matching
-
-                    if q and reinforce_matching(profile, q):
-                        await self.memory.save_user_profile(profile)
-                block = build_partner_memory_block(
-                    profile, query=q, project_path=project_path
-                )
-                if block:
-                    parts.append(block)
-                # Full-scope reminder (no project jail) — once per context build
-                if self.project_path_is_unset() or self.access_scope() == "full":
-                    parts.append(
-                        "Access scope: full (no project folder). "
-                        "Tools are not limited to a project jail — prefer "
-                        "asking the user to pick a folder for focused coding, "
-                        "and avoid broad writes outside the active task."
-                    )
-
-        # Session Brief (Memory Harness L2) when present on agent
-        with suppress(Exception):
-            from remedy.memory.harness.brief import brief_to_context_block
-
-            brief = getattr(self, "_session_brief", None)
-            block = brief_to_context_block(brief)
-            if block:
-                parts.append(block)
-
-        recent: list[Any] = []
-        with suppress(Exception):
-            # Keep short — large memory dumps push weak models into pointless tool loops.
-            # Prefer query-time search later; recent is a light fallback.
-            recent = await self.memory.list_recent(limit=6)
-        if recent:
-            lines = []
-            for e in recent:
-                content = (e.content or "").strip()
-                # Skip noisy fallback/self-chat noise that poisons simple answers.
-                if "fallback mode" in content.lower() or content.startswith("Received:"):
-                    continue
-                if content.startswith("User (") or content.startswith("Remedy:"):
-                    # Gateway echo memories — skip; session history covers chat.
-                    continue
-                ts = e.created_at.isoformat()[:19] if e.created_at else "?"
-                lines.append(f"[{ts}] {content[:140]}")
-            if lines:
-                parts.append(
-                    "Recent memory (optional):\n" + "\n".join(lines[-4:])
-                )
-
-        tools = self.tool_registry.tools
-        if tools:
-            names = ", ".join(t.name for t in tools)
-            parts.append(
-                f"Built-in tools (executable): {names}."
-            )
-
-        # Skills catalog (progressive disclosure stage 1) — ranked, not full bodies.
-        with suppress(Exception):
-            reg = getattr(self, "skills", None)
-            count = int(getattr(reg, "count", 0) or 0) if reg is not None else 0
-            if reg is not None and count > 0:
-                ws = str(self.effective_project_path())
-                # Single ranked catalog with workspace hint (no double rank / discard)
-                ranked_lines = reg.summary_lines(limit=24, query="")
-                if hasattr(reg, "match_skills"):
-                    top = reg.match_skills(
-                        "",
-                        limit=24,
-                        workspace_hint=ws,
-                    )
-                    if top:
-                        # Rebuild lines from ranked order with status badges
-                        lines: list[str] = []
-                        for skill, _sc in top:
-                            m = skill.manifest
-                            st = m.status.value if hasattr(m.status, "value") else str(m.status)
-                            desc = (m.description or "").strip()
-                            if len(desc) > 140:
-                                desc = desc[:137] + "…"
-                            lines.append(f"- **{m.name}** [{st}]: {desc}")
-                        lines.append(
-                            "_Activate with skill_activate(name=…); rank with skill_search._"
-                        )
-                        ranked_lines = lines
-                parts.append(
-                    "Skills catalog (name+status only — call skill_activate to load "
-                    "full procedure; skill_search to rank by task):\n"
-                    + "\n".join(ranked_lines)
-                )
-                with suppress(Exception):
-                    from remedy.core.metrics import default_registry
-
-                    default_registry.gauge(
-                        "remedy_context_skills_listed"
-                    ).set(float(min(count, 24)))
-            else:
-                parts.append(
-                    "Skills loaded: (none yet — bundled defaults load on server start)."
-                )
-
-        return "\n\n".join(parts)
+        return await build_turn_context(self)
 
     def _fallback_response(self, message: str, event: GatewayEvent) -> str:
         msg_lower = message.lower().strip()

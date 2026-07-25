@@ -2,7 +2,12 @@
 
 High-level product notes for owners. Full detail lives in repo `CHANGELOG.md`.
 
-Ship **one** installer/tag for the current series (**v0.12.1**).
+Ship **one** installer/tag for the current series (**v0.12.2**).
+
+## 0.12.2 — Single relaunch · thinner agent context
+
+- In-app update: **one** relaunch after install (no double window from NSIS + updater).
+- Agent: turn context assembly extracted to `agent_context` (typed under mypy).
 
 ## 0.12.1 — Progress that doesn’t disappear
 

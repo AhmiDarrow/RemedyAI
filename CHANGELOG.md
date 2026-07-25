@@ -2,6 +2,19 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.12.2] — 2026-07-25
+
+### Fix: autoupdate double relaunch
+
+- In-app updater passes `/NOAUTOLAUNCH` so NSIS POSTINSTALL does not start the app;
+  the update script performs the **single** relaunch after verify.
+- Prevents two Remedy windows after a successful silent update.
+
+### Refactor: agent context extract
+
+- Move turn context assembly (`_build_context`) to `remedy.core.agent_context`
+  (mypy-covered); `agent.py` remains the ReAct orchestrator.
+
 ## [0.12.1] — 2026-07-25
 
 ### Feature / UX: update & setup progress

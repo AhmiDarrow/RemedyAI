@@ -62,6 +62,16 @@
   ;
   ; Silent (/S), passive (/P), and update (/UPDATE) installs skip the finish page,
   ; so we relaunch here (cmd /c start so the process survives installer exit).
+  ;
+  ; /NOAUTOLAUNCH: in-app updater owns a *single* relaunch after verify
+  ; (avoids double-start when POSTINSTALL + PowerShell both launch).
+  ClearErrors
+  ${GetOptions} $CMDLINE "/NOAUTOLAUNCH" $R9
+  ${IfNot} ${Errors}
+    DetailPrint "NOAUTOLAUNCH: deferring start to updater script (single relaunch)."
+    Goto skip_auto_launch
+  ${EndIf}
+
   StrCpy $R7 0
   StrCmp $PassiveMode "1" 0 +2
     StrCpy $R7 1
@@ -81,7 +91,7 @@
   Goto launch_done
 
   skip_auto_launch:
-  DetailPrint "Interactive install: launch deferred to finish page (Run checkbox)."
+  DetailPrint "Interactive install (or NOAUTOLAUNCH): launch deferred."
   launch_done:
 !macroend
 

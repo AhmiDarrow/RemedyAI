@@ -29,7 +29,8 @@ Full **Quit** stops the server — the WebUI will stop working.
 2. A separate **Remedy Update** progress window stays open while the app closes and
    the silent installer runs — so you are not left on a blank desktop.  
 3. Update-mode uninstall keeps your **user data** (`/UPDATE` path).  
-4. App relaunches when the pipeline succeeds; the progress window closes.  
+4. App **relaunches once** when the pipeline succeeds (installer does not also
+   auto-start — that used to open two windows); the progress window closes.  
 
 If download fails, use the release page manually:  
 https://github.com/AhmiDarrow/RemedyAI/releases

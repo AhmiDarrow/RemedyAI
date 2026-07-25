@@ -1706,9 +1706,11 @@ foreach ($c in $candidates) {{
   }}
 }}
 
-# Silent update install. /UPDATE marks update-mode (hooks keep user data, may relaunch).
+# Silent update install. /UPDATE = keep user data.
+# /NOAUTOLAUNCH = NSIS POSTINSTALL must NOT start the app (we launch once below).
+# Without NOAUTOLAUNCH, POSTINSTALL + this script both Start-Process → double relaunch.
 # /D= must be last and unquoted (NSIS rule) when forcing dir.
-$args = @('/S', '/NCRC', '/UPDATE')
+$args = @('/S', '/NCRC', '/UPDATE', '/NOAUTOLAUNCH')
 $priorDir = '{current_dir}'
 if ($priorDir -and (Test-Path -LiteralPath $priorDir)) {{
   $args += "/D=$priorDir"
@@ -1731,7 +1733,8 @@ $exitCode = 0
 try {{ $exitCode = $p.ExitCode }} catch {{ $exitCode = -1 }}
 Log "NSIS exit code: $exitCode"
 Set-UpdateStatus 'verifying' 98 'Verifying install…'
-Start-Sleep -Seconds 2
+# Give file locks a moment after NSIS; avoid racing a half-written EXE.
+Start-Sleep -Seconds 3
 
 # Prefer a binary that is new or newly written.
 $launch = $null
@@ -1753,10 +1756,11 @@ if (-not $launch) {{
 }}
 
 if ($launch) {{
-  Log "Relaunching: $launch"
+  # Single relaunch owner for in-app updates (NSIS skipped via /NOAUTOLAUNCH).
+  Log "Relaunching once: $launch"
   Set-UpdateStatus 'relaunch' 100 'Relaunching Remedy…'
   Start-Process -FilePath $launch
-  Log 'Relaunch issued'
+  Log 'Relaunch issued (single)'
   Set-UpdateStatus 'done' 100 'Update complete'
   exit 0
 }}
