@@ -66,6 +66,14 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
   const stepIndex = STEPS.indexOf(step)
   const primaryProviders = useMemo(() => catalog.filter((p) => !p.advanced), [catalog])
   const advancedProviders = useMemo(() => catalog.filter((p) => p.advanced), [catalog])
+  /** Free cloud keys only — Demo/Ollama get dedicated cards above. */
+  const freeKeyOptions = useMemo(
+    () =>
+      freeOptions.filter(
+        (o) => o.id !== 'demo' && o.id !== 'ollama' && (o.tier === 'free_key' || o.free_tier === 'free_key'),
+      ),
+    [freeOptions],
+  )
   const activeMeta = catalog.find((p) => p.id === provider) || FALLBACK_PROVIDERS[0]
   const showBaseUrl = Boolean(activeMeta?.show_base_url || provider === 'custom')
   const modelOptions = (activeMeta?.models || []).map((m) => m.id)
@@ -276,17 +284,19 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
     setSaving(true)
     setError('')
     try {
-      if (launchAtLogin) {
-        try {
-          const { invoke } = await import('@tauri-apps/api/core')
-          await invoke('set_launch_at_login', { enabled: true })
-          await invoke('set_desktop_prefs', {
-            close_to_tray: true,
-            start_in_tray: true,
-          })
-        } catch {
-          /* browser or missing command */
-        }
+      // Launch-at-login must NOT force start-in-tray (that made every boot look
+      // minimized even when the user never asked for tray-only startup).
+      try {
+        const { invoke } = await import('@tauri-apps/api/core')
+        await invoke('set_launch_at_login', { enabled: launchAtLogin })
+        await invoke('set_desktop_prefs', {
+          // Close-to-tray is fine default for always-ready; start visible by default.
+          close_to_tray: true,
+          start_in_tray: false,
+          skip_quit_server_warning: false,
+        })
+      } catch {
+        /* browser or missing command */
       }
       // Re-bootstrap auth then save — corrupt/wiped installs often need a fresh token.
       try {
@@ -306,8 +316,8 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
         user_name: userName.trim() || undefined,
         setup_completed: true,
         launch_at_login: launchAtLogin,
-        start_in_tray: launchAtLogin,
-        close_to_tray: launchAtLogin,
+        start_in_tray: false,
+        close_to_tray: true,
         vision_enabled: enableVision,
         vision_model_id: 'qwen2.5-vl-3b',
       })
@@ -497,63 +507,99 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
 
           {step === 'provider' && (
             <>
-              {freeOptions.length > 0 && (
-                <div className="space-y-2">
-                  <div className="text-sm font-medium" style={labelStyles}>
-                    Free to try
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {freeOptions.map((opt) => {
-                      const selected = provider === opt.id
-                      return (
-                        <button
-                          key={opt.id}
-                          type="button"
-                          onClick={() => handleProviderChange(opt.id)}
-                          title={opt.blurb}
-                          className="rounded-lg px-3 py-2 text-sm font-medium transition-colors"
-                          style={{
-                            border: selected
-                              ? '1.5px solid var(--accent)'
-                              : '1px solid var(--border)',
-                            background: selected
-                              ? 'color-mix(in srgb, var(--accent) 14%, var(--bg-primary))'
-                              : 'var(--bg-tertiary)',
-                            color: 'var(--text-primary)',
-                          }}
-                        >
-                          {opt.title}
-                          {opt.badge ? (
-                            <span
-                              className="ml-1.5 text-[10px] opacity-80"
-                              style={{ color: 'var(--accent)' }}
-                            >
-                              {opt.badge}
-                            </span>
-                          ) : null}
-                        </button>
-                      )
-                    })}
-                  </div>
+              {/* Clean free path — three choices max, not a chip flea market */}
+              <div className="space-y-2">
+                <div className="text-sm font-medium" style={labelStyles}>
+                  Start free
                 </div>
-              )}
-              {ollamaHint && (
-                <div
-                  className="text-sm rounded-lg px-3 py-2"
-                  style={{ ...mutedStyles, border: '1px solid var(--border)' }}
-                >
-                  {ollamaHint}
+                <div className="grid gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleProviderChange('demo')}
+                    className="w-full text-left rounded-xl px-3.5 py-3 transition-colors"
+                    style={{
+                      border:
+                        provider === 'demo'
+                          ? '1.5px solid var(--accent)'
+                          : '1px solid var(--border)',
+                      background:
+                        provider === 'demo'
+                          ? 'color-mix(in srgb, var(--accent) 12%, var(--bg-primary))'
+                          : 'var(--bg-tertiary)',
+                    }}
+                  >
+                    <div className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+                      Demo · no signup
+                    </div>
+                    <div className="text-xs mt-0.5" style={mutedStyles}>
+                      Chat immediately on a rate-limited free gateway. Switch later in Settings.
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleProviderChange('ollama')}
+                    className="w-full text-left rounded-xl px-3.5 py-3 transition-colors"
+                    style={{
+                      border:
+                        provider === 'ollama'
+                          ? '1.5px solid var(--accent)'
+                          : '1px solid var(--border)',
+                      background:
+                        provider === 'ollama'
+                          ? 'color-mix(in srgb, var(--accent) 12%, var(--bg-primary))'
+                          : 'var(--bg-tertiary)',
+                    }}
+                  >
+                    <div className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+                      Ollama · free & private on this PC
+                    </div>
+                    <div className="text-xs mt-0.5" style={mutedStyles}>
+                      {ollamaHint
+                        || 'Requires Ollama installed locally. No cloud API key.'}
+                    </div>
+                  </button>
                 </div>
-              )}
+                {freeKeyOptions.length > 0 && (
+                  <div className="pt-1">
+                    <label className="block mb-1 text-xs font-medium" style={mutedStyles}>
+                      Or a free cloud key (optional)
+                    </label>
+                    <select
+                      value={freeKeyOptions.some((o) => o.id === provider) ? provider : ''}
+                      onChange={(e) => {
+                        const id = e.target.value
+                        if (id) handleProviderChange(id)
+                      }}
+                      className="w-full rounded-lg px-3 py-2 text-sm outline-none"
+                      style={inputStyles}
+                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--accent)')}
+                      onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--border)')}
+                    >
+                      <option value="">Choose provider…</option>
+                      {freeKeyOptions.map((opt) => (
+                        <option key={opt.id} value={opt.id}>
+                          {opt.title || opt.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+
               <div>
                 <label
                   className="block mb-1.5 text-sm font-medium"
                   style={labelStyles}
                 >
-                  Provider
+                  Or pick a paid / full provider
                 </label>
                 <select
-                  value={provider}
+                  value={
+                    provider === 'demo' || provider === 'ollama'
+                      || freeKeyOptions.some((o) => o.id === provider)
+                      ? provider
+                      : provider
+                  }
                   onChange={(e) => handleProviderChange(e.target.value)}
                   className="w-full rounded-lg px-3 py-2.5 text-base outline-none"
                   style={inputStyles}
@@ -562,7 +608,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                 >
                   {primaryProviders.map((p) => (
                     <option key={p.id} value={p.id}>
-                      {p.badge ? `${p.name} · ${p.badge}` : p.name}
+                      {p.name}
                     </option>
                   ))}
                   {showAdvanced && advancedProviders.map((p) => (
@@ -582,7 +628,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
               </div>
               {provider === 'demo' && (
                 <div className="text-sm" style={mutedStyles}>
-                  Demo needs no key (rate-limited). For private use, pick Ollama.
+                  Demo is rate-limited and not private. Prefer Ollama or your own key for real work.
                 </div>
               )}
               {activeMeta?.key_docs_url && provider !== 'demo' && provider !== 'ollama' && (

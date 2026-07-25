@@ -59,7 +59,7 @@ try {
 
   $form = New-Object System.Windows.Forms.Form
   $form.Text = 'Remedy Desktop - Uninstall'
-  $form.Size = New-Object System.Drawing.Size(500, 340)
+  $form.Size = New-Object System.Drawing.Size(520, 360)
   $form.StartPosition = 'CenterScreen'
   $form.FormBorderStyle = 'FixedDialog'
   $form.MaximizeBox = $false
@@ -78,14 +78,14 @@ try {
 
   $cbConfig = New-Object System.Windows.Forms.CheckBox
   $cbConfig.Location = New-Object System.Drawing.Point(24, 76)
-  $cbConfig.Size = New-Object System.Drawing.Size(440, 28)
+  $cbConfig.Size = New-Object System.Drawing.Size(440, 40)
   $cbConfig.Font = $uiFont
   $cbConfig.UseVisualStyleBackColor = $true
-  $cbConfig.Text = 'Remove configuration (config, desktop prefs, API keys / auth)'
+  $cbConfig.Text = 'Remove configuration (config, keys, visual decoder / llama.cpp models)'
   $form.Controls.Add($cbConfig)
 
   $cbSkills = New-Object System.Windows.Forms.CheckBox
-  $cbSkills.Location = New-Object System.Drawing.Point(24, 110)
+  $cbSkills.Location = New-Object System.Drawing.Point(24, 120)
   $cbSkills.Size = New-Object System.Drawing.Size(440, 28)
   $cbSkills.Font = $uiFont
   $cbSkills.UseVisualStyleBackColor = $true
@@ -93,7 +93,7 @@ try {
   $form.Controls.Add($cbSkills)
 
   $cbFull = New-Object System.Windows.Forms.CheckBox
-  $cbFull.Location = New-Object System.Drawing.Point(24, 144)
+  $cbFull.Location = New-Object System.Drawing.Point(24, 154)
   $cbFull.Size = New-Object System.Drawing.Size(440, 40)
   $cbFull.Font = $uiFont
   $cbFull.UseVisualStyleBackColor = $true
@@ -101,11 +101,11 @@ try {
   $form.Controls.Add($cbFull)
 
   $hint = New-Object System.Windows.Forms.Label
-  $hint.Location = New-Object System.Drawing.Point(24, 192)
-  $hint.Size = New-Object System.Drawing.Size(440, 40)
+  $hint.Location = New-Object System.Drawing.Point(24, 202)
+  $hint.Size = New-Object System.Drawing.Size(440, 48)
   $hint.Font = $uiFont
   $hint.ForeColor = [System.Drawing.SystemColors]::GrayText
-  $hint.Text = 'Leave all unchecked to keep your data. Full wipe includes config, skills, memory, and sessions.'
+  $hint.Text = 'Config wipe also removes the local visual decoder (llama-server + GGUF models under .remedy\vision). Full wipe includes memory, sessions, and everything else.'
   $form.Controls.Add($hint)
 
   $cbFull.Add_CheckedChanged({
@@ -122,7 +122,7 @@ try {
 
   $btnOk = New-Object System.Windows.Forms.Button
   $btnOk.Text = 'Continue uninstall'
-  $btnOk.Location = New-Object System.Drawing.Point(250, 250)
+  $btnOk.Location = New-Object System.Drawing.Point(260, 270)
   $btnOk.Size = New-Object System.Drawing.Size(140, 30)
   $btnOk.Font = $uiFont
   $btnOk.DialogResult = [System.Windows.Forms.DialogResult]::OK
@@ -132,7 +132,7 @@ try {
 
   $btnCancel = New-Object System.Windows.Forms.Button
   $btnCancel.Text = 'Cancel'
-  $btnCancel.Location = New-Object System.Drawing.Point(140, 250)
+  $btnCancel.Location = New-Object System.Drawing.Point(150, 270)
   $btnCancel.Size = New-Object System.Drawing.Size(90, 30)
   $btnCancel.Font = $uiFont
   $btnCancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel

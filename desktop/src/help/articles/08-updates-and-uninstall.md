@@ -51,9 +51,11 @@ Silent auto-update uninstalls **do not** show the wipe dialog and **keep** data.
 | Option | Effect |
 |--------|--------|
 | Keep all (default on cancel/error) | Remove app only |
-| Remove config | Deletes config / desktop prefs / auth |
+| Remove config | Deletes config / desktop prefs / auth **and** the local visual decoder (`~/.remedy/vision` — llama-server + GGUF models) |
 | Remove skills | Deletes user skills tree |
-| Full wipe | Removes `~/.remedy` and related app data |
+| Full wipe | Removes entire `~/.remedy` (including vision, memory, sessions) and related app data |
+
+Uninstall **stops `llama-server`** before deleting vision files so large model weights are not left locked.
 
 3. Cancel aborts uninstall.  
 4. Dialog/script errors **soft-fail**: app still uninstalls, data kept.

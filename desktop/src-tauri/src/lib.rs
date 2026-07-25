@@ -115,8 +115,13 @@ fn load_desktop_prefs() -> DesktopPrefs {
         if let Some(v) = toml_bool(&raw, "close_to_tray") {
             prefs.close_to_tray = v;
         }
-        if let Some(v) = toml_bool(&raw, "start_in_tray") {
-            prefs.start_in_tray = v;
+        // start_in_tray: do NOT seed `true` from config.toml alone.
+        // Older Setup coupled "Start with Windows" → start_in_tray=true, so many
+        // installs always hid on launch. Only honor an explicit false here; an
+        // explicit true requires desktop.json (written when the user checks the
+        // "Start hidden in tray" box in Settings).
+        if let Some(false) = toml_bool(&raw, "start_in_tray") {
+            prefs.start_in_tray = false;
         }
         if let Some(v) = toml_bool(&raw, "skip_quit_server_warning") {
             prefs.skip_quit_server_warning = v;
@@ -1934,19 +1939,35 @@ pub fn run() {
                 remove_legacy_run_key();
             }
 
-            // Start hidden when always-ready start_in_tray is on
+            // Start hidden only when start_in_tray is explicitly true in desktop.json
+            // (or in-memory prefs). Re-load from disk so a Settings save before restart
+            // cannot be ignored by a stale in-memory default.
             {
-                let state = app.state::<ServerState>();
-                let start_hidden = state
+                let fresh = load_desktop_prefs();
+                if let Ok(mut lock) = app.state::<ServerState>().desktop_prefs.lock() {
+                    *lock = fresh;
+                }
+                let start_hidden = app
+                    .state::<ServerState>()
                     .desktop_prefs
                     .lock()
                     .map(|p| p.start_in_tray)
                     .unwrap_or(false);
+                log::info!(
+                    "launch visibility: start_in_tray={} (window {})",
+                    start_hidden,
+                    if start_hidden { "hidden" } else { "shown" }
+                );
                 if start_hidden {
                     if let Some(w) = app.get_webview_window("main") {
                         let _ = w.hide();
                         log::info!("start_in_tray: main window hidden");
                     }
+                } else if let Some(w) = app.get_webview_window("main") {
+                    // Ensure we are not stuck minimized/hidden from a prior tray session.
+                    let _ = w.show();
+                    let _ = w.unminimize();
+                    let _ = w.set_focus();
                 }
             }
 

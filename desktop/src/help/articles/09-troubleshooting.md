@@ -11,6 +11,16 @@ Work top-down: is the **local server** up, is **auth** loaded, is the **provider
 5. Reinstall the latest desktop build.  
 6. **Open data folder** and read logs under `%USERPROFILE%\.remedy\logs\` (see below).
 
+## Always starts minimized / only in the tray
+
+“Start with Windows” and “Start hidden in tray” are **separate**. Older setup incorrectly
+turned on **start hidden** whenever login-at-startup was enabled.
+
+1. Open **Settings → Always ready**.  
+2. Uncheck **Start hidden in tray** (leave **Start with Windows** on if you want).  
+3. **Save**, fully Quit, relaunch — the main window should open normally.  
+4. Tray-only start is only when that box is checked (stored in `%USERPROFILE%\.remedy\desktop.json`).
+
 ## Status bar flips Connected ↔ Disconnected
 
 Usually the local API event loop was blocked (historically: visual decoder health checks against a dead `llama-server` port). Fixed builds use a cheap `/api/ping` probe and non-blocking vision status.

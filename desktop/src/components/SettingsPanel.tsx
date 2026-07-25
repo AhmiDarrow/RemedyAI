@@ -234,6 +234,7 @@ export function SettingsPanel({
       setAgentName(s.name || 'Remedy')
       setAccessScope(s.access_scope || 'project')
       setLaunchAtLogin(Boolean(s.launch_at_login))
+      // Prefer shell desktop.json for tray prefs (authoritative at launch).
       setStartInTray(Boolean(s.start_in_tray))
       setCloseToTray(Boolean(s.close_to_tray))
       setHarnessMode(s.harness_mode || 'auto')
@@ -267,10 +268,19 @@ export function SettingsPanel({
       void Promise.allSettled([
         (async () => {
           try {
-            const prefs = await invoke<{ skip_quit_server_warning?: boolean }>(
-              'get_desktop_prefs',
-            )
+            const prefs = await invoke<{
+              skip_quit_server_warning?: boolean
+              start_in_tray?: boolean
+              close_to_tray?: boolean
+            }>('get_desktop_prefs')
             setSkipQuitWarn(Boolean(prefs?.skip_quit_server_warning))
+            // Shell prefs win for visibility toggles (match what launch uses).
+            if (typeof prefs?.start_in_tray === 'boolean') {
+              setStartInTray(prefs.start_in_tray)
+            }
+            if (typeof prefs?.close_to_tray === 'boolean') {
+              setCloseToTray(prefs.close_to_tray)
+            }
           } catch {
             try {
               setSkipQuitWarn(localStorage.getItem('remedy.skipQuitServerWarning') === '1')
@@ -886,8 +896,14 @@ export function SettingsPanel({
                   onChange={(e) => setStartInTray(e.target.checked)}
                   style={{ accentColor: 'var(--accent)' }}
                 />
-                <span style={{ color: 'var(--text-primary)' }}>Start in tray (when at login)</span>
+                <span style={{ color: 'var(--text-primary)' }}>
+                  Start hidden in tray
+                </span>
               </label>
+              <div className="text-[10px] leading-snug mb-1.5 pl-6" style={{ color: 'var(--text-muted)' }}>
+                Off = window opens normally (recommended). On = only a tray icon until you click it.
+                Independent of “Start with Windows”.
+              </div>
               <label className="flex items-center gap-2 mb-1 cursor-pointer">
                 <input
                   type="checkbox"

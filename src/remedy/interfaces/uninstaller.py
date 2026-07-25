@@ -11,6 +11,7 @@ Usage:
 from __future__ import annotations
 
 import contextlib
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -86,26 +87,60 @@ def _wipe_config() -> None:
     if auth.exists():
         shutil.rmtree(auth, ignore_errors=True)
         console.print(f"  removed [dim]{auth}[/dim]")
-    # Visual decoder side state (keep large models unless full purge)
-    vj = REMEDY_HOME / "vision" / "vision.json"
-    if vj.exists():
-        vj.unlink(missing_ok=True)
-        console.print(f"  removed [dim]{vj}[/dim]")
+    # vision.json removed with full vision tree via _wipe_vision() (called after)
+
+
+def _stop_llama_server_processes() -> None:
+    """Best-effort kill so vision tree is not file-locked on Windows."""
+    import subprocess
+
+    if os.name == "nt":
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        with contextlib.suppress(Exception):
+            subprocess.run(
+                ["taskkill", "/F", "/IM", "llama-server.exe", "/T"],
+                capture_output=True,
+                timeout=15,
+                creationflags=flags,
+                check=False,
+            )
+    else:
+        with contextlib.suppress(Exception):
+            subprocess.run(
+                ["pkill", "-f", "llama-server"],
+                capture_output=True,
+                timeout=10,
+                check=False,
+            )
 
 
 def _wipe_vision() -> None:
-    """Remove local visual decoder runtime + models under ~/.remedy/vision."""
+    """Remove local visual decoder runtime + models under ~/.remedy/vision.
+
+    Always stops llama-server first, then deletes runtime binaries, GGUF models,
+    downloads, and vision.json so reinstall starts clean.
+    """
+    _stop_llama_server_processes()
     vision = REMEDY_HOME / "vision"
-    if not vision.exists():
-        return
     try:
         from remedy.vision.install import wipe_vision_data
 
-        wipe_vision_data(REMEDY_HOME)
-        console.print(f"  removed [dim]{vision}[/dim]")
+        result = wipe_vision_data(REMEDY_HOME)
+        if vision.exists():
+            shutil.rmtree(vision, ignore_errors=True)
+        console.print(
+            f"  removed [dim]{vision}[/dim] (llama.cpp + visual models)"
+            + (f" — {result}" if result else "")
+        )
     except Exception:
-        shutil.rmtree(vision, ignore_errors=True)
-        console.print(f"  removed [dim]{vision}[/dim]")
+        if vision.exists():
+            shutil.rmtree(vision, ignore_errors=True)
+            console.print(f"  removed [dim]{vision}[/dim]")
+    # Legacy stray paths
+    for stray in ("llama-server", "llama.cpp"):
+        p = REMEDY_HOME / stray
+        if p.exists():
+            shutil.rmtree(p, ignore_errors=True) if p.is_dir() else p.unlink(missing_ok=True)
 
 
 def _wipe_skills() -> None:

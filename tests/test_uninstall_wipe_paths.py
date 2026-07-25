@@ -39,3 +39,26 @@ def test_full_wipe_paths_documented_in_ps1():
     assert "skill_stats.json" in text
     assert "full" in text.lower()
     assert ".remedy" in text
+    # Visual decoder / llama.cpp must be stopped and removed on config or full wipe
+    assert "llama-server" in text
+    assert "vision" in text
+    assert "Remove-VisionTree" in text or "vision" in text
+
+
+def test_wipe_config_removes_vision_tree(tmp_path: Path, monkeypatch):
+    home = tmp_path / ".remedy"
+    vision = home / "vision" / "runtime"
+    vision.mkdir(parents=True)
+    (vision / "llama-server.exe").write_bytes(b"fake")
+    (home / "vision" / "models" / "qwen").mkdir(parents=True)
+    (home / "vision" / "models" / "qwen" / "m.gguf").write_bytes(b"gguf")
+    (home / "config.toml").write_text("name='x'\n", encoding="utf-8")
+    mem = home / "memory.db"
+    mem.write_text("keep", encoding="utf-8")
+
+    monkeypatch.setattr(uninst, "REMEDY_HOME", home)
+    uninst._wipe_config()  # noqa: SLF001
+    uninst._wipe_vision()  # noqa: SLF001
+
+    assert not (home / "vision").exists()
+    assert mem.exists()  # memory preserved on config wipe

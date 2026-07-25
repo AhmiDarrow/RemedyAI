@@ -47,8 +47,42 @@ function Remove-PathSafe([string]$p) {
   }
 }
 
+function Stop-VisionDecoder {
+  # Stop local llama-server so vision/ files are not locked during wipe.
+  try {
+    Get-Process -Name 'llama-server' -ErrorAction SilentlyContinue |
+      ForEach-Object {
+        Log "Stopping vision process pid=$($_.Id)"
+        Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
+      }
+  } catch {
+    Log "WARN stop llama-server: $($_.Exception.Message)"
+  }
+  # Best-effort free vision port
+  try {
+    $conns = Get-NetTCPConnection -LocalPort 8740 -ErrorAction SilentlyContinue
+    foreach ($c in $conns) {
+      if ($c.OwningProcess) {
+        Stop-Process -Id $c.OwningProcess -Force -ErrorAction SilentlyContinue
+        Log "Stopped pid on :8740 = $($c.OwningProcess)"
+      }
+    }
+  } catch {}
+}
+
+function Remove-VisionTree {
+  Stop-VisionDecoder
+  Start-Sleep -Milliseconds 400
+  Remove-PathSafe (Join-Path $homeRem 'vision')
+  # Stray download/cache names if any lived outside vision/ (legacy)
+  Remove-PathSafe (Join-Path $homeRem 'llama-server')
+  Remove-PathSafe (Join-Path $homeRem 'llama.cpp')
+  Log 'Vision decoder (llama.cpp + models) removed'
+}
+
 if ($full -eq 1) {
   # Full wipe: nothing left for a fresh install.
+  Stop-VisionDecoder
   # Do NOT delete the live install directory from this process — NSIS already
   # removed app files; wiping Programs\Remedy Desktop while uninstall.exe still
   # runs can fail or leave a half-deleted folder. Best-effort only after a delay.
@@ -108,9 +142,9 @@ if ($config -eq 1 -and (Test-Path -LiteralPath $homeRem)) {
     'comfyui.json'
   ) | ForEach-Object { Remove-PathSafe (Join-Path $homeRem $_) }
   Remove-PathSafe (Join-Path $homeRem 'auth')
-  # Local visual decoder (llama-server + GGUF) lives under vision/
-  Remove-PathSafe (Join-Path $homeRem 'vision')
-  Log 'Config wipe done (includes vision decoder)'
+  # Local visual decoder: llama-server binary + Qwen GGUF/mmproj (~GBs)
+  Remove-VisionTree
+  Log 'Config wipe done (includes vision decoder / llama.cpp)'
 }
 
 if ($skills -eq 1) {

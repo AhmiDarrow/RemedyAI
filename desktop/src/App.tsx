@@ -1104,6 +1104,16 @@ export default function App() {
         }}
         onExport={handleExport}
         onImport={() => void handleImport()}
+        footer={
+          <TokenCostTicker
+            placement="sidebar"
+            run={runUsage}
+            session={sessionUsage}
+            streaming={streaming}
+            model={model}
+            provider={llmProvider}
+          />
+        }
       />
 
       <div className="flex-1 flex flex-col min-w-0 relative min-h-0">
@@ -1144,13 +1154,6 @@ export default function App() {
               onQuickPrompt={(text) => void handleSend(text)}
               onRegenerate={(id) => void handleRegenerate(id)}
               userName={userName}
-            />
-            <TokenCostTicker
-              run={runUsage}
-              session={sessionUsage}
-              streaming={streaming}
-              model={model}
-              provider={llmProvider}
             />
 
             <Composer

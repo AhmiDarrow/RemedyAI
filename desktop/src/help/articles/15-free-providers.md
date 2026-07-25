@@ -2,16 +2,17 @@
 
 Remedy works without paying. Use a free path until you add a paid key.
 
-## Quick pick
+## Quick pick (first-run)
+
+Setup keeps free paths simple — not a wall of logos:
 
 | Option | Signup? | Best for |
 |--------|---------|----------|
-| **Demo** | No | First minutes — try chat with no keys |
-| **Gemini** | Free AI Studio key | Strong free multimodal |
-| **Groq** | Free key | Very fast open models |
-| **OpenRouter** | Free key | Many models ending in `:free` |
-| **Mistral** | Free Experiment key | EU provider free tier |
-| **Ollama** | Install app | Private, local, unlimited on your hardware |
+| **Demo · no signup** | No | First minutes — try chat immediately |
+| **Ollama · free & private** | Install app | Local models, nothing leaves your PC |
+| **Free cloud key** (dropdown) | Free key | Gemini / Groq / OpenRouter / Mistral |
+
+Paid providers (OpenAI, Anthropic, xAI, DeepSeek, …) sit in the main **Provider** list.
 
 ## Demo (no signup)
 

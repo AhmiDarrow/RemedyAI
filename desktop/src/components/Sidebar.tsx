@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, useRef } from 'react'
+import { useMemo, useState, useEffect, useRef, type ReactNode } from 'react'
 import type { ChatSession } from '../types'
 import { relativeTime } from '../utils/relativeTime'
 import {
@@ -18,6 +18,8 @@ interface SidebarProps {
   onRename?: (id: string, title: string) => void
   onExport?: (id: string) => void
   onImport?: () => void
+  /** Bottom-left usage / cost strip (session column). */
+  footer?: ReactNode
 }
 
 export function Sidebar({
@@ -29,6 +31,7 @@ export function Sidebar({
   onRename,
   onExport,
   onImport,
+  footer,
 }: SidebarProps) {
   const [query, setQuery] = useState('')
   const [meta, setMeta] = useState<Record<string, SessionMeta>>(() => getAllSessionMeta())
@@ -385,11 +388,12 @@ export function Sidebar({
         )}
       </div>
       <div
-        className="px-3 py-1.5 text-[10px] border-t"
+        className="px-3 py-1 text-[10px] border-t shrink-0"
         style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
       >
         Double-click a session to rename
       </div>
+      {footer}
     </div>
   )
 }
