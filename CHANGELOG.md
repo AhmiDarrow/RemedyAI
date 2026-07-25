@@ -2,6 +2,19 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.13.0] — 2026-07-25
+
+### Feature: coding agency (Build-class tool plane)
+
+- **`file_edit`**: unique search/replace (or `replace_all`); time-travel undo compatible.
+- **`repo_search`**: project text search via ripgrep when available, pure-Python fallback.
+- **Missions**: `mission_start`, `mission_status`, `mission_update`, `mission_verify` —
+  durable goal/checklist/verify for work-alone multi-step builds.
+- **`job_run`**: silent explore/verify jobs (summary only; one partner voice).
+- **`web_fetch`**: optional HTTP fetch when `web_tools_enabled` is true.
+- Work-alone + tool intent packs steer models toward edit/search/mission loops.
+- Agency battery fixtures under `scripts/agency_battery/`; manual chapter `18-agency`.
+
 ## [0.12.3] — 2026-07-25
 
 ### Refactor: agent.py peel (orchestrator thinner)

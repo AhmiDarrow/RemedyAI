@@ -45,6 +45,15 @@ const META: HelpArticleMeta[] = [
       'Operator guide: continuity workers, NanoToken BPE packs (v2 default), calibration — not chat agents.',
   },
   {
+    id: '18-agency',
+    title: 'Coding agency (Build-class power)',
+    category: 'Build',
+    order: 7.5,
+    tags: ['agency', 'file_edit', 'repo_search', 'mission', 'work alone', 'tools'],
+    summary:
+      'file_edit, repo_search, missions, silent jobs — multi-hour coding with one partner.',
+  },
+  {
     id: '01-install-windows',
     title: 'Install (Windows)',
     category: 'Start here',

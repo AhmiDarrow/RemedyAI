@@ -49,6 +49,7 @@ Nothing in this architecture requires a Remedy cloud account. Chat content goes 
 | [Security & data](04-security-and-data) | Tokens, scope, approvals |
 | [Chat & sessions](05-chat-and-sessions) | UI map, Plan/Build, export |
 | [Memory & harness](06-memory-and-harness) | `/remember`, `/compact` |
+| [Coding agency](18-agency) | `file_edit`, missions, work alone |
 | [Skills](07-skills) | Lifecycle, Trust, panel |
 | [Updates & uninstall](08-updates-and-uninstall) | Auto-update, wipe options |
 | [Troubleshooting](09-troubleshooting) | Server, OAuth, Defender |

@@ -102,6 +102,7 @@ The desktop app bundles the full Remedy server as a sidecar, so everything runs 
 | **Quit safety** | Full quit warns that the local server (and browser Web UI) will stop; “don’t warn again” option |
 | **Memory Harness** | Context prune + Session Brief + `/compact` |
 | **Approvals** | High-impact shell / write / skill scripts: Approve/Deny (auto mode remains an owner choice) |
+| **Coding tools** | `file_edit` (search/replace), `repo_search`, missions + silent `job_run` for Build-class agency |
 | **Diff view** | Unified diffs and `file_write` process dumps: red removals / green additions |
 | **Goals & plans** | `/goal`, `/goals`, `/plan`, `/plans`, goal/plan tools |
 | **ComfyUI skill** | From-scratch install guide + portable discovery + generate images into chat (Flux.2 Klein) |
@@ -472,7 +473,7 @@ def teardown_plugin():
 git clone https://github.com/AhmiDarrow/RemedyAI.git
 cd RemedyAI
 uv sync --group dev
-uv run pytest -q          # full suite (560+ tests; currently ~740)
+uv run pytest -q          # full suite (560+ tests; currently ~769)
 cd desktop && npm test    # frontend unit tests (vitest)
 python scripts/check_docs.py  # docs stay synced with code (help, cmds, versions)
 uv run remedy --help

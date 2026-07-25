@@ -160,6 +160,126 @@ def register_workspace_tools(runtime: Any) -> None:
             pass
         return f"Wrote {len(content)} bytes to {path}"
 
+    async def file_edit(
+        path: str = "",
+        old_string: str = "",
+        new_string: str = "",
+        replace_all: bool = False,
+    ) -> str:
+        """Precise search/replace edit (prefer over rewriting whole files)."""
+        from remedy.core.approvals import APPROVALS
+        from remedy.core.file_edit import apply_search_replace
+
+        if not (path or "").strip():
+            return format_tool_error(
+                "path is required",
+                code="MISSING_PATH",
+                tool_name="file_edit",
+                suggestion='file_edit(path="src/foo.py", old_string="...", new_string="...")',
+            )
+        ask_reason = APPROVALS.needs_ask(f"edit {path}", tool_name="file_edit")
+        sid = getattr(runtime, "_session_id", None)
+        if ask_reason and not APPROVALS.is_approved(
+            "file_edit", f"edit {path}", session_id=sid
+        ):
+            item = APPROVALS.create(
+                tool_name="file_edit",
+                command=f"edit {path}",
+                reason=ask_reason,
+                session_id=sid,
+            )
+            return (
+                f"APPROVAL_REQUIRED id={item.id}\n"
+                f"reason={ask_reason}\n"
+                f"path={path}\n"
+                "Do not invent success. Tell the user this needs approval "
+                f"(or /approve {item.id}), then retry file_edit."
+            )
+        target = runtime.resolve_tool_path(path)
+        if not target.is_file():
+            return format_tool_error(
+                f"file not found: {path}",
+                code="NOT_FOUND",
+                tool_name="file_edit",
+                suggestion="Use list_dir/repo_search to find the path, then file_read before edit.",
+            )
+        try:
+            previous = target.read_text(encoding="utf-8", errors="replace")
+        except OSError as e:
+            return format_tool_error(
+                f"cannot read {path}: {e}",
+                code="IO_ERROR",
+                tool_name="file_edit",
+            )
+        result = apply_search_replace(
+            previous,
+            old_string or "",
+            new_string if new_string is not None else "",
+            replace_all=bool(replace_all),
+        )
+        if not result.ok or result.new_content is None:
+            return format_tool_error(
+                result.message,
+                code="EDIT_FAILED",
+                tool_name="file_edit",
+                suggestion=(
+                    "file_read the file, copy the exact old_string (including whitespace), "
+                    "or set replace_all=true if multiple matches are intentional."
+                ),
+            )
+        try:
+            target.write_text(result.new_content, encoding="utf-8")
+        except OSError as e:
+            return format_tool_error(
+                f"cannot write {path}: {e}",
+                code="IO_ERROR",
+                tool_name="file_edit",
+            )
+        runtime._track_artifact(str(target))
+        try:
+            from remedy.core.time_travel import SessionUndoLog
+
+            home = getattr(getattr(runtime, "config", None), "home_dir", None)
+            SessionUndoLog(home).record_file_write(
+                session_id=str(sid or getattr(runtime, "_session_id", "") or ""),
+                path=target,
+                previous_content=previous,
+                existed=True,
+                new_size=len(result.new_content or ""),
+                message_id=getattr(runtime, "_active_message_id", None),
+            )
+        except Exception:
+            pass
+        return f"{result.message} path={path}"
+
+    async def repo_search(
+        pattern: str = "",
+        path: str = ".",
+        glob: str = "",
+        max_matches: int = 50,
+        case_insensitive: bool = False,
+    ) -> str:
+        """Search repository text (ripgrep if available, else pure Python)."""
+        from remedy.core.repo_search import format_hits, search_repo
+
+        if not (pattern or "").strip():
+            return format_tool_error(
+                "pattern is required",
+                code="MISSING_PATTERN",
+                tool_name="repo_search",
+                suggestion='repo_search(pattern="def foo", path="src", glob="*.py")',
+            )
+        root = runtime.effective_project_path()
+        hits, engine = search_repo(
+            root,
+            pattern.strip(),
+            path=path or ".",
+            glob=(glob or None) or None,
+            max_matches=int(max_matches or 50),
+            case_insensitive=bool(case_insensitive),
+        )
+        return format_hits(hits, engine=engine, pattern=pattern.strip())
+
     async def list_dir(
         path: str = ".",
         limit: int = 200,
@@ -322,8 +442,8 @@ def register_workspace_tools(runtime: Any) -> None:
     )
     runtime.tool_registry.register_builtin_handler(
         "file_write",
-        "Create or overwrite a text file (UTF-8). Preferred for all simple "
-        "create/edit of .txt/.md/.json — do NOT use bash/powershell Set-Content. "
+        "Create or overwrite a text file (UTF-8). Prefer file_edit for small "
+        "changes to existing files. Do NOT use bash/powershell Set-Content. "
         "Allowed: project, Desktop, Documents, Downloads (plus home when access "
         "scope is home/full). Absolute Desktop paths are fine.",
         file_write,
@@ -340,6 +460,68 @@ def register_workspace_tools(runtime: Any) -> None:
                 },
             },
             "required": ["path", "content"],
+        },
+    )
+    runtime.tool_registry.register_builtin_handler(
+        "file_edit",
+        "Precise search/replace edit of an existing text file. Prefer this over "
+        "file_write when changing part of a large file. old_string must match "
+        "exactly once unless replace_all=true.",
+        file_edit,
+        {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "File path"},
+                "old_string": {
+                    "type": "string",
+                    "description": "Exact text to find (include context if needed)",
+                },
+                "new_string": {
+                    "type": "string",
+                    "description": "Replacement text",
+                },
+                "replace_all": {
+                    "type": "boolean",
+                    "description": "Replace every match (default false = unique match required)",
+                    "default": False,
+                },
+            },
+            "required": ["path", "old_string", "new_string"],
+        },
+    )
+    runtime.tool_registry.register_builtin_handler(
+        "repo_search",
+        "Search project text by regex/literal (ripgrep if installed, else built-in). "
+        "Prefer this over bash grep/Select-String for code discovery.",
+        repo_search,
+        {
+            "type": "object",
+            "properties": {
+                "pattern": {
+                    "type": "string",
+                    "description": "Search pattern (regex supported)",
+                },
+                "path": {
+                    "type": "string",
+                    "description": "Subdirectory or file (default project root)",
+                    "default": ".",
+                },
+                "glob": {
+                    "type": "string",
+                    "description": "Optional file glob e.g. *.py",
+                },
+                "max_matches": {
+                    "type": "integer",
+                    "description": "Max hits (default 50, max 500)",
+                    "default": 50,
+                },
+                "case_insensitive": {
+                    "type": "boolean",
+                    "description": "Case-insensitive search",
+                    "default": False,
+                },
+            },
+            "required": ["pattern"],
         },
     )
     runtime.tool_registry.register_builtin_handler(
@@ -382,6 +564,18 @@ def register_workspace_tools(runtime: Any) -> None:
     runtime._register_vision_tools()
     runtime._register_local_discover_tools()
     runtime._register_skill_tools()
+    try:
+        from remedy.core.agent_mission_tools import register_mission_tools
+
+        register_mission_tools(runtime)
+    except Exception:
+        pass
+    try:
+        from remedy.core.agent_web_tools import register_web_tools
+
+        register_web_tools(runtime)
+    except Exception:
+        pass
     # Per-turn tool trace for auto-learn (reset each stream_response)
     runtime._turn_tool_steps = []
     runtime._learning_loop = None

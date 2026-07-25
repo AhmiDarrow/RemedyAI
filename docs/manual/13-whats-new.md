@@ -2,7 +2,17 @@
 
 High-level product notes for owners. Full detail lives in repo `CHANGELOG.md`.
 
-Ship **one** installer/tag for the current series (**v0.12.3**).
+Ship **one** installer/tag for the current series (**v0.13.0**).
+
+## 0.13.0 — Coding agency (Build-class tools)
+
+- **`file_edit`** — precise search/replace (prefer over full-file rewrite).
+- **`repo_search`** — project text search (ripgrep or built-in).
+- **Missions** — `mission_start` / `update` / `verify` for work-alone checklists + tests.
+- **`job_run`** — silent explore/verify jobs (no multi-agent chat).
+- Optional **`web_fetch`** when `web_tools_enabled` is true.
+- Work-alone policy steers toward missions + file_edit + verify loops.
+- Manual: F1 → *Coding agency*.
 
 ## 0.12.3 — Agent runtime peel
 
