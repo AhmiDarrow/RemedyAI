@@ -17,6 +17,7 @@ from remedy.interfaces.api_models import (
     ChatRequest,
     CreateSessionRequest,
     SendMessageRequest,
+    SessionLlmRequest,
     UpdateSessionRequest,
 )
 from remedy.interfaces.api_support import (
@@ -148,6 +149,110 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
     @app.post("/api/sessions/{session_id}/abort")
     async def abort_session(session_id: str):
         return {"status": "aborted", "session_id": session_id}
+
+    @app.put("/api/sessions/{session_id}/llm")
+    async def set_session_llm(session_id: str, req: SessionLlmRequest):
+        """Switch provider/model for this session (NanoToken remeasure on apply).
+
+        Blocks while the runtime is streaming when detectable. Optionally
+        persists as global default (make_default=true).
+        """
+        from remedy.interfaces.api_support import (
+            _apply_llm_to_runtime,
+            _default_config_path,
+            _find_config_path,
+            _write_config,
+        )
+        from remedy.interfaces.config import normalize_llm_settings
+
+        if runtime is not None and getattr(runtime, "_streaming", False):
+            raise HTTPException(
+                409,
+                "Stop generation before switching provider/model",
+            )
+
+        cfg = load_config()
+        provider, model, base_url = normalize_llm_settings(
+            req.provider,
+            req.model or cfg.get("llm_model"),
+            cfg.get("llm_base_url") if str(req.provider).lower() == str(cfg.get("llm_provider") or "").lower() else None,
+        )
+        # Load messages for remeasure
+        messages: list[dict] = []
+        if memory is not None:
+            try:
+                msgs = await memory.get_chat_messages(session_id, limit=80, offset=0)
+                for m in msgs:
+                    messages.append(
+                        {
+                            "role": m.role.value if hasattr(m.role, "value") else str(m.role),
+                            "content": m.content or "",
+                        }
+                    )
+            except Exception:
+                messages = []
+
+        if runtime is not None:
+            with contextlib.suppress(Exception):
+                runtime._session_id = session_id
+            if messages:
+                with contextlib.suppress(Exception):
+                    runtime._last_send_messages = messages
+
+        # Resolve key for new provider
+        api_key = None
+        try:
+            from remedy.interfaces.config import resolve_provider_api_key
+
+            api_key = resolve_provider_api_key(cfg, provider)
+        except Exception:
+            api_key = None
+        if not api_key and provider in ("ollama", "demo"):
+            api_key = "local"
+
+        _apply_llm_to_runtime(
+            runtime,
+            provider=provider,
+            model=model,
+            base_url=base_url,
+            api_key=api_key,
+        )
+
+        # Persist last_model_by_provider always; global default when asked
+        config_path = _find_config_path() or _default_config_path()
+        last_by = dict(cfg.get("last_model_by_provider") or {})
+        last_by[provider] = model
+        cfg["last_model_by_provider"] = last_by
+        if req.make_default:
+            cfg["llm_provider"] = provider
+            cfg["llm_model"] = model
+            cfg["llm_base_url"] = base_url
+        try:
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            _write_config(config_path, cfg)
+        except Exception as exc:
+            logger.warning("session llm config write failed: %s", exc)
+
+        # Update session model label when memory supports it
+        if memory is not None:
+            with contextlib.suppress(Exception):
+                await memory.update_chat_session(session_id, model=model)
+
+        remeasure = None
+        with contextlib.suppress(Exception):
+            from remedy.nanoswarm.token_nanobot import get_token_nanobot
+
+            remeasure = get_token_nanobot().last_remeasure(session_id)
+
+        return {
+            "status": "ok",
+            "session_id": session_id,
+            "provider": provider,
+            "model": model,
+            "base_url": base_url,
+            "make_default": req.make_default,
+            "remeasure": remeasure,
+        }
 
     # -- messages ------------------------------------------------------------
     @app.get("/api/sessions/{session_id}/messages")

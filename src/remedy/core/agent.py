@@ -663,9 +663,11 @@ class BasicRuntime(AgentRuntime):
         if harness_max_context_pct is not None:
             self._harness_max_pct = float(harness_max_context_pct)
         _prov_changed = False
+        old_provider = getattr(self, "_llm_provider", None)
+        old_model = getattr(self, "_llm_model", None)
         if provider is not None and provider.strip():
             new_p = provider.strip().lower()
-            _prov_changed = new_p != getattr(self, "_llm_provider", None)
+            _prov_changed = new_p != old_provider
             self._llm_provider = new_p
             self._provider = get_provider(self._llm_provider)
             if hasattr(self, "config") and self.config is not None:
@@ -673,7 +675,7 @@ class BasicRuntime(AgentRuntime):
                     self.config.llm_provider = self._llm_provider
         if model is not None and model.strip():
             new_m = model.strip()
-            _prov_changed = _prov_changed or new_m != getattr(self, "_llm_model", None)
+            _prov_changed = _prov_changed or new_m != old_model
             self._llm_model = new_m
             if hasattr(self, "config") and self.config is not None:
                 with suppress(Exception):
@@ -688,11 +690,21 @@ class BasicRuntime(AgentRuntime):
                 from remedy.nanoswarm import get_swarm
                 from remedy.nanoswarm.events import SwarmEvent
 
+                msgs = getattr(self, "_last_send_messages", None)
                 get_swarm().dispatch(
                     SwarmEvent.provider_changed(
                         getattr(self, "_llm_provider", "") or "",
                         model=getattr(self, "_llm_model", None),
-                    )
+                        old_provider=old_provider,
+                        old_model=old_model,
+                        session_id=str(getattr(self, "_session_id", "") or ""),
+                    ),
+                    messages=msgs if isinstance(msgs, list) else None,
+                    session_id=str(getattr(self, "_session_id", "") or ""),
+                    old_provider=old_provider,
+                    old_model=old_model,
+                    min_pct=float(getattr(self, "_harness_min_pct", 0.75) or 0.75),
+                    max_pct=float(getattr(self, "_harness_max_pct", 0.92) or 0.92),
                 )
         if api_key is not None:
             # Empty string means leave unchanged (UI "keep current" path).
@@ -1045,6 +1057,7 @@ class BasicRuntime(AgentRuntime):
                         name or "unknown",
                         success=bool(result.success),
                         duration_ms=float(getattr(result, "duration_ms", 0) or 0),
+                        session_id=str(getattr(self, "_session_id", "") or ""),
                     )
                 )
                 # Speculative prep while more tools / model continue
@@ -1717,6 +1730,9 @@ class BasicRuntime(AgentRuntime):
                                     if u:
                                         try:
                                             from remedy.core.usage import observe_provider_usage
+                                            from remedy.core.usage_ledger import (
+                                                record_usage_event,
+                                            )
                                             from remedy.nanoswarm.token_nanobot import (
                                                 get_token_nanobot,
                                             )
@@ -1724,12 +1740,14 @@ class BasicRuntime(AgentRuntime):
                                             pt = int(u.get("prompt_tokens") or 0)
                                             ct = int(u.get("completion_tokens") or 0)
                                             est = int(get_token_nanobot().last_estimate or 0)
+                                            prov = getattr(self, "_llm_provider", None)
+                                            mod = getattr(self, "_llm_model", None)
                                             if pt > 0 and est > 0:
                                                 observe_provider_usage(
                                                     est,
                                                     pt,
-                                                    provider=getattr(self, "_llm_provider", None),
-                                                    model=getattr(self, "_llm_model", None),
+                                                    provider=prov,
+                                                    model=mod,
                                                 )
                                             if pt or ct:
                                                 with suppress(Exception):
@@ -1745,6 +1763,25 @@ class BasicRuntime(AgentRuntime):
                                                     ).record_turn(
                                                         prompt_tokens=pt,
                                                         completion_tokens=ct,
+                                                    )
+                                                with suppress(Exception):
+                                                    record_usage_event(
+                                                        session_id=str(
+                                                            getattr(self, "_session_id", "")
+                                                            or ""
+                                                        )
+                                                        or None,
+                                                        provider=prov,
+                                                        model=mod,
+                                                        prompt_tokens=pt,
+                                                        completion_tokens=ct,
+                                                        total_tokens=int(
+                                                            u.get("total_tokens") or (pt + ct)
+                                                        ),
+                                                        estimated_cost_usd=float(
+                                                            u.get("estimated_cost_usd") or 0
+                                                        ),
+                                                        source=str(u.get("source") or "provider"),
                                                     )
                                         except Exception:
                                             pass

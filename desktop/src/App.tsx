@@ -27,6 +27,12 @@ import { useUpdateChecker } from './hooks/useUpdateChecker'
 import { listAgents, listCommands, exportSession, importSession } from './api/messages'
 import { apiFetch } from './api/client'
 import { getSettings, updateSettings } from './api/settings'
+import {
+  listConnectedProviders,
+  setSessionLlm,
+  type ConnectedProvider,
+} from './api/providers'
+import { UsageDashboard } from './components/UsageDashboard'
 import { isPlaceholderTitle, titleFromPrompt } from './utils/sessionTitle'
 import { tauriInvoke, tauriListen } from './api/tauri'
 import { normalizeToolProcess, type ToolProcessMode } from './utils/toolLabels'
@@ -160,6 +166,8 @@ export default function App() {
   const [helpArticleId, setHelpArticleId] = useState<string | null>(null)
   const [quitWarnOpen, setQuitWarnOpen] = useState(false)
   const [timeTravelOpen, setTimeTravelOpen] = useState(false)
+  const [usageOpen, setUsageOpen] = useState(false)
+  const [connectedProviders, setConnectedProviders] = useState<ConnectedProvider[]>([])
 
   const sessionUsage: UsageSnapshot = useMemo(() => {
     let prompt = 0
@@ -483,6 +491,14 @@ export default function App() {
       if (settings) {
         if (settings.llm_model) setModel(settings.llm_model)
         if (settings.llm_provider) setLlmProvider(settings.llm_provider)
+        try {
+          const conn = await listConnectedProviders()
+          setConnectedProviders(conn.picker?.length ? conn.picker : conn.connected || [])
+          if (conn.active_provider) setLlmProvider(conn.active_provider)
+          if (conn.active_model) setModel(conn.active_model)
+        } catch {
+          /* picker falls back to models-only */
+        }
         const tl = String(settings.thinking_level || 'high').toLowerCase()
         if (tl === 'off' || tl === 'low' || tl === 'medium' || tl === 'high') {
           setThinkingLevel(tl)
@@ -1248,6 +1264,32 @@ export default function App() {
           streaming={streaming}
           model={model}
           models={models}
+          provider={llmProvider}
+          connectedProviders={connectedProviders}
+          onProviderModelChange={(prov, mid) => {
+            if (streaming) return
+            setLlmProvider(prov)
+            setModel(mid)
+            const apply = async () => {
+              if (activeId) {
+                try {
+                  const r = await setSessionLlm(activeId, prov, mid, true)
+                  if (r.provider) setLlmProvider(r.provider)
+                  if (r.model) setModel(r.model)
+                  return
+                } catch {
+                  /* fall through to settings */
+                }
+              }
+              await updateSettings({ llm_provider: prov, llm_model: mid })
+            }
+            void apply()
+              .then(() => listConnectedProviders())
+              .then((conn) => {
+                setConnectedProviders(conn.picker?.length ? conn.picker : conn.connected || [])
+              })
+              .catch(() => {})
+          }}
           onModelChange={(id) => {
             setModel(id)
             // Persist + hot-apply on server so it survives restarts and chat uses it now.
@@ -1257,6 +1299,7 @@ export default function App() {
               })
               .catch(() => {})
           }}
+          onOpenUsage={() => setUsageOpen(true)}
           thinkingLevel={thinkingLevel}
           onThinkingLevelChange={(level) => {
             setThinkingLevel(level)
@@ -1293,6 +1336,14 @@ export default function App() {
           }}
           timeTravelOpen={timeTravelOpen}
           onToggleTimeTravel={() => setTimeTravelOpen((v) => !v)}
+        />
+
+        <UsageDashboard
+          open={usageOpen}
+          onClose={() => setUsageOpen(false)}
+          sessionId={activeId}
+          provider={llmProvider}
+          model={model}
         />
       </div>
     </div>

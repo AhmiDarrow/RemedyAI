@@ -133,23 +133,24 @@ def build_context_snapshot(
         "ambiguous": bool(intent_out.get("ambiguous")),
     }
 
-    # Pattern nanobot window → stuck recovery when tools are failing
-    pat = swarm.pattern
+    # Pattern nanobot window (per-session) → stuck recovery when tools fail
     pat_rate: float | None = None
-    pat_n = len(pat.steps)
+    pat_n = 0
     recent: list[str] = []
-    if pat_n:
-        try:
-            ok = sum(1 for s in pat.steps if s.get("success"))
-            pat_rate = ok / max(1, pat_n)
-            recent = [str(s.get("tool_name") or "") for s in pat.steps[-6:]]
+    try:
+        pat_snap = swarm.pattern.for_session(session_id).snapshot()
+        pat_n = int(pat_snap.get("step_count") or 0)
+        pat_rate = pat_snap.get("success_rate")
+        recent = list(pat_snap.get("recent") or [])
+        if pat_n:
             snap.signals["pattern"] = {
                 "step_count": pat_n,
-                "success_rate": round(pat_rate, 3),
+                "success_rate": pat_rate,
                 "recent": recent,
+                "session_id": session_id or "_default",
             }
-        except Exception:
-            pass
+    except Exception:
+        pass
 
     # Quality control loop → silent system remedies
     if apply_remedies:
@@ -179,13 +180,9 @@ def build_context_snapshot(
     except Exception:
         pass
 
-    # Swarm status counters (shared coordinator — one brain, no bot theater)
+    # Swarm status counters (shared coordinator — locked API, no private races)
     try:
-        import time as _time
-
-        swarm._event_count += 1  # noqa: SLF001
-        swarm._last_event = "message_added"  # noqa: SLF001
-        swarm._last_ts = _time.time()  # noqa: SLF001
+        swarm.note_event("message_added")
     except Exception:
         pass
 

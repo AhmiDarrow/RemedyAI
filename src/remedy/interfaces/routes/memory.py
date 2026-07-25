@@ -465,11 +465,23 @@ def register_memory_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
             or ""
         )
         if expected:
+            import hmac
+
             auth = request.headers.get("Authorization", "")
             secret = request.headers.get("X-Remedy-Webhook-Secret", "")
-            bearer_ok = auth == f"Bearer {expected}"
-            secret_ok = secret == expected or secret == _os.environ.get(
-                "REMEDY_WEBHOOK_SECRET", ""
+            expected_bearer = f"Bearer {expected}"
+            bearer_ok = hmac.compare_digest(
+                auth.encode("utf-8"), expected_bearer.encode("utf-8")
+            )
+            webhook_secret = (_os.environ.get("REMEDY_WEBHOOK_SECRET") or "").strip()
+            secret_ok = bool(secret) and (
+                hmac.compare_digest(secret.encode("utf-8"), expected.encode("utf-8"))
+                or (
+                    bool(webhook_secret)
+                    and hmac.compare_digest(
+                        secret.encode("utf-8"), webhook_secret.encode("utf-8")
+                    )
+                )
             )
             if not (bearer_ok or secret_ok):
                 raise HTTPException(401, "Webhook auth required")

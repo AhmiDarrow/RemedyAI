@@ -83,6 +83,14 @@ class UpdateSessionRequest(BaseModel):
     project_path: str | None = None
 
 
+class SessionLlmRequest(BaseModel):
+    """Mid-session provider/model switch (session override + hot runtime apply)."""
+
+    provider: str = Field(..., min_length=1)
+    model: str | None = None
+    make_default: bool = False
+
+
 class ImportSessionRequest(BaseModel):
     """Import a chat session from plain-text (or legacy markdown) export.
 
@@ -161,3 +169,9 @@ class SettingsUpdateRequest(BaseModel):
     # Prefer local image→text even when the chat model supports native vision
     # (saves provider image tokens / context when decoder is ready).
     vision_force_decode: bool | None = None
+    # Provider picker catalog
+    enabled_providers: list[str] | None = None
+    enabled_models: dict[str, list[str]] | None = None
+    last_model_by_provider: dict[str, str] | None = None
+    # Soft budget for active skills eligible for hot-catalog injection
+    skills_active_budget: int | None = Field(default=None, ge=10, le=500)

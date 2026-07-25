@@ -268,3 +268,46 @@ export async function detectOllama(): Promise<OllamaDetect> {
     }
   }
 }
+
+export interface ConnectedProvider extends ProviderInfo {
+  connected: boolean
+  connect_reason: string
+  enabled: boolean
+  picker_eligible: boolean
+  last_model?: string | null
+  catalog_models?: ProviderModel[]
+}
+
+export interface ConnectedProvidersResponse {
+  providers: ConnectedProvider[]
+  connected: ConnectedProvider[]
+  picker: ConnectedProvider[]
+  active_provider: string
+  active_model?: string
+  enabled_providers: string[] | null
+}
+
+export async function listConnectedProviders(): Promise<ConnectedProvidersResponse> {
+  return apiFetch<ConnectedProvidersResponse>('/providers/connected')
+}
+
+export async function setSessionLlm(
+  sessionId: string,
+  provider: string,
+  model?: string,
+  makeDefault = true,
+): Promise<{
+  status: string
+  provider: string
+  model: string
+  remeasure?: Record<string, unknown> | null
+}> {
+  return apiFetch(`/sessions/${sessionId}/llm`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      provider,
+      model: model || null,
+      make_default: makeDefault,
+    }),
+  })
+}

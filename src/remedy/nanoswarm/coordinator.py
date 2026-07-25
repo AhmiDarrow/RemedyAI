@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Any  # noqa: F401 — used by job handlers
+from typing import Any
 
 from remedy.nanoswarm.events import SwarmEvent
 from remedy.nanoswarm.helper_nanobot import HelperNanobot
@@ -31,6 +31,13 @@ class NanoSwarm:
         self._last_ts: float = 0.0
         self.started_at = time.time()
 
+    def note_event(self, name: str = "message_added") -> None:
+        """Thread-safe counter bump (prefer this over private field mutation)."""
+        with self._lock:
+            self._event_count += 1
+            self._last_event = name
+            self._last_ts = time.time()
+
     def dispatch(self, event: SwarmEvent, **ctx: Any) -> dict[str, Any]:
         """Route event to bots; ctx may include brief, messages, learning_loop, etc."""
         with self._lock:
@@ -38,6 +45,11 @@ class NanoSwarm:
             self._last_event = event.name
             self._last_ts = time.time()
         results: dict[str, Any] = {"event": event.name, "signals": {}}
+        session_id = (
+            event.payload.get("session_id")
+            or ctx.get("session_id")
+            or None
+        )
 
         if event.name == "message_added":
             content = str(event.payload.get("content") or "")
@@ -61,6 +73,7 @@ class NanoSwarm:
                 str(event.payload.get("tool_name") or "unknown"),
                 success=bool(event.payload.get("success", True)),
                 duration_ms=float(event.payload.get("duration_ms") or 0),
+                session_id=str(session_id) if session_id else None,
             )
 
         elif event.name == "skill_result":
@@ -76,14 +89,48 @@ class NanoSwarm:
             results["signals"]["pattern_pregate"] = self.pattern.pregate_trace(
                 overall_success=bool(event.payload.get("success", True)),
                 title=str(event.payload.get("title") or ""),
+                session_id=str(
+                    event.payload.get("session_id") or session_id or ""
+                )
+                or None,
             )
 
         elif event.name == "provider_changed":
-            # Token calibrator keeps per-provider buckets; nothing else required
-            results["signals"]["token"] = {
-                "provider": event.payload.get("provider"),
-                "model": event.payload.get("model"),
-            }
+            # NanoToken: select per-provider cache + remeasure history when provided
+            results["signals"]["token"] = self.token.on_provider_changed(
+                str(event.payload.get("provider") or ""),
+                model=event.payload.get("model"),
+                session_id=str(session_id) if session_id else None,
+                messages=ctx.get("messages"),
+                old_provider=event.payload.get("old_provider")
+                or ctx.get("old_provider"),
+                old_model=event.payload.get("old_model") or ctx.get("old_model"),
+                min_pct=float(ctx.get("min_pct") or 0.75),
+                max_pct=float(ctx.get("max_pct") or 0.92),
+            )
+
+        elif event.name == "usage_observed":
+            # Optional ledger hook via ctx
+            try:
+                from remedy.core.usage_ledger import record_usage_event
+
+                results["signals"]["usage"] = record_usage_event(
+                    session_id=str(session_id) if session_id else None,
+                    provider=event.payload.get("provider"),
+                    model=event.payload.get("model"),
+                    prompt_tokens=int(event.payload.get("prompt_tokens") or 0),
+                    completion_tokens=int(
+                        event.payload.get("completion_tokens") or 0
+                    ),
+                    total_tokens=int(event.payload.get("total_tokens") or 0),
+                    estimated_cost_usd=float(
+                        event.payload.get("estimated_cost_usd") or 0
+                    ),
+                    source=str(event.payload.get("source") or "provider"),
+                    run_id=event.payload.get("run_id"),
+                )
+            except Exception as e:
+                results["signals"]["usage"] = {"error": str(e)}
 
         return results
 

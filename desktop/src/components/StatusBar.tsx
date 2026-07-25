@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { getLatestCheckpoint, getPartnerStatus } from '../api/partner'
 import { getVisionStatus, type VisionStatus } from '../api/vision'
+import type { ConnectedProvider } from '../api/providers'
 import { ThemeSwitcher } from './ThemeSwitcher'
 import type { ThemeId, Theme } from '../themes'
 import type { ModelInfo } from '../App'
@@ -15,6 +16,11 @@ interface StatusBarProps {
   model: string
   models?: ModelInfo[]
   onModelChange?: (id: string) => void
+  /** Active LLM provider id */
+  provider?: string
+  /** Connected+enabled providers for the main-screen picker */
+  connectedProviders?: ConnectedProvider[]
+  onProviderModelChange?: (provider: string, model: string) => void
   thinkingLevel: ThinkingLevel
   onThinkingLevelChange?: (level: ThinkingLevel) => void
   approvalMode: ApprovalMode
@@ -36,6 +42,8 @@ interface StatusBarProps {
   /** Toggle interactive Time Travel timeline panel. */
   timeTravelOpen?: boolean
   onToggleTimeTravel?: () => void
+  /** Open multiprovider Usage & Continuity dashboard */
+  onOpenUsage?: () => void
 }
 
 const THINKING_OPTIONS: { id: ThinkingLevel; label: string }[] = [
@@ -110,6 +118,9 @@ export function StatusBar({
   model,
   models = [],
   onModelChange,
+  provider = '',
+  connectedProviders = [],
+  onProviderModelChange,
   thinkingLevel,
   onThinkingLevelChange,
   approvalMode,
@@ -127,6 +138,7 @@ export function StatusBar({
   updateAvailable,
   onCheckUpdates,
   onInstallUpdate,
+  onOpenUsage,
   timeTravelOpen = false,
   onToggleTimeTravel,
 }: StatusBarProps) {
@@ -502,7 +514,77 @@ export function StatusBar({
         </div>
 
         <div className="flex items-center gap-1.5 flex-shrink-0">
-          {models.length > 0 && onModelChange ? (
+          {onOpenUsage && (
+            <button
+              type="button"
+              className="text-xs px-1.5 py-0.5 rounded"
+              title="Usage & Continuity dashboard"
+              onClick={onOpenUsage}
+              style={{
+                background: 'var(--bg-tertiary)',
+                color: 'var(--text-muted)',
+                border: '1px solid var(--border)',
+              }}
+            >
+              Usage
+            </button>
+          )}
+          {connectedProviders.length > 0 && onProviderModelChange ? (
+            <>
+              <select
+                value={provider}
+                disabled={streaming}
+                onChange={(e) => {
+                  const pid = e.target.value
+                  const p = connectedProviders.find((x) => x.id === pid)
+                  const nextModel =
+                    p?.last_model
+                    || p?.default_model
+                    || p?.models?.[0]?.id
+                    || model
+                  onProviderModelChange(pid, nextModel)
+                }}
+                className="text-xs rounded px-1.5 py-0.5 outline-none"
+                title={streaming ? 'Stop generation to switch provider' : 'Active provider'}
+                style={{
+                  background: 'var(--bg-tertiary)',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--border)',
+                  maxWidth: 110,
+                  opacity: streaming ? 0.6 : 1,
+                }}
+              >
+                {connectedProviders.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={model}
+                disabled={streaming}
+                onChange={(e) => onProviderModelChange(provider, e.target.value)}
+                className="text-xs rounded px-1.5 py-0.5 outline-none"
+                title={streaming ? 'Stop generation to switch model' : 'Active model'}
+                style={{
+                  background: 'var(--bg-tertiary)',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--border)',
+                  maxWidth: 140,
+                  opacity: streaming ? 0.6 : 1,
+                }}
+              >
+                {(
+                  connectedProviders.find((p) => p.id === provider)?.models
+                  || models.map((m) => ({ id: m.id, name: m.name }))
+                ).map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name}
+                  </option>
+                ))}
+              </select>
+            </>
+          ) : models.length > 0 && onModelChange ? (
             <select
               value={model}
               onChange={(e) => onModelChange(e.target.value)}

@@ -157,6 +157,10 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             "thinking_level": str(cfg.get("thinking_level") or "high").lower(),
             "approval_mode": str(cfg.get("approval_mode") or "ask").lower(),
             "tool_process": _normalize_tool_process(cfg),
+            "enabled_providers": cfg.get("enabled_providers"),
+            "enabled_models": cfg.get("enabled_models") or {},
+            "last_model_by_provider": cfg.get("last_model_by_provider") or {},
+            "skills_active_budget": int(cfg.get("skills_active_budget") or 80),
             "version": _remedy_version,
             "config_exists": config_path is not None,
             "setup_completed": setup_completed,
@@ -262,6 +266,48 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         if "harness_mode" in updates and updates["harness_mode"] is not None:
             hm = str(updates["harness_mode"]).strip().lower()
             updates["harness_mode"] = hm if hm in ("off", "manual", "auto") else "auto"
+
+        if "enabled_providers" in updates and updates["enabled_providers"] is not None:
+            raw_ep = updates["enabled_providers"]
+            if isinstance(raw_ep, list):
+                updates["enabled_providers"] = [
+                    str(x).strip().lower() for x in raw_ep if str(x).strip()
+                ]
+            elif isinstance(raw_ep, str) and raw_ep.strip():
+                updates["enabled_providers"] = [
+                    x.strip().lower() for x in raw_ep.split(",") if x.strip()
+                ]
+            else:
+                updates["enabled_providers"] = []
+
+        if "enabled_models" in updates and updates["enabled_models"] is not None:
+            raw_em = updates["enabled_models"]
+            if isinstance(raw_em, dict):
+                clean: dict[str, list[str]] = {}
+                for k, v in raw_em.items():
+                    if isinstance(v, list):
+                        clean[str(k).lower()] = [str(x) for x in v if str(x).strip()]
+                updates["enabled_models"] = clean
+            else:
+                updates.pop("enabled_models", None)
+
+        if "last_model_by_provider" in updates and updates["last_model_by_provider"] is not None:
+            raw_lm = updates["last_model_by_provider"]
+            if isinstance(raw_lm, dict):
+                updates["last_model_by_provider"] = {
+                    str(k).lower(): str(v)
+                    for k, v in raw_lm.items()
+                    if str(k).strip() and str(v).strip()
+                }
+            else:
+                updates.pop("last_model_by_provider", None)
+
+        if "skills_active_budget" in updates and updates["skills_active_budget"] is not None:
+            try:
+                b = int(updates["skills_active_budget"])
+                updates["skills_active_budget"] = max(10, min(500, b))
+            except (TypeError, ValueError):
+                updates["skills_active_budget"] = 80
 
         if "thinking_level" in updates and updates["thinking_level"] is not None:
             tl = str(updates["thinking_level"]).strip().lower()

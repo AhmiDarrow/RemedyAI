@@ -229,10 +229,40 @@ def _download_asset(
 
 
 def _extract_zip(zip_path: Path, dest_dir: Path) -> None:
+    """Extract with Zip-Slip protection (same rules as skill pack import)."""
     _check_cancel()
     dest_dir.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(zip_path, "r") as zf:
-        zf.extractall(dest_dir)
+        try:
+            from remedy.skills.exporter import _safe_extract_zip
+
+            # Vision runtimes are large (GGUF / CUDA bins); SHA256 already checked.
+            _safe_extract_zip(
+                zf,
+                dest_dir,
+                max_files=50_000,
+                max_member_bytes=8_000_000_000,  # 8 GiB per member
+            )
+        except ValueError:
+            raise
+        except Exception:
+            # Fallback: manual safe extract if importer signature changes
+            dest = dest_dir.resolve()
+            for info in zf.infolist():
+                name = info.filename
+                if not name or name.endswith("/"):
+                    continue
+                cleaned = name.replace("\\", "/").lstrip("/")
+                if ".." in cleaned.split("/"):
+                    raise ValueError(f"Zip Slip blocked: {name}")
+                target = (dest / cleaned).resolve()
+                try:
+                    target.relative_to(dest)
+                except ValueError as exc:
+                    raise ValueError(f"Zip Slip blocked: {name}") from exc
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with zf.open(info, "r") as src, open(target, "wb") as out:
+                    out.write(src.read())
 
 
 def _existing_progress_bytes(

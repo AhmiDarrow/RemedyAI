@@ -48,6 +48,10 @@ export interface Settings {
     model_name?: string
     force_decode?: boolean
   }
+  enabled_providers?: string[] | null
+  enabled_models?: Record<string, string[]>
+  last_model_by_provider?: Record<string, string>
+  skills_active_budget?: number
   version: string
   config_exists: boolean
   setup_completed: boolean
@@ -79,6 +83,10 @@ export interface SettingsUpdate {
   vision_enabled?: boolean
   vision_model_id?: string
   vision_force_decode?: boolean
+  enabled_providers?: string[]
+  enabled_models?: Record<string, string[]>
+  last_model_by_provider?: Record<string, string>
+  skills_active_budget?: number
 }
 
 export async function getSettings(): Promise<Settings> {

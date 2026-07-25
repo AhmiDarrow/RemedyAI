@@ -246,8 +246,18 @@ class SkillExporter:
         return imported
 
 
-def _safe_extract_zip(zf: zipfile.ZipFile, dest: Path, *, max_files: int = 500) -> None:
-    """Extract ZIP members with Zip-Slip protection (paths must stay under dest)."""
+def _safe_extract_zip(
+    zf: zipfile.ZipFile,
+    dest: Path,
+    *,
+    max_files: int = 500,
+    max_member_bytes: int = 5_000_000,
+) -> None:
+    """Extract ZIP members with Zip-Slip protection (paths must stay under dest).
+
+    ``max_member_bytes`` defaults to 5 MiB (skill packs). Vision/runtime
+    extractors pass a much higher limit after SHA256 verification.
+    """
     dest = dest.resolve()
     count = 0
     for info in zf.infolist():
@@ -267,7 +277,7 @@ def _safe_extract_zip(zf: zipfile.ZipFile, dest: Path, *, max_files: int = 500) 
             target.relative_to(dest)
         except ValueError as exc:
             raise ValueError(f"Zip Slip blocked: {name}") from exc
-        if info.file_size > 5_000_000:
+        if max_member_bytes > 0 and info.file_size > max_member_bytes:
             raise ValueError(f"Zip member too large: {name}")
         count += 1
         if count > max_files:

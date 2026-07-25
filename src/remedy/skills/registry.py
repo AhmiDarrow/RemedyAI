@@ -238,6 +238,16 @@ class SkillRegistry:
         ):
             m.status = SkillStatus.ACTIVE
 
+    def active_budget(self) -> int:
+        """Soft cap for skills eligible for hot-catalog injection (power-user scale)."""
+        try:
+            from remedy.interfaces.api_support import load_config
+
+            cfg = load_config()
+            return max(10, min(500, int(cfg.get("skills_active_budget") or 80)))
+        except Exception:
+            return 80
+
     def summary_lines(
         self,
         *,
@@ -249,10 +259,13 @@ class SkillRegistry:
 
         Ranked when ``query`` is set; otherwise prefer ACTIVE, then effort, name.
         Includes status so the model knows probation vs trusted.
+        Respects skills_active_budget so libraries of 100+ stay lean in-prompt.
         """
+        budget = self.active_budget()
+        effective_limit = min(limit, budget)
         ranked = self.match_skills(
             query or "",
-            limit=limit,
+            limit=effective_limit,
             include_disabled=include_disabled,
         )
         lines: list[str] = []
@@ -314,6 +327,7 @@ class SkillRegistry:
             if not include_disabled and m.status in (
                 SkillStatus.DISABLED,
                 SkillStatus.DEPRECATED,
+                SkillStatus.ARCHIVED,
             ):
                 continue
             meta = m.metadata or {}

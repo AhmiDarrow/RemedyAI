@@ -30,6 +30,7 @@ class SkillStatus(StrEnum):
     ACTIVE = "active"
     DISABLED = "disabled"
     DEPRECATED = "deprecated"
+    ARCHIVED = "archived"  # power-user scale: kept on disk, out of hot catalog
 
 
 class MemoryEntryType(StrEnum):

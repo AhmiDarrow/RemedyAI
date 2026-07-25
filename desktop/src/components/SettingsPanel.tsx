@@ -24,8 +24,10 @@ import {
 } from '../api/auth'
 import {
   listProviders,
+  listConnectedProviders,
   FALLBACK_PROVIDERS,
   type ProviderInfo,
+  type ConnectedProvider,
 } from '../api/providers'
 import type { ThemeId } from '../themes'
 import type { UpdateInfo } from '../api/updates'
@@ -141,6 +143,10 @@ export function SettingsPanel({
   const [visionBusy, setVisionBusy] = useState(false)
   const [visionMsg, setVisionMsg] = useState('')
   const visionPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [connectedList, setConnectedList] = useState<ConnectedProvider[]>([])
+  const [providerSearch, setProviderSearch] = useState('')
+  const [enabledProviders, setEnabledProviders] = useState<string[] | null>(null)
+  const [skillsBudget, setSkillsBudget] = useState(80)
 
   const primaryProviders = useMemo(
     () => catalog.filter((p) => !p.advanced),
@@ -232,8 +238,17 @@ export function SettingsPanel({
     const t0 = performance.now()
     try {
       // Critical path first — do not wait on vision (was multi-second freezes).
-      const [s, providers] = await Promise.all([getSettings(), listProviders()])
+      const [s, providers, connected] = await Promise.all([
+        getSettings(),
+        listProviders(),
+        listConnectedProviders().catch(() => null),
+      ])
       setCatalog(providers)
+      if (connected?.providers) setConnectedList(connected.providers)
+      if (s.enabled_providers !== undefined) {
+        setEnabledProviders(s.enabled_providers)
+      }
+      if (s.skills_active_budget) setSkillsBudget(s.skills_active_budget)
       setSettings(s)
       const prov = s.llm_provider || 'openai'
       setProvider(prov)
@@ -467,6 +482,10 @@ export function SettingsPanel({
       close_to_tray: closeToTray,
       harness_mode: harnessMode,
       tool_process: toolProcess,
+      skills_active_budget: skillsBudget,
+    }
+    if (enabledProviders !== null) {
+      updates.enabled_providers = enabledProviders
     }
     if (apiKey) {
       updates.llm_api_key = apiKey
@@ -747,6 +766,106 @@ export function SettingsPanel({
                 }
                 password
               />
+            </SettingsSection>
+
+            {/* Provider catalog — enable for main-screen picker */}
+            <SettingsSection
+              id="provider-catalog"
+              title="Provider catalog"
+              summary="Search, enable providers for the status-bar picker"
+            >
+              <div className="text-[10px] mb-2" style={{ color: 'var(--text-muted)' }}>
+                Connected providers with a key, OAuth, Demo, or local Ollama appear in the
+                main status bar. Disable to hide without deleting credentials.
+              </div>
+              <input
+                type="search"
+                value={providerSearch}
+                onChange={(e) => setProviderSearch(e.target.value)}
+                placeholder="Search providers…"
+                className="w-full rounded px-2 py-1 text-xs mb-2 outline-none"
+                style={{
+                  background: 'var(--bg-tertiary)',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--border)',
+                }}
+              />
+              <div className="max-h-48 overflow-y-auto space-y-1">
+                {(connectedList.length ? connectedList : catalog)
+                  .filter((p) => {
+                    const q = providerSearch.trim().toLowerCase()
+                    if (!q) return true
+                    return (
+                      p.id.includes(q)
+                      || p.name.toLowerCase().includes(q)
+                      || (p.models || []).some(
+                        (m) => m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q),
+                      )
+                    )
+                  })
+                  .map((p) => {
+                    const conn = 'connected' in p ? Boolean((p as ConnectedProvider).connected) : true
+                    const isEnabled =
+                      enabledProviders === null
+                        ? true
+                        : enabledProviders.includes(p.id)
+                    return (
+                      <label
+                        key={p.id}
+                        className="flex items-center gap-2 rounded px-2 py-1.5"
+                        style={{
+                          background: 'var(--bg-secondary)',
+                          border: '1px solid var(--border)',
+                          opacity: conn ? 1 : 0.65,
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isEnabled}
+                          onChange={(e) => {
+                            const on = e.target.checked
+                            setEnabledProviders((prev) => {
+                              const base =
+                                prev
+                                ?? (connectedList.length
+                                  ? connectedList.map((x) => x.id)
+                                  : catalog.map((x) => x.id))
+                              if (on) return [...new Set([...base, p.id])]
+                              return base.filter((id) => id !== p.id)
+                            })
+                          }}
+                        />
+                        <span className="flex-1 min-w-0">
+                          <span className="font-medium">{p.name}</span>
+                          <span className="block text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                            {conn ? 'connected' : 'not connected'}
+                            {' · '}
+                            {(p.models || []).length} models
+                          </span>
+                        </span>
+                      </label>
+                    )
+                  })}
+              </div>
+              <div className="mt-2 flex items-center gap-2">
+                <label className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                  Skills active budget
+                </label>
+                <input
+                  type="number"
+                  min={10}
+                  max={500}
+                  value={skillsBudget}
+                  onChange={(e) => setSkillsBudget(Number(e.target.value) || 80)}
+                  className="w-16 rounded px-1 py-0.5 text-xs outline-none"
+                  style={{
+                    background: 'var(--bg-tertiary)',
+                    border: '1px solid var(--border)',
+                    color: 'var(--text-primary)',
+                  }}
+                  title="Soft cap for skills in the hot catalog (100+ library scale)"
+                />
+              </div>
             </SettingsSection>
 
             {/* You + Agent */}

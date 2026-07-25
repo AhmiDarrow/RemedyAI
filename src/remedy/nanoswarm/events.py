@@ -53,3 +53,31 @@ class SwarmEvent:
             "provider_changed",
             {"provider": provider, "model": model, **extra},
         )
+
+    @staticmethod
+    def usage_observed(
+        *,
+        provider: str | None = None,
+        model: str | None = None,
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        total_tokens: int = 0,
+        estimated_cost_usd: float = 0.0,
+        source: str = "provider",
+        session_id: str | None = None,
+        **extra: Any,
+    ) -> SwarmEvent:
+        return SwarmEvent(
+            "usage_observed",
+            {
+                "provider": provider,
+                "model": model,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens,
+                "estimated_cost_usd": estimated_cost_usd,
+                "source": source,
+                "session_id": session_id,
+                **extra,
+            },
+        )
