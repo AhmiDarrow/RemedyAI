@@ -10,6 +10,7 @@ import {
   startVisionServer,
   stopVisionServer,
   getNanoSwarmStatus,
+  formatDownloadGb,
   type VisionStatus,
   type NanoSwarmStatus,
 } from '../api/vision'
