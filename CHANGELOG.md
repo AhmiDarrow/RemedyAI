@@ -4,6 +4,14 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [0.11.3] — 2026-07-25
 
+### Feature: Remedy-owned NanoToken BPE
+
+- Clean-room **byte-level BPE** engine (`bpe_engine.py`) — no tiktoken/Gigatoken/HF deps.
+- Shipped pack **`remedy-bbpe-v1`** trained on first-party synthetic corpus; retrain via `scripts/train_nanotoken_bpe.py`.
+- Swarm **assignment** maps provider/model → Remedy pack; `provider_changed` remeasures with that pack.
+- Heuristic weight packs remain fallback (`REMEDY_BPE=0` forces heuristic).
+- Status/API: `/api/nanoswarm/token/assignment`, `/token/packs`; Helper tip for BPE.
+
 ### Feature: finish continuity expansion plan
 
 - **Session LLM**: per-session `llm_provider` + model in SQLite; status-bar switch toast; models refresh after switch; tabs restore provider independently.

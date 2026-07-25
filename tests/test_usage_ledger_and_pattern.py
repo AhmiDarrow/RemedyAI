@@ -42,7 +42,7 @@ def test_token_remeasure_on_provider_change():
     assert out["remeasured"] is True
     assert out["token_estimate"] > 0
     assert out["context_window"] > 0
-    assert encoding_family("anthropic", "claude-3") == "anthropic"
+    assert encoding_family("anthropic", "claude-3") == "anthropic-like"
     assert resolve_context_window("anthropic", "claude-3-5-sonnet") >= 100_000
     assert estimate_text_tokens("abc") > 0
 

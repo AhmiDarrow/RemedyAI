@@ -45,6 +45,17 @@ _HELP_CARDS: list[dict[str, str]] = [
         ),
     },
     {
+        "id": "nanotoken-bpe",
+        "title": "NanoToken BPE (owned)",
+        "body": (
+            "Token counts use Remedy's own byte-level BPE pack when present "
+            "(remedy-bbpe-v1), assigned per provider by the continuity swarm. "
+            "Provider API usage is still the source of truth for billing. "
+            "Retrain packs with scripts/train_nanotoken_bpe.py — no third-party "
+            "tokenizers are shipped. Set REMEDY_BPE=0 to force heuristics."
+        ),
+    },
+    {
         "id": "skills-scale",
         "title": "Many skills (100+)",
         "body": (

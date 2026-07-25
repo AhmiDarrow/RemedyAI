@@ -1,8 +1,9 @@
 """NanoToken — multiprovider token accounting for the Remedy nanoswarm.
 
-In-house class-weighted estimates + per-provider|model calibration from real
-usage blobs. No tiktoken / Gigatoken dependency; accuracy converges via
-calibration and encoding-family weight packs.
+Remedy-owned byte-level BPE (when pack present) + class-weighted heuristic
+fallback + per-provider|model calibration from real usage blobs.
+
+No third-party tokenizer libraries or foreign merge tables.
 
 Used by Memory Harness thresholds, cost tickers, and mid-session provider switch
 recompute.
@@ -11,12 +12,19 @@ recompute.
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from remedy.nanoswarm.bpe_engine import (
+    DEFAULT_PACK_ID,
+    count_tokens as bpe_count_tokens,
+    get_pack,
+    list_available_packs,
+)
 from remedy.nanoswarm.token_tables import (
     content_boost,
     list_families,
@@ -24,18 +32,29 @@ from remedy.nanoswarm.token_tables import (
     resolved_weights,
 )
 
+# Routing labels (not foreign tokenizer names we load)
 _PROVIDER_FAMILY: dict[str, str] = {
-    "openai": "cl100k",
-    "xai": "cl100k",
-    "groq": "cl100k",
-    "openrouter": "cl100k",
-    "mistral": "cl100k",
-    "google": "gemini",
-    "anthropic": "anthropic",
-    "deepseek": "deepseek",
+    "openai": "openai-compat",
+    "xai": "openai-compat",
+    "groq": "openai-compat",
+    "openrouter": "openai-compat",
+    "mistral": "openai-compat",
+    "google": "gemini-like",
+    "anthropic": "anthropic-like",
+    "deepseek": "deepseek-like",
     "ollama": "local",
     "demo": "local",
-    "custom": "cl100k",
+    "custom": "openai-compat",
+}
+
+# All providers currently share the single Remedy pack; family only changes
+# overhead/heuristic scales. Future packs can diverge here.
+_FAMILY_DEFAULT_PACK: dict[str, str] = {
+    "openai-compat": DEFAULT_PACK_ID,
+    "anthropic-like": DEFAULT_PACK_ID,
+    "deepseek-like": DEFAULT_PACK_ID,
+    "gemini-like": DEFAULT_PACK_ID,
+    "local": DEFAULT_PACK_ID,
 }
 
 # Default context windows by model pattern (conservative).
@@ -66,20 +85,71 @@ _SAMPLE_TAIL = 8_000
 
 
 def encoding_family(provider: str | None = None, model: str | None = None) -> str:
-    """Return encoding family id for provider/model."""
+    """Return Remedy routing family label for provider/model (not a foreign vocab id)."""
     p = (provider or "").strip().lower()
     m = (model or "").strip().lower()
     if p in _PROVIDER_FAMILY:
         fam = _PROVIDER_FAMILY[p]
     else:
-        fam = "cl100k"
+        fam = "openai-compat"
     if "claude" in m:
-        fam = "anthropic"
+        fam = "anthropic-like"
     elif "deepseek" in m:
-        fam = "deepseek"
-    elif any(x in m for x in ("llama", "mistral", "codestral", "ollama")):
+        fam = "deepseek-like"
+    elif "gemini" in m:
+        fam = "gemini-like"
+    elif any(x in m for x in ("llama", "mistral", "codestral", "ollama", "phi-", "qwen")):
         fam = "local"
     return fam
+
+
+def resolve_bpe_assignment(
+    provider: str | None = None,
+    model: str | None = None,
+) -> dict[str, Any]:
+    """Swarm assignment: which Remedy BPE pack applies to this provider/model.
+
+    Only Remedy pack ids are returned — never third-party tokenizer names as deps.
+    """
+    fam = encoding_family(provider, model)
+    # Config override: REMEDY_BPE_PACK or token maps later
+    env_pack = (os.environ.get("REMEDY_BPE_PACK") or "").strip()
+    pack_id = env_pack or _FAMILY_DEFAULT_PACK.get(fam) or DEFAULT_PACK_ID
+    pack = get_pack(pack_id)
+    if pack is None and pack_id != DEFAULT_PACK_ID:
+        pack = get_pack(DEFAULT_PACK_ID)
+        pack_id = DEFAULT_PACK_ID if pack else pack_id
+    window = resolve_context_window(provider, model)
+    if pack is not None:
+        return {
+            "family": fam,
+            "bpe_pack_id": pack.id,
+            "pack_version": pack.version,
+            "method": "bpe",
+            "context_window": window,
+            "msg_overhead": pack.msg_overhead,
+            "available": True,
+        }
+    return {
+        "family": fam,
+        "bpe_pack_id": None,
+        "pack_version": None,
+        "method": "heuristic",
+        "context_window": window,
+        "msg_overhead": msg_overhead(fam if fam in ("local",) else "cl100k"),
+        "available": False,
+    }
+
+
+def _heuristic_family_key(family: str) -> str:
+    """Map routing labels onto token_tables family pack keys."""
+    return {
+        "openai-compat": "cl100k",
+        "anthropic-like": "anthropic",
+        "deepseek-like": "deepseek",
+        "gemini-like": "gemini",
+        "local": "local",
+    }.get(family, "cl100k")
 
 
 def resolve_context_window(
@@ -124,18 +194,33 @@ def estimate_text_tokens(
     provider: str | None = None,
     model: str | None = None,
     family: str | None = None,
+    prefer_bpe: bool = True,
 ) -> int:
-    """Class-weighted estimate; samples very large strings for snappiness."""
+    """Token estimate: Remedy BPE when pack available, else class-weighted heuristic."""
     if not text:
         return 0
     fam = family or encoding_family(provider, model)
-    weights = _weights_for_family(fam)
-    boost = content_boost(fam, text)
+    if prefer_bpe:
+        asg = resolve_bpe_assignment(provider, model)
+        pack = get_pack(asg.get("bpe_pack_id")) if asg.get("available") else None
+        if pack is not None:
+            n = len(text)
+            if n <= _FULL_SCAN_MAX:
+                return max(0, bpe_count_tokens(text, pack))
+            # Sample head+tail for huge blobs (snappiness)
+            head = text[:_SAMPLE_HEAD]
+            tail = text[-_SAMPLE_TAIL:]
+            sample_n = bpe_count_tokens(head + tail, pack)
+            sample_len = len(head) + len(tail) or 1
+            return max(1, int(sample_n * (n / sample_len) + 0.5))
+
+    hf = _heuristic_family_key(fam)
+    weights = _weights_for_family(hf)
+    boost = content_boost(hf, text)
     n = len(text)
     if n <= _FULL_SCAN_MAX:
         total_w = sum(_class_weight(ch, weights) for ch in text) * boost
         return max(0, int(total_w + 0.5))
-    # Sample head + tail; scale by full length
     head = text[:_SAMPLE_HEAD]
     tail = text[-_SAMPLE_TAIL:]
     sample = head + tail
@@ -156,9 +241,14 @@ def _messages_cache_key(
     messages: list[dict[str, Any]],
     provider: str | None,
     model: str | None,
+    pack_id: str | None,
 ) -> str:
-    # Cheap fingerprint: count + roles + content lengths + tail hash
-    parts: list[str] = [encoding_family(provider, model), str(len(messages))]
+    # Cheap fingerprint: pack + roles + content lengths + tail hash
+    parts: list[str] = [
+        encoding_family(provider, model),
+        pack_id or "heuristic",
+        str(len(messages)),
+    ]
     for m in messages[-12:]:
         c = m.get("content")
         clen = len(c) if isinstance(c, str) else len(str(c or ""))
@@ -182,37 +272,52 @@ def estimate_messages_tokens(
     """Estimate tokens for a chat message list (content + light overhead)."""
     if not messages:
         return 0
-    fam = encoding_family(provider, model)
-    key = _messages_cache_key(messages, provider, model)
+    asg = resolve_bpe_assignment(provider, model)
+    fam = str(asg.get("family") or encoding_family(provider, model))
+    pack_id = asg.get("bpe_pack_id")
+    key = _messages_cache_key(messages, provider, model, str(pack_id) if pack_id else None)
     with _msg_cache_lock:
         if key in _msg_cache:
             return _msg_cache[key]
 
-    overhead = msg_overhead(fam)
+    overhead = int(asg.get("msg_overhead") or msg_overhead(_heuristic_family_key(fam)))
     total = 0
     for m in messages:
         total += overhead
         content = m.get("content")
         if isinstance(content, str):
-            total += estimate_text_tokens(content, family=fam)
+            total += estimate_text_tokens(
+                content, provider=provider, model=model, family=fam
+            )
         elif content is not None:
             try:
                 total += estimate_text_tokens(
-                    json.dumps(content, default=str), family=fam
+                    json.dumps(content, default=str),
+                    provider=provider,
+                    model=model,
+                    family=fam,
                 )
             except Exception:
-                total += estimate_text_tokens(str(content), family=fam)
+                total += estimate_text_tokens(
+                    str(content), provider=provider, model=model, family=fam
+                )
         tcs = m.get("tool_calls")
         if tcs:
             try:
-                total += estimate_text_tokens(json.dumps(tcs, default=str), family=fam)
+                total += estimate_text_tokens(
+                    json.dumps(tcs, default=str),
+                    provider=provider,
+                    model=model,
+                    family=fam,
+                )
             except Exception:
                 total += 32
-        # reasoning_content / thinking when present
         for k in ("reasoning_content", "thinking", "reasoning"):
             rc = m.get(k)
             if isinstance(rc, str) and rc:
-                total += estimate_text_tokens(rc, family=fam)
+                total += estimate_text_tokens(
+                    rc, provider=provider, model=model, family=fam
+                )
     result = max(1, total)
     with _msg_cache_lock:
         _msg_cache[key] = result
@@ -308,6 +413,7 @@ class TokenBucketCache:
     model: str
     family: str
     context_window: int
+    bpe_pack_id: str | None = None
     last_estimate: int = 0
     last_method: str = "heuristic"
     last_fill_pct: float = 0.0
@@ -322,6 +428,7 @@ class TokenNanobot:
         self.calibrator = calibrator or _default_calibrator
         self.last_method: str = "heuristic"
         self.last_estimate: int = 0
+        self.last_assignment: dict[str, Any] = {}
         self.active_provider: str | None = None
         self.active_model: str | None = None
         self._buckets: dict[str, TokenBucketCache] = {}
@@ -348,16 +455,26 @@ class TokenNanobot:
         model: str | None = None,
         calibrate: bool = True,
     ) -> int:
+        asg = resolve_bpe_assignment(provider, model)
+        self.last_assignment = asg
+        base_method = str(asg.get("method") or "heuristic")
         raw = estimate_messages_tokens(messages, provider=provider, model=model)
         if calibrate:
-            adj, method = self.calibrator.adjust(raw, provider=provider, model=model)
+            adj, cal_method = self.calibrator.adjust(
+                raw, provider=provider, model=model
+            )
+            method = (
+                f"{base_method}+calibrated"
+                if cal_method == "calibrated"
+                else base_method
+            )
         else:
-            adj, method = raw, "heuristic"
+            adj, method = raw, base_method
         self.last_method = method
         self.last_estimate = adj
         key = self._bucket_key(provider, model)
-        fam = encoding_family(provider, model)
-        window = resolve_context_window(provider, model)
+        fam = str(asg.get("family") or encoding_family(provider, model))
+        window = int(asg.get("context_window") or resolve_context_window(provider, model))
         with self._lock:
             b = self._buckets.get(key)
             if b is None:
@@ -367,12 +484,14 @@ class TokenNanobot:
                     model=(model or "").lower(),
                     family=fam,
                     context_window=window,
+                    bpe_pack_id=asg.get("bpe_pack_id"),
                 )
                 self._buckets[key] = b
             b.last_estimate = adj
             b.last_method = method
             b.context_window = window
             b.family = fam
+            b.bpe_pack_id = asg.get("bpe_pack_id")
             b.last_fill_pct = self.fill_pct(adj, context_window=window)
             b.last_remeasure_at = time.time()
         return adj
@@ -399,15 +518,17 @@ class TokenNanobot:
         min_pct: float = 0.75,
         max_pct: float = 0.92,
     ) -> dict[str, Any]:
-        """Select cache bucket and remeasure history under the new provider/model."""
+        """Assign Remedy BPE pack for provider/model and remeasure history."""
         prov = (provider or "").strip().lower()
         mod = (model or "").strip()
         self.active_provider = prov or None
         self.active_model = mod or None
-        window = resolve_context_window(prov, mod)
-        fam = encoding_family(prov, mod)
+        asg = resolve_bpe_assignment(prov, mod)
+        self.last_assignment = asg
+        window = int(asg.get("context_window") or resolve_context_window(prov, mod))
+        fam = str(asg.get("family") or encoding_family(prov, mod))
         est = 0
-        method = "heuristic"
+        method = str(asg.get("method") or "heuristic")
         if messages:
             est = self.measure_messages(messages, provider=prov, model=mod)
             method = self.last_method
@@ -422,6 +543,8 @@ class TokenNanobot:
             "old_provider": old_provider,
             "old_model": old_model,
             "encoding_family": fam,
+            "bpe_pack_id": asg.get("bpe_pack_id"),
+            "pack_version": asg.get("pack_version"),
             "context_window": window,
             "token_estimate": est,
             "fill_pct": round(fill, 4),
@@ -438,6 +561,7 @@ class TokenNanobot:
             if b is not None:
                 b.last_nudge = nudge
                 b.last_fill_pct = fill
+                b.bpe_pack_id = asg.get("bpe_pack_id")
         return out
 
     def last_remeasure(self, session_id: str | None = None) -> dict[str, Any] | None:
@@ -480,6 +604,7 @@ class TokenNanobot:
             buckets = {
                 k: {
                     "family": v.family,
+                    "bpe_pack_id": v.bpe_pack_id,
                     "context_window": v.context_window,
                     "last_estimate": v.last_estimate,
                     "last_method": v.last_method,
@@ -488,6 +613,9 @@ class TokenNanobot:
                 }
                 for k, v in self._buckets.items()
             }
+        asg = self.last_assignment or resolve_bpe_assignment(
+            self.active_provider, self.active_model
+        )
         return {
             "bot": "token",
             "label": "NanoToken",
@@ -495,9 +623,15 @@ class TokenNanobot:
             "last_estimate": self.last_estimate,
             "active_provider": self.active_provider,
             "active_model": self.active_model,
+            "bpe_assignment": asg,
+            "bpe_packs": list_available_packs(),
             "calibrator": self.calibrator.stats(),
             "buckets": buckets,
             "families": list_families(),
+            "ip_note": (
+                "Remedy-owned BBPE packs only; no third-party tokenizer "
+                "libraries or foreign merge tables."
+            ),
         }
 
 

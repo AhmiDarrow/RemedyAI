@@ -92,3 +92,23 @@ def register_nanoswarm_routes(app: FastAPI, *, runtime=None, gateway=None, memor
         from remedy.nanoswarm.token_tables import list_families
 
         return {"families": list_families()}
+
+    @app.get("/api/nanoswarm/token/assignment")
+    async def nanoswarm_token_assignment(
+        provider: str = "",
+        model: str = "",
+    ) -> dict[str, Any]:
+        """Which Remedy BPE pack the swarm assigns for provider/model."""
+        from remedy.nanoswarm.token_nanobot import resolve_bpe_assignment
+
+        return resolve_bpe_assignment(provider or None, model or None)
+
+    @app.get("/api/nanoswarm/token/packs")
+    async def nanoswarm_token_packs() -> dict[str, Any]:
+        """List Remedy-owned BPE packs (packaged + user overrides)."""
+        from remedy.nanoswarm.bpe_engine import list_available_packs
+
+        return {
+            "packs": list_available_packs(),
+            "ip_note": "Remedy-owned packs only; no third-party tokenizers.",
+        }
