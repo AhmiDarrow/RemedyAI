@@ -29,7 +29,7 @@ It combines:
 
 - **Depth** — A self-improving learning loop that distills task traces into reusable skills
 - **Memory** — Persistent SQLite+FTS5 knowledge store with structured handoff notes and session continuity
-- **Continuity layer** — Session Brief, context budget, quality remedies, project-level learning (silent)
+- **Continuity layer** — Session Brief, context budget, quality remedies, project-level learning (silent local workers; see `docs/manual/17-nanoswarm.md`)
 - **Breadth** — Multi-channel gateway (CLI, REST API, Telegram, Discord, Slack, webhooks)
 - **Compatibility** — Native [agentskills.io](https://agentskills.io) support, plus adapters for Hermes and OpenClaw/ClawHub
 - **Security** — Local-first by design: full power for you on this PC, not an open doorway for others

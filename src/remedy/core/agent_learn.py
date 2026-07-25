@@ -43,7 +43,26 @@ def auto_learn_from_turn(
     steps_list = list(steps or [])
     if not should_auto_learn_from_steps(steps_list):
         return None
+
+    # Pattern nanobot pre-gate: skip learning noisy / rejectable traces.
     title = (message or "session-task").strip().split("\n")[0][:80]
+    try:
+        from remedy.nanoswarm import get_swarm
+        from remedy.nanoswarm.events import SwarmEvent
+
+        gate = get_swarm().dispatch(
+            SwarmEvent.session_end(session_id, success=True, title=title or ""),
+        )
+        preg = (gate.get("signals") or {}).get("pattern_pregate") or {}
+        if preg.get("skip_learn") or preg.get("action") in ("reject", "skip"):
+            logger.info(
+                "Auto-learn skipped by pattern pregate: %s",
+                preg.get("reasoning") or preg.get("action"),
+            )
+            return None
+    except Exception:
+        logger.debug("pattern pregate failed", exc_info=True)
+
     skill = learning_loop.learn_from_tool_steps(
         title=title or "multi-tool-task",
         steps=steps_list,

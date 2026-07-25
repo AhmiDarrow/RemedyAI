@@ -662,14 +662,19 @@ class BasicRuntime(AgentRuntime):
             self._harness_min_pct = float(harness_min_context_pct)
         if harness_max_context_pct is not None:
             self._harness_max_pct = float(harness_max_context_pct)
+        _prov_changed = False
         if provider is not None and provider.strip():
-            self._llm_provider = provider.strip().lower()
+            new_p = provider.strip().lower()
+            _prov_changed = new_p != getattr(self, "_llm_provider", None)
+            self._llm_provider = new_p
             self._provider = get_provider(self._llm_provider)
             if hasattr(self, "config") and self.config is not None:
                 with suppress(Exception):
                     self.config.llm_provider = self._llm_provider
         if model is not None and model.strip():
-            self._llm_model = model.strip()
+            new_m = model.strip()
+            _prov_changed = _prov_changed or new_m != getattr(self, "_llm_model", None)
+            self._llm_model = new_m
             if hasattr(self, "config") and self.config is not None:
                 with suppress(Exception):
                     self.config.llm_model = self._llm_model
@@ -678,6 +683,17 @@ class BasicRuntime(AgentRuntime):
             if hasattr(self, "config") and self.config is not None:
                 with suppress(Exception):
                     self.config.llm_base_url = self._llm_base_url
+        if _prov_changed:
+            with suppress(Exception):
+                from remedy.nanoswarm import get_swarm
+                from remedy.nanoswarm.events import SwarmEvent
+
+                get_swarm().dispatch(
+                    SwarmEvent.provider_changed(
+                        getattr(self, "_llm_provider", "") or "",
+                        model=getattr(self, "_llm_model", None),
+                    )
+                )
         if api_key is not None:
             # Empty string means leave unchanged (UI "keep current" path).
             if api_key != "":

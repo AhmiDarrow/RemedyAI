@@ -186,7 +186,7 @@ Same-name re-upload overwrites the prior file (no `_N` suffixes).
 | `GET` | `/api/status` | Health / version / provider status |
 | `GET` | `/api/metrics` | JSON metrics + health; `?format=prometheus` for scrape text |
 | | | Chat latency: `remedy_chat_duration_seconds{path=session_stream\|session_message\|chat}` |
-| `GET` | `/api/models` | Available LLM models + default (auto-discovers from provider) |
+| `GET` | `/api/models` | Available LLM models + default (**live** `GET {base}/models` for OpenAI-compatible providers; catalog fallback) |
 | `GET` | `/api/providers` | Provider catalog (auth modes, models, advanced flag) |
 | `GET` | `/api/providers/ollama/detect` | Probe local Ollama for setup suggestions |
 | `GET` | `/api/auth/xai` | xAI connection status (OAuth / API key) |

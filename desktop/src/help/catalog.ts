@@ -36,6 +36,15 @@ const META: HelpArticleMeta[] = [
       'Why Remedy feels like one partner on any model — silent continuity, not a bot farm.',
   },
   {
+    id: '17-nanoswarm',
+    title: 'Continuity workers (nano swarm)',
+    category: 'Reference',
+    order: 16.5,
+    tags: ['nanoswarm', 'continuity', 'token', 'router', 'pattern', 'operator'],
+    summary:
+      'Operator guide: how silent continuity workers measure, prune, and learn — not chat agents.',
+  },
+  {
     id: '01-install-windows',
     title: 'Install (Windows)',
     category: 'Start here',

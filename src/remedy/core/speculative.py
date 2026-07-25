@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from contextlib import suppress
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -108,3 +109,24 @@ def _prep(
             load_project_profile(project_path)  # ensure file exists
         except Exception:
             pass
+
+    # 4) Warm skill ranking cache for next skill-intent turn (nano skill bot)
+    try:
+        from remedy.nanoswarm import get_swarm
+        from remedy.skills.registry import SkillRegistry
+
+        reg = SkillRegistry()
+        with suppress(Exception):
+            reg.discover_defaults()
+        get_swarm().skill.rank_catalog_lines(reg, limit=24)
+    except Exception:
+        logger.debug("speculative skill rank failed", exc_info=True)
+
+    # 5) Token nanobot: keep calibrator warm with last message window size
+    try:
+        from remedy.nanoswarm.token_nanobot import get_token_nanobot
+
+        if messages:
+            get_token_nanobot().measure_messages(messages[-16:])
+    except Exception:
+        pass

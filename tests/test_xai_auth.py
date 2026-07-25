@@ -48,7 +48,7 @@ class TestXaiCatalog:
         assert PROVIDER_CATALOG["xai"]["base_url"] == "https://api.x.ai/v1"
         assert "oauth" in PROVIDER_CATALOG["xai"]["auth"]
         models = {m["id"] for m in PROVIDER_CATALOG["xai"]["models"]}
-        assert "grok-3-mini" in models
+        assert models & {"grok-4.5", "grok-4.3", "grok-4"}
 
     def test_infer_model_and_url(self):
         assert infer_provider_from_model("grok-3") == "xai"

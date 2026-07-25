@@ -2,7 +2,14 @@
 
 High-level product notes for owners. Full detail lives in repo `CHANGELOG.md`.
 
-Ship **one** installer/tag for the current series (**v0.11.1**).
+Ship **one** installer/tag for the current series (**v0.11.2**).
+
+## 0.11.2 — Live models + smarter continuity workers
+
+- **Live provider models**: `GET {base}/models` restored for DeepSeek, xAI, and other OpenAI-compatible clouds (was limited in 0.10.44 perf). Catalog is fallback only.
+- **DeepSeek / xAI ids**: V4 Flash/Pro and current Grok family; legacy `deepseek-chat` and old `grok-3*` migrate automatically.
+- **Nano swarm utilization**: shared bots in ContextSnapshot; pattern → stuck remedies; skill rank cache warmed off hot path; learn pre-gate; provider-change events.
+- Operator doc: F1 → *Continuity workers* (`17-nanoswarm`).
 
 ## 0.11.1 — Windows Defender posture
 

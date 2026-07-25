@@ -769,6 +769,14 @@ def _sync_runtime_llm_from_config(
         or os.environ.get("REMEDY_LLM_BASE_URL")
         or ""
     )
+    # Migrate retired model ids (deepseek-chat → v4, old grok-3 → current, …)
+    # and align base_url with provider so chat works without a settings re-save.
+    try:
+        from remedy.interfaces.config import normalize_llm_settings
+
+        provider, model, base_url = normalize_llm_settings(provider, model, base_url)
+    except Exception as exc:
+        logger.debug("normalize_llm_settings in runtime sync failed: %s", exc)
     # Per-provider only — never reuse DeepSeek sk-… for xAI, etc.
     try:
         from remedy.interfaces.config import resolve_provider_api_key

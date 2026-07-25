@@ -26,13 +26,39 @@ class RouterNanobot:
         label = "chat"
         if not text:
             label = "chat"
-        elif text.startswith("/memory") or "remember" in text or "what do you know" in text:
+        elif (
+            text.startswith("/memory")
+            or "remember that" in text
+            or re.search(r"\bremember\b", text)
+            or "what do you know" in text
+            or "what do you remember" in text
+            or re.search(r"\b(recall|forget that|did i tell you)\b", text)
+        ):
             label = "memory"
-        elif text.startswith("/plan") or text.startswith("plan ") or "make a plan" in text:
+        elif (
+            text.startswith("/plan")
+            or text.startswith("plan ")
+            or "make a plan" in text
+            or "step by step" in text
+            or re.search(r"\b(roadmap|break (this|it) down|implementation plan)\b", text)
+        ):
             label = "plan"
-        elif "skill" in text or text.startswith("/skills") or "use the " in text:
+        elif (
+            text.startswith("/skills")
+            or text.startswith("/skill")
+            or re.search(r"\b(use (the )?skill|skill_search|which skill)\b", text)
+            or ("skill" in text and re.search(r"\b(run|use|activate|find)\b", text))
+        ):
             label = "skill"
-        elif re.search(r"\b(run|execute|bash|shell|npm|pip|git)\b", text):
+        elif re.search(
+            r"\b("
+            r"run|execute|bash|shell|npm|pip|uv |cargo |git |"
+            r"implement|refactor|debug|fix (the |this )?(bug|error|build)|"
+            r"create (a )?file|edit (the )?file|write (a )?(test|script)|"
+            r"open (the )?pr|commit |push |pull request"
+            r")\b",
+            text,
+        ):
             label = "tool"
         self.last_label = label
         self.last_method = "heuristic"
@@ -40,6 +66,7 @@ class RouterNanobot:
             "label": label,
             "method": "heuristic",
             "bot": "router",
+            "ambiguous": label == "chat" and len(text) > 40,
         }
 
     def classify_with_local_model(

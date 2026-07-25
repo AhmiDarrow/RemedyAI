@@ -14,8 +14,11 @@ def remedies_from_quality(
     *,
     fill_pct: float = 0.0,
     nudge: str | None = None,
+    pattern_success_rate: float | None = None,
+    pattern_step_count: int = 0,
+    pattern_recent: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Return {system, actions[]} based on session quality snapshot."""
+    """Return {system, actions[]} based on session quality + optional swarm pattern."""
     q = quality or {}
     actions: list[str] = []
     lines: list[str] = []
@@ -39,13 +42,21 @@ def remedies_from_quality(
             "acknowledge and proceed with the corrected constraint."
         )
 
-    # Stuck loop
-    if stuck_n >= 2 or stuck_rate >= 0.2 or fail_streak >= 3:
+    # Stuck loop (session quality and/or pattern nanobot tool window)
+    pattern_bad = (
+        pattern_step_count >= 3
+        and pattern_success_rate is not None
+        and float(pattern_success_rate) < 0.5
+    )
+    if stuck_n >= 2 or stuck_rate >= 0.2 or fail_streak >= 3 or pattern_bad:
         actions.append("stuck_recovery")
+        recent = [str(t) for t in (pattern_recent or []) if t][:6]
+        extra = f" Recent tools: {', '.join(recent)}." if recent else ""
         lines.append(
             "[Continuity] Recent loop risk. Change approach: smaller tool args, "
             "list_dir/discover before guessing paths, skill_search for a known procedure, "
             "or propose a short plan before more shell. Do not repeat the same failed call."
+            + extra
         )
 
     # Weak last compress

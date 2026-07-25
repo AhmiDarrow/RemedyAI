@@ -105,37 +105,44 @@ def register_catalog_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
 
         verify_ssl = not _is_local_url(base_url)
 
-        # Live /models discovery is valuable for local/flexible hosts, but for
-        # closed cloud catalogs it often adds 200ms–4s of network with little UX
-        # gain (picker already has the curated list + configured model).
-        # Keep live discovery for: ollama, openrouter, custom, and any local URL.
-        live_providers = {"ollama", "openrouter", "custom"}
-        want_live = (
-            configured_provider in live_providers
+        # Live GET {base_url}/models is the source of truth for OpenAI-compatible
+        # providers (DeepSeek, xAI, OpenAI, Groq, …). Curated catalogs are fallback
+        # only when discovery fails or returns empty.
+        #
+        # 0.10.44 briefly skipped cloud discovery for latency; that left users on
+        # stale ids (e.g. deepseek-chat after V4 rename). Restored by default.
+        # Opt out: REMEDY_LIVE_MODELS=0. Force on: REMEDY_LIVE_MODELS=1.
+        live_env = str(os.environ.get("REMEDY_LIVE_MODELS", "")).strip().lower()
+        live_off = live_env in ("0", "false", "no", "off")
+        live_force = live_env in ("1", "true", "yes", "on")
+        # Anthropic Messages API is not OpenAI /models compatible.
+        openai_compat = configured_provider != "anthropic"
+        want_live = (not live_off) and (
+            live_force
+            or openai_compat
             or _is_local_url(base_url)
-            or str(os.environ.get("REMEDY_LIVE_MODELS", "")).strip().lower()
-            in ("1", "true", "yes", "on")
+            or configured_provider in ("ollama", "openrouter", "custom")
         )
-        # Never hang startup: short timeout, and skip entirely without a key on
-        # remote hosts (would 401 and waste the full timeout budget).
+        # Skip remote discovery without a key (would 401 and burn the timeout).
         can_live = bool(base_url) and (
             configured_provider == "ollama"
             or _is_local_url(base_url)
             or (api_key and api_key != "local")
+            or live_force
         )
 
-        # OpenAI-compatible /models (DeepSeek, OpenAI, Ollama /v1, OpenRouter, …)
-        # Skip Anthropic here — its Messages API is not OpenAI /models compatible.
+        # OpenAI-compatible /models (DeepSeek, xAI, OpenAI, Ollama /v1, OpenRouter, …)
         if (
             not from_cache
             and want_live
             and can_live
-            and configured_provider != "anthropic"
+            and openai_compat
             and base_url
         ):
             try:
+                # 3.5s: enough for cloud; cache (90s) keeps Settings/status bar snappy.
                 async with aiohttp.ClientSession(
-                    timeout=aiohttp.ClientTimeout(total=1.8)
+                    timeout=aiohttp.ClientTimeout(total=3.5)
                 ) as session:
                     models_url = base_url.rstrip("/") + "/models"
                     headers: dict[str, str] = {}
@@ -154,17 +161,24 @@ def register_catalog_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
                                         "name": mid,
                                         "provider": configured_provider,
                                         "default": False,
+                                        "source": "endpoint",
                                     }
                                 )
+                        else:
+                            logger.info(
+                                "Model discovery HTTP %s for %s",
+                                resp.status,
+                                models_url,
+                            )
             except Exception as exc:
-                logger.debug("Model discovery failed for %s: %s", base_url, exc)
+                logger.info("Model discovery failed for %s: %s", base_url, exc)
 
         # Ollama native tags API
         if not from_cache and (configured_provider == "ollama" or "11434" in (base_url or "")):
             try:
                 ollama_url = base_url.rstrip("/").removesuffix("/v1") + "/api/tags"
                 async with aiohttp.ClientSession(
-                    timeout=aiohttp.ClientTimeout(total=1.5)
+                    timeout=aiohttp.ClientTimeout(total=3.0)
                 ) as session:
                     async with session.get(ollama_url) as resp:
                         if resp.ok:

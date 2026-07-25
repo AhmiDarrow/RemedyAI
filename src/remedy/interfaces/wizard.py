@@ -347,12 +347,12 @@ LLM_PROVIDERS: dict[str, dict[str, str]] = {
     },
     "deepseek": {
         "label": "DeepSeek",
-        "model": "deepseek-chat",
+        "model": "deepseek-v4-flash",
         "base_url": "https://api.deepseek.com/v1",
     },
     "xai": {
         "label": "xAI (Grok) — OAuth or API key",
-        "model": "grok-3-mini",
+        "model": "grok-4.5",
         "base_url": "https://api.x.ai/v1",
     },
     "groq": {

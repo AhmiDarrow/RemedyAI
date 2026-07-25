@@ -597,21 +597,25 @@ class GoogleProvider(OpenAIProvider):
 
 
 class DeepSeekProvider(OpenAIProvider):
-    """DeepSeek chat/reasoner APIs (OpenAI-compatible + reasoning_content)."""
+    """DeepSeek V4 APIs (OpenAI-compatible + reasoning_content)."""
 
     provider_name = "deepseek"
     default_base_url = "https://api.deepseek.com"
-    # DeepSeek rejects oversized max_tokens (HTTP 400). Use their documented
-    # ceiling; the agent auto-continues on finish_reason=length so long answers
-    # still complete without us artificially cutting the user off.
-    # Output default max is 4k; maximum max_tokens is 8k for chat; reasoner
-    # supports larger combined thinking+output — request the high end.
+    # DeepSeek rejects oversized max_tokens (HTTP 400). Cap to documented limits.
+    # V4 Pro/Flash allow large max output; legacy chat was ~8k.
     DEEPSEEK_MAX_OUTPUT = 8192
 
     def provider_max_output_tokens(self, model: str | None = None) -> int:
         mid = (model or "").lower()
-        # Reasoner / thinking models: allow larger completion when API supports it.
-        if "reasoner" in mid or "r1" in mid or "think" in mid:
+        # V4 and reasoner-class models support large completions.
+        if (
+            "v4-pro" in mid
+            or "v4-flash" in mid
+            or "reasoner" in mid
+            or "r1" in mid
+            or "think" in mid
+            or "pro" in mid
+        ):
             return 65_536
         return self.DEEPSEEK_MAX_OUTPUT
 

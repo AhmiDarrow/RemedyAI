@@ -41,12 +41,14 @@ Once installed and **enabled**:
 - Hide-to-tray keeps the server up.  
 - Settings still offers Start/Stop for power users; default is **on with the app**.
 
-## Nano swarm
+## Nano swarm (continuity workers)
 
-Deterministic bots (Token · Pattern · Memory · Skill) run without the local LLM.  
-Vision and optional local Router assist need the server — which is why auto-start matters after install.
+Deterministic bots (Token · Pattern · Memory · Skill · Router) run without the local LLM on the hot path.  
+Vision and optional local Router refine need the server — which is why auto-start matters after install.
 
-`GET /api/nanoswarm/status` · Settings swarm panel · `/harness` in chat.
+They never appear as separate chat partners. See [Continuity workers](17-nanoswarm) for the operator guide.
+
+`GET /api/nanoswarm/status` · Settings (Full+) · `/harness` in chat.
 
 ## When it runs (images)
 

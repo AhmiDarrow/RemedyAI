@@ -9,6 +9,8 @@ _NON_VISION_EXACT = frozenset(
     {
         "deepseek-chat",
         "deepseek-reasoner",
+        "deepseek-v4-flash",
+        "deepseek-v4-pro",
         "codestral-latest",
         "codestral",
         "o1",
@@ -49,6 +51,9 @@ _VISION_HINTS = (
     "llama3.2-vision",
     "grok-2-vision",
     "grok-vision",
+    "grok-4",
+    "grok-4.3",
+    "grok-4.5",
 )
 
 # Providers whose catalog models are vision-capable by default (when unknown).

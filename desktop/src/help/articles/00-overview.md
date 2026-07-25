@@ -42,6 +42,7 @@ Nothing in this architecture requires a Remedy cloud account. Chat content goes 
 | Chapter | Topic |
 |---------|--------|
 | [How Remedy works](16-continuity-philosophy) | Continuity philosophy (partner, not bot farm) |
+| [Continuity workers](17-nanoswarm) | Nano swarm internals (operator guide — not chat branding) |
 | [Install (Windows)](01-install-windows) | Installer, paths, SmartScreen |
 | [First run](02-first-run) | Setup wizard, Skip, re-setup |
 | [Providers & auth](03-providers-and-auth) | Keys, xAI OAuth, Ollama |

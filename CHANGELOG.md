@@ -2,6 +2,25 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.11.2] — 2026-07-25
+
+### Fix: restore live provider model discovery (DeepSeek / xAI / cloud)
+
+- **Root cause**: 0.10.44 perf path limited live `GET {base}/models` to ollama/openrouter/custom only — DeepSeek and xAI fell back to a **stale catalog** (`deepseek-chat`, old Grok ids) after API renames.
+- **Restore**: OpenAI-compatible providers query the endpoint again by default (90s cache; opt out `REMEDY_LIVE_MODELS=0`).
+- **Catalog fallbacks**: DeepSeek → `deepseek-v4-flash` / `deepseek-v4-pro`; xAI → `grok-4.5` / `grok-4.3` / `grok-4`.
+- **Legacy id migration**: `deepseek-chat`/`reasoner` → V4 Flash; old `grok-3*` → current Grok family (normalize + runtime sync).
+
+### Feature: smarter nano swarm utilization (still one Remedy voice)
+
+- **ContextSnapshot** uses shared swarm bots (token/router/memory/pattern/skill) instead of disposable instances.
+- **Pattern → remedies**: low tool success windows trigger stuck recovery guidance.
+- **Skill ranks**: speculative prep warms catalog; skill intent reuses cache (no chat branding).
+- **Learn pre-gate**: pattern nanobot can skip noisy auto-learn traces.
+- **Provider change** events notify the swarm for token calibration buckets.
+- **Router heuristics** expanded (implement/debug/PR/plan/memory phrasing).
+- Docs: `docs/manual/17-nanoswarm.md` (operator guide; not session UI).
+
 ## [0.11.1] — 2026-07-25
 
 ### Fix: Windows Defender / SmartScreen posture (hardening)

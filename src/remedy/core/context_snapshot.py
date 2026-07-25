@@ -57,16 +57,20 @@ def build_context_snapshot(
     apply_brief_touch: bool = True,
     apply_remedies: bool = True,
 ) -> ContextSnapshot:
-    """One-pass continuity snapshot (deterministic; no network)."""
-    from remedy.core.intent_policy import policy_for_intent
+    """One-pass continuity snapshot (deterministic; no network).
+
+    Uses the shared nano swarm bots (token, router, memory, pattern, skill)
+    so status and remedies stay coherent across turns.
+    """
+    from remedy.core.intent_policy import format_policy_block, policy_for_intent
     from remedy.core.project_learning import load_project_profile, suggest_harness_pct
     from remedy.core.quality_remedies import remedies_from_quality
     from remedy.core.session_quality import get_session_quality
-    from remedy.nanoswarm.router_nanobot import RouterNanobot
-    from remedy.nanoswarm.token_nanobot import get_token_nanobot
+    from remedy.nanoswarm import get_swarm
 
     msgs = list(messages or [])
     snap = ContextSnapshot()
+    swarm = get_swarm()
 
     # Project-level harness tuning (compound learning)
     min_use, max_use = min_pct, max_pct
@@ -78,70 +82,87 @@ def build_context_snapshot(
         except Exception:
             pass
 
-    token = get_token_nanobot()
-    est = token.measure_messages(msgs, provider=provider, model=model)
-    fill = token.fill_pct(est, context_window=context_window)
-    nudge = token.should_nudge_compress(
-        est,
+    # Token + memory nanobots (shared instances)
+    mem_sig = swarm.memory.on_message(
+        user_text or "",
+        brief=brief if apply_brief_touch else None,
+        messages=msgs,
         context_window=context_window,
         min_pct=min_use,
         max_pct=max_use,
+        provider=provider,
+        model=model,
     )
-    snap.token_estimate = est
-    snap.fill_pct = fill
-    snap.nudge = nudge
-    snap.estimate_method = token.last_method
+    snap.token_estimate = int(mem_sig.get("token_estimate") or 0)
+    snap.fill_pct = float(mem_sig.get("fill_pct") or 0.0)
+    snap.nudge = mem_sig.get("nudge")  # type: ignore[assignment]
+    snap.estimate_method = str(mem_sig.get("estimate_method") or "heuristic")
+    snap.brief_touched = bool(mem_sig.get("brief_touched"))
+    snap.proactive_merge = bool(mem_sig.get("proactive_merge"))
+    if mem_sig.get("brief_error"):
+        snap.signals["brief_error"] = mem_sig["brief_error"]
+    est = snap.token_estimate
+    fill = snap.fill_pct
+    nudge = snap.nudge
 
-    # Intent → policy pack (cheap heuristic)
-    router = RouterNanobot()
-    intent_out = router.classify_intent(user_text or "")
+    # Intent → policy (shared router — not a fresh instance per turn)
+    intent_out = swarm.router.classify_intent(user_text or "")
     intent = str(intent_out.get("label") or "chat")
     snap.intent = intent
     pack = policy_for_intent(intent, user_text=user_text or "")
     snap.policy_id = pack.get("id") or intent
-    from remedy.core.intent_policy import format_policy_block
-
     snap.policy_system = format_policy_block(pack)
+    # Skill intent: reuse pre-ranked catalog (warmed by speculative prep / prior turns)
+    if intent == "skill":
+        try:
+            lines = list(getattr(swarm.skill, "_rank_cache", None) or [])
+            if lines:
+                snap.policy_system = (
+                    (snap.policy_system + "\n" if snap.policy_system else "")
+                    + "[Continuity] Top skills to consider:\n"
+                    + "\n".join(lines[:8])
+                )
+                snap.signals["skill_catalog_lines"] = len(lines)
+        except Exception as e:
+            snap.signals["skill_rank_error"] = str(e)
+
     snap.signals["policy"] = {
         "id": snap.policy_id,
         "suggest_tools": pack.get("suggest_tools") or [],
+        "router_method": intent_out.get("method"),
+        "ambiguous": bool(intent_out.get("ambiguous")),
     }
 
-    # Brief touch + optional proactive merge (same pass as memory nanobot)
-    if apply_brief_touch and brief is not None and (user_text or msgs):
+    # Pattern nanobot window → stuck recovery when tools are failing
+    pat = swarm.pattern
+    pat_rate: float | None = None
+    pat_n = len(pat.steps)
+    recent: list[str] = []
+    if pat_n:
         try:
-            import re
-
-            from remedy.memory.harness.compressor import (
-                extract_paths_from_text,
-                heuristic_merge_from_history,
-            )
-
-            content = user_text or ""
-            for p in extract_paths_from_text(content):
-                brief.add_artifact(p)
-            for m in re.finditer(
-                r"(?:decided to|deciding to|will use|choosing|strategy:)\s+([^.!?\n]{3,120})",
-                content,
-                re.I,
-            ):
-                d = m.group(1).strip()
-                if d and d not in (brief.decisions or []):
-                    brief.decisions = list(brief.decisions or []) + [d]
-                    if len(brief.decisions) > 12:
-                        brief.decisions = brief.decisions[-12:]
-            snap.brief_touched = True
-            if nudge:
-                heuristic_merge_from_history(brief, msgs, intent_hint=user_text or None)
-                snap.proactive_merge = True
-        except Exception as e:
-            snap.signals["brief_error"] = str(e)
+            ok = sum(1 for s in pat.steps if s.get("success"))
+            pat_rate = ok / max(1, pat_n)
+            recent = [str(s.get("tool_name") or "") for s in pat.steps[-6:]]
+            snap.signals["pattern"] = {
+                "step_count": pat_n,
+                "success_rate": round(pat_rate, 3),
+                "recent": recent,
+            }
+        except Exception:
+            pass
 
     # Quality control loop → silent system remedies
     if apply_remedies:
         try:
             q = get_session_quality(session_id).snapshot()
-            rem = remedies_from_quality(q, fill_pct=fill, nudge=nudge)
+            rem = remedies_from_quality(
+                q,
+                fill_pct=fill,
+                nudge=nudge,
+                pattern_success_rate=pat_rate,
+                pattern_step_count=pat_n,
+                pattern_recent=recent,
+            )
             snap.remedy_system = str(rem.get("system") or "")
             snap.signals["remedies"] = rem.get("actions") or []
         except Exception as e:
@@ -158,22 +179,13 @@ def build_context_snapshot(
     except Exception:
         pass
 
-    # Keep swarm status fields in sync (no nested locks — avoid hot-path stalls)
+    # Swarm status counters (shared coordinator — one brain, no bot theater)
     try:
         import time as _time
 
-        from remedy.nanoswarm import get_swarm
-
-        swarm = get_swarm()
-        swarm._event_count += 1  # noqa: SLF001 — status counters only
+        swarm._event_count += 1  # noqa: SLF001
         swarm._last_event = "message_added"  # noqa: SLF001
         swarm._last_ts = _time.time()  # noqa: SLF001
-        swarm.memory.last_fill_pct = fill
-        swarm.memory.last_nudge = nudge
-        if snap.brief_touched:
-            swarm.memory.updates += 1
-        swarm.router.last_label = intent
-        swarm.router.last_method = "heuristic"
     except Exception:
         pass
 

@@ -399,9 +399,11 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
         "show_base_url": False,
         "free_tier": "none",
         "key_docs_url": "https://platform.deepseek.com/api_keys",
+        # Fallback only — live GET /models is preferred when a key is present.
+        # deepseek-chat / deepseek-reasoner retired 2026-07-24 → V4 ids.
         "models": [
-            {"id": "deepseek-chat", "name": "DeepSeek Chat", "vision": False},
-            {"id": "deepseek-reasoner", "name": "DeepSeek Reasoner", "vision": False},
+            {"id": "deepseek-v4-flash", "name": "DeepSeek V4 Flash", "vision": False},
+            {"id": "deepseek-v4-pro", "name": "DeepSeek V4 Pro", "vision": False},
         ],
     },
     "xai": {
@@ -412,12 +414,11 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
         "show_base_url": False,
         "free_tier": "none",
         "key_docs_url": "https://console.x.ai/team/default/api-keys",
+        # Fallback only — live GET /models is preferred when a key is present.
         "models": [
+            {"id": "grok-4.5", "name": "Grok 4.5", "vision": True},
+            {"id": "grok-4.3", "name": "Grok 4.3", "vision": True},
             {"id": "grok-4", "name": "Grok 4", "vision": True},
-            {"id": "grok-3", "name": "Grok 3", "vision": False},
-            {"id": "grok-3-mini", "name": "Grok 3 Mini", "vision": False},
-            {"id": "grok-2", "name": "Grok 2", "vision": False},
-            {"id": "grok-2-vision-1212", "name": "Grok 2 Vision", "vision": True},
         ],
     },
     "groq": {
@@ -648,6 +649,27 @@ def infer_provider_from_base_url(base_url: str) -> str | None:
     return None
 
 
+# Retired / renamed API model ids → current ids (before live discovery or chat).
+# Endpoint discovery is preferred; these keep saved config working offline.
+_LEGACY_MODEL_ALIASES: dict[str, str] = {
+    # DeepSeek: chat/reasoner retired 2026-07-24 (mapped to V4 Flash modes).
+    "deepseek-chat": "deepseek-v4-flash",
+    "deepseek-reasoner": "deepseek-v4-flash",
+    "deepseek-coder": "deepseek-v4-flash",
+    # xAI: older Grok slugs retired / redirected; prefer current flagship family.
+    "grok-3": "grok-4.3",
+    "grok-3-mini": "grok-4.3",
+    "grok-3-fast": "grok-4.3",
+    "grok-3-mini-fast": "grok-4.3",
+    "grok-2": "grok-4.3",
+    "grok-2-1212": "grok-4.3",
+    "grok-2-vision-1212": "grok-4.5",
+    "grok-2-vision": "grok-4.5",
+    "grok-beta": "grok-4.5",
+    "grok-vision-beta": "grok-4.5",
+}
+
+
 def normalize_llm_settings(
     provider: str | None,
     model: str | None,
@@ -656,8 +678,9 @@ def normalize_llm_settings(
     """Align provider, model, and base_url so they don't cross-wire.
 
     Examples of bad states we fix:
-    - provider=deepseek, model=claude-3-haiku  → model=deepseek-chat
+    - provider=deepseek, model=claude-3-haiku  → model=deepseek-v4-flash
     - provider=deepseek, base_url=api.openai.com → base_url=api.deepseek.com
+    - provider=deepseek, model=deepseek-chat → deepseek-v4-flash (retired id)
     """
     prov = (provider or "openai").strip().lower() or "openai"
     if prov not in PROVIDER_CATALOG:
@@ -672,6 +695,11 @@ def normalize_llm_settings(
 
     url = (base_url or "").strip() or default_url
     mid = (model or "").strip() or default_model
+
+    # Map retired provider model ids before ownership checks.
+    alias = _LEGACY_MODEL_ALIASES.get(mid.lower())
+    if alias:
+        mid = alias
 
     # If URL clearly belongs to another known provider, snap to this provider's URL.
     url_owner = infer_provider_from_base_url(url)
@@ -692,7 +720,10 @@ def normalize_llm_settings(
         if not mid:
             mid = default_model
         # Closed catalogs: reject foreign model ids.
+        # Allow any deepseek-* / grok-* id (endpoint may list more than fallback).
         if prov == "deepseek" and mid not in known and model_owner not in (None, "deepseek"):
+            mid = default_model
+        if prov == "xai" and mid not in known and model_owner not in (None, "xai"):
             mid = default_model
         if prov in _CLOSED_PROVIDERS and model_owner and model_owner != prov:
             mid = default_model

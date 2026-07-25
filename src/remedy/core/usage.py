@@ -24,9 +24,13 @@ _PRICE_TABLE: list[tuple[re.Pattern[str], float, float]] = [
     (re.compile(r"claude-3-5-haiku|claude-3-haiku", re.I), 0.80, 4.0),
     (re.compile(r"claude-3-5-sonnet|claude-sonnet|claude-3-7", re.I), 3.0, 15.0),
     (re.compile(r"claude-3-opus|claude-opus", re.I), 15.0, 75.0),
-    # DeepSeek
-    (re.compile(r"deepseek-reasoner|deepseek-r1", re.I), 0.55, 2.19),
+    # DeepSeek (V4 Pro higher; Flash / legacy default lower)
+    (re.compile(r"deepseek-v4-pro|deepseek-reasoner|deepseek-r1", re.I), 0.55, 2.19),
     (re.compile(r"deepseek", re.I), 0.14, 0.28),
+    # xAI Grok
+    (re.compile(r"grok-4\.5|grok-4-5", re.I), 2.0, 6.0),
+    (re.compile(r"grok-4\.3|grok-4", re.I), 1.25, 2.5),
+    (re.compile(r"grok", re.I), 1.0, 3.0),
     # Google
     (re.compile(r"gemini-2\.5|gemini-2\.0|gemini-1\.5", re.I), 0.35, 1.05),
     # Groq / free-ish

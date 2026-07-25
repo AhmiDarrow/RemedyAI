@@ -75,4 +75,5 @@ Screenshots and OCR use an optional **local** model on this PC (first-run downlo
 - [Memory & Memory Harness](06-memory-and-harness)  
 - [Skills](07-skills)  
 - [Local vision](14-visual-decoder)  
+- [Continuity workers (nano swarm)](17-nanoswarm) — operator detail  
 - [Security & data](04-security-and-data)  

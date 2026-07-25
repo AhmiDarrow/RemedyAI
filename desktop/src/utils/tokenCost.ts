@@ -17,8 +17,11 @@ const PRICE: Array<{ re: RegExp; pin: number; pout: number }> = [
   { re: /gpt-4o|gpt-4\.1/i, pin: 2.5, pout: 10 },
   { re: /claude-3-5-sonnet|claude-sonnet/i, pin: 3, pout: 15 },
   { re: /claude-3-5-haiku|claude-3-haiku/i, pin: 0.8, pout: 4 },
-  { re: /deepseek-reasoner|deepseek-r1/i, pin: 0.55, pout: 2.19 },
+  { re: /deepseek-v4-pro|deepseek-reasoner|deepseek-r1/i, pin: 0.55, pout: 2.19 },
   { re: /deepseek/i, pin: 0.14, pout: 0.28 },
+  { re: /grok-4\.5|grok-4-5/i, pin: 2.0, pout: 6.0 },
+  { re: /grok-4\.3|grok-4/i, pin: 1.25, pout: 2.5 },
+  { re: /grok/i, pin: 1.0, pout: 3.0 },
   { re: /gemini/i, pin: 0.35, pout: 1.05 },
   { re: /demo|ollama/i, pin: 0, pout: 0 },
 ]

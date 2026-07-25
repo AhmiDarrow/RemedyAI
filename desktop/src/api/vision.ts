@@ -176,6 +176,8 @@ export function chatModelSupportsVision(provider: string, model: string): boolea
   const non = new Set([
     'deepseek-chat',
     'deepseek-reasoner',
+    'deepseek-v4-flash',
+    'deepseek-v4-pro',
     'codestral-latest',
     'codestral',
     'o1',
