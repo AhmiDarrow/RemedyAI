@@ -21,9 +21,11 @@ from typing import Any
 
 from remedy.nanoswarm.bpe_engine import (
     DEFAULT_PACK_ID,
-    count_tokens as bpe_count_tokens,
     get_pack,
     list_available_packs,
+)
+from remedy.nanoswarm.bpe_engine import (
+    count_tokens as bpe_count_tokens,
 )
 from remedy.nanoswarm.token_tables import (
     content_boost,
@@ -88,10 +90,7 @@ def encoding_family(provider: str | None = None, model: str | None = None) -> st
     """Return Remedy routing family label for provider/model (not a foreign vocab id)."""
     p = (provider or "").strip().lower()
     m = (model or "").strip().lower()
-    if p in _PROVIDER_FAMILY:
-        fam = _PROVIDER_FAMILY[p]
-    else:
-        fam = "openai-compat"
+    fam = _PROVIDER_FAMILY.get(p, "openai-compat")
     if "claude" in m:
         fam = "anthropic-like"
     elif "deepseek" in m:

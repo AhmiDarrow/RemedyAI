@@ -2,7 +2,18 @@
 
 High-level product notes for owners. Full detail lives in repo `CHANGELOG.md`.
 
-Ship **one** installer/tag for the current series (**v0.11.2**).
+Ship **one** installer/tag for the current series (**v0.11.4**).
+
+## 0.11.4 — NanoToken BPE v2 + tool polish
+
+- **Default BPE pack `remedy-bbpe-v2`**: clean-room byte BPE trained on first-party repo + live DeepSeek/xAI tool/skill battery (v1 kept).
+- **Retrain path**: `scripts/nanotoken_battery_and_train.py` (`--from-corpus` reuses a prior dump); ratio check `scripts/nanotoken_ratio_eval.py`.
+- **file_read**: optional `offset`/`limit` line windows (models no longer crash the tool with extra args).
+- F1 → *Continuity workers* documents packs, calibration band, and knobs (`REMEDY_BPE=0`).
+
+## 0.11.3 — Owned NanoToken BPE + plan finish
+
+- Clean-room BPE engine + `remedy-bbpe-v1`; swarm pack assignment; session LLM; skills scale; untrusted scope.
 
 ## 0.11.2 — Live models + smarter continuity workers
 

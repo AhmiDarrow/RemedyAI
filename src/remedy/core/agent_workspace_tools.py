@@ -25,7 +25,12 @@ def register_workspace_tools(runtime: Any) -> None:
         parent = Path(p).parent.as_posix()
         return parent if parent not in ("", ".") else "."
 
-    async def file_read(path: str = ".") -> str:
+    async def file_read(
+        path: str = ".",
+        offset: int = 0,
+        limit: int | None = None,
+        **_kwargs: object,
+    ) -> str:
         runtime.effective_project_path()
         target = runtime.resolve_tool_path(path)
         if not target.exists():
@@ -57,7 +62,31 @@ def register_workspace_tools(runtime: Any) -> None:
                 tool_name="file_read",
                 suggestion="Check permissions or try list_dir on the parent path.",
             )
-        # Full file contents — only emergency OOM guard (not a quality limit).
+        # Optional line window (models often pass offset/limit like list_dir).
+        # Full file remains default; only emergency OOM guard after slicing.
+        try:
+            off = max(0, int(offset or 0))
+        except (TypeError, ValueError):
+            off = 0
+        lim: int | None
+        try:
+            lim = None if limit is None else max(1, int(limit))
+        except (TypeError, ValueError):
+            lim = None
+        if off or lim is not None:
+            lines = data.splitlines(keepends=True)
+            end = len(lines) if lim is None else min(len(lines), off + lim)
+            start = min(off, len(lines))
+            sliced = "".join(lines[start:end])
+            suffix = ""
+            if end < len(lines):
+                suffix = (
+                    f"\n\n... [lines {start+1}-{end} of {len(lines)}; "
+                    f"file_read path={path!r} offset={end} limit={lim or 200} for more]"
+                )
+            elif start > 0 or lim is not None:
+                suffix = f"\n\n... [lines {start+1}-{end} of {len(lines)}]"
+            data = sliced + suffix
         cap = _FILE_READ_CHAR_CAP if _FILE_READ_CHAR_CAP > 0 else _HARD_SAFETY_CHARS
         if len(data) > cap:
             return (
@@ -271,12 +300,22 @@ def register_workspace_tools(runtime: Any) -> None:
     runtime.tool_registry.register_builtin_handler(
         "file_read",
         "Read a text file under allowed roots (see access scope). "
-        "Prefer paths relative to the project root.",
+        "Prefer paths relative to the project root. "
+        "Optional offset/limit are 0-based line windows for large files.",
         file_read,
         {
             "type": "object",
             "properties": {
                 "path": {"type": "string", "description": "Relative path within the project"},
+                "offset": {
+                    "type": "integer",
+                    "description": "0-based start line (optional)",
+                    "default": 0,
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max lines to return (optional; omit for full file subject to safety cap)",
+                },
             },
             "required": ["path"],
         },

@@ -2,6 +2,20 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.11.4] — 2026-07-25
+
+### Feature: NanoToken BPE v2 (battery-trained default)
+
+- Default pack **`remedy-bbpe-v2`** (4000 merges) trained on first-party repo source/tests/docs/skills **plus** live multi-provider agent battery transcripts (DeepSeek V4 Flash/Pro, Grok 4.5/4.3 tool+skill turns). Secrets scrubbed; no third-party tokenizer merges.
+- **`remedy-bbpe-v1`** retained for fallback/comparison.
+- Train/retrain: `scripts/nanotoken_battery_and_train.py` (`--from-corpus`, `--merges`, `--skip-live`); measure pack vs provider usage: `scripts/nanotoken_ratio_eval.py`.
+- Progress logging in `train_bpe` for long runs.
+- Docs: `docs/manual/17-nanoswarm.md` BPE section; What’s new; README bullet; Helper tip updated.
+
+### Fix: file_read accepts offset/limit
+
+- Models often pass `limit`/`offset` like `list_dir`; previously TypeError aborted the tool. Optional line windows + schema docs; unknown kwargs ignored.
+
 ## [0.11.3] — 2026-07-25
 
 ### Feature: Remedy-owned NanoToken BPE

@@ -6,7 +6,6 @@ from contextlib import suppress
 from pathlib import Path
 
 # suppress used by archive-unused / packs
-
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 

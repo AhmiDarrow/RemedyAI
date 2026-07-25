@@ -30,6 +30,7 @@ It combines:
 - **Depth** — A self-improving learning loop that distills task traces into reusable skills
 - **Memory** — Persistent SQLite+FTS5 knowledge store with structured handoff notes and session continuity
 - **Continuity layer** — Session Brief, context budget, quality remedies, project-level learning (silent local workers; see `docs/manual/17-nanoswarm.md`)
+- **NanoToken BPE** — Remedy-owned byte-level token estimates (`remedy-bbpe-v2`); provider usage remains billing truth; auto-calibrates per model
 - **Breadth** — Multi-channel gateway (CLI, REST API, Telegram, Discord, Slack, webhooks)
 - **Compatibility** — Native [agentskills.io](https://agentskills.io) support, plus adapters for Hermes and OpenClaw/ClawHub
 - **Security** — Local-first by design: full power for you on this PC, not an open doorway for others
@@ -134,6 +135,7 @@ The desktop app bundles the full Remedy server as a sidecar, so everything runs 
 | `/export` | Export this chat session as plain-text `.txt` |
 | `/import-session` | Import a session from `.txt` / `.md` (file picker or path) |
 | `/skills` · `/handoff` | Skills list · handoff notes |
+| `/helper` · `/tip` | Offline help tips (or `/helper error <text>`) |
 | `/init` | Project scan helpers |
 
 ### Architecture
@@ -468,7 +470,7 @@ def teardown_plugin():
 git clone https://github.com/AhmiDarrow/RemedyAI.git
 cd RemedyAI
 uv sync --group dev
-uv run pytest -q          # full suite (560+ tests; currently ~707)
+uv run pytest -q          # full suite (560+ tests; currently ~730)
 cd desktop && npm test    # frontend unit tests (vitest)
 python scripts/check_docs.py  # docs stay synced with code (help, cmds, versions)
 uv run remedy --help

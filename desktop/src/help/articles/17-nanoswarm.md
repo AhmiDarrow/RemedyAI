@@ -62,6 +62,24 @@ query the endpoint so catalog renames (DeepSeek V4, Grok 4.x) stay correct.
 Continuity workers themselves were not removed — only some paths stopped
 *using* shared instances until Continuity 0.11+ rewired them.
 
+## NanoToken BPE (owned packs)
+
+Token fill estimates use Remedy’s **clean-room byte-level BPE** — not tiktoken or
+any vendor merge tables.
+
+| Pack | Role |
+|------|------|
+| **`remedy-bbpe-v2`** (default) | Trained on first-party repo + multi-provider tool/skill battery transcripts |
+| **`remedy-bbpe-v1`** | Earlier synthetic pack; kept as fallback / comparison |
+
+- Swarm **assigns** a pack per provider/model family; `provider_changed` remeasures.
+- **Provider API usage** remains billing ground truth. Auto **calibration** scales
+  raw pack counts toward real usage (target raw band roughly **0.75–1.25**).
+- Retrain: `scripts/nanotoken_battery_and_train.py` (live battery + train) or
+  `--from-corpus` on a prior dump; measure with `scripts/nanotoken_ratio_eval.py`.
+- `REMEDY_BPE=0` forces heuristic weights only.
+- APIs: `/api/nanoswarm/token/assignment`, `/api/nanoswarm/token/packs`.
+
 ## Operator knobs
 
 | Knob | Effect |
@@ -70,6 +88,7 @@ Continuity workers themselves were not removed — only some paths stopped
 | Harness **off** | Skips snapshot continuity pass |
 | Tool process **Full+** | Continuity activity visible in UI |
 | `REMEDY_LIVE_MODELS=0` | Disable live provider model listing |
+| `REMEDY_BPE=0` | Disable owned BPE; heuristic token estimates |
 | Vision enable + auto_start | Local Qwen with Remedy |
 
 ## Related
@@ -78,3 +97,4 @@ Continuity workers themselves were not removed — only some paths stopped
 - [Memory & harness](06-memory-and-harness)  
 - [Local vision](14-visual-decoder)  
 - [CLI & API](10-cli-and-api)  
+

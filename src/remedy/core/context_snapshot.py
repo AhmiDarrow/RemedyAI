@@ -96,7 +96,8 @@ def build_context_snapshot(
     )
     snap.token_estimate = int(mem_sig.get("token_estimate") or 0)
     snap.fill_pct = float(mem_sig.get("fill_pct") or 0.0)
-    snap.nudge = mem_sig.get("nudge")  # type: ignore[assignment]
+    nudge_val = mem_sig.get("nudge")
+    snap.nudge = str(nudge_val) if nudge_val else None
     snap.estimate_method = str(mem_sig.get("estimate_method") or "heuristic")
     snap.brief_touched = bool(mem_sig.get("brief_touched"))
     snap.proactive_merge = bool(mem_sig.get("proactive_merge"))
@@ -262,10 +263,8 @@ def build_context_snapshot(
         snap.signals["health_error"] = str(e)
 
     # Swarm status counters (shared coordinator — locked API, no private races)
-    try:
+    with suppress(Exception):
         swarm.note_event("message_added")
-    except Exception:
-        pass
 
     snap.signals["min_pct"] = min_use
     snap.signals["max_pct"] = max_use

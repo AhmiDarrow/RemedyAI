@@ -42,7 +42,7 @@ const META: HelpArticleMeta[] = [
     order: 16.5,
     tags: ['nanoswarm', 'continuity', 'token', 'router', 'pattern', 'operator'],
     summary:
-      'Operator guide: how silent continuity workers measure, prune, and learn — not chat agents.',
+      'Operator guide: continuity workers, NanoToken BPE packs (v2 default), calibration — not chat agents.',
   },
   {
     id: '01-install-windows',

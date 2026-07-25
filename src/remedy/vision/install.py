@@ -254,7 +254,7 @@ def _extract_zip(zip_path: Path, dest_dir: Path) -> None:
                     continue
                 cleaned = name.replace("\\", "/").lstrip("/")
                 if ".." in cleaned.split("/"):
-                    raise ValueError(f"Zip Slip blocked: {name}")
+                    raise ValueError(f"Zip Slip blocked: {name}") from None
                 target = (dest / cleaned).resolve()
                 try:
                     target.relative_to(dest)

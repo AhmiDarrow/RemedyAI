@@ -250,8 +250,8 @@ async def handle_slash_command(
         try:
             from remedy.nanoswarm import get_swarm
 
-            rest = raw.split(maxsplit=1)
-            arg = rest[1].strip() if len(rest) > 1 else ""
+            parts = raw.split(maxsplit=1)
+            arg = parts[1].strip() if len(parts) > 1 else ""
             low = arg.lower()
             if low.startswith("error ") or low.startswith("err "):
                 err = arg.split(maxsplit=1)[1] if " " in arg else arg

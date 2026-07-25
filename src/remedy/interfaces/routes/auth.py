@@ -9,7 +9,6 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 # Any used by connected-providers payload typing
-
 from remedy.interfaces.api_support import (
     _apply_llm_to_runtime,
     _default_config_path,
@@ -100,7 +99,7 @@ def register_auth_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
                 "provider_keys_set"
             ) or {}
         except Exception:
-            keys_set = {k: True for k in keys}
+            keys_set = dict.fromkeys(keys, True)
 
         enabled_raw = cfg.get("enabled_providers")
         if isinstance(enabled_raw, str) and enabled_raw.strip():

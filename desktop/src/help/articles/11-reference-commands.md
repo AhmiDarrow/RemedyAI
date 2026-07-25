@@ -23,6 +23,7 @@ Type `/` in the composer for autocomplete. Commands also work via
 | `/deny` | `id?` | Deny pending action |
 | `/import` | `path` | Import folder of notes into memory |
 | `/export` | | Export this session as `.txt` (desktop) |
+| `/helper` | `topic` · `error <text>` · alias `/tip` | Offline help tips from the Helper worker |
 | `/import-session` | `path?` | Import session from `.txt`/`.md` |
 | `/skills` | | List available skills |
 | `/handoff` | | List handoff notes |

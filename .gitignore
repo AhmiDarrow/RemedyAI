@@ -46,6 +46,10 @@ coverage/
 logs/
 *.pid
 
+# NanoToken train artifacts (generated corpus/logs; packs under src/ are committed)
+scripts/_nanotoken_corpus/
+scripts/_nanotoken_*.log
+
 # Desktop build outputs (sidecar binaries, not source)
 desktop/bin/
 

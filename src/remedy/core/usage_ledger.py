@@ -11,6 +11,7 @@ import json
 import sqlite3
 import threading
 import time
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -62,10 +63,8 @@ def _get_conn(home: Path | str | None = None) -> sqlite3.Connection:
         if _conn is not None and _path == path:
             return _conn
         if _conn is not None:
-            try:
+            with suppress(Exception):
                 _conn.close()
-            except Exception:
-                pass
         conn = sqlite3.connect(str(path), check_same_thread=False)
         conn.row_factory = sqlite3.Row
         conn.executescript(_SCHEMA)
@@ -218,7 +217,7 @@ def summary(
         bucket["completion_tokens"] += entry["completion_tokens"]
         bucket["total_tokens"] += entry["total_tokens"]
         bucket["estimated_cost_usd"] = round(
-            float(bucket["estimated_cost_usd"]) + entry["estimated_cost_usd"], 6
+            float(bucket["estimated_cost_usd"]) + float(entry["estimated_cost_usd"]), 6
         )
         bucket["events"] += entry["events"]
     return {

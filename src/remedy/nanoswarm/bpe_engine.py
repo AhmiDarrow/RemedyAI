@@ -16,10 +16,10 @@ from pathlib import Path
 from typing import Any
 
 # Pack id for the default shipped Remedy pack
-DEFAULT_PACK_ID = "remedy-bbpe-v1"
+DEFAULT_PACK_ID = "remedy-bbpe-v2"
 
 _pack_lock = threading.Lock()
-_pack_cache: dict[str, "BpePack"] = {}
+_pack_cache: dict[str, BpePack] = {}
 _pretoken_cache: dict[tuple[str, str], int] = {}
 _pretoken_order: list[tuple[str, str]] = []
 _PRETOKEN_CACHE_MAX = 4096
@@ -167,10 +167,7 @@ def count_tokens(text: str | None, pack: BpePack) -> int:
         if cache_key in _pretoken_cache:
             return _pretoken_cache[cache_key]
 
-    if pack.pretoken == "none":
-        pieces = [text]
-    else:
-        pieces = _basic_pretokenize(text)
+    pieces = [text] if pack.pretoken == "none" else _basic_pretokenize(text)
 
     total = 0
     for piece in pieces:
@@ -321,8 +318,10 @@ def train_bpe(
     next_id = 256
     merges: list[tuple[int, int]] = []
     # Map from current id space — we merge in place using next_id
+    import time as _time
 
-    for _ in range(num_merges):
+    t0 = _time.perf_counter()
+    for step in range(num_merges):
         counts: dict[tuple[int, int], int] = {}
         for ids in corpus:
             for i in range(len(ids) - 1):
@@ -340,6 +339,15 @@ def train_bpe(
             new_corpus.append(_merge_once(ids, best_pair, next_id))
         corpus = new_corpus
         next_id += 1
+        if (step + 1) % 100 == 0 or step == 0:
+            elapsed = _time.perf_counter() - t0
+            rate = (step + 1) / elapsed if elapsed > 0 else 0.0
+            remain = (num_merges - step - 1) / rate if rate > 0 else 0.0
+            print(
+                f"  bpe train merge {step+1}/{num_merges} "
+                f"best_count={best_c} elapsed={elapsed:.0f}s eta~{remain:.0f}s",
+                flush=True,
+            )
     return merges
 
 

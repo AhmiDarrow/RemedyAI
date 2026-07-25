@@ -13,6 +13,20 @@ class RouterClassifyRequest(BaseModel):
     use_local: bool = False  # opt-in; can block ~seconds if llama-server is busy
 
 
+class HelperHelpRequest(BaseModel):
+    prompt: str = ""
+
+
+class HelperErrorRequest(BaseModel):
+    error: str = ""
+
+
+class GuardAssessRequest(BaseModel):
+    tool_name: str = ""
+    command: str = ""
+    path: str = ""
+
+
 def register_nanoswarm_routes(app: FastAPI, *, runtime=None, gateway=None, memory=None) -> None:
     @app.get("/api/nanoswarm/status")
     async def nanoswarm_status() -> dict[str, Any]:
@@ -51,12 +65,6 @@ def register_nanoswarm_routes(app: FastAPI, *, runtime=None, gateway=None, memor
 
         return default_queue().status()
 
-    class HelperHelpRequest(BaseModel):
-        prompt: str = ""
-
-    class HelperErrorRequest(BaseModel):
-        error: str = ""
-
     @app.post("/api/nanoswarm/helper/help")
     async def nanoswarm_helper_help(body: HelperHelpRequest) -> dict[str, Any]:
         """Offline help cards (Helper nanobot)."""
@@ -70,11 +78,6 @@ def register_nanoswarm_routes(app: FastAPI, *, runtime=None, gateway=None, memor
         from remedy.nanoswarm import get_swarm
 
         return get_swarm().helper.explain_error(body.error or "")
-
-    class GuardAssessRequest(BaseModel):
-        tool_name: str = ""
-        command: str = ""
-        path: str = ""
 
     @app.post("/api/nanoswarm/guard/assess")
     async def nanoswarm_guard_assess(body: GuardAssessRequest) -> dict[str, Any]:

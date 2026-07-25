@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
+from contextlib import suppress
 from typing import Any
 
 from remedy.nanoswarm.events import SwarmEvent
@@ -161,10 +162,8 @@ class NanoSwarm:
 
         elif event.name == "skill_library_changed":
             # Drop rank cache so next skill intent re-ranks
-            try:
+            with suppress(Exception):
                 self.skill._rank_cache = []  # noqa: SLF001
-            except Exception:
-                pass
             results["signals"]["skill"] = {"rank_cache_cleared": True}
 
         return results

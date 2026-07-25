@@ -96,8 +96,15 @@ def test_estimate_text_tokens_bpe_path():
 
 
 def test_packaged_pack_file_exists():
-    p = Path(__file__).resolve().parents[1] / "src" / "remedy" / "nanoswarm" / "bpe_packs" / f"{DEFAULT_PACK_ID}.json"
+    packs = Path(__file__).resolve().parents[1] / "src" / "remedy" / "nanoswarm" / "bpe_packs"
+    p = packs / f"{DEFAULT_PACK_ID}.json"
     assert p.is_file()
     text = p.read_text(encoding="utf-8")
-    assert "remedy-bbpe-v1" in text
+    assert DEFAULT_PACK_ID in text
     assert "No third-party" in text or "Original Remedy" in text
+    # v1 retained for optional fallback / comparison
+    assert (packs / "remedy-bbpe-v1.json").is_file()
+    assert (packs / "remedy-bbpe-v2.json").is_file()
+    v2 = get_pack("remedy-bbpe-v2")
+    assert v2 is not None
+    assert len(v2.ranks) >= 1000
