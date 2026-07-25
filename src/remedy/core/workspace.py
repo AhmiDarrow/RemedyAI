@@ -30,24 +30,55 @@ _SKIP_DIR_NAMES = {
 }
 
 
+def is_unset_project_path(raw: str | Path | None) -> bool:
+    """True when the user has not chosen a real project folder.
+
+    Empty / missing / ``.`` means “no project” — not “current process cwd”.
+    """
+    if raw is None:
+        return True
+    text = str(raw).strip()
+    return not text or text in (".", "./")
+
+
 def resolve_project_path(raw: str | None, *, fallback: Path | None = None) -> Path:
     """Resolve a project path to an absolute directory.
 
-    Empty / '.' / missing → ``fallback`` or ``Path.cwd()``.
-    Creates the directory if it does not exist when it looks intentional.
+    Empty / '.' / missing → ``fallback`` or the user home directory (not the
+    process cwd — Desktop sidecars often run from the install folder).
+    Pair with :func:`effective_access_scope`: unset project → full access.
     """
-    fb = (fallback or Path.cwd()).expanduser().resolve()
-    if raw is None:
+    if fallback is not None:
+        fb = fallback.expanduser().resolve()
+    else:
+        try:
+            fb = Path.home().expanduser().resolve()
+        except OSError:
+            fb = Path.cwd().resolve()
+    if is_unset_project_path(raw):
         return fb
     text = str(raw).strip()
-    if not text or text in (".", "./"):
-        return fb
     path = Path(text).expanduser()
     try:
         path = path.resolve()
     except OSError:
         path = Path(text).expanduser().absolute()
     return path
+
+
+def effective_access_scope(
+    configured: str | None,
+    project_path_raw: str | Path | None,
+) -> str:
+    """Access scope used for tools.
+
+    When no project folder is set, treat as **full** user-machine access so
+    the partner is not jailed to an install/cwd folder. Prefer picking a
+    project folder for focused coding work.
+    """
+    if is_unset_project_path(project_path_raw):
+        return "full"
+    return normalize_access_scope(configured)
 
 
 def ensure_project_dir(path: Path) -> Path:
@@ -242,6 +273,7 @@ def workspace_context_block(
     *,
     access_scope: str = "project",
     extra_roots: list[Path] | None = None,
+    project_unset: bool = False,
 ) -> str:
     """Markdown-ish block for the agent system prompt."""
     try:
@@ -249,11 +281,20 @@ def workspace_context_block(
     except Exception as exc:
         return f"Working directory: (unavailable: {exc})"
     scope = normalize_access_scope(access_scope)
+    if project_unset:
+        # Empty project path → full access (owner PC); recommend setting a folder.
+        scope = "full"
     lines = [
         f"Working directory (project root): {root}",
         f"Access scope: {scope}",
     ]
-    if scope == "project":
+    if project_unset:
+        lines.append(
+            "No project folder is set — filesystem access is **full** (this user account). "
+            "Prefer absolute paths or paths under the user profile. "
+            "Recommend the user pick a project folder in Settings for focused code work."
+        )
+    elif scope == "project":
         lines.append(
             "File and shell tools are jailed to the project directory unless the user "
             "raises access scope in Settings."
@@ -263,6 +304,10 @@ def workspace_context_block(
             "File tools may use the project directory and the user home profile. "
             "Prefer the project root for code work."
         )
+    elif scope == "untrusted":
+        lines.append(
+            "Untrusted scope: project root only; high-impact tools stay on Ask."
+        )
     else:
         lines.append(
             "Access scope is full user machine (no silent admin elevation). "
@@ -270,7 +315,10 @@ def workspace_context_block(
         )
     if extra_roots:
         lines.append("Allowed roots: " + ", ".join(str(r) for r in extra_roots[:6]))
-    lines.append("Prefer relative paths from the project root when possible.")
+    if project_unset:
+        lines.append("Prefer absolute paths when the target is outside the default home root.")
+    else:
+        lines.append("Prefer relative paths from the project root when possible.")
     entries = list_workspace_entries(root)
     if entries:
         listing = ", ".join(

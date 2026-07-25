@@ -866,7 +866,18 @@ class MemoryStore:
             "llm_provider",
             "message_count",
         }
-        updates = {k: v for k, v in fields.items() if k in allowed and v is not None}
+        updates: dict[str, Any] = {}
+        for k, v in fields.items():
+            if k not in allowed:
+                continue
+            # project_path may be cleared to NULL (no-project sessions)
+            if k == "project_path":
+                if v is None or str(v).strip() in ("", ".", "./"):
+                    updates[k] = None
+                else:
+                    updates[k] = v
+            elif v is not None:
+                updates[k] = v
         if not updates:
             return await self.get_chat_session(session_id)
         updates["updated_at"] = datetime.now(UTC).isoformat()

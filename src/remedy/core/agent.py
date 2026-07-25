@@ -71,7 +71,9 @@ from remedy.core.react_stream import (
 from remedy.core.runtime import AgentRuntime
 from remedy.core.workspace import (
     allowed_roots_for_scope,
+    effective_access_scope,
     ensure_project_dir,
+    is_unset_project_path,
     normalize_access_scope,
     resolve_project_path,
     resolve_under_roots,
@@ -119,9 +121,12 @@ class BasicRuntime(AgentRuntime):
         self._provider: ProviderAdapter = get_provider(self._llm_provider)
         self._max_react_steps = _MAX_REACT_STEPS
         # Default workspace from config; per-session override applied in stream_response.
-        self._default_project_path: Path = resolve_project_path(
-            getattr(config, "project_path", None)
+        # Empty / "." project → home as root + full access (see workspace.effective_access_scope).
+        raw_proj = getattr(config, "project_path", None)
+        self._project_path_raw: str | None = (
+            None if raw_proj is None else str(raw_proj)
         )
+        self._default_project_path: Path = resolve_project_path(self._project_path_raw)
         self._active_project_path: Path = self._default_project_path
         self._access_scope: str = normalize_access_scope(
             getattr(config, "access_scope", None) or "project"
@@ -152,6 +157,10 @@ class BasicRuntime(AgentRuntime):
         self._register_workspace_tools()
         self._register_memory_tools()
 
+    def project_path_is_unset(self) -> bool:
+        """True when no real project folder is configured (→ full access)."""
+        return is_unset_project_path(getattr(self, "_project_path_raw", None))
+
     def effective_project_path(self) -> Path:
         """Active workspace root for tools / context (session or default)."""
         try:
@@ -160,7 +169,11 @@ class BasicRuntime(AgentRuntime):
             return resolve_project_path(None)
 
     def access_scope(self) -> str:
-        return normalize_access_scope(self._access_scope)
+        """Configured scope, or **full** when no project folder is set."""
+        return effective_access_scope(
+            getattr(self, "_access_scope", None),
+            getattr(self, "_project_path_raw", None),
+        )
 
     def allowed_roots(self) -> list[Path]:
         return allowed_roots_for_scope(
@@ -177,10 +190,16 @@ class BasicRuntime(AgentRuntime):
 
     def set_project_path(self, path: str | Path | None, *, as_default: bool = False) -> Path:
         """Set active (and optionally default) project workspace."""
-        resolved = resolve_project_path(
-            str(path) if path is not None else None,
-            fallback=self._default_project_path,
-        )
+        raw = None if path is None else str(path)
+        if is_unset_project_path(raw):
+            self._project_path_raw = None
+            resolved = resolve_project_path(None)
+        else:
+            self._project_path_raw = raw.strip() if raw else None
+            resolved = resolve_project_path(
+                raw,
+                fallback=self._default_project_path,
+            )
         with suppress(Exception):
             resolved = ensure_project_dir(resolved)
         self._active_project_path = resolved
@@ -188,7 +207,10 @@ class BasicRuntime(AgentRuntime):
             self._default_project_path = resolved
             if hasattr(self, "config") and self.config is not None:
                 with suppress(Exception):
-                    self.config.project_path = str(resolved)
+                    # Persist empty as "" so UI shows unset, not a guessed home path.
+                    self.config.project_path = (
+                        "" if self.project_path_is_unset() else str(resolved)
+                    )
         return resolved
 
     def _register_workspace_tools(self) -> None:
@@ -725,7 +747,7 @@ class BasicRuntime(AgentRuntime):
                 with suppress(Exception):
                     self.config.name = name.strip()
         if project_path is not None:
-            # Allow clearing to cwd via empty string.
+            # Empty string clears project → home root + full access.
             self.set_project_path(project_path if project_path.strip() else None, as_default=True)
 
     async def handle_event(self, event: GatewayEvent) -> AsyncIterator[Any]:
@@ -2528,6 +2550,7 @@ class BasicRuntime(AgentRuntime):
                     self.effective_project_path(),
                     access_scope=self.access_scope(),
                     extra_roots=self.allowed_roots(),
+                    project_unset=self.project_path_is_unset(),
                 )
             )
 

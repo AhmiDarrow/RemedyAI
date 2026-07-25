@@ -110,6 +110,21 @@ Change via status bar or Settings. Full/Full+ keep process expanded after the tu
 - Feed follows the bottom unless you scroll up; **↓** resumes follow.  
 - **Stop** aborts the current generation.  
 
+## Sessions by project
+
+The left sidebar groups chats:
+
+| Group | Contents |
+|-------|----------|
+| **No project** | Sessions not attached to a folder |
+| **📁 Project name** | Sessions whose `project_path` is that directory (children under the folder) |
+
+- **+** on a project header — new session in that project  
+- **+ Add project folder** — register a folder (browse or type path) even before any chats  
+- **📁** on a session row — move the chat to another project / No project  
+
+Default **New Session** still uses Settings → default project folder when set.
+
 ## Editing & regenerate
 
 - Edit a prior user message (when available) to branch the conversation.  

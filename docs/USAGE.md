@@ -556,7 +556,7 @@ remedy migrate openclaw ~/openclaw/skills --no-copy
 | `llm_model` | string | provider default | Model id for the provider |
 | `llm_base_url` | string | provider default | Usually auto-filled; required mainly for `custom` |
 | `llm_api_key` | string | `""` | Cloud API key (xAI may use OAuth instead) |
-| `project_path` | string | `""` | Default workspace for tools / `@file` |
+| `project_path` | string | `""` | Default workspace for tools / `@file`. Empty / `.` = no project → **full** access (warns in Settings; pick a folder for focused coding) |
 | `setup_completed` | bool | `false` | First-run wizard gate |
 
 ### Gateway section `[gateway]`

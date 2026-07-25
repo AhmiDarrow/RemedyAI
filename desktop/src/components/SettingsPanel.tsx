@@ -1042,6 +1042,20 @@ export function SettingsPanel({
               <div className="text-[10px] leading-snug" style={{ color: 'var(--text-muted)' }}>
                 Type a path or browse. Save reloads the workspace (file tools, shell cwd, @file search).
               </div>
+              {(!projectPath.trim() || projectPath.trim() === '.') && (
+                <div
+                  className="text-[10px] leading-snug mt-1.5 rounded px-2 py-1.5"
+                  style={{
+                    color: 'var(--warning)',
+                    background: 'color-mix(in srgb, var(--warning) 12%, var(--bg-tertiary))',
+                    border: '1px solid color-mix(in srgb, var(--warning) 35%, var(--border))',
+                  }}
+                >
+                  <strong>No project folder</strong> — tools use <strong>full</strong> access on
+                  this PC (your Windows user). Fine for general help; for coding, pick a project
+                  folder so work stays focused and safer.
+                </div>
+              )}
             </SettingsSection>
 
             {/* Access */}
@@ -1056,11 +1070,13 @@ export function SettingsPanel({
               <select
                 value={accessScope}
                 onChange={(e) => setAccessScope(e.target.value)}
+                disabled={!projectPath.trim() || projectPath.trim() === '.'}
                 className="w-full rounded px-2 py-1 text-xs mb-1 outline-none"
                 style={{
                   background: 'var(--bg-tertiary)',
                   color: 'var(--text-primary)',
                   border: '1px solid var(--border)',
+                  opacity: !projectPath.trim() || projectPath.trim() === '.' ? 0.55 : 1,
                 }}
               >
                 <option value="untrusted">Untrusted project (strict)</option>
@@ -1069,8 +1085,17 @@ export function SettingsPanel({
                 <option value="full">Full user machine (you grant)</option>
               </select>
               <div className="text-[10px] leading-snug" style={{ color: 'var(--text-muted)' }}>
-                <strong>Untrusted</strong> = project root only + always Ask for shell/write
-                (use for downloaded folders). Full still runs as your Windows user.
+                {(!projectPath.trim() || projectPath.trim() === '.') ? (
+                  <>
+                    Scope is forced to <strong>full</strong> while no project folder is set.
+                    Choose a folder above to use Project / Home / Untrusted jails.
+                  </>
+                ) : (
+                  <>
+                    <strong>Untrusted</strong> = project root only + always Ask for shell/write
+                    (use for downloaded folders). Full still runs as your Windows user.
+                  </>
+                )}
               </div>
             </SettingsSection>
 

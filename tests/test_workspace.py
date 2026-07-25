@@ -9,7 +9,9 @@ import pytest
 from remedy.core.errors import SecurityError
 from remedy.core.security import check_dangerous_command, safe_path
 from remedy.core.workspace import (
+    effective_access_scope,
     ensure_project_dir,
+    is_unset_project_path,
     jail_path,
     list_workspace_entries,
     resolve_project_path,
@@ -17,11 +19,26 @@ from remedy.core.workspace import (
 )
 
 
+def test_unset_project_path_helpers():
+    assert is_unset_project_path(None)
+    assert is_unset_project_path("")
+    assert is_unset_project_path(".")
+    assert is_unset_project_path("./")
+    assert not is_unset_project_path("C:/proj")
+    assert not is_unset_project_path("/tmp/x")
+    # Empty project → full access
+    assert effective_access_scope("project", None) == "full"
+    assert effective_access_scope("project", "") == "full"
+    assert effective_access_scope("project", ".") == "full"
+    assert effective_access_scope("home", "/real/proj") == "home"
+    assert effective_access_scope("untrusted", "C:/code") == "untrusted"
+
+
 def test_resolve_project_path_defaults(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    assert resolve_project_path(None) == tmp_path.resolve()
-    assert resolve_project_path("") == tmp_path.resolve()
-    assert resolve_project_path(".") == tmp_path.resolve()
+    # Unset paths use fallback (home by default), not process cwd.
+    assert resolve_project_path(None, fallback=tmp_path) == tmp_path.resolve()
+    assert resolve_project_path("", fallback=tmp_path) == tmp_path.resolve()
+    assert resolve_project_path(".", fallback=tmp_path) == tmp_path.resolve()
 
 
 def test_resolve_project_path_absolute(tmp_path):
@@ -64,6 +81,12 @@ def test_workspace_context_block_shape(tmp_path):
     block = workspace_context_block(tmp_path)
     assert "Workspace" in block or "project" in block.lower() or str(tmp_path) in block
     assert "readme.md" in block or "pkg" in block
+
+
+def test_workspace_context_unset_project_warns_full(tmp_path):
+    block = workspace_context_block(tmp_path, project_unset=True)
+    assert "No project folder" in block or "full" in block.lower()
+    assert "Access scope: full" in block
 
 
 def test_list_workspace_entries_filters(tmp_path):

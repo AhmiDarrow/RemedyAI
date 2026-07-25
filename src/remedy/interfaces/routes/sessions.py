@@ -63,13 +63,21 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         if memory is None:
             raise HTTPException(503, "Memory store not available")
 
-        from remedy.core.workspace import ensure_project_dir, resolve_project_path
+        from remedy.core.workspace import (
+            ensure_project_dir,
+            is_unset_project_path,
+            resolve_project_path,
+        )
         from remedy.models import ChatSession as CS
 
-        # Inherit global project_path when the client does not pass one.
-        raw_project = req.project_path or load_config().get("project_path")
+        # Inherit global project only when the client omits project_path (None).
+        # Explicit "" / "." means no-project session (sidebar "No project" group).
+        if req.project_path is not None:
+            raw_project = req.project_path
+        else:
+            raw_project = load_config().get("project_path")
         project_path = None
-        if raw_project and str(raw_project).strip() and str(raw_project).strip() not in (".", "./"):
+        if not is_unset_project_path(raw_project):
             try:
                 project_path = str(ensure_project_dir(resolve_project_path(str(raw_project))))
             except Exception:
@@ -117,16 +125,29 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
     async def update_chat_session(session_id: str, req: UpdateSessionRequest):
         if memory is None:
             raise HTTPException(503, "Memory store not available")
-        fields = {k: v for k, v in req.model_dump().items() if v is not None}
-        if "project_path" in fields and fields["project_path"]:
-            from remedy.core.workspace import ensure_project_dir, resolve_project_path
+        # exclude_unset: only fields the client sent (so project_path can be cleared)
+        fields = {
+            k: v
+            for k, v in req.model_dump(exclude_unset=True).items()
+            if v is not None or k == "project_path"
+        }
+        if "project_path" in fields:
+            from remedy.core.workspace import (
+                ensure_project_dir,
+                is_unset_project_path,
+                resolve_project_path,
+            )
 
-            try:
-                fields["project_path"] = str(
-                    ensure_project_dir(resolve_project_path(str(fields["project_path"])))
-                )
-            except Exception:
-                fields["project_path"] = str(resolve_project_path(str(fields["project_path"])))
+            raw = fields["project_path"]
+            if is_unset_project_path(raw):
+                fields["project_path"] = None
+            else:
+                try:
+                    fields["project_path"] = str(
+                        ensure_project_dir(resolve_project_path(str(raw)))
+                    )
+                except Exception:
+                    fields["project_path"] = str(resolve_project_path(str(raw)))
         session = await memory.update_chat_session(session_id, **fields)
         if session is None:
             raise HTTPException(404, "Session not found")

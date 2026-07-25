@@ -2,6 +2,7 @@ import { useState, useCallback, useRef } from 'react'
 import { listSessions, createSession, deleteSession, updateSession } from '../api/sessions'
 import { getSettings } from '../api/settings'
 import type { ChatSession } from '../types'
+import { addKnownProject } from '../utils/sessionProjects'
 
 export function useSessions() {
   const [sessions, setSessions] = useState<ChatSession[]>([])
@@ -71,6 +72,56 @@ export function useSessions() {
       setSessions((prev) =>
         prev.map((s) => (s.id === id ? { ...s, title } : s)),
       )
+    }, []),
+    /** Create a session under a specific project (null = no project). */
+    createInProject: useCallback(async (projectPath: string | null, title?: string) => {
+      try {
+        // Pass "" explicitly for no-project so the API does not inherit Settings default.
+        const project_path =
+          projectPath && projectPath.trim() && projectPath.trim() !== '.'
+            ? projectPath.trim()
+            : ''
+        if (project_path) {
+          projectPathCache.current = project_path
+          addKnownProject(project_path)
+        }
+        const s = await createSession({ title, project_path })
+        setSessions((prev) => [s, ...prev])
+        setActiveId(s.id)
+        return s
+      } catch {
+        return null
+      }
+    }, []),
+    /** Attach or clear project_path on an existing session. */
+    setProject: useCallback(async (id: string, projectPath: string | null) => {
+      try {
+        const project_path =
+          projectPath && projectPath.trim() && projectPath.trim() !== '.'
+            ? projectPath.trim()
+            : ''
+        if (project_path) {
+          addKnownProject(project_path)
+        }
+        const s = await updateSession(id, { project_path })
+        setSessions((prev) =>
+          prev.map((row) =>
+            row.id === id
+              ? {
+                  ...row,
+                  project_path: s.project_path ?? (project_path || null),
+                }
+              : row,
+          ),
+        )
+        return s
+      } catch {
+        return null
+      }
+    }, []),
+    /** Invalidate cached default project (e.g. after Settings change). */
+    clearProjectCache: useCallback(() => {
+      projectPathCache.current = null
     }, []),
   }
 }

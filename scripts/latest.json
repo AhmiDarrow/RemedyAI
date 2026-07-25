@@ -1,11 +1,11 @@
 {
-  "version": "v0.11.5",
-  "notes": "Remedy Desktop v0.11.5 \u2014 Windows installer",
-  "pub_date": "2026-07-25T15:14:01Z",
+  "version": "v0.11.6",
+  "notes": "Remedy Desktop v0.11.6 \u2014 Windows installer",
+  "pub_date": "2026-07-25T16:00:03Z",
   "platforms": {
     "windows-x86_64": {
       "signature": "",
-      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.11.5/Remedy.Desktop_0.11.5_x64-setup.exe"
+      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.11.6/Remedy.Desktop_0.11.6_x64-setup.exe"
     }
   }
 }

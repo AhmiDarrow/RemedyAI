@@ -904,6 +904,7 @@ home_dir = "{home_dir.as_posix()}"
 setup_completed = false
 
 # Default project/workspace folder for the agent (file tools, shell cwd, @file UI)
+# Empty / unset → full access on this PC (home as default root); pick a folder for coding.
 # project_path = "C:/Users/You/Projects/MyApp"
 
 # --- LLM Provider ---

@@ -120,6 +120,8 @@ export default function App() {
     activeId,
     setActiveId,
     create,
+    createInProject,
+    setProject: setSessionProject,
     remove,
     rename,
     refresh: refreshSessions,
@@ -1178,6 +1180,25 @@ export default function App() {
         activeId={activeId}
         onSelect={handleSelect}
         onNew={handleNewSession}
+        onNewInProject={(projectPath) => {
+          void (async () => {
+            const s = await createInProject(projectPath)
+            if (s?.id) {
+              setOpenTabs((prev) => new Set([...prev, s.id]))
+            }
+          })()
+        }}
+        onSetSessionProject={(id, projectPath) => {
+          void setSessionProject(id, projectPath)
+        }}
+        onBrowseProject={async () => {
+          try {
+            const path = await tauriInvoke<string | null>('pick_folder')
+            return path && path.trim() ? path.trim() : null
+          } catch {
+            return null
+          }
+        }}
         onDelete={(id) => {
           remove(id)
           handleCloseTab(id)

@@ -9,6 +9,7 @@ import pytest
 from remedy.core.errors import SecurityError
 from remedy.core.workspace import (
     allowed_roots_for_scope,
+    effective_access_scope,
     normalize_access_scope,
     resolve_under_roots,
 )
@@ -20,6 +21,13 @@ def test_normalize_access_scope():
     assert normalize_access_scope("full") == "full"
     assert normalize_access_scope("PROJECT+HOME") == "home"
     assert normalize_access_scope(None) == "project"
+
+
+def test_empty_project_forces_full_access():
+    assert effective_access_scope("project", None) == "full"
+    assert effective_access_scope("untrusted", "") == "full"
+    assert effective_access_scope("project", ".") == "full"
+    assert effective_access_scope("project", "C:/MyApp") == "project"
 
 
 def test_allowed_roots_project_includes_project_and_profile_folders(tmp_path: Path):

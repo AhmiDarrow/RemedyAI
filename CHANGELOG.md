@@ -2,6 +2,25 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.11.6] — 2026-07-25
+
+### Feature: sessions nested under project folders
+
+- Sidebar groups **No project** first, then each project path as a collapsible parent with session children.
+- **+ Add project folder** (browse/type), **+** on a folder for new chat in that project, move session between projects.
+- API: explicit empty `project_path` creates/clears no-project sessions (no silent inherit).
+
+### Feature: empty project path = full access
+
+- Unset / `.` project no longer jails tools to install/cwd; access scope becomes **full** (user home as default root).
+- Settings warns that picking a folder is better for focused coding.
+
+### Polish (0.11.5 follow-through)
+
+- Session list limit raised (200) for larger trees.
+- Creating/moving under a project registers it in the known-projects list.
+- Tests: session project API, access-scope unset, frontend grouping helpers.
+
 ## [0.11.5] — 2026-07-25
 
 ### Fix: stuck agent on “proceed” / short kicks

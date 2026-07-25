@@ -48,9 +48,12 @@ Settings → **Access scope** limits where tools may operate:
 
 | Scope | Meaning |
 |-------|---------|
-| **Project** (default) | Project folder **plus** Desktop / Documents / Downloads |
+| **Project** (default when a folder is set) | Project folder **plus** Desktop / Documents / Downloads |
 | **Home** | Full user home profile |
 | **Full** | Broader user-machine access (opt-in) |
+| **Untrusted** | Project root only (strict) |
+
+**No project folder** (empty / `.`): tools use **full** access automatically so you are not jailed to the install directory. Settings shows a warning — pick a project folder for focused coding (narrower jail + clearer defaults).
 
 Always prefer the narrowest scope that still works for your task.
 

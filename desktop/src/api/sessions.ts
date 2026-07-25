@@ -1,7 +1,7 @@
 import { apiFetch } from './client'
 import type { ChatSession } from '../types'
 
-export async function listSessions(limit = 50, offset = 0) {
+export async function listSessions(limit = 200, offset = 0) {
   const data = await apiFetch<{ sessions: ChatSession[] }>(
     `/sessions?limit=${limit}&offset=${offset}`,
   )

@@ -2,7 +2,13 @@
 
 High-level product notes for owners. Full detail lives in repo `CHANGELOG.md`.
 
-Ship **one** installer/tag for the current series (**v0.11.5**).
+Ship **one** installer/tag for the current series (**v0.11.6**).
+
+## 0.11.6 — Project tree sessions · empty project = full access
+
+- Sidebar: **No project** + project folders with nested chats; add project; new-in-project; move session.
+- Empty project path → full machine access (with Settings warning); pick a folder for focused work.
+- Builds on 0.11.5 proceed-kick / Full process visibility.
 
 ## 0.11.5 — Never miss model output · stuck-kick fix
 
