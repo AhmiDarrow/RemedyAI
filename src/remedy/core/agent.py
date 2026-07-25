@@ -2399,19 +2399,38 @@ class BasicRuntime(AgentRuntime):
             return await resp.json()
 
     async def _apply_session_workspace(self, session_id: str | None) -> None:
-        """Bind tools/cwd to the session project path (else default config path)."""
+        """Bind tools/cwd to the **session** project for this turn.
+
+        Tree contract: a session under ``📁 RemedyAI`` uses that folder as the
+        tool jail; a **No project** session gets unset → full access. Global
+        Settings default is only used when there is no session row.
+        """
         if session_id:
             self._session_id = session_id
         session_path: str | None = None
+        has_session_row = False
         if session_id and self.memory is not None:
             with suppress(Exception):
                 sess = await self.memory.get_chat_session(session_id)
                 if sess is not None:
+                    has_session_row = True
                     session_path = getattr(sess, "project_path", None)
-        if session_path and str(session_path).strip():
-            self.set_project_path(session_path, as_default=False)
+        if has_session_row:
+            # Session owns workspace for this turn (do not keep prior session raw).
+            if session_path and not is_unset_project_path(session_path):
+                self.set_project_path(session_path, as_default=False)
+            else:
+                # Explicit no-project → full access for this turn
+                self.set_project_path(None, as_default=False)
+            return
+        # No session row: fall back to configured default project
+        cfg_path = None
+        if getattr(self, "config", None) is not None:
+            cfg_path = getattr(self.config, "project_path", None)
+        if is_unset_project_path(cfg_path):
+            self.set_project_path(None, as_default=False)
         else:
-            self._active_project_path = self._default_project_path
+            self.set_project_path(str(cfg_path), as_default=False)
 
     async def stream_response(
         self,

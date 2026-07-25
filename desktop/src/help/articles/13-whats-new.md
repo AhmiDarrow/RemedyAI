@@ -2,7 +2,12 @@
 
 High-level product notes for owners. Full detail lives in repo `CHANGELOG.md`.
 
-Ship **one** installer/tag for the current series (**v0.11.6**).
+Ship **one** installer/tag for the current series (**v0.11.7**).
+
+## 0.11.7 — Session tree power tools
+
+- Session project binds tools each turn; multi-select + drag onto folders; load more; bulk API.
+- Optional “New-in-project sets default” for Settings project path.
 
 ## 0.11.6 — Project tree sessions · empty project = full access
 

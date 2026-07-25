@@ -2,6 +2,23 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.11.7] — 2026-07-25
+
+### Feature: session project = tool jail (turn binding)
+
+- Each stream turn applies the **session** `project_path` to the agent (not leftover prior session).
+- **No project** sessions → full access for that turn; project sessions jail to that folder.
+
+### Feature: multi-select, drag-drop, pagination
+
+- Sidebar checkboxes + Shift+click range; bulk move toolbar; drag sessions onto project folders.
+- `POST /api/sessions/bulk-project`; list sessions paginated (`has_more`, limit up to 500).
+- **Load more** in the sidebar; optional **New-in-project sets default** Settings path.
+
+### Polish
+
+- Dropped deprecated `License ::` classifier (PEP 639); tree structure unit snapshot test.
+
 ## [0.11.6] — 2026-07-25
 
 ### Feature: sessions nested under project folders

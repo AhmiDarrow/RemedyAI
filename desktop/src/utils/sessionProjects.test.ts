@@ -55,4 +55,26 @@ describe('sessionProjects', () => {
     const empty = groups.find((g) => g.path.includes('Empty'))
     expect(empty?.sessions).toEqual([])
   })
+
+  it('tree snapshot: stable structure for sidebar', () => {
+    const groups = groupSessionsByProject(
+      [
+        sess('1', null),
+        sess('2', 'D:\\RemedyAI'),
+        sess('3', 'D:\\RemedyAI'),
+        sess('4', 'D:\\Other'),
+      ],
+      [],
+    )
+    // Structural snapshot (not a screenshot): labels + child ids
+    const snap = groups.map((g) => ({
+      label: g.label,
+      kids: g.sessions.map((s) => s.id).sort(),
+    }))
+    expect(snap).toEqual([
+      { label: 'No project', kids: ['1'] },
+      { label: 'Other', kids: ['4'] },
+      { label: 'RemedyAI', kids: ['2', '3'] },
+    ])
+  })
 })

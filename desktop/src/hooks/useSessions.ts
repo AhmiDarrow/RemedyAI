@@ -1,27 +1,38 @@
 import { useState, useCallback, useRef } from 'react'
-import { listSessions, createSession, deleteSession, updateSession } from '../api/sessions'
-import { getSettings } from '../api/settings'
+import {
+  listSessions,
+  createSession,
+  deleteSession,
+  updateSession,
+  bulkSetSessionProject,
+} from '../api/sessions'
+import { getSettings, updateSettings } from '../api/settings'
 import type { ChatSession } from '../types'
 import { addKnownProject } from '../utils/sessionProjects'
+
+const PAGE_SIZE = 100
 
 export function useSessions() {
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [hasMore, setHasMore] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
   const hasLoaded = useRef(false)
+  const offsetRef = useRef(0)
   /** Avoid a full GET /settings on every New Session once we know project_path. */
   const projectPathCache = useRef<string | undefined | null>(null)
 
   const refresh = useCallback(async () => {
     setLoading(true)
     try {
-      const list = await listSessions()
-      setSessions(list)
-      // Only set initial active when none selected (do not depend on activeId
-      // identity for the callback — avoids re-fetch loops on tab switch).
+      const page = await listSessions(PAGE_SIZE, 0)
+      offsetRef.current = page.sessions.length
+      setSessions(page.sessions)
+      setHasMore(page.has_more)
       setActiveId((cur) => {
         if (cur) return cur
-        return list.length > 0 ? list[0]!.id : null
+        return page.sessions.length > 0 ? page.sessions[0]!.id : null
       })
     } catch {
       // server not ready
@@ -31,12 +42,34 @@ export function useSessions() {
     }
   }, [])
 
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !hasMore) return
+    setLoadingMore(true)
+    try {
+      const page = await listSessions(PAGE_SIZE, offsetRef.current)
+      offsetRef.current += page.sessions.length
+      setSessions((prev) => {
+        const seen = new Set(prev.map((s) => s.id))
+        const extra = page.sessions.filter((s) => !seen.has(s.id))
+        return [...prev, ...extra]
+      })
+      setHasMore(page.has_more && page.sessions.length > 0)
+    } catch {
+      /* */
+    } finally {
+      setLoadingMore(false)
+    }
+  }, [hasMore, loadingMore])
+
   return {
     sessions,
     activeId,
     setActiveId,
     loading,
+    hasMore,
+    loadingMore,
     refresh,
+    loadMore,
     create: useCallback(async (title?: string) => {
       try {
         // Stamp session with the configured default project folder.
@@ -50,7 +83,6 @@ export function useSessions() {
               s.project_path && s.project_path !== '.' ? s.project_path : undefined
             projectPathCache.current = project_path
           } catch {
-            // server may omit; create still works — API also inherits from config
             projectPathCache.current = undefined
           }
         }
@@ -62,38 +94,38 @@ export function useSessions() {
         return null
       }
     }, []),
-    remove: useCallback(async (id: string) => {
-      await deleteSession(id)
-      setSessions((prev) => prev.filter((s) => s.id !== id))
-      if (activeId === id) setActiveId(null)
-    }, [activeId]),
-    rename: useCallback(async (id: string, title: string) => {
-      await updateSession(id, { title })
-      setSessions((prev) =>
-        prev.map((s) => (s.id === id ? { ...s, title } : s)),
-      )
-    }, []),
-    /** Create a session under a specific project (null = no project). */
-    createInProject: useCallback(async (projectPath: string | null, title?: string) => {
-      try {
-        // Pass "" explicitly for no-project so the API does not inherit Settings default.
-        const project_path =
-          projectPath && projectPath.trim() && projectPath.trim() !== '.'
-            ? projectPath.trim()
-            : ''
-        if (project_path) {
-          projectPathCache.current = project_path
-          addKnownProject(project_path)
+    createInProject: useCallback(
+      async (
+        projectPath: string | null,
+        title?: string,
+        opts?: { setAsDefault?: boolean },
+      ) => {
+        try {
+          const project_path =
+            projectPath && projectPath.trim() && projectPath.trim() !== '.'
+              ? projectPath.trim()
+              : ''
+          if (project_path) {
+            projectPathCache.current = project_path
+            addKnownProject(project_path)
+            if (opts?.setAsDefault) {
+              try {
+                await updateSettings({ project_path })
+              } catch {
+                /* settings optional */
+              }
+            }
+          }
+          const s = await createSession({ title, project_path })
+          setSessions((prev) => [s, ...prev])
+          setActiveId(s.id)
+          return s
+        } catch {
+          return null
         }
-        const s = await createSession({ title, project_path })
-        setSessions((prev) => [s, ...prev])
-        setActiveId(s.id)
-        return s
-      } catch {
-        return null
-      }
-    }, []),
-    /** Attach or clear project_path on an existing session. */
+      },
+      [],
+    ),
     setProject: useCallback(async (id: string, projectPath: string | null) => {
       try {
         const project_path =
@@ -119,9 +151,38 @@ export function useSessions() {
         return null
       }
     }, []),
-    /** Invalidate cached default project (e.g. after Settings change). */
+    bulkSetProject: useCallback(async (ids: string[], projectPath: string | null) => {
+      if (!ids.length) return null
+      try {
+        if (projectPath && projectPath.trim() && projectPath.trim() !== '.') {
+          addKnownProject(projectPath.trim())
+        }
+        const res = await bulkSetSessionProject(ids, projectPath)
+        const path = res.project_path ?? null
+        const updated = new Set(res.updated || [])
+        setSessions((prev) =>
+          prev.map((row) =>
+            updated.has(row.id) ? { ...row, project_path: path } : row,
+          ),
+        )
+        return res
+      } catch {
+        return null
+      }
+    }, []),
     clearProjectCache: useCallback(() => {
       projectPathCache.current = null
+    }, []),
+    remove: useCallback(async (id: string) => {
+      await deleteSession(id)
+      setSessions((prev) => prev.filter((s) => s.id !== id))
+      if (activeId === id) setActiveId(null)
+    }, [activeId]),
+    rename: useCallback(async (id: string, title: string) => {
+      await updateSession(id, { title })
+      setSessions((prev) =>
+        prev.map((s) => (s.id === id ? { ...s, title } : s)),
+      )
     }, []),
   }
 }

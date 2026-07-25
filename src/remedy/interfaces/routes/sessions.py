@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 
 from remedy.interfaces.api_models import (
     AttachmentUploadRequest,
+    BulkSessionProjectRequest,
     ChatRequest,
     CreateSessionRequest,
     SendMessageRequest,
@@ -38,13 +39,20 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
     # -- chat sessions -------------------------------------------------------
     @app.get("/api/sessions")
     async def list_chat_sessions(
-        limit: int = Query(default=50, le=100),
+        limit: int = Query(default=100, le=500),
         offset: int = Query(default=0, ge=0),
     ):
         if memory is None:
-            return {"sessions": []}
+            return {"sessions": [], "offset": offset, "limit": limit, "has_more": False}
         sessions = await memory.list_chat_sessions(limit=limit, offset=offset)
-        return {"sessions": sessions}
+        # Hint for client pagination (page may be full)
+        has_more = len(sessions) >= limit
+        return {
+            "sessions": sessions,
+            "offset": offset,
+            "limit": limit,
+            "has_more": has_more,
+        }
 
     def _default_project_path() -> str | None:
         """Resolved default workspace from config / runtime."""
@@ -159,6 +167,48 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             "project_path": session.project_path,
             "llm_provider": getattr(session, "llm_provider", None),
             "updated_at": session.updated_at.isoformat() if session.updated_at else None,
+        }
+
+    @app.post("/api/sessions/bulk-project")
+    async def bulk_set_session_project(req: BulkSessionProjectRequest):
+        """Attach many sessions to one project folder (or clear → no project)."""
+        if memory is None:
+            raise HTTPException(503, "Memory store not available")
+        from remedy.core.workspace import (
+            ensure_project_dir,
+            is_unset_project_path,
+            resolve_project_path,
+        )
+
+        ids = [str(i).strip() for i in (req.session_ids or []) if str(i).strip()]
+        if not ids:
+            raise HTTPException(400, "session_ids required")
+        if len(ids) > 200:
+            raise HTTPException(400, "At most 200 sessions per bulk move")
+
+        project_path: str | None = None
+        if not is_unset_project_path(req.project_path):
+            try:
+                project_path = str(
+                    ensure_project_dir(resolve_project_path(str(req.project_path)))
+                )
+            except Exception:
+                project_path = str(resolve_project_path(str(req.project_path)))
+
+        updated: list[str] = []
+        missing: list[str] = []
+        for sid in ids:
+            sess = await memory.update_chat_session(sid, project_path=project_path)
+            if sess is None:
+                missing.append(sid)
+            else:
+                updated.append(sid)
+        return {
+            "status": "ok",
+            "project_path": project_path,
+            "updated": updated,
+            "missing": missing,
+            "count": len(updated),
         }
 
     @app.delete("/api/sessions/{session_id}")

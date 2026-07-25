@@ -122,6 +122,10 @@ export default function App() {
     create,
     createInProject,
     setProject: setSessionProject,
+    bulkSetProject,
+    hasMore: sessionsHasMore,
+    loadingMore: sessionsLoadingMore,
+    loadMore: loadMoreSessions,
     remove,
     rename,
     refresh: refreshSessions,
@@ -1180,9 +1184,9 @@ export default function App() {
         activeId={activeId}
         onSelect={handleSelect}
         onNew={handleNewSession}
-        onNewInProject={(projectPath) => {
+        onNewInProject={(projectPath, opts) => {
           void (async () => {
-            const s = await createInProject(projectPath)
+            const s = await createInProject(projectPath, undefined, opts)
             if (s?.id) {
               setOpenTabs((prev) => new Set([...prev, s.id]))
             }
@@ -1190,6 +1194,9 @@ export default function App() {
         }}
         onSetSessionProject={(id, projectPath) => {
           void setSessionProject(id, projectPath)
+        }}
+        onBulkSetProject={(ids, projectPath) => {
+          void bulkSetProject(ids, projectPath)
         }}
         onBrowseProject={async () => {
           try {
@@ -1199,6 +1206,9 @@ export default function App() {
             return null
           }
         }}
+        hasMore={sessionsHasMore}
+        loadingMore={sessionsLoadingMore}
+        onLoadMore={() => void loadMoreSessions()}
         onDelete={(id) => {
           remove(id)
           handleCloseTab(id)

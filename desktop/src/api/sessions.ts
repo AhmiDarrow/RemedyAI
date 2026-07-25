@@ -1,11 +1,42 @@
 import { apiFetch } from './client'
 import type { ChatSession } from '../types'
 
-export async function listSessions(limit = 200, offset = 0) {
-  const data = await apiFetch<{ sessions: ChatSession[] }>(
+export type SessionListPage = {
+  sessions: ChatSession[]
+  offset: number
+  limit: number
+  has_more: boolean
+}
+
+export async function listSessions(limit = 100, offset = 0): Promise<SessionListPage> {
+  const data = await apiFetch<SessionListPage & { sessions: ChatSession[] }>(
     `/sessions?limit=${limit}&offset=${offset}`,
   )
-  return data.sessions
+  return {
+    sessions: data.sessions || [],
+    offset: data.offset ?? offset,
+    limit: data.limit ?? limit,
+    has_more: Boolean(data.has_more),
+  }
+}
+
+/** @deprecated prefer listSessions page shape; kept for simple callers */
+export async function listSessionsFlat(limit = 100, offset = 0): Promise<ChatSession[]> {
+  const page = await listSessions(limit, offset)
+  return page.sessions
+}
+
+export async function bulkSetSessionProject(
+  sessionIds: string[],
+  projectPath: string | null,
+): Promise<{ updated: string[]; missing: string[]; project_path: string | null }> {
+  return apiFetch('/sessions/bulk-project', {
+    method: 'POST',
+    body: JSON.stringify({
+      session_ids: sessionIds,
+      project_path: projectPath ?? '',
+    }),
+  })
 }
 
 export async function createSession(params: {

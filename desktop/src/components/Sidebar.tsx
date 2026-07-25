@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, useRef, type ReactNode } from 'react'
+import { useMemo, useState, useEffect, useRef, type ReactNode, type DragEvent } from 'react'
 import type { ChatSession } from '../types'
 import { relativeTime } from '../utils/relativeTime'
 import {
@@ -25,19 +25,25 @@ interface SidebarProps {
   activeId: string | null
   onSelect: (id: string) => void
   onNew: () => void
-  /** New session stamped with this project path (empty = no project). */
-  onNewInProject?: (projectPath: string | null) => void
+  onNewInProject?: (
+    projectPath: string | null,
+    opts?: { setAsDefault?: boolean },
+  ) => void
   onDelete: (id: string) => void
   onRename?: (id: string, title: string) => void
-  /** Attach session to a project folder (null/empty clears). */
   onSetSessionProject?: (id: string, projectPath: string | null) => void
-  /** Browse OS folder picker; returns absolute path or null. */
+  /** Bulk-move selected sessions to a project (null = no project). */
+  onBulkSetProject?: (ids: string[], projectPath: string | null) => void
   onBrowseProject?: () => Promise<string | null>
   onExport?: (id: string) => void
   onImport?: () => void
-  /** Bottom-left usage / cost strip (session column). */
+  hasMore?: boolean
+  loadingMore?: boolean
+  onLoadMore?: () => void
   footer?: ReactNode
 }
+
+const DRAG_MIME = 'application/x-remedy-session-ids'
 
 export function Sidebar({
   sessions,
@@ -48,9 +54,13 @@ export function Sidebar({
   onDelete,
   onRename,
   onSetSessionProject,
+  onBulkSetProject,
   onBrowseProject,
   onExport,
   onImport,
+  hasMore,
+  loadingMore,
+  onLoadMore,
   footer,
 }: SidebarProps) {
   const [query, setQuery] = useState('')
@@ -67,6 +77,10 @@ export function Sidebar({
   const [addingProject, setAddingProject] = useState(false)
   const [addProjectDraft, setAddProjectDraft] = useState('')
   const [moveTarget, setMoveTarget] = useState<string | null>(null)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [dropHoverKey, setDropHoverKey] = useState<string | null>(null)
+  const [setDefaultOnNew, setSetDefaultOnNew] = useState(false)
+  const lastClickedRef = useRef<string | null>(null)
 
   useEffect(() => {
     const id = window.setInterval(() => setTick((t) => t + 1), 60_000)
@@ -81,6 +95,15 @@ export function Sidebar({
       })
     }
   }, [renamingId])
+
+  // Drop selection when sessions disappear
+  useEffect(() => {
+    const ids = new Set(sessions.map((s) => s.id))
+    setSelected((prev) => {
+      const next = new Set([...prev].filter((id) => ids.has(id)))
+      return next.size === prev.size ? prev : next
+    })
+  }, [sessions])
 
   const groups = useMemo(() => {
     let list = [...sessions]
@@ -102,7 +125,6 @@ export function Sidebar({
         )
       })
     }
-    // Pinned float to top within each group
     list.sort((a, b) => {
       const ap = meta[a.id]?.pinned ? 1 : 0
       const bp = meta[b.id]?.pinned ? 1 : 0
@@ -149,7 +171,6 @@ export function Sidebar({
     setKnownProjects(next)
     setAddingProject(false)
     setAddProjectDraft('')
-    // Expand the new project
     setProjectCollapsed(projectKey(trimmed), false)
     setCollapsed((prev) => {
       const n = { ...prev }
@@ -174,11 +195,63 @@ export function Sidebar({
     return [...keys].sort((a, b) => a.localeCompare(b))
   }, [sessions, knownProjects])
 
+  const toggleSelect = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setSelected((prev) => {
+      const n = new Set(prev)
+      if (e.shiftKey && lastClickedRef.current) {
+        const flat = groups.flatMap((g) => g.sessions.map((s) => s.id))
+        const a = flat.indexOf(lastClickedRef.current)
+        const b = flat.indexOf(id)
+        if (a >= 0 && b >= 0) {
+          const [lo, hi] = a < b ? [a, b] : [b, a]
+          for (let i = lo; i <= hi; i++) n.add(flat[i]!)
+          return n
+        }
+      }
+      if (n.has(id)) n.delete(id)
+      else n.add(id)
+      return n
+    })
+    lastClickedRef.current = id
+  }
+
+  const clearSelection = () => setSelected(new Set())
+
+  const moveSelectedTo = (projectPath: string | null) => {
+    const ids = [...selected]
+    if (!ids.length) return
+    if (onBulkSetProject) onBulkSetProject(ids, projectPath)
+    else if (onSetSessionProject) ids.forEach((id) => onSetSessionProject(id, projectPath))
+    clearSelection()
+  }
+
+  const onDragStartSession = (e: DragEvent, id: string) => {
+    const ids = selected.has(id) && selected.size > 0 ? [...selected] : [id]
+    e.dataTransfer.setData(DRAG_MIME, JSON.stringify(ids))
+    e.dataTransfer.effectAllowed = 'move'
+  }
+
+  const onDropOnProject = (e: DragEvent, projectPath: string | null) => {
+    e.preventDefault()
+    setDropHoverKey(null)
+    let ids: string[] = []
+    try {
+      ids = JSON.parse(e.dataTransfer.getData(DRAG_MIME) || '[]') as string[]
+    } catch {
+      ids = []
+    }
+    if (!ids.length) return
+    if (onBulkSetProject) onBulkSetProject(ids, projectPath)
+    else if (onSetSessionProject) ids.forEach((id) => onSetSessionProject(id, projectPath))
+    clearSelection()
+  }
+
   return (
     <div
       className="flex flex-col border-r"
       style={{
-        width: 260,
+        width: 270,
         background: 'var(--bg-secondary)',
         borderColor: 'var(--border)',
       }}
@@ -199,13 +272,12 @@ export function Sidebar({
               <button
                 type="button"
                 onClick={onImport}
-                className="flex-1 px-2 py-1.5 rounded-md text-xs font-medium transition-colors"
+                className="flex-1 px-2 py-1.5 rounded-md text-xs font-medium"
                 style={{
                   background: 'var(--bg-primary)',
                   border: '1px solid var(--border)',
                   color: 'var(--text-secondary)',
                 }}
-                title="Import session from .txt file"
               >
                 Import
               </button>
@@ -215,13 +287,12 @@ export function Sidebar({
                 type="button"
                 onClick={() => activeId && onExport(activeId)}
                 disabled={!activeId}
-                className="flex-1 px-2 py-1.5 rounded-md text-xs font-medium transition-colors disabled:opacity-40"
+                className="flex-1 px-2 py-1.5 rounded-md text-xs font-medium disabled:opacity-40"
                 style={{
                   background: 'var(--bg-primary)',
                   border: '1px solid var(--border)',
                   color: 'var(--text-secondary)',
                 }}
-                title="Export active session as .txt"
               >
                 Export
               </button>
@@ -241,18 +312,66 @@ export function Sidebar({
           aria-label="Search sessions"
         />
         <div className="flex flex-wrap gap-1">
-          <FilterChip
-            active={filter === 'all'}
-            onClick={() => setFilter('all')}
-            label="All"
-          />
+          <FilterChip active={filter === 'all'} onClick={() => setFilter('all')} label="All" />
           <FilterChip
             active={filter === 'pinned'}
             onClick={() => setFilter('pinned')}
             label="★ Pin"
           />
         </div>
+        <label
+          className="flex items-center gap-1.5 text-[10px] cursor-pointer"
+          style={{ color: 'var(--text-muted)' }}
+          title="When creating a session under a project, also save that folder as Settings default project"
+        >
+          <input
+            type="checkbox"
+            checked={setDefaultOnNew}
+            onChange={(e) => setSetDefaultOnNew(e.target.checked)}
+          />
+          New-in-project sets default
+        </label>
       </div>
+
+      {/* Multi-select action bar */}
+      {selected.size > 0 && (
+        <div
+          className="px-2 py-1.5 border-b flex flex-wrap items-center gap-1"
+          style={{ borderColor: 'var(--border)', background: 'var(--bg-tertiary)' }}
+        >
+          <span className="text-[10px] font-semibold" style={{ color: 'var(--text-primary)' }}>
+            {selected.size} selected
+          </span>
+          <button
+            type="button"
+            className="text-[10px] px-1.5 py-0.5 rounded"
+            style={{ background: 'var(--bg-primary)', color: 'var(--text-secondary)' }}
+            onClick={() => moveSelectedTo(null)}
+          >
+            → No project
+          </button>
+          {projectOptions.slice(0, 4).map((p) => (
+            <button
+              key={p}
+              type="button"
+              className="text-[10px] px-1.5 py-0.5 rounded truncate max-w-[5.5rem]"
+              style={{ background: 'var(--bg-primary)', color: 'var(--text-secondary)' }}
+              title={p}
+              onClick={() => moveSelectedTo(p)}
+            >
+              → {p.split(/[/\\]/).filter(Boolean).pop()}
+            </button>
+          ))}
+          <button
+            type="button"
+            className="text-[10px] ml-auto"
+            style={{ color: 'var(--text-muted)' }}
+            onClick={clearSelection}
+          >
+            Clear
+          </button>
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto py-1">
         {groups.map((group) => (
@@ -262,6 +381,8 @@ export function Sidebar({
             collapsed={isCollapsed(group.key)}
             onToggle={() => toggleCollapse(group.key)}
             activeId={activeId}
+            selected={selected}
+            dropHover={dropHoverKey === (group.key || '__none__')}
             meta={meta}
             renamingId={renamingId}
             renameDraft={renameDraft}
@@ -271,6 +392,7 @@ export function Sidebar({
             moveTarget={moveTarget}
             projectOptions={projectOptions}
             onSelect={onSelect}
+            onToggleSelect={toggleSelect}
             onDelete={onDelete}
             onRename={onRename}
             onStartRename={startRename}
@@ -281,45 +403,50 @@ export function Sidebar({
             setTagDraft={setTagDraft}
             setMoveTarget={setMoveTarget}
             refreshMeta={refreshMeta}
-            onNewInProject={onNewInProject}
+            onNewInProject={
+              onNewInProject
+                ? (path) =>
+                    onNewInProject(path, {
+                      setAsDefault: setDefaultOnNew && Boolean(path),
+                    })
+                : undefined
+            }
             onSetSessionProject={onSetSessionProject}
+            onDragStartSession={onDragStartSession}
+            onDragOverProject={(e) => {
+              e.preventDefault()
+              e.dataTransfer.dropEffect = 'move'
+              setDropHoverKey(group.key || '__none__')
+            }}
+            onDragLeaveProject={() => setDropHoverKey(null)}
+            onDropProject={(e) => onDropOnProject(e, group.key ? group.path : null)}
             onRemoveKnownProject={
               group.key
-                ? () => {
-                    setKnownProjects(removeKnownProject(group.path))
-                  }
+                ? () => setKnownProjects(removeKnownProject(group.path))
                 : undefined
             }
           />
         ))}
 
-        {/* Add project / folder */}
         <div className="px-2 mt-2 mb-2">
           {!addingProject ? (
             <button
               type="button"
-              className="w-full text-left px-2 py-1.5 rounded-md text-xs font-medium transition-colors"
+              className="w-full text-left px-2 py-1.5 rounded-md text-xs font-medium"
               style={{
                 background: 'var(--bg-primary)',
                 border: '1px dashed var(--border)',
                 color: 'var(--text-secondary)',
               }}
               onClick={() => setAddingProject(true)}
-              title="Add a project folder to group sessions under"
             >
               + Add project folder
             </button>
           ) : (
             <div
               className="rounded-md p-2 space-y-1.5"
-              style={{
-                background: 'var(--bg-primary)',
-                border: '1px solid var(--border)',
-              }}
+              style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)' }}
             >
-              <div className="text-[10px] font-semibold" style={{ color: 'var(--text-muted)' }}>
-                Project folder
-              </div>
               <input
                 value={addProjectDraft}
                 onChange={(e) => setAddProjectDraft(e.target.value)}
@@ -345,11 +472,10 @@ export function Sidebar({
                 {onBrowseProject && (
                   <button
                     type="button"
-                    className="flex-1 px-1.5 py-1 rounded text-[10px] font-medium"
+                    className="flex-1 px-1.5 py-1 rounded text-[10px]"
                     style={{
                       background: 'var(--bg-tertiary)',
                       border: '1px solid var(--border)',
-                      color: 'var(--text-secondary)',
                     }}
                     onClick={() => void handleBrowseAdd()}
                   >
@@ -359,12 +485,7 @@ export function Sidebar({
                 <button
                   type="button"
                   className="flex-1 px-1.5 py-1 rounded text-[10px] font-medium"
-                  style={{
-                    background: 'var(--accent)',
-                    color: '#fff',
-                    border: 'none',
-                    opacity: addProjectDraft.trim() ? 1 : 0.5,
-                  }}
+                  style={{ background: 'var(--accent)', color: '#fff' }}
                   disabled={!addProjectDraft.trim()}
                   onClick={() => void handleAddProject(addProjectDraft)}
                 >
@@ -372,7 +493,7 @@ export function Sidebar({
                 </button>
                 <button
                   type="button"
-                  className="px-1.5 py-1 rounded text-[10px]"
+                  className="px-1.5 py-1 text-[10px]"
                   style={{ color: 'var(--text-muted)' }}
                   onClick={() => {
                     setAddingProject(false)
@@ -386,14 +507,27 @@ export function Sidebar({
           )}
         </div>
 
+        {hasMore && onLoadMore && (
+          <div className="px-2 mb-2">
+            <button
+              type="button"
+              className="w-full py-1.5 rounded text-xs"
+              style={{
+                background: 'var(--bg-primary)',
+                border: '1px solid var(--border)',
+                color: 'var(--text-secondary)',
+              }}
+              disabled={loadingMore}
+              onClick={() => onLoadMore()}
+            >
+              {loadingMore ? 'Loading…' : 'Load more sessions'}
+            </button>
+          </div>
+        )}
+
         {groups.every((g) => g.sessions.length === 0) && sessions.length === 0 && (
           <div className="px-3 py-6 text-center text-sm" style={{ color: 'var(--text-muted)' }}>
             No sessions yet
-          </div>
-        )}
-        {query.trim() && groups.every((g) => g.sessions.length === 0) && sessions.length > 0 && (
-          <div className="px-3 py-6 text-center text-sm" style={{ color: 'var(--text-muted)' }}>
-            No matches
           </div>
         )}
       </div>
@@ -401,7 +535,7 @@ export function Sidebar({
         className="px-3 py-1 text-[10px] border-t shrink-0"
         style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
       >
-        Sessions nest under project folders · double-click to rename
+        Checkbox multi-select · drag onto folders · Shift+click range
       </div>
       {footer}
     </div>
@@ -413,6 +547,8 @@ function ProjectSection({
   collapsed,
   onToggle,
   activeId,
+  selected,
+  dropHover,
   meta,
   renamingId,
   renameDraft,
@@ -422,6 +558,7 @@ function ProjectSection({
   moveTarget,
   projectOptions,
   onSelect,
+  onToggleSelect,
   onDelete,
   onRename,
   onStartRename,
@@ -434,12 +571,18 @@ function ProjectSection({
   refreshMeta,
   onNewInProject,
   onSetSessionProject,
+  onDragStartSession,
+  onDragOverProject,
+  onDragLeaveProject,
+  onDropProject,
   onRemoveKnownProject,
 }: {
   group: ProjectGroup
   collapsed: boolean
   onToggle: () => void
   activeId: string | null
+  selected: Set<string>
+  dropHover: boolean
   meta: Record<string, SessionMeta>
   renamingId: string | null
   renameDraft: string
@@ -449,6 +592,7 @@ function ProjectSection({
   moveTarget: string | null
   projectOptions: string[]
   onSelect: (id: string) => void
+  onToggleSelect: (id: string, e: React.MouseEvent) => void
   onDelete: (id: string) => void
   onRename?: (id: string, title: string) => void
   onStartRename: (s: ChatSession) => void
@@ -461,6 +605,10 @@ function ProjectSection({
   refreshMeta: () => void
   onNewInProject?: (projectPath: string | null) => void
   onSetSessionProject?: (id: string, projectPath: string | null) => void
+  onDragStartSession: (e: DragEvent, id: string) => void
+  onDragOverProject: (e: DragEvent) => void
+  onDragLeaveProject: () => void
+  onDropProject: (e: DragEvent) => void
   onRemoveKnownProject?: () => void
 }) {
   const isNone = !group.key
@@ -469,52 +617,46 @@ function ProjectSection({
 
   return (
     <div className="mb-0.5">
-      {/* Project folder header */}
       <div
         className="group/header flex items-center gap-1 px-2 py-1.5 mx-1 rounded-md cursor-pointer select-none"
         style={{
-          background: hasActive && !isNone
-            ? 'color-mix(in srgb, var(--accent) 12%, transparent)'
-            : 'transparent',
+          background: dropHover
+            ? 'color-mix(in srgb, var(--accent) 28%, transparent)'
+            : hasActive && !isNone
+              ? 'color-mix(in srgb, var(--accent) 12%, transparent)'
+              : 'transparent',
+          outline: dropHover ? '1px dashed var(--accent)' : 'none',
           color: 'var(--text-secondary)',
         }}
         onClick={onToggle}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.background = 'var(--bg-tertiary)'
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.background =
-            hasActive && !isNone
-              ? 'color-mix(in srgb, var(--accent) 12%, transparent)'
-              : 'transparent'
-        }}
-        title={group.path || 'Sessions without a project folder'}
+        onDragOver={onDragOverProject}
+        onDragLeave={onDragLeaveProject}
+        onDrop={onDropProject}
+        title={
+          group.path
+            ? `${group.path} — drop sessions here`
+            : 'Sessions without a project — drop to clear project'
+        }
       >
-        <span
-          className="text-[10px] w-3 flex-shrink-0 text-center"
-          style={{ color: 'var(--text-muted)' }}
-          aria-hidden
-        >
+        <span className="text-[10px] w-3 text-center" style={{ color: 'var(--text-muted)' }}>
           {collapsed ? '▸' : '▾'}
         </span>
-        <span className="text-[12px] flex-shrink-0" aria-hidden>
-          {isNone ? '○' : '📁'}
-        </span>
+        <span className="text-[12px]">{isNone ? '○' : '📁'}</span>
         <span
           className="truncate flex-1 min-w-0 text-xs font-semibold"
           style={{ color: 'var(--text-primary)' }}
         >
           {group.label}
         </span>
-        <span className="text-[10px] flex-shrink-0" style={{ color: 'var(--text-muted)' }}>
+        <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
           {count}
         </span>
         {onNewInProject && (
           <button
             type="button"
-            className="opacity-0 group-hover/header:opacity-100 text-[10px] px-1 rounded flex-shrink-0"
+            className="opacity-0 group-hover/header:opacity-100 text-[10px] px-1 rounded"
             style={{ color: 'var(--accent)' }}
-            title={isNone ? 'New session (no project)' : 'New session in this project'}
+            title="New session in this project"
             onClick={(e) => {
               e.stopPropagation()
               onNewInProject(isNone ? null : group.path)
@@ -526,9 +668,8 @@ function ProjectSection({
         {onRemoveKnownProject && count === 0 && (
           <button
             type="button"
-            className="opacity-0 group-hover/header:opacity-100 text-[10px] w-4 flex-shrink-0"
+            className="opacity-0 group-hover/header:opacity-100 text-[10px] w-4"
             style={{ color: 'var(--error)' }}
-            title="Remove empty project from list"
             onClick={(e) => {
               e.stopPropagation()
               onRemoveKnownProject()
@@ -545,12 +686,19 @@ function ProjectSection({
             const m = meta[s.id] || {}
             const pinned = Boolean(m.pinned)
             const isRenaming = renamingId === s.id
+            const isSel = selected.has(s.id)
             return (
               <div
                 key={s.id}
-                className="group flex flex-col px-2 cursor-pointer text-sm transition-colors relative"
+                draggable={!isRenaming}
+                onDragStart={(e) => onDragStartSession(e, s.id)}
+                className="group flex flex-col px-2 cursor-pointer text-sm relative"
                 style={{
-                  background: s.id === activeId ? 'var(--bg-tertiary)' : 'transparent',
+                  background: isSel
+                    ? 'color-mix(in srgb, var(--accent) 18%, var(--bg-tertiary))'
+                    : s.id === activeId
+                      ? 'var(--bg-tertiary)'
+                      : 'transparent',
                   color: s.id === activeId ? 'var(--text-primary)' : 'var(--text-secondary)',
                   borderLeft:
                     s.id === activeId ? '3px solid var(--accent)' : '3px solid transparent',
@@ -565,18 +713,20 @@ function ProjectSection({
                   e.stopPropagation()
                   onStartRename(s)
                 }}
-                onMouseEnter={(e) => {
-                  if (s.id !== activeId) e.currentTarget.style.background = 'var(--bg-tertiary)'
-                }}
-                onMouseLeave={(e) => {
-                  if (s.id !== activeId) e.currentTarget.style.background = 'transparent'
-                }}
               >
-                <div className="flex items-center gap-1.5 px-1">
+                <div className="flex items-center gap-1 px-1">
+                  <input
+                    type="checkbox"
+                    checked={isSel}
+                    onChange={() => {}}
+                    onClick={(e) => onToggleSelect(s.id, e)}
+                    className="flex-shrink-0 w-3 h-3 cursor-pointer"
+                    title="Select for bulk move"
+                    aria-label={`Select ${s.title || 'session'}`}
+                  />
                   <button
                     type="button"
                     className="flex-shrink-0 text-xs w-4 opacity-50 group-hover:opacity-100"
-                    title={pinned ? 'Unpin' : 'Pin'}
                     style={{ color: pinned ? 'var(--accent)' : 'var(--text-muted)' }}
                     onClick={(e) => {
                       e.stopPropagation()
@@ -609,30 +759,20 @@ function ProjectSection({
                         border: '1px solid var(--accent)',
                         color: 'var(--text-primary)',
                       }}
-                      aria-label="Rename session"
                     />
                   ) : (
-                    <span
-                      className="truncate flex-1 min-w-0 font-medium"
-                      title={`${s.title || 'New Session'} — double-click to rename`}
-                    >
+                    <span className="truncate flex-1 min-w-0 font-medium">
                       {s.title || 'New Session'}
                     </span>
                   )}
-                  <span
-                    className="text-[10px] flex-shrink-0"
-                    style={{ color: 'var(--text-muted)' }}
-                    title={s.updated_at}
-                  >
+                  <span className="text-[10px] flex-shrink-0" style={{ color: 'var(--text-muted)' }}>
                     {relativeTime(s.updated_at)}
                   </span>
                   {onRename && !isRenaming && (
                     <button
                       type="button"
-                      className="flex-shrink-0 opacity-0 group-hover:opacity-80 p-0.5 rounded"
+                      className="opacity-0 group-hover:opacity-80 p-0.5"
                       style={{ color: 'var(--text-muted)' }}
-                      title="Rename"
-                      aria-label="Rename"
                       onClick={(e) => {
                         e.stopPropagation()
                         onStartRename(s)
@@ -642,19 +782,17 @@ function ProjectSection({
                     </button>
                   )}
                   <button
-                    className="flex-shrink-0 w-5 h-5 text-sm leading-none rounded opacity-0 pointer-events-none group-hover:opacity-70 group-hover:pointer-events-auto hover:!opacity-100"
+                    className="w-5 h-5 opacity-0 group-hover:opacity-70"
                     style={{ color: 'var(--error)' }}
                     onClick={(e) => {
                       e.stopPropagation()
                       onDelete(s.id)
                     }}
-                    title="Delete"
-                    aria-label="Delete"
                   >
                     ×
                   </button>
                 </div>
-                <div className="flex items-center gap-1 px-1 mt-0.5 min-h-[1rem]">
+                <div className="flex items-center gap-1 px-1 mt-0.5 min-h-[1rem] pl-5">
                   <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
                     {s.message_count} msg
                   </span>
@@ -674,7 +812,6 @@ function ProjectSection({
                     type="button"
                     className="text-[10px] ml-auto opacity-0 group-hover:opacity-70"
                     style={{ color: 'var(--text-muted)' }}
-                    title="Tag or move to project"
                     onClick={(e) => {
                       e.stopPropagation()
                       setTagTarget(tagTarget === s.id ? null : s.id)
@@ -689,7 +826,6 @@ function ProjectSection({
                       type="button"
                       className="text-[10px] opacity-0 group-hover:opacity-70"
                       style={{ color: 'var(--text-muted)' }}
-                      title="Move to project"
                       onClick={(e) => {
                         e.stopPropagation()
                         setMoveTarget(moveTarget === s.id ? null : s.id)
@@ -701,7 +837,7 @@ function ProjectSection({
                   )}
                 </div>
                 {tagTarget === s.id && (
-                  <div className="px-1 mt-1 flex gap-1" onClick={(e) => e.stopPropagation()}>
+                  <div className="px-1 mt-1 flex gap-1 pl-5" onClick={(e) => e.stopPropagation()}>
                     <input
                       value={tagDraft}
                       onChange={(e) => setTagDraft(e.target.value)}
@@ -715,8 +851,10 @@ function ProjectSection({
                       autoFocus
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' && tagDraft.trim()) {
-                          const raw = tagDraft.trim()
-                          const tags = [...(getAllSessionMeta()[s.id]?.tags || []), raw]
+                          const tags = [
+                            ...(getAllSessionMeta()[s.id]?.tags || []),
+                            tagDraft.trim(),
+                          ]
                           setSessionMeta(s.id, { tags })
                           refreshMeta()
                           setTagDraft('')
@@ -728,19 +866,10 @@ function ProjectSection({
                   </div>
                 )}
                 {moveTarget === s.id && onSetSessionProject && (
-                  <div
-                    className="px-1 mt-1 space-y-0.5"
-                    onClick={(e) => e.stopPropagation()}
-                  >
+                  <div className="px-1 mt-1 space-y-0.5 pl-5" onClick={(e) => e.stopPropagation()}>
                     <button
                       type="button"
                       className="w-full text-left text-[10px] px-1.5 py-0.5 rounded"
-                      style={{
-                        background: isNoProjectPath(s.project_path)
-                          ? 'var(--bg-tertiary)'
-                          : 'transparent',
-                        color: 'var(--text-secondary)',
-                      }}
                       onClick={() => {
                         onSetSessionProject(s.id, null)
                         setMoveTarget(null)
@@ -753,13 +882,6 @@ function ProjectSection({
                         key={p}
                         type="button"
                         className="w-full text-left text-[10px] px-1.5 py-0.5 rounded truncate"
-                        style={{
-                          background:
-                            projectKey(s.project_path) === p
-                              ? 'var(--bg-tertiary)'
-                              : 'transparent',
-                          color: 'var(--text-secondary)',
-                        }}
                         title={p}
                         onClick={() => {
                           onSetSessionProject(s.id, p)
@@ -779,7 +901,7 @@ function ProjectSection({
               className="px-3 py-1.5 text-[10px]"
               style={{ color: 'var(--text-muted)', marginLeft: isNone ? 0 : 4 }}
             >
-              {isNone ? 'No unattached sessions' : 'No sessions yet — use + to start one'}
+              {isNone ? 'No unattached sessions' : 'Drop sessions here or use +'}
             </div>
           )}
         </div>

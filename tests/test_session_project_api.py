@@ -125,3 +125,59 @@ def test_agent_unset_project_forces_full_access(tmp_path: Path):
     (tmp_path / "code").mkdir(exist_ok=True)
     assert rt.project_path_is_unset() is False
     assert rt.access_scope() == "project"
+
+
+@pytest.mark.asyncio
+async def test_apply_session_workspace_binds_project(store: MemoryStore, tmp_path: Path):
+    """Streaming turn must jail tools to the session project, not leftover state."""
+    proj_a = tmp_path / "A"
+    proj_b = tmp_path / "B"
+    proj_a.mkdir()
+    proj_b.mkdir()
+    sa = ChatSession(title="a", project_path=str(proj_a))
+    sb = ChatSession(title="b", project_path=str(proj_b))
+    snone = ChatSession(title="none", project_path=None)
+    sa = await store.create_chat_session(sa)
+    sb = await store.create_chat_session(sb)
+    snone = await store.create_chat_session(snone)
+
+    cfg = AgentConfig(
+        name="t",
+        project_path=str(proj_a),
+        access_scope="project",
+        llm_provider="openai",
+        llm_model="m",
+        llm_api_key="k",
+    )
+    rt = BasicRuntime(cfg, memory=store)
+
+    await rt._apply_session_workspace(sb.id)
+    assert "B" in str(rt.effective_project_path())
+    assert rt.project_path_is_unset() is False
+
+    await rt._apply_session_workspace(snone.id)
+    assert rt.project_path_is_unset() is True
+    assert rt.access_scope() == "full"
+
+
+def test_bulk_set_session_project(client):
+    c, tmp = client
+    proj = tmp / "Bulk"
+    proj.mkdir()
+    ids = []
+    for title in ("x", "y", "z"):
+        r = c.post("/api/sessions", json={"title": title, "project_path": ""})
+        ids.append(r.json()["id"])
+    r = c.post(
+        "/api/sessions/bulk-project",
+        json={"session_ids": ids, "project_path": str(proj)},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["count"] == 3
+    assert "Bulk" in str(body["project_path"])
+    listed = c.get("/api/sessions?limit=50").json()["sessions"]
+    by_id = {s["id"]: s for s in listed}
+    for sid in ids:
+        assert by_id[sid].get("project_path")
+        assert "Bulk" in str(by_id[sid]["project_path"])

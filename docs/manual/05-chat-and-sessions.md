@@ -116,12 +116,15 @@ The left sidebar groups chats:
 
 | Group | Contents |
 |-------|----------|
-| **No project** | Sessions not attached to a folder |
-| **📁 Project name** | Sessions whose `project_path` is that directory (children under the folder) |
+| **No project** | Sessions not attached to a folder (tools use full access that turn) |
+| **📁 Project name** | Sessions under that directory; tools are jailed to that project for the turn |
 
 - **+** on a project header — new session in that project  
 - **+ Add project folder** — register a folder (browse or type path) even before any chats  
 - **📁** on a session row — move the chat to another project / No project  
+- **Checkbox** multi-select + toolbar move; **Shift+click** range; **drag** sessions onto a folder  
+- **Load more** when you have many sessions (paginated)  
+- **New-in-project sets default** — optional checkbox to also write Settings → project path  
 
 Default **New Session** still uses Settings → default project folder when set.
 

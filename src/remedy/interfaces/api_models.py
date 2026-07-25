@@ -83,6 +83,14 @@ class UpdateSessionRequest(BaseModel):
     project_path: str | None = None
 
 
+class BulkSessionProjectRequest(BaseModel):
+    """Move many sessions under one project (or clear with empty path)."""
+
+    session_ids: list[str] = Field(default_factory=list, min_length=1)
+    # Empty / null / "." → no project
+    project_path: str | None = None
+
+
 class SessionLlmRequest(BaseModel):
     """Mid-session provider/model switch (session override + hot runtime apply)."""
 
