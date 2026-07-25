@@ -2,7 +2,13 @@
 
 High-level product notes for owners. Full detail lives in repo `CHANGELOG.md`.
 
-Ship **one** installer/tag for the current series (**v0.14.0**).
+Ship **one** installer/tag for the current series (**v0.14.1**).
+
+## 0.14.1 — Autoupdate: download UI → install popup → one restart
+
+- Download progress stays **inside** Remedy.  
+- When Remedy closes, a **new** install-progress window shows silent install.  
+- App restarts **once** (no second window from the installer).  
 
 ## 0.14.0 — Maintainability: ReAct peel + Settings modules
 

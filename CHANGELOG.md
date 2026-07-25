@@ -2,6 +2,20 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.14.1] — 2026-07-25
+
+### Fix: autoupdate UX + single relaunch (regression)
+
+- **Two-stage progress** (as intended):
+  1. In-app **download** screen  
+  2. After Remedy closes → **new Install Progress** popup (STA WinForms) for
+     silent install + relaunch  
+- Install host: `-STA`, `cmd start` / independent process, status JSON after exit.  
+- **Single relaunch**: TEMP `RemedyDesktop-UpdaterOwnsRelaunch.flag` + `/NOAUTOLAUNCH`
+  so NSIS POSTINSTALL does not also start the app (fixes double window).  
+- Update script kills only app shells (never the progress PowerShell host).  
+- Docs/manual updated; pipeline + hooks contract tests.
+
 ## [0.14.0] — 2026-07-25
 
 ### Refactor: ReAct peel + Settings modularization

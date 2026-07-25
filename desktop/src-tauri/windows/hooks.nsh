@@ -61,14 +61,23 @@
   ; Never pre-launch there — it races the finish page and confuses users.
   ;
   ; Silent (/S), passive (/P), and update (/UPDATE) installs skip the finish page,
-  ; so we relaunch here (cmd /c start so the process survives installer exit).
+  ; so we relaunch here UNLESS the in-app updater owns relaunch.
   ;
-  ; /NOAUTOLAUNCH: in-app updater owns a *single* relaunch after verify
-  ; (avoids double-start when POSTINSTALL + PowerShell both launch).
+  ; Double-launch root cause (pre-0.14.1): POSTINSTALL + updater script both started
+  ; the app. Prefer a TEMP marker file (reliable even when GetOptions/CMDLINE fail)
+  ; and keep /NOAUTOLAUNCH as a second signal.
+  ;
+  ; Marker: %TEMP%\RemedyDesktop-UpdaterOwnsRelaunch.flag (written by lib.rs update path)
+  IfFileExists "$TEMP\RemedyDesktop-UpdaterOwnsRelaunch.flag" 0 check_noautolaunch_opt
+    DetailPrint "UpdaterOwnsRelaunch marker: single relaunch deferred to update script."
+    Delete "$TEMP\RemedyDesktop-UpdaterOwnsRelaunch.flag"
+    Goto skip_auto_launch
+  check_noautolaunch_opt:
+  ; Secondary: /NOAUTOLAUNCH on the installer command line (FileFunc GetOptions).
   ClearErrors
   ${GetOptions} $CMDLINE "/NOAUTOLAUNCH" $R9
   ${IfNot} ${Errors}
-    DetailPrint "NOAUTOLAUNCH: deferring start to updater script (single relaunch)."
+    DetailPrint "NOAUTOLAUNCH (GetOptions): deferring start to updater script."
     Goto skip_auto_launch
   ${EndIf}
 
@@ -91,7 +100,7 @@
   Goto launch_done
 
   skip_auto_launch:
-  DetailPrint "Interactive install (or NOAUTOLAUNCH): launch deferred."
+  DetailPrint "Interactive install or updater-owned relaunch: launch deferred."
   launch_done:
 !macroend
 

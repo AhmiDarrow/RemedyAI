@@ -13,22 +13,36 @@ if (-not $StatusPath) {
   $StatusPath = Join-Path $env:TEMP 'RemedyDesktop-Update-status.json'
 }
 
+# WinForms requires STA (caller should pass -STA; re-enter if not).
+if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA') {
+  $argList = @(
+    '-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass',
+    '-File', $MyInvocation.MyCommand.Path,
+    '-StatusPath', $StatusPath,
+    '-From', $From,
+    '-To', $To
+  )
+  Start-Process -FilePath 'powershell.exe' -ArgumentList $argList -WindowStyle Normal | Out-Null
+  exit 0
+}
+
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
 $form = New-Object System.Windows.Forms.Form
-$form.Text = 'Remedy Update'
-$form.Size = New-Object System.Drawing.Size(440, 220)
+$form.Text = 'Remedy Install Progress'
+$form.Size = New-Object System.Drawing.Size(460, 230)
 $form.StartPosition = 'CenterScreen'
 $form.FormBorderStyle = 'FixedDialog'
 $form.MaximizeBox = $false
 $form.MinimizeBox = $true
 $form.TopMost = $true
+$form.ShowInTaskbar = $true
 $form.BackColor = [System.Drawing.Color]::FromArgb(18, 22, 28)
 $form.ForeColor = [System.Drawing.Color]::FromArgb(230, 236, 242)
 
 $title = New-Object System.Windows.Forms.Label
-$title.Text = 'Remedy Update'
+$title.Text = 'Remedy Install'
 $title.Font = New-Object System.Drawing.Font('Segoe UI', 16, [System.Drawing.FontStyle]::Bold)
 $title.ForeColor = [System.Drawing.Color]::FromArgb(56, 189, 248)
 $title.AutoSize = $true
@@ -71,11 +85,21 @@ $msg.Location = New-Object System.Drawing.Point(26, 140)
 $form.Controls.Add($msg)
 
 $timer = New-Object System.Windows.Forms.Timer
-$timer.Interval = 500
-$done = $false
+$timer.Interval = 400
+$script:done = $false
+$script:idleTicks = 0
 
 $timer.Add_Tick({
-  if (-not (Test-Path -LiteralPath $StatusPath)) { return }
+  if (-not (Test-Path -LiteralPath $StatusPath)) {
+    $script:idleTicks++
+    # Keep window visible even if status file is late (app just closed).
+    if ($script:idleTicks -eq 1) {
+      $phaseLbl.Text = 'Waiting for installer…'
+      $msg.Text = 'Remedy closed — install continues. Leave this window open.'
+    }
+    return
+  }
+  $script:idleTicks = 0
   try {
     $raw = Get-Content -LiteralPath $StatusPath -Raw -ErrorAction Stop
     $j = $raw | ConvertFrom-Json
@@ -95,7 +119,7 @@ $timer.Add_Tick({
   switch ($p) {
     'downloading' { $phaseLbl.Text = 'Downloading update…' }
     'closing'     { $phaseLbl.Text = 'Closing Remedy…' }
-    'installing'  { $phaseLbl.Text = 'Installing silently…' }
+    'installing'  { $phaseLbl.Text = 'Installing update…' }
     'verifying'   { $phaseLbl.Text = 'Verifying install…' }
     'relaunch'    { $phaseLbl.Text = 'Relaunching…' }
     'done' {
@@ -103,7 +127,7 @@ $timer.Add_Tick({
       $bar.Value = 100
       $script:done = $true
       $timer.Stop()
-      Start-Sleep -Milliseconds 900
+      Start-Sleep -Milliseconds 1400
       $form.Close()
     }
     'error' {
@@ -118,6 +142,10 @@ $timer.Add_Tick({
   }
 })
 
-$form.Add_Shown({ $timer.Start() })
+$form.Add_Shown({
+  $form.Activate()
+  $form.BringToFront()
+  $timer.Start()
+})
 $form.Add_FormClosed({ $timer.Stop() })
 [void]$form.ShowDialog()

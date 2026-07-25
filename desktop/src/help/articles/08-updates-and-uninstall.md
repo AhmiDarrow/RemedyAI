@@ -25,12 +25,15 @@ Full **Quit** stops the server — the WebUI will stop working.
 
 ## Install an update
 
-1. When an update is available, open the update screen (download progress bar).  
-2. A separate **Remedy Update** progress window stays open while the app closes and
-   the silent installer runs — so you are not left on a blank desktop.  
-3. Update-mode uninstall keeps your **user data** (`/UPDATE` path).  
-4. App **relaunches once** when the pipeline succeeds (installer does not also
-   auto-start — that used to open two windows); the progress window closes.  
+Two-stage progress (by design):
+
+1. **In-app** update screen shows **download** progress only.  
+2. When download finishes, **Remedy closes** (that screen closes with it).  
+3. A **new** **Remedy Install Progress** popup appears for silent install + relaunch  
+   (so you are not left on a blank desktop after the app exits).  
+4. Update-mode uninstall keeps your **user data** (`/UPDATE` path).  
+5. App **relaunches once** when the pipeline succeeds (the installer does **not** also
+   auto-start — that used to open two Remedy windows); the install popup closes.  
 
 If download fails, use the release page manually:  
 https://github.com/AhmiDarrow/RemedyAI/releases

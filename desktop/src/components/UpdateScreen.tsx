@@ -10,11 +10,12 @@ interface UpdateScreenProps {
   autoStart?: boolean
 }
 
-type Phase = 'ready' | 'downloading' | 'installing' | 'relaunch' | 'error'
+type Phase = 'ready' | 'downloading' | 'closing' | 'installing' | 'relaunch' | 'error'
 
 /**
- * Full-screen update UI (Ollama-style):
- * one click from Settings/status bar → download with progress → silent install → relaunch.
+ * Stage 1 update UI (in-app):
+ * download progress only. When Remedy closes, a *separate* install-progress
+ * popup appears (stage 2) for silent install + single relaunch.
  */
 export function UpdateScreen({ info, onClose, autoStart = true }: UpdateScreenProps) {
   const [phase, setPhase] = useState<Phase>(autoStart && info.download_url ? 'downloading' : 'ready')
@@ -33,7 +34,15 @@ export function UpdateScreen({ info, onClose, autoStart = true }: UpdateScreenPr
         setPhase('downloading')
         setPercent(typeof p.percent === 'number' ? p.percent : 0)
         setMessage(p.message || 'Downloading…')
+      } else if (p.phase === 'closing') {
+        setPhase('closing')
+        setPercent(100)
+        setMessage(
+          p.message
+            || 'Download complete. Remedy will close — a new window shows install progress.',
+        )
       } else if (p.phase === 'installing') {
+        // In-app rarely sees this (install runs after exit); keep for status events.
         setPhase('installing')
         setPercent(100)
         setMessage(p.message || 'Installing…')
@@ -113,10 +122,17 @@ export function UpdateScreen({ info, onClose, autoStart = true }: UpdateScreenPr
           <div className="text-sm" style={{ color: 'var(--text-muted)' }}>
             {phase === 'ready' && 'A new version is ready to install'}
             {phase === 'downloading' && 'Downloading update…'}
-            {phase === 'installing' && 'Installing silently…'}
+            {phase === 'closing' && 'Download done — Remedy will close next'}
+            {phase === 'installing' && 'Installing…'}
             {phase === 'relaunch' && 'Almost done — app will reopen…'}
             {phase === 'error' && 'Update failed'}
           </div>
+          {(phase === 'downloading' || phase === 'closing') && (
+            <div className="text-[11px] mt-2 leading-snug" style={{ color: 'var(--text-muted)' }}>
+              After this window closes, a separate <strong style={{ color: 'var(--text-secondary)' }}>install progress</strong> popup
+              appears until Remedy restarts (once).
+            </div>
+          )}
         </div>
 
         <div
@@ -143,7 +159,7 @@ export function UpdateScreen({ info, onClose, autoStart = true }: UpdateScreenPr
           </div>
         )}
 
-        {(phase === 'downloading' || phase === 'installing' || phase === 'relaunch') && (
+        {(phase === 'downloading' || phase === 'closing' || phase === 'installing' || phase === 'relaunch') && (
           <div className="mb-5">
             <div
               className="h-2 rounded-full overflow-hidden mb-2"
@@ -226,21 +242,20 @@ export function UpdateScreen({ info, onClose, autoStart = true }: UpdateScreenPr
               </button>
             </>
           )}
-          {(phase === 'downloading' || phase === 'installing' || phase === 'relaunch') && (
+          {(phase === 'downloading' || phase === 'closing') && (
             <div
               className="flex-1 py-2.5 text-center text-sm"
               style={{ color: 'var(--text-muted)' }}
             >
-              Please wait — do not close the app
-              {phase === 'installing' || phase === 'relaunch'
-                ? '. Windows may ask for permission once.'
-                : ''}
+              {phase === 'closing'
+                ? 'Closing Remedy… install progress opens next'
+                : 'Please wait — download runs inside Remedy'}
             </div>
           )}
         </div>
 
         <div className="mt-4 text-[0.65rem] text-center" style={{ color: 'var(--text-muted)' }}>
-          One click: download → silent install → app restarts on the new version.
+          Download here → Remedy closes → install progress popup → one restart.
         </div>
       </div>
     </div>

@@ -51,22 +51,39 @@ $oldTicks = (Get-Item -LiteralPath $appPath).LastWriteTimeUtc.Ticks
 Write-Host "Old app ticks=$oldTicks version=$((Get-Content $versionFile -Raw).Trim())"
 
 # --- 2) Fake installer (NSIS stand-in: /S /NCRC /D=path) ---
-Write-Utf8 $fakeInstaller @'
-param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Rest)
-$ErrorActionPreference = "Stop"
-$dest = $null
-foreach ($a in $Rest) { if ($a -like "/D=*") { $dest = $a.Substring(3) } }
-if (-not $dest) { throw "FakeInstaller: missing /D=" }
-if (-not (Test-Path -LiteralPath $dest)) { New-Item -ItemType Directory -Path $dest -Force | Out-Null }
-$app = Join-Path $dest "Remedy Desktop.cmd"
-$ver = Join-Path $dest "VERSION.txt"
-$stub = "@echo off`r`necho relaunched>%~dp0RELAUNCHED.marker`r`necho NEW`r`n"
-[System.IO.File]::WriteAllText($app, $stub)
-[System.IO.File]::WriteAllText($ver, "0.10.30")
+# If /NOAUTOLAUNCH is missing and no owns-flag, simulate POSTINSTALL double-start bug.
+$ownsFlag = Join-Path $env:TEMP 'RemedyDesktop-UpdaterOwnsRelaunch.flag'
+$postInstallLaunches = Join-Path $root 'postinstall_launches.txt'
+Write-Utf8 $fakeInstaller @"
+param([Parameter(ValueFromRemainingArguments=`$true)][string[]]`$Rest)
+`$ErrorActionPreference = "Stop"
+`$dest = `$null
+`$noAuto = `$false
+foreach (`$a in `$Rest) {
+  if (`$a -like "/D=*") { `$dest = `$a.Substring(3) }
+  if (`$a -eq "/NOAUTOLAUNCH") { `$noAuto = `$true }
+}
+if (-not `$dest) { throw "FakeInstaller: missing /D=" }
+if (-not (Test-Path -LiteralPath `$dest)) { New-Item -ItemType Directory -Path `$dest -Force | Out-Null }
+`$app = Join-Path `$dest "Remedy Desktop.cmd"
+`$ver = Join-Path `$dest "VERSION.txt"
+`$stub = "@echo off``r``necho relaunched>%~dp0RELAUNCHED.marker``r``necho NEW``r``n"
+[System.IO.File]::WriteAllText(`$app, `$stub)
+[System.IO.File]::WriteAllText(`$ver, "0.10.30")
 Start-Sleep -Milliseconds 80
-(Get-Item -LiteralPath $app).LastWriteTimeUtc = (Get-Date).ToUniversalTime().AddMinutes(5)
+(Get-Item -LiteralPath `$app).LastWriteTimeUtc = (Get-Date).ToUniversalTime().AddMinutes(5)
+# Mirror hooks.nsh: skip auto-start when marker or /NOAUTOLAUNCH present.
+`$flag = Join-Path `$env:TEMP 'RemedyDesktop-UpdaterOwnsRelaunch.flag'
+if ((Test-Path -LiteralPath `$flag) -or `$noAuto) {
+  if (Test-Path -LiteralPath `$flag) { Remove-Item -LiteralPath `$flag -Force -EA SilentlyContinue }
+  Add-Content -LiteralPath '$($postInstallLaunches.Replace('\','\\'))' -Value 'skipped'
+} else {
+  # Bug simulation: POSTINSTALL starts app (would cause double with updater).
+  Add-Content -LiteralPath '$($postInstallLaunches.Replace('\','\\'))' -Value 'launched'
+  Start-Process -FilePath `$app -WindowStyle Hidden | Out-Null
+}
 exit 0
-'@
+"@
 
 # --- 3) Update orchestrator (same control flow as lib.rs; short sleeps) ---
 # Build without nested-quote hell: use single-quoted fragments + -f format.
@@ -87,7 +104,10 @@ $updateLines = @(
   '$before = @{}'
   'foreach ($c in $candidates) { if (Test-Path -LiteralPath $c) { $before[$c] = (Get-Item -LiteralPath $c).LastWriteTimeUtc.Ticks } }'
   'Log ("Snapshot count: " + $before.Count)'
-  '$argList = @("-NoProfile","-ExecutionPolicy","Bypass","-File",$installer,"/S","/NCRC","/UPDATE",("/D=" + $priorDir))'
+  # Marker + /NOAUTOLAUNCH: sole relaunch owner (matches lib.rs 0.14.1+)
+  ('$ownsFlag = "{0}"' -f $ownsFlag.Replace('\', '\\'))
+  'Set-Content -LiteralPath $ownsFlag -Value "owned_by=test" -Encoding ASCII'
+  '$argList = @("-NoProfile","-ExecutionPolicy","Bypass","-File",$installer,"/S","/NCRC","/UPDATE","/NOAUTOLAUNCH",("/D=" + $priorDir))'
   'Log ("Starting fake installer -> " + $priorDir)'
   '$p = Start-Process -FilePath "powershell.exe" -ArgumentList $argList -PassThru -WindowStyle Hidden'
   'if (-not $p) { Log "ERROR: Start-Process null"; exit 3 }'
@@ -105,9 +125,9 @@ $updateLines = @(
   '}'
   'if (-not $launch) { foreach ($c in $candidates) { if (Test-Path -LiteralPath $c) { $launch = $c; break } } }'
   'if ($launch) {'
-  '  Log ("Relaunching: " + $launch)'
+  '  Log ("Relaunching once: " + $launch)'
   '  Start-Process -FilePath $launch -WindowStyle Hidden'
-  '  Log "Relaunch issued"'
+  '  Log "Relaunch issued (single)"'
   '  exit 0'
   '}'
   'Log "ERROR: no app binary found after install"'
@@ -170,11 +190,21 @@ if (Test-Path -LiteralPath $appPath) {
   Write-Host "App mtime advanced: $($newTicks -gt $oldTicks) ($oldTicks -> $newTicks)"
 }
 
-if (-not ($okLog -and $okVer -and $okRelaunch)) {
-  Fail "Pipeline incomplete (log=$okLog ver=$okVer relaunch=$okRelaunch)"
+# POSTINSTALL must have skipped auto-start (marker + /NOAUTOLAUNCH).
+$okSkip = $false
+if (Test-Path -LiteralPath $postInstallLaunches) {
+  $pil = Get-Content -LiteralPath $postInstallLaunches -Raw
+  $okSkip = ($pil -match 'skipped') -and ($pil -notmatch 'launched')
+  Write-Host "POSTINSTALL skip (no double-start): $okSkip  ($($pil.Trim()))"
+} else {
+  Write-Host 'POSTINSTALL log missing' -ForegroundColor Yellow
+}
+
+if (-not ($okLog -and $okVer -and $okRelaunch -and $okSkip)) {
+  Fail "Pipeline incomplete (log=$okLog ver=$okVer relaunch=$okRelaunch skip=$okSkip)"
 }
 
 Write-Host ''
-Write-Host 'PASS: fake auto-update pipeline completed after parent exit.' -ForegroundColor Green
+Write-Host 'PASS: fake auto-update pipeline completed after parent exit (single relaunch).' -ForegroundColor Green
 Write-Host "Work dir: $root"
 exit 0
