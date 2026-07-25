@@ -103,7 +103,7 @@ def search_repo(
     max_matches = max(1, min(500, int(max_matches or 50)))
     rg = _which_rg()
     if rg:
-        hits = _search_rg(
+        hits, rg_ok = _search_rg(
             rg,
             root,
             start,
@@ -114,7 +114,9 @@ def search_repo(
             context_before=context_before,
             context_after=context_after,
         )
-        return hits, "rg"
+        # Fall back if rg missing results due to crash/bad flags (not merely no matches)
+        if rg_ok:
+            return hits, "rg"
     hits = _search_python(
         root,
         start,
@@ -124,6 +126,22 @@ def search_repo(
         case_insensitive=case_insensitive,
     )
     return hits, "python"
+
+
+def _parse_rg_line(line: str) -> tuple[str, int, str] | None:
+    """Parse ``path:line:text`` robustly (Windows drive letters use ``:``)."""
+    # Match the *last* :digits: or :digits- segment so ``C:\a\b.py:12:code`` works.
+    m = re.search(r":(\d+)([:\-])(.*)$", line)
+    if not m:
+        return None
+    path = line[: m.start()]
+    if not path:
+        return None
+    try:
+        lineno = int(m.group(1))
+    except ValueError:
+        return None
+    return path, lineno, m.group(3)
 
 
 def _search_rg(
@@ -137,15 +155,17 @@ def _search_rg(
     case_insensitive: bool,
     context_before: int,
     context_after: int,
-) -> list[SearchHit]:
+) -> tuple[list[SearchHit], bool]:
+    """Returns (hits, ok). ok=False means fall back to pure Python."""
     cmd = [
         rg,
         "--line-number",
         "--no-heading",
         "--color",
         "never",
+        # Per-file cap high; we enforce total max_matches while parsing.
         "--max-count",
-        str(max_matches),
+        str(max(1, min(100, max_matches))),
     ]
     if case_insensitive:
         cmd.append("-i")
@@ -171,24 +191,26 @@ def _search_rg(
             env={**os.environ, "RIPGREP_CONFIG_PATH": ""},
         )
     except (OSError, subprocess.TimeoutExpired):
-        return []
+        return [], False
+    # 0 = matches, 1 = no matches, 2 = error (bad regex / etc.)
+    if proc.returncode not in (0, 1):
+        return [], False
     hits: list[SearchHit] = []
     for line in (proc.stdout or "").splitlines():
-        # path:line:text  or context lines path-line-text
-        m = re.match(r"^(.*?):(\d+)[:\-](.*)$", line)
-        if not m:
+        parsed = _parse_rg_line(line)
+        if not parsed:
             continue
-        p = Path(m.group(1))
+        raw_path, lineno, text = parsed
+        p = Path(raw_path)
         try:
-            rel = p.resolve().relative_to(root).as_posix()
+            p = (root / p).resolve() if not p.is_absolute() else p.resolve()
+            rel = p.relative_to(root).as_posix()
         except Exception:
-            rel = m.group(1)
-        hits.append(
-            SearchHit(path=rel, line=int(m.group(2)), text=m.group(3).rstrip("\n")[:400])
-        )
+            rel = raw_path.replace("\\", "/")
+        hits.append(SearchHit(path=rel, line=lineno, text=text.rstrip("\n")[:400]))
         if len(hits) >= max_matches:
             break
-    return hits
+    return hits, True
 
 
 def _glob_match(name: str, pattern: str | None) -> bool:

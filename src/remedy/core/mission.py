@@ -83,13 +83,37 @@ class MissionStore:
         return mission
 
     def get(self, mission_id: str) -> Mission | None:
-        p = self._path(mission_id)
-        if not p.is_file():
+        mid = (mission_id or "").strip()
+        if not mid:
             return None
-        try:
-            return Mission.from_dict(json.loads(p.read_text(encoding="utf-8")))
-        except (OSError, json.JSONDecodeError, TypeError):
+        p = self._path(mid)
+        if p.is_file():
+            try:
+                return Mission.from_dict(json.loads(p.read_text(encoding="utf-8")))
+            except (OSError, json.JSONDecodeError, TypeError, ValueError):
+                return None
+        # Prefix match (summaries show first 8 chars of UUID)
+        if len(mid) < 4:
             return None
+        needle = mid.replace("-", "").lower()
+        matches: list[Mission] = []
+        for fp in self.root.glob("*.json"):
+            stem = fp.stem
+            if not (
+                stem.startswith(mid)
+                or stem.replace("-", "").lower().startswith(needle)
+            ):
+                continue
+            try:
+                m = Mission.from_dict(json.loads(fp.read_text(encoding="utf-8")))
+            except (OSError, json.JSONDecodeError, TypeError, ValueError):
+                continue
+            compact = m.id.replace("-", "").lower()
+            if m.id.startswith(mid) or compact.startswith(needle):
+                matches.append(m)
+        if len(matches) == 1:
+            return matches[0]
+        return None
 
     def latest(self, session_id: str | None = None) -> Mission | None:
         if session_id:

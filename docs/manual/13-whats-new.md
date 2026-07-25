@@ -2,7 +2,11 @@
 
 High-level product notes for owners. Full detail lives in repo `CHANGELOG.md`.
 
-Ship **one** installer/tag for the current series (**v0.13.0**).
+Ship **one** installer/tag for the current series (**v0.13.1**).
+
+## 0.13.1 — Agency tool fixes
+
+- Windows-safe `repo_search` parsing; mission short-id lookup; `web_fetch` SSRF blocks.
 
 ## 0.13.0 — Coding agency (Build-class tools)
 

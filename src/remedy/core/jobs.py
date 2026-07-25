@@ -6,14 +6,8 @@ loop. They never open a second chat personality.
 
 from __future__ import annotations
 
-import logging
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
-
-logger = logging.getLogger(__name__)
-
-JobHandler = Callable[..., Awaitable[str] | str]
 
 
 @dataclass
@@ -36,11 +30,12 @@ async def run_explore_job(
 
     root = runtime.effective_project_path()
     parts: list[str] = [f"Explore job under {root}"]
-    # List top-level
     try:
         target = runtime.resolve_tool_path(path or ".")
         if target.is_dir():
-            entries = sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
+            entries = sorted(
+                target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())
+            )
             visible = [p for p in entries if not p.name.startswith(".")][:max_files]
             lines = []
             for p in visible:
@@ -50,12 +45,22 @@ async def run_explore_job(
                     rel = p.name
                 lines.append(f"{'dir ' if p.is_dir() else 'file'} {rel}")
             parts.append("Listing:\n" + ("\n".join(lines) if lines else "(empty)"))
+        elif target.is_file():
+            try:
+                rel = target.relative_to(root).as_posix()
+            except ValueError:
+                rel = str(target)
+            parts.append(f"File: {rel}")
     except Exception as e:
         parts.append(f"list error: {e}")
 
     if (query or "").strip():
-        hits, engine = search_repo(root, query.strip(), path=path or ".", max_matches=30)
+        hits, engine = search_repo(
+            root, query.strip(), path=path or ".", max_matches=30
+        )
         parts.append(format_hits(hits, engine=engine, pattern=query.strip()))
+    elif not any(p.startswith("Listing:") or p.startswith("File:") for p in parts):
+        parts.append("(no query — pass query= to search)")
 
     summary = "\n\n".join(parts)
     return JobResult(kind="explore", ok=True, summary=summary[:12_000])

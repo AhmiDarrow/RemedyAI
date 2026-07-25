@@ -2,6 +2,15 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.13.1] — 2026-07-25
+
+### Fix: agency tool robustness
+
+- **`repo_search`**: parse Windows `C:\path:line:text` correctly; fall back to pure Python when ripgrep errors (not only when missing).
+- **Missions**: `mission_status` / `mission_update` accept **short id prefixes** (first 8 chars of UUID).
+- **`web_fetch`**: SSRF guard blocks localhost/private/metadata hosts (including redirects).
+- **`job_run` explore**: handles file paths; clearer empty-query message.
+
 ## [0.13.0] — 2026-07-25
 
 ### Feature: coding agency (Build-class tool plane)

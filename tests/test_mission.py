@@ -27,3 +27,12 @@ def test_create_and_advance(tmp_path):
     text = mission_summary(loaded)
     assert "Ship feature" in text
     assert "Verify:" in text
+
+
+def test_get_by_short_prefix(tmp_path):
+    m = create_mission("Goal", steps=["A"], home=tmp_path)
+    store = MissionStore(tmp_path)
+    short = m.id[:8]
+    found = store.get(short)
+    assert found is not None
+    assert found.id == m.id
