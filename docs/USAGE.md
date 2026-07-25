@@ -31,15 +31,16 @@ remedy --help      # Lists all commands
 
 ### Desktop: tool process visibility
 
-In **Settings → Tool process** (or status bar **Proc**):
+In **Settings → Tool process** (or status bar **Min / Med / Full / Full+**):
 
 | Mode | What you see |
 |------|----------------|
-| **Off** (default) | Progress only — clean chat |
-| **Medium** | Human labels + status + short results |
-| **Full** | Complete raw tool args and stdout (safety cap ~500k chars) |
+| **Min** (default) | Answer always complete · thinking collapsible · progress chips only |
+| **Med** | Answer always complete · tool labels + short previews (expand for more) |
+| **Full** | Answer + thinking open · **complete** raw tool args/results (nothing truncated) |
+| **Full+** | Full raw process + advanced continuity diagnostics |
 
-After a turn, process stays under the assistant message, **collapsed** until you expand it. The feed (and the process frame while live) auto-scrolls unless you scroll up; **↓** resumes follow.
+The chat **answer is never truncated** by this setting. After a turn, process stays under the assistant message — **expanded** in Full/Full+, collapsed in Med until you open it. The feed auto-scrolls unless you scroll up; **↓** resumes follow.
 
 ### Desktop: your name
 

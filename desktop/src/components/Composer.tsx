@@ -40,6 +40,8 @@ interface ComposerProps {
   streaming: boolean
   disabled: boolean
   planMode?: boolean
+  /** Shift+Tab toggles Plan ↔ Build (composer-focused). */
+  onTogglePlanMode?: () => void
   agents?: AgentDef[]
   /**
    * Prefill for edit-and-resend. Use a new `key` every time so the same text
@@ -128,6 +130,7 @@ export function Composer({
   streaming,
   disabled,
   planMode,
+  onTogglePlanMode,
   agents = [],
   editDraft,
   sessionId,
@@ -610,6 +613,13 @@ export function Composer({
         }
       }
 
+      // Shift+Tab: Plan ↔ Build (requested; works while typing / streaming).
+      if (e.key === 'Tab' && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault()
+        onTogglePlanMode?.()
+        return
+      }
+
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault()
         handleSubmit()
@@ -623,6 +633,7 @@ export function Composer({
       handleSubmit,
       input,
       applyHistoryEntry,
+      onTogglePlanMode,
     ],
   )
 
@@ -1046,12 +1057,21 @@ export function Composer({
           onPaste={onPaste}
           placeholder={
             planMode
-              ? 'Plan mode — describe what to do (no tools)'
-              : attachments.length
-                ? 'Message (optional)…'
-                : 'Message, /command, @file…'
+              ? 'Plan mode — explore & plan (Shift+Tab → Build)'
+              : streaming
+                ? 'Type anytime — Stop to send next message…'
+                : attachments.length
+                  ? 'Message (optional)…'
+                  : 'Message, /command, @file… (Shift+Tab Plan/Build)'
           }
           disabled={disabled}
+          title={
+            streaming
+              ? 'You can keep typing while Remedy works. Stop generation to send.'
+              : planMode
+                ? 'Plan mode: planning tools only. Shift+Tab switches to Build.'
+                : undefined
+          }
           rows={1}
           className="composer-input flex-1 resize-none rounded-xl px-3 py-2.5 text-sm outline-none transition-colors"
           style={{

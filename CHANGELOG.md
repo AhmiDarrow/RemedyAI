@@ -2,6 +2,21 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.11.5] — 2026-07-25
+
+### Fix: stuck agent on “proceed” / short kicks
+
+- Short messages like **proceed**, **continue**, **go ahead**, **do it**, **proceed with all fixes** now enable tools (session log bug: tools=`[]` → force_answer → thinking-only stubs).
+- Plan mode auto-exits on build/proceed language so file tools load without a manual toggle.
+- Composer stays typable while streaming; **Shift+Tab** toggles Plan ↔ Build.
+
+### Feature: tool process Min / Med / Full / Full+ contract
+
+- **Answer text is never truncated** by process mode.
+- **Full / Full+**: complete raw tool args and every result; process + thinking expanded by default; no silent preview cuts.
+- Status bar cycles Min → Med → Full → Full+.
+- Chat polish: wider assistant bubbles, flat thinking strip, better prose/code typography.
+
 ## [0.11.4] — 2026-07-25
 
 ### Feature: NanoToken BPE v2 (battery-trained default)

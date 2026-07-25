@@ -125,7 +125,8 @@ _TOOL_HINT_RE = re.compile(
     r"file|files|folder|directory|path|workspace|codebase|repo|repository|project|"
     r"review|analyze|analyse|explore|overview|inspect|structure|architecture|"
     r"run|execute|shell|bash|command|terminal|install|build|test|"
-    r"implement|refactor|debug|fix|bug|error|stack|trace|"
+    r"implement|implemen\w*|refactor|debug|fix(?:es)?|bug|error|stack|trace|"
+    r"patch|apply|ship|deploy|"
     r"git|commit|diff|branch|src/|\\.[a-z]{1,5}\b|"
     r"comfyui|comfy|txt2img|img2img|portrait|nebula|spacey|"
     r"generate(\s+an?)?\s+image|image\s+generation|render(\s+an?)?\s+image|"
@@ -134,6 +135,47 @@ _TOOL_HINT_RE = re.compile(
     r"show\s+(it|me|the\s+image)|embed(\s+it)?|display(\s+it)?"
     r")\b|"
     r"(?:[A-Za-z]:)?[\\/][\w.\\/ -]+",
+    re.IGNORECASE,
+)
+
+# Short kicks that must keep tools on. Session bug (2026-07-25): "proceed",
+# "continue", "go ahead", "proceed with all fixes" returned False → tools=[]
+# → force_answer on step 0 → model only narrated with zero tool_calls.
+_ACTION_KICK_RE = re.compile(
+    r"(?:"
+    r"\bproceed\b|"
+    r"\bcontinue\b|"
+    r"\bgo\s+ahead\b|"
+    r"\bdo\s+it\b|"
+    r"\bkeep\s+going\b|"
+    r"\bcarry\s+on\b|"
+    r"\bstart\s+(?:working|now|implementing|coding|building)\b|"
+    r"\bget\s+(?:to\s+)?work\b|"
+    r"\bact(?:ually)?\s+(?:do|implement|start|run|fix)\b|"
+    r"\bnot\s+doing\s+anything\b|"
+    r"\bdoing\s+anything\b|"
+    r"\bswitch\s+to\s+build\b|"
+    r"\bleave\s+plan(?:\s+mode)?\b|"
+    r"\bout\s+of\s+plan(?:\s+mode)?\b|"
+    r"\benter\s+build(?:\s+mode)?\b|"
+    r"\bbuild\s+mode\b|"
+    r"\byes[,.]?\s*(?:please\s+)?(?:proceed|continue|do\s+it|go|implement)\b|"
+    r"\bok(?:ay)?[,.]?\s*(?:please\s+)?(?:proceed|continue|do\s+it|go|implement)\b"
+    r")",
+    re.IGNORECASE,
+)
+
+# Pure social / chat-only (keep tools off even when short-default flips).
+_CHAT_ONLY_RE = re.compile(
+    r"^(?:"
+    r"hi+|hello+|hey+|yo+|sup|"
+    r"thanks?(?:\s+you)?|thx|ty|"
+    r"ok(?:ay)?|k|cool|nice|great|awesome|perfect|"
+    r"lol|haha|hmm+|mhm+|yep|yup|nope|"
+    r"good\s+(?:morning|afternoon|evening|night)|"
+    r"how\s+are\s+you\??|"
+    r"bye|goodbye|see\s+ya"
+    r")[\s!.?]*$",
     re.IGNORECASE,
 )
 
@@ -180,15 +222,26 @@ _COMFY_HUNT_RE = re.compile(
 
 
 def message_wants_tools(message: str) -> bool:
-    """Return False for chit-chat / simple Qs so models answer in one shot."""
+    """Return False for chit-chat / simple Qs so models answer in one shot.
+
+    Critical: short *action kicks* (proceed / continue / go ahead / do it)
+    must return True. Otherwise the agent loop sets tools=[] and force_answer
+    on the first step — the model only streams thinking + a status line and
+    never calls list_dir / file_read / file_write (looks "stuck").
+    """
     msg = (message or "").strip()
     if not msg:
         return False
     if _META_NO_TOOLS_RE.search(msg):
         return False
+    if _CHAT_ONLY_RE.match(msg):
+        return False
     if _TOOL_HINT_RE.search(msg):
         return True
-    return not len(msg) <= 160
+    if _ACTION_KICK_RE.search(msg):
+        return True
+    # Longer prompts are usually real work — keep tools available.
+    return len(msg) > 160
 
 
 # Back-compat alias used by older tests / imports.

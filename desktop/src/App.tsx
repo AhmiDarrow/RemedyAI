@@ -48,6 +48,28 @@ export interface ModelInfo {
 
 type ServerState = 'connecting' | 'ready' | 'error'
 
+/** True when the user is clearly asking to leave Plan and/or start Build work. */
+function looksLikeBuildKick(text: string): boolean {
+  const t = (text || '').trim()
+  if (!t) return false
+  return (
+    /\bproceed\b/i.test(t)
+    || /\bcontinue\b/i.test(t)
+    || /\bgo\s+ahead\b/i.test(t)
+    || /\bdo\s+it\b/i.test(t)
+    || /\bkeep\s+going\b/i.test(t)
+    || /\bimplement\b/i.test(t)
+    || /\bfixes?\b/i.test(t)
+    || /\bswitch\s+to\s+build\b/i.test(t)
+    || /\bleave\s+plan(?:\s+mode)?\b/i.test(t)
+    || /\bout\s+of\s+plan(?:\s+mode)?\b/i.test(t)
+    || /\benter\s+build(?:\s+mode)?\b/i.test(t)
+    || /\bbuild\s+mode\b/i.test(t)
+    || /\bstart\s+(?:working|implementing|coding|building)\b/i.test(t)
+    || /\bnot\s+doing\s+anything\b/i.test(t)
+  )
+}
+
 function isTauri(): boolean {
   if (typeof window === 'undefined') return false
   const w = window as any
@@ -777,7 +799,15 @@ export default function App() {
           )
           void rename(sid, title)
         }
-        send(text, model, sid, attachments, planMode)
+        // Session log bug: user said "proceed out of plan mode" / "proceed with all
+        // fixes" while Plan was still on → only plan tools → felt stuck. Auto-leave
+        // Plan on build/proceed kicks so Build tools actually load.
+        let usePlan = planMode
+        if (usePlan && looksLikeBuildKick(text)) {
+          usePlan = false
+          setPlanMode(false)
+        }
+        send(text, model, sid, attachments, usePlan)
         // Pull titles/message counts after the turn starts (server may have renamed).
         window.setTimeout(() => {
           void refreshSessions()
@@ -1214,8 +1244,11 @@ export default function App() {
               onStop={stop}
               onCommand={handleCommand}
               streaming={streaming}
-              disabled={streaming}
+              // Never lock the prompt while the model streams/thinks — user must
+              // always be able to type (and queue the next send after Stop).
+              disabled={serverState !== 'ready'}
               planMode={planMode}
+              onTogglePlanMode={() => setPlanMode((p) => !p)}
               agents={agentDefs}
               editDraft={editDraft}
               sessionId={activeId}

@@ -27,6 +27,9 @@ import {
 } from './icons'
 import { ProcessTrace } from './ProcessTrace'
 import {
+  isFullProcessMode,
+  processDefaultCollapsed,
+  showsProcessTrace,
   stepsFromMessageTools,
   type ProcessStep,
   type ToolProcessMode,
@@ -46,7 +49,7 @@ interface MessageFeedProps {
   activeTools?: ActiveTool[]
   processSteps?: ProcessStep[]
   taskProgress?: TaskProgressInfo | null
-  /** off | medium | full */
+  /** off | medium | full | full+ — never hides the chat answer */
   toolProcessMode?: ToolProcessMode
   onEditUserMessage?: (msgId: string, content: string) => void
   onQuickPrompt?: (text: string) => void
@@ -133,10 +136,19 @@ function CodeBlock({
   )
 }
 
-function ThinkingPanel({ text, openDefault = false }: { text: string; openDefault?: boolean }) {
+function ThinkingPanel({
+  text,
+  openDefault = false,
+  /** Full/Full+: show complete thinking without tight height traps */
+  fullReveal = false,
+}: {
+  text: string
+  openDefault?: boolean
+  fullReveal?: boolean
+}) {
   const [open, setOpen] = useState(openDefault)
   const bodyRef = useRef<HTMLDivElement | null>(null)
-  // Keep expanded while streaming new thinking; user can still collapse.
+  // Keep expanded while streaming or when Full mode demands visibility.
   useEffect(() => {
     if (openDefault) setOpen(true)
   }, [openDefault])
@@ -150,26 +162,34 @@ function ThinkingPanel({ text, openDefault = false }: { text: string; openDefaul
     }
   }, [text, open, openDefault])
   if (!text.trim()) return null
+  // Flat strip with left accent — not a nested box-in-box.
   return (
     <div
-      className="mb-2 rounded-md overflow-hidden"
-      style={{ border: '1px solid var(--border)', background: 'var(--bg-primary)' }}
+      className={`thinking-panel mb-2 w-full min-w-0 ${open ? 'thinking-panel-open' : ''}`}
     >
       <button
         type="button"
-        className="w-full flex items-center justify-between gap-2 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide"
-        style={{ color: 'var(--text-muted)' }}
+        className="thinking-panel-toggle w-full flex items-center justify-between gap-2 text-[10px] font-semibold uppercase tracking-wide text-left"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
       >
-        <span>Thinking{text.length > 80 ? ` · ${text.length.toLocaleString()} chars` : ''}</span>
-        <span>{open ? '▾' : '▸'}</span>
+        <span>
+          Thinking
+          {text.length > 80 ? ` · ${text.length.toLocaleString()} chars` : ''}
+          {fullReveal && open ? ' · full' : ''}
+        </span>
+        <span aria-hidden className="thinking-chevron">
+          {open ? '▾' : '▸'}
+        </span>
       </button>
       {open && (
         <div
           ref={bodyRef}
-          className="px-2.5 pb-2 text-xs whitespace-pre-wrap max-h-[min(60vh,28rem)] overflow-y-auto"
-          style={{ color: 'var(--text-secondary)', lineHeight: 1.45 }}
+          className={
+            fullReveal
+              ? 'thinking-panel-body thinking-panel-body-full'
+              : 'thinking-panel-body'
+          }
         >
           {text}
         </div>
@@ -211,12 +231,14 @@ const MessageBubble = memo(function MessageBubble({
     [rawText, isUser, isSystem],
   )
   const thinkingText = (msg.thinking || '') + (partialThinking || '')
+  const fullReveal = isFullProcessMode(toolProcessMode)
   const showEdit =
     msg.role === 'user' && !msg.reverted && !!onEditUserMessage && !streaming
   const timeLabel = formatTime(msg.created_at)
   const long = text.length > COLLAPSE_CHARS
   const [expanded, setExpanded] = useState(false)
   const [copied, setCopied] = useState(false)
+  // Answer text is never truncated by process mode (COLLAPSE_CHARS is infinite).
   const displayText =
     long && !expanded && !isStreamingPartial
       ? `${text.slice(0, COLLAPSE_CHARS).trimEnd()}…`
@@ -292,7 +314,7 @@ const MessageBubble = memo(function MessageBubble({
   )
 
   const histSteps =
-    !isUser && !isSystem && !isStreamingPartial && toolProcessMode !== 'off' // full+ included
+    !isUser && !isSystem && !isStreamingPartial && showsProcessTrace(toolProcessMode)
       ? stepsFromMessageTools(msg.tool_calls || [], msg.tool_results || [])
       : []
 
@@ -303,7 +325,6 @@ const MessageBubble = memo(function MessageBubble({
       }`}
       style={{ paddingTop: 'var(--chat-pad-y)', paddingBottom: 'var(--chat-pad-y)' }}
     >
-      {/* w-fit: cluster + bubble hug content; never stretch to the other side's width */}
       <div
         className={`chat-cluster relative flex items-end gap-1.5 ${
           isUser ? 'flex-row-reverse' : 'flex-row'
@@ -323,37 +344,19 @@ const MessageBubble = memo(function MessageBubble({
           }}
         >
           {!isUser && !isSystem && (
-            <div className="flex items-center gap-2 mb-0.5 w-fit max-w-full">
-              <div
-                className="text-[9px] font-semibold tracking-wide"
-                style={{ color: 'var(--text-muted)' }}
-              >
-                Remedy
-              </div>
-              {timeLabel && (
-                <div
-                  className="text-[9px] opacity-0 group-hover:opacity-100 transition-opacity"
-                  style={{ color: 'var(--text-muted)' }}
-                >
-                  {timeLabel}
-                </div>
-              )}
+            <div className="chat-meta flex items-center gap-2 mb-1 w-fit max-w-full">
+              <div className="chat-meta-label">Remedy</div>
+              {timeLabel && <div className="chat-meta-time">{timeLabel}</div>}
             </div>
           )}
 
           {isUser && (
-            <div className="flex items-center justify-end gap-1.5 mb-0.5 w-fit max-w-full ml-auto">
-              <div
-                className="text-[9px] font-semibold tracking-wide"
-                style={{ color: 'inherit', opacity: 0.85 }}
-              >
+            <div className="chat-meta chat-meta-user flex items-center justify-end gap-1.5 mb-1 w-fit max-w-full ml-auto">
+              <div className="chat-meta-label" style={{ color: 'inherit', opacity: 0.9 }}>
                 {userLabel}
               </div>
               {timeLabel && (
-                <div
-                  className="text-[9px] opacity-0 group-hover:opacity-70 transition-opacity"
-                  style={{ color: 'inherit' }}
-                >
+                <div className="chat-meta-time" style={{ color: 'inherit', opacity: 0.75 }}>
                   {timeLabel}
                 </div>
               )}
@@ -363,7 +366,10 @@ const MessageBubble = memo(function MessageBubble({
           {!isUser && !isSystem && (
             <ThinkingPanel
               text={thinkingText}
-              openDefault={Boolean(isStreamingPartial && partialThinking)}
+              openDefault={
+                Boolean(isStreamingPartial && partialThinking) || fullReveal
+              }
+              fullReveal={fullReveal}
             />
           )}
 
@@ -372,76 +378,60 @@ const MessageBubble = memo(function MessageBubble({
               <>
                 {/* Plain text while streaming — markdown only after finalize (snappier). */}
                 {isStreamingPartial && !isUser && !isSystem ? (
-                  <div
-                    className="whitespace-pre-wrap break-words"
-                    style={{ fontFamily: 'inherit', lineHeight: 1.5 }}
-                  >
+                  <div className="stream-plain whitespace-pre-wrap break-words">
                     {displayText}
-                    <span className="stream-caret opacity-60">▍</span>
+                    <span className="stream-caret" aria-hidden>
+                      ▍
+                    </span>
                   </div>
                 ) : (
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
-                  components={{
-                    pre({ children }) {
-                      return <>{children}</>
-                    },
-                    img({ src, alt }) {
-                      if (!src) return null
-                      return (
-                        <button
-                          type="button"
-                          className="block p-0 m-0 border-0 bg-transparent cursor-zoom-in w-full text-left"
-                          onClick={() => onOpenImage?.(src, alt)}
-                          title="Click to expand"
-                        >
-                          <img
-                            src={src}
-                            alt={alt || 'image'}
-                            style={{
-                              maxWidth: '100%',
-                              borderRadius: 8,
-                              marginTop: 8,
-                              marginBottom: 8,
-                              border: '1px solid var(--border)',
-                            }}
-                            loading="lazy"
-                          />
-                        </button>
-                      )
-                    },
-                    code({ children, className }) {
-                      const inline = !className
-                      if (inline) {
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      pre({ children }) {
+                        return <>{children}</>
+                      },
+                      img({ src, alt }) {
+                        if (!src) return null
                         return (
-                          <code
-                            style={{
-                              background: isUser
-                                ? 'rgba(255,255,255,0.18)'
-                                : 'var(--bg-tertiary)',
-                              padding: '2px 6px',
-                              borderRadius: 4,
-                              fontSize: '0.9em',
-                            }}
+                          <button
+                            type="button"
+                            className="chat-img-btn block p-0 m-0 border-0 bg-transparent cursor-zoom-in w-full text-left"
+                            onClick={() => onOpenImage?.(src, alt)}
+                            title="Click to expand"
                           >
-                            {children}
-                          </code>
+                            <img
+                              src={src}
+                              alt={alt || 'image'}
+                              className="chat-img"
+                              loading="lazy"
+                            />
+                          </button>
                         )
-                      }
-                      return (
-                        <CodeBlock className={className} isUser={isUser}>
-                          {children}
-                        </CodeBlock>
-                      )
-                    },
-                  }}
-                >
-                  {displayText}
-                </ReactMarkdown>
+                      },
+                      code({ children, className }) {
+                        const inline = !className
+                        if (inline) {
+                          return (
+                            <code className={isUser ? 'chat-inline-code user' : 'chat-inline-code'}>
+                              {children}
+                            </code>
+                          )
+                        }
+                        return (
+                          <CodeBlock className={className} isUser={isUser}>
+                            {children}
+                          </CodeBlock>
+                        )
+                      },
+                    }}
+                  >
+                    {displayText}
+                  </ReactMarkdown>
                 )}
               </>
             ) : (
-              <span style={{ color: 'var(--text-muted)' }}>
+              <span className="chat-empty-placeholder">
                 {isStreamingPartial ? (
                   <>
                     {thinkingText ? 'Thinking' : 'Generating'}
@@ -465,10 +455,9 @@ const MessageBubble = memo(function MessageBubble({
             </div>
           )}
 
-          {/* Icon actions: copy + edit only (no save) */}
           {!isSystem && !isStreamingPartial && text && (
             <div
-              className="mt-1 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity"
+              className="chat-actions mt-1.5 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity"
               style={{ justifyContent: isUser ? 'flex-end' : 'flex-start' }}
             >
               <IconBtn
@@ -495,19 +484,20 @@ const MessageBubble = memo(function MessageBubble({
           )}
         </div>
       </div>
-      {/* Process under answer — collapsed by default after turn */}
+      {/* Process under answer — Full stays expanded so nothing is buried */}
       {histSteps.length > 0 && (
         <div
-          className="w-full mt-0.5"
+          className="process-under-answer w-full mt-1"
           style={{
-            maxWidth:
-              toolProcessMode === 'full' || toolProcessMode === 'full+'
-                ? '100%'
-                : 'min(var(--chat-max-width), 100%)',
+            maxWidth: fullReveal ? '100%' : 'min(var(--chat-max-width), 100%)',
             paddingLeft: 'calc(var(--chat-avatar) + 0.35rem)',
           }}
         >
-          <ProcessTrace mode={toolProcessMode} steps={histSteps} defaultCollapsed />
+          <ProcessTrace
+            mode={toolProcessMode}
+            steps={histSteps}
+            defaultCollapsed={processDefaultCollapsed(toolProcessMode)}
+          />
         </div>
       )}
     </div>
@@ -676,9 +666,9 @@ export function MessageFeed({
             streaming={streaming}
             activeTools={activeTools}
             progress={taskProgress}
-            showToolDetails={toolProcessMode !== 'off'}
+            showToolDetails={showsProcessTrace(toolProcessMode)}
           />
-          {toolProcessMode !== 'off' && processSteps.length > 0 && (
+          {showsProcessTrace(toolProcessMode) && processSteps.length > 0 && (
             <ProcessTrace mode={toolProcessMode} steps={processSteps} live />
           )}
         </div>
@@ -701,7 +691,8 @@ export function MessageFeed({
           }}
           partial={partialText}
           partialThinking={partialThinking}
-          toolProcessMode="off"
+          /* Keep process mode so Full opens thinking; process trail is above */
+          toolProcessMode={toolProcessMode}
           isStreamingPartial
           onOpenImage={(src, alt) => setLightbox({ src, alt })}
         />

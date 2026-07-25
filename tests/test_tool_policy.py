@@ -34,6 +34,11 @@ def test_project_tasks_enable_tools():
     assert _message_wants_tools("fix the bug in agent.py") is True
     assert _message_wants_tools("review project") is True
     assert _message_wants_tools("analyze the architecture") is True
+    # Action kicks (must not leave tools=[] / force_answer)
+    assert _message_wants_tools("proceed") is True
+    assert _message_wants_tools("proceed with all fixes") is True
+    assert _message_wants_tools("continue") is True
+    assert _message_wants_tools("go ahead") is True
 
 
 def test_pseudo_tool_detection_and_parse():

@@ -29,7 +29,8 @@
   --chat-system-fg: #f87171;
   --chat-system-border: #2a2a3d;
   --chat-bubble-radius: 0.65rem;
-  --chat-max-width: 72%;
+  /* Wider so long answers / thinking aren't cramped in narrow bubbles */
+  --chat-max-width: 88%;
 }
 
 /* ---- theme variants ---- */
@@ -244,7 +245,7 @@ html.theme-animating body * {
   --chat-avatar: 1.2rem;
   --composer-pad: 0.5rem;
   --sidebar-row-py: 0.3rem;
-  --chat-max-width: 76%;
+  --chat-max-width: 90%;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -381,6 +382,11 @@ pre code {
   max-width: min(var(--chat-max-width), calc(100% - 0.5rem));
   min-width: 0;
 }
+/* Assistant: use more of the row so prose isn't trapped in a skinny bubble */
+.message-feed .chat-row:not(.items-end):not(.items-center) .chat-cluster {
+  max-width: min(var(--chat-max-width), calc(100% - 0.5rem));
+  width: min(var(--chat-max-width), calc(100% - 0.5rem));
+}
 .message-feed .chat-bubble {
   width: fit-content;
   max-width: 100%;
@@ -395,7 +401,10 @@ pre code {
   border-bottom-right-radius: 0.25rem !important;
 }
 .message-feed .chat-bubble-assistant {
+  width: 100%;
+  max-width: 100%;
   border-bottom-left-radius: 0.25rem !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 .message-feed .chat-bubble-system {
   width: fit-content;
@@ -404,27 +413,128 @@ pre code {
   font-size: 0.75rem;
   padding: 0.3rem 0.55rem !important;
 }
+/* ---- Thinking strip (flat, not a nested box) ---- */
+.message-feed .thinking-panel {
+  width: 100%;
+  max-width: 100%;
+  border-left: 2px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  padding-left: 0.55rem;
+  margin-left: 0.05rem;
+}
+.message-feed .thinking-panel-toggle {
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0.2rem 0;
+  letter-spacing: 0.04em;
+}
+.message-feed .thinking-panel-toggle:hover {
+  color: var(--text-secondary);
+}
+.message-feed .thinking-panel-body {
+  padding: 0.4rem 0 0.55rem;
+  font-size: 0.78rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  max-height: min(55vh, 28rem);
+  overflow-y: auto;
+  color: var(--text-secondary);
+  line-height: 1.55;
+  font-style: italic;
+  opacity: 0.92;
+}
+/* Full / Full+: full thinking visible — tall scroll, not truncated content */
+.message-feed .thinking-panel-body-full {
+  max-height: min(80vh, 48rem);
+  font-style: normal;
+  opacity: 1;
+}
+
+/* ---- Meta labels ---- */
+.message-feed .chat-meta-label {
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.message-feed .chat-meta-time {
+  font-size: 0.62rem;
+  color: var(--text-muted);
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.message-feed .group:hover .chat-meta-time {
+  opacity: 1;
+}
+
+/* ---- Assistant prose polish ---- */
 .message-feed .message-body {
   overflow-wrap: anywhere;
   word-break: break-word;
   color: inherit;
-  line-height: var(--chat-line-height, 1.45);
-  /* Prevent prose/block children from stretching the bubble wider than content */
-  width: fit-content;
+  line-height: var(--chat-line-height, 1.55);
+  width: 100%;
   max-width: 100%;
+  letter-spacing: 0.005em;
+}
+.message-feed .chat-bubble-user .message-body {
+  width: fit-content;
+  line-height: 1.45;
 }
 .message-feed .message-body > *:not(pre):not(.code-block):not(table):not(ul):not(ol):not(blockquote) {
-  width: fit-content;
   max-width: 100%;
 }
-/* Long code / tables may grow up to the bubble max */
+.message-feed .stream-plain {
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.message-feed .stream-caret {
+  display: inline-block;
+  margin-left: 1px;
+  color: var(--accent);
+  animation: remedy-caret-blink 1s steps(1) infinite;
+  opacity: 0.85;
+  font-weight: 400;
+}
+@keyframes remedy-caret-blink {
+  50% { opacity: 0; }
+}
+.message-feed .chat-empty-placeholder {
+  color: var(--text-muted);
+  font-size: 0.9em;
+}
+.message-feed .chat-inline-code {
+  background: var(--bg-tertiary);
+  padding: 0.12em 0.4em;
+  border-radius: 4px;
+  font-size: 0.88em;
+  font-family: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', ui-monospace, monospace;
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+}
+.message-feed .chat-inline-code.user {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.14);
+}
+.message-feed .chat-img {
+  max-width: 100%;
+  border-radius: 10px;
+  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
+  border: 1px solid var(--border);
+  display: block;
+}
 .message-feed .message-body pre,
 .message-feed .message-body .code-block,
 .message-feed .message-body table {
-  max-width: min(100%, 36rem);
+  max-width: 100%;
+  width: 100%;
 }
 .message-feed .message-body p {
-  margin: 0.25em 0;
+  margin: 0.4em 0;
 }
 .message-feed .message-body p:first-child {
   margin-top: 0;
@@ -434,40 +544,50 @@ pre code {
 }
 .message-feed .message-body ul,
 .message-feed .message-body ol {
-  margin: 0.4em 0 0.4em 1.15rem;
+  margin: 0.5em 0 0.5em 1.25rem;
   padding: 0;
 }
 .message-feed .message-body li {
-  margin: 0.2em 0;
+  margin: 0.28em 0;
+  line-height: 1.5;
 }
 .message-feed .message-body li > p {
   margin: 0.15em 0;
 }
+.message-feed .message-body strong {
+  font-weight: 600;
+  color: inherit;
+}
+.message-feed .message-body em {
+  font-style: italic;
+  color: color-mix(in srgb, var(--text-primary) 92%, var(--text-secondary));
+}
 .message-feed .message-body blockquote {
-  margin: 0.5em 0;
-  padding: 0.35em 0.75em;
+  margin: 0.65em 0;
+  padding: 0.45em 0.85em;
   border-left: 3px solid var(--accent);
-  background: color-mix(in srgb, var(--bg-tertiary) 80%, transparent);
-  border-radius: 0 6px 6px 0;
+  background: color-mix(in srgb, var(--bg-tertiary) 70%, transparent);
+  border-radius: 0 8px 8px 0;
   color: var(--text-secondary);
 }
 .message-feed .message-body hr {
   border: none;
   border-top: 1px solid var(--border);
-  margin: 0.75em 0;
+  margin: 0.9em 0;
 }
 .message-feed .message-body table {
   width: 100%;
   border-collapse: collapse;
-  margin: 0.6em 0;
-  font-size: 0.85em;
+  margin: 0.7em 0;
+  font-size: 0.88em;
   display: block;
   overflow-x: auto;
+  border-radius: 8px;
 }
 .message-feed .message-body th,
 .message-feed .message-body td {
   border: 1px solid var(--border);
-  padding: 0.35em 0.55em;
+  padding: 0.4em 0.6em;
   text-align: left;
 }
 .message-feed .message-body th {
@@ -477,6 +597,7 @@ pre code {
 .message-feed .message-body a {
   text-decoration: none;
   color: var(--accent);
+  font-weight: 500;
 }
 .message-feed .chat-bubble-user .message-body a {
   color: inherit;
@@ -492,42 +613,51 @@ pre code {
 .message-feed .message-body h2,
 .message-feed .message-body h3,
 .message-feed .message-body h4 {
-  margin: 0.75em 0 0.35em;
-  line-height: 1.3;
-  font-weight: 600;
+  margin: 0.9em 0 0.4em;
+  line-height: 1.28;
+  font-weight: 650;
+  letter-spacing: -0.01em;
   color: inherit;
 }
-.message-feed .message-body h1 { font-size: 1.2em; }
-.message-feed .message-body h2 { font-size: 1.1em; }
+.message-feed .message-body h1:first-child,
+.message-feed .message-body h2:first-child,
+.message-feed .message-body h3:first-child {
+  margin-top: 0.15em;
+}
+.message-feed .message-body h1 { font-size: 1.22em; }
+.message-feed .message-body h2 { font-size: 1.12em; }
 .message-feed .message-body h3 { font-size: 1.05em; }
 
 /* Code blocks with toolbar */
 .message-feed .code-block {
-  margin: 0.55rem 0;
-  border-radius: 8px;
+  margin: 0.65rem 0;
+  border-radius: 10px;
   border: 1px solid var(--border);
   background: var(--bg-primary);
   overflow: hidden;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
 }
 .message-feed .code-block-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
-  padding: 0.3rem 0.55rem;
+  padding: 0.35rem 0.65rem;
   background: var(--bg-tertiary);
   border-bottom: 1px solid var(--border);
   font-size: 0.68rem;
   color: var(--text-muted);
   font-family: ui-sans-serif, system-ui, sans-serif;
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
 }
 .message-feed .code-block-header button {
   appearance: none;
   border: 1px solid var(--border);
   background: var(--bg-secondary);
   color: var(--text-secondary);
-  border-radius: 4px;
-  padding: 0.15rem 0.45rem;
+  border-radius: 5px;
+  padding: 0.15rem 0.5rem;
   font-size: 0.65rem;
   cursor: pointer;
   line-height: 1.3;
@@ -541,12 +671,17 @@ pre code {
   border: none;
   border-radius: 0;
   background: transparent;
-  padding: 0.75rem 0.85rem;
+  padding: 0.8rem 0.9rem;
+  font-size: 0.82em;
+  line-height: 1.45;
 }
 .message-feed .chat-bubble pre {
   background: var(--bg-tertiary);
   border-color: var(--border);
   color: var(--text-primary);
+}
+.message-feed .process-under-answer {
+  min-width: 0;
 }
 .message-feed .chat-bubble-user .code-block {
   background: rgba(0, 0, 0, 0.18);
@@ -653,18 +788,6 @@ pre code {
 .message-feed .chat-bubble-user .diff-line-del {
   color: #ffa198;
   background: rgba(248, 81, 73, 0.2);
-}
-
-/* Streaming caret */
-.message-feed .stream-caret {
-  display: inline-block;
-  width: 0.45em;
-  height: 1em;
-  margin-left: 1px;
-  vertical-align: text-bottom;
-  background: var(--accent);
-  border-radius: 1px;
-  animation: remedy-caret-blink 1s step-end infinite;
 }
 
 /* Empty-state chips */

@@ -8,6 +8,7 @@ Canonical list for Remedy Desktop. Also shown under **Settings → Help & shortc
 |------|--------|
 | **Enter** | Send message |
 | **Shift+Enter** | Insert a new line |
+| **Shift+Tab** | Toggle Plan / Build mode |
 | **↑** | Previous prompt (when appropriate) |
 | **↓** | Next prompt while browsing history |
 

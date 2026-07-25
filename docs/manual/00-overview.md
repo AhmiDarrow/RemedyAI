@@ -62,7 +62,7 @@ Nothing in this architecture requires a Remedy cloud account. Chat content goes 
 - **Enter** sends · **Shift+Enter** new line · **↑/↓** prompt history  
 - **@** attach project files · **/** slash commands  
 - **Plan** mode explores without editing · **Build** can change files  
-- **Proc** on the status bar controls tool-process detail (Off / Medium / Full)  
+- Status bar **Min / Med / Full / Full+** controls tool-process detail (answer always full)  
 - Data lives under `C:\Users\<you>\.remedy` on Windows  
 
 Continue with [Install (Windows)](01-install-windows) or jump to [Troubleshooting](09-troubleshooting) if something already failed.

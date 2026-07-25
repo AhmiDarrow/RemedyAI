@@ -49,7 +49,7 @@ force-promote.
 
 - Chat bubbles: user right / Remedy left (theme tokens); sleek shrink-wrap; user name/initials
 - Stick-to-bottom feed (tokens, thinking, tools); **↓** if you scrolled up
-- **Tool process**: Off / Medium / Full (status bar **Proc** + Settings)
+- **Tool process**: Min / Med / Full / Full+ (status bar + Settings; answer always full)
 - Prompt history: ↑ / ↓ in the composer
 - Title-bar wordmark menu: Settings, About, Updates; session avatars use circuit-R
 - Settings: your name, agent name, persona, project browse, scope, harness, themes, density, accent

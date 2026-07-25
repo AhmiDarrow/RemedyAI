@@ -64,6 +64,11 @@ export const HOTKEYS: HotkeyDef[] = [
     match: { key: 'b', ctrl: true },
   },
   {
+    keys: 'Shift+Tab',
+    scope: 'composer',
+    action: 'Toggle Plan / Build mode',
+  },
+  {
     keys: 'Ctrl+,',
     scope: 'global',
     action: 'Open settings',

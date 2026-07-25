@@ -1138,9 +1138,12 @@ export function SettingsPanel({
               summary="Visibility of tool steps"
             >
               <div className="text-[10px] leading-snug mb-2" style={{ color: 'var(--text-muted)' }}>
-                How much of the tool trail to show in chat. Default is Off (minimal).
-                <strong style={{ color: 'var(--text-secondary)' }}> Full+</strong> also shows
-                advanced continuity diagnostics (session quality, internal activity).
+                Controls the <em>tool trail</em> only — the model&apos;s chat answer is always
+                complete (never truncated by this setting).{' '}
+                <strong style={{ color: 'var(--text-secondary)' }}>Full</strong> expands thinking
+                and shows complete raw args/results.{' '}
+                <strong style={{ color: 'var(--text-secondary)' }}>Full+</strong> adds advanced
+                continuity diagnostics.
               </div>
               <div className="flex gap-1 mb-1 flex-wrap">
                 {TOOL_PROCESS_MODES.map((m) => (

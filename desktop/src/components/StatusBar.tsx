@@ -5,7 +5,11 @@ import type { ConnectedProvider } from '../api/providers'
 import { ThemeSwitcher } from './ThemeSwitcher'
 import type { ThemeId, Theme } from '../themes'
 import type { ModelInfo } from '../App'
-import type { ToolProcessMode } from '../utils/toolLabels'
+import {
+  isFullProcessMode,
+  TOOL_PROCESS_CYCLE,
+  type ToolProcessMode,
+} from '../utils/toolLabels'
 
 export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high'
 export type ApprovalMode = 'ask' | 'auto'
@@ -683,18 +687,20 @@ export function StatusBar({
           <button
             type="button"
             onClick={() => {
-              const order: ToolProcessMode[] = ['off', 'medium', 'full']
-              const i = order.indexOf(toolProcessMode)
-              const next = order[(i + 1) % order.length]!
+              const i = TOOL_PROCESS_CYCLE.indexOf(toolProcessMode)
+              const next =
+                TOOL_PROCESS_CYCLE[(i >= 0 ? i + 1 : 0) % TOOL_PROCESS_CYCLE.length]!
               onToolProcessChange?.(next)
             }}
             className="px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide"
             title={
               toolProcessMode === 'off'
-                ? 'Tool process: Off (minimal) — click for Medium'
+                ? 'Min — answer always full · process chips only (click → Med)'
                 : toolProcessMode === 'medium'
-                  ? 'Tool process: Medium — click for Full'
-                  : 'Tool process: Full — click for Off'
+                  ? 'Med — tool labels + short previews (click → Full)'
+                  : toolProcessMode === 'full'
+                    ? 'Full — all model process output, nothing truncated (click → Full+)'
+                    : 'Full+ — full raw + advanced diagnostics (click → Min)'
             }
             aria-label={`Tool process ${toolProcessMode}`}
             style={{
@@ -702,14 +708,20 @@ export function StatusBar({
                 toolProcessMode === 'off'
                   ? 'var(--bg-tertiary)'
                   : toolProcessMode === 'medium'
-                    ? 'color-mix(in srgb, var(--accent) 20%, var(--bg-tertiary))'
+                    ? 'color-mix(in srgb, var(--accent) 22%, var(--bg-tertiary))'
                     : 'var(--accent)',
-              color: toolProcessMode === 'full' ? '#fff' : 'var(--text-secondary)',
+              color: isFullProcessMode(toolProcessMode) ? '#fff' : 'var(--text-secondary)',
               border: `1px solid ${toolProcessMode === 'off' ? 'var(--border)' : 'var(--accent)'}`,
-              minWidth: 36,
+              minWidth: 40,
             }}
           >
-            {toolProcessMode === 'off' ? 'Proc' : toolProcessMode === 'medium' ? 'Med' : 'Full'}
+            {toolProcessMode === 'off'
+              ? 'Min'
+              : toolProcessMode === 'medium'
+                ? 'Med'
+                : toolProcessMode === 'full+'
+                  ? 'Full+'
+                  : 'Full'}
           </button>
 
           <ThemeSwitcher currentId={themeId} currentTheme={theme} onChange={onThemeChange} />

@@ -2,7 +2,13 @@
 
 High-level product notes for owners. Full detail lives in repo `CHANGELOG.md`.
 
-Ship **one** installer/tag for the current series (**v0.11.4**).
+Ship **one** installer/tag for the current series (**v0.11.5**).
+
+## 0.11.5 — Never miss model output · stuck-kick fix
+
+- **Tool process**: Min / Med / Full / Full+ — chat answer always complete; Full shows all process output expanded.
+- **Stuck “proceed”**: short action kicks enable tools again; Plan auto-exits on proceed/build language.
+- Composer typable while streaming; Shift+Tab Plan/Build; polished assistant chat look.
 
 ## 0.11.4 — NanoToken BPE v2 + tool polish
 

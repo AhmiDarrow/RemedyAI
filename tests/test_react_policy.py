@@ -24,6 +24,27 @@ def test_message_wants_tools_chat_vs_code() -> None:
     assert message_wants_tools("please review the codebase architecture") is True
 
 
+def test_message_wants_tools_action_kicks() -> None:
+    """Session stuck log: short proceed/continue must enable tools (not force_answer)."""
+    for msg in (
+        "proceed",
+        "proceed with all fixes",
+        "continue",
+        "go ahead",
+        "do it",
+        "keep going",
+        "you may proceed out of plan mode",
+        "it doesn't look like you are doing anything",
+        "switch to build",
+        "leave plan mode",
+    ):
+        assert message_wants_tools(msg) is True, msg
+    # Still skip pure chit-chat
+    assert message_wants_tools("hi") is False
+    assert message_wants_tools("thanks") is False
+    assert message_wants_tools("ok") is False
+
+
 def test_pseudo_tool_parse_and_log(caplog) -> None:
     text = 'file_read("README.md") && list_dir("src")'
     assert looks_like_pseudo_tools(text)
