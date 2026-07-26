@@ -35,7 +35,7 @@ def _primary_domain(tags: list[str]) -> str:
     """Bucket skills for readable grouping."""
     tags_l = [t.lower() for t in tags]
     order = [
-        ("gaming", ("gaming", "combat", "level-design", "liveops", "narrative", "multiplayer")),
+        ("gaming", ("gaming", "combat", "level-design", "liveops", "narrative", "multiplayer", "godot", "gdscript", "engine")),
         ("design", ("design", "ui", "ux", "art", "brand", "print", "creative")),
         ("content", ("content", "writing", "marketing", "video", "audio", "social", "comms", "community", "seo")),
         ("personal", ("personal", "productivity", "habits", "career", "wellness", "home", "travel", "food", "fitness", "learning", "social", "finance", "planning", "privacy")),

@@ -1,6 +1,6 @@
 # Skills list
 
-_Auto-generated from `skills/*/SKILL.md` — **280** skills. Last updated: 2026-07-26 22:58 UTC. Do not edit by hand; run `python scripts/generate_skills_list.py` or `python scripts/build_catalog.py`._
+_Auto-generated from `skills/*/SKILL.md` — **281** skills. Last updated: 2026-07-26 23:01 UTC. Do not edit by hand; run `python scripts/generate_skills_list.py` or `python scripts/build_catalog.py`._
 
 ## Summary by area
 
@@ -12,7 +12,7 @@ _Auto-generated from `skills/*/SKILL.md` — **280** skills. Last updated: 2026-
 | design | 45 |
 | docs | 5 |
 | frontend | 7 |
-| gaming | 34 |
+| gaming | 35 |
 | git | 10 |
 | llm | 3 |
 | ops | 14 |
@@ -22,7 +22,7 @@ _Auto-generated from `skills/*/SKILL.md` — **280** skills. Last updated: 2026-
 | testing | 13 |
 | tooling | 18 |
 
-| **Total** | **280** |
+| **Total** | **281** |
 
 ## Backend
 
@@ -202,6 +202,7 @@ _Auto-generated from `skills/*/SKILL.md` — **280** skills. Last updated: 2026-
 | [`game-tutorial-flow`](skills/game-tutorial-flow/SKILL.md) | Design an onboarding/tutorial that teaches verbs in context with skip options. |
 | [`game-ui-hud`](skills/game-ui-hud/SKILL.md) | Design HUD/information architecture: diegetic vs non-diegetic, clutter budget, combat readability. |
 | [`game-vfx-checklist`](skills/game-vfx-checklist/SKILL.md) | Define VFX readability and performance budgets for abilities and environments. |
+| [`godot-game-engine`](skills/godot-game-engine/SKILL.md) | Build and debug games in Godot Engine 4.7.1: project layout, scenes/nodes, typed GDScript, signals, resources, input, physics, export, and common pitfalls. |
 | [`level-design-brief`](skills/level-design-brief/SKILL.md) | Produce a level design brief: layout goals, encounters, pacing, and greybox checklist. |
 | [`loot-table-design`](skills/loot-table-design/SKILL.md) | Design loot tables with drop rates, pity systems, and economy safety. |
 | [`multiplayer-session-design`](skills/multiplayer-session-design/SKILL.md) | Design multiplayer session flow: matchmaking intent, disconnects, host migration, fairness. |
@@ -513,6 +514,7 @@ _Auto-generated from `skills/*/SKILL.md` — **280** skills. Last updated: 2026-
 - [`git-bisect-helper`](skills/git-bisect-helper/SKILL.md) — Drive git bisect with a clear good/bad test command to find a regression-introducing commit.
 - [`go-module-hygiene`](skills/go-module-hygiene/SKILL.md) — Tidy Go modules and verify reproducible builds/tests.
 - [`goal-breakdown`](skills/goal-breakdown/SKILL.md) — Break a large goal into milestones, weekly outcomes, and first concrete actions.
+- [`godot-game-engine`](skills/godot-game-engine/SKILL.md) — Build and debug games in Godot Engine 4.7.1: project layout, scenes/nodes, typed GDScript, signals, resources, input, ph…
 - [`graceful-shutdown`](skills/graceful-shutdown/SKILL.md) — Implement SIGTERM-aware graceful shutdown and drain for servers/workers.
 - [`graphql-schema-review`](skills/graphql-schema-review/SKILL.md) — Review GraphQL schemas/resolvers for authz, N+1, pagination, and deprecations.
 - [`gratitude-practice`](skills/gratitude-practice/SKILL.md) — Set up a short gratitude practice with prompts and streak-free consistency tips.
