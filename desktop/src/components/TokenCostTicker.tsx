@@ -65,14 +65,15 @@ export function TokenCostTicker({
     }
   }, [hideCost])
 
-  const runTok = run?.total_tokens ?? 0
-  const runCost = run?.estimated_cost_usd ?? 0
-  const sessTok = session?.total_tokens ?? 0
-  const sessCost = session?.estimated_cost_usd ?? 0
+  const runTok = Math.max(0, Math.round(run?.total_tokens ?? 0))
+  const runCost = Number(run?.estimated_cost_usd ?? 0) || 0
+  const sessTok = Math.max(0, Math.round(session?.total_tokens ?? 0))
+  const sessCost = Number(session?.estimated_cost_usd ?? 0) || 0
   const src = run?.source === 'provider' ? 'API' : 'est.'
-  const hasData = runTok > 0 || sessTok > 0 || streaming
+  // Always show something meaningful while streaming (even before first token).
+  const hasData = runTok > 0 || sessTok > 0 || streaming || (run?.completion_tokens ?? 0) > 0
   const isSidebar = placement === 'sidebar'
-  const displayTok = streaming ? runTok : sessTok || runTok
+  const displayTok = streaming ? Math.max(runTok, run?.completion_tokens ?? 0) : sessTok || runTok
   const displayCost = streaming ? runCost : sessCost || runCost
 
   if (hidden) {

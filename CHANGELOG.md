@@ -2,6 +2,22 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.14.5] — 2026-07-26
+
+### UX: stream queue, live usage, sticky answer, export speed
+
+- **Send while streaming:** Enter queues the next prompt; Ctrl+Enter (or
+  right-click Send) **interrupts** and sends now. Queue bar supports After /
+  Interrupt / Cancel / Clear.
+- **Sticky live dock:** thinking + final answer stay pinned at the bottom of
+  the chat while tool process dumps stay capped above.
+- **Token ticker:** live estimate from partial tokens while streaming; correct
+  **grok-4.5** pricing (was matched as grok-4); better session estimates.
+- **Export/import:** yield UI before work; strip base64 images + cap message
+  bodies; Save dialog picks path then Rust writes (no multi-MB PowerShell copy).
+- **Chat monogram:** `public/icon.png` / favicon / logo regenerated from alpha
+  `assets/remedy_icon.png` (true RGBA).
+
 ## [0.14.4] — 2026-07-25
 
 ### Fix: brand assets in UI + silent autoupdate host

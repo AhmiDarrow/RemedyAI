@@ -94,13 +94,31 @@ preview; if only *generated* previews fail, it is almost always path/scope.
 ## Session Export does nothing / no file
 
 On desktop, Export uses a **native Save dialog** (0.14.3+). If you cancel the
-dialog, nothing is written (expected).
+dialog, nothing is written (expected). Large sessions (0.14.5+) strip embedded
+images and cap huge tool dumps so the machine does not freeze.
 
 | Check | Fix |
 |-------|-----|
 | Old WebView-only download | Update to **0.14.4+** |
 | Empty session | Export needs at least one stored message |
+| UI freezes on export | Update to **0.14.5+** (capped export + async write) |
 | API error toast | Confirm Connected status; check `remedy.log` for `/export` |
+
+## Cannot send while Remedy is streaming
+
+As of **0.14.5** you can type and send during a turn:
+
+| Action | Effect |
+|--------|--------|
+| **Enter** | Queue message for after the current turn |
+| **Ctrl+Enter** (or right-click Send) | Stop current turn and send immediately |
+| Queue bar | Interrupt / After / Cancel / Clear all |
+
+## Usage ticker stuck on idle / $0
+
+Live run counts use streaming partials until the provider reports usage.
+Session totals use message length estimates when token metadata is missing.
+**0.14.5** fixes Grok 4.5 pricing match order and live estimates.
 
 ## Update shows black CMD windows
 

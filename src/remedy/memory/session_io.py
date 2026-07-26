@@ -78,6 +78,32 @@ def safe_filename_stem(title: str, max_len: int = 60) -> str:
     return safe[:max_len]
 
 
+# Cap huge tool dumps / data-URIs so export does not freeze UI or fill RAM.
+_EXPORT_CONTENT_CAP = 120_000
+
+
+def _export_content(content: str, *, cap: int = _EXPORT_CONTENT_CAP) -> str:
+    if not content:
+        return ""
+    # Strip inline base64 images (common in comfyui / previews) — keep a stub.
+    cleaned = re.sub(
+        r"!\[[^\]]*\]\(data:image/[^)]+\)",
+        "![image omitted in export]",
+        content,
+    )
+    cleaned = re.sub(
+        r"data:image/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=\s]{200,}",
+        "[base64 image omitted]",
+        cleaned,
+    )
+    if len(cleaned) <= cap:
+        return cleaned.rstrip("\n")
+    return (
+        cleaned[:cap].rstrip("\n")
+        + f"\n\n…[export truncated {len(cleaned) - cap} chars]"
+    )
+
+
 def format_session_txt(
     *,
     title: str,
@@ -124,8 +150,9 @@ def format_session_txt(
             meta_bits.append(f"at={str(created)[:19]}")
         if meta_bits:
             lines.append(f"# {' | '.join(meta_bits)}")
-        if content:
-            lines.append(content.rstrip("\n"))
+        body = _export_content(content)
+        if body:
+            lines.append(body)
         lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"
@@ -167,8 +194,9 @@ def format_session_markdown(
             header += f" `{str(created)[:19]}`"
         lines.append(header)
         lines.append("")
-        if content:
-            lines.append(content)
+        body = _export_content(content)
+        if body:
+            lines.append(body)
             lines.append("")
         lines.append("---")
         lines.append("")

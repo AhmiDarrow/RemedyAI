@@ -33,12 +33,28 @@ export type SendAttachment = {
   is_text?: boolean
 }
 
+export type ComposerQueuedItem = {
+  id: string
+  text: string
+  mode: 'after' | 'interrupt'
+}
+
 interface ComposerProps {
-  onSend: (text: string, attachments?: SendAttachment[]) => void
+  onSend: (
+    text: string,
+    attachments?: SendAttachment[],
+    opts?: { mode?: 'after' | 'interrupt' },
+  ) => void
   onStop: () => void
   onCommand: (command: string) => void
   streaming: boolean
   disabled: boolean
+  /** Pending prompts while a turn is in flight. */
+  queue?: ComposerQueuedItem[]
+  onCancelQueued?: (id: string) => void
+  onClearQueue?: () => void
+  onPromoteQueued?: (id: string) => void
+  onUpdateQueued?: (id: string, patch: { text?: string; mode?: 'after' | 'interrupt' }) => void
   planMode?: boolean
   /** Shift+Tab toggles Plan ↔ Build (composer-focused). */
   onTogglePlanMode?: () => void
@@ -129,6 +145,11 @@ export function Composer({
   onCommand,
   streaming,
   disabled,
+  queue = [],
+  onCancelQueued,
+  onClearQueue,
+  onPromoteQueued,
+  onUpdateQueued,
   planMode,
   onTogglePlanMode,
   agents = [],
@@ -516,42 +537,48 @@ export function Composer({
     draftBeforeHistoryRef.current = ''
   }, [])
 
-  const handleSubmit = useCallback(() => {
-    const text = input.trim()
-    if ((!text && attachments.length === 0) || streaming || disabled || uploading) return
-    if (submittingRef.current) return
-    submittingRef.current = true
-    try {
-      if (text) pushPromptHistory(text)
-      if (text.startsWith('/') && attachments.length === 0) {
-        onCommand(text)
-      } else {
-        const payload = attachments.map((a) => ({
-          path: a.path,
-          name: a.name,
-          mime: a.mime,
-          size: a.size,
-          is_image: a.is_image,
-          is_text: a.is_text,
-        }))
-        onSend(text, payload.length ? payload : undefined)
+  const handleSubmit = useCallback(
+    (mode: 'after' | 'interrupt' = 'after') => {
+      const text = input.trim()
+      if ((!text && attachments.length === 0) || disabled || uploading) return
+      // Commands still require a quiet moment (no concurrent turn side-effects).
+      if (text.startsWith('/') && attachments.length === 0 && streaming) return
+      if (submittingRef.current) return
+      submittingRef.current = true
+      try {
+        if (text) pushPromptHistory(text)
+        if (text.startsWith('/') && attachments.length === 0) {
+          onCommand(text)
+        } else {
+          const payload = attachments.map((a) => ({
+            path: a.path,
+            name: a.name,
+            mime: a.mime,
+            size: a.size,
+            is_image: a.is_image,
+            is_text: a.is_text,
+          }))
+          // Streaming: queue (after) or interrupt depending on mode.
+          onSend(text, payload.length ? payload : undefined, streaming ? { mode } : undefined)
+        }
+        setInput('')
+        historyIndexRef.current = -1
+        draftBeforeHistoryRef.current = ''
+        for (const a of attachments) {
+          if (a.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(a.previewUrl)
+        }
+        setAttachments([])
+        setUploadError('')
+        setAttachNotice('')
+        seenDropKeysRef.current.clear()
+      } finally {
+        requestAnimationFrame(() => {
+          submittingRef.current = false
+        })
       }
-      setInput('')
-      historyIndexRef.current = -1
-      draftBeforeHistoryRef.current = ''
-      for (const a of attachments) {
-        if (a.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(a.previewUrl)
-      }
-      setAttachments([])
-      setUploadError('')
-      setAttachNotice('')
-      seenDropKeysRef.current.clear()
-    } finally {
-      requestAnimationFrame(() => {
-        submittingRef.current = false
-      })
-    }
-  }, [input, attachments, onSend, onCommand, streaming, disabled, uploading, pushPromptHistory])
+    },
+    [input, attachments, onSend, onCommand, streaming, disabled, uploading, pushPromptHistory],
+  )
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -622,7 +649,12 @@ export function Composer({
 
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault()
-        handleSubmit()
+        // Ctrl/Cmd+Enter while streaming → interrupt; plain Enter → queue after.
+        if (streaming && (e.ctrlKey || e.metaKey)) {
+          handleSubmit('interrupt')
+        } else {
+          handleSubmit(streaming ? 'after' : 'after')
+        }
       }
     },
     [
@@ -634,6 +666,7 @@ export function Composer({
       input,
       applyHistoryEntry,
       onTogglePlanMode,
+      streaming,
     ],
   )
 
@@ -788,7 +821,11 @@ export function Composer({
   }, [streaming])
 
   const canSend =
-    !disabled && !streaming && !uploading && (Boolean(input.trim()) || attachments.length > 0)
+    !disabled &&
+    !uploading &&
+    (Boolean(input.trim()) || attachments.length > 0) &&
+    // Slash commands still wait until the current turn ends.
+    !(streaming && input.trim().startsWith('/'))
 
   return (
     <div
@@ -799,6 +836,87 @@ export function Composer({
       onDragOver={onDragOver}
       onDrop={onDrop}
     >
+      {queue.length > 0 && (
+        <div
+          className="mb-2 rounded-lg border px-2 py-1.5 space-y-1"
+          style={{
+            borderColor: 'var(--border)',
+            background: 'var(--bg-primary)',
+          }}
+        >
+          <div className="flex items-center justify-between gap-2">
+            <span
+              className="text-[10px] font-semibold uppercase tracking-wide"
+              style={{ color: 'var(--text-muted)' }}
+            >
+              Queue · {queue.length}
+            </span>
+            {onClearQueue && (
+              <button
+                type="button"
+                className="text-[10px] px-1.5 py-0.5 rounded"
+                style={{ color: 'var(--error)' }}
+                onClick={() => onClearQueue()}
+              >
+                Clear all
+              </button>
+            )}
+          </div>
+          {queue.map((q, idx) => (
+            <div
+              key={q.id}
+              className="flex items-start gap-1.5 text-xs rounded px-1.5 py-1"
+              style={{ background: 'var(--bg-secondary)' }}
+            >
+              <span style={{ color: 'var(--text-muted)' }} className="shrink-0 pt-0.5">
+                {idx + 1}.
+              </span>
+              <div className="flex-1 min-w-0">
+                <div className="truncate" style={{ color: 'var(--text-primary)' }} title={q.text}>
+                  {q.text || '(attachments)'}
+                </div>
+                <div className="flex flex-wrap gap-1 mt-0.5">
+                  <button
+                    type="button"
+                    className="px-1.5 py-0.5 rounded text-[10px]"
+                    style={{
+                      background:
+                        q.mode === 'after' ? 'var(--accent)' : 'var(--bg-tertiary)',
+                      color: q.mode === 'after' ? '#fff' : 'var(--text-secondary)',
+                    }}
+                    title="Send after current turn finishes"
+                    onClick={() => onUpdateQueued?.(q.id, { mode: 'after' })}
+                  >
+                    After
+                  </button>
+                  <button
+                    type="button"
+                    className="px-1.5 py-0.5 rounded text-[10px]"
+                    style={{
+                      background:
+                        q.mode === 'interrupt' ? 'var(--warning)' : 'var(--bg-tertiary)',
+                      color: q.mode === 'interrupt' ? '#111' : 'var(--text-secondary)',
+                    }}
+                    title="Interrupt current turn and send now"
+                    onClick={() => onPromoteQueued?.(q.id)}
+                  >
+                    Interrupt
+                  </button>
+                  <button
+                    type="button"
+                    className="px-1.5 py-0.5 rounded text-[10px]"
+                    style={{ color: 'var(--error)' }}
+                    onClick={() => onCancelQueued?.(q.id)}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {dragOver && (
         <div
           className="absolute inset-2 z-20 rounded-lg flex items-center justify-center pointer-events-none"
@@ -1059,7 +1177,7 @@ export function Composer({
             planMode
               ? 'Plan mode — explore & plan (Shift+Tab → Build)'
               : streaming
-                ? 'Type anytime — Stop to send next message…'
+                ? 'Send to queue (Enter) · Ctrl+Enter interrupt…'
                 : attachments.length
                   ? 'Message (optional)…'
                   : 'Message, /command, @file… (Shift+Tab Plan/Build)'
@@ -1067,7 +1185,7 @@ export function Composer({
           disabled={disabled}
           title={
             streaming
-              ? 'You can keep typing while Remedy works. Stop generation to send.'
+              ? 'Enter queues after this turn. Ctrl+Enter interrupts and sends now.'
               : planMode
                 ? 'Plan mode: planning tools only. Shift+Tab switches to Build.'
                 : undefined
@@ -1089,9 +1207,20 @@ export function Composer({
 
         <button
           type="button"
-          onClick={handleSubmit}
+          onClick={() => handleSubmit(streaming ? 'after' : 'after')}
+          onContextMenu={(e) => {
+            if (!streaming || !canSend) return
+            e.preventDefault()
+            handleSubmit('interrupt')
+          }}
           disabled={!canSend}
-          title={uploading ? 'Uploading…' : 'Send'}
+          title={
+            uploading
+              ? 'Uploading…'
+              : streaming
+                ? 'Queue after current turn (right-click or Ctrl+Enter to interrupt)'
+                : 'Send'
+          }
           aria-label="Send"
           className="flex items-center justify-center rounded-xl flex-shrink-0 transition-colors"
           style={{

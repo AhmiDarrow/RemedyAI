@@ -13,6 +13,24 @@ import { emptyUsage, type UsageSnapshot } from '../utils/tokenCost'
 
 export type ActiveTool = { name: string; status: 'running' | 'done' | 'error' }
 
+export type QueuedSend = {
+  id: string
+  text: string
+  model?: string
+  sid?: string
+  attachments?: {
+    path: string
+    name?: string
+    mime?: string
+    size?: number
+    is_image?: boolean
+    is_text?: boolean
+  }[]
+  planMode?: boolean
+  /** after = wait for current turn; interrupt = stop current then send */
+  mode: 'after' | 'interrupt'
+}
+
 export function useMessages(sessionId: string | null) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [loading, setLoading] = useState(false)
@@ -24,14 +42,30 @@ export function useMessages(sessionId: string | null) {
   const [taskProgress, setTaskProgress] = useState<StreamProgress | null>(null)
   const [runUsage, setRunUsage] = useState<UsageSnapshot | null>(null)
   const [streamCtrl, setStreamCtrl] = useState<AbortController | null>(null)
+  const [queue, setQueue] = useState<QueuedSend[]>([])
   const streamingRef = useRef(false)
   const sendLockRef = useRef(false)
   const processStepsRef = useRef<ProcessStep[]>([])
+  const queueRef = useRef<QueuedSend[]>([])
+  const streamCtrlRef = useRef<AbortController | null>(null)
+  /** Avoid re-entrant auto-drain while finishing a turn. */
+  const drainingRef = useRef(false)
   /** RAF-batched stream text (avoids re-render every token). */
   const partialBufRef = useRef('')
   const partialRafRef = useRef<number | null>(null)
   const thinkingBufRef = useRef('')
   const thinkingRafRef = useRef<number | null>(null)
+  /** Latest sendTurn for queue drain (avoids stale closures). */
+  const sendTurnRef = useRef<
+    | ((
+        text: string,
+        model?: string,
+        sid?: string,
+        attachments?: QueuedSend['attachments'],
+        planMode?: boolean,
+      ) => Promise<void>)
+    | null
+  >(null)
 
   const flushPartialText = useCallback(() => {
     partialRafRef.current = null
@@ -94,7 +128,6 @@ export function useMessages(sessionId: string | null) {
       }
       thinkingRafRef.current = null
     }
-    // Flush any leftover so finish/load sees complete text
     if (partialBufRef.current) {
       const left = partialBufRef.current
       partialBufRef.current = ''
@@ -128,19 +161,33 @@ export function useMessages(sessionId: string | null) {
     load()
   }, [load])
 
-  const send = useCallback(
+  useEffect(() => {
+    queueRef.current = queue
+  }, [queue])
+
+  const drainQueue = useCallback(async () => {
+    if (drainingRef.current || streamingRef.current || sendLockRef.current) return
+    const next = queueRef.current[0]
+    if (!next) return
+    drainingRef.current = true
+    setQueue((q) => q.slice(1))
+    queueRef.current = queueRef.current.slice(1)
+    try {
+      const fn = sendTurnRef.current
+      if (fn) {
+        await fn(next.text, next.model, next.sid, next.attachments, next.planMode)
+      }
+    } finally {
+      drainingRef.current = false
+    }
+  }, [])
+
+  const sendTurn = useCallback(
     async (
       text: string,
       model?: string,
       sid?: string,
-      attachments?: {
-        path: string
-        name?: string
-        mime?: string
-        size?: number
-        is_image?: boolean
-        is_text?: boolean
-      }[],
+      attachments?: QueuedSend['attachments'],
       planMode?: boolean,
     ) => {
       const targetId = sid || sessionId
@@ -195,6 +242,7 @@ export function useMessages(sessionId: string | null) {
         const stepsSnapshot = [...processStepsRef.current]
         setStreaming(false)
         setStreamCtrl(null)
+        streamCtrlRef.current = null
         setPartialText('')
         setPartialThinking('')
         setActiveTools([])
@@ -203,7 +251,6 @@ export function useMessages(sessionId: string | null) {
         sendLockRef.current = false
         try {
           const msgs = await listMessages(targetId)
-          // Ensure last assistant has process data if server omitted it.
           if (stepsSnapshot.length && msgs.length) {
             const last = msgs[msgs.length - 1]
             if (last && last.role === 'assistant') {
@@ -223,10 +270,14 @@ export function useMessages(sessionId: string | null) {
           }
           setMessages(msgs)
         } catch {
-          // keep optimistic state
+          /* keep optimistic */
         }
         setProcessSteps([])
         processStepsRef.current = []
+        // Drain next queued prompt after a tick so React can settle.
+        window.setTimeout(() => {
+          void drainQueue()
+        }, 40)
       }
 
       const finishErr = async (errMsg: string) => {
@@ -235,6 +286,7 @@ export function useMessages(sessionId: string | null) {
         resetStreamBuffers()
         setStreaming(false)
         setStreamCtrl(null)
+        streamCtrlRef.current = null
         setPartialText('')
         setPartialThinking('')
         setActiveTools([])
@@ -259,6 +311,9 @@ export function useMessages(sessionId: string | null) {
             reverted: false,
           },
         ])
+        window.setTimeout(() => {
+          void drainQueue()
+        }, 40)
       }
 
       const pushSteps = (next: ProcessStep[]) => {
@@ -353,16 +408,113 @@ export function useMessages(sessionId: string | null) {
         },
       )
 
+      streamCtrlRef.current = ctrl
       setStreamCtrl(ctrl)
     },
-    [sessionId, appendPartialToken, appendPartialThinking, resetStreamBuffers],
+    [
+      sessionId,
+      appendPartialToken,
+      appendPartialThinking,
+      resetStreamBuffers,
+      drainQueue,
+    ],
+  )
+
+  useEffect(() => {
+    sendTurnRef.current = sendTurn
+  }, [sendTurn])
+
+  const send = useCallback(
+    async (
+      text: string,
+      model?: string,
+      sid?: string,
+      attachments?: QueuedSend['attachments'],
+      planMode?: boolean,
+      opts?: { mode?: 'after' | 'interrupt' },
+    ) => {
+      const hasAtt = Boolean(attachments?.length)
+      if (!text.trim() && !hasAtt) return
+      const targetId = sid || sessionId
+      if (!targetId) return
+
+      // Busy: queue for after current turn, or interrupt now.
+      if (streamingRef.current || sendLockRef.current) {
+        const mode = opts?.mode === 'interrupt' ? 'interrupt' : 'after'
+        const item: QueuedSend = {
+          id: crypto.randomUUID(),
+          text,
+          model,
+          sid: targetId,
+          attachments,
+          planMode,
+          mode,
+        }
+        if (mode === 'interrupt') {
+          // Stop current stream, then send this first (ahead of after-queue).
+          streamCtrlRef.current?.abort()
+          resetStreamBuffers()
+          setStreaming(false)
+          setStreamCtrl(null)
+          streamCtrlRef.current = null
+          setActiveTools([])
+          setTaskProgress(null)
+          streamingRef.current = false
+          sendLockRef.current = false
+          setPartialThinking('')
+          setPartialText((pt) => {
+            if (pt.trim()) {
+              const steps = processStepsRef.current
+              const assistantMsg: ChatMessage = {
+                id: crypto.randomUUID(),
+                role: 'assistant',
+                content: pt,
+                thinking: null,
+                tool_calls: steps.map((s) => ({
+                  name: s.name,
+                  args: s.argsText ? safeParseArgs(s.argsText) : {},
+                })),
+                tool_results: steps.map((s) => ({
+                  name: s.name,
+                  output: s.resultText || '',
+                  error: s.error,
+                })),
+                model: null,
+                agent: null,
+                tokens: null,
+                created_at: new Date().toISOString(),
+                reverted: false,
+              }
+              setMessages((prev) => [...prev, assistantMsg])
+            }
+            return ''
+          })
+          setProcessSteps([])
+          processStepsRef.current = []
+          // Put interrupt item at front
+          setQueue((q) => [item, ...q.filter((x) => x.id !== item.id)])
+          queueRef.current = [item, ...queueRef.current.filter((x) => x.id !== item.id)]
+          window.setTimeout(() => {
+            void drainQueue()
+          }, 50)
+          return
+        }
+        setQueue((q) => [...q, item])
+        return
+      }
+
+      await sendTurn(text, model, sid, attachments, planMode)
+    },
+    [sessionId, sendTurn, resetStreamBuffers, drainQueue],
   )
 
   const stop = useCallback(() => {
+    streamCtrlRef.current?.abort()
     streamCtrl?.abort()
     resetStreamBuffers()
     setStreaming(false)
     setStreamCtrl(null)
+    streamCtrlRef.current = null
     setActiveTools([])
     setTaskProgress(null)
     streamingRef.current = false
@@ -398,6 +550,32 @@ export function useMessages(sessionId: string | null) {
     setProcessSteps([])
     processStepsRef.current = []
   }, [streamCtrl, resetStreamBuffers])
+
+  const cancelQueued = useCallback((id: string) => {
+    setQueue((q) => q.filter((x) => x.id !== id))
+  }, [])
+
+  const clearQueue = useCallback(() => {
+    setQueue([])
+    queueRef.current = []
+  }, [])
+
+  const updateQueued = useCallback((id: string, patch: Partial<QueuedSend>) => {
+    setQueue((q) => q.map((x) => (x.id === id ? { ...x, ...patch } : x)))
+  }, [])
+
+  const promoteQueued = useCallback(
+    (id: string) => {
+      const item = queueRef.current.find((x) => x.id === id)
+      if (!item) return
+      // Interrupt with this message
+      void send(item.text, item.model, item.sid, item.attachments, item.planMode, {
+        mode: 'interrupt',
+      })
+      setQueue((q) => q.filter((x) => x.id !== id))
+    },
+    [send],
+  )
 
   const beginEdit = useCallback(
     async (msgId: string, fallbackContent?: string): Promise<string | null> => {
@@ -480,8 +658,13 @@ export function useMessages(sessionId: string | null) {
     processSteps,
     taskProgress,
     runUsage,
+    queue,
     send,
     stop,
+    cancelQueued,
+    clearQueue,
+    updateQueued,
+    promoteQueued,
     runCommand,
     load,
     addCommandMessage,
@@ -489,11 +672,11 @@ export function useMessages(sessionId: string | null) {
   }
 }
 
-function safeParseArgs(text: string): Record<string, unknown> {
+function safeParseArgs(raw: string): Record<string, unknown> {
   try {
-    const v = JSON.parse(text)
-    return typeof v === 'object' && v && !Array.isArray(v) ? v : { value: v }
+    const v = JSON.parse(raw)
+    return v && typeof v === 'object' ? (v as Record<string, unknown>) : {}
   } catch {
-    return { _raw: text }
+    return { raw }
   }
 }

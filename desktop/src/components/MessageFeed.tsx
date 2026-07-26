@@ -654,7 +654,7 @@ export function MessageFeed({
       })}
 
       {streaming && (
-        <div className="px-3">
+        <div className="px-3 max-h-[28vh] overflow-y-auto">
           <TaskProgress
             streaming={streaming}
             activeTools={activeTools}
@@ -667,28 +667,58 @@ export function MessageFeed({
         </div>
       )}
 
-      {streaming && (partialText || partialThinking || activeTools.length === 0) && (
-        <MessageBubble
-          msg={{
-            id: 'streaming',
-            role: 'assistant',
-            content: '',
-            thinking: null,
-            tool_calls: [],
-            tool_results: [],
-            model: null,
-            agent: null,
-            tokens: null,
-            created_at: '',
-            reverted: false,
+      {/* Live thinking + answer always docked at the visual bottom of the feed. */}
+      {streaming && (
+        <div
+          className="sticky bottom-0 z-20 pt-1 pb-2"
+          style={{
+            background:
+              'linear-gradient(180deg, transparent 0%, var(--bg-primary) 18%, var(--bg-primary) 100%)',
           }}
-          partial={partialText}
-          partialThinking={partialThinking}
-          /* Keep process mode so Full opens thinking; process trail is above */
-          toolProcessMode={toolProcessMode}
-          isStreamingPartial
-          onOpenImage={(src, alt) => setLightbox({ src, alt })}
-        />
+        >
+          <div
+            className="mx-2 rounded-xl border"
+            style={{
+              borderColor: 'var(--border)',
+              background: 'var(--bg-secondary)',
+              boxShadow: '0 -6px 24px color-mix(in srgb, var(--bg-primary) 70%, transparent)',
+            }}
+          >
+            <div
+              className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wide flex items-center gap-1.5"
+              style={{ color: 'var(--accent)', borderBottom: '1px solid var(--border)' }}
+            >
+              <span
+                className="inline-block w-1.5 h-1.5 rounded-full"
+                style={{
+                  background: 'var(--accent)',
+                  animation: 'pulse 1.2s ease infinite',
+                }}
+              />
+              Live · thinking & answer
+            </div>
+            <MessageBubble
+              msg={{
+                id: 'streaming',
+                role: 'assistant',
+                content: '',
+                thinking: null,
+                tool_calls: [],
+                tool_results: [],
+                model: null,
+                agent: null,
+                tokens: null,
+                created_at: '',
+                reverted: false,
+              }}
+              partial={partialText}
+              partialThinking={partialThinking}
+              toolProcessMode={toolProcessMode}
+              isStreamingPartial
+              onOpenImage={(src, alt) => setLightbox({ src, alt })}
+            />
+          </div>
+        </div>
       )}
 
       {!loading && visible.length === 0 && !streaming && (

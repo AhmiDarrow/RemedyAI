@@ -587,16 +587,9 @@ fn save_text_file(default_name: String, contents: String) -> Result<Option<Strin
     #[cfg(target_os = "windows")]
     {
         use std::fs;
-        // Escape for PowerShell single-quoted string: ' -> ''
+        // Pick path only in PowerShell — write bytes from Rust (avoids UI freeze
+        // when export bodies are multi-MB from long tool dumps).
         let ps_name = name.replace('\'', "''");
-        // Write contents to a temp file to avoid huge command-line payloads.
-        let tmp = std::env::temp_dir().join(format!(
-            "remedy-export-{}.txt",
-            std::process::id()
-        ));
-        fs::write(&tmp, contents.as_bytes())
-            .map_err(|e| format!("temp write failed: {e}"))?;
-        let tmp_s = tmp.to_string_lossy().replace('\'', "''");
         let script = format!(
             r#"
 Add-Type -AssemblyName System.Windows.Forms | Out-Null
@@ -608,18 +601,15 @@ $d.DefaultExt = 'txt'
 $d.AddExtension = $true
 $d.OverwritePrompt = $true
 if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {{
-  Copy-Item -LiteralPath '{tmp}' -Destination $d.FileName -Force
   Write-Output $d.FileName
 }}
 "#,
             name = ps_name,
-            tmp = tmp_s,
         );
         let output = Command::new("powershell")
             .args(["-NoProfile", "-STA", "-Command", &script])
             .output()
             .map_err(|e| format!("save dialog failed: {e}"))?;
-        let _ = fs::remove_file(&tmp);
         if !output.status.success() {
             let err = String::from_utf8_lossy(&output.stderr);
             if err.trim().is_empty() {
@@ -631,6 +621,7 @@ if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {{
         if path.is_empty() {
             return Ok(None);
         }
+        fs::write(&path, contents.as_bytes()).map_err(|e| format!("write failed: {e}"))?;
         return Ok(Some(path));
     }
 

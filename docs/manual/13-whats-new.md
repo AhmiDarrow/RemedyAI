@@ -2,7 +2,14 @@
 
 High-level product notes for owners. Full detail lives in repo `CHANGELOG.md`.
 
-Ship **one** installer/tag for the current series (**v0.14.4**).
+Ship **one** installer/tag for the current series (**v0.14.5**).
+
+## 0.14.5 — Stream queue · sticky answer · usage ticker · export
+
+- Send while Remedy streams (queue or interrupt).  
+- Thinking + answer docked at the bottom of chat.  
+- Live usage ticker + correct Grok 4.5 cost estimate.  
+- Faster session export/import; alpha chat monogram.
 
 ## 0.14.4 — Brand assets + silent update host
 

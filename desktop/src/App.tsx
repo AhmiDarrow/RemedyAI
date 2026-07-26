@@ -9,7 +9,12 @@ import { MemoryPanel, SkillsPanel } from './components/Panels'
 import { SettingsPanel } from './components/SettingsPanel'
 import { TokenCostTicker } from './components/TokenCostTicker'
 import { TimeTravelTimeline } from './components/TimeTravelTimeline'
-import { estimateCostUsd, type UsageSnapshot } from './utils/tokenCost'
+import {
+  estimateCostUsd,
+  estimateTokensText,
+  liveRunEstimate,
+  type UsageSnapshot,
+} from './utils/tokenCost'
 import { HelpPanel } from './components/HelpPanel'
 import { QuitServerWarning } from './components/QuitServerWarning'
 import { SplashScreen } from './components/SplashScreen'
@@ -119,8 +124,13 @@ export default function App() {
     processSteps,
     taskProgress,
     runUsage,
+    queue,
     send,
     stop,
+    cancelQueued,
+    clearQueue,
+    updateQueued,
+    promoteQueued,
     runCommand,
     addCommandMessage,
     beginEdit,
@@ -219,20 +229,16 @@ export default function App() {
     for (const m of messages) {
       if (m.reverted) continue
       if (m.role === 'user') {
-        prompt += Math.ceil((m.content || '').length / 4)
+        prompt += estimateTokensText(m.content || '')
       } else if (m.role === 'assistant') {
         if (typeof m.tokens === 'number' && m.tokens > 0) {
           completion += m.tokens
         } else {
-          completion += Math.ceil(
-            ((m.content || '') + (m.thinking || '')).length / 4,
+          completion += estimateTokensText(
+            `${m.content || ''}${m.thinking || ''}`,
           )
         }
       }
-    }
-    // Prefer live run totals when they include provider prompt counts
-    if (runUsage && runUsage.total_tokens > 0 && !streaming) {
-      /* keep session sum of stored messages */
     }
     return {
       prompt_tokens: prompt,
@@ -243,7 +249,20 @@ export default function App() {
       model,
       provider: llmProvider,
     }
-  }, [messages, model, llmProvider, runUsage, streaming])
+  }, [messages, model, llmProvider])
+
+  /** Live run ticker: provider usage when present, else partial-token estimate. */
+  const displayRunUsage = useMemo(
+    () =>
+      liveRunEstimate(
+        partialText,
+        partialThinking,
+        model,
+        llmProvider,
+        runUsage,
+      ),
+    [partialText, partialThinking, model, llmProvider, runUsage],
+  )
 
   const openHelp = useCallback((articleId?: string) => {
     setHelpArticleId(articleId || null)
@@ -624,6 +643,9 @@ export default function App() {
 
   const handleExport = useCallback(
     async (sessionId: string) => {
+      notify('Preparing export…', { silent: true })
+      // Yield so the UI can paint before heavy work (large sessions).
+      await new Promise<void>((r) => window.setTimeout(r, 0))
       try {
         const { text, markdown, filename } = await exportSession(sessionId, 'txt')
         const body = text || markdown || ''
@@ -637,6 +659,8 @@ export default function App() {
             : `${filename || 'remedy-export'}.txt`
         ).replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')
 
+        await new Promise<void>((r) => window.setTimeout(r, 0))
+
         // Tauri: native Save dialog (WebView <a download> is unreliable).
         if (isTauri()) {
           try {
@@ -648,7 +672,6 @@ export default function App() {
               notify('Exported session', { body: saved, silent: true })
               return
             }
-            // User cancelled dialog — not an error
             notify('Export cancelled', { silent: true })
             return
           } catch (nativeErr) {
@@ -695,14 +718,24 @@ export default function App() {
         }, 60_000)
       })
       if (!file) return
+      notify('Importing session…', { silent: true })
+      await new Promise<void>((r) => window.setTimeout(r, 0))
       const text = await file.text()
       if (!text.trim()) {
         notify('Import failed', { body: 'File is empty' })
         return
       }
+      // Guard absurd imports that freeze the process
+      if (text.length > 8_000_000) {
+        notify('Import failed', {
+          body: 'File too large (8 MB max). Export without embedded images or split the session.',
+        })
+        return
+      }
       const stem = file.name.replace(/\.(txt|md)$/i, '').trim()
       const title =
         stem && !stem.toLowerCase().startsWith('remedy-export') ? stem : undefined
+      await new Promise<void>((r) => window.setTimeout(r, 0))
       const created = await importSession({ text, title })
       await refreshSessions()
       if (created?.id) {
@@ -801,6 +834,7 @@ export default function App() {
         is_image?: boolean
         is_text?: boolean
       }[],
+      opts?: { mode?: 'after' | 'interrupt' },
     ) => {
       // Clear edit prefill once the user sends (revised prompt is on its way).
       setEditDraft(null)
@@ -825,8 +859,8 @@ export default function App() {
           usePlan = false
           setPlanMode(false)
         }
-        send(text, model, sid, attachments, usePlan)
-        // Pull titles/message counts after the turn starts (server may have renamed).
+        // While streaming, send() queues (after) or interrupts based on opts.mode.
+        void send(text, model, sid, attachments, usePlan, opts)
         window.setTimeout(() => {
           void refreshSessions()
         }, 1200)
@@ -1233,7 +1267,7 @@ export default function App() {
         footer={
           <TokenCostTicker
             placement="sidebar"
-            run={runUsage}
+            run={displayRunUsage}
             session={sessionUsage}
             streaming={streaming}
             model={model}
@@ -1287,8 +1321,13 @@ export default function App() {
               onStop={stop}
               onCommand={handleCommand}
               streaming={streaming}
-              // Never lock the prompt while the model streams/thinks — user must
-              // always be able to type (and queue the next send after Stop).
+              queue={queue}
+              onCancelQueued={cancelQueued}
+              onClearQueue={clearQueue}
+              onPromoteQueued={promoteQueued}
+              onUpdateQueued={updateQueued}
+              // Never lock the prompt while the model streams/thinks — user can
+              // type and send into the queue (or interrupt).
               disabled={serverState !== 'ready'}
               planMode={planMode}
               onTogglePlanMode={() => setPlanMode((p) => !p)}

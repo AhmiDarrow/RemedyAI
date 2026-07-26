@@ -10,8 +10,11 @@ export type UsageSnapshot = {
   provider?: string | null
 }
 
+// Order matters: more specific model ids first (grok-4.5 before grok-4).
 const PRICE: Array<{ re: RegExp; pin: number; pout: number }> = [
-  { re: /grok-4|grok-3(?!-mini)/i, pin: 3.0, pout: 15.0 },
+  { re: /grok-4\.5|grok-4-5/i, pin: 2.0, pout: 6.0 },
+  { re: /grok-4\.3/i, pin: 1.25, pout: 2.5 },
+  { re: /grok-4(?!\.|\d)|grok-3(?!-mini)/i, pin: 3.0, pout: 15.0 },
   { re: /grok-3-mini|grok-2/i, pin: 0.3, pout: 0.5 },
   { re: /gpt-4o-mini/i, pin: 0.15, pout: 0.6 },
   { re: /gpt-4o|gpt-4\.1/i, pin: 2.5, pout: 10 },
@@ -19,8 +22,6 @@ const PRICE: Array<{ re: RegExp; pin: number; pout: number }> = [
   { re: /claude-3-5-haiku|claude-3-haiku/i, pin: 0.8, pout: 4 },
   { re: /deepseek-v4-pro|deepseek-reasoner|deepseek-r1/i, pin: 0.55, pout: 2.19 },
   { re: /deepseek/i, pin: 0.14, pout: 0.28 },
-  { re: /grok-4\.5|grok-4-5/i, pin: 2.0, pout: 6.0 },
-  { re: /grok-4\.3|grok-4/i, pin: 1.25, pout: 2.5 },
   { re: /grok/i, pin: 1.0, pout: 3.0 },
   { re: /gemini/i, pin: 0.35, pout: 1.05 },
   { re: /demo|ollama/i, pin: 0, pout: 0 },
@@ -65,16 +66,17 @@ export function estimateCostUsd(
 }
 
 export function formatCost(usd: number): string {
-  if (usd <= 0) return '$0.00'
+  if (!Number.isFinite(usd) || usd <= 0) return '$0.00'
   if (usd < 0.01) return `$${usd.toFixed(4)}`
   if (usd < 1) return `$${usd.toFixed(3)}`
   return `$${usd.toFixed(2)}`
 }
 
 export function formatTokens(n: number): string {
-  if (n < 1000) return String(n)
-  if (n < 10_000) return `${(n / 1000).toFixed(1)}k`
-  return `${Math.round(n / 1000)}k`
+  const v = Math.max(0, Math.round(Number(n) || 0))
+  if (v < 1000) return String(v)
+  if (v < 10_000) return `${(v / 1000).toFixed(1)}k`
+  return `${Math.round(v / 1000)}k`
 }
 
 export function emptyUsage(model?: string | null, provider?: string | null): UsageSnapshot {
@@ -89,6 +91,38 @@ export function emptyUsage(model?: string | null, provider?: string | null): Usa
   }
 }
 
+/** Live run estimate while streaming (until provider usage arrives). */
+export function liveRunEstimate(
+  partialText: string,
+  partialThinking: string,
+  model?: string | null,
+  provider?: string | null,
+  providerUsage?: UsageSnapshot | null,
+): UsageSnapshot {
+  if (providerUsage && providerUsage.source === 'provider' && (providerUsage.total_tokens || 0) > 0) {
+    return providerUsage
+  }
+  const completion = estimateTokensText(`${partialThinking || ''}${partialText || ''}`)
+  // Prompt is unknown mid-run without a provider frame — show completion as the live count.
+  return {
+    prompt_tokens: providerUsage?.prompt_tokens ?? 0,
+    completion_tokens: Math.max(completion, providerUsage?.completion_tokens ?? 0),
+    total_tokens: Math.max(
+      completion + (providerUsage?.prompt_tokens ?? 0),
+      providerUsage?.total_tokens ?? 0,
+    ),
+    estimated_cost_usd: estimateCostUsd(
+      providerUsage?.prompt_tokens ?? 0,
+      Math.max(completion, providerUsage?.completion_tokens ?? 0),
+      model,
+      provider,
+    ),
+    source: providerUsage?.source === 'provider' ? 'provider' : 'estimate',
+    model,
+    provider,
+  }
+}
+
 export function mergeUsage(a: UsageSnapshot, b: Partial<UsageSnapshot>): UsageSnapshot {
   const prompt = (a.prompt_tokens || 0) + (b.prompt_tokens || 0)
   const completion = (a.completion_tokens || 0) + (b.completion_tokens || 0)
@@ -96,9 +130,10 @@ export function mergeUsage(a: UsageSnapshot, b: Partial<UsageSnapshot>): UsageSn
     b.source === 'provider' || a.source === 'provider' ? 'provider' : a.source || 'estimate'
   const model = b.model ?? a.model
   const provider = b.provider ?? a.provider
-  const total = (b.total_tokens || 0) > 0
-    ? (a.total_tokens || 0) + (b.total_tokens || 0)
-    : prompt + completion
+  const total =
+    (b.total_tokens || 0) > 0
+      ? (a.total_tokens || 0) + (b.total_tokens || 0)
+      : prompt + completion
   return {
     prompt_tokens: prompt,
     completion_tokens: completion,
