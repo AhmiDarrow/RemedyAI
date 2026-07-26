@@ -8,9 +8,9 @@
  * - Thinking is always stored; Full/Full+ open it by default.
  * - Min → Med → Full → Full+ only add more of the same trail (not alternate layouts).
  *
- * - **Min (off)**: Process list of step labels/status only.
- * - **Med**: same list; expand a step for short args/result previews.
- * - **Full**: same list; full args/results, steps open by default.
+ * - **Min (off)**: Process list — step names + status only.
+ * - **Med**: same list + always-visible path/command/result one-liners (and short result body).
+ * - **Full**: same list + full args/results open; follows new output while live.
  * - **Full+**: Full + advanced diagnostics (settings / continuity internals).
  */
 export type ToolProcessMode = 'off' | 'medium' | 'full' | 'full+'
@@ -19,22 +19,22 @@ export const TOOL_PROCESS_MODES: { id: ToolProcessMode; label: string; hint: str
   {
     id: 'off',
     label: 'Min',
-    hint: 'Same Process list — step names only (answer always full)',
+    hint: 'Process steps as names only — answer always full',
   },
   {
     id: 'medium',
     label: 'Med',
-    hint: 'Same Process list — click a step for short previews',
+    hint: 'Same list with path/command + short result under each step',
   },
   {
     id: 'full',
     label: 'Full',
-    hint: 'Same Process list — full args/results, open by default',
+    hint: 'Same list with complete args/results (auto-scrolls while live)',
   },
   {
     id: 'full+',
     label: 'Full+',
-    hint: 'Full process detail + advanced diagnostics elsewhere in Settings',
+    hint: 'Full process detail + advanced diagnostics in Settings',
   },
 ]
 

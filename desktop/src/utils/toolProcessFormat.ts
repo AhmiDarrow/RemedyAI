@@ -108,3 +108,73 @@ export function formatToolResultDisplay(
   // file_write success often returns a short status string — leave as plain
   return { text: raw }
 }
+
+function oneLine(text: string, max = 140): string {
+  const s = text.replace(/\s+/g, ' ').trim()
+  if (!s) return ''
+  return s.length <= max ? s : `${s.slice(0, max - 1)}…`
+}
+
+/**
+ * Always-visible one-liner under a process step (Med depth).
+ * Prefer path / command / query from args; fall back to result / error.
+ */
+export function stepInlineSummary(
+  toolName: string,
+  argsText?: string,
+  resultText?: string,
+  error?: string,
+): string | null {
+  if (error) return oneLine(`Error: ${error}`, 160)
+  const name = (toolName || '').toLowerCase()
+  const obj = tryParseJson(argsText)
+
+  if (obj) {
+    const path = strField(obj, 'path', 'file', 'filepath', 'file_path', 'directory', 'dir')
+    const cmd = strField(obj, 'command', 'cmd', 'shell', 'code')
+    const query = strField(obj, 'query', 'q', 'pattern', 'search', 'url', 'prompt', 'title')
+    if (path) return oneLine(path, 160)
+    if (cmd) return oneLine(cmd, 160)
+    if (query) return oneLine(query, 160)
+  }
+
+  if (argsText && argsText.trim() && !argsText.trim().startsWith('{')) {
+    return oneLine(argsText, 160)
+  }
+
+  if (resultText && resultText.trim()) {
+    // Prefer first non-empty line
+    const first =
+      resultText
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .find((l) => l.length > 0) || resultText
+    return oneLine(first, 160)
+  }
+
+  // JSON args with no known keys — show compact keys
+  if (obj) {
+    const keys = Object.keys(obj).slice(0, 4).join(', ')
+    if (keys) return oneLine(`{${keys}}`, 120)
+  }
+
+  void name
+  return null
+}
+
+/** Short multi-line body for Med (not a full dump). */
+export function stepMediumPreview(
+  resultText?: string,
+  error?: string,
+  opts?: { maxLines?: number; maxChars?: number },
+): string {
+  const maxLines = opts?.maxLines ?? 4
+  const maxChars = opts?.maxChars ?? 480
+  const raw = (error || resultText || '').trim()
+  if (!raw) return ''
+  const lines = raw.split(/\r?\n/)
+  let out = lines.slice(0, maxLines).join('\n')
+  if (lines.length > maxLines) out += '\n…'
+  if (out.length > maxChars) out = `${out.slice(0, maxChars - 1)}…`
+  return out
+}

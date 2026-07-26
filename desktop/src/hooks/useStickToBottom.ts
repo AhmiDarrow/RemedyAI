@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
-const NEAR_PX = 100
+const NEAR_PX = 140
 
 type Options = {
   /** When this flips true (e.g. streaming/live), re-pin and follow again. */
@@ -15,12 +15,17 @@ type Options = {
  * Stick a scroll container to the bottom while content grows
  * (tokens, thinking, tools, process dumps) unless the user scrolls up.
  * Jump button re-enables following.
+ *
+ * Callback refs update state so effects re-bind when the scroller mounts
+ * (e.g. Process panel expands after first paint).
  */
 export function useStickToBottom(options: Options = {}) {
   const { followActive = false, deps = [], alwaysOfferJump = false } = options
 
   const scrollerRef = useRef<HTMLElement | null>(null)
   const contentRef = useRef<HTMLElement | null>(null)
+  const [scrollerEl, setScrollerEl] = useState<HTMLElement | null>(null)
+  const [contentEl, setContentEl] = useState<HTMLElement | null>(null)
   const stickRef = useRef(true)
   const autoLockRef = useRef(false)
   const lockTimerRef = useRef<number | null>(null)
@@ -28,10 +33,12 @@ export function useStickToBottom(options: Options = {}) {
 
   const setScroller = useCallback((node: HTMLElement | null) => {
     scrollerRef.current = node
+    setScrollerEl(node)
   }, [])
 
   const setContent = useCallback((node: HTMLElement | null) => {
     contentRef.current = node
+    setContentEl(node)
   }, [])
 
   const pinToBottom = useCallback((smooth = false) => {
@@ -43,11 +50,12 @@ export function useStickToBottom(options: Options = {}) {
       lockTimerRef.current = null
     }
     const apply = () => {
-      const max = el.scrollHeight - el.clientHeight
+      // Always clamp to true bottom (scrollHeight alone can be off-by-one on some engines)
+      const max = Math.max(0, el.scrollHeight - el.clientHeight)
       if (smooth) {
-        el.scrollTo({ top: Math.max(0, max), behavior: 'smooth' })
+        el.scrollTo({ top: max, behavior: 'smooth' })
       } else {
-        el.scrollTop = Math.max(0, el.scrollHeight)
+        el.scrollTop = max
       }
     }
     apply()
@@ -55,10 +63,11 @@ export function useStickToBottom(options: Options = {}) {
       apply()
       requestAnimationFrame(() => {
         apply()
+        // Longer lock so rapid dump growth doesn't look like user scroll
         lockTimerRef.current = window.setTimeout(() => {
           autoLockRef.current = false
           lockTimerRef.current = null
-        }, smooth ? 380 : 64)
+        }, smooth ? 420 : 120)
       })
     })
     setShowJump(false)
@@ -76,10 +85,12 @@ export function useStickToBottom(options: Options = {}) {
 
   // User scroll / wheel / touch → may detach from bottom
   useEffect(() => {
-    const el = scrollerRef.current
+    const el = scrollerEl
     if (!el) return
     const onScroll = () => syncStickFromScroll()
     const onUser = () => {
+      // Only detach on real user intent, not layout-driven scroll
+      if (autoLockRef.current) return
       requestAnimationFrame(syncStickFromScroll)
     }
     el.addEventListener('scroll', onScroll, { passive: true })
@@ -90,7 +101,7 @@ export function useStickToBottom(options: Options = {}) {
       el.removeEventListener('wheel', onUser)
       el.removeEventListener('touchmove', onUser)
     }
-  }, [syncStickFromScroll, followActive])
+  }, [scrollerEl, syncStickFromScroll])
 
   // New active turn → always re-follow
   useEffect(() => {
@@ -98,29 +109,29 @@ export function useStickToBottom(options: Options = {}) {
       stickRef.current = true
       pinToBottom(false)
     }
-  }, [followActive, pinToBottom])
+  }, [followActive, pinToBottom, scrollerEl])
 
   // After DOM commits (tokens / thinking / tools / process)
   useLayoutEffect(() => {
-    if (!stickRef.current) return
+    if (!stickRef.current || !scrollerEl) return
     pinToBottom(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- caller passes growth deps
-  }, [pinToBottom, followActive, ...deps])
+  }, [pinToBottom, followActive, scrollerEl, ...deps])
 
   // Height growth (markdown reflow, expanding process, images)
   useEffect(() => {
-    const content = contentRef.current
+    const content = contentEl
     if (!content) return
     const ro = new ResizeObserver(() => {
       if (stickRef.current) pinToBottom(false)
     })
     ro.observe(content)
     return () => ro.disconnect()
-  }, [pinToBottom, followActive])
+  }, [pinToBottom, contentEl, followActive])
 
   // Subtree mutations (thinking text, raw dumps) while following
   useEffect(() => {
-    const content = contentRef.current
+    const content = contentEl
     if (!content || !followActive) return
     const mo = new MutationObserver(() => {
       if (stickRef.current) pinToBottom(false)
@@ -131,7 +142,7 @@ export function useStickToBottom(options: Options = {}) {
       characterData: true,
     })
     return () => mo.disconnect()
-  }, [followActive, pinToBottom])
+  }, [followActive, pinToBottom, contentEl])
 
   const jumpLatest = useCallback(() => {
     stickRef.current = true
