@@ -1,6 +1,6 @@
 # Skills list
 
-_Auto-generated from `skills/*/SKILL.md` — **281** skills. Last updated: 2026-07-26 23:01 UTC. Do not edit by hand; run `python scripts/generate_skills_list.py` or `python scripts/build_catalog.py`._
+_Auto-generated from `skills/*/SKILL.md` — **282** skills. Last updated: 2026-07-26 23:04 UTC. Do not edit by hand; run `python scripts/generate_skills_list.py` or `python scripts/build_catalog.py`._
 
 ## Summary by area
 
@@ -12,7 +12,7 @@ _Auto-generated from `skills/*/SKILL.md` — **281** skills. Last updated: 2026-
 | design | 45 |
 | docs | 5 |
 | frontend | 7 |
-| gaming | 35 |
+| gaming | 36 |
 | git | 10 |
 | llm | 3 |
 | ops | 14 |
@@ -22,7 +22,7 @@ _Auto-generated from `skills/*/SKILL.md` — **281** skills. Last updated: 2026-
 | testing | 13 |
 | tooling | 18 |
 
-| **Total** | **281** |
+| **Total** | **282** |
 
 ## Backend
 
@@ -206,6 +206,7 @@ _Auto-generated from `skills/*/SKILL.md` — **281** skills. Last updated: 2026-
 | [`level-design-brief`](skills/level-design-brief/SKILL.md) | Produce a level design brief: layout goals, encounters, pacing, and greybox checklist. |
 | [`loot-table-design`](skills/loot-table-design/SKILL.md) | Design loot tables with drop rates, pity systems, and economy safety. |
 | [`multiplayer-session-design`](skills/multiplayer-session-design/SKILL.md) | Design multiplayer session flow: matchmaking intent, disconnects, host migration, fairness. |
+| [`pixellab-game-assets`](skills/pixellab-game-assets/SKILL.md) | Generate pixel art game assets with PixelLab: MCP server tools and REST API v2 — characters, animations, tilesets, map objects, UI, rotate/edit; job workflow… |
 | [`playtest-protocol`](skills/playtest-protocol/SKILL.md) | Run a structured playtest: goals, tasks, observation notes, and debrief actions. |
 | [`progression-curve`](skills/progression-curve/SKILL.md) | Design player progression curves: XP, unlocks, soft gates, and catch-up. |
 | [`quest-design`](skills/quest-design/SKILL.md) | Design quests/missions with objectives, gates, rewards, and failure paths. |
@@ -586,6 +587,7 @@ _Auto-generated from `skills/*/SKILL.md` — **281** skills. Last updated: 2026-
 - [`pet-care-routine`](skills/pet-care-routine/SKILL.md) — Create a pet care routine: feeding, walks, meds placeholders, emergency contacts.
 - [`photo-art-direction`](skills/photo-art-direction/SKILL.md) — Art-direct photoshoots or stock selection: subject, lighting, crop, usage rights checklist.
 - [`pii-data-handling`](skills/pii-data-handling/SKILL.md) — Minimize and protect PII: access, logs redaction, retention, deletion paths.
+- [`pixellab-game-assets`](skills/pixellab-game-assets/SKILL.md) — Generate pixel art game assets with PixelLab: MCP server tools and REST API v2 — characters, animations, tilesets, map o…
 - [`playtest-protocol`](skills/playtest-protocol/SKILL.md) — Run a structured playtest: goals, tasks, observation notes, and debrief actions.
 - [`podcast-episode-plan`](skills/podcast-episode-plan/SKILL.md) — Plan a podcast episode: cold open, segments, guests prep, show notes.
 - [`portfolio-case-layout`](skills/portfolio-case-layout/SKILL.md) — Structure a portfolio case study page: problem, process, outcome, images.

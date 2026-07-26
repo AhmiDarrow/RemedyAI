@@ -35,7 +35,7 @@ Each skill says when to use it, the steps, tool hints, and what “done” looks
 
 <!-- BEGIN AUTO-SKILLS-LIST -->
 
-## What’s in the library (281 skills)
+## What’s in the library (282 skills)
 
 Snapshot of packs on this branch as of 2026-07-26. Descriptions and the full alphabetical list live in **[SKILLS.md](./SKILLS.md)**.
 
@@ -47,7 +47,7 @@ Snapshot of packs on this branch as of 2026-07-26. Descriptions and the full alp
 | Design & UX | 45 | `a11y-design-review`, `brand-voice-guide`, `call-to-action-copy`, `cli-ux-polish` · +41 more |
 | Docs & process | 5 | `adr-write`, `bug-report-template`, `feature-toggle-cleanup`, `markdown-doc-structure` · +1 more |
 | Frontend | 7 | `bundle-size-check`, `css-specificity-debug`, `email-template-review`, `frontend-a11y` · +3 more |
-| Gaming | 35 | `boss-fight-design`, `combat-feel-tuning`, `game-accessibility`, `game-ai-behavior` · +31 more |
+| Gaming | 36 | `boss-fight-design`, `combat-feel-tuning`, `game-accessibility`, `game-ai-behavior` · +32 more |
 | Git & release | 10 | `branch-hygiene`, `changelog-entry`, `cherry-pick-commit`, `codeowners-setup` · +6 more |
 | LLM & agents | 3 | `llm-cost-guardrails`, `rag-chunking`, `tool-use-spec` |
 | Ops & reliability | 14 | `backup-restore-drill`, `ci-pipeline-review`, `container-image-harden`, `container-orchestration-review` · +10 more |
@@ -57,7 +57,7 @@ Snapshot of packs on this branch as of 2026-07-26. Descriptions and the full alp
 | Testing | 13 | `acceptance-criteria`, `benchmark-micro`, `browser-automation-safe`, `contract-test-api` · +9 more |
 | Tooling & languages | 18 | `algorithmic-complexity`, `cross-platform-paths`, `deadlock-debug`, `dev-environment-container` · +14 more |
 
-**281 total** — skim the [full list](./SKILLS.md), or open **Skills → Library** in Remedy Desktop and install only what you need.
+**282 total** — skim the [full list](./SKILLS.md), or open **Skills → Library** in Remedy Desktop and install only what you need.
 
 <!-- END AUTO-SKILLS-LIST -->
 
