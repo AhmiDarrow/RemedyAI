@@ -1,5 +1,5 @@
 ---
-name: dev environment container-setup
+name: dev-environment-container
 version: 1.0.0
 description: >
   Add a dev environment container for reproducible contributor environments.
@@ -15,7 +15,7 @@ tools:
   - file_write
 metadata:
   source: library
-  library_id: dev environment container-setup
+  library_id: dev-environment-container
   official: true
   security_flags: []
 ---

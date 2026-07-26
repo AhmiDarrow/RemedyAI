@@ -118,6 +118,7 @@ def main() -> None:
     p.add_argument("--github-urls", action="store_true")
     p.add_argument("--release-tag", default="v1.0.0")
     p.add_argument("--no-dist", action="store_true")
+    p.add_argument("--skip-docs", action="store_true", help="Skip SKILLS.md / README list regen")
     args = p.parse_args()
     cat = build_catalog(
         args.skills_dir,
@@ -128,6 +129,22 @@ def main() -> None:
     )
     args.output.write_text(json.dumps(cat, indent=2) + "\n", encoding="utf-8")
     print(f"Wrote {args.output} ({len(cat['skills'])} skills)")
+    if not args.skip_docs:
+        import subprocess
+        import sys
+
+        list_script = Path(__file__).resolve().parent / "generate_skills_list.py"
+        try:
+            subprocess.check_call(
+                [
+                    sys.executable,
+                    str(list_script),
+                    "--skills-dir",
+                    str(args.skills_dir),
+                ]
+            )
+        except Exception as e:
+            print(f"Warning: could not regenerate skills list docs: {e}")
 
 
 if __name__ == "__main__":

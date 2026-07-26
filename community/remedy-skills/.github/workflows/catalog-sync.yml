@@ -15,7 +15,7 @@ jobs:
           python-version: "3.12"
       - name: Install deps
         run: pip install pyyaml packaging pynacl
-      - name: Build catalog (GitHub release URLs)
+      - name: Build catalog + skills list docs (GitHub release URLs)
         run: python scripts/build_catalog.py --github-urls --output catalog.json
       - name: Sign catalog
         env:
@@ -33,3 +33,5 @@ jobs:
           path: |
             catalog.json
             catalog.json.sig
+            SKILLS.md
+            README.md
