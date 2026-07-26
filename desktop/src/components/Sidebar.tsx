@@ -811,16 +811,16 @@ function ProjectSection({
                     type="button"
                     className="flex-shrink-0 text-[10px] opacity-40 group-hover:opacity-100"
                     style={{
-                      color: sm?.archived ? 'var(--accent)' : 'var(--text-muted)',
+                      color: m.archived ? 'var(--accent)' : 'var(--text-muted)',
                     }}
                     onClick={(e) => {
                       e.stopPropagation()
                       toggleSessionArchive(s.id)
                       refreshMeta()
                     }}
-                    title={sm?.archived ? 'Unarchive' : 'Archive'}
+                    title={m.archived ? 'Unarchive' : 'Archive'}
                   >
-                    {sm?.archived ? '▣' : '▢'}
+                    {m.archived ? '▣' : '▢'}
                   </button>
                   {isRenaming ? (
                     <input
