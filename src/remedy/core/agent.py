@@ -543,7 +543,7 @@ class BasicRuntime(AgentRuntime):
         *,
         plan_mode: bool = False,
     ) -> AsyncIterator[str]:
-        """Call the LLM with a smooth ReAct loop (OpenCode-grade)."""
+        """Call the LLM with a smooth ReAct loop."""
         from remedy.core.agent_react_loop import call_llm_stream
 
         async for chunk in call_llm_stream(

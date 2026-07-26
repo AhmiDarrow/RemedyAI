@@ -2,7 +2,7 @@
 
 Orchestrates reflection, skill generation, refinement, and procedural
 memory integration. The single entry point for Remedy's "grows with you"
-philosophy, inspired by Hermes' autonomous learning.
+philosophy.
 """
 
 from __future__ import annotations

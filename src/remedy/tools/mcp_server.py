@@ -1,7 +1,7 @@
 """Remedy as an MCP *server* (stdio JSON-RPC) — personal partner Phase C.
 
 Exposes this machine's skills (and read-only helpers) to external hosts
-(Cursor, Claude Desktop, etc.) over loopback/stdio only.
+(any MCP-compatible client) over loopback/stdio only.
 
 No multi-tenant gateway — same-owner local capability export.
 """

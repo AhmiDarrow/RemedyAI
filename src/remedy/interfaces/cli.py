@@ -280,7 +280,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Force the setup wizard even if setup was completed",
     )
 
-    # remedy mcp serve — expose skills to Cursor / Claude Desktop (stdio)
+    # remedy mcp serve — expose skills to external MCP clients (stdio)
     mcp_cmd = sub.add_parser(
         "mcp",
         help="MCP host: expose local skills to external apps (stdio)",
@@ -288,7 +288,7 @@ def build_parser() -> argparse.ArgumentParser:
     mcp_sub = mcp_cmd.add_subparsers(dest="mcp_cmd")
     mcp_sub.add_parser(
         "serve",
-        help="Run MCP server on stdio (for Cursor / Claude Desktop config)",
+        help="Run MCP server on stdio (for any MCP-compatible client config)",
     )
 
     # remedy desktop

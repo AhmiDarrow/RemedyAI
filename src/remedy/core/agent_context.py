@@ -20,7 +20,7 @@ async def build_turn_context(runtime: Any) -> str:
 
     parts: list[str] = []
 
-    # Project workspace (OpenCode-style default directory for this session)
+    # Project workspace (default directory for this session)
     with suppress(Exception):
         parts.append(
             workspace_context_block(

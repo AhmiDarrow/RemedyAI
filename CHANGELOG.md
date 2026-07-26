@@ -89,7 +89,7 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 - **Icons:** rounded-plate shell icons; chat assistant uses partner initials; empty session keeps monogram.
 - **Sessions:** open tabs only in Sessions slide; rule-based archive (30d) + Archive filter.
 - **Project picker:** rfd (no PowerShell lag); Add project sticky above list.
-- **Plan mode:** read/search tools allowed; Grok/Claude-style plan banner (Approve → Build / Request changes).
+- **Plan mode:** read/search tools allowed; plan banner (Approve → Build / Request changes).
 
 ## [0.14.10] — 2026-07-26
 
@@ -650,7 +650,7 @@ streamed "Processing…" and never called tools again.
 - Desktop prefers Tauri IPC token before HTTP bootstrap; updater requires signed `latest.json` URL match.
 - **Auto-approve and full shell remain available** for the owner — no capability removed.
 
-### Feature: Grok-style diff colors in chat
+### Feature: Diff colors in chat
 
 - Unified diffs in chat code fences (`diff`/`patch` or auto-detected) show **red removals** and **green additions**, with muted meta/hunk lines.
 - Tool process (Proc) args/results use the same highlighting when content looks like a patch.
@@ -939,7 +939,7 @@ skill library — see `docs/SKILL_LIFECYCLE.md`.
 
 ## [0.10.15] — 2026-07-23
 
-### xAI OAuth + API key (OpenCode-style dual auth)
+### xAI OAuth + API key (dual auth)
 
 - First-class **xAI (Grok)** provider with `https://api.x.ai/v1`
 - **Sign in with xAI** device-code OAuth (desktop Settings + Setup wizard)

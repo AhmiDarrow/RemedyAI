@@ -273,7 +273,7 @@ def parse_steps_from_text(text: str) -> list[str]:
 
 
 # Tools allowed when the UI is in Plan mode (explore, no shell/file mutation).
-# Read/research tools only — no shell/file writes. Mirrors Grok/Claude plan mode.
+# Read/research tools only — no shell/file writes.
 PLAN_MODE_TOOL_NAMES = frozenset(
     {
         "plan_save",

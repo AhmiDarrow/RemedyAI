@@ -90,7 +90,7 @@ export const SETTINGS_SECTION_META: Record<
   mcp: {
     title: 'MCP host',
     summary: 'Expose skills to other apps',
-    keywords: 'mcp cursor claude desktop host server',
+    keywords: 'mcp host server external client',
   },
   channels: {
     title: 'Messaging channels',

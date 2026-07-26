@@ -464,7 +464,7 @@ def teardown_plugin():
 | **agentskills.io** | Native, full compliance |
 | **Hermes Agent** | Deep adapter — `hermes_config.yaml` parsing, tool mapping, batch migration |
 | **OpenClaw / ClawHub** | Deep adapter — SKILL.md, skill.yaml, claw.yaml, MCP extraction, channel config |
-| **MCP (Model Context Protocol)** | Client (use external tools) + host (`remedy mcp serve` exports skills to Cursor/Claude) |
+| **MCP (Model Context Protocol)** | Client (use external tools) + host (`remedy mcp serve` exports skills to MCP clients) |
 
 ---
 

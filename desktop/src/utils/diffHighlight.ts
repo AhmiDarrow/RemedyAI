@@ -1,5 +1,5 @@
 /**
- * Detect unified diffs and classify lines for red/green rendering (Grok-style).
+ * Detect unified diffs and classify lines for red/green rendering.
  */
 
 export type DiffLineKind = 'add' | 'del' | 'hunk' | 'meta' | 'ctx'

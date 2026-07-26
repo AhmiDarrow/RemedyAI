@@ -1,11 +1,10 @@
-"""xAI (Grok) authentication: API key + OAuth device-code (OpenCode-style).
+"""xAI (Grok) authentication: API key + OAuth device-code flow.
 
 API key path uses console keys (XAI_API_KEY / xai-…).
 OAuth path uses accounts.x.ai device authorization for SuperGrok / X Premium+.
 
-OAuth client id defaults to the public Grok Build / open-agent ecosystem client
-used by OpenClaw and peers. Override with REMEDY_XAI_OAUTH_CLIENT_ID if you
-register your own application with xAI.
+OAuth client id defaults to the public device-OAuth client used with xAI accounts.
+Override with REMEDY_XAI_OAUTH_CLIENT_ID if you register your own application with xAI.
 """
 
 from __future__ import annotations
@@ -35,7 +34,7 @@ DEVICE_CODE_URL = f"{OAUTH_SERVER}/oauth2/device/code"
 TOKEN_URL = f"{OAUTH_SERVER}/oauth2/token"
 # Marker embedded in frozen builds so we can verify the sidecar is up to date.
 OAUTH_BUILD_ID = "auth.x.ai-device-v4-api-access"
-# Full grant used by Hermes / OpenClaw-class agents. Identity-only scopes
+# Full OAuth scope set for API access. Identity-only scopes
 # (openid profile email offline_access) produce JWTs that api.x.ai rejects with
 # "OAuth2 token missing required scope: api:access".
 DEFAULT_OAUTH_SCOPE = (
@@ -48,8 +47,7 @@ _DEVICE_CODE_CANDIDATES = (
     DEVICE_CODE_URL,
     "https://auth.x.ai/oauth2/device/code",
 )
-# Public client id used by Grok Build / OpenClaw-class agents for device OAuth.
-# https://github.com/openclaw/openclaw/issues/84504
+# Public xAI device-OAuth client id (override via REMEDY_XAI_OAUTH_CLIENT_ID).
 DEFAULT_CLIENT_ID = "b1a00492-073a-47ea-816f-4c329264a828"
 GRANT_DEVICE = "urn:ietf:params:oauth:grant-type:device_code"
 

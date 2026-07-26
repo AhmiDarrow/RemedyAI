@@ -1658,13 +1658,13 @@ export function SettingsFormSections(p: SettingsFormProps): ReactNode {
               </div>
             </SettingsSection>
 
-            {/* MCP host — export skills to Cursor / Claude Desktop */}
+            {/* MCP host — export skills to external MCP clients */}
             <SettingsSection
               {...sectionProps('mcp')}
             >
               <div className="text-xs space-y-2" style={{ color: 'var(--text-secondary)' }}>
                 <p style={{ margin: 0, fontSize: '0.75rem' }}>
-                  Run Remedy as an MCP <strong>server</strong> so Cursor, Claude Desktop, or other
+                  Run Remedy as an MCP <strong>server</strong> so other MCP-compatible
                   tools can use skills and plans on <em>this machine</em> (same-owner, local only).
                 </p>
                 <div
@@ -1705,7 +1705,7 @@ export function SettingsFormSections(p: SettingsFormProps): ReactNode {
                     })
                   }}
                 >
-                  Copy Cursor / Claude Desktop JSON
+                  Copy MCP client JSON
                 </button>
                 <ul
                   className="m-0 pl-4 space-y-1"

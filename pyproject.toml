@@ -51,7 +51,7 @@ Repository = "https://github.com/AhmiDarrow/RemedyAI"
 
 [project.scripts]
 remedy = "remedy.interfaces.cli:main"
-# Standalone MCP stdio host (Cursor / Claude Desktop can call this binary)
+# Standalone MCP stdio host (any MCP-compatible client can call this binary)
 remedy-mcp = "remedy.tools.mcp_server:main"
 
 [build-system]

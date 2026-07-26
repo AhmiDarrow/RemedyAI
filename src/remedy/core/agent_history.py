@@ -24,7 +24,7 @@ async def load_session_history(
     char_budget: int = HISTORY_CHAR_BUDGET,
     soft_trim: int = HISTORY_MSG_SOFT_TRIM,
 ) -> list[dict[str, Any]]:
-    """Load recent user/assistant turns for multi-turn continuity (OpenCode-style)."""
+    """Load recent user/assistant turns for multi-turn continuity."""
     if not session_id or memory is None:
         return []
     try:

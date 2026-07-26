@@ -1,4 +1,4 @@
-"""ReAct LLM stream loop (OpenCode-grade).
+"""ReAct LLM stream loop.
 
 Extracted from BasicRuntime._call_llm_stream so agent.py remains a thin
 orchestrator. Takes a runtime instance for config, tools, and side effects.
@@ -53,7 +53,7 @@ async def call_llm_stream(runtime, message: str,
         *,
         plan_mode: bool = False,
     ) -> AsyncIterator[str]:
-    """Call the LLM with a smooth ReAct loop (OpenCode-grade).
+    """Call the LLM with a smooth ReAct loop.
 
     Yields status tokens prefixed with '@@' for tool-call lifecycle events.
     Never leaves the user with a bare "tool limit" dead-end — final step

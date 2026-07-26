@@ -1,4 +1,4 @@
-"""Simple-query tool policy + agent budget (OpenCode-smooth)."""
+"""Simple-query tool policy + agent budget."""
 
 from __future__ import annotations
 

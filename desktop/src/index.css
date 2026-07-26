@@ -709,7 +709,7 @@ pre code {
   color: #fff;
 }
 
-/* Unified diff (Grok-style): red removals, green additions */
+/* Unified diff: red removals, green additions */
 .message-feed .code-block .diff-code,
 .message-feed .code-block .diff-code-plain,
 .process-diff-wrap .diff-code,

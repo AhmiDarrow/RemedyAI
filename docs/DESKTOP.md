@@ -121,7 +121,7 @@ It bundles the full Remedy server as a sidecar inside a native Tauri application
 so users only need to download and run one installer — no Python, Node, or Rust
 toolchain required.
 
-The desktop app provides an OpenCode-like chat interface with streaming tokens,
+The desktop app provides a chat interface with streaming tokens,
 session management, file/image attachments (drag-and-drop), slash commands,
 themes, first-run setup, bundled skills, and persistent memory. Releases are
 minisign-signed for in-app auto-update.
@@ -209,7 +209,7 @@ event: done          → { request_id: "..." }
 event: error         → { message: "..." }
 ```
 
-## UI Layout (OpenCode-like)
+## UI Layout
 
 ```
 ┌──────────────┬──────────────────────────────────────┐

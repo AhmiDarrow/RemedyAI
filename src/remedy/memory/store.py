@@ -1,6 +1,5 @@
 """Persistent memory backend with SQLite + FTS5 and explicit handoff support.
 
-Inspired by Hermes' memory system, adapted as a clean standalone module.
 Supports cross-session search, user modeling, and structured handoff notes
 critical for the Remedy/Reme companion experience.
 """

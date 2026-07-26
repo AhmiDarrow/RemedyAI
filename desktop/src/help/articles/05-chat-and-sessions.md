@@ -74,7 +74,7 @@ Browser content loads **inside** the panel; sites that block embedding offer **O
 
 | Mode | Use when |
 |------|----------|
-| **Plan** | Research & design like Grok/Claude plan mode: **read/search/list/fetch OK**; **writes/shell blocked**. Ask clarifying questions; save a structured plan (`plan_save`); ASCII outline in chat. |
+| **Plan** | Research & design only: **read/search/list/fetch OK**; **writes/shell blocked**. Ask clarifying questions; save a structured plan (`plan_save`); ASCII outline in chat. |
 | **Build** | Implement changes, run tools, write files — follows the latest plan when present. |
 
 Status bar toggle or **Ctrl+B** / Shift+Tab in composer. Desktop sends `plan_mode` so the server enforces the allowlist.

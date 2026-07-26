@@ -22,7 +22,7 @@ Remedy keeps durable knowledge so it can remember facts, goals, and session cont
 - Status bar shows **Memory · CP** when a checkpoint exists  
 - Slash commands in chat (see below)  
 - Settings → **Your name** syncs into profile  
-- Settings → **MCP host** — export skills to Cursor / Claude Desktop
+- Settings → **MCP host** — export skills to external MCP clients
 
 ## Essential commands
 

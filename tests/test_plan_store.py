@@ -86,7 +86,7 @@ def test_plan_mode_tool_names_exclude_shell():
     assert "bash_exec" not in PLAN_MODE_TOOL_NAMES
     assert "file_write" not in PLAN_MODE_TOOL_NAMES
     assert "file_edit" not in PLAN_MODE_TOOL_NAMES
-    # Research tools allowed (Grok/Claude-style plan mode)
+    # Research tools allowed in plan mode
     assert "file_read" in PLAN_MODE_TOOL_NAMES
     assert "list_dir" in PLAN_MODE_TOOL_NAMES
     assert "repo_search" in PLAN_MODE_TOOL_NAMES

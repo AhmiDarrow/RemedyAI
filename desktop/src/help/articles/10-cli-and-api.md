@@ -27,7 +27,7 @@ remedy auth login xai
 remedy serve --host 127.0.0.1 --port 7400
 remedy skill list
 remedy memory search "query"
-remedy mcp serve          # MCP stdio host for Cursor / Claude Desktop
+remedy mcp serve          # MCP stdio host for external MCP clients
 ```
 
 Desktop sidecar already runs `serve` with `--skip-setup`. Do not start a second server on 7400 while Desktop is open unless you know what you are doing.
@@ -40,7 +40,7 @@ remedy mcp serve
 remedy-mcp
 ```
 
-Configure Cursor/Claude Desktop with a stdio MCP server (same Python env as `remedy`):
+Configure any MCP-compatible client with a stdio MCP server (same Python env as `remedy`):
 
 ```json
 {

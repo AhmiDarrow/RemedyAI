@@ -1,8 +1,7 @@
-"""Project workspace root for agent sessions (OpenCode-style folder context).
+"""Project workspace root for agent sessions (folder context).
 
 The configured / session ``project_path`` is the default directory for file
-tools, shell cwd, and @file UI jailing — similar to opening a folder in a
-code agent.
+tools, shell cwd, and @file UI jailing.
 """
 
 from __future__ import annotations

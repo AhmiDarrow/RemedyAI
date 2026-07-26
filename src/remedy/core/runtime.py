@@ -1,7 +1,6 @@
 """Core agent runtime -- the intelligent "brain" of Remedy.
 
 Orchestrates planning, tool use, sub-agent delegation, and skill invocation.
-Inspired by Hermes' ReAct loop with learning and self-improvement.
 """
 
 from __future__ import annotations
