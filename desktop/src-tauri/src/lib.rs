@@ -1588,9 +1588,9 @@ fn ensure_update_ui_ps1_in_temp() -> PathBuf {
 fn launch_install_progress_ui(from: &str, to: &str) {
     let status = update_status_path();
     write_update_status(
-        "closing",
+        "installing",
         90,
-        "Remedy closed. Installing update - leave this window open.",
+        "Installing update...",
         from,
         to,
     );
@@ -1951,11 +1951,12 @@ fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), Stri
                 download_url
             );
 
+            // One calm in-app message (UI maps installing/closing/verifying the same).
             emit_progress(
                 &app_for_thread,
                 "closing",
                 100,
-                "Download complete. Remedy will close - a new window shows install progress.",
+                "Download complete. Restarting to finish install...",
             );
 
             // 1) Drop our Child handle for the sidecar.
@@ -1972,25 +1973,13 @@ fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), Stri
             force_stop_remedy_processes();
             thread::sleep(Duration::from_millis(800));
 
-            // 3) Exit the UI process FIRST so app.exe / Remedy Desktop.exe unlock.
-            //    Then the detached installer can overwrite install-dir files.
-            //    (Launching NSIS while we still hold the main EXE caused
-            //    "Can't write ...\remedy-desktop.exe" / partial aborts.)
-            // Progress host (I-A) already shows "Closing..." after this status write.
+            // 3) Exit the UI process so app.exe / Remedy Desktop.exe unlock.
+            //    Install must be scheduled *and proven started* before exit
+            //    (0.14.5: schedule looked ok but Job Object killed the script).
             write_updater_owns_relaunch_flag();
-            emit_progress_ver(
-                &app_for_thread,
-                "closing",
-                90,
-                "Closing Remedy so the installer can replace files...",
-                &ver_from,
-                &ver_to,
-            );
-            // Stage 2 popup: launch *before* app.exit so it appears as the download UI
-            // disappears with the app. Detached so it outlives this process.
+            // Stage 2 host (calm "Updating Remedy...") outlives this process.
             launch_install_progress_ui(&ver_from, &ver_to);
-            // Brief beat so the WinForms host can paint before we exit.
-            thread::sleep(Duration::from_millis(450));
+            thread::sleep(Duration::from_millis(400));
 
             #[cfg(target_os = "windows")]
             {
@@ -2077,7 +2066,7 @@ try {{ Set-Content -LiteralPath $ownsFlag -Value 'owned_by=update_script' -Encod
 
 # Stage 2 host should already be up (launched from the app just before exit).
 # If missing (crash / race), start it now so install is never blank-desktop.
-Set-UpdateStatus 'closing' 88 'Remedy closed. Install progress running...'
+Set-UpdateStatus 'installing' 88 'Installing update...'
 $uiPs1 = Join-Path $env:TEMP 'remedy-update-ui.ps1'
 $uiAlive = $false
 try {{
@@ -2086,8 +2075,7 @@ try {{
   }}).Count -gt 0
 }} catch {{ $uiAlive = $false }}
 if (-not $uiAlive -and (Test-Path -LiteralPath $uiPs1)) {{
-  Log 'Install progress popup not found - launching stage 2 host now'
-  # Hidden console only; WinForms UI still paints. Never use cmd /c start.
+  Log 'Progress UI not found - launching host now'
   Start-Process -FilePath 'powershell.exe' -ArgumentList @(
     '-NoProfile','-STA','-ExecutionPolicy','Bypass','-WindowStyle','Hidden',
     '-File', $uiPs1,
@@ -2097,14 +2085,14 @@ if (-not $uiAlive -and (Test-Path -LiteralPath $uiPs1)) {{
   ) -WindowStyle Hidden | Out-Null
   Start-Sleep -Milliseconds 500
 }} else {{
-  Log ("Install progress popup alive=$uiAlive")
+  Log ("Progress UI alive=$uiAlive")
 }}
 
-# Wait for the app process tree to die (file locks). Install popup stays open.
-Start-Sleep -Seconds 4
+# Wait for the app process tree to die (file locks).
+Start-Sleep -Seconds 3
 Stop-RemedyAppOnly
-Set-UpdateStatus 'closing' 92 'Preparing installer...'
-Start-Sleep -Seconds 2
+Set-UpdateStatus 'installing' 92 'Installing update...'
+Start-Sleep -Seconds 1
 
 $installer = '{install_path}'
 if (-not (Test-Path -LiteralPath $installer)) {{
@@ -2141,7 +2129,7 @@ if ($priorDir -and (Test-Path -LiteralPath $priorDir)) {{
   $args += "/D=$priorDir"
   Log "Using /D=$priorDir"
 }}
-Set-UpdateStatus 'installing' 95 'Installing update - progress stays open until restart.'
+Set-UpdateStatus 'installing' 95 'Installing update...'
 Log ("Starting NSIS: $installer $($args -join ' ')")
 $p = Start-Process -FilePath $installer -ArgumentList $args -PassThru -WindowStyle Hidden
 if (-not $p) {{
@@ -2240,6 +2228,54 @@ try {
                     ps1_path,
                     log_path
                 );
+                // Do not exit until the install script proves it started (BOOT line).
+                // Prevents "download done, app closes, nothing happens."
+                let log_full = env::temp_dir().join("RemedyDesktop-Update.log");
+                let mut booted = false;
+                for i in 0..40 {
+                    thread::sleep(Duration::from_millis(150));
+                    if let Ok(txt) = std::fs::read_to_string(&log_full) {
+                        // Accept either new BOOT marker or classic start line.
+                        if txt.contains("BOOT pid=") || txt.contains("Update script started") {
+                            // Prefer a line from this run (installer path unique per pid).
+                            if txt.contains(&temp.file_name().unwrap_or_default().to_string_lossy().to_string())
+                                || txt.contains("BOOT pid=")
+                            {
+                                booted = true;
+                                log::info!("Install script alive after {}ms", (i + 1) * 150);
+                                break;
+                            }
+                        }
+                    }
+                }
+                if !booted {
+                    // One more hard retry via schtasks only, then re-check.
+                    log::warn!("Install script not alive yet; re-running schedule");
+                    let _ = schedule_update_install_script(&ps1_path);
+                    for i in 0..30 {
+                        thread::sleep(Duration::from_millis(200));
+                        if let Ok(txt) = std::fs::read_to_string(&log_full) {
+                            if txt.contains("BOOT pid=") || txt.contains("Update script started") {
+                                booted = true;
+                                log::info!("Install script alive on retry after {}ms", (i + 1) * 200);
+                                break;
+                            }
+                        }
+                    }
+                }
+                if !booted {
+                    return Err(
+                        "Could not start the install step after download. \
+                         Leave Remedy open and click Retry, or install from GitHub Releases."
+                            .into(),
+                    );
+                }
+                emit_progress(
+                    &app_for_thread,
+                    "closing",
+                    100,
+                    "Install started. Remedy will reopen on the new version...",
+                );
             }
             #[cfg(not(target_os = "windows"))]
             {
@@ -2248,10 +2284,8 @@ try {
                     .map_err(|e| format!("Failed to launch installer: {e}"))?;
             }
 
-            // Give the scheduler time to start (and for WMI/schtasks to register),
-            // then exit so file locks clear. Too short a delay was a failure mode
-            // when breakaway spawn was slow.
-            thread::sleep(Duration::from_millis(1800));
+            // Brief beat so UI can paint the final message, then exit.
+            thread::sleep(Duration::from_millis(700));
             app_for_thread.exit(0);
             Ok(())
         })();

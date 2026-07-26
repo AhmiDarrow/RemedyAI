@@ -2,6 +2,17 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.14.7] — 2026-07-26
+
+### Fix: update UX calm + install must start before exit
+
+- **In-app update copy:** one message path — download, then “Restarting to finish
+  install” (no triple “closing / another popup” spam).
+- **Install host copy:** short “Updating Remedy…” status; less serious language.
+- **Hard gate:** app does **not** exit until the install script logs `BOOT` /
+  `Update script started` (retry schedule once). Prevents download-done → silent
+  death with nothing coming back.
+
 ## [0.14.6] — 2026-07-26
 
 ### Fix: autoupdate install never ran after download + alpha logos everywhere

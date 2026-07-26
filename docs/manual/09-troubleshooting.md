@@ -135,8 +135,8 @@ old build), the install script may have been killed with the app process
 
 | Check | Fix |
 |-------|-----|
-| Stuck at “closing” | Update to **0.14.6+** (multi-path install schedule) |
-| `%TEMP%\RemedyDesktop-Update.log` has no `BOOT` / `Update script started` | Confirm **0.14.6+**; otherwise install the `.exe` from GitHub Releases |
+| Stuck at “closing” | Update to **0.14.7+** (multi-path install schedule) |
+| `%TEMP%\RemedyDesktop-Update.log` has no `BOOT` / `Update script started` | Confirm **0.14.7+**; otherwise install the `.exe` from GitHub Releases |
 | Close-to-tray only | Use tray → **Quit** if an old update left installers in `%TEMP%` |
 | Manual recovery | Run the newest `RemedyDesktop-Update-*.exe` in `%TEMP%`, or the release installer |
 
@@ -202,3 +202,4 @@ Trojan. Known historical / ML labels and status:
 ## Related
 
 - [First run](02-first-run) · [Providers](03-providers-and-auth) · [Updates](08-updates-and-uninstall)
+

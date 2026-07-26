@@ -63,7 +63,7 @@ $ver.Location = New-Object System.Drawing.Point(26, 52)
 $form.Controls.Add($ver)
 
 $phaseLbl = New-Object System.Windows.Forms.Label
-$phaseLbl.Text = 'Preparing...'
+$phaseLbl.Text = 'Updating Remedy...'
 $phaseLbl.Font = New-Object System.Drawing.Font('Segoe UI', 10)
 $phaseLbl.ForeColor = [System.Drawing.Color]::White
 $phaseLbl.AutoSize = $false
@@ -81,7 +81,7 @@ $bar.Location = New-Object System.Drawing.Point(26, 112)
 $form.Controls.Add($bar)
 
 $msg = New-Object System.Windows.Forms.Label
-$msg.Text = 'Please keep this window open until Remedy restarts.'
+$msg.Text = 'Hang tight - Remedy restarts when this finishes.'
 $msg.Font = New-Object System.Drawing.Font('Segoe UI', 8.5)
 $msg.ForeColor = [System.Drawing.Color]::FromArgb(140, 155, 170)
 $msg.AutoSize = $false
@@ -101,8 +101,8 @@ $timer.Add_Tick({
     $script:idleTicks++
     # Keep window visible even if status file is late (app just closed).
     if ($script:idleTicks -eq 1) {
-      $phaseLbl.Text = 'Waiting for installer...'
-      $msg.Text = 'Remedy closed - install continues. Leave this window open.'
+      $phaseLbl.Text = 'Updating Remedy...'
+      $msg.Text = 'Installing in the background. This window closes when done.'
     }
     return
   }
@@ -118,33 +118,36 @@ $timer.Add_Tick({
   if ($pct -lt 0) { $pct = 0 }
   if ($pct -gt 100) { $pct = 100 }
   $bar.Value = $pct
-  if ($j.message) { $msg.Text = [string]$j.message }
+  # Prefer short calm labels over raw status spam.
   if ($j.from) { $script:From = [string]$j.from }
   if ($j.to) { $script:To = [string]$j.to }
   $ver.Text = ("v{0}  ->  v{1}" -f $script:From, $script:To)
 
   switch ($p) {
-    'downloading' { $phaseLbl.Text = 'Downloading update...' }
-    'closing'     { $phaseLbl.Text = 'Closing Remedy...' }
-    'installing'  { $phaseLbl.Text = 'Installing update...' }
-    'verifying'   { $phaseLbl.Text = 'Verifying install...' }
-    'relaunch'    { $phaseLbl.Text = 'Relaunching...' }
+    'downloading' { $phaseLbl.Text = 'Downloading...'; $msg.Text = 'Almost ready to install.' }
+    'closing'     { $phaseLbl.Text = 'Preparing install...'; $msg.Text = 'Please wait a moment.' }
+    'installing'  { $phaseLbl.Text = 'Installing update...'; $msg.Text = 'This usually takes under a minute.' }
+    'verifying'   { $phaseLbl.Text = 'Finishing...'; $msg.Text = 'Checking the new install.' }
+    'relaunch'    { $phaseLbl.Text = 'Starting Remedy...'; $msg.Text = 'App will open shortly.' }
     'done' {
       $phaseLbl.Text = 'Update complete'
+      $msg.Text = 'You are all set.'
       $bar.Value = 100
       $script:done = $true
       $timer.Stop()
-      Start-Sleep -Milliseconds 1400
+      Start-Sleep -Milliseconds 1200
       $form.Close()
     }
     'error' {
       $phaseLbl.Text = 'Update failed'
       $phaseLbl.ForeColor = [System.Drawing.Color]::FromArgb(248, 113, 113)
+      if ($j.message) { $msg.Text = [string]$j.message }
       $script:done = $true
       $timer.Stop()
     }
     default {
-      if ($p) { $phaseLbl.Text = $p }
+      if ($p) { $phaseLbl.Text = 'Updating Remedy...' }
+      if ($j.message) { $msg.Text = [string]$j.message }
     }
   }
 })

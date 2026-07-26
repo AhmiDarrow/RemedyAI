@@ -48,6 +48,9 @@ def test_lib_rs_two_stage_update_ux() -> None:
     assert "wscript.exe" in text
     assert "schtasks.exe" in text
     assert "CREATE_BREAKAWAY_FROM_JOB" in text
+    # Do not exit until install script proves it started (0.14.7+)
+    assert "BOOT pid=" in text
+    assert "Install script alive" in text or "not alive yet" in text
     # Download begin must not start the install host
     assert "launch_install_progress_ui(&ver_from, &ver_to);" in text
     # Ensure call is after closing phase, not at thread start with download
