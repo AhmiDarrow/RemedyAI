@@ -2,6 +2,17 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.15.0] — 2026-07-26
+
+### Feature: three-frame workspace, plan mode, image markup, sessions scale
+
+- **Workspace:** left/right swappable slides (Sessions, Settings, Files, Terminal, Browser, Scratch) with popout; chat is the middle frame.
+- **Image viewer:** fixed WebView load (no crossOrigin on blob); hover Edit/Copy/Save; Save & attach closes editor onto the prompt.
+- **Icons:** rounded-plate shell icons; chat assistant uses partner initials; empty session keeps monogram.
+- **Sessions:** open tabs only in Sessions slide; rule-based archive (30d) + Archive filter.
+- **Project picker:** rfd (no PowerShell lag); Add project sticky above list.
+- **Plan mode:** read/search tools allowed; Grok/Claude-style plan banner (Approve → Build / Request changes).
+
 ## [0.14.10] — 2026-07-26
 
 ### Feature: session image viewer + Snipping-Tool markup

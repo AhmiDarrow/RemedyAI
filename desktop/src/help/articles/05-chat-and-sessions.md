@@ -30,8 +30,9 @@
 
 ### Image viewer & markup
 
-Any image shown in the session (markdown previews, Comfy outputs, local paths via
-`/api/media`) opens in a full-screen viewer:
+Any image in the session (markdown, Comfy, local path via `/api/media`, or URL)
+scales in the bubble. **Hover** for **Edit · Copy · Save**. **Click** or **Edit**
+opens the full viewer:
 
 | Tool | Shortcut | Purpose |
 |------|----------|---------|
@@ -43,19 +44,27 @@ Any image shown in the session (markdown previews, Comfy outputs, local paths vi
 | **Undo** | `Ctrl+Z` | Remove last stroke |
 | **Zoom** | `+` / `−` / `0` | Enlarge / shrink / reset |
 
-**Attach markup to message** exports the annotated PNG and puts it on the composer
-attachment rail so you can explain or point something out in the next prompt
-(same path as 📎 / paste). Without markup, **Attach to message** still attaches
-the plain image.
+**Save & attach to prompt** exports the (annotated) PNG, closes the editor, and
+puts the file on the composer rail so you can point things out to Remedy.
 
 ## Sessions
 
 - **New session** — Ctrl+N, logo menu, or `/new`  
-- **Tabs** — multiple open chats  
+- **Open tabs** — only inside the **Sessions** slide (not above chat)  
+- **Archive** — filter + auto-hide after 30 days (not pinned/open); row toggle  
 - **Auto-title** — from the first prompt  
 - **Rename / pin / search / tags** — session sidebar features  
 - **Export** — `/export` or command palette → `.txt`  
 - **Import** — `/import-session` or palette → `.txt` / `.md`  
+
+## Three-frame workspace
+
+```
+[ left slide ] | chat | [ right slide ]
+```
+
+Rails: Sessions · Settings · Files · Terminal · Browser · Scratch.  
+**⇄ Swap sides** · hide/show · Terminal/Browser/Scratch pop out (↗) / fullscreen (⛶).
 
 ## Plan vs Build
 

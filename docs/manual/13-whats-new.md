@@ -2,7 +2,11 @@
 
 High-level product notes for owners. Full detail lives in repo `CHANGELOG.md`.
 
-Ship **one** installer/tag for the current series (**v0.14.10**).
+Ship **one** installer/tag for the current series (**v0.15.0**).
+
+## 0.15.0 — Workspace · plan mode · images
+
+- Three-frame slides, image markup attach, session archive, Plan approve banner.
 
 ## 0.14.10 — Image viewer + markup
 
