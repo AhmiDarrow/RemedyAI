@@ -988,7 +988,7 @@ fn request_close_main_window(
 }
 
 /// Apply the current branding PNG as the window icon (taskbar / Alt-Tab).
-/// `include_image!` embeds icons/icon.png (circuit-R) at compile time.
+/// `include_image!` embeds icons/icon.png (rounded plate circuit-R) at compile time.
 fn apply_window_icons(app: &AppHandle) {
     // Path is relative to the crate root (desktop/src-tauri/)
     let icon = tauri::include_image!("icons/icon.png");

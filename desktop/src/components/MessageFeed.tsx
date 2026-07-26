@@ -58,6 +58,8 @@ interface MessageFeedProps {
   onRegenerate?: (assistantMsgId: string) => void
   /** Display name for the human (avatar + label). */
   userName?: string
+  /** Partner display name for assistant avatar initials (default Remedy). */
+  partnerName?: string
   /**
    * Attach a marked-up (or plain) image from the viewer to the next user prompt.
    * Parent should route this into the composer attachment rail.
@@ -216,6 +218,7 @@ const MessageBubble = memo(function MessageBubble({
   onOpenImage,
   onRegenerate,
   userName,
+  partnerName,
 }: {
   msg: ChatMessage
   partial?: string
@@ -228,6 +231,7 @@ const MessageBubble = memo(function MessageBubble({
   onOpenImage?: (src: string, alt?: string) => void
   onRegenerate?: (id: string) => void
   userName?: string
+  partnerName?: string
 }) {
   const isUser = msg.role === 'user'
   const isSystem = msg.role === 'system'
@@ -284,6 +288,8 @@ const MessageBubble = memo(function MessageBubble({
 
   const userLabel = firstName(userName)
   const userAv = userInitials(userName)
+  const partnerLabel = firstName(partnerName || 'Remedy')
+  const partnerAv = userInitials(partnerName || 'Remedy')
 
   const avatar = isUser || isSystem ? (
     <div
@@ -304,19 +310,21 @@ const MessageBubble = memo(function MessageBubble({
     </div>
   ) : (
     <div
-      className="flex-shrink-0 rounded-full overflow-hidden flex items-center justify-center"
+      className="flex-shrink-0 rounded-full flex items-center justify-center font-semibold"
       style={{
         width: 'var(--chat-avatar)',
         height: 'var(--chat-avatar)',
-        // Transparent host so true-alpha monogram is not sat on a baked black tile.
-        background: 'transparent',
-        border: 'none',
+        fontSize: partnerAv.length > 1 ? '0.55rem' : '0.65rem',
+        // Match user-side avatar style; initials from partner display name
+        background: 'color-mix(in srgb, var(--accent) 55%, var(--bg-tertiary))',
+        color: '#fff',
+        border: '1px solid var(--border)',
         visibility: hideAvatar ? 'hidden' : 'visible',
       }}
       aria-hidden
-      title="Remedy"
+      title={partnerName || 'Remedy'}
     >
-      <RemedyLogo size={20} variant="auto" />
+      {partnerAv}
     </div>
   )
 
@@ -352,7 +360,7 @@ const MessageBubble = memo(function MessageBubble({
         >
           {!isUser && !isSystem && (
             <div className="chat-meta flex items-center gap-2 mb-1 w-fit max-w-full">
-              <div className="chat-meta-label">Remedy</div>
+              <div className="chat-meta-label">{partnerLabel}</div>
               {timeLabel && <div className="chat-meta-time">{timeLabel}</div>}
             </div>
           )}
@@ -518,6 +526,7 @@ export function MessageFeed({
   onQuickPrompt,
   onRegenerate,
   userName,
+  partnerName = 'Remedy',
   onAttachMarkup,
 }: MessageFeedProps) {
   const [lightbox, setLightbox] = useState<{ src: string; alt?: string } | null>(null)
@@ -655,6 +664,7 @@ export function MessageFeed({
               onOpenImage={(src, alt) => setLightbox({ src, alt })}
               onRegenerate={onRegenerate}
               userName={userName}
+              partnerName={partnerName}
             />
           </Fragment>
         )
