@@ -50,12 +50,19 @@ export function PlanBanner({
     }
   }, [sessionId])
 
+  // Only hit the local API while Plan mode is on (or once after approve when plan still shown).
+  // Avoids 4s polling / provider-adjacent noise when the user is in normal Build chat.
   useEffect(() => {
-    void refresh()
     if (!planMode) return
-    const t = window.setInterval(() => void refresh(), 4000)
+    void refresh()
+    const t = window.setInterval(() => void refresh(), 8000)
     return () => window.clearInterval(t)
   }, [planMode, refresh])
+
+  // Drop stale plan card when leaving Plan mode so we do not keep polling or UI chrome.
+  useEffect(() => {
+    if (!planMode) setPlan(null)
+  }, [planMode])
 
   if (!planMode && !plan) return null
 

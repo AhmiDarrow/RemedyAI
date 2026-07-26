@@ -208,6 +208,8 @@ export default function App() {
   const [planMode, setPlanMode] = useState(false)
   const [panel, setPanel] = useState<'memory' | 'skills' | 'settings' | null>(null)
   const [openTabs, setOpenTabs] = useState<Set<string>>(new Set())
+  /** Stable list for Sessions open-chip strip (avoid new array every parent render). */
+  const openTabIds = useMemo(() => [...openTabs], [openTabs])
   const [serverState, setServerState] = useState<ServerState>(isTauri() ? 'connecting' : 'ready')
   const [serverError, setServerError] = useState('')
   const [paletteOpen, setPaletteOpen] = useState(false)
@@ -1352,7 +1354,7 @@ export default function App() {
       }}
       onExport={handleExport}
       onImport={() => void handleImport()}
-      openTabIds={[...openTabs]}
+      openTabIds={openTabIds}
       onCloseTab={handleCloseTab}
       footer={
         <TokenCostTicker
@@ -1594,8 +1596,15 @@ export default function App() {
             onClose={() => setPanel(null)}
             onOpenHelp={openHelp}
           />
+          {/* Avoid mounting Settings twice when the workspace slide already embeds it */}
           <SettingsPanel
-            open={panel === 'settings'}
+            open={
+              panel === 'settings' &&
+              !(
+                (wsLayout.leftOpen && wsLayout.left === 'settings') ||
+                (wsLayout.rightOpen && wsLayout.right === 'settings')
+              )
+            }
             onClose={() => setPanel(null)}
             themeId={themeId}
             onThemeChange={setTheme}
