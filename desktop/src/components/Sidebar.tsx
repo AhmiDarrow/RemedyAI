@@ -763,7 +763,7 @@ function ProjectSection({
                   onStartRename(s)
                 }}
               >
-                <div className="flex items-center gap-1 px-1">
+                <div className="flex items-center gap-0.5 px-1 min-w-0">
                   <input
                     type="checkbox"
                     checked={isSel}
@@ -775,7 +775,7 @@ function ProjectSection({
                   />
                   <button
                     type="button"
-                    className="flex-shrink-0 text-xs w-4 opacity-50 group-hover:opacity-100"
+                    className="flex-shrink-0 text-[10px] w-3.5 opacity-50 group-hover:opacity-100"
                     style={{ color: pinned ? 'var(--accent)' : 'var(--text-muted)' }}
                     onClick={(e) => {
                       e.stopPropagation()
@@ -785,21 +785,6 @@ function ProjectSection({
                     title={pinned ? 'Unpin' : 'Pin'}
                   >
                     {pinned ? '★' : '☆'}
-                  </button>
-                  <button
-                    type="button"
-                    className="flex-shrink-0 text-[10px] opacity-40 group-hover:opacity-100"
-                    style={{
-                      color: m.archived ? 'var(--accent)' : 'var(--text-muted)',
-                    }}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      toggleSessionArchive(s.id)
-                      refreshMeta()
-                    }}
-                    title={m.archived ? 'Unarchive' : 'Archive'}
-                  >
-                    {m.archived ? '▣' : '▢'}
                   </button>
                   {isRenaming ? (
                     <input
@@ -826,28 +811,28 @@ function ProjectSection({
                       }}
                     />
                   ) : (
-                    <span className="truncate flex-1 min-w-0 font-medium">
+                    <span
+                      className="truncate flex-1 min-w-0 text-[13px] font-medium leading-snug"
+                      title={s.title || 'New Session'}
+                    >
                       {s.title || 'New Session'}
                     </span>
                   )}
-                  <span className="text-[10px] flex-shrink-0" style={{ color: 'var(--text-muted)' }}>
-                    {relativeTime(s.updated_at)}
-                  </span>
                   {onRename && !isRenaming && (
                     <button
                       type="button"
-                      className="opacity-0 group-hover:opacity-80 p-0.5"
+                      className="opacity-0 group-hover:opacity-80 p-0.5 shrink-0"
                       style={{ color: 'var(--text-muted)' }}
                       onClick={(e) => {
                         e.stopPropagation()
                         onStartRename(s)
                       }}
                     >
-                      <IconEdit size={12} />
+                      <IconEdit size={11} />
                     </button>
                   )}
                   <button
-                    className="w-5 h-5 opacity-0 group-hover:opacity-70"
+                    className="w-4 h-4 opacity-0 group-hover:opacity-70 shrink-0 text-[11px]"
                     style={{ color: 'var(--error)' }}
                     onClick={(e) => {
                       e.stopPropagation()
@@ -857,10 +842,35 @@ function ProjectSection({
                     ×
                   </button>
                 </div>
-                <div className="flex items-center gap-1 px-1 mt-0.5 min-h-[1rem] pl-5">
-                  <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                <div className="flex items-center gap-1.5 px-1 mt-0.5 min-h-[0.9rem] pl-7 min-w-0">
+                  <span
+                    className="text-[9px] tabular-nums shrink-0"
+                    style={{ color: 'var(--text-muted)', opacity: 0.85 }}
+                    title={s.updated_at || undefined}
+                  >
+                    {relativeTime(s.updated_at)}
+                  </span>
+                  <span className="text-[9px] shrink-0" style={{ color: 'var(--text-muted)' }}>
+                    ·
+                  </span>
+                  <span className="text-[9px] shrink-0" style={{ color: 'var(--text-muted)' }}>
                     {s.message_count} msg
                   </span>
+                  <button
+                    type="button"
+                    className="text-[9px] shrink-0 opacity-0 group-hover:opacity-80"
+                    style={{
+                      color: m.archived ? 'var(--accent)' : 'var(--text-muted)',
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      toggleSessionArchive(s.id)
+                      refreshMeta()
+                    }}
+                    title={m.archived ? 'Unarchive' : 'Archive'}
+                  >
+                    {m.archived ? 'archived' : 'archive'}
+                  </button>
                   {(m.tags || []).slice(0, 2).map((t) => (
                     <span
                       key={t}

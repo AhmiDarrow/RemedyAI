@@ -100,6 +100,9 @@ export function SettingsPanel({
   const [apiKey, setApiKey] = useState('')
   const [apiKeySet, setApiKeySet] = useState(false)
   const [projectPath, setProjectPath] = useState('.')
+  const [browserHomeUrl, setBrowserHomeUrl] = useState(
+    'https://github.com/AhmiDarrow/RemedyAI',
+  )
   const [persona, setPersona] = useState('balanced')
   const [userName, setUserName] = useState('')
   const [agentName, setAgentName] = useState('Remedy')
@@ -268,6 +271,9 @@ export function SettingsPanel({
       // Prefer shell desktop.json for tray prefs (authoritative at launch).
       setStartInTray(Boolean(s.start_in_tray))
       setCloseToTray(Boolean(s.close_to_tray))
+      setBrowserHomeUrl(
+        (s.browser_home_url || '').trim() || 'https://github.com/AhmiDarrow/RemedyAI',
+      )
       setHarnessMode(s.harness_mode || 'auto')
       {
         const mn = Number(s.harness_min_context_pct)
@@ -534,6 +540,7 @@ export function SettingsPanel({
       llm_model: model,
       llm_base_url: baseUrl,
       project_path: projectPath,
+      browser_home_url: browserHomeUrl.trim() || 'https://github.com/AhmiDarrow/RemedyAI',
       persona,
       user_name: userName.trim(),
       name: agentName.trim() || 'Remedy',
@@ -641,16 +648,18 @@ export function SettingsPanel({
       style={{
         width: embedded ? '100%' : 300,
         minWidth: embedded ? 0 : 300,
+        maxWidth: embedded ? '100%' : 300,
         background: 'var(--bg-secondary)',
         borderColor: 'var(--border)',
       }}
     >
-      <div
-        className="flex items-center justify-between px-3 py-2 border-b text-xs font-medium shrink-0"
-        style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}
-      >
-        <span>Settings</span>
-        {!embedded && (
+      {/* Workspace slide already has a "Settings" header when embedded */}
+      {!embedded && (
+        <div
+          className="flex items-center justify-between px-3 py-2 border-b text-xs font-medium shrink-0"
+          style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}
+        >
+          <span>Settings</span>
           <button
             onClick={onClose}
             className="px-1 rounded"
@@ -658,10 +667,10 @@ export function SettingsPanel({
           >
             {'\u00D7'}
           </button>
-        )}
-      </div>
+        </div>
+      )}
 
-      <div className="px-3 pt-2 pb-1 border-b" style={{ borderColor: 'var(--border)' }}>
+      <div className="px-3 pt-2 pb-1 border-b shrink-0" style={{ borderColor: 'var(--border)' }}>
         <input
           type="search"
           value={settingsSearch}
@@ -694,6 +703,8 @@ export function SettingsPanel({
               apiKeySet={apiKeySet}
               projectPath={projectPath}
               setProjectPath={setProjectPath}
+              browserHomeUrl={browserHomeUrl}
+              setBrowserHomeUrl={setBrowserHomeUrl}
               persona={persona}
               setPersona={setPersona}
               userName={userName}

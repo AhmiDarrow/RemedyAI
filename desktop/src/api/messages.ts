@@ -221,9 +221,12 @@ export function streamMessage(
         onDone({ request_id: '' })
       }
     } catch (err: unknown) {
-      if (err instanceof Error && err.name !== 'AbortError') {
-        onError(err.message)
+      // AbortError: user Stop or session switch — callers clear streaming state.
+      // Do not call onDone (would race setMessages onto the wrong session).
+      if (err instanceof Error && err.name === 'AbortError') {
+        return
       }
+      onError(err instanceof Error ? err.message : String(err || 'Stream failed'))
     }
   })()
 

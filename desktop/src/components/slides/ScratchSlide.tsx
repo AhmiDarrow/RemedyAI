@@ -87,10 +87,16 @@ export function ScratchSlide({ sessionId }: { sessionId: string | null }) {
   }
 
   return (
-    <div className="flex flex-col h-full min-h-0 text-xs">
+    <div className="flex flex-col h-full min-h-0 max-h-full overflow-hidden text-xs">
       <div
         className="px-2 py-1.5 border-b shrink-0 flex flex-wrap items-center gap-1"
-        style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+        style={{
+          borderColor: 'var(--border)',
+          color: 'var(--text-muted)',
+          background: 'var(--bg-secondary)',
+          position: 'relative',
+          zIndex: 2,
+        }}
       >
         <span className="mr-auto">Scratch · auto-saves</span>
         <button
@@ -148,14 +154,18 @@ export function ScratchSlide({ sessionId }: { sessionId: string | null }) {
         <textarea
           value={text}
           onChange={(e) => save(e.target.value)}
-          className="flex-1 min-h-0 w-full resize-none p-2 outline-none text-sm"
+          onKeyDown={(e) => {
+            // Do not stop Esc — PopoutOverlay capture handler exits fullscreen / closes
+            if (e.key === 'Escape') return
+          }}
+          className="flex-1 min-h-0 w-full max-h-full resize-none p-2 outline-none text-sm"
           style={{
             background: 'var(--bg-primary)',
             color: 'var(--text-primary)',
             border: 'none',
             lineHeight: 1.5,
           }}
-          placeholder="Notes, TODOs, paste dumps… (Markdown ok)"
+          placeholder="Notes, TODOs, paste dumps… (Markdown ok) · Esc exits fullscreen"
           spellCheck
         />
       )}

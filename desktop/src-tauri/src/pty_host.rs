@@ -3,6 +3,7 @@
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use std::collections::HashMap;
 use std::io::{Read, Write};
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -13,7 +14,7 @@ static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 struct PtySession {
     writer: Mutex<Box<dyn Write + Send>>,
     master: Mutex<Box<dyn MasterPty + Send>>,
-    _child: Box<dyn portable_pty::Child + Send + Sync>,
+    child: Mutex<Box<dyn portable_pty::Child + Send + Sync>>,
 }
 
 pub struct PtyState {
@@ -28,22 +29,45 @@ impl Default for PtyState {
     }
 }
 
-fn pick_shell() -> (&'static str, Vec<&'static str>) {
-    // Prefer PowerShell 7+, then Windows PowerShell 5.1
-    if which_exists("pwsh.exe") {
-        return ("pwsh.exe", vec!["-NoLogo", "-NoExit"]);
-    }
-    ("powershell.exe", vec!["-NoLogo", "-NoExit"])
-}
+/// Resolve a real PowerShell binary by absolute path (GUI PATH is unreliable).
+fn pick_shell() -> (String, Vec<String>) {
+    let mut candidates: Vec<String> = Vec::new();
 
-fn which_exists(name: &str) -> bool {
-    std::process::Command::new("where")
-        .arg(name)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+    // PowerShell 7+ common install locations
+    if let Ok(pf) = std::env::var("ProgramFiles") {
+        candidates.push(format!(r"{pf}\PowerShell\7\pwsh.exe"));
+        candidates.push(format!(r"{pf}\PowerShell\7-preview\pwsh.exe"));
+    }
+    if let Ok(pf86) = std::env::var("ProgramFiles(x86)") {
+        candidates.push(format!(r"{pf86}\PowerShell\7\pwsh.exe"));
+    }
+    // Windows PowerShell 5.1 (always present on modern Windows)
+    if let Ok(sys) = std::env::var("SystemRoot") {
+        candidates.push(format!(
+            r"{sys}\System32\WindowsPowerShell\v1.0\powershell.exe"
+        ));
+        candidates.push(format!(
+            r"{sys}\SysWOW64\WindowsPowerShell\v1.0\powershell.exe"
+        ));
+    }
+    candidates.push(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe".into());
+
+    for c in &candidates {
+        if Path::new(c).is_file() {
+            log::info!("pty: using shell {c}");
+            return (
+                c.clone(),
+                vec!["-NoLogo".into(), "-NoExit".into()],
+            );
+        }
+    }
+
+    // Last resort — PATH lookup (may fail in packaged GUI)
+    log::warn!("pty: absolute PowerShell path not found; trying powershell.exe on PATH");
+    (
+        "powershell.exe".into(),
+        vec!["-NoLogo".into(), "-NoExit".into()],
+    )
 }
 
 #[tauri::command]
@@ -67,12 +91,16 @@ pub fn pty_open(
         .map_err(|e| format!("openpty: {e}"))?;
 
     let (shell, args) = pick_shell();
-    let mut cmd = CommandBuilder::new(shell);
-    for a in args {
+    let mut cmd = CommandBuilder::new(&shell);
+    for a in &args {
         cmd.arg(a);
     }
     if let Some(dir) = cwd.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-        cmd.cwd(dir);
+        if Path::new(dir).is_dir() {
+            cmd.cwd(dir);
+        } else {
+            log::warn!("pty: cwd not a directory, ignoring: {dir}");
+        }
     }
 
     let child = pair
@@ -93,7 +121,7 @@ pub fn pty_open(
     let session = Arc::new(PtySession {
         writer: Mutex::new(writer),
         master: Mutex::new(pair.master),
-        _child: child,
+        child: Mutex::new(child),
     });
 
     {
@@ -103,14 +131,12 @@ pub fn pty_open(
 
     let app2 = app.clone();
     let id2 = id.clone();
-    let state_flag = Arc::clone(&session);
     thread::spawn(move || {
-        let mut buf = [0u8; 4096];
+        let mut buf = [0u8; 8192];
         loop {
             match reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
-                    // Lossy UTF-8 is fine for terminal output
                     let data = String::from_utf8_lossy(&buf[..n]).to_string();
                     let _ = app2.emit(
                         "pty-data",
@@ -121,9 +147,9 @@ pub fn pty_open(
             }
         }
         let _ = app2.emit("pty-exit", serde_json::json!({ "id": id2 }));
-        drop(state_flag);
     });
 
+    log::info!("pty_open: {id} shell={shell} cols={cols} rows={rows}");
     Ok(id)
 }
 
@@ -166,6 +192,13 @@ pub fn pty_resize(
 #[tauri::command]
 pub fn pty_close(state: State<'_, PtyState>, id: String) -> Result<(), String> {
     let mut map = state.sessions.lock().map_err(|e| e.to_string())?;
-    map.remove(&id);
+    if let Some(session) = map.remove(&id) {
+        // Kill the shell process so it does not linger after the UI closes the slide.
+        if let Ok(mut child) = session.child.lock() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        log::info!("pty_close: {id}");
+    }
     Ok(())
 }

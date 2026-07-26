@@ -47,19 +47,21 @@ export function Panel({ open, onClose, title, children }: PanelProps) {
     }
   }, [open, onClose])
 
+  // Critical: unmount when closed. A width:0 panel still contributes content height
+  // in a column flex parent and was collapsing the chat feed to 0px.
+  if (!open) return null
+
   return (
     <div
       ref={rootRef}
       role="complementary"
       aria-label={title}
-      aria-hidden={!open}
-      className="flex flex-col border-l transition-all overflow-hidden"
+      className="flex flex-col border-l overflow-hidden fixed top-0 right-0 bottom-0 z-[80]"
       style={{
-        width: open ? 280 : 0,
-        minWidth: open ? 280 : 0,
+        width: 280,
         background: 'var(--bg-secondary)',
         borderColor: 'var(--border)',
-        transition: 'width 0.2s ease, min-width 0.2s ease',
+        boxShadow: '-8px 0 24px rgba(0,0,0,0.25)',
       }}
     >
       <div

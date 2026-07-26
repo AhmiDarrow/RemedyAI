@@ -1,3 +1,6 @@
+/** Default homepage for the in-app Browser slide (override in Settings). */
+export const DEFAULT_BROWSER_HOME = 'https://github.com/AhmiDarrow/RemedyAI'
+
 /**
  * Normalize a user-entered browser URL for iframe / external open.
  * Only http(s) and about: are allowed through as-is; bare hosts get https://.
@@ -11,6 +14,11 @@ export function normalizeBrowserUrl(raw: string): string {
     u = `https://${u}`
   }
   return u
+}
+
+/** Settings / home button: normalize or fall back to Remedy GitHub. */
+export function resolveBrowserHome(raw?: string | null): string {
+  return normalizeBrowserUrl(raw || '') || DEFAULT_BROWSER_HOME
 }
 
 /** True when the URL is safe to open externally (matches Rust open_external_url). */

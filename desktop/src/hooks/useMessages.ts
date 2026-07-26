@@ -48,6 +48,9 @@ export function useMessages(sessionId: string | null) {
   const processStepsRef = useRef<ProcessStep[]>([])
   const queueRef = useRef<QueuedSend[]>([])
   const streamCtrlRef = useRef<AbortController | null>(null)
+  /** Latest active session — finishOk must not paint onto a switched session. */
+  const sessionIdRef = useRef(sessionId)
+  sessionIdRef.current = sessionId
   /** Avoid re-entrant auto-drain while finishing a turn. */
   const drainingRef = useRef(false)
   /** RAF-batched stream text (avoids re-render every token). */
@@ -140,20 +143,28 @@ export function useMessages(sessionId: string | null) {
     }
   }, [])
 
+  const [loadError, setLoadError] = useState<string | null>(null)
+
   const load = useCallback(async (opts?: { force?: boolean }) => {
     if (!sessionId) {
       setMessages([])
       setLoading(false)
+      setLoadError(null)
       return
     }
     // Always load when switching sessions (force). Only skip mid-stream refreshes
     // for the same session — previously a stuck stream blocked all session switches.
     if (streamingRef.current && !opts?.force) return
     setLoading(true)
+    setLoadError(null)
     try {
       const msgs = await listMessages(sessionId)
-      setMessages(msgs)
-    } catch {
+      setMessages(Array.isArray(msgs) ? msgs : [])
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e)
+      console.warn('[remedy] listMessages failed', sessionId, msg)
+      setLoadError(msg || 'Failed to load messages')
+      // Clear so we never show another session's transcript under a load failure.
       setMessages([])
     } finally {
       setLoading(false)
@@ -161,7 +172,24 @@ export function useMessages(sessionId: string | null) {
   }, [sessionId])
 
   // Session change: always force-load history so list clicks work.
+  // Abort any in-flight stream and clear stuck flags so a dead stream cannot blank the feed.
   useEffect(() => {
+    try {
+      streamCtrlRef.current?.abort()
+    } catch {
+      /* */
+    }
+    streamingRef.current = false
+    sendLockRef.current = false
+    setStreaming(false)
+    setPartialText('')
+    setPartialThinking('')
+    setActiveTools([])
+    setProcessSteps([])
+    processStepsRef.current = []
+    setTaskProgress(null)
+    setStreamCtrl(null)
+    streamCtrlRef.current = null
     void load({ force: true })
   }, [load])
 
@@ -253,8 +281,18 @@ export function useMessages(sessionId: string | null) {
         setTaskProgress(null)
         streamingRef.current = false
         sendLockRef.current = false
+        // Drop results if the user already switched sessions.
+        if (sessionIdRef.current !== targetId) {
+          setProcessSteps([])
+          processStepsRef.current = []
+          window.setTimeout(() => {
+            void drainQueue()
+          }, 40)
+          return
+        }
         try {
           const msgs = await listMessages(targetId)
+          if (sessionIdRef.current !== targetId) return
           if (stepsSnapshot.length && msgs.length) {
             const last = msgs[msgs.length - 1]
             if (last && last.role === 'assistant') {
@@ -655,6 +693,7 @@ export function useMessages(sessionId: string | null) {
   return {
     messages,
     loading,
+    loadError,
     streaming,
     partialText,
     partialThinking,

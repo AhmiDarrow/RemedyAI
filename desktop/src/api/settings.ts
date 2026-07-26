@@ -63,6 +63,8 @@ export interface Settings {
   enabled_models?: Record<string, string[]>
   last_model_by_provider?: Record<string, string>
   skills_active_budget?: number
+  /** In-app Browser homepage (Settings); default Remedy GitHub */
+  browser_home_url?: string
   version: string
   config_exists: boolean
   setup_completed: boolean
@@ -104,6 +106,7 @@ export interface SettingsUpdate {
   enabled_models?: Record<string, string[]>
   last_model_by_provider?: Record<string, string>
   skills_active_budget?: number
+  browser_home_url?: string
 }
 
 export async function getSettings(): Promise<Settings> {

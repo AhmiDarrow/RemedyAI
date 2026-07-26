@@ -47,6 +47,8 @@ interface MessageFeedProps {
   partialThinking?: string
   streaming: boolean
   loading: boolean
+  /** Shown when history fetch fails (session list still works). */
+  loadError?: string | null
   planMode?: boolean
   activeTools?: ActiveTool[]
   processSteps?: ProcessStep[]
@@ -521,6 +523,7 @@ export function MessageFeed({
   partialThinking = '',
   streaming,
   loading,
+  loadError = null,
   planMode,
   activeTools = [],
   processSteps = [],
@@ -601,7 +604,13 @@ export function MessageFeed({
   return (
     <div
       ref={setScroller}
-      className="flex-1 overflow-y-auto message-feed py-2 min-h-0 relative h-full"
+      className="message-feed py-2 relative w-full"
+      style={{
+        position: 'absolute',
+        inset: 0,
+        overflowY: 'auto',
+        overflowX: 'hidden',
+      }}
     >
       <div ref={setContent} className="message-feed-content min-h-full flex flex-col">
       {planMode && (
@@ -621,6 +630,20 @@ export function MessageFeed({
       {loading && visible.length === 0 && (
         <div className="px-4 py-8 text-center" style={{ color: 'var(--text-muted)' }}>
           Loading messages...
+        </div>
+      )}
+
+      {loadError && !loading && (
+        <div
+          className="mx-4 mt-3 mb-2 px-3 py-2 rounded-md text-xs"
+          style={{
+            background: 'color-mix(in srgb, var(--error) 12%, var(--bg-tertiary))',
+            border: '1px solid var(--error)',
+            color: 'var(--error)',
+          }}
+          role="alert"
+        >
+          Could not load chat history: {loadError}
         </div>
       )}
 

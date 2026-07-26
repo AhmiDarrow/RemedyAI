@@ -1,38 +1,218 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { isTauri, tauriInvoke } from '../../api/tauri'
-import { normalizeBrowserUrl } from '../../utils/browserUrl'
+import { getSettings } from '../../api/settings'
+import {
+  DEFAULT_BROWSER_HOME,
+  normalizeBrowserUrl,
+  resolveBrowserHome,
+} from '../../utils/browserUrl'
 import { openExternalUrl } from '../../api/auth'
 
-const HOME = 'https://github.com/AhmiDarrow/RemedyAI'
+type Bounds = { x: number; y: number; width: number; height: number }
 
 /**
- * Embedded browser panel: iframe in the slide (not a separate popup window).
- * Sites that block framing show a friendly note + Open externally.
+ * CSS-pixel bounds for the native WebView2 child.
+ * Only report a usable host so the embed never covers PopoutOverlay chrome
+ * or zero-size rail leftovers.
+ */
+function readBounds(el: HTMLElement | null): Bounds | null {
+  if (!el || !el.isConnected) return null
+  const style = window.getComputedStyle(el)
+  if (
+    style.display === 'none' ||
+    style.visibility === 'hidden' ||
+    Number(style.opacity) === 0
+  ) {
+    return null
+  }
+  const r = el.getBoundingClientRect()
+  // Require a real panel — tiny/offscreen rects fight fullscreen popout bounds
+  if (r.width < 80 || r.height < 80) return null
+  if (r.bottom < 0 || r.right < 0) return null
+  if (r.top > window.innerHeight || r.left > window.innerWidth) return null
+  return {
+    x: Math.round(r.left),
+    y: Math.round(r.top),
+    width: Math.round(r.width),
+    height: Math.round(r.height),
+  }
+}
+
+/**
+ * Embedded WebView2 (Chromium) browser **inside** the Browser slide.
+ * Separate OS popup only when the user clicks ↗ (system browser).
  */
 export function BrowserSlide() {
-  const [url, setUrl] = useState(HOME)
-  const [activeUrl, setActiveUrl] = useState(HOME)
-  const [status, setStatus] = useState('')
-  const [frameKey, setFrameKey] = useState(0)
-  const [frameError, setFrameError] = useState(false)
+  const hostRef = useRef<HTMLDivElement | null>(null)
+  const [home, setHome] = useState(DEFAULT_BROWSER_HOME)
+  const [url, setUrl] = useState(DEFAULT_BROWSER_HOME)
+  const [activeUrl, setActiveUrl] = useState(DEFAULT_BROWSER_HOME)
+  const [status, setStatus] = useState('Enter a URL and press Go')
+  const [loaded, setLoaded] = useState(false)
+  const [busy, setBusy] = useState(false)
 
-  const go = useCallback((raw: string) => {
-    const u = normalizeBrowserUrl(raw)
-    if (!u) {
-      setStatus('Enter an http(s) URL')
-      return
+  // Settings → browser_home_url (default: Remedy GitHub)
+  useEffect(() => {
+    let cancelled = false
+    void getSettings()
+      .then((s) => {
+        if (cancelled) return
+        const h = resolveBrowserHome(s.browser_home_url)
+        setHome(h)
+        // Only seed the address bar when still on the previous default / empty
+        setUrl((prev) => {
+          const p = (prev || '').trim()
+          if (!p || p === DEFAULT_BROWSER_HOME || p === 'https://example.com') return h
+          return prev
+        })
+        setActiveUrl((prev) => {
+          const p = (prev || '').trim()
+          if (!p || p === DEFAULT_BROWSER_HOME || p === 'https://example.com') return h
+          return prev
+        })
+      })
+      .catch(() => {
+        /* keep DEFAULT_BROWSER_HOME */
+      })
+    return () => {
+      cancelled = true
     }
-    setUrl(u)
-    setActiveUrl(u)
-    setFrameError(false)
-    setFrameKey((k) => k + 1)
-    setStatus('')
   }, [])
 
-  // Load home once when the slide mounts
+  const pushBounds = useCallback(async () => {
+    if (!isTauri() || !loaded) return
+    const b = readBounds(hostRef.current)
+    if (!b) return
+    try {
+      await tauriInvoke('browser_set_bounds', { bounds: b })
+    } catch {
+      /* not open yet */
+    }
+  }, [loaded])
+
+  // Keep child webview aligned with the host while the slide is open
   useEffect(() => {
-    go(HOME)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const el = hostRef.current
+    if (!el || !isTauri()) return
+    const ro = new ResizeObserver(() => {
+      void pushBounds()
+    })
+    ro.observe(el)
+    const onWin = () => void pushBounds()
+    window.addEventListener('resize', onWin)
+    // Popout/fullscreen layout can settle over several frames
+    let n = 0
+    let raf = 0
+    const tick = () => {
+      void pushBounds()
+      n += 1
+      if (n < 12) raf = window.requestAnimationFrame(tick)
+    }
+    raf = window.requestAnimationFrame(tick)
+    return () => {
+      ro.disconnect()
+      window.removeEventListener('resize', onWin)
+      window.cancelAnimationFrame(raf)
+    }
+  }, [pushBounds])
+
+  // Hide embed when this Browser slide instance unmounts (rail ↔ popout
+  // remounts the other instance, which re-shows + rebounds).
+  useEffect(() => {
+    return () => {
+      if (!isTauri()) return
+      void tauriInvoke('browser_hide').catch(() => {})
+    }
+  }, [])
+
+  // Show again if still open when remounting (e.g. popout open/close)
+  useEffect(() => {
+    if (!isTauri()) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const open = await tauriInvoke<boolean>('browser_is_open')
+        if (cancelled) return
+        if (open) {
+          setLoaded(true)
+          await tauriInvoke('browser_show').catch(() => {})
+          // Wait a frame so popout chrome has laid out above us
+          await new Promise<void>((r) => requestAnimationFrame(() => r()))
+          await pushBounds()
+          await new Promise<void>((r) => requestAnimationFrame(() => r()))
+          await pushBounds()
+          setStatus('Browser ready')
+        }
+      } catch {
+        /* */
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [pushBounds])
+
+  const go = useCallback(
+    async (raw: string) => {
+      const u = normalizeBrowserUrl(raw)
+      if (!u) {
+        setStatus('Enter an http(s) URL')
+        return
+      }
+      setUrl(u)
+      setActiveUrl(u)
+      if (!isTauri()) {
+        // Web UI: iframe is best-effort (many sites block framing)
+        setLoaded(true)
+        setStatus('Web UI iframe (desktop embeds WebView2)')
+        return
+      }
+      const b = readBounds(hostRef.current)
+      if (!b) {
+        setStatus('Browser panel too small — expand the Browser rail')
+        return
+      }
+      setBusy(true)
+      setStatus('Loading…')
+      try {
+        const nav = await tauriInvoke<string>('browser_navigate', {
+          url: u,
+          bounds: b,
+        })
+        setActiveUrl(nav || u)
+        setLoaded(true)
+        setStatus('Loaded in Remedy (WebView2)')
+        // Re-sync bounds after layout settles (critical in popout / fullscreen)
+        const resync = () => void pushBounds()
+        window.requestAnimationFrame(resync)
+        window.setTimeout(resync, 50)
+        window.setTimeout(resync, 200)
+        window.setTimeout(resync, 500)
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e)
+        console.warn('[remedy] browser_navigate failed', msg)
+        setStatus(`Embed failed: ${msg}`)
+        setLoaded(false)
+      } finally {
+        setBusy(false)
+      }
+    },
+    [pushBounds],
+  )
+
+  const closeEmbed = useCallback(async () => {
+    if (!isTauri()) {
+      setLoaded(false)
+      setStatus('Closed')
+      return
+    }
+    try {
+      await tauriInvoke('browser_close')
+      setLoaded(false)
+      setStatus('Browser closed')
+    } catch (e: unknown) {
+      setStatus(e instanceof Error ? e.message : String(e))
+    }
   }, [])
 
   const openExternal = async () => {
@@ -41,13 +221,11 @@ export function BrowserSlide() {
       if (isTauri()) {
         try {
           await openExternalUrl(u)
-          setStatus('Opened in system browser')
-          return
         } catch {
           await tauriInvoke('open_external_url', { url: u })
-          setStatus('Opened in system browser')
-          return
         }
+        setStatus('Opened in system browser (popup)')
+        return
       }
       window.open(u, '_blank', 'noopener,noreferrer')
       setStatus('Opened in browser tab')
@@ -57,21 +235,27 @@ export function BrowserSlide() {
   }
 
   return (
-    <div className="flex flex-col h-full min-h-0 text-xs">
+    <div className="flex flex-col h-full min-h-0 max-h-full overflow-hidden text-xs">
+      {/* React toolbar stays above native WebView2 (hostRef only below this) */}
       <form
         className="flex gap-1 px-2 py-1.5 border-b shrink-0"
-        style={{ borderColor: 'var(--border)' }}
+        style={{
+          borderColor: 'var(--border)',
+          background: 'var(--bg-secondary)',
+          position: 'relative',
+          zIndex: 2,
+        }}
         onSubmit={(e) => {
           e.preventDefault()
-          go(url)
+          void go(url)
         }}
       >
         <button
           type="button"
           className="px-1.5 py-1 rounded"
           style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
-          title="Home"
-          onClick={() => go(HOME)}
+          title={`Home (${home})`}
+          onClick={() => void go(home)}
         >
           ⌂
         </button>
@@ -80,9 +264,12 @@ export function BrowserSlide() {
           className="px-1.5 py-1 rounded"
           style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
           title="Reload"
+          disabled={!loaded || busy}
           onClick={() => {
-            setFrameError(false)
-            setFrameKey((k) => k + 1)
+            if (!isTauri() || !loaded) return
+            void tauriInvoke('browser_reload')
+              .then(() => setStatus('Reloaded'))
+              .catch(() => void go(activeUrl))
           }}
         >
           ↻
@@ -104,6 +291,7 @@ export function BrowserSlide() {
           type="submit"
           className="px-2 py-1 rounded font-medium"
           style={{ background: 'var(--accent)', color: '#fff' }}
+          disabled={busy}
         >
           Go
         </button>
@@ -111,43 +299,60 @@ export function BrowserSlide() {
           type="button"
           className="px-1.5 py-1 rounded"
           style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
-          title="Open in system browser"
+          title="Open in system browser (external popup)"
           onClick={() => void openExternal()}
         >
           ↗
         </button>
+        <button
+          type="button"
+          className="px-1.5 py-1 rounded"
+          style={{
+            border: '1px solid var(--border)',
+            color: loaded ? 'var(--error)' : 'var(--text-muted)',
+            opacity: loaded ? 1 : 0.5,
+          }}
+          title="Close embedded browser"
+          disabled={!loaded}
+          onClick={() => void closeEmbed()}
+        >
+          ✕
+        </button>
       </form>
 
-      <div className="flex-1 min-h-0 relative" style={{ background: '#fff' }}>
-        {frameError ? (
+      {/* Host rect ONLY: native WebView2 is positioned over this box — never the popout chrome */}
+      <div
+        ref={hostRef}
+        className="flex-1 min-h-0 relative w-full overflow-hidden"
+        style={{
+          background: loaded ? '#ffffff' : 'var(--bg-primary)',
+          minHeight: 120,
+          zIndex: 1,
+          isolation: 'isolate',
+        }}
+        data-browser-embed-host
+      >
+        {!loaded && (
           <div
-            className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-6 text-center"
-            style={{ background: 'var(--bg-primary)', color: 'var(--text-secondary)' }}
+            className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-6 text-center"
+            style={{ color: 'var(--text-secondary)' }}
           >
-            <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-              This site blocked embedding
+            <div className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+              Embedded browser
+            </div>
+            <p className="max-w-sm text-[11px] leading-relaxed">
+              WebView2 (Chromium) loads <strong>inside</strong> this panel. Press{' '}
+              <strong>Go</strong>. Use <strong>↗</strong> only for an external system-browser popup.
             </p>
-            <p className="max-w-sm leading-relaxed text-[11px]">
-              Some sites refuse to load inside a panel. Open them in your system browser instead.
-            </p>
-            <button
-              type="button"
-              className="px-3 py-1.5 rounded font-medium"
-              style={{ background: 'var(--accent)', color: '#fff' }}
-              onClick={() => void openExternal()}
-            >
-              Open externally
-            </button>
           </div>
-        ) : (
+        )}
+        {/* Desktop: native child webview paints here. Web UI fallback: iframe. */}
+        {!isTauri() && loaded && (
           <iframe
-            key={frameKey}
             title="Remedy Browser"
             src={activeUrl}
             className="absolute inset-0 w-full h-full border-0"
-            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"
-            referrerPolicy="no-referrer-when-downgrade"
-            onError={() => setFrameError(true)}
+            sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
           />
         )}
       </div>

@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { ALL_SLIDES, SLIDE_META, type SlideId } from '../../workspace/types'
 import type { RailMode } from '../../workspace/layoutPrefs'
 
@@ -230,35 +231,125 @@ export function PopoutOverlay({
   onToggleFullscreen: () => void
   children: ReactNode
 }) {
-  return (
+  // Esc: exit fullscreen first, then close popout.
+  // Capture phase so it wins over xterm focus / helper textarea.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      e.preventDefault()
+      e.stopPropagation()
+      if (fullscreen) onToggleFullscreen()
+      else onClose()
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [fullscreen, onClose, onToggleFullscreen])
+
+  // Portal to body so no parent transform/overflow can trap fixed positioning
+  // or let xterm / layout paint over the exit chrome (Terminal, Browser, Scratch).
+  const overlay = (
     <div
-      className="fixed z-[90] flex flex-col rounded-lg shadow-2xl overflow-hidden"
+      className="fixed flex flex-col overflow-hidden shadow-2xl"
+      data-popout-overlay
+      data-fullscreen={fullscreen ? 'true' : 'false'}
       style={{
-        background: 'var(--bg-secondary)',
-        border: '1px solid var(--border)',
+        // Above titlebar, panels, lightbox (z-100), help (z-200)
+        zIndex: 500,
+        background: '#0d1117',
+        border: fullscreen ? 'none' : '1px solid var(--border)',
+        borderRadius: fullscreen ? 0 : 12,
+        // Fullscreen always covers the whole webview — chrome stays in-flow above content
         ...(fullscreen
-          ? { inset: 8 }
+          ? { top: 0, left: 0, right: 0, bottom: 0 }
           : {
-              top: '10%',
-              left: '15%',
-              width: '70%',
-              height: '75%',
+              top: '8%',
+              left: '12%',
+              width: '76%',
+              height: '80%',
             }),
       }}
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
     >
+      {/*
+        Always-visible exit chrome for ALL popout slides (Terminal / Browser / Scratch).
+        - position relative + high z-index keeps it above DOM children
+        - Browser native WebView2 is only positioned over the host *below* this bar
+        - pointer-events ensured so buttons stay clickable
+      */}
       <div
-        className="flex items-center gap-2 px-3 py-1.5 border-b text-xs font-semibold shrink-0"
-        style={{ borderColor: 'var(--border)', color: 'var(--text-primary)' }}
+        className="flex items-center gap-2 px-3 shrink-0 select-none"
+        data-popout-chrome
+        style={{
+          height: 44,
+          minHeight: 44,
+          maxHeight: 44,
+          borderBottom: '1px solid #30363d',
+          color: '#e6edf3',
+          background: '#161b22',
+          position: 'relative',
+          zIndex: 20,
+          boxShadow: '0 2px 8px rgba(0,0,0,0.45)',
+          flexShrink: 0,
+          pointerEvents: 'auto',
+        }}
       >
-        <span className="flex-1">{title}</span>
-        <button type="button" onClick={onToggleFullscreen} title="Toggle fullscreen">
-          ⛶
+        <span className="flex-1 font-semibold text-sm truncate">{title}</span>
+        <span className="text-[11px] tabular-nums" style={{ color: '#8b949e' }}>
+          Esc · {fullscreen ? 'exit fullscreen' : 'close'}
+        </span>
+        <button
+          type="button"
+          className="px-3 py-1.5 rounded text-xs font-semibold"
+          style={{
+            background: '#21262d',
+            border: '1px solid #30363d',
+            color: '#e6edf3',
+            cursor: 'pointer',
+          }}
+          onClick={(e) => {
+            e.stopPropagation()
+            onToggleFullscreen()
+          }}
+          title={fullscreen ? 'Exit fullscreen (Esc)' : 'Fullscreen'}
+        >
+          {fullscreen ? '↘ Exit fullscreen' : '⛶ Fullscreen'}
         </button>
-        <button type="button" onClick={onClose} title="Re-embed">
-          ×
+        <button
+          type="button"
+          className="px-3 py-1.5 rounded text-xs font-semibold"
+          style={{
+            background: '#da3633',
+            color: '#fff',
+            border: 'none',
+            cursor: 'pointer',
+          }}
+          onClick={(e) => {
+            e.stopPropagation()
+            onClose()
+          }}
+          title="Close panel (Esc when not fullscreen)"
+        >
+          ✕ Close
         </button>
       </div>
-      <div className="flex-1 min-h-0">{children}</div>
+      {/* Content clipped below chrome — terminal/browser/scratch cannot paint over the bar */}
+      <div
+        className="relative overflow-hidden"
+        data-popout-body
+        style={{
+          flex: '1 1 0%',
+          minHeight: 0,
+          zIndex: 1,
+          isolation: 'isolate',
+        }}
+      >
+        {children}
+      </div>
     </div>
   )
+
+  if (typeof document === 'undefined') return overlay
+  return createPortal(overlay, document.body)
 }

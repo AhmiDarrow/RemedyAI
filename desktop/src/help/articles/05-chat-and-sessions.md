@@ -67,6 +67,7 @@ puts the file on the composer rail so you can point things out to Remedy.
 Rails: Sessions · Settings · Files · Terminal · Browser · Scratch.  
 Each side: **thin strip** (click → icons) → **icon rail** (click icon → open panel) → **×** minimizes to thin.  
 **⇄ Swap sides** · Terminal/Browser/Scratch can pop out (↗) / fullscreen (⛶).  
+In fullscreen: use **Exit fullscreen** / **Close** on the top bar, or press **Esc**.  
 Browser content loads **inside** the panel; sites that block embedding offer **Open externally**.
 
 ## Plan vs Build
@@ -185,7 +186,8 @@ Settings → Appearance: system/dark/light themes, density, custom accent. Does 
 - **Left / right rails:** Sessions · Settings · Files · Terminal · Browser · Scratch
 - **⇄ Swap sides** centers above chat
 - Hide a side with **×**; reopen from the edge strip
-- Terminal / Browser / Scratch support **pop out** (↗) and **fullscreen** (⛶)
+- Terminal / Browser / Scratch support **pop out** (↗) and **fullscreen** (⛶). Exit with the top bar buttons or **Esc**.
+- Browser **⌂ Home** defaults to the Remedy GitHub page (change in **Settings → Project workspace → Browser homepage**).
 - Open **session tabs** live only inside the **Sessions** slide (not above chat)
 - **Archive** filter + auto-hide sessions older than 30 days (not pinned/open)
 

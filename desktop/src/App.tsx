@@ -128,6 +128,7 @@ export default function App() {
   const {
     messages,
     loading: messagesLoading,
+    loadError: messagesLoadError,
     streaming,
     partialText,
     partialThinking,
@@ -209,6 +210,36 @@ export default function App() {
   const [toolProcessMode, setToolProcessMode] = useState<ToolProcessMode>('off')
   const [planMode, setPlanMode] = useState(false)
   const [panel, setPanel] = useState<'memory' | 'skills' | 'settings' | null>(null)
+  /**
+   * Settings always open in the **right** workspace rail.
+   * Never steals the left (sessions) rail; never uses the floating panel
+   * (that used to collapse the chat shell).
+   */
+  const openSettingsInRail = useCallback(() => {
+    setPanel(null)
+    setWsLayout((prev) => {
+      const next = {
+        ...prev,
+        // If settings was parked on the left, put sessions back on the left.
+        left: prev.left === 'settings' ? ('sessions' as const) : prev.left,
+        leftRail:
+          prev.left === 'settings'
+            ? ('open' as const)
+            : prev.leftRail === 'thin'
+              ? ('icons' as const)
+              : prev.leftRail,
+        right: 'settings' as const,
+        rightRail: 'open' as const,
+        rightOpen: true,
+        leftOpen:
+          prev.left === 'settings'
+            ? true
+            : prev.leftRail === 'open' || prev.leftOpen,
+      }
+      saveWorkspaceLayout(next)
+      return next
+    })
+  }, [])
   /** Track recently opened sessions (for archive filter only — no chip strip UI). */
   const [openTabs, setOpenTabs] = useState<Set<string>>(new Set())
   const openTabIds = useMemo(() => [...openTabs], [openTabs])
@@ -328,10 +359,16 @@ export default function App() {
       window.close()
       return
     }
-    try {
-      const { tauriInvoke } = await import('./api/tauri')
-      if (dontWarnAgain) {
+    // Never block quit on prefs I/O — that made "Quit and stop server" look broken.
+    if (dontWarnAgain) {
+      try {
+        localStorage.setItem('remedy.skipQuitServerWarning', '1')
+      } catch {
+        /* */
+      }
+      void (async () => {
         try {
+          const { tauriInvoke } = await import('./api/tauri')
           const prefs = await tauriInvoke<{
             close_to_tray?: boolean
             start_in_tray?: boolean
@@ -343,14 +380,16 @@ export default function App() {
           })
         } catch (e) {
           console.warn('save skip_quit_server_warning:', e)
-          try {
-            localStorage.setItem('remedy.skipQuitServerWarning', '1')
-          } catch {
-            /* */
-          }
         }
-      }
-      await tauriInvoke('quit_app')
+      })()
+    }
+    try {
+      const { tauriInvoke } = await import('./api/tauri')
+      // Race: if quit_app hangs, still try to leave
+      await Promise.race([
+        tauriInvoke('quit_app'),
+        new Promise<void>((resolve) => window.setTimeout(resolve, 2500)),
+      ])
     } catch (e) {
       console.warn('quit_app failed:', e)
     }
@@ -399,19 +438,19 @@ export default function App() {
 
   /** Run update check with visible UI (settings About section), not a silent focus. */
   const runUpdateCheckVisible = useCallback(async () => {
-    setPanel('settings')
+    openSettingsInRail()
     const result = await checkUpdates()
     if (result.updateAvailable && result.desktopInfo?.download_url) {
       setShowUpdateScreen(true)
     }
     return result
-  }, [checkUpdates])
+  }, [checkUpdates, openSettingsInRail])
 
   const handleMenuAction = useCallback(
     (action: AppMenuAction) => {
       switch (action) {
         case 'settings':
-          setPanel('settings')
+          openSettingsInRail()
           break
         case 'memory':
           setPanel('memory')
@@ -477,7 +516,7 @@ export default function App() {
           break
       }
     },
-    [runUpdateCheckVisible, desktopInfo, create, openHelp, requestQuitWithWarning],
+    [runUpdateCheckVisible, desktopInfo, create, openHelp, requestQuitWithWarning, openSettingsInRail],
   )
 
   // Tray Quit / window close when not hide-to-tray → show server-stop warning
@@ -520,7 +559,7 @@ export default function App() {
     if (!isTauri()) return
     let off: Array<() => void> = []
     void (async () => {
-      off.push(await tauriListen('tray-open-settings', () => setPanel('settings')))
+      off.push(await tauriListen('tray-open-settings', () => openSettingsInRail()))
       off.push(
         await tauriListen('tray-check-updates', () => {
           void runUpdateCheckVisible()
@@ -531,7 +570,7 @@ export default function App() {
     return () => {
       for (const u of off) u()
     }
-  }, [runUpdateCheckVisible])
+  }, [runUpdateCheckVisible, openSettingsInRail])
 
   /** Refresh model list only — does not change the selected model unless asked. */
   const refreshModels = useCallback(async (opts?: { selectDefault?: boolean }) => {
@@ -1457,7 +1496,7 @@ export default function App() {
       />
 
       {/* True three-column shell: Left | Chat | Right (rails on outer edges) */}
-      <div className="flex flex-1 min-h-0">
+      <div className="flex flex-1 min-h-0 h-full items-stretch">
         <WorkspaceSide
           side="left"
           active={wsLayout.left}
@@ -1483,11 +1522,28 @@ export default function App() {
               : undefined
           }
         >
-          {wsLayout.leftRail === 'open' ? renderSlide(wsLayout.left) : null}
+          {/* Unmount when this slide is in popout — avoids dual Browser bounds / dual PTYs */}
+          {wsLayout.leftRail === 'open' && popout?.id !== wsLayout.left
+            ? renderSlide(wsLayout.left)
+            : null}
         </WorkspaceSide>
 
-        {/* Middle: chat only — messages fill; composer pinned to bottom */}
-        <div className="flex-1 flex flex-col min-w-0 relative min-h-0">
+        {/* Middle: CSS grid rows auto/1fr/auto — flex was collapsing the message feed to 0px. */}
+        <div
+          className="chat-middle"
+          style={{
+            display: 'grid',
+            gridTemplateRows: 'auto minmax(0, 1fr) auto',
+            flex: '1 1 0%',
+            minWidth: 240,
+            minHeight: 0,
+            height: '100%',
+            alignSelf: 'stretch',
+            overflow: 'hidden',
+            position: 'relative',
+            background: 'var(--bg-primary)',
+          }}
+        >
           {planMode && (
             <div
               className="absolute top-2 right-2 z-10 px-2 py-0.5 text-xs font-semibold rounded pointer-events-none"
@@ -1497,7 +1553,7 @@ export default function App() {
             </div>
           )}
 
-          <div className="shrink-0">
+          <div style={{ position: 'relative', zIndex: 6 }}>
             <ApprovalBanner sessionId={activeId} />
             <PlanBanner
               planMode={planMode}
@@ -1516,13 +1572,21 @@ export default function App() {
             />
           </div>
 
-          <div className="flex-1 min-h-0 flex flex-col">
+          <div
+            className="chat-middle-feed"
+            style={{
+              minHeight: 0,
+              overflow: 'hidden',
+              position: 'relative',
+            }}
+          >
             <MessageFeed
               messages={messages}
               partialText={partialText}
               partialThinking={partialThinking}
               streaming={streaming}
               loading={messagesLoading}
+              loadError={messagesLoadError}
               planMode={planMode}
               activeTools={activeTools}
               processSteps={processSteps}
@@ -1537,7 +1601,10 @@ export default function App() {
             />
           </div>
 
-          <div className="shrink-0 flex flex-col">
+          <div
+            className="chat-middle-composer flex flex-col"
+            style={{ position: 'relative', zIndex: 5 }}
+          >
             <TokenCostTicker
               placement="sidebar"
               run={displayRunUsage}
@@ -1565,10 +1632,7 @@ export default function App() {
               sessionId={activeId}
               llmProvider={llmProvider}
               llmModel={model}
-              onOpenSettings={() => {
-                patchWs({ right: 'settings', rightOpen: true, rightRail: 'open' })
-                setPanel(null)
-              }}
+              onOpenSettings={openSettingsInRail}
               ensureSession={async () => {
                 if (activeId) return activeId
                 const s = await create()
@@ -1580,74 +1644,6 @@ export default function App() {
               }}
             />
           </div>
-
-          <TimeTravelTimeline
-            open={timeTravelOpen}
-            onClose={() => setTimeTravelOpen(false)}
-            sessionId={activeId}
-            onRestored={() => {
-              void reloadMessages()
-              void refreshSessions()
-            }}
-          />
-          <MemoryPanel
-            open={panel === 'memory'}
-            onClose={() => setPanel(null)}
-            sessionId={activeId}
-          />
-          <SkillsPanel
-            open={panel === 'skills'}
-            onClose={() => setPanel(null)}
-            onOpenHelp={openHelp}
-          />
-          {/* Avoid mounting Settings twice when a workspace slide already embeds it */}
-          <SettingsPanel
-            open={
-              panel === 'settings' &&
-              !(
-                (wsLayout.leftRail === 'open' && wsLayout.left === 'settings') ||
-                (wsLayout.rightRail === 'open' && wsLayout.right === 'settings')
-              )
-            }
-            onClose={() => setPanel(null)}
-            themeId={themeId}
-            onThemeChange={setTheme}
-            density={density}
-            onDensityChange={setDensity}
-            customAccent={customAccent}
-            onCustomAccentChange={setCustomAccent}
-            updateInfo={updateInfo}
-            checkingUpdates={checkingUpdates}
-            updateStatus={updateLastStatus}
-            onCheckUpdates={() => {
-              void runUpdateCheckVisible()
-            }}
-            onInstallUpdate={() => {
-              if (desktopInfo?.update_available && desktopInfo.download_url) {
-                setShowUpdateScreen(true)
-              } else {
-                void runUpdateCheckVisible()
-              }
-            }}
-            models={models}
-            toolProcessMode={toolProcessMode}
-            onToolProcessChange={(mode) => {
-              setToolProcessMode(mode)
-              updateSettings({ tool_process: mode }).catch(() => {})
-            }}
-            onOpenHelp={openHelp}
-            onSettingsSaved={() => {
-              void getSettings()
-                .then((s) => {
-                  if (s.llm_model) setModel(s.llm_model)
-                  if (s.llm_provider) setLlmProvider(s.llm_provider)
-                  setUserName((s.user_name || '').trim())
-                  setToolProcessMode(normalizeToolProcess(s.tool_process))
-                  return refreshModels()
-                })
-                .catch(() => refreshModels())
-            }}
-          />
         </div>
 
         <WorkspaceSide
@@ -1675,9 +1671,12 @@ export default function App() {
               : undefined
           }
         >
-          {wsLayout.rightRail === 'open' ? renderSlide(wsLayout.right) : null}
+          {wsLayout.rightRail === 'open' && popout?.id !== wsLayout.right
+            ? renderSlide(wsLayout.right)
+            : null}
         </WorkspaceSide>
 
+        {/* Shared by Terminal / Browser / Scratch — same exit chrome + Esc */}
         {popout && (
           <PopoutOverlay
             title={(SLIDE_META[popout.id] ?? SLIDE_META.sessions).label}
@@ -1691,6 +1690,69 @@ export default function App() {
           </PopoutOverlay>
         )}
       </div>
+
+      {/* Overlays outside three-column flex so they never collapse chat feed height */}
+      <TimeTravelTimeline
+        open={timeTravelOpen}
+        onClose={() => setTimeTravelOpen(false)}
+        sessionId={activeId}
+        onRestored={() => {
+          void reloadMessages()
+          void refreshSessions()
+        }}
+      />
+      <MemoryPanel
+        open={panel === 'memory'}
+        onClose={() => setPanel(null)}
+        sessionId={activeId}
+      />
+      <SkillsPanel
+        open={panel === 'skills'}
+        onClose={() => setPanel(null)}
+        onOpenHelp={openHelp}
+      />
+      {/* Floating settings disabled — always use right rail (openSettingsInRail). */}
+      <SettingsPanel
+        open={false}
+        onClose={() => setPanel(null)}
+        themeId={themeId}
+        onThemeChange={setTheme}
+        density={density}
+        onDensityChange={setDensity}
+        customAccent={customAccent}
+        onCustomAccentChange={setCustomAccent}
+        updateInfo={updateInfo}
+        checkingUpdates={checkingUpdates}
+        updateStatus={updateLastStatus}
+        onCheckUpdates={() => {
+          void runUpdateCheckVisible()
+        }}
+        onInstallUpdate={() => {
+          if (desktopInfo?.update_available && desktopInfo.download_url) {
+            setShowUpdateScreen(true)
+          } else {
+            void runUpdateCheckVisible()
+          }
+        }}
+        models={models}
+        toolProcessMode={toolProcessMode}
+        onToolProcessChange={(mode) => {
+          setToolProcessMode(mode)
+          updateSettings({ tool_process: mode }).catch(() => {})
+        }}
+        onOpenHelp={openHelp}
+        onSettingsSaved={() => {
+          void getSettings()
+            .then((s) => {
+              if (s.llm_model) setModel(s.llm_model)
+              if (s.llm_provider) setLlmProvider(s.llm_provider)
+              setUserName((s.user_name || '').trim())
+              setToolProcessMode(normalizeToolProcess(s.tool_process))
+              return refreshModels()
+            })
+            .catch(() => refreshModels())
+        }}
+      />
 
       <StatusBar
           sessionId={activeId}
@@ -1793,8 +1855,45 @@ export default function App() {
           onThemeChange={setTheme}
           planMode={planMode}
           onTogglePlanMode={() => setPlanMode((p) => !p)}
-          panel={panel}
-          onTogglePanel={(p) => setPanel((prev) => (prev === p ? null : p))}
+          panel={
+            wsLayout.right === 'settings' && wsLayout.rightRail === 'open'
+              ? 'settings'
+              : panel === 'settings'
+                ? null
+                : panel
+          }
+          onTogglePanel={(p) => {
+            if (p === 'settings') {
+              // Toggle right-rail settings; never collapse chat.
+              setPanel(null)
+              setWsLayout((prev) => {
+                const already =
+                  prev.right === 'settings' && prev.rightRail === 'open'
+                if (already) {
+                  const next = {
+                    ...prev,
+                    rightRail: 'thin' as const,
+                    rightOpen: false,
+                  }
+                  saveWorkspaceLayout(next)
+                  return next
+                }
+                const next = {
+                  ...prev,
+                  left: prev.left === 'settings' ? ('sessions' as const) : prev.left,
+                  leftRail:
+                    prev.left === 'settings' ? ('open' as const) : prev.leftRail,
+                  right: 'settings' as const,
+                  rightRail: 'open' as const,
+                  rightOpen: true,
+                }
+                saveWorkspaceLayout(next)
+                return next
+              })
+              return
+            }
+            setPanel((prev) => (prev === p ? null : p))
+          }}
           onOpenHelp={() => openHelp()}
           updateAvailable={updateAvailable}
           onCheckUpdates={() => {
@@ -1947,7 +2046,7 @@ export default function App() {
               }}
               onClick={() => {
                 setAboutOpen(false)
-                setPanel('settings')
+                openSettingsInRail()
               }}
             >
               Settings

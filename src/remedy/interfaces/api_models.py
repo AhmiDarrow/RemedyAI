@@ -193,3 +193,5 @@ class SettingsUpdateRequest(BaseModel):
     last_model_by_provider: dict[str, str] | None = None
     # Soft budget for active skills eligible for hot-catalog injection
     skills_active_budget: int | None = Field(default=None, ge=10, le=500)
+    # In-app Browser slide homepage (http/https); empty → Remedy GitHub default
+    browser_home_url: str | None = None

@@ -40,7 +40,7 @@ export const SETTINGS_SECTION_META: Record<
   workspace: {
     title: 'Project workspace',
     summary: 'Folder for tools',
-    keywords: 'project path folder directory cwd',
+    keywords: 'project path folder directory cwd browser home homepage github url',
   },
   access: {
     title: 'Access & permissions',

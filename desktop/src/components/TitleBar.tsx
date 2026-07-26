@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { isTauri, tauriInvoke } from '../api/tauri'
+import { useEffect, useRef, useState } from 'react'
+import { isTauri } from '../api/tauri'
 
 export type AppMenuAction =
   | 'settings'
@@ -20,24 +20,9 @@ interface TitleBarProps {
   onMenuAction?: (action: AppMenuAction) => void
 }
 
-/** Prefer official window API; fall back to custom Rust commands. */
-async function withMainWindow<T>(
-  fn: (win: {
-    minimize: () => Promise<void>
-    toggleMaximize: () => Promise<void>
-    isMaximized: () => Promise<boolean>
-    close: () => Promise<void>
-    hide: () => Promise<void>
-  }) => Promise<T>,
-): Promise<T> {
-  const { getCurrentWindow } = await import('@tauri-apps/api/window')
-  return fn(getCurrentWindow())
-}
-
 /**
- * Custom themed window chrome. Wordmark logo opens the app menu.
- * Drag region is a dedicated middle strip only — never wraps chrome buttons
- * (WebView2 steals clicks if min/max/close sit inside app-region:drag).
+ * In-app menu bar. Window min/max/close use **native OS decorations**
+ * (tauri.conf decorations: true) because WebView2 custom chrome was unreliable.
  */
 export function TitleBar({
   title = 'Remedy',
@@ -45,35 +30,9 @@ export function TitleBar({
   updateAvailable,
   onMenuAction,
 }: TitleBarProps) {
-  const [maximized, setMaximized] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
-  const inTauri = isTauri()
-
-  useEffect(() => {
-    if (!inTauri) return
-    let unlisten: (() => void) | undefined
-    ;(async () => {
-      try {
-        const { getCurrentWindow } = await import('@tauri-apps/api/window')
-        const win = getCurrentWindow()
-        setMaximized(await win.isMaximized())
-        unlisten = await win.onResized(async () => {
-          try {
-            setMaximized(await win.isMaximized())
-          } catch {
-            /* ignore */
-          }
-        })
-      } catch {
-        /* browser */
-      }
-    })()
-    return () => {
-      unlisten?.()
-    }
-  }, [inTauri])
 
   useEffect(() => {
     if (!menuOpen) return
@@ -93,67 +52,6 @@ export function TitleBar({
     }
   }, [menuOpen])
 
-  const onMinimize = useCallback(() => {
-    if (!inTauri) return
-    void (async () => {
-      try {
-        await withMainWindow((w) => w.minimize())
-        return
-      } catch (e) {
-        console.warn('[remedy] window.minimize failed, trying command', e)
-      }
-      try {
-        await tauriInvoke('minimize_main_window')
-      } catch (e2) {
-        console.warn('[remedy] minimize failed', e2)
-      }
-    })()
-  }, [inTauri])
-
-  const onToggleMax = useCallback(() => {
-    if (!inTauri) return
-    void (async () => {
-      try {
-        await withMainWindow(async (w) => {
-          await w.toggleMaximize()
-          setMaximized(await w.isMaximized())
-        })
-        return
-      } catch (e) {
-        console.warn('[remedy] window.toggleMaximize failed, trying command', e)
-      }
-      try {
-        const m = await tauriInvoke<boolean>('toggle_maximize_main_window')
-        setMaximized(Boolean(m))
-      } catch (e2) {
-        console.warn('[remedy] maximize failed', e2)
-      }
-    })()
-  }, [inTauri])
-
-  const onClose = useCallback(() => {
-    if (!inTauri) return
-    // Prefer Rust close-to-tray path; fall back to OS close (CloseRequested).
-    void (async () => {
-      try {
-        await tauriInvoke('request_close_main_window')
-        return
-      } catch (e) {
-        console.warn('[remedy] request_close_main_window failed, trying window API', e)
-      }
-      try {
-        await withMainWindow((w) => w.close())
-      } catch (e2) {
-        console.warn('[remedy] close failed', e2)
-        try {
-          await withMainWindow((w) => w.hide())
-        } catch {
-          /* last resort exhausted */
-        }
-      }
-    })()
-  }, [inTauri])
-
   const run = (action: AppMenuAction) => {
     setMenuOpen(false)
     onMenuAction?.(action)
@@ -161,24 +59,26 @@ export function TitleBar({
 
   return (
     <div
-      className="titlebar flex items-stretch flex-shrink-0 select-none"
+      className="titlebar flex items-center flex-shrink-0 select-none"
       style={{
         height: 36,
         background: 'var(--bg-secondary)',
         borderBottom: '1px solid var(--border)',
         color: 'var(--text-primary)',
+        paddingLeft: 6,
+        paddingRight: 8,
       }}
     >
-      {/* Logo / menu — no-drag */}
-      <div className="titlebar-no-drag relative flex-shrink-0 flex items-center px-1" style={{ zIndex: 60 }}>
+      <div className="relative flex-shrink-0 flex items-center">
         <button
           ref={btnRef}
           type="button"
-          className="titlebar-btn flex items-center px-1.5 rounded"
+          className="flex items-center px-1.5 rounded"
           style={{
-            width: 'auto',
-            height: 32,
+            height: 30,
             background: menuOpen ? 'var(--bg-tertiary)' : 'transparent',
+            border: 'none',
+            cursor: 'pointer',
           }}
           title="Remedy menu"
           aria-haspopup="menu"
@@ -186,7 +86,6 @@ export function TitleBar({
           aria-label="Open Remedy menu"
           onClick={(e) => {
             e.stopPropagation()
-            e.preventDefault()
             setMenuOpen((o) => !o)
           }}
         >
@@ -195,9 +94,9 @@ export function TitleBar({
             alt="Remedy"
             draggable={false}
             style={{
-              height: 24,
+              height: 22,
               width: 'auto',
-              maxWidth: 150,
+              maxWidth: 140,
               objectFit: 'contain',
               objectPosition: 'left center',
               display: 'block',
@@ -216,7 +115,7 @@ export function TitleBar({
           <div
             ref={menuRef}
             role="menu"
-            className="titlebar-no-drag absolute top-full left-0 mt-1 z-[80] min-w-[200px] rounded-lg py-1 shadow-xl"
+            className="absolute top-full left-0 mt-1 z-[80] min-w-[200px] rounded-lg py-1 shadow-xl"
             style={{
               background: 'var(--bg-secondary)',
               border: '1px solid var(--border)',
@@ -230,18 +129,11 @@ export function TitleBar({
             <MenuItem label="Skills" onClick={() => run('skills')} />
             <MenuItem label="Help / Owner's Manual…" onClick={() => run('help')} shortcut="F1" />
             {isTauri() && (
-              <MenuItem
-                label="Switch to WebUI…"
-                onClick={() => run('switch_web_ui')}
-              />
+              <MenuItem label="Switch to WebUI…" onClick={() => run('switch_web_ui')} />
             )}
             <MenuSep />
             {updateAvailable ? (
-              <MenuItem
-                label="Install update…"
-                onClick={() => run('install_update')}
-                accent
-              />
+              <MenuItem label="Install update…" onClick={() => run('install_update')} accent />
             ) : (
               <MenuItem label="Check for updates…" onClick={() => run('check_updates')} />
             )}
@@ -255,87 +147,8 @@ export function TitleBar({
         )}
       </div>
 
-      {/* Dedicated drag strip only — double-click maximizes */}
-      <div
-        className="flex-1 min-w-0 h-full"
-        data-tauri-drag-region
-        onDoubleClick={() => onToggleMax()}
-      >
-        <span className="sr-only">{title}</span>
-      </div>
-
-      {/* Window controls — must stay outside drag region */}
-      <div className="titlebar-controls titlebar-no-drag flex flex-shrink-0" style={{ zIndex: 70 }}>
-        <button
-          type="button"
-          className="titlebar-btn"
-          title="Minimize"
-          aria-label="Minimize"
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={(e) => {
-            e.stopPropagation()
-            e.preventDefault()
-            onMinimize()
-          }}
-        >
-          <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden>
-            <path fill="currentColor" d="M2 6.5h8v1H2z" />
-          </svg>
-        </button>
-        <button
-          type="button"
-          className="titlebar-btn"
-          title={maximized ? 'Restore' : 'Maximize'}
-          aria-label={maximized ? 'Restore' : 'Maximize'}
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={(e) => {
-            e.stopPropagation()
-            e.preventDefault()
-            onToggleMax()
-          }}
-        >
-          {maximized ? (
-            <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden>
-              <path
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1"
-                d="M3.5 4.5h5v5h-5zM4.5 3.5h5v5"
-              />
-            </svg>
-          ) : (
-            <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden>
-              <rect
-                x="2.5"
-                y="2.5"
-                width="7"
-                height="7"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1"
-              />
-            </svg>
-          )}
-        </button>
-        <button
-          type="button"
-          className="titlebar-btn titlebar-btn-close"
-          title="Close (hides to tray when Always ready is on)"
-          aria-label="Close"
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={(e) => {
-            e.stopPropagation()
-            e.preventDefault()
-            onClose()
-          }}
-        >
-          <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden>
-            <path
-              fill="currentColor"
-              d="M3.2 2.5 2.5 3.2 5.3 6 2.5 8.8l.7.7L6 6.7l2.8 2.8.7-.7L6.7 6l2.8-2.8-.7-.7L6 5.3z"
-            />
-          </svg>
-        </button>
+      <div className="flex-1 min-w-0 px-3 truncate text-[11px]" style={{ color: 'var(--text-muted)' }}>
+        {title}
       </div>
     </div>
   )

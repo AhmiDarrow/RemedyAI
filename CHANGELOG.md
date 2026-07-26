@@ -2,6 +2,17 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.15.5] - 2026-07-26
+
+### Fix/Feature: popout exit chrome, embedded browser, browser homepage
+
+- **Fullscreen/popout:** always-visible exit bar (Exit fullscreen / Close) + **Esc** for Terminal, Browser, and Scratch; portal overlay so chrome is never covered.
+- **Browser:** native WebView2 embed stays inside the slide host (not over OS chrome); rail unmounts when popout so bounds/PTY are not dual-mounted; homepage defaults to **https://github.com/AhmiDarrow/RemedyAI**.
+- **Settings → Project workspace:** **Browser homepage** (`browser_home_url`) — user can change the in-app Browser ⌂ target.
+- **Terminal:** reliable ConPTY PowerShell path; Esc not swallowed by xterm.
+- **Quit / shell:** tray quit force-exit; denser sessions; settings stay right-rail without killing chat; native window decorations.
+- **Tests:** browser home normalizer; full suite green.
+
 ## [0.15.4] - 2026-07-26
 
 ### Fix: window chrome, chat shell, sessions, browser, rails

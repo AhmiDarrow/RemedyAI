@@ -419,55 +419,29 @@ fn kill_child(guard: &mut Option<Child>) {
     }
 }
 
+/// Best-effort vision stop via raw HTTP (never spawn PowerShell — cold start hangs quit).
+fn try_stop_vision_http() {
+    // Fire-and-forget thread with hard timeout so the quit path never blocks here.
+    let _ = thread::Builder::new()
+        .name("vision-stop".into())
+        .spawn(|| {
+            let agent = ureq::AgentBuilder::new()
+                .timeout_connect(Duration::from_millis(400))
+                .timeout(Duration::from_millis(800))
+                .build();
+            // Bootstrap is optional; stop often works without auth on loopback.
+            let _ = agent
+                .post("http://127.0.0.1:7400/api/vision/stop")
+                .call();
+        });
+    // Cap wait so quit stays snappy even if the request is slow.
+    thread::sleep(Duration::from_millis(250));
+}
+
 /// Stop the managed sidecar and any leftover remedy-desktop processes / :7400 listeners.
+/// Must never hang — tray "Quit and stop server" depends on this returning quickly.
 fn shutdown_sidecar(state: &ServerState) {
-    // Ask the API to stop vision (llama-server) cleanly before tree-killing the sidecar.
-    // Best-effort: short timeout so quit never hangs if the server is already dead.
-    #[cfg(target_os = "windows")]
-    {
-        let _ = Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-Command",
-                // Prefer local-bootstrap token when present; ignore failures.
-                r#"
-$ErrorActionPreference='SilentlyContinue'
-$base='http://127.0.0.1:7400'
-$token=$null
-try {
-  $r=Invoke-WebRequest -UseBasicParsing -TimeoutSec 1 -Uri "$base/api/auth/local-bootstrap"
-  if ($r.StatusCode -ge 200 -and $r.StatusCode -lt 300) {
-    $j=$r.Content | ConvertFrom-Json
-    $token=$j.token
-  }
-} catch {}
-$headers=@{}
-if ($token) { $headers['Authorization']="Bearer $token" }
-try {
-  Invoke-WebRequest -UseBasicParsing -Method POST -TimeoutSec 2 -Headers $headers -Uri "$base/api/vision/stop" | Out-Null
-} catch {}
-"#,
-            ])
-            .creation_flags(CREATE_NO_WINDOW)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        let _ = Command::new("curl")
-            .args([
-                "-sS",
-                "-m",
-                "2",
-                "-X",
-                "POST",
-                "http://127.0.0.1:7400/api/vision/stop",
-            ])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-    }
+    try_stop_vision_http();
 
     match state.process.lock() {
         Ok(mut guard) => kill_child(&mut guard),
@@ -662,11 +636,13 @@ async fn pick_folder(app: AppHandle) -> Result<Option<String>, String> {
         let _ = tx.send(path);
     })
     .map_err(|e| format!("folder picker (main thread): {e}"))?;
+    // Wait off the UI thread; dialog itself runs on main via run_on_main_thread.
     rx.recv()
         .map_err(|e| format!("folder picker channel: {e}"))
 }
 
 /// Open a file or folder with the OS default app (Explorer / associated program).
+/// Windows: prefer explorer / ShellExecute-style open without a visible cmd.exe flash.
 #[tauri::command]
 fn open_path(path: String) -> Result<String, String> {
     let p = PathBuf::from(path.trim());
@@ -675,14 +651,24 @@ fn open_path(path: String) -> Result<String, String> {
     }
     #[cfg(target_os = "windows")]
     {
-        let status = Command::new("cmd")
-            .args(["/C", "start", "", &p.to_string_lossy()])
-            .status()
-            .map_err(|e| format!("open_path: {e}"))?;
-        if status.success() {
-            return Ok(format!("Opened {}", p.display()));
+        // Folders → open in Explorer. Files → Explorer select (fast, no cmd).
+        let status = if p.is_dir() {
+            Command::new("explorer.exe")
+                .arg(p.as_os_str())
+                .creation_flags(CREATE_NO_WINDOW)
+                .status()
+        } else {
+            // /select,path — Explorer opens parent and highlights the file
+            let arg = format!("/select,{}", p.display());
+            Command::new("explorer.exe")
+                .arg(arg)
+                .creation_flags(CREATE_NO_WINDOW)
+                .status()
         }
-        return Err(format!("open_path failed: {status}"));
+        .map_err(|e| format!("open_path: {e}"))?;
+        // explorer returns non-zero even on success sometimes — only error on launch fail
+        let _ = status;
+        return Ok(format!("Opened {}", p.display()));
     }
     #[cfg(target_os = "macos")]
     {
@@ -1068,12 +1054,36 @@ fn get_desktop_prefs(state: State<'_, ServerState>) -> Result<serde_json::Value,
     }))
 }
 
+/// Hard-exit failsafe: if Tauri's event loop does not tear down, kill ourselves.
+fn schedule_force_exit(after: Duration) {
+    let pid = std::process::id();
+    thread::spawn(move || {
+        thread::sleep(after);
+        log::warn!("quit failsafe: process still alive after {after:?} — forcing exit");
+        #[cfg(target_os = "windows")]
+        {
+            let _ = Command::new("taskkill")
+                .args(["/F", "/T", "/PID", &pid.to_string()])
+                .creation_flags(CREATE_NO_WINDOW)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+        }
+        std::process::exit(0);
+    });
+}
+
 /// Full quit: stop sidecar (Web UI dies) and exit. Use after the warning dialog.
 #[tauri::command]
 fn quit_app(app: AppHandle, state: State<'_, ServerState>) -> Result<(), String> {
     log::info!("quit_app: shutting down sidecar and exiting");
+    browser_host::close_browser_on_quit(&app);
+    // Never block the invoke forever — user clicked "Quit and stop server".
     shutdown_sidecar(&state);
+    // Exit via Tauri, with a hard failsafe if the event loop stalls.
+    schedule_force_exit(Duration::from_secs(2));
     app.exit(0);
+    // If exit() is deferred, still return so the IPC call completes.
     Ok(())
 }
 
@@ -1090,12 +1100,14 @@ fn request_quit_app(app: AppHandle, state: State<'_, ServerState>) -> Result<ser
         };
     }
     if fresh.skip_quit_server_warning {
+        browser_host::close_browser_on_quit(&app);
         shutdown_sidecar(&state);
+        schedule_force_exit(Duration::from_secs(2));
         app.exit(0);
         return Ok(serde_json::json!({ "needs_confirm": false, "quitting": true }));
     }
     // Bring window forward so the in-app dialog is visible (e.g. tray Quit).
-    if let Some(w) = app.get_webview_window("main") {
+    if let Some(w) = primary_window(&app) {
         let _ = w.show();
         let _ = w.unminimize();
         let _ = w.set_focus();
@@ -1140,7 +1152,7 @@ fn switch_to_web_ui(app: AppHandle) -> Result<String, String> {
     }
 
     // Hide to tray (keep sidecar alive) - same as close-to-tray.
-    if let Some(w) = app.get_webview_window("main") {
+    if let Some(w) = primary_window(&app) {
         w.hide().map_err(|e| format!("hide to tray failed: {e}"))?;
         log::info!("switch_to_web_ui: desktop hidden to tray");
     }
@@ -2648,7 +2660,12 @@ pub fn run() {
             browser_host::browser_reload,
             browser_host::browser_go_back,
             browser_host::browser_go_forward,
-            browser_host::browser_current_url
+            browser_host::browser_current_url,
+            browser_host::browser_close,
+            browser_host::browser_is_open,
+            browser_host::browser_set_bounds,
+            browser_host::browser_hide,
+            browser_host::browser_show,
         ])
         .setup(|app| {
             let _shell = app.handle().plugin(tauri_plugin_shell::init())?;
@@ -2729,7 +2746,9 @@ pub fn run() {
                                 .unwrap_or(false)
                                 || load_desktop_prefs().skip_quit_server_warning;
                             if skip {
+                                browser_host::close_browser_on_quit(&app_for_menu);
                                 shutdown_sidecar(&state);
+                                schedule_force_exit(Duration::from_secs(2));
                                 app_for_menu.exit(0);
                             } else {
                                 if let Some(w) = app_for_menu.get_webview_window("main") {
@@ -2966,12 +2985,19 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {
-            // App-level exit (tray quit, process teardown) - window Destroyed may
-            // not run if the process is exiting another way.
+            // App-level exit — keep this path FAST (no PowerShell). A second
+            // slow shutdown here used to make "Quit and stop server" look dead.
             match event {
-                tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit => {
+                tauri::RunEvent::ExitRequested { .. } => {
                     let state = app_handle.state::<ServerState>();
-                    shutdown_sidecar(&state);
+                    // Only tree-kill leftovers; main quit_app already stopped the child.
+                    force_stop_remedy_processes();
+                    force_stop_vision_processes();
+                    let _ = state; // keep lock pattern available if needed later
+                }
+                tauri::RunEvent::Exit => {
+                    force_stop_remedy_processes();
+                    force_stop_vision_processes();
                 }
                 _ => {}
             }

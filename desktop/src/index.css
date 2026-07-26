@@ -264,53 +264,44 @@ html.theme-animating body * {
   }
 }
 
-/* Custom themed window chrome (decorations: false) */
+/* In-app menu bar (OS decorations handle min/max/close). */
 .titlebar {
   -webkit-user-select: none;
   user-select: none;
   position: relative;
   z-index: 100;
 }
-/* Only the dedicated middle strip is draggable — never logo/menu or min/max/close */
-.titlebar [data-tauri-drag-region] {
-  app-region: drag;
-  -webkit-app-region: drag;
-}
-.titlebar-no-drag,
-.titlebar-controls,
-.titlebar-btn {
-  app-region: no-drag !important;
-  -webkit-app-region: no-drag !important;
-  pointer-events: auto;
-}
-.titlebar-btn {
-  appearance: none;
-  border: none;
-  margin: 0;
-  padding: 0;
-  width: 46px;
+
+/* Chat middle column — must participate in height chain (flex 1 1 0% + h-full).
+   Absolute-positioned feed was collapsing to 0 when the parent height was indefinite. */
+.chat-middle {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0%;
+  min-width: 0;
+  min-height: 0;
   height: 100%;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
+  align-self: stretch;
   position: relative;
-  z-index: 2;
+  overflow: hidden;
 }
-.titlebar-btn:hover {
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
+.chat-middle-feed {
+  flex: 1 1 0%;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
-.titlebar-btn-close:hover {
-  background: #e81123;
-  color: #fff;
-}
-.titlebar-controls {
+.chat-middle-feed > .message-feed {
+  flex: 1 1 0%;
+  min-height: 0;
   height: 100%;
+  overflow-y: auto;
+}
+.chat-middle-composer {
+  flex: 0 0 auto;
   position: relative;
-  z-index: 2;
+  z-index: 5;
 }
 
 @keyframes remedy-progress-slide {

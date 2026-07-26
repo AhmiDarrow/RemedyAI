@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { isOpenableBrowserUrl, normalizeBrowserUrl } from './browserUrl'
+import {
+  DEFAULT_BROWSER_HOME,
+  isOpenableBrowserUrl,
+  normalizeBrowserUrl,
+  resolveBrowserHome,
+} from './browserUrl'
 
 describe('browserUrl', () => {
   it('prefixes https for bare hosts', () => {
@@ -26,5 +31,13 @@ describe('browserUrl', () => {
     expect(isOpenableBrowserUrl('about:blank')).toBe(true)
     expect(isOpenableBrowserUrl('javascript:x')).toBe(false)
     expect(isOpenableBrowserUrl('file:///x')).toBe(false)
+  })
+
+  it('default home is Remedy GitHub; resolveBrowserHome falls back', () => {
+    expect(DEFAULT_BROWSER_HOME).toBe('https://github.com/AhmiDarrow/RemedyAI')
+    expect(resolveBrowserHome('')).toBe(DEFAULT_BROWSER_HOME)
+    expect(resolveBrowserHome(null)).toBe(DEFAULT_BROWSER_HOME)
+    expect(resolveBrowserHome('javascript:x')).toBe(DEFAULT_BROWSER_HOME)
+    expect(resolveBrowserHome('docs.example.com')).toBe('https://docs.example.com')
   })
 })

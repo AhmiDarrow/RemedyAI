@@ -52,6 +52,8 @@ export interface SettingsFormProps {
   apiKeySet: boolean
   projectPath: string
   setProjectPath: Dispatch<SetStateAction<string>>
+  browserHomeUrl: string
+  setBrowserHomeUrl: Dispatch<SetStateAction<string>>
   persona: string
   setPersona: Dispatch<SetStateAction<string>>
   userName: string
@@ -154,6 +156,7 @@ export function SettingsFormSections(p: SettingsFormProps): ReactNode {
     apiKey, setApiKey,
     apiKeySet,
     projectPath, setProjectPath,
+    browserHomeUrl, setBrowserHomeUrl,
     persona, setPersona,
     userName, setUserName,
     agentName, setAgentName,
@@ -645,6 +648,25 @@ export function SettingsFormSections(p: SettingsFormProps): ReactNode {
                   folder so work stays focused and safer.
                 </div>
               )}
+              <label className="block mb-0.5 mt-3" style={{ color: 'var(--text-muted)' }}>
+                Browser homepage
+              </label>
+              <input
+                type="url"
+                value={browserHomeUrl}
+                onChange={(e) => setBrowserHomeUrl(e.target.value)}
+                placeholder="https://github.com/AhmiDarrow/RemedyAI"
+                className="w-full rounded px-2 py-1 text-xs outline-none mb-1"
+                style={{
+                  background: 'var(--bg-tertiary)',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--border)',
+                }}
+                spellCheck={false}
+              />
+              <div className="text-[10px] leading-snug" style={{ color: 'var(--text-muted)' }}>
+                In-app Browser (⌂ Home). Default is the Remedy GitHub repo. Use http(s) only.
+              </div>
             </SettingsSection>
 
             {/* Access */}
@@ -826,6 +848,11 @@ export function SettingsFormSections(p: SettingsFormProps): ReactNode {
                 />
                 <span style={{ color: 'var(--text-primary)' }}>Close window hides to tray</span>
               </label>
+              <div className="text-[10px] leading-snug mb-1.5 pl-6" style={{ color: 'var(--text-muted)' }}>
+                On (default): the ✕ button hides Remedy to the tray and keeps the local server running.
+                Off: ✕ asks to quit and stops the server. Menu <strong>Quit Remedy</strong> always
+                fully exits. Shift+click ✕ also requests a full quit.
+              </div>
               <label className="flex items-center gap-2 mb-1 cursor-pointer">
                 <input
                   type="checkbox"

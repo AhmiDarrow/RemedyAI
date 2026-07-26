@@ -1005,6 +1005,9 @@ sarcasm_mode = false
 # start_in_tray = false
 # close_to_tray = true
 
+# In-app Browser slide homepage (Settings → Project workspace)
+# browser_home_url = "https://github.com/AhmiDarrow/RemedyAI"
+
 [gateway]
 heartbeat_interval = 60
 rate_limit = 120

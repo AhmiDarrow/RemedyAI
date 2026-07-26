@@ -2,7 +2,13 @@
 
 High-level product notes for owners. Full detail lives in repo `CHANGELOG.md`.
 
-Ship **one** installer/tag for the current series (**v0.15.4**).
+Ship **one** installer/tag for the current series (**v0.15.5**).
+
+## 0.15.5 - Popout exit, embed browser, homepage
+
+- **Fullscreen** (Terminal / Browser / Scratch): top bar **Exit fullscreen** + **Close**, or **Esc**.
+- **Browser:** stays embedded in the panel; default homepage is the **Remedy GitHub** repo (change under **Settings → Project workspace → Browser homepage**).
+- Quit and window chrome reliability improvements from the 0.15.x shell work.
 
 ## 0.15.4 - Chrome, chat, rails, browser
 

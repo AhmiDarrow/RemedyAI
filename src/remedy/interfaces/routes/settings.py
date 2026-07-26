@@ -57,6 +57,24 @@ def _effective_http_bootstrap(cfg: dict | None = None) -> bool:
         return True
 
 
+DEFAULT_BROWSER_HOME_URL = "https://github.com/AhmiDarrow/RemedyAI"
+
+
+def _normalize_browser_home_url(raw: object | None) -> str:
+    """http(s) homepage for the in-app Browser slide; empty/invalid → Remedy GitHub."""
+    u = str(raw or "").strip()
+    if not u:
+        return DEFAULT_BROWSER_HOME_URL
+    low = u.lower()
+    if low.startswith(("javascript:", "data:", "vbscript:", "file:")):
+        return DEFAULT_BROWSER_HOME_URL
+    if not (low.startswith("http://") or low.startswith("https://")):
+        if low.startswith("about:"):
+            return DEFAULT_BROWSER_HOME_URL
+        u = f"https://{u}"
+    return u
+
+
 def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory=None) -> None:
     """Register routes (closes over runtime/gateway/memory)."""
     # -- settings -----------------------------------------------------------
@@ -179,6 +197,7 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             "enabled_models": cfg.get("enabled_models") or {},
             "last_model_by_provider": cfg.get("last_model_by_provider") or {},
             "skills_active_budget": int(cfg.get("skills_active_budget") or 80),
+            "browser_home_url": _normalize_browser_home_url(cfg.get("browser_home_url")),
             "version": _remedy_version,
             "config_exists": config_path is not None,
             "setup_completed": setup_completed,
@@ -348,6 +367,11 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
 
         if "http_bootstrap" in updates and updates["http_bootstrap"] is not None:
             updates["http_bootstrap"] = bool(updates["http_bootstrap"])
+
+        if "browser_home_url" in updates and updates["browser_home_url"] is not None:
+            updates["browser_home_url"] = _normalize_browser_home_url(
+                updates["browser_home_url"]
+            )
 
         if "allow_skill_creation" in updates and updates["allow_skill_creation"] is not None:
             updates["allow_skill_creation"] = bool(updates["allow_skill_creation"])

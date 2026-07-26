@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.15.4"
+version = "0.15.5"
 description = "Remedy Desktop — local AI partner for knowledge, design, and code"
 authors = ["Ahmi <ahmitdarrow@gmail.com>"]
 license = "LicenseRef-Proprietary"
@@ -22,7 +22,8 @@ tauri-build = { version = "2.6.3", features = [] }
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
-tauri = { version = "2.11.3", features = ["tray-icon"] }
+# unstable = multiwebview (embedded Browser slide via window.add_child)
+tauri = { version = "2.11.3", features = ["tray-icon", "unstable"] }
 tauri-plugin-log = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-updater = "2.10.1"
