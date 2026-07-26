@@ -7,6 +7,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from remedy.core.plan_store import (
+    PLAN_MODE_SYSTEM_ADDENDUM,
     PLAN_MODE_TOOL_NAMES,
     PlanStore,
     parse_steps_from_text,
@@ -61,6 +62,12 @@ def test_plan_mode_tool_names_exclude_shell():
     assert "plan_save" in PLAN_MODE_TOOL_NAMES
     assert "bash_exec" not in PLAN_MODE_TOOL_NAMES
     assert "file_write" not in PLAN_MODE_TOOL_NAMES
+    assert "file_edit" not in PLAN_MODE_TOOL_NAMES
+    # Research tools allowed (Grok/Claude-style plan mode)
+    assert "file_read" in PLAN_MODE_TOOL_NAMES
+    assert "list_dir" in PLAN_MODE_TOOL_NAMES
+    assert "repo_search" in PLAN_MODE_TOOL_NAMES
+    assert "Approve" in PLAN_MODE_SYSTEM_ADDENDUM or "plan_save" in PLAN_MODE_SYSTEM_ADDENDUM
 
 
 def test_plans_api(tmp_path: Path, monkeypatch):

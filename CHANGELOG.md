@@ -2,6 +2,17 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.15.1] — 2026-07-26
+
+### Fix: workspace polish, archive days bug, quieter plan banner
+
+- **Auto-archive:** missing localStorage key no longer disables age-based archive (Number(null)===0 bug).
+- **Plan banner:** poll only in Plan mode (8s); clear when leaving Plan.
+- **Settings:** no dual mount when slide embeds Settings.
+- **Terminal:** prefer PowerShell (pwsh → Windows PowerShell) in project cwd.
+- **Browser / Scratch:** Firefox-prefer external open; scratch preview/save/clear.
+- **Tests:** sessionMeta archive rules, layoutPrefs, plan research tools.
+
 ## [0.15.0] — 2026-07-26
 
 ### Feature: three-frame workspace, plan mode, image markup, sessions scale

@@ -16,7 +16,10 @@ const ARCHIVE_DAYS_KEY = 'remedy.autoArchiveDays'
 
 export function getAutoArchiveDays(): number {
   try {
-    const n = Number(localStorage.getItem(ARCHIVE_DAYS_KEY))
+    // getItem missing → null; Number(null) is 0 — must not treat as "0 days".
+    const raw = localStorage.getItem(ARCHIVE_DAYS_KEY)
+    if (raw == null || raw === '') return DEFAULT_AUTO_ARCHIVE_DAYS
+    const n = Number(raw)
     if (Number.isFinite(n) && n >= 0) return Math.min(3650, Math.floor(n))
   } catch {
     /* */

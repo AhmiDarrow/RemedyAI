@@ -74,6 +74,8 @@ def test_plan_mode_tool_names_exclude_destructive() -> None:
     blocked = {"bash_exec", "file_write", "file_edit", "job_run"}
     assert not (blocked & set(PLAN_MODE_TOOL_NAMES))
     assert "plan_save" in PLAN_MODE_TOOL_NAMES
+    assert "file_read" in PLAN_MODE_TOOL_NAMES
+    assert "web_fetch" in PLAN_MODE_TOOL_NAMES
 
 
 def test_should_enable_tools_for_build_intent() -> None:

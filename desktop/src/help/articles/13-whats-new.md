@@ -2,7 +2,11 @@
 
 High-level product notes for owners. Full detail lives in repo `CHANGELOG.md`.
 
-Ship **one** installer/tag for the current series (**v0.15.0**).
+Ship **one** installer/tag for the current series (**v0.15.1**).
+
+## 0.15.1 — Workspace polish
+
+- PowerShell terminal, Firefox browser open, archive fix, quieter plan banner.
 
 ## 0.15.0 — Workspace · plan mode · images
 
