@@ -1,3 +1,4 @@
+mod pty_host;
 use std::env;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpStream};
@@ -2550,6 +2551,7 @@ pub fn run() {
             pending_drops: Arc::new(Mutex::new(Vec::new())),
             desktop_prefs: Arc::new(Mutex::new(load_desktop_prefs())),
         })
+        .manage(pty_host::PtyState::default())
         .invoke_handler(tauri::generate_handler![
             open_data_folder,
             pick_folder,
@@ -2574,7 +2576,11 @@ pub fn run() {
             start_desktop_update,
             get_local_api_token,
             read_dropped_files,
-            take_pending_file_drops
+            take_pending_file_drops,
+            pty_host::pty_open,
+            pty_host::pty_write,
+            pty_host::pty_resize,
+            pty_host::pty_close
         ])
         .setup(|app| {
             let _shell = app.handle().plugin(tauri_plugin_shell::init())?;

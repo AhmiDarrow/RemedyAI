@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "allow-pty"
+description = "Allow in-app PowerShell PTY open/write/resize/close"
+commands.allow = ["pty_open", "pty_write", "pty_resize", "pty_close"]

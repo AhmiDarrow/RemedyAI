@@ -32,6 +32,9 @@
     "allow-restart-server",
     "allow-app-update",
     "allow-read-dropped-files",
-    "allow-window-chrome"
+    "allow-window-chrome",
+    "allow-open-terminal",
+    "allow-open-external-url",
+    "allow-pty"
   ]
 }
