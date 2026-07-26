@@ -15,6 +15,7 @@ import {
   type MarkupTool,
   type Point,
 } from '../utils/imageMarkup'
+import { shouldUseCorsForImage } from '../utils/chatMedia'
 
 interface ImageLightboxProps {
   src: string | null
@@ -68,7 +69,7 @@ export function ImageLightbox({ src, alt, onClose, onAttachMarkup }: ImageLightb
       const img = new Image()
       // blob:/data: must NOT set crossOrigin (WebView2 often fails onload).
       // http(s): use anonymous when possible so canvas markup can export.
-      if (withCors && /^https?:/i.test(src)) {
+      if (withCors && shouldUseCorsForImage(src)) {
         img.crossOrigin = 'anonymous'
       }
       img.onload = () => {
@@ -80,7 +81,7 @@ export function ImageLightbox({ src, alt, onClose, onAttachMarkup }: ImageLightb
       }
       img.onerror = () => {
         if (cancelled) return
-        if (withCors && /^https?:/i.test(src)) {
+        if (withCors && shouldUseCorsForImage(src)) {
           // Retry without CORS (view works; export may be restricted)
           load(false)
           return
@@ -491,7 +492,16 @@ export function ImageLightbox({ src, alt, onClose, onAttachMarkup }: ImageLightb
         onClick={(e) => e.stopPropagation()}
       >
         {loadError && (
-          <div className="text-sm text-red-300">{loadError}</div>
+          <div className="flex flex-col items-center gap-3">
+            <div className="text-sm text-red-300">{loadError}</div>
+            {/* Fallback plain img — view-only if canvas path failed */}
+            <img
+              src={src}
+              alt={alt || 'Preview'}
+              className="max-w-[min(92vw,1000px)] max-h-[70vh] object-contain rounded-lg"
+              style={{ border: '1px solid rgba(255,255,255,0.15)' }}
+            />
+          </div>
         )}
         {!ready && !loadError && (
           <div className="text-sm text-white/60">Loading image…</div>

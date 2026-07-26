@@ -3,6 +3,7 @@ import {
   isLocalMediaPath,
   isRemoteOrDataUrl,
   normalizeLocalMediaPath,
+  shouldUseCorsForImage,
 } from './chatMedia'
 
 describe('chatMedia path helpers', () => {
@@ -29,5 +30,12 @@ describe('chatMedia path helpers', () => {
     expect(normalizeLocalMediaPath('assets/previews/x.png')).toBe(
       'assets/previews/x.png',
     )
+  })
+
+  it('never sets CORS on blob/data (WebView image viewer)', () => {
+    expect(shouldUseCorsForImage('blob:http://127.0.0.1/uuid')).toBe(false)
+    expect(shouldUseCorsForImage('data:image/png;base64,xx')).toBe(false)
+    expect(shouldUseCorsForImage('/icon.png')).toBe(false)
+    expect(shouldUseCorsForImage('https://cdn.example/x.png')).toBe(true)
   })
 })

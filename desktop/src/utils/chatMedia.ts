@@ -12,6 +12,11 @@ export function isRemoteOrDataUrl(src: string): boolean {
   return /^(https?:|data:|blob:)/i.test(s)
 }
 
+/** WebView-safe: only http(s) may use crossOrigin for canvas export. */
+export function shouldUseCorsForImage(src: string): boolean {
+  return /^https?:\/\//i.test((src || '').trim())
+}
+
 /** True when src looks like a local filesystem / project-relative path. */
 export function isLocalMediaPath(src: string): boolean {
   const s = (src || '').trim()

@@ -677,15 +677,26 @@ export default function App() {
       setOpenTabs((prev) => {
         const next = new Set(prev)
         next.delete(id)
-        if (activeId === id && next.size > 0) {
-          setActiveId([...next][0])
-        } else if (next.size === 0) {
-          setActiveId(null)
+        if (activeId === id) {
+          if (next.size > 0) {
+            // Prefer neighbor in recency order (sessions list is newest-first-ish)
+            const ordered = sessions
+              .map((s) => s.id)
+              .filter((sid) => next.has(sid))
+            const fromOpen = [...next]
+            const pick = ordered[0] || fromOpen[fromOpen.length - 1]!
+            setActiveId(pick)
+          } else {
+            // Fall back to any remaining session, not a blank middle
+            const fallback = sessions.find((s) => s.id !== id)?.id ?? null
+            setActiveId(fallback)
+            if (fallback) next.add(fallback)
+          }
         }
         return next
       })
     },
-    [activeId, setActiveId],
+    [activeId, setActiveId, sessions],
   )
 
   const handleExport = useCallback(
@@ -1362,24 +1373,53 @@ export default function App() {
         return sessionsSlide
       case 'settings':
         return (
-          <div className="p-3 space-y-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
-            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-              Full settings open as a panel (same forms as before).
-            </p>
-            <button
-              type="button"
-              className="w-full px-3 py-2 rounded-md text-sm font-medium"
-              style={{ background: 'var(--accent)', color: '#fff' }}
-              onClick={() => setPanel('settings')}
-            >
-              Open Settings…
-            </button>
-          </div>
+          <SettingsPanel
+            open
+            embedded
+            onClose={() => {}}
+            themeId={themeId}
+            onThemeChange={setTheme}
+            density={density}
+            onDensityChange={setDensity}
+            customAccent={customAccent}
+            onCustomAccentChange={setCustomAccent}
+            updateInfo={updateInfo}
+            checkingUpdates={checkingUpdates}
+            updateStatus={updateLastStatus}
+            onCheckUpdates={() => {
+              void runUpdateCheckVisible()
+            }}
+            onInstallUpdate={() => {
+              if (desktopInfo?.update_available && desktopInfo.download_url) {
+                setShowUpdateScreen(true)
+              } else {
+                void runUpdateCheckVisible()
+              }
+            }}
+            models={models}
+            toolProcessMode={toolProcessMode}
+            onToolProcessChange={(mode) => {
+              setToolProcessMode(mode)
+              updateSettings({ tool_process: mode }).catch(() => {})
+            }}
+            onOpenHelp={openHelp}
+            onSettingsSaved={() => {
+              void getSettings()
+                .then((s) => {
+                  if (s.llm_model) setModel(s.llm_model)
+                  if (s.llm_provider) setLlmProvider(s.llm_provider)
+                  setUserName((s.user_name || '').trim())
+                  setToolProcessMode(normalizeToolProcess(s.tool_process))
+                  return refreshModels()
+                })
+                .catch(() => refreshModels())
+            }}
+          />
         )
       case 'files':
         return <FilesSlide sessionId={activeId} />
       case 'terminal':
-        return <TerminalSlide />
+        return <TerminalSlide sessionId={activeId} />
       case 'browser':
         return <BrowserSlide />
       case 'scratch':
@@ -1605,7 +1645,6 @@ export default function App() {
             width={wsLayout.rightWidth}
             onSelect={(id) => {
               patchWs({ right: id })
-              if (id === 'settings') setPanel('settings')
             }}
             onWidth={(w) => patchWs({ rightWidth: w })}
             onHide={() => patchWs({ rightOpen: false })}
