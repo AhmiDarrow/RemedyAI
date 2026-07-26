@@ -75,6 +75,33 @@ so the webview reported a network error. **0.10.38+** lets OPTIONS through auth;
 - Do not call the API from non-loopback hosts.  
 - Advanced: `REMEDY_API_AUTH=0` only for local debugging.
 
+## Images in chat show “Loading…” / broken / blank
+
+Remedy does **not** depend on the LLM provider for image *display*. Models often
+write markdown like `![preview](assets/previews/hero.png)`. The desktop loads
+those through the local API (`GET /api/media`) with your project path.
+
+| Check | Fix |
+|-------|-----|
+| Relative path outside project | Set **Project folder** in Settings to the repo that owns the files |
+| Absolute path outside access scope | Scope is `project` / `home` / `full` — expand scope or copy files into project |
+| Old build | Install **0.14.3+** (ChatImage + media route) |
+| Still blank | Open `%USERPROFILE%\.remedy\logs\errors.log` after expanding the image |
+
+Attachments (drag/drop screenshots) use a separate upload path and should always
+preview; if only *generated* previews fail, it is almost always path/scope.
+
+## Session Export does nothing / no file
+
+On desktop, Export uses a **native Save dialog** (0.14.3+). If you cancel the
+dialog, nothing is written (expected).
+
+| Check | Fix |
+|-------|-----|
+| Old WebView-only download | Update to **0.14.3+** |
+| Empty session | Export needs at least one stored message |
+| API error toast | Confirm Connected status; check `remedy.log` for `/export` |
+
 ## SmartScreen / Unknown publisher
 
 - Install **only** from [RemedyAI Releases](https://github.com/AhmiDarrow/RemedyAI/releases).  

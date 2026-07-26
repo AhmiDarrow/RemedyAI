@@ -887,13 +887,31 @@ def _sync_runtime_llm_from_config(
     ):
         api_key = "local"
 
+    # Partner trust: keep APPROVALS + runtime aligned with config on every turn.
+    # Without this, thumbs-up (auto) in Settings/UI can show while tools still
+    # emit APPROVAL_REQUIRED because the process started on default ask.
+    am = str(cfg.get("approval_mode") or "ask").strip().lower()
+    if am not in ("ask", "auto"):
+        am = "ask"
+    scope = cfg.get("access_scope")
     _apply_llm_to_runtime(
         runtime,
         provider=provider,
         model=model,
         base_url=base_url,
         api_key=api_key if api_key else None,
+        project_path=cfg.get("project_path"),
+        access_scope=str(scope) if scope is not None else None,
+        harness_mode=cfg.get("harness_mode"),
+        thinking_level=cfg.get("thinking_level"),
+        approval_mode=am,
     )
+    try:
+        from remedy.core.approvals import APPROVALS
+
+        APPROVALS.sync_from_config(cfg)
+    except Exception:
+        pass
     return str(getattr(runtime, "_llm_api_key", "") or api_key or "")
 
 

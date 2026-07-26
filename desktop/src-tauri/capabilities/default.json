@@ -27,6 +27,7 @@
     "updater:allow-download-and-install",
     "allow-open-data-folder",
     "allow-pick-folder",
+    "allow-save-text-file",
     "allow-launch-at-login",
     "allow-restart-server",
     "allow-app-update",

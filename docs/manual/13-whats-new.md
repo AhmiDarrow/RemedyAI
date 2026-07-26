@@ -2,7 +2,13 @@
 
 High-level product notes for owners. Full detail lives in repo `CHANGELOG.md`.
 
-Ship **one** installer/tag for the current series (**v0.14.1**).
+Ship **one** installer/tag for the current series (**v0.14.3**).
+
+## 0.14.3 — Chat images · session export · stay-on-task
+
+- Local image paths in chat markdown render for **any** provider (`/api/media`).
+- Session **Export** uses a real Save dialog in the desktop shell.
+- Auto-approve + tool continuity fixes so short follow-ups keep agency.
 
 ## 0.14.1 — Autoupdate: download UI → install popup → one restart
 

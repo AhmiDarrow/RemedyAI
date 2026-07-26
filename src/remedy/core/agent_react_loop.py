@@ -26,6 +26,7 @@ from remedy.core.react_policy import (
     _parse_pseudo_tool_calls,
     _tool_call_fingerprint,
     batch_has_tool_errors,
+    looks_like_false_progress,
     recovery_nudge_message,
     strip_tool_markup,
 )
@@ -297,14 +298,25 @@ async def call_llm_stream(runtime, message: str,
             ]
         else:
             # Creative image prompts ("make something cool/spacey") must keep tools on.
+            # Also: unfinished multi-turn work (history tool use / open tasks) so short
+            # follow-ups like "go with your suggestions" keep agency.
+            open_tasks: list[str] = []
+            with suppress(Exception):
+                brief = getattr(runtime, "_session_brief", None)
+                if brief is not None:
+                    open_tasks = list(getattr(brief, "open_tasks", None) or [])
             tools = (
                 all_tools
                 if should_enable_tools(
-                    message, all_tools, has_attachments=bool(attachments)
+                    message,
+                    all_tools,
+                    has_attachments=bool(attachments),
+                    history=history,
+                    open_tasks=open_tasks or None,
                 )
                 or bool(
                     re.search(
-                        r"\b(comfy|image|picture|nebula|spacey|generate|draw|illustrat)\b",
+                        r"\b(comfy|image|picture|nebula|spacey|generate|draw|illustrat|logo|asset|png)\b",
                         message or "",
                         re.I,
                     )
@@ -317,6 +329,8 @@ async def call_llm_stream(runtime, message: str,
         produced_user_text = False
         pseudo_recovery_done = False
         pseudo_nudge_count = 0
+        # Nudge once when the model claims progress without native tool_calls.
+        false_progress_nudge_count = 0
         # One automatic recovery nudge per turn after a failing tool batch.
         recovery_nudge_done = False
         headers = runtime._provider.auth_headers(runtime._llm_api_key)
@@ -782,6 +796,41 @@ async def call_llm_stream(runtime, message: str,
                                     "list_dir / bash_exec), or answer from context."
                                 ),
                             }
+                        )
+                        continue
+                    # Narrating "I'm processing…" without tools looks stuck in the UI.
+                    # One hard nudge: call tools now, don't restate intent.
+                    if (
+                        not tool_calls_list
+                        and all_tools
+                        and not force_answer
+                        and false_progress_nudge_count < 1
+                        and looks_like_false_progress(text_out)
+                    ):
+                        false_progress_nudge_count += 1
+                        tools = all_tools
+                        force_answer_sticky = False
+                        messages.append(
+                            {
+                                "role": "assistant",
+                                "content": text_out,
+                            }
+                        )
+                        messages.append(
+                            {
+                                "role": "user",
+                                "content": (
+                                    "Stop narrating intent. Use native function-calling "
+                                    "tools now (list_dir / file_read / file_write / "
+                                    "file_edit / bash_exec / comfyui / mission_start) "
+                                    "and keep going until the user request is finished. "
+                                    "Do not reply with only a status line."
+                                ),
+                            }
+                        )
+                        logger.info(
+                            "False-progress nudge after step %d (no tool_calls)",
+                            step + 1,
                         )
                         continue
                     if stream_live and produced_user_text:

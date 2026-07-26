@@ -69,6 +69,102 @@ def register_workspace_routes(app: FastAPI, *, runtime=None, gateway=None, memor
             candidate.relative_to(base)
             return candidate
 
+    @app.get("/api/media")
+    async def serve_local_media(
+        path: str = Query(..., description="Absolute or project-relative image path"),
+    ):
+        """Serve a local image for chat markdown (provider-agnostic).
+
+        Models embed ``![alt](assets/foo.png)`` or absolute Windows paths.
+        WebView cannot load bare filesystem paths — the desktop rewrites those
+        to this endpoint (auth via Bearer / loopback token).
+        """
+        from fastapi.responses import FileResponse
+
+        raw = (path or "").strip().strip('"').strip("'")
+        if raw.lower().startswith("file:"):
+            raw = raw[5:].lstrip("/\\")
+            # file:///C:/Users/... → C:/Users/...
+            if len(raw) >= 2 and raw[1] == ":":
+                pass
+            elif raw.startswith("/") and len(raw) >= 3 and raw[2] == ":":
+                raw = raw[1:]
+        if not raw:
+            raise HTTPException(400, "path required")
+
+        candidate: Path | None = None
+        try:
+            p = Path(raw).expanduser()
+            if p.is_absolute():
+                candidate = p.resolve()
+            else:
+                base = _files_base()
+                candidate = (base / raw).resolve()
+        except Exception as exc:
+            raise HTTPException(400, f"invalid path: {exc}") from exc
+
+        if candidate is None or not candidate.is_file():
+            raise HTTPException(404, "media not found")
+
+        # Jail: project roots, runtime allowed roots, and ~/.remedy
+        roots: list[Path] = []
+        with contextlib.suppress(Exception):
+            roots.append(_files_base().resolve())
+        if runtime is not None and hasattr(runtime, "allowed_roots"):
+            with contextlib.suppress(Exception):
+                for r in runtime.allowed_roots() or []:
+                    roots.append(Path(r).resolve())
+        with contextlib.suppress(Exception):
+            home = Path(load_config().get("home_dir") or (Path.home() / ".remedy"))
+            roots.append(home.expanduser().resolve())
+        # Always allow reading under the default project if configured
+        with contextlib.suppress(Exception):
+            pp = load_config().get("project_path")
+            if pp:
+                roots.append(Path(str(pp)).expanduser().resolve())
+
+        allowed = False
+        for root in roots:
+            try:
+                candidate.relative_to(root)
+                allowed = True
+                break
+            except ValueError:
+                continue
+        if not allowed:
+            raise HTTPException(403, "path outside allowed roots")
+
+        suffix = candidate.suffix.lower()
+        media_types = {
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".gif": "image/gif",
+            ".webp": "image/webp",
+            ".svg": "image/svg+xml",
+            ".bmp": "image/bmp",
+            ".ico": "image/x-icon",
+        }
+        if suffix not in media_types:
+            raise HTTPException(415, f"unsupported media type: {suffix or 'none'}")
+        # Cap huge files (chat previews)
+        try:
+            size = candidate.stat().st_size
+        except OSError as exc:
+            raise HTTPException(404, f"cannot read: {exc}") from exc
+        if size > 25 * 1024 * 1024:
+            raise HTTPException(413, "media too large (25 MB max)")
+
+        return FileResponse(
+            candidate,
+            media_type=media_types[suffix],
+            filename=candidate.name,
+            headers={
+                "Cache-Control": "private, max-age=120",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+
     @app.get("/api/workspace")
     async def get_workspace(session_id: str | None = Query(default=None)):
         """Return the active project/workspace root for UI and tools."""

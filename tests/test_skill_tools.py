@@ -119,8 +119,12 @@ async def test_skill_activate_quarantine_blocked(runtime):
 
 
 @pytest.mark.asyncio
-async def test_skill_run_requires_approval(runtime):
+async def test_skill_run_requires_approval(runtime, monkeypatch):
     _reg_skill(runtime, "runner", scripts=["scripts/run.py"])
+    monkeypatch.setattr(
+        "remedy.interfaces.api_support.load_config",
+        lambda: {"access_scope": "project", "approval_mode": "ask"},
+    )
     APPROVALS.set_mode("ask")
     res = await runtime.call_tool(
         ToolCall(tool_name="skill_run", arguments={"skill": "runner"})

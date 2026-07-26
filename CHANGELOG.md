@@ -2,6 +2,48 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.14.3] — 2026-07-25
+
+### Fix: chat images + session export + agency continuity
+
+- **Chat images (provider-agnostic):** markdown `![alt](assets/…)` and absolute
+  local paths now load via `GET /api/media` + desktop `ChatImage` (blob URL with
+  auth). Works for any model that embeds local paths — not only data: URIs.
+- **Session export:** Tauri native Save dialog (`save_text_file`) so export works
+  in WebView (anchor download was a no-op).
+- Brand assets kit under `assets/` (alpha masters + mono variants + previews).
+- Agency: tool-gating history continuity, auto-approve config wiring (from 0.14.2).
+
+## [0.14.2] — 2026-07-25
+
+### Fix: auto-approve actually grants full power
+
+Status-bar thumbs-up / Settings `approval_mode=auto` was **saved to config** and
+shown in the UI, but the process still ran as **ask** because
+`config_to_agent_config()` never copied `approval_mode` into `AgentConfig`.
+Result: shell/file tools still returned `APPROVAL_REQUIRED` and the banner
+still asked for permission.
+
+- Load `approval_mode` (+ access_scope / harness / thinking) into AgentConfig
+- Re-sync APPROVALS from config.toml on every tool ask + partner status poll
+- Switching to **auto** auto-approves pending items (banner clears)
+- Per-turn runtime sync applies approval_mode before chat streams
+
+### Fix: stay on task (agency / tool gating)
+
+Desktop session log (assets/logos work): after the first turn used tools, short
+follow-ups like **"go with your suggestions"**, **"progress?"**, **"eta"**, and
+**"troubleshoot"** set `tools=[]` + `force_answer` on step 0 — the model only
+streamed "Processing…" and never called tools again.
+
+- Expand **action kicks** and **asset/image tool hints** in `message_wants_tools`
+- **History-aware tool enablement**: keep tools on when recent turns used tools
+  or Session Brief has open tasks (pure chit-chat still stays tool-free)
+- **False-progress nudge**: if the model claims to be working without native
+  `tool_calls`, force a tool-using recovery step
+- Auto-learned skill titles use **tool-name patterns** (not full path prompts)
+- Desktop **session export** download: attach anchor to DOM (Tauri/WebView)
+
 ## [0.14.1] — 2026-07-25
 
 ### Fix: autoupdate UX + single relaunch (regression)

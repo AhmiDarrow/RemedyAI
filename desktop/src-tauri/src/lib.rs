@@ -568,6 +568,91 @@ fn start_sidecar(process: &Arc<Mutex<Option<Child>>>, cmd: &str) -> Result<(), S
     Ok(())
 }
 
+/// Save plain text via native Save dialog (session export — WebView download is unreliable).
+#[tauri::command]
+fn save_text_file(default_name: String, contents: String) -> Result<Option<String>, String> {
+    let name = if default_name.trim().is_empty() {
+        "remedy-export.txt".to_string()
+    } else {
+        default_name
+            .chars()
+            .map(|c| match c {
+                '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => '_',
+                c if c.is_control() => '_',
+                c => c,
+            })
+            .collect::<String>()
+    };
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::fs;
+        // Escape for PowerShell single-quoted string: ' → ''
+        let ps_name = name.replace('\'', "''");
+        // Write contents to a temp file to avoid huge command-line payloads.
+        let tmp = std::env::temp_dir().join(format!(
+            "remedy-export-{}.txt",
+            std::process::id()
+        ));
+        fs::write(&tmp, contents.as_bytes())
+            .map_err(|e| format!("temp write failed: {e}"))?;
+        let tmp_s = tmp.to_string_lossy().replace('\'', "''");
+        let script = format!(
+            r#"
+Add-Type -AssemblyName System.Windows.Forms | Out-Null
+$d = New-Object System.Windows.Forms.SaveFileDialog
+$d.Title = 'Export Remedy session'
+$d.FileName = '{name}'
+$d.Filter = 'Text files (*.txt)|*.txt|Markdown (*.md)|*.md|All files (*.*)|*.*'
+$d.DefaultExt = 'txt'
+$d.AddExtension = $true
+$d.OverwritePrompt = $true
+if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {{
+  Copy-Item -LiteralPath '{tmp}' -Destination $d.FileName -Force
+  Write-Output $d.FileName
+}}
+"#,
+            name = ps_name,
+            tmp = tmp_s,
+        );
+        let output = Command::new("powershell")
+            .args(["-NoProfile", "-STA", "-Command", &script])
+            .output()
+            .map_err(|e| format!("save dialog failed: {e}"))?;
+        let _ = fs::remove_file(&tmp);
+        if !output.status.success() {
+            let err = String::from_utf8_lossy(&output.stderr);
+            if err.trim().is_empty() {
+                return Ok(None);
+            }
+            return Err(format!("save dialog error: {}", err.trim()));
+        }
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if path.is_empty() {
+            return Ok(None);
+        }
+        return Ok(Some(path));
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        // Fallback: write next to home Downloads
+        let home = dirs_next_home().unwrap_or_else(|| std::path::PathBuf::from("."));
+        let dest = home.join("Downloads").join(&name);
+        if let Some(parent) = dest.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        std::fs::write(&dest, contents.as_bytes())
+            .map_err(|e| format!("write failed: {e}"))?;
+        Ok(Some(dest.to_string_lossy().to_string()))
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn dirs_next_home() -> Option<std::path::PathBuf> {
+    std::env::var_os("HOME").map(std::path::PathBuf::from)
+}
+
 /// Native folder picker for Settings project workspace (Windows Forms / zenity / osascript).
 #[tauri::command]
 fn pick_folder() -> Result<Option<String>, String> {
@@ -2074,6 +2159,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             open_data_folder,
             pick_folder,
+            save_text_file,
             set_launch_at_login,
             get_launch_at_login,
             scrub_legacy_autostart,

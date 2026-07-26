@@ -15,6 +15,7 @@ import { sanitizeAssistantText } from '../utils/sanitizeChat'
 import { dayKey, dayLabel } from '../utils/relativeTime'
 import { TaskProgress, type TaskProgressInfo } from './TaskProgress'
 import { ImageLightbox } from './ImageLightbox'
+import { ChatImage } from './ChatImage'
 import { RemedyLogo } from './RemedyLogo'
 import {
   IconBtn,
@@ -394,19 +395,11 @@ const MessageBubble = memo(function MessageBubble({
                       img({ src, alt }) {
                         if (!src) return null
                         return (
-                          <button
-                            type="button"
-                            className="chat-img-btn block p-0 m-0 border-0 bg-transparent cursor-zoom-in w-full text-left"
-                            onClick={() => onOpenImage?.(src, alt)}
-                            title="Click to expand"
-                          >
-                            <img
-                              src={src}
-                              alt={alt || 'image'}
-                              className="chat-img"
-                              loading="lazy"
-                            />
-                          </button>
+                          <ChatImage
+                            src={src}
+                            alt={alt}
+                            onOpen={(url, a) => onOpenImage?.(url, a)}
+                          />
                         )
                       },
                       code({ children, className }) {

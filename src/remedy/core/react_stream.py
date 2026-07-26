@@ -12,6 +12,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from remedy.core.react_policy import (
+    _CHAT_ONLY_RE,
+    _META_NO_TOOLS_RE,
+    history_suggests_open_work,
     looks_like_pseudo_tools,
     message_wants_tools,
     parse_pseudo_tool_calls,
@@ -187,8 +190,32 @@ def should_enable_tools(
     all_tools: list[dict[str, Any]],
     *,
     has_attachments: bool,
+    history: list[dict[str, Any]] | None = None,
+    open_tasks: list[str] | None = None,
 ) -> bool:
-    return bool(all_tools) and (message_wants_tools(message) or has_attachments)
+    """Gate tool schemas for the ReAct loop.
+
+    Tools stay on when:
+    - the current message looks like work / an action kick, or
+    - attachments are present, or
+    - recent history / open tasks show unfinished work (critical for
+      short follow-ups like "go with your suggestions" / "progress?").
+
+    Pure chit-chat still returns False even mid-session so "thanks" does not
+    thrash the filesystem.
+    """
+    if not all_tools:
+        return False
+    if has_attachments:
+        return True
+    msg = (message or "").strip()
+    # Pure social / meta questions stay tool-free even mid-session.
+    if msg and (_META_NO_TOOLS_RE.search(msg) or _CHAT_ONLY_RE.match(msg)):
+        return False
+    if message_wants_tools(message):
+        return True
+    # History-aware continuity: keep agency across multi-turn tasks.
+    return history_suggests_open_work(history, open_tasks=open_tasks)
 
 
 def filter_fresh_tool_calls(

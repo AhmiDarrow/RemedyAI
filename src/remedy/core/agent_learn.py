@@ -7,12 +7,32 @@ the full ReAct agent. Behavior matches the previous inline implementation.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 # Meta tools alone do not count toward a "real work" multi-tool turn.
 _META_TOOLS = frozenset({"skill_search", "skill_activate", "local_discover"})
+
+
+def _skill_title_from_steps(message: str, steps: list[dict[str, Any]]) -> str:
+    """Build a short, stable skill title from tool names — not the full user path dump."""
+    tools: list[str] = []
+    for s in steps:
+        name = str(s.get("tool") or s.get("name") or "").strip()
+        if name and name not in _META_TOOLS and name not in tools:
+            tools.append(name)
+        if len(tools) >= 3:
+            break
+    if tools:
+        return ("-".join(tools))[:60]
+    # Fallback: first line of user message, strip drive paths.
+    line = (message or "session-task").strip().split("\n")[0]
+    line = re.sub(r"[A-Za-z]:\\[^\s]+", "", line)
+    line = re.sub(r"/[^\s]+", "", line)
+    line = re.sub(r"\s+", " ", line).strip(" -_.,")
+    return (line or "session-task")[:60]
 
 
 def should_auto_learn_from_steps(steps: list[dict[str, Any]] | None) -> bool:
@@ -45,7 +65,9 @@ def auto_learn_from_turn(
         return None
 
     # Pattern nanobot pre-gate: skip learning noisy / rejectable traces.
-    title = (message or "session-task").strip().split("\n")[0][:80]
+    # Prefer a short tool-pattern title over the raw user prompt (paths make
+    # garbage skill ids like "file_read-i-like-our-assets-for-remedy-located-…").
+    title = _skill_title_from_steps(message, steps_list)
     try:
         from remedy.nanoswarm import get_swarm
         from remedy.nanoswarm.events import SwarmEvent

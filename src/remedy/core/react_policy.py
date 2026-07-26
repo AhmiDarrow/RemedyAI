@@ -128,6 +128,9 @@ _TOOL_HINT_RE = re.compile(
     r"implement|implemen\w*|refactor|debug|fix(?:es)?|bug|error|stack|trace|"
     r"patch|apply|ship|deploy|"
     r"git|commit|diff|branch|src/|\\.[a-z]{1,5}\b|"
+    # Asset / image work (session log 2026-07-25: logos on alpha without tools)
+    r"asset|assets|logo|logos|icon|icons|favicon|png|jpe?g|webp|svg|gif|"
+    r"alpha|transparent|cutout|brighten|background|process|"
     r"comfyui|comfy|txt2img|img2img|portrait|nebula|spacey|"
     r"generate(\s+an?)?\s+image|image\s+generation|render(\s+an?)?\s+image|"
     r"make\s+(me\s+)?(an?\s+)?(image|picture|photo)|"
@@ -141,14 +144,25 @@ _TOOL_HINT_RE = re.compile(
 # Short kicks that must keep tools on. Session bug (2026-07-25): "proceed",
 # "continue", "go ahead", "proceed with all fixes" returned False → tools=[]
 # → force_answer on step 0 → model only narrated with zero tool_calls.
+# Same session: "go with your suggestions" / "progress?" / "eta" also gated
+# tools off mid-task after the model had already started tool work.
 _ACTION_KICK_RE = re.compile(
     r"(?:"
     r"\bproceed\b|"
     r"\bcontinue\b|"
     r"\bgo\s+ahead\b|"
+    r"\bgo\s+with\b|"
     r"\bdo\s+it\b|"
+    r"\bdo\s+that\b|"
+    r"\bdo\s+this\b|"
+    r"\bdo\s+the\s+(?:work|task|thing|fix|rest)\b|"
     r"\bkeep\s+going\b|"
     r"\bcarry\s+on\b|"
+    r"\bsounds?\s+good\b|"
+    r"\bthat\s+works\b|"
+    r"\byour\s+(?:call|suggestion|suggestions|recommendation|recommendations)\b|"
+    r"\bwith\s+your\s+(?:suggestion|suggestions|recommendation|recommendations|plan|idea|ideas)\b|"
+    r"\brecommended?\b|"
     r"\bstart\s+(?:working|now|implementing|coding|building)\b|"
     r"\bget\s+(?:to\s+)?work\b|"
     r"\bact(?:ually)?\s+(?:do|implement|start|run|fix)\b|"
@@ -159,8 +173,38 @@ _ACTION_KICK_RE = re.compile(
     r"\bout\s+of\s+plan(?:\s+mode)?\b|"
     r"\benter\s+build(?:\s+mode)?\b|"
     r"\bbuild\s+mode\b|"
+    # Progress / stuck pings must re-enable tools so the agent can check work.
+    r"\bprogress\b|"
+    r"\bstatus\b|"
+    r"\beta\b|"
+    r"\bany\s+update\b|"
+    r"\bupdate\s+me\b|"
+    r"\bcheck\s+again\b|"
+    r"\btroubleshoot\b|"
+    r"\bstuck\b|"
+    r"\bnot\s+(?:working|able|finishing|completing)\b|"
+    r"\bcannot\s+(?:finish|complete|provide)\b|"
+    r"\bcan'?t\s+(?:finish|complete|provide)\b|"
+    r"\bcomplete\s+this\b|"
+    r"\bfinish\s+(?:it|this|the\s+task)\b|"
     r"\byes[,.]?\s*(?:please\s+)?(?:proceed|continue|do\s+it|go|implement)\b|"
     r"\bok(?:ay)?[,.]?\s*(?:please\s+)?(?:proceed|continue|do\s+it|go|implement)\b"
+    r")",
+    re.IGNORECASE,
+)
+
+# Model narrates progress without calling tools (false "I'm working on it").
+_FALSE_PROGRESS_RE = re.compile(
+    r"(?:"
+    r"\b(?:i(?:'m| am)|i'?ll|let\s+me|now)\s+"
+    r"(?:process|processing|check|checking|work|working|pick(?:ing)?\s+up|"
+    r"start|starting|do(?:ing)?|handle|handling|run|running)\b|"
+    r"\bprocessing\b|"
+    r"\bworking\s+on\s+it\b|"
+    r"\bpicking\s+up\b|"
+    r"\bgiving\s+you\s+(?:a\s+)?(?:real\s+)?eta\b|"
+    r"\bchecking\s+assets\b|"
+    r"\bdoing\s+the\s+(?:asset|logo|work)\b"
     r")",
     re.IGNORECASE,
 )
@@ -242,6 +286,46 @@ def message_wants_tools(message: str) -> bool:
         return True
     # Longer prompts are usually real work — keep tools available.
     return len(msg) > 160
+
+
+def history_suggests_open_work(
+    history: list[dict[str, Any]] | None,
+    *,
+    open_tasks: list[str] | None = None,
+    lookback: int = 24,
+) -> bool:
+    """True when recent session history still has tool work / open tasks.
+
+    Follow-ups like "go with your suggestions" or "progress?" must keep tools
+    on if the prior turn already used tools or the Session Brief has open work.
+    Otherwise tools=[] + force_answer → pure narration and a stuck UI.
+    """
+    if open_tasks:
+        for t in open_tasks:
+            if (t or "").strip():
+                return True
+    if not history:
+        return False
+    recent = history[-max(1, lookback) :]
+    for m in recent:
+        if not isinstance(m, dict):
+            continue
+        role = (m.get("role") or "").strip().lower()
+        if role == "tool":
+            return True
+        if m.get("tool_calls"):
+            return True
+        # Assistant committed to doing work without tools yet.
+        if role == "assistant":
+            content = m.get("content")
+            if isinstance(content, str) and _FALSE_PROGRESS_RE.search(content):
+                return True
+    return False
+
+
+def looks_like_false_progress(text: str) -> bool:
+    """True when the model claims to be working without native tool_calls."""
+    return bool(text and _FALSE_PROGRESS_RE.search(text))
 
 
 # Back-compat alias used by older tests / imports.

@@ -10,8 +10,13 @@ from remedy.core.approvals import APPROVALS, ApprovalQueue
 from remedy.memory.knowledge_pack import import_knowledge_pack
 
 
-def test_approval_needs_ask_destructive():
+def test_approval_needs_ask_destructive(monkeypatch):
     q = ApprovalQueue()
+    q.set_mode("ask")
+    monkeypatch.setattr(
+        "remedy.interfaces.api_support.load_config",
+        lambda: {"access_scope": "project", "approval_mode": "ask"},
+    )
     assert q.needs_ask("rm -rf /tmp/foo") is not None
     assert q.needs_ask("git reset --hard HEAD") is not None
     assert q.needs_ask("ls -la") is None

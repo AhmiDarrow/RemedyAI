@@ -56,13 +56,51 @@ class ApprovalQueue:
             return self._mode
 
     def set_mode(self, mode: str) -> str:
-        """Set approval mode: ``ask`` (thumbs down) or ``auto`` (thumbs up)."""
+        """Set approval mode: ``ask`` (thumbs down) or ``auto`` (thumbs up).
+
+        Switching to **auto** also clears any pending prompts (full owner power).
+        """
         m = (mode or "ask").strip().lower()
         if m not in ("ask", "auto"):
             m = "ask"
         with self._lock:
+            prev = self._mode
             self._mode = m
+            if m == "auto" and prev != "auto":
+                # Auto-approve anything still waiting so the banner disappears
+                # and in-flight tool retries can proceed without a click.
+                for item in self._items.values():
+                    if item.status == "pending":
+                        item.status = "approved"
+                        sid = item.session_id or "default"
+                        self._session_fps.setdefault(sid, set()).add(item.fingerprint)
             return self._mode
+
+    def sync_from_config(self, cfg: dict[str, Any] | None = None) -> str:
+        """Align process mode with persisted config.toml when explicitly set.
+
+        Fixes the restart bug: Settings UI read ``approval_mode=auto`` from TOML
+        while the in-memory queue stayed on ``ask`` because AgentConfig omitted
+        the field at boot.
+
+        Only overrides mode when *cfg* contains ``approval_mode`` so unit tests
+        that call ``set_mode("ask")`` with a partial monkeypatched config keep
+        their intended mode.
+        """
+        if cfg is None:
+            try:
+                from remedy.interfaces.api_support import load_config
+
+                cfg = load_config() or {}
+            except Exception:
+                cfg = {}
+        if not isinstance(cfg, dict) or "approval_mode" not in cfg:
+            with self._lock:
+                return self._mode
+        am = str(cfg.get("approval_mode") or "ask").strip().lower()
+        if am not in ("ask", "auto"):
+            am = "ask"
+        return self.set_mode(am)
 
     @staticmethod
     def fingerprint(tool_name: str, command: str) -> str:
@@ -83,12 +121,16 @@ class ApprovalQueue:
         Hard security blocks (wipe/privilege) live in ``check_dangerous_command``
         and are separate from this partner-trust queue.
         """
-        # Untrusted workspace: never skip asks even in auto mode
+        # Re-sync mode when config explicitly sets approval_mode (desktop thumbs).
+        # Scope always comes from config when available.
         untrusted = False
         try:
             from remedy.interfaces.api_support import load_config
 
-            scope = str((load_config() or {}).get("access_scope") or "").lower()
+            cfg = load_config() or {}
+            if isinstance(cfg, dict) and "approval_mode" in cfg:
+                self.sync_from_config(cfg)
+            scope = str(cfg.get("access_scope") or "").lower()
             untrusted = scope in ("untrusted", "sandbox", "strict", "download")
         except Exception:
             untrusted = False

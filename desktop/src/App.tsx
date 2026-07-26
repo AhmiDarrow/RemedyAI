@@ -627,16 +627,49 @@ export default function App() {
       try {
         const { text, markdown, filename } = await exportSession(sessionId, 'txt')
         const body = text || markdown || ''
+        if (!body.trim()) {
+          notify('Export failed', { body: 'Session export was empty' })
+          return
+        }
+        const safeName = (
+          filename.endsWith('.txt') || filename.endsWith('.md')
+            ? filename
+            : `${filename || 'remedy-export'}.txt`
+        ).replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')
+
+        // Tauri: native Save dialog (WebView <a download> is unreliable).
+        if (isTauri()) {
+          try {
+            const saved = await tauriInvoke<string | null>('save_text_file', {
+              defaultName: safeName,
+              contents: body,
+            })
+            if (saved) {
+              notify('Exported session', { body: saved, silent: true })
+              return
+            }
+            // User cancelled dialog — not an error
+            notify('Export cancelled', { silent: true })
+            return
+          } catch (nativeErr) {
+            console.warn('Native save failed, trying browser download:', nativeErr)
+          }
+        }
+
         const blob = new Blob([body], { type: 'text/plain;charset=utf-8' })
         const url = URL.createObjectURL(blob)
         const a = document.createElement('a')
         a.href = url
-        a.download = filename.endsWith('.txt') || filename.endsWith('.md')
-          ? filename
-          : `${filename}.txt`
+        a.download = safeName
+        a.rel = 'noopener'
+        a.style.display = 'none'
+        document.body.appendChild(a)
         a.click()
-        URL.revokeObjectURL(url)
-        notify('Exported session', { body: a.download, silent: true })
+        window.setTimeout(() => {
+          a.remove()
+          URL.revokeObjectURL(url)
+        }, 1500)
+        notify('Exported session', { body: safeName, silent: true })
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e)
         console.warn('Export failed:', msg)

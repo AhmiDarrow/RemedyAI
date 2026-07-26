@@ -37,12 +37,64 @@ def test_message_wants_tools_action_kicks() -> None:
         "it doesn't look like you are doing anything",
         "switch to build",
         "leave plan mode",
+        # 2026-07-25 assets session: affirm + progress pings must keep tools on
+        "go with your suggestions",
+        "progress?",
+        "eta",
+        "I need an eta",
+        "do that",
+        "sounds good",
+        "troubleshoot why",
+        "you don't seem to be able to complete this task",
+        "process the assets",
     ):
         assert message_wants_tools(msg) is True, msg
     # Still skip pure chit-chat
     assert message_wants_tools("hi") is False
     assert message_wants_tools("thanks") is False
     assert message_wants_tools("ok") is False
+
+
+def test_history_suggests_open_work_keeps_agency() -> None:
+    """Short follow-ups with no keywords still enable tools after prior tool use."""
+    from remedy.core.react_policy import history_suggests_open_work, looks_like_false_progress
+    from remedy.core.react_stream import should_enable_tools
+
+    history = [
+        {"role": "user", "content": "fix the logos"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "c1",
+                    "type": "function",
+                    "function": {"name": "list_dir", "arguments": "{}"},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "c1", "content": "remedy_icon.png"},
+    ]
+    assert history_suggests_open_work(history) is True
+    tools = [
+        {
+            "type": "function",
+            "function": {"name": "list_dir", "parameters": {"type": "object"}},
+        }
+    ]
+    # Even a bare affirmation that might miss regex still keeps tools via history.
+    assert (
+        should_enable_tools(
+            "please",
+            tools,
+            has_attachments=False,
+            history=history,
+        )
+        is True
+    )
+    assert should_enable_tools("thanks", tools, has_attachments=False, history=history) is False
+    assert looks_like_false_progress("Processing both logos now.") is True
+    assert looks_like_false_progress("Here is the final result.") is False
 
 
 def test_pseudo_tool_parse_and_log(caplog) -> None:

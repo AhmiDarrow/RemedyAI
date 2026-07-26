@@ -867,6 +867,17 @@ def config_to_agent_config(config: dict[str, Any]) -> AgentConfig:
         llm_api_key = "local"
         logger.info("No API key set for local LLM at %s — using dummy key", llm_base_url)
 
+    am = str(config.get("approval_mode") or "ask").strip().lower()
+    if am not in ("ask", "auto"):
+        am = "ask"
+    scope = str(config.get("access_scope") or "project").strip().lower() or "project"
+    hm = str(config.get("harness_mode") or "auto").strip().lower()
+    if hm not in ("off", "manual", "auto"):
+        hm = "auto"
+    tl = str(config.get("thinking_level") or "high").strip().lower()
+    if tl not in ("off", "low", "medium", "high"):
+        tl = "high"
+
     return AgentConfig(
         name=config.get("name", "Remedy"),
         persona=config.get("persona", "default"),
@@ -888,6 +899,18 @@ def config_to_agent_config(config: dict[str, Any]) -> AgentConfig:
         ),
         llm_base_url=llm_base_url,
         project_path=config.get("project_path") or os.environ.get("REMEDY_PROJECT_PATH") or None,
+        # Partner trust / agency — must come from config.toml (status-bar thumbs).
+        # Previously omitted → always defaulted to approval_mode="ask" at startup
+        # while Settings UI still showed auto from raw TOML.
+        access_scope=scope,
+        harness_mode=hm,
+        harness_min_context_pct=float(config.get("harness_min_context_pct") or 0.75),
+        harness_max_context_pct=float(config.get("harness_max_context_pct") or 0.92),
+        thinking_level=tl,
+        approval_mode=am,
+        launch_at_login=bool(config.get("launch_at_login", False)),
+        start_in_tray=bool(config.get("start_in_tray", False)),
+        close_to_tray=bool(config.get("close_to_tray", False)),
     )
 
 

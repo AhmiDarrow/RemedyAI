@@ -229,6 +229,13 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
         """Compact status for desktop status bar / harness chip."""
         from remedy.core.approvals import APPROVALS
 
+        # Keep thumbs-up (auto) in sync with config.toml every poll.
+        try:
+            from remedy.interfaces.api_support import load_config
+
+            APPROVALS.sync_from_config(load_config() or {})
+        except Exception:
+            pass
         pending = APPROVALS.list_pending()
         goals_open = 0
         harness = "auto"
@@ -311,6 +318,7 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
 
         return {
             "pending_approvals": len(pending),
+            "approval_mode": APPROVALS.mode,
             "open_goals": goals_open,
             "access_scope": scope,
             "harness_mode": harness,
