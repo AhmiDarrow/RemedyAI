@@ -58,6 +58,29 @@ def test_plan_store_roundtrip(tmp_path: Path):
     assert "Build" in md
 
 
+def test_latest_for_session_does_not_leak_other_session(tmp_path: Path):
+    """Fresh session must not inherit another chat's plan (Plan banner bug)."""
+    store = PlanStore(tmp_path)
+    store.create(
+        "Old session plan",
+        goal="Belong to A",
+        steps=["Step A"],
+        session_id="sess-A",
+    )
+    store.create(
+        "Untagged plan",
+        goal="No session",
+        steps=["Orphan"],
+        session_id=None,
+    )
+    assert store.latest_for_session("sess-B") is None
+    assert store.latest_for_session("sess-A") is not None
+    assert store.latest_for_session("sess-A").title == "Old session plan"
+    # Strict filter: untagged plans do not match a session id
+    listed = store.list_plans(session_id="sess-B", limit=10)
+    assert listed == []
+
+
 def test_plan_mode_tool_names_exclude_shell():
     assert "plan_save" in PLAN_MODE_TOOL_NAMES
     assert "bash_exec" not in PLAN_MODE_TOOL_NAMES
@@ -122,6 +145,11 @@ def test_plans_api(tmp_path: Path, monkeypatch):
     r4 = client.get("/api/plans/latest")
     assert r4.status_code == 200
     assert r4.json()["plan"]["id"] == pid
+
+    # With a session_id that has no plans, do NOT fall back to global latest
+    r5 = client.get("/api/plans/latest", params={"session_id": "fresh-empty-session"})
+    assert r5.status_code == 200
+    assert r5.json()["plan"] is None
 
 
 def test_call_tool_blocks_in_plan_mode():

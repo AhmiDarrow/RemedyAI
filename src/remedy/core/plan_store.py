@@ -168,6 +168,11 @@ class PlanStore:
         session_id: str | None = None,
         limit: int = 50,
     ) -> list[TaskPlan]:
+        """List plans newest-first.
+
+        When *session_id* is set, only plans tagged with that exact session
+        are returned (untagged / other-session plans are excluded).
+        """
         items: list[TaskPlan] = []
         for path in sorted(self.root.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
             try:
@@ -177,22 +182,25 @@ class PlanStore:
             if not isinstance(raw, dict):
                 continue
             plan = TaskPlan.from_dict(raw)
-            if session_id and plan.session_id and plan.session_id != session_id:
-                continue
+            if session_id is not None:
+                # Strict: never leak another session's plan into this chat.
+                if str(plan.session_id or "") != str(session_id):
+                    continue
             items.append(plan)
             if len(items) >= limit:
                 break
         return items
 
     def latest_for_session(self, session_id: str | None) -> TaskPlan | None:
+        """Latest plan for *session_id*, or global latest when session is None.
+
+        Never returns another session's plan when a session id is provided.
+        """
         if not session_id:
             plans = self.list_plans(limit=1)
             return plans[0] if plans else None
-        plans = self.list_plans(session_id=session_id, limit=1)
-        if plans:
-            return plans[0]
-        # Fallback: most recent overall (session may not have been tagged)
-        return None
+        plans = self.list_plans(session_id=str(session_id), limit=1)
+        return plans[0] if plans else None
 
     def create(
         self,

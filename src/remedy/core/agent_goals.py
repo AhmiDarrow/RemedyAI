@@ -203,20 +203,22 @@ def register_goal_and_plan_tools(runtime: Any) -> None:
             plan = store.get(plan_id.strip())
         if plan is None:
             sid = getattr(runtime, "_session_id", None)
+            # Session-scoped only — do not surface another chat's plan.
             plan = store.latest_for_session(str(sid) if sid else None)
         if plan is None:
-            plans = store.list_plans(limit=1)
-            plan = plans[0] if plans else None
-        if plan is None:
-            return "No plans saved yet. Use plan_save in Plan mode."
+            return "No plans saved yet for this session. Use plan_save in Plan mode."
         return plan.summary_markdown()
 
     async def plan_list(limit: int = 10) -> str:
         store = _plan_store()
         sid = getattr(runtime, "_session_id", None)
-        plans = store.list_plans(session_id=str(sid) if sid else None, limit=max(1, min(int(limit or 10), 30)))
-        if not plans:
-            plans = store.list_plans(limit=max(1, min(int(limit or 10), 30)))
+        # Prefer this session; if none tagged, list recent (explicit, not as "current")
+        plans = store.list_plans(
+            session_id=str(sid) if sid else None,
+            limit=max(1, min(int(limit or 10), 30)),
+        )
+        if not plans and sid:
+            return "No plans for this session yet. Use plan_save in Plan mode."
         if not plans:
             return "No plans yet."
         lines = [f"- [{p.status}] {p.title} (id={p.id}, steps={len(p.steps)})" for p in plans]

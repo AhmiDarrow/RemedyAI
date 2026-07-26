@@ -1164,12 +1164,13 @@ export default function App() {
 
   // Wire global shortcuts from hotkeys.ts (single source of truth for labels + keys).
   const globalShortcuts: ShortcutDef[] = useMemo(() => {
+    const togglePlan = () => setPlanMode((p) => !p)
     const byAction: Record<string, () => void> = {
       'New chat session': () => {
         void handleNewSession()
       },
       'Open command palette': () => setPaletteOpen((o) => !o),
-      'Toggle plan mode': () => setPlanMode((p) => !p),
+      'Toggle plan mode': togglePlan,
       'Open settings': () => setPanel((p) => (p === 'settings' ? null : 'settings')),
       "Open Help wiki (owner's manual)": () => openHelp(),
       'Close panels and command palette': () => {
@@ -1187,9 +1188,12 @@ export default function App() {
       if (!h.match || h.scope !== 'global') continue
       const handler = byAction[h.action]
       if (!handler) continue
+      // Plan toggle + help must work while the composer (textarea) is focused.
       const allowInInput =
         h.match.key === 'F1'
         || h.match.key === 'Escape'
+        || h.match.key === 'Tab'
+        || (h.match.key === 'b' && h.match.ctrl)
         || (h.match.key === '/' && h.match.ctrl)
       out.push({
         key: h.match.key,

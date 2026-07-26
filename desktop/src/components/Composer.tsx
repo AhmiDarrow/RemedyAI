@@ -670,10 +670,16 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         }
       }
 
-      // Shift+Tab: Plan ↔ Build (requested; works while typing / streaming).
+      // Shift+Tab Plan/Build is handled globally (hotkeys.ts) with allowInInput so
+      // we don't double-toggle. Still preventDefault so focus doesn't leave composer.
       if (e.key === 'Tab' && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault()
-        onTogglePlanMode?.()
+        // Prefer parent toggle if global listener didn't run (edge focus cases).
+        if (onTogglePlanMode && e.nativeEvent.isTrusted) {
+          // stopPropagation so window handler doesn't flip twice
+          e.stopPropagation()
+          onTogglePlanMode()
+        }
         return
       }
 

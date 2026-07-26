@@ -61,12 +61,15 @@ export const HOTKEYS: HotkeyDef[] = [
     keys: 'Ctrl+B',
     scope: 'global',
     action: 'Toggle plan mode',
+    // Works while typing in the composer (allowInInput in App wiring)
     match: { key: 'b', ctrl: true },
   },
   {
     keys: 'Shift+Tab',
-    scope: 'composer',
-    action: 'Toggle Plan / Build mode',
+    scope: 'global',
+    action: 'Toggle plan mode',
+    // Same toggle as Ctrl+B — global so it works even if composer focus is odd
+    match: { key: 'Tab', shift: true },
   },
   {
     keys: 'Ctrl+,',
