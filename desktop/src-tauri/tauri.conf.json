@@ -23,7 +23,7 @@
         "fullscreen": false,
         "center": true,
         "dragDropEnabled": true,
-        "decorations": true,
+        "decorations": false,
         "shadow": true
       }
     ],
@@ -31,7 +31,8 @@
       "id": "main",
       "iconPath": "icons/tray-icon@2x.png",
       "iconAsTemplate": false,
-      "tooltip": "Remedy"
+      "tooltip": "Remedy",
+      "showMenuOnLeftClick": false
     },
     "security": {
       "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:7400 http://localhost:7400 https: http:; img-src 'self' data: blob: asset: http://asset.localhost http://127.0.0.1:7400 http://localhost:7400 https: http:; font-src 'self' data:; frame-src https: http: data: blob:; child-src https: http: data: blob:; object-src 'none'; base-uri 'self'"

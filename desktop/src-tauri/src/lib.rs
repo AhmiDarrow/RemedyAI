@@ -624,6 +624,31 @@ fn primary_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
     })
 }
 
+/// Reliable show + unminimize + focus (taskbar minimize + tray restore).
+///
+/// Windows often leaves maximized windows stuck minimized unless we unminimize
+/// *before* show/focus, and a brief always-on-top pulse reorders Z-order when
+/// `set_focus` alone is ignored after tray/taskbar hide.
+fn bring_main_to_front(app: &AppHandle) {
+    let Some(w) = primary_window(app) else {
+        log::warn!("bring_main_to_front: no main window");
+        return;
+    };
+    let _ = w.set_skip_taskbar(false);
+    // Unminimize first — show alone does not restore from taskbar minimize.
+    if w.is_minimized().unwrap_or(true) {
+        let _ = w.unminimize();
+    }
+    let _ = w.show();
+    let _ = w.unminimize();
+    // Pulse always-on-top so the window surfaces above other apps on Windows.
+    let _ = w.set_always_on_top(true);
+    let _ = w.set_focus();
+    let _ = w.set_always_on_top(false);
+    let _ = w.set_focus();
+    log::info!("bring_main_to_front: shown + focused");
+}
+
 /// Native folder picker (rfd — must run on the UI thread on Windows).
 #[tauri::command]
 async fn pick_folder(app: AppHandle) -> Result<Option<String>, String> {
@@ -1107,22 +1132,23 @@ fn request_quit_app(app: AppHandle, state: State<'_, ServerState>) -> Result<ser
         return Ok(serde_json::json!({ "needs_confirm": false, "quitting": true }));
     }
     // Bring window forward so the in-app dialog is visible (e.g. tray Quit).
-    if let Some(w) = primary_window(&app) {
-        let _ = w.show();
-        let _ = w.unminimize();
-        let _ = w.set_focus();
-    }
+    bring_main_to_front(&app);
     let _ = app.emit("app-quit-requested", ());
     Ok(serde_json::json!({ "needs_confirm": true, "quitting": false }))
 }
 
 #[tauri::command]
 fn show_main_window(app: AppHandle) -> Result<(), String> {
-    let w = primary_window(&app).ok_or_else(|| "no main window".to_string())?;
-    let _ = w.show();
-    let _ = w.unminimize();
-    let _ = w.set_focus();
+    primary_window(&app).ok_or_else(|| "no main window".to_string())?;
+    bring_main_to_front(&app);
     Ok(())
+}
+
+#[tauri::command]
+fn is_main_window_maximized(app: AppHandle) -> Result<bool, String> {
+    let w = primary_window(&app).ok_or_else(|| "no main window".to_string())?;
+    w.is_maximized()
+        .map_err(|e| format!("is_maximized failed: {e}"))
 }
 
 /// Reliable minimize from the custom title bar (avoids webview permission races).
@@ -2640,6 +2666,7 @@ pub fn run() {
             set_desktop_prefs,
             get_desktop_prefs,
             show_main_window,
+            is_main_window_maximized,
             minimize_main_window,
             toggle_maximize_main_window,
             request_close_main_window,
@@ -2702,38 +2729,26 @@ pub fn run() {
                 // Prefer tray from tauri.conf.json; attach menu + events
                 if let Some(tray) = app.tray_by_id("main") {
                     let _ = tray.set_menu(Some(menu.clone()));
-                    let _ = tray.set_tooltip(Some("Remedy - right-click for Settings"));
+                    // Left click / double-click = show window; right-click = menu.
+                    let _ = tray.set_show_menu_on_left_click(false);
+                    let _ = tray.set_tooltip(Some(
+                        "Remedy — left-click to show · right-click for menu",
+                    ));
                     let app_for_menu = app.handle().clone();
                     tray.on_menu_event(move |_tray, event| match event.id.as_ref() {
                         "show" => {
-                            if let Some(w) = app_for_menu.get_webview_window("main") {
-                                let _ = w.show();
-                                let _ = w.unminimize();
-                                let _ = w.set_focus();
-                            }
+                            bring_main_to_front(&app_for_menu);
                         }
                         "settings" => {
-                            if let Some(w) = app_for_menu.get_webview_window("main") {
-                                let _ = w.show();
-                                let _ = w.unminimize();
-                                let _ = w.set_focus();
-                            }
+                            bring_main_to_front(&app_for_menu);
                             let _ = app_for_menu.emit("tray-open-settings", ());
                         }
                         "check_updates" => {
-                            if let Some(w) = app_for_menu.get_webview_window("main") {
-                                let _ = w.show();
-                                let _ = w.unminimize();
-                                let _ = w.set_focus();
-                            }
+                            bring_main_to_front(&app_for_menu);
                             let _ = app_for_menu.emit("tray-check-updates", ());
                         }
                         "about" => {
-                            if let Some(w) = app_for_menu.get_webview_window("main") {
-                                let _ = w.show();
-                                let _ = w.unminimize();
-                                let _ = w.set_focus();
-                            }
+                            bring_main_to_front(&app_for_menu);
                             let _ = app_for_menu.emit("tray-about", ());
                         }
                         "quit" => {
@@ -2751,29 +2766,28 @@ pub fn run() {
                                 schedule_force_exit(Duration::from_secs(2));
                                 app_for_menu.exit(0);
                             } else {
-                                if let Some(w) = app_for_menu.get_webview_window("main") {
-                                    let _ = w.show();
-                                    let _ = w.unminimize();
-                                    let _ = w.set_focus();
-                                }
+                                bring_main_to_front(&app_for_menu);
                                 let _ = app_for_menu.emit("app-quit-requested", ());
                             }
                         }
                         _ => {}
                     });
                     tray.on_tray_icon_event(|tray, event| {
-                        if let TrayIconEvent::Click {
-                            button: MouseButton::Left,
-                            button_state: MouseButtonState::Up,
-                            ..
-                        } = event
-                        {
-                            let app = tray.app_handle();
-                            if let Some(w) = app.get_webview_window("main") {
-                                let _ = w.show();
-                                let _ = w.unminimize();
-                                let _ = w.set_focus();
+                        let app = tray.app_handle();
+                        match event {
+                            // Single left click or double-click restores the main window.
+                            TrayIconEvent::Click {
+                                button: MouseButton::Left,
+                                button_state: MouseButtonState::Up,
+                                ..
                             }
+                            | TrayIconEvent::DoubleClick {
+                                button: MouseButton::Left,
+                                ..
+                            } => {
+                                bring_main_to_front(app);
+                            }
+                            _ => {}
                         }
                     });
                 } else {
@@ -2812,11 +2826,9 @@ pub fn run() {
                         let _ = w.hide();
                         log::info!("start_in_tray: main window hidden");
                     }
-                } else if let Some(w) = app.get_webview_window("main") {
+                } else {
                     // Ensure we are not stuck minimized/hidden from a prior tray session.
-                    let _ = w.show();
-                    let _ = w.unminimize();
-                    let _ = w.set_focus();
+                    bring_main_to_front(app.handle());
                 }
             }
 

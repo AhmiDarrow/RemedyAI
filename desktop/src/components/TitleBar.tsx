@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
-import { isTauri } from '../api/tauri'
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { isTauri, tauriInvoke } from '../api/tauri'
 
 export type AppMenuAction =
   | 'settings'
@@ -21,8 +21,8 @@ interface TitleBarProps {
 }
 
 /**
- * In-app menu bar. Window min/max/close use **native OS decorations**
- * (tauri.conf decorations: true) because WebView2 custom chrome was unreliable.
+ * Single in-app chrome bar: logo/menu + drag region + window controls.
+ * Requires `decorations: false` so OS chrome is not stacked above this bar.
  */
 export function TitleBar({
   title = 'Remedy',
@@ -31,6 +31,7 @@ export function TitleBar({
   onMenuAction,
 }: TitleBarProps) {
   const [menuOpen, setMenuOpen] = useState(false)
+  const [maximized, setMaximized] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
 
@@ -52,10 +53,96 @@ export function TitleBar({
     }
   }, [menuOpen])
 
+  // Keep maximize icon in sync after system maximize/restore
+  useEffect(() => {
+    if (!isTauri()) return
+    let cancelled = false
+    const poll = () => {
+      tauriInvoke<boolean>('is_main_window_maximized')
+        .then((v) => {
+          if (!cancelled) setMaximized(Boolean(v))
+        })
+        .catch(() => {})
+    }
+    poll()
+    const id = window.setInterval(poll, 800)
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+    }
+  }, [])
+
   const run = (action: AppMenuAction) => {
     setMenuOpen(false)
     onMenuAction?.(action)
   }
+
+  const onDragDoubleClick = (e: ReactMouseEvent) => {
+    // Only toggle when the empty drag area (not buttons) is double-clicked
+    if ((e.target as HTMLElement).closest('button')) return
+    if (!isTauri()) return
+    e.preventDefault()
+    void tauriInvoke<boolean>('toggle_maximize_main_window')
+      .then((v) => setMaximized(Boolean(v)))
+      .catch(() => {})
+  }
+
+  const winBtn = (label: string, onClick: () => void, hoverBg?: string) => (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      className="titlebar-winbtn flex items-center justify-center flex-shrink-0"
+      style={{
+        width: 46,
+        height: 36,
+        background: 'transparent',
+        border: 'none',
+        color: 'var(--text-secondary)',
+        cursor: 'pointer',
+        fontSize: 12,
+        lineHeight: 1,
+      }}
+      onClick={(e) => {
+        e.stopPropagation()
+        onClick()
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = hoverBg || 'var(--bg-tertiary)'
+        if (hoverBg) e.currentTarget.style.color = '#fff'
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = 'transparent'
+        e.currentTarget.style.color = 'var(--text-secondary)'
+      }}
+    >
+      {label === 'Minimize' && (
+        <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
+          <path d="M1 5h8" stroke="currentColor" strokeWidth="1.2" />
+        </svg>
+      )}
+      {label === 'Maximize' && !maximized && (
+        <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
+          <rect x="1.5" y="1.5" width="7" height="7" fill="none" stroke="currentColor" strokeWidth="1.2" />
+        </svg>
+      )}
+      {label === 'Maximize' && maximized && (
+        <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
+          <path
+            d="M3 3h5v5H3V3zm-1.5 1.5V9.5H7"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.1"
+          />
+        </svg>
+      )}
+      {label === 'Close' && (
+        <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
+          <path d="M2 2l6 6M8 2L2 8" stroke="currentColor" strokeWidth="1.2" />
+        </svg>
+      )}
+    </button>
+  )
 
   return (
     <div
@@ -66,10 +153,11 @@ export function TitleBar({
         borderBottom: '1px solid var(--border)',
         color: 'var(--text-primary)',
         paddingLeft: 6,
-        paddingRight: 8,
+        paddingRight: 0,
       }}
     >
-      <div className="relative flex-shrink-0 flex items-center">
+      {/* Logo / app menu — not a drag region so clicks work */}
+      <div className="relative flex-shrink-0 flex items-center" data-tauri-drag-region={undefined}>
         <button
           ref={btnRef}
           type="button"
@@ -94,9 +182,9 @@ export function TitleBar({
             alt="Remedy"
             draggable={false}
             style={{
-              height: 22,
+              height: 28,
               width: 'auto',
-              maxWidth: 140,
+              maxWidth: 168,
               objectFit: 'contain',
               objectPosition: 'left center',
               display: 'block',
@@ -147,9 +235,41 @@ export function TitleBar({
         )}
       </div>
 
-      <div className="flex-1 min-w-0 px-3 truncate text-[11px]" style={{ color: 'var(--text-muted)' }}>
-        {title}
+      {/* Drag + double-click maximize (Windows title-bar convention) */}
+      <div
+        className="flex-1 min-w-0 h-full flex items-center px-3"
+        data-tauri-drag-region
+        onDoubleClick={onDragDoubleClick}
+        title={title}
+      >
+        <span
+          className="truncate text-[11px] pointer-events-none"
+          style={{ color: 'var(--text-muted)' }}
+          data-tauri-drag-region
+        >
+          {title}
+        </span>
       </div>
+
+      {isTauri() && (
+        <div className="flex items-stretch flex-shrink-0 h-full">
+          {winBtn('Minimize', () => {
+            void tauriInvoke('minimize_main_window').catch(() => {})
+          })}
+          {winBtn('Maximize', () => {
+            void tauriInvoke<boolean>('toggle_maximize_main_window')
+              .then((v) => setMaximized(Boolean(v)))
+              .catch(() => {})
+          })}
+          {winBtn(
+            'Close',
+            () => {
+              void tauriInvoke('request_close_main_window').catch(() => {})
+            },
+            'var(--error, #e81123)',
+          )}
+        </div>
+      )}
     </div>
   )
 }

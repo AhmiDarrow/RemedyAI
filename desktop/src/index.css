@@ -264,12 +264,18 @@ html.theme-animating body * {
   }
 }
 
-/* In-app menu bar (OS decorations handle min/max/close). */
+/* Unified chrome: logo + drag region + window controls (decorations: false). */
 .titlebar {
   -webkit-user-select: none;
   user-select: none;
   position: relative;
   z-index: 100;
+}
+/* Buttons must never start a window drag. */
+.titlebar button,
+.titlebar .titlebar-winbtn {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
 }
 
 /* Chat middle column — must participate in height chain (flex 1 1 0% + h-full).
