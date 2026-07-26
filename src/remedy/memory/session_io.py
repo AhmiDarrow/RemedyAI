@@ -79,12 +79,33 @@ def safe_filename_stem(title: str, max_len: int = 60) -> str:
 
 
 # Cap huge tool dumps / data-URIs so export does not freeze UI or fill RAM.
-_EXPORT_CONTENT_CAP = 120_000
+# User/assistant stay readable; tool payloads are the usual multi-MB freeze source.
+_EXPORT_CONTENT_CAP = 48_000
+_EXPORT_TOOL_CAP = 2_000
+_EXPORT_MAX_MESSAGES = 2_000
 
 
-def _export_content(content: str, *, cap: int = _EXPORT_CONTENT_CAP) -> str:
+def _export_content(
+    content: str,
+    *,
+    cap: int = _EXPORT_CONTENT_CAP,
+    role: str | None = None,
+) -> str:
     if not content:
         return ""
+    role_l = (role or "").lower()
+    if role_l == "tool":
+        cap = min(cap, _EXPORT_TOOL_CAP)
+        # Tool dumps are rarely useful in a portable .txt; keep a short stub.
+        one_line = " ".join(content.split())
+        if len(one_line) > cap:
+            return one_line[:cap] + f"…[tool output truncated {len(one_line) - cap} chars]"
+        return one_line
+
+    # Fast path: already small and no data-URI marker.
+    if len(content) <= cap and "data:image" not in content and "base64," not in content:
+        return content.rstrip("\n")
+
     # Strip inline base64 images (common in comfyui / previews) — keep a stub.
     cleaned = re.sub(
         r"!\[[^\]]*\]\(data:image/[^)]+\)",
@@ -123,7 +144,14 @@ def format_session_txt(
         lines.append(f"Agent: {agent}")
     lines.append(f"Source-Session-ID: {session_id}")
     lines.append(f"Exported: {datetime.now(UTC).isoformat()}")
-    lines.append(f"Messages: {len(messages)}")
+    total = len(messages)
+    if total > _EXPORT_MAX_MESSAGES:
+        lines.append(
+            f"Messages: {total} (exporting last {_EXPORT_MAX_MESSAGES}; older omitted for size)"
+        )
+        messages = messages[-_EXPORT_MAX_MESSAGES:]
+    else:
+        lines.append(f"Messages: {total}")
     lines.append("")
 
     for m in messages:
@@ -150,7 +178,7 @@ def format_session_txt(
             meta_bits.append(f"at={str(created)[:19]}")
         if meta_bits:
             lines.append(f"# {' | '.join(meta_bits)}")
-        body = _export_content(content)
+        body = _export_content(content, role=role)
         if body:
             lines.append(body)
         lines.append("")
@@ -194,7 +222,7 @@ def format_session_markdown(
             header += f" `{str(created)[:19]}`"
         lines.append(header)
         lines.append("")
-        body = _export_content(content)
+        body = _export_content(content, role=role)
         if body:
             lines.append(body)
             lines.append("")

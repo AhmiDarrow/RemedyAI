@@ -60,6 +60,67 @@ def _fit_rgba(img: Image.Image, max_w: int, max_h: int) -> Image.Image:
     return src
 
 
+def _plate_icon(
+    img: Image.Image,
+    size: int,
+    *,
+    pad_frac: float = 0.10,
+    accent: tuple[int, int, int, int] = (212, 175, 55, 255),
+) -> Image.Image:
+    """Circuit-R on a dark rounded plate — readable in the Windows tray/taskbar.
+
+    Small sizes (≤48) use less padding + a gold rim so the monogram does not
+    disappear into the system tray.
+    """
+    from PIL import ImageDraw, ImageEnhance, ImageFilter
+
+    src = img.convert("RGBA")
+    # At tray sizes, prefer higher-contrast mono-light strokes when available.
+    if size <= 48:
+        mono = ASSETS / "remedy_icon_mono_light.png"
+        if mono.is_file():
+            src = Image.open(mono).convert("RGBA")
+        # Slightly thricker presence: boost contrast/brightness of strokes.
+        src = ImageEnhance.Contrast(src).enhance(1.35)
+        src = ImageEnhance.Brightness(src).enhance(1.15)
+        pad_frac = min(pad_frac, 0.06)
+
+    canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    plate = Image.new("RGBA", (size, size), (14, 18, 28, 255))
+    mask = Image.new("L", (size, size), 0)
+    draw = ImageDraw.Draw(mask)
+    radius = max(2, size // 5)
+    draw.rounded_rectangle((0, 0, size - 1, size - 1), radius=radius, fill=255)
+    plate.putalpha(mask)
+    canvas.paste(plate, (0, 0), plate)
+
+    # Gold rim for tray contrast on light taskbars.
+    if size <= 64:
+        rim = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        rd = ImageDraw.Draw(rim)
+        inset = max(1, size // 32)
+        rd.rounded_rectangle(
+            (inset, inset, size - 1 - inset, size - 1 - inset),
+            radius=max(1, radius - inset),
+            outline=accent,
+            width=max(1, size // 24),
+        )
+        canvas = Image.alpha_composite(canvas, rim)
+
+    inner = max(8, int(size * (1.0 - 2 * pad_frac)))
+    glyph = _resize_square(src, inner)
+    # Tiny soft glow under strokes so thin traces stay visible at 16–32px.
+    if size <= 48:
+        glow = glyph.filter(ImageFilter.GaussianBlur(radius=max(0.6, size / 40)))
+        gx = (size - glow.width) // 2
+        gy = (size - glow.height) // 2
+        canvas.paste(glow, (gx, gy), glow)
+    x = (size - glyph.width) // 2
+    y = (size - glyph.height) // 2
+    canvas.paste(glyph, (x, y), glyph)
+    return canvas
+
+
 def generate_icons(source: Path, icons_dir: Path) -> None:
     img = Image.open(source).convert("RGBA")
     icons_dir.mkdir(parents=True, exist_ok=True)
@@ -70,18 +131,49 @@ def generate_icons(source: Path, icons_dir: Path) -> None:
         resized.save(dest, "PNG", optimize=True)
         print(f"  {name} ({size}x{size})")
 
+    # Multi-size ICO (Windows taskbar/Start need 16/32/48, not only 256).
+    # Pillow: save from the largest square with a sizes= list (it downscales each).
     ico_path = icons_dir / "icon.ico"
-    master_img = _resize_square(img, 256)
-    master_img.save(
+    master_for_ico = _resize_square(img, max(ICO_SIZES))
+    master_for_ico.save(
         ico_path,
         format="ICO",
         sizes=[(s, s) for s in ICO_SIZES],
     )
-    print(f"  icon.ico ({', '.join(f'{s}x{s}' for s in ICO_SIZES)})")
+    try:
+        check = Image.open(ico_path)
+        n = getattr(check, "n_frames", 1)
+        sizes_found: list[str] = []
+        for i in range(n):
+            check.seek(i)
+            sizes_found.append(f"{check.size[0]}x{check.size[1]}")
+        print(f"  icon.ico frames={n} ({', '.join(sizes_found)})")
+        if n < 3:
+            # Fallback: write a 256-only ICO that at least has full detail for Win11.
+            _resize_square(img, 256).save(ico_path, format="ICO")
+            print("  icon.ico fallback → single 256x256 (Pillow multi-size sparse)")
+    except Exception as exc:
+        print(f"  icon.ico written; verify failed: {exc}")
 
+    master_img = _resize_square(img, 256)
     master_png = icons_dir / "icon-256.png"
     master_img.save(master_png, "PNG", optimize=True)
     print("  icon-256.png (256x256)")
+
+    # Tray: bold plate (not template-tinted thin monogram).
+    # Ship 32 + 64; conf points at 32, OS may pick @2x when available as icon.png plate.
+    for tray_name, tray_size in (
+        ("tray-icon.png", 32),
+        ("tray-icon@2x.png", 64),
+        ("tray-icon-48.png", 48),
+    ):
+        plate = _plate_icon(img, tray_size)
+        plate.save(icons_dir / tray_name, "PNG", optimize=True)
+        print(f"  {tray_name} ({tray_size}x{tray_size} plate)")
+
+    # Optional larger plate for high-DPI tray / about
+    _plate_icon(img, 256).save(icons_dir / "icon-plate-256.png", "PNG", optimize=True)
+    print("  icon-plate-256.png (256x256 plate)")
 
     _resize_square(img, 512).save(icons_dir / "icon-512.png", "PNG", optimize=True)
     icns_path = icons_dir / "icon.icns"
@@ -90,7 +182,6 @@ def generate_icons(source: Path, icons_dir: Path) -> None:
         print("  icon.icns (ICNS via Pillow)")
     except Exception:
         print("  icon.icns skipped (generate on macOS with iconutil)")
-
 
 def setup_public_branding(icon_source: Path, logo_source: Path, public_dir: Path) -> None:
     """Write UI-facing public assets used by Vite/WebUI (logo, icon, favicons)."""
@@ -122,11 +213,17 @@ def setup_public_branding(icon_source: Path, logo_source: Path, public_dir: Path
             print(f"  {out_name} -> {dest}")
 
     # Circuit-R monogram used by RemedyLogo, notifications, empty states.
+    # True alpha (no baked black plate) so chat avatars composite on theme bg.
     icon_img = Image.open(icon_source).convert("RGBA")
     icon_dest = public_dir / "icon.png"
     _resize_square(icon_img, 256).save(icon_dest, "PNG", optimize=True)
-    print(f"  icon.png -> {icon_dest} (256x256)")
+    print(f"  icon.png -> {icon_dest} (256x256 alpha)")
 
+    # Bold plate variant for UI spots that need higher contrast (optional).
+    plate = _plate_icon(icon_img, 256)
+    plate_dest = public_dir / "icon-plate.png"
+    plate.save(plate_dest, "PNG", optimize=True)
+    print(f"  icon-plate.png -> {plate_dest}")
     fav32 = _resize_square(icon_img, 32)
     fav_path = public_dir / "favicon.png"
     fav32.save(fav_path, "PNG", optimize=True)
@@ -162,6 +259,7 @@ def sync_dist_branding(public_dir: Path, dist_dir: Path) -> None:
     for name in (
         "logo.png",
         "icon.png",
+        "icon-plate.png",
         "favicon.png",
         "favicon.ico",
         "favicon.svg",

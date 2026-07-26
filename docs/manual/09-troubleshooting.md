@@ -136,6 +136,9 @@ old build), the install script may have been killed with the app process
 | Check | Fix |
 |-------|-----|
 | Stuck at “closing” | Update to **0.14.7+** (multi-path install schedule) |
+| Defender **Bearfoos** / **Wacatac** on update | ML false positive on unsigned installer/sidecar. **Allow on this device** if you installed from official GitHub Releases. Fixed PE identity since earlier 0.14.x; Authenticode still pending. |
+| Taskbar shows old icon | Quit fully, then clear Windows icon cache (see DESKTOP.md). Rebuild embeds multi-size alpha ICO. |
+| Tray icon hard to see | **0.14.9+** uses a bold dark-plate tray glyph (`iconAsTemplate` off). |
 | `%TEMP%\RemedyDesktop-Update.log` has no `BOOT` / `Update script started` | Confirm **0.14.7+**; otherwise install the `.exe` from GitHub Releases |
 | Close-to-tray only | Use tray → **Quit** if an old update left installers in `%TEMP%` |
 | Manual recovery | Run the newest `RemedyDesktop-Update-*.exe` in `%TEMP%`, or the release installer |

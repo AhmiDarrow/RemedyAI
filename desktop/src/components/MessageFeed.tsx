@@ -303,14 +303,15 @@ const MessageBubble = memo(function MessageBubble({
       style={{
         width: 'var(--chat-avatar)',
         height: 'var(--chat-avatar)',
-        background: 'var(--bg-tertiary)',
-        border: '1px solid var(--border)',
+        // Transparent host so true-alpha monogram is not sat on a baked black tile.
+        background: 'transparent',
+        border: 'none',
         visibility: hideAvatar ? 'hidden' : 'visible',
       }}
       aria-hidden
       title="Remedy"
     >
-      <RemedyLogo size={14} />
+      <RemedyLogo size={20} variant="auto" />
     </div>
   )
 

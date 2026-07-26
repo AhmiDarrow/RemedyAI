@@ -570,73 +570,66 @@ fn start_sidecar(process: &Arc<Mutex<Option<Child>>>, cmd: &str) -> Result<(), S
 
 /// Save plain text via native Save dialog (session export - WebView download is unreliable).
 #[tauri::command]
+fn sanitize_export_filename(default_name: &str) -> String {
+    if default_name.trim().is_empty() {
+        return "remedy-export.txt".to_string();
+    }
+    default_name
+        .chars()
+        .map(|c| match c {
+            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => '_',
+            c if c.is_control() => '_',
+            c => c,
+        })
+        .collect::<String>()
+}
+
+/// Native save dialog + write (no PowerShell). Large exports stay in Rust only.
+#[tauri::command]
 fn save_text_file(default_name: String, contents: String) -> Result<Option<String>, String> {
-    let name = if default_name.trim().is_empty() {
-        "remedy-export.txt".to_string()
-    } else {
-        default_name
-            .chars()
-            .map(|c| match c {
-                '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => '_',
-                c if c.is_control() => '_',
-                c => c,
-            })
-            .collect::<String>()
+    let name = sanitize_export_filename(&default_name);
+
+    let path = rfd::FileDialog::new()
+        .set_title("Export Remedy session")
+        .set_file_name(&name)
+        .add_filter("Text", &["txt"])
+        .add_filter("Markdown", &["md"])
+        .add_filter("All files", &["*"])
+        .save_file();
+
+    let Some(path) = path else {
+        return Ok(None);
     };
+    std::fs::write(&path, contents.as_bytes()).map_err(|e| format!("write failed: {e}"))?;
+    Ok(Some(path.to_string_lossy().to_string()))
+}
 
-    #[cfg(target_os = "windows")]
-    {
-        use std::fs;
-        // Pick path only in PowerShell — write bytes from Rust (avoids UI freeze
-        // when export bodies are multi-MB from long tool dumps).
-        let ps_name = name.replace('\'', "''");
-        let script = format!(
-            r#"
-Add-Type -AssemblyName System.Windows.Forms | Out-Null
-$d = New-Object System.Windows.Forms.SaveFileDialog
-$d.Title = 'Export Remedy session'
-$d.FileName = '{name}'
-$d.Filter = 'Text files (*.txt)|*.txt|Markdown (*.md)|*.md|All files (*.*)|*.*'
-$d.DefaultExt = 'txt'
-$d.AddExtension = $true
-$d.OverwritePrompt = $true
-if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {{
-  Write-Output $d.FileName
-}}
-"#,
-            name = ps_name,
+/// Native open dialog for session import.
+/// Returns `{ path, text }` so the UI can POST text (or path) without WebView FileReader.
+#[tauri::command]
+fn open_text_file() -> Result<Option<serde_json::Value>, String> {
+    let path = rfd::FileDialog::new()
+        .set_title("Import Remedy session")
+        .add_filter("Session export", &["txt", "md"])
+        .add_filter("All files", &["*"])
+        .pick_file();
+    let Some(path) = path else {
+        return Ok(None);
+    };
+    let meta = std::fs::metadata(&path).map_err(|e| format!("stat failed: {e}"))?;
+    // Match frontend 8 MB guard — avoid multi-hundred-MB freezes.
+    if meta.len() > 8_000_000 {
+        return Err(
+            "File too large (8 MB max). Export without embedded images or split the session."
+                .into(),
         );
-        let output = Command::new("powershell")
-            .args(["-NoProfile", "-STA", "-Command", &script])
-            .output()
-            .map_err(|e| format!("save dialog failed: {e}"))?;
-        if !output.status.success() {
-            let err = String::from_utf8_lossy(&output.stderr);
-            if err.trim().is_empty() {
-                return Ok(None);
-            }
-            return Err(format!("save dialog error: {}", err.trim()));
-        }
-        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if path.is_empty() {
-            return Ok(None);
-        }
-        fs::write(&path, contents.as_bytes()).map_err(|e| format!("write failed: {e}"))?;
-        return Ok(Some(path));
     }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        // Fallback: write next to home Downloads
-        let home = dirs_next_home().unwrap_or_else(|| std::path::PathBuf::from("."));
-        let dest = home.join("Downloads").join(&name);
-        if let Some(parent) = dest.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        std::fs::write(&dest, contents.as_bytes())
-            .map_err(|e| format!("write failed: {e}"))?;
-        Ok(Some(dest.to_string_lossy().to_string()))
-    }
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("read failed: {e}"))?;
+    Ok(Some(serde_json::json!({
+        "path": path.to_string_lossy(),
+        "text": text,
+        "name": path.file_name().and_then(|s| s.to_str()).unwrap_or("import.txt"),
+    })))
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -2452,6 +2445,7 @@ pub fn run() {
             open_data_folder,
             pick_folder,
             save_text_file,
+            open_text_file,
             set_launch_at_login,
             get_launch_at_login,
             scrub_legacy_autostart,

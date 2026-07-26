@@ -2,7 +2,12 @@
 
 High-level product notes for owners. Full detail lives in repo `CHANGELOG.md`.
 
-Ship **one** installer/tag for the current series (**v0.14.8**).
+Ship **one** installer/tag for the current series (**v0.14.9**).
+
+## 0.14.9 — Icons + faster export/import
+
+- Theme-aware alpha chat monogram; bold tray plate; clearer taskbar icon.
+- Native save/open dialogs; smaller/faster session export (tool dumps capped).
 
 ## 0.14.8 — Project etiquette (ship skill)
 

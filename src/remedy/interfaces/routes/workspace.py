@@ -451,7 +451,8 @@ def register_workspace_routes(app: FastAPI, *, runtime=None, gateway=None, memor
         session = await memory.get_chat_session(session_id)
         if not session:
             raise HTTPException(404, "Session not found")
-        messages = await memory.get_chat_messages(session_id, limit=10000)
+        # Cap rows hard — tool dumps dominate export size/time.
+        messages = await memory.get_chat_messages(session_id, limit=2000)
         from remedy.memory.session_io import (
             format_session_markdown,
             format_session_txt,

@@ -645,7 +645,7 @@ export default function App() {
     async (sessionId: string) => {
       notify('Preparing export…', { silent: true })
       // Yield so the UI can paint before heavy work (large sessions).
-      await new Promise<void>((r) => window.setTimeout(r, 0))
+      await new Promise<void>((r) => window.requestAnimationFrame(() => r()))
       try {
         const { text, markdown, filename } = await exportSession(sessionId, 'txt')
         const body = text || markdown || ''
@@ -659,9 +659,9 @@ export default function App() {
             : `${filename || 'remedy-export'}.txt`
         ).replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')
 
-        await new Promise<void>((r) => window.setTimeout(r, 0))
+        await new Promise<void>((r) => window.requestAnimationFrame(() => r()))
 
-        // Tauri: native Save dialog (WebView <a download> is unreliable).
+        // Tauri: native rfd Save dialog (no PowerShell cold-start).
         if (isTauri()) {
           try {
             const saved = await tauriInvoke<string | null>('save_text_file', {
@@ -704,6 +704,43 @@ export default function App() {
 
   const handleImport = useCallback(async () => {
     try {
+      // Desktop: native open dialog + Rust read (no WebView FileReader / path-jail lag).
+      if (isTauri()) {
+        try {
+          const picked = await tauriInvoke<{
+            path: string
+            text: string
+            name?: string
+          } | null>('open_text_file')
+          if (!picked) return
+          notify('Importing session…', { silent: true })
+          await new Promise<void>((r) => window.requestAnimationFrame(() => r()))
+          const stem = (picked.name || picked.path)
+            .replace(/^.*[\\/]/, '')
+            .replace(/\.(txt|md)$/i, '')
+            .trim()
+          const title =
+            stem && !stem.toLowerCase().startsWith('remedy-export') ? stem : undefined
+          // Prefer text body (always works); path is optional fallback for API.
+          const created = await importSession({
+            text: picked.text,
+            title,
+          })
+          await refreshSessions()
+          if (created?.id) {
+            setActiveId(created.id)
+            setOpenTabs((prev) => new Set([...prev, created.id]))
+            notify('Session imported', {
+              body: created.title || `${created.imported_messages ?? ''} messages`,
+              silent: true,
+            })
+          }
+          return
+        } catch (nativeErr) {
+          console.warn('Native open failed, falling back to file input:', nativeErr)
+        }
+      }
+
       const input = document.createElement('input')
       input.type = 'file'
       input.accept = '.txt,.md,text/plain,text/markdown'
@@ -719,7 +756,7 @@ export default function App() {
       })
       if (!file) return
       notify('Importing session…', { silent: true })
-      await new Promise<void>((r) => window.setTimeout(r, 0))
+      await new Promise<void>((r) => window.requestAnimationFrame(() => r()))
       const text = await file.text()
       if (!text.trim()) {
         notify('Import failed', { body: 'File is empty' })
@@ -735,7 +772,7 @@ export default function App() {
       const stem = file.name.replace(/\.(txt|md)$/i, '').trim()
       const title =
         stem && !stem.toLowerCase().startsWith('remedy-export') ? stem : undefined
-      await new Promise<void>((r) => window.setTimeout(r, 0))
+      await new Promise<void>((r) => window.requestAnimationFrame(() => r()))
       const created = await importSession({ text, title })
       await refreshSessions()
       if (created?.id) {

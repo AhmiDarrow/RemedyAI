@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.14.8"
+version = "0.14.9"
 description = "Remedy Desktop — local AI partner for knowledge, design, and code"
 authors = ["Ahmi <ahmitdarrow@gmail.com>"]
 license = "LicenseRef-Proprietary"
@@ -30,3 +30,5 @@ ureq = { version = "2.12", default-features = false, features = ["tls", "json"] 
 base64 = "0.22"
 # Direct registry access for legacy Run-key scrub (no PowerShell Bypass).
 winreg = "0.55"
+# Native save/open dialogs (avoids multi-second PowerShell STA cold-start on export/import).
+rfd = "0.15"

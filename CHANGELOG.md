@@ -2,6 +2,17 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.14.9] — 2026-07-26
+
+### Fix: chat/tray/taskbar icons + faster export/import
+
+- **Chat monogram:** true-alpha theme-aware icons (icon-mono-light / icon-mono-dark) with cache-bust; no baked black avatar tile.
+- **Tray:** bold dark-plate glyph + gold rim; iconAsTemplate off (was nearly invisible).
+- **Taskbar:** regenerated alpha ICO/PNG masters; window icon re-applied at launch.
+- **Export/import:** native 
+fd dialogs (no PowerShell cold-start); tool dumps aggressively capped; import reads file in Rust.
+- **Defender Bearfoos:** docs note update-path ML scans + WDSI submission; PE identity/minisign unchanged. Authenticode still the long-term fix.
+
 ## [0.14.8] — 2026-07-25
 
 ### Docs: project etiquette ship skill

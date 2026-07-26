@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Remedy Desktop",
-  "version": "0.14.8",
+  "version": "0.14.9",
   "identifier": "com.remedy.desktop",
   "build": {
     "frontendDist": "../dist",
@@ -28,8 +28,8 @@
     ],
     "trayIcon": {
       "id": "main",
-      "iconPath": "icons/icon.png",
-      "iconAsTemplate": true,
+      "iconPath": "icons/tray-icon@2x.png",
+      "iconAsTemplate": false,
       "tooltip": "Remedy"
     },
     "security": {
