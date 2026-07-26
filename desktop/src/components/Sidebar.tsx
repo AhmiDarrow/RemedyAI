@@ -46,6 +46,8 @@ interface SidebarProps {
   /** Open session tabs live only inside the Sessions slide */
   openTabIds?: string[]
   onCloseTab?: (id: string) => void
+  /** Fill parent (three-frame workspace slide) instead of fixed 270px column */
+  embedded?: boolean
 }
 
 const DRAG_MIME = 'application/x-remedy-session-ids'
@@ -69,6 +71,7 @@ export function Sidebar({
   footer,
   openTabIds = [],
   onCloseTab,
+  embedded = false,
 }: SidebarProps) {
   const [query, setQuery] = useState('')
   const [meta, setMeta] = useState<Record<string, SessionMeta>>(() => getAllSessionMeta())
@@ -267,11 +270,12 @@ export function Sidebar({
 
   return (
     <div
-      className="flex flex-col border-r min-h-0 h-full"
+      className="flex flex-col min-h-0 h-full"
       style={{
-        width: 270,
+        width: embedded ? '100%' : 270,
         background: 'var(--bg-secondary)',
         borderColor: 'var(--border)',
+        borderRight: embedded ? undefined : '1px solid var(--border)',
       }}
     >
       {/* Sticky chrome: stays visible while session list scrolls */}

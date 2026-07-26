@@ -6,6 +6,17 @@ import { Composer, type ComposerHandle } from './components/Composer'
 import { StatusBar, type ThinkingLevel, type ApprovalMode } from './components/StatusBar'
 import { MemoryPanel, SkillsPanel } from './components/Panels'
 import { SettingsPanel } from './components/SettingsPanel'
+import { WorkspaceSide, PopoutOverlay } from './components/slides/WorkspaceSide'
+import { FilesSlide } from './components/slides/FilesSlide'
+import { TerminalSlide } from './components/slides/TerminalSlide'
+import { BrowserSlide } from './components/slides/BrowserSlide'
+import { ScratchSlide } from './components/slides/ScratchSlide'
+import {
+  loadWorkspaceLayout,
+  saveWorkspaceLayout,
+  type WorkspaceLayout,
+} from './workspace/layoutPrefs'
+import { SLIDE_META, type SlideId } from './workspace/types'
 import { TokenCostTicker } from './components/TokenCostTicker'
 import { TimeTravelTimeline } from './components/TimeTravelTimeline'
 import {
@@ -142,6 +153,36 @@ export default function App() {
   const handleAttachMarkup = useCallback(async (file: File) => {
     await composerRef.current?.addFiles([file])
     composerRef.current?.focus()
+  }, [])
+
+  const [wsLayout, setWsLayout] = useState<WorkspaceLayout>(() => loadWorkspaceLayout())
+  const [popout, setPopout] = useState<{
+    id: SlideId
+    fullscreen: boolean
+  } | null>(null)
+
+  const patchWs = useCallback((patch: Partial<WorkspaceLayout>) => {
+    setWsLayout((prev) => {
+      const next = { ...prev, ...patch }
+      saveWorkspaceLayout(next)
+      return next
+    })
+  }, [])
+
+  const swapSides = useCallback(() => {
+    setWsLayout((prev) => {
+      const next: WorkspaceLayout = {
+        ...prev,
+        left: prev.right,
+        right: prev.left,
+        leftWidth: prev.rightWidth,
+        rightWidth: prev.leftWidth,
+        leftOpen: prev.rightOpen,
+        rightOpen: prev.leftOpen,
+      }
+      saveWorkspaceLayout(next)
+      return next
+    })
   }, [])
   // Don't carry an edit draft across session switches.
   useEffect(() => {
@@ -1258,6 +1299,95 @@ export default function App() {
     )
   }
 
+  const sessionsSlide = (
+    <Sidebar
+      embedded
+      sessions={sessions}
+      activeId={activeId}
+      onSelect={handleSelect}
+      onNew={handleNewSession}
+      onNewInProject={(projectPath, opts) => {
+        void (async () => {
+          const s = await createInProject(projectPath, undefined, opts)
+          if (s?.id) {
+            setOpenTabs((prev) => new Set([...prev, s.id]))
+          }
+        })()
+      }}
+      onSetSessionProject={(id, projectPath) => {
+        void setSessionProject(id, projectPath)
+      }}
+      onBulkSetProject={(ids, projectPath) => {
+        void bulkSetProject(ids, projectPath)
+      }}
+      onBrowseProject={async () => {
+        try {
+          const path = await tauriInvoke<string | null>('pick_folder')
+          return path && path.trim() ? path.trim() : null
+        } catch {
+          return null
+        }
+      }}
+      hasMore={sessionsHasMore}
+      loadingMore={sessionsLoadingMore}
+      onLoadMore={() => void loadMoreSessions()}
+      onDelete={(id) => {
+        remove(id)
+        handleCloseTab(id)
+      }}
+      onRename={(id, title) => {
+        void rename(id, title)
+      }}
+      onExport={handleExport}
+      onImport={() => void handleImport()}
+      openTabIds={[...openTabs]}
+      onCloseTab={handleCloseTab}
+      footer={
+        <TokenCostTicker
+          placement="sidebar"
+          run={displayRunUsage}
+          session={sessionUsage}
+          streaming={streaming}
+          model={model}
+          provider={llmProvider}
+        />
+      }
+    />
+  )
+
+  const renderSlide = (id: SlideId) => {
+    switch (id) {
+      case 'sessions':
+        return sessionsSlide
+      case 'settings':
+        return (
+          <div className="p-3 space-y-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+              Full settings open as a panel (same forms as before).
+            </p>
+            <button
+              type="button"
+              className="w-full px-3 py-2 rounded-md text-sm font-medium"
+              style={{ background: 'var(--accent)', color: '#fff' }}
+              onClick={() => setPanel('settings')}
+            >
+              Open Settings…
+            </button>
+          </div>
+        )
+      case 'files':
+        return <FilesSlide sessionId={activeId} />
+      case 'terminal':
+        return <TerminalSlide />
+      case 'browser':
+        return <BrowserSlide />
+      case 'scratch':
+        return <ScratchSlide sessionId={activeId} />
+      default:
+        return null
+    }
+  }
+
   return (
     <AppShell {...shellProps}>
     <div className="flex flex-1 min-h-0" style={{ background: 'var(--bg-primary)' }}>
@@ -1267,60 +1397,63 @@ export default function App() {
         commands={paletteCommands}
       />
 
-      <Sidebar
-        sessions={sessions}
-        activeId={activeId}
-        onSelect={handleSelect}
-        onNew={handleNewSession}
-        onNewInProject={(projectPath, opts) => {
-          void (async () => {
-            const s = await createInProject(projectPath, undefined, opts)
-            if (s?.id) {
-              setOpenTabs((prev) => new Set([...prev, s.id]))
-            }
-          })()
-        }}
-        onSetSessionProject={(id, projectPath) => {
-          void setSessionProject(id, projectPath)
-        }}
-        onBulkSetProject={(ids, projectPath) => {
-          void bulkSetProject(ids, projectPath)
-        }}
-        onBrowseProject={async () => {
-          try {
-            const path = await tauriInvoke<string | null>('pick_folder')
-            return path && path.trim() ? path.trim() : null
-          } catch {
-            return null
+      {/* Left slide */}
+      {wsLayout.leftOpen && (
+        <WorkspaceSide
+          side="left"
+          active={wsLayout.left}
+          width={wsLayout.leftWidth}
+          onSelect={(id) => patchWs({ left: id })}
+          onWidth={(w) => patchWs({ leftWidth: w })}
+          onHide={() => patchWs({ leftOpen: false })}
+          onPopout={
+            SLIDE_META[wsLayout.left].popout
+              ? () => setPopout({ id: wsLayout.left, fullscreen: false })
+              : undefined
           }
-        }}
-        hasMore={sessionsHasMore}
-        loadingMore={sessionsLoadingMore}
-        onLoadMore={() => void loadMoreSessions()}
-        onDelete={(id) => {
-          remove(id)
-          handleCloseTab(id)
-        }}
-        onRename={(id, title) => {
-          void rename(id, title)
-        }}
-        onExport={handleExport}
-        onImport={() => void handleImport()}
-        openTabIds={[...openTabs]}
-        onCloseTab={handleCloseTab}
-        footer={
-          <TokenCostTicker
-            placement="sidebar"
-            run={displayRunUsage}
-            session={sessionUsage}
-            streaming={streaming}
-            model={model}
-            provider={llmProvider}
-          />
-        }
-      />
+          onFullscreen={
+            SLIDE_META[wsLayout.left].popout
+              ? () => setPopout({ id: wsLayout.left, fullscreen: true })
+              : undefined
+          }
+        >
+          {renderSlide(wsLayout.left)}
+        </WorkspaceSide>
+      )}
+      {!wsLayout.leftOpen && (
+        <button
+          type="button"
+          className="shrink-0 px-1 text-xs border-r"
+          style={{
+            writingMode: 'vertical-rl',
+            background: 'var(--bg-tertiary)',
+            borderColor: 'var(--border)',
+            color: 'var(--text-muted)',
+          }}
+          onClick={() => patchWs({ leftOpen: true })}
+          title="Show left panel"
+        >
+          ◂ {SLIDE_META[wsLayout.left].label}
+        </button>
+      )}
 
+      {/* Middle: chat only */}
       <div className="flex-1 flex flex-col min-w-0 relative min-h-0">
+        <div className="absolute top-1 left-1/2 -translate-x-1/2 z-10 flex gap-1">
+          <button
+            type="button"
+            className="px-2 py-0.5 rounded text-[10px] font-medium"
+            style={{
+              background: 'var(--bg-tertiary)',
+              border: '1px solid var(--border)',
+              color: 'var(--text-secondary)',
+            }}
+            title="Swap left and right panels"
+            onClick={swapSides}
+          >
+            ⇄ Swap sides
+          </button>
+        </div>
         {planMode && (
           <div
             className="absolute top-2 right-2 z-10 px-2 py-0.5 text-xs font-semibold rounded pointer-events-none"
@@ -1331,7 +1464,6 @@ export default function App() {
         )}
 
         <div className="flex-1 flex min-h-0">
-          {/* Full chat column is the drop target (not only the small composer bar). */}
           <div className="flex-1 flex flex-col min-w-0 min-h-0">
             <ApprovalBanner sessionId={activeId} />
             <MessageFeed
@@ -1363,8 +1495,6 @@ export default function App() {
               onClearQueue={clearQueue}
               onPromoteQueued={promoteQueued}
               onUpdateQueued={updateQueued}
-              // Never lock the prompt while the model streams/thinks — user can
-              // type and send into the queue (or interrupt).
               disabled={serverState !== 'ready'}
               planMode={planMode}
               onTogglePlanMode={() => setPlanMode((p) => !p)}
@@ -1373,7 +1503,10 @@ export default function App() {
               sessionId={activeId}
               llmProvider={llmProvider}
               llmModel={model}
-              onOpenSettings={() => setPanel('settings')}
+              onOpenSettings={() => {
+                patchWs({ right: 'settings', rightOpen: true })
+                setPanel('settings')
+              }}
               ensureSession={async () => {
                 if (activeId) return activeId
                 const s = await create()
@@ -1447,6 +1580,62 @@ export default function App() {
             }}
           />
         </div>
+
+        {/* Right slide */}
+        {wsLayout.rightOpen && (
+          <WorkspaceSide
+            side="right"
+            active={wsLayout.right}
+            width={wsLayout.rightWidth}
+            onSelect={(id) => {
+              patchWs({ right: id })
+              if (id === 'settings') setPanel('settings')
+            }}
+            onWidth={(w) => patchWs({ rightWidth: w })}
+            onHide={() => patchWs({ rightOpen: false })}
+            onPopout={
+              SLIDE_META[wsLayout.right].popout
+                ? () => setPopout({ id: wsLayout.right, fullscreen: false })
+                : undefined
+            }
+            onFullscreen={
+              SLIDE_META[wsLayout.right].popout
+                ? () => setPopout({ id: wsLayout.right, fullscreen: true })
+                : undefined
+            }
+          >
+            {renderSlide(wsLayout.right)}
+          </WorkspaceSide>
+        )}
+        {!wsLayout.rightOpen && (
+          <button
+            type="button"
+            className="shrink-0 px-1 text-xs border-l"
+            style={{
+              writingMode: 'vertical-rl',
+              background: 'var(--bg-tertiary)',
+              borderColor: 'var(--border)',
+              color: 'var(--text-muted)',
+            }}
+            onClick={() => patchWs({ rightOpen: true })}
+            title="Show right panel"
+          >
+            {SLIDE_META[wsLayout.right].label} ▸
+          </button>
+        )}
+
+        {popout && (
+          <PopoutOverlay
+            title={SLIDE_META[popout.id].label}
+            fullscreen={popout.fullscreen}
+            onClose={() => setPopout(null)}
+            onToggleFullscreen={() =>
+              setPopout((p) => (p ? { ...p, fullscreen: !p.fullscreen } : null))
+            }
+          >
+            {renderSlide(popout.id)}
+          </PopoutOverlay>
+        )}
 
         <StatusBar
           sessionId={activeId}
