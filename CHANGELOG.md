@@ -2,6 +2,18 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.15.3] - unreleased
+
+### Fix/Feature: shell layout, in-app terminal/browser, New Project, icons, images
+
+- **Shell:** true Left | Chat | Right; outer icon rails; right collapsed by default; swap in side headers (layout prefs v2).
+- **Terminal:** in-app PowerShell via ConPTY + xterm (auto-start); ACL for PTY commands.
+- **Browser:** in-app WebView2 window (not iframe); single URL chrome.
+- **Projects:** seed `Documents/Remedy Projects/New Project` when unset (not install cwd).
+- **Icons:** tray/taskbar/Start from `assets/remedy_icon_original.png`.
+- **Images:** bare path autolink to ChatImage; media normalize via Pillow; less flicker.
+- **Files:** open path, copy path, drag-to-chat; follows session project.
+
 ## [0.15.2] - 2026-07-26
 
 ### Fix: workspace harden, plan banner after approve, browser URL safety

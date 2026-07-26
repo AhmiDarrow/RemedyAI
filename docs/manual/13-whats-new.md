@@ -2,8 +2,12 @@
 
 High-level product notes for owners. Full detail lives in repo `CHANGELOG.md`.
 
-Ship **one** installer/tag for the current series (**v0.15.2**).
+$10.15.3-unreleased**).
 
+
+## 0.15.3 - Shell + in-app tools (unreleased)
+
+- True three-column workspace; in-app PowerShell and browser; New Project sandbox; original shell icons; path images.
 ## 0.15.2 - Workspace harden
 
 - Safer workspace prefs (bad slide ids no longer crash).
