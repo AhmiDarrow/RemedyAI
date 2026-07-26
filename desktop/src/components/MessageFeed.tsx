@@ -733,6 +733,7 @@ export function MessageFeed({
               toolProcessMode={toolProcessMode}
               isStreamingPartial
               onOpenImage={(src, alt) => setLightbox({ src, alt })}
+              partnerName={partnerName}
             />
           </div>
         </div>

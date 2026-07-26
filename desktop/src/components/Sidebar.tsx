@@ -3,7 +3,9 @@ import type { ChatSession } from '../types'
 import { relativeTime } from '../utils/relativeTime'
 import {
   getAllSessionMeta,
+  isSessionArchived,
   setSessionMeta,
+  toggleSessionArchive,
   toggleSessionPin,
   type SessionMeta,
 } from '../utils/sessionMeta'
@@ -41,6 +43,9 @@ interface SidebarProps {
   loadingMore?: boolean
   onLoadMore?: () => void
   footer?: ReactNode
+  /** Open session tabs live only inside the Sessions slide */
+  openTabIds?: string[]
+  onCloseTab?: (id: string) => void
 }
 
 const DRAG_MIME = 'application/x-remedy-session-ids'
@@ -62,12 +67,14 @@ export function Sidebar({
   loadingMore,
   onLoadMore,
   footer,
+  openTabIds = [],
+  onCloseTab,
 }: SidebarProps) {
   const [query, setQuery] = useState('')
   const [meta, setMeta] = useState<Record<string, SessionMeta>>(() => getAllSessionMeta())
   const [tagDraft, setTagDraft] = useState('')
   const [tagTarget, setTagTarget] = useState<string | null>(null)
-  const [filter, setFilter] = useState<'all' | 'pinned'>('all')
+  const [filter, setFilter] = useState<'all' | 'pinned' | 'archived'>('all')
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameDraft, setRenameDraft] = useState('')
   const renameRef = useRef<HTMLInputElement>(null)
@@ -105,10 +112,21 @@ export function Sidebar({
     })
   }, [sessions])
 
+  const openIds = useMemo(() => new Set(openTabIds), [openTabIds])
+
   const groups = useMemo(() => {
     let list = [...sessions]
     if (filter === 'pinned') {
       list = list.filter((s) => meta[s.id]?.pinned)
+    } else if (filter === 'archived') {
+      list = list.filter((s) =>
+        isSessionArchived(s, meta[s.id], { openIds }),
+      )
+    } else {
+      // Hot list: hide archived (manual or auto-age) unless open
+      list = list.filter(
+        (s) => !isSessionArchived(s, meta[s.id], { openIds }),
+      )
     }
     const q = query.trim().toLowerCase()
     if (q) {
@@ -132,7 +150,7 @@ export function Sidebar({
       return (b.updated_at || '').localeCompare(a.updated_at || '')
     })
     return groupSessionsByProject(list, knownProjects)
-  }, [sessions, query, meta, filter, knownProjects])
+  }, [sessions, query, meta, filter, knownProjects, openIds])
 
   const refreshMeta = () => setMeta(getAllSessionMeta())
 
@@ -322,7 +340,55 @@ export function Sidebar({
             onClick={() => setFilter('pinned')}
             label="★ Pin"
           />
+          <FilterChip
+            active={filter === 'archived'}
+            onClick={() => setFilter('archived')}
+            label="Archive"
+          />
         </div>
+        {/* Open tabs — only live inside Sessions slide */}
+        {openTabIds.length > 0 && (
+          <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto">
+            {openTabIds.map((id) => {
+              const s = sessions.find((x) => x.id === id)
+              const title = s?.title || 'Untitled'
+              const active = id === activeId
+              return (
+                <div
+                  key={id}
+                  className="flex items-center gap-0.5 rounded pl-1.5 pr-0.5 py-0.5 text-[10px] max-w-full"
+                  style={{
+                    background: active ? 'var(--accent)' : 'var(--bg-primary)',
+                    color: active ? '#fff' : 'var(--text-secondary)',
+                    border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
+                  }}
+                >
+                  <button
+                    type="button"
+                    className="truncate max-w-[7rem] text-left"
+                    onClick={() => onSelect(id)}
+                    title={title}
+                  >
+                    {title}
+                  </button>
+                  {onCloseTab && (
+                    <button
+                      type="button"
+                      className="w-4 h-4 rounded flex items-center justify-center opacity-80 hover:opacity-100"
+                      title="Close tab"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onCloseTab(id)
+                      }}
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
         <label
           className="flex items-center gap-1.5 text-[10px] cursor-pointer"
           style={{ color: 'var(--text-muted)' }}
@@ -737,8 +803,24 @@ function ProjectSection({
                       toggleSessionPin(s.id)
                       refreshMeta()
                     }}
+                    title={pinned ? 'Unpin' : 'Pin'}
                   >
                     {pinned ? '★' : '☆'}
+                  </button>
+                  <button
+                    type="button"
+                    className="flex-shrink-0 text-[10px] opacity-40 group-hover:opacity-100"
+                    style={{
+                      color: sm?.archived ? 'var(--accent)' : 'var(--text-muted)',
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      toggleSessionArchive(s.id)
+                      refreshMeta()
+                    }}
+                    title={sm?.archived ? 'Unarchive' : 'Archive'}
+                  >
+                    {sm?.archived ? '▣' : '▢'}
                   </button>
                   {isRenaming ? (
                     <input

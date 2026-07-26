@@ -1,10 +1,59 @@
-/** Local session extras: pin + tags (no server schema required). */
+/** Local session extras: pin + tags + archive (no server schema required). */
 
 export type SessionMeta = {
   pinned?: boolean
   tags?: string[]
   /** Optional folder/label group */
   folder?: string
+  /** Soft-archive: hidden from hot list unless "Show archived" */
+  archived?: boolean
+}
+
+/** Auto-archive sessions older than this many days (not pinned / not open). */
+export const DEFAULT_AUTO_ARCHIVE_DAYS = 30
+
+const ARCHIVE_DAYS_KEY = 'remedy.autoArchiveDays'
+
+export function getAutoArchiveDays(): number {
+  try {
+    const n = Number(localStorage.getItem(ARCHIVE_DAYS_KEY))
+    if (Number.isFinite(n) && n >= 0) return Math.min(3650, Math.floor(n))
+  } catch {
+    /* */
+  }
+  return DEFAULT_AUTO_ARCHIVE_DAYS
+}
+
+export function setAutoArchiveDays(days: number) {
+  try {
+    localStorage.setItem(ARCHIVE_DAYS_KEY, String(Math.max(0, Math.floor(days))))
+  } catch {
+    /* */
+  }
+}
+
+/** True if session should be treated as archived (manual flag or age rule). */
+export function isSessionArchived(
+  session: { id: string; updated_at?: string },
+  meta: SessionMeta | undefined,
+  opts?: { openIds?: Set<string>; days?: number },
+): boolean {
+  if (meta?.pinned) return false
+  if (meta?.archived) return true
+  if (opts?.openIds?.has(session.id)) return false
+  const days = opts?.days ?? getAutoArchiveDays()
+  if (days <= 0) return false
+  const updated = session.updated_at ? Date.parse(session.updated_at) : NaN
+  if (!Number.isFinite(updated)) return false
+  const ageMs = Date.now() - updated
+  return ageMs > days * 24 * 60 * 60 * 1000
+}
+
+export function toggleSessionArchive(id: string): boolean {
+  const cur = getSessionMeta(id)
+  const archived = !cur.archived
+  setSessionMeta(id, { archived })
+  return archived
 }
 
 const KEY = 'remedy.sessionMeta.v1'
@@ -55,7 +104,8 @@ export function setSessionMeta(id: string, patch: Partial<SessionMeta>): Session
 export function toggleSessionPin(id: string): boolean {
   const cur = getSessionMeta(id)
   const pinned = !cur.pinned
-  setSessionMeta(id, { pinned })
+  // Pinning clears archive so the session reappears in the hot list
+  setSessionMeta(id, { pinned, archived: pinned ? false : cur.archived })
   return pinned
 }
 

@@ -4,7 +4,6 @@ import { ApprovalBanner } from './components/ApprovalBanner'
 import { MessageFeed } from './components/MessageFeed'
 import { Composer, type ComposerHandle } from './components/Composer'
 import { StatusBar, type ThinkingLevel, type ApprovalMode } from './components/StatusBar'
-import { TabBar } from './components/TabBar'
 import { MemoryPanel, SkillsPanel } from './components/Panels'
 import { SettingsPanel } from './components/SettingsPanel'
 import { TokenCostTicker } from './components/TokenCostTicker'
@@ -1307,6 +1306,8 @@ export default function App() {
         }}
         onExport={handleExport}
         onImport={() => void handleImport()}
+        openTabIds={[...openTabs]}
+        onCloseTab={handleCloseTab}
         footer={
           <TokenCostTicker
             placement="sidebar"
@@ -1320,18 +1321,9 @@ export default function App() {
       />
 
       <div className="flex-1 flex flex-col min-w-0 relative min-h-0">
-        <TabBar
-          tabs={sessions.filter((s) => openTabs.has(s.id))}
-          activeId={activeId}
-          onSelect={handleSelect}
-          onClose={handleCloseTab}
-          onNew={handleNewSession}
-          onExport={handleExport}
-        />
-
         {planMode && (
           <div
-            className="absolute top-9 right-2 z-10 px-2 py-0.5 text-xs font-semibold rounded pointer-events-none"
+            className="absolute top-2 right-2 z-10 px-2 py-0.5 text-xs font-semibold rounded pointer-events-none"
             style={{ background: 'var(--accent)', color: '#fff', opacity: 0.9 }}
           >
             Plan Mode
