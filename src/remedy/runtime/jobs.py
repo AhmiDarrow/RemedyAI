@@ -23,7 +23,7 @@ class LocalJob:
     created_at: float = field(default_factory=time.time)
     priority: int = 0  # higher runs first within queue
     # Handler snapshot at submit time — avoids late-bound re-register races
-    _handler: Callable[["LocalJob"], Any] | None = field(
+    _handler: Callable[[LocalJob], Any] | None = field(
         default=None, repr=False, compare=False
     )
 

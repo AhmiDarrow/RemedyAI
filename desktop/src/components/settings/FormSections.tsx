@@ -181,7 +181,7 @@ export function SettingsFormSections(p: SettingsFormProps): ReactNode {
     catalog, showAdvanced, setShowAdvanced,
     xaiAuth, xaiLoginBusy, xaiUserCode, xaiVerifyUrl, xaiLoginMsg,
     handleXaiSignIn, handleXaiLogout,
-    vision, swarm, visionBusy, setVisionBusy, visionMsg, setVisionMsg,
+    vision, swarm: _swarm, visionBusy, setVisionBusy, visionMsg, setVisionMsg,
     refreshVision, startVisionInstallPoll,
     connectedList, providerSearch, setProviderSearch,
     enabledProviders, setEnabledProviders,

@@ -2,6 +2,18 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.15.7] - 2026-07-26
+
+### Feature: Memory Harness v2 + continuity harden
+
+- **Send-view enforce:** Auto harness applies soft/strong lean prune (token budget, outcome-aware tool collapse, offload) without rewriting stored chat.
+- **Session Brief:** decisions with *why*, cumulative `history_thread`, auto-create on first compress; local Qwen `brief_update` jobs (non-blocking) via shared llama-server queue.
+- **Quality gate:** fail-closed when no extractable facts; score pre-prune history; middle-history replace only when brief is solid.
+- **Mid-turn re-slim:** re-prune between ReAct steps when context fill is high.
+- **Desktop:** Plan mode per session; single Browser rail (no dual WebView2); process Min/Med/Full (Full+ removed); tool results match by `call_id`; scratch flush on session switch; Process panel rebinds collapse to mode.
+- **Docs:** Memory Harness manual updated for enforce + local co-pilot.
+- **Tests:** harness send policy / quality / offload coverage; suite 833.
+
 ## [0.15.6] - 2026-07-26
 
 ### Fix: images always display in chat + smoother stream finish

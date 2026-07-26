@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.15.6"
+version = "0.15.7"
 description = "Remedy Desktop — local AI partner for knowledge, design, and code"
 authors = ["Ahmi <ahmitdarrow@gmail.com>"]
 license = "LicenseRef-Proprietary"

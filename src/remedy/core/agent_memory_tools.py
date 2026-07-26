@@ -117,7 +117,7 @@ def register_memory_tools(runtime: Any) -> None:
         # Cumulative history thread entry (manual /compact)
         with suppress(Exception):
             brief.append_history_thread(
-                f"Manual compress_context"
+                "Manual compress_context"
                 + (f" focus={focus[:120]}" if focus else "")
                 + f". Intent: {(brief.intent or focus or '')[:200]}",
                 decisions_why=list(brief.decisions[-4:]),

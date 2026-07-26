@@ -2,7 +2,14 @@
 
 High-level product notes for owners. Full detail lives in repo `CHANGELOG.md`.
 
-Ship **one** installer/tag for the current series (**v0.15.6**).
+Ship **one** installer/tag for the current series (**v0.15.7**).
+
+## 0.15.7 - Memory Harness v2
+
+- Long chats stay sharp: Auto harness **enforces** a lean model send-view (your full transcript is still saved).
+- **Session Brief** keeps intent, decisions *why*, files, and a history thread; local model can refresh the brief in the background.
+- Process trail is **Min / Med / Full** (Full+ removed). Plan mode is per chat session.
+- Browser only on one rail at a time (stable embed).
 
 ## 0.15.6 - Images in chat for every model
 

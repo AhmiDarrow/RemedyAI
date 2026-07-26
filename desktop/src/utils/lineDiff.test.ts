@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { unifiedLineDiff, unifiedNewFile } from './lineDiff'
 import { looksLikeUnifiedDiff } from './diffHighlight'
-import {
-  formatToolArgsDisplay,
-  stepInlineSummary,
-  stepMediumPreview,
-} from './toolProcessFormat'
+import { formatToolArgsDisplay } from './toolProcessFormat'
 
 describe('lineDiff', () => {
   it('marks pure additions for new files', () => {

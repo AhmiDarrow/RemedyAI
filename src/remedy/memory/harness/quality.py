@@ -130,10 +130,9 @@ def review_compress_quality(
     dec_score = (len(dec_kept) / n_dec) if n_dec else 1.0
     # Fail-closed when nothing extractable: do not authorize middle-history drop.
     # (Previously defaulted to 0.85, which always passed the 0.65 gate.)
-    if n_path or n_dec:
-        score = 0.65 * path_score + 0.35 * dec_score
-    else:
-        score = 0.40
+    score = (
+        0.65 * path_score + 0.35 * dec_score if (n_path or n_dec) else 0.40
+    )
 
     brief_substance = False
     if brief is not None:

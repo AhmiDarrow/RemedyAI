@@ -5,6 +5,7 @@ Uses shared llama-server via LocalJobQueue — never blocks the provider turn.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import re
@@ -94,7 +95,6 @@ def apply_local_brief_payload(brief: Any, data: dict[str, Any]) -> None:
     if brief is None or not data:
         return
     try:
-        from remedy.memory.harness.brief import DecisionRecord
 
         intent = data.get("intent")
         decisions = data.get("decisions")
@@ -244,10 +244,8 @@ def schedule_background_brief_update(
         )
         if not sid:
             sid = f"anon-{id(brief)}"
-            try:
+            with contextlib.suppress(Exception):
                 brief.session_id = sid
-            except Exception:
-                pass
         register_session_brief(sid, brief)
 
         job = LocalJob(

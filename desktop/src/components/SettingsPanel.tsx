@@ -3,7 +3,6 @@ import { invoke } from '@tauri-apps/api/core'
 import { getSettings, updateSettings, type Settings, type SettingsUpdate } from '../api/settings'
 import {
   getVisionStatus,
-  getNanoSwarmStatus,
   type VisionStatus,
   type NanoSwarmStatus,
 } from '../api/vision'

@@ -6,7 +6,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from remedy.memory.harness.brief import (
-    DecisionRecord,
     SessionBrief,
     brief_to_context_block,
 )
@@ -213,21 +212,21 @@ def test_budget_trim_protects_recent_tools():
 
 
 def _fake_runtime(**kwargs):
-    base = dict(
-        _harness_mode="auto",
-        _harness_min_pct=0.01,  # force soft/strong easily
-        _harness_max_pct=0.02,
-        _llm_provider="openai",
-        _llm_model="gpt-4o-mini",
-        _session_id="sess-test",
-        _session_brief=None,
-        config=SimpleNamespace(
+    base = {
+        "_harness_mode": "auto",
+        "_harness_min_pct": 0.01,  # force soft/strong easily
+        "_harness_max_pct": 0.02,
+        "_llm_provider": "openai",
+        "_llm_model": "gpt-4o-mini",
+        "_session_id": "sess-test",
+        "_session_brief": None,
+        "config": SimpleNamespace(
             provider="openai",
             model="gpt-4o-mini",
             project_path="",
             home_dir=None,
         ),
-    )
+    }
     base.update(kwargs)
     return SimpleNamespace(**base)
 
