@@ -108,6 +108,17 @@ export async function skillFeedback(name: string, success: boolean): Promise<voi
   })
 }
 
+/** Permanently remove a user-installed skill (registry + files under ~/.remedy/skills). */
+export async function deleteSkill(
+  name: string,
+  opts?: { purge?: boolean },
+): Promise<{ name: string; status: string; removed_files?: boolean }> {
+  const qs = opts?.purge === false ? '?purge=false' : ''
+  return apiFetch(`/skills/${encodeURIComponent(name)}${qs}`, {
+    method: 'DELETE',
+  })
+}
+
 /** Download a skill pack ZIP (selected names or all). */
 export async function exportSkillsPack(names?: string[]): Promise<void> {
   await ensureApiToken()
