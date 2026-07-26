@@ -63,19 +63,37 @@ export function ImageLightbox({ src, alt, onClose, onAttachMarkup }: ImageLightb
     setZoom(1)
     setStatus(null)
 
-    const img = new Image()
-    // blob: and data: don't need CORS; remote may
-    img.crossOrigin = 'anonymous'
-    img.onload = () => {
-      imageRef.current = img
-      setNat({ w: img.naturalWidth || img.width, h: img.naturalHeight || img.height })
-      setReady(true)
+    let cancelled = false
+    const load = (withCors: boolean) => {
+      const img = new Image()
+      // blob:/data: must NOT set crossOrigin (WebView2 often fails onload).
+      // http(s): use anonymous when possible so canvas markup can export.
+      if (withCors && /^https?:/i.test(src)) {
+        img.crossOrigin = 'anonymous'
+      }
+      img.onload = () => {
+        if (cancelled) return
+        imageRef.current = img
+        setNat({ w: img.naturalWidth || img.width, h: img.naturalHeight || img.height })
+        setReady(true)
+        setLoadError(null)
+      }
+      img.onerror = () => {
+        if (cancelled) return
+        if (withCors && /^https?:/i.test(src)) {
+          // Retry without CORS (view works; export may be restricted)
+          load(false)
+          return
+        }
+        setLoadError('Could not load image')
+        setReady(false)
+      }
+      img.src = src
     }
-    img.onerror = () => {
-      setLoadError('Could not load image')
-      setReady(false)
+    load(true)
+    return () => {
+      cancelled = true
     }
-    img.src = src
   }, [src])
 
   const redraw = useCallback(() => {
@@ -243,18 +261,20 @@ export function ImageLightbox({ src, alt, onClose, onAttachMarkup }: ImageLightb
     try {
       // Ensure latest strokes are painted
       redraw()
-      // If only viewing with no strokes, still allow attach of the plain image
-      // so user can re-send any chat image as attachment.
       const blob = await canvasToPngBlob(canvasRef.current)
-      const file = new File([blob], stampMarkupFilename(alt), { type: 'image/png' })
+      const file = new File(
+        [blob],
+        strokes.length ? stampMarkupFilename(alt) : stampMarkupFilename(alt || 'image'),
+        { type: 'image/png' },
+      )
       await onAttachMarkup(file)
       setStatus(
         strokes.length
-          ? 'Markup attached to your next message'
-          : 'Image attached to your next message',
+          ? 'Saved — attached to your next message'
+          : 'Attached to your next message',
       )
-      // Brief confirmation then close so user can type the prompt
-      window.setTimeout(() => onClose(), 450)
+      // Close editor after save so user lands on composer with attachment
+      window.setTimeout(() => onClose(), 350)
     } catch (err: unknown) {
       setStatus(err instanceof Error ? err.message : 'Attach failed')
     } finally {
@@ -447,10 +467,10 @@ export function ImageLightbox({ src, alt, onClose, onAttachMarkup }: ImageLightb
               onClick={() => void handleAttach()}
             >
               {attaching
-                ? 'Attaching…'
+                ? 'Saving…'
                 : strokes.length
-                  ? 'Attach markup to message'
-                  : 'Attach to message'}
+                  ? 'Save & attach to prompt'
+                  : 'Attach to prompt'}
             </button>
           )}
 

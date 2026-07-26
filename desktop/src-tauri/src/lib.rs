@@ -637,73 +637,13 @@ fn dirs_next_home() -> Option<std::path::PathBuf> {
     std::env::var_os("HOME").map(std::path::PathBuf::from)
 }
 
-/// Native folder picker for Settings project workspace (Windows Forms / zenity / osascript).
+/// Native folder picker (rfd — no PowerShell cold-start).
 #[tauri::command]
 fn pick_folder() -> Result<Option<String>, String> {
-    #[cfg(target_os = "windows")]
-    {
-        // PowerShell FolderBrowserDialog - no extra crate; works from Tauri main thread spawn.
-        let script = r#"
-Add-Type -AssemblyName System.Windows.Forms | Out-Null
-$d = New-Object System.Windows.Forms.FolderBrowserDialog
-$d.Description = 'Select project folder'
-$d.ShowNewFolderButton = $true
-if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
-  Write-Output $d.SelectedPath
-}
-"#;
-        let output = Command::new("powershell")
-            .args(["-NoProfile", "-STA", "-Command", script])
-            .output()
-            .map_err(|e| format!("folder picker failed: {e}"))?;
-        if !output.status.success() {
-            let err = String::from_utf8_lossy(&output.stderr);
-            if err.trim().is_empty() {
-                return Ok(None);
-            }
-            return Err(format!("folder picker error: {}", err.trim()));
-        }
-        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if path.is_empty() {
-            return Ok(None);
-        }
-        return Ok(Some(path));
-    }
-    #[cfg(target_os = "macos")]
-    {
-        let output = Command::new("osascript")
-            .args([
-                "-e",
-                "POSIX path of (choose folder with prompt \"Select project folder\")",
-            ])
-            .output()
-            .map_err(|e| format!("folder picker failed: {e}"))?;
-        if !output.status.success() {
-            return Ok(None);
-        }
-        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if path.is_empty() {
-            return Ok(None);
-        }
-        return Ok(Some(path));
-    }
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        let output = Command::new("zenity")
-            .args(["--file-selection", "--directory", "--title=Select project folder"])
-            .output()
-            .map_err(|e| format!("folder picker failed (install zenity): {e}"))?;
-        if !output.status.success() {
-            return Ok(None);
-        }
-        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if path.is_empty() {
-            return Ok(None);
-        }
-        return Ok(Some(path));
-    }
-    #[allow(unreachable_code)]
-    Ok(None)
+    let path = rfd::FileDialog::new()
+        .set_title("Select project folder")
+        .pick_folder();
+    Ok(path.map(|p| p.to_string_lossy().to_string()))
 }
 
 /// Startup-folder shortcut name (user-visible in Settings -> Apps -> Startup).

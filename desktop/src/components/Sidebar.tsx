@@ -249,14 +249,18 @@ export function Sidebar({
 
   return (
     <div
-      className="flex flex-col border-r"
+      className="flex flex-col border-r min-h-0 h-full"
       style={{
         width: 270,
         background: 'var(--bg-secondary)',
         borderColor: 'var(--border)',
       }}
     >
-      <div className="p-3 border-b space-y-2" style={{ borderColor: 'var(--border)' }}>
+      {/* Sticky chrome: stays visible while session list scrolls */}
+      <div
+        className="p-3 border-b space-y-2 shrink-0 sticky top-0 z-10"
+        style={{ borderColor: 'var(--border)', background: 'var(--bg-secondary)' }}
+      >
         <button
           onClick={onNew}
           className="w-full text-left px-3 py-2 rounded-md text-sm font-medium transition-colors"
@@ -331,104 +335,8 @@ export function Sidebar({
           />
           New-in-project sets default
         </label>
-      </div>
-
-      {/* Multi-select action bar */}
-      {selected.size > 0 && (
-        <div
-          className="px-2 py-1.5 border-b flex flex-wrap items-center gap-1"
-          style={{ borderColor: 'var(--border)', background: 'var(--bg-tertiary)' }}
-        >
-          <span className="text-[10px] font-semibold" style={{ color: 'var(--text-primary)' }}>
-            {selected.size} selected
-          </span>
-          <button
-            type="button"
-            className="text-[10px] px-1.5 py-0.5 rounded"
-            style={{ background: 'var(--bg-primary)', color: 'var(--text-secondary)' }}
-            onClick={() => moveSelectedTo(null)}
-          >
-            → No project
-          </button>
-          {projectOptions.slice(0, 4).map((p) => (
-            <button
-              key={p}
-              type="button"
-              className="text-[10px] px-1.5 py-0.5 rounded truncate max-w-[5.5rem]"
-              style={{ background: 'var(--bg-primary)', color: 'var(--text-secondary)' }}
-              title={p}
-              onClick={() => moveSelectedTo(p)}
-            >
-              → {p.split(/[/\\]/).filter(Boolean).pop()}
-            </button>
-          ))}
-          <button
-            type="button"
-            className="text-[10px] ml-auto"
-            style={{ color: 'var(--text-muted)' }}
-            onClick={clearSelection}
-          >
-            Clear
-          </button>
-        </div>
-      )}
-
-      <div className="flex-1 overflow-y-auto py-1">
-        {groups.map((group) => (
-          <ProjectSection
-            key={group.key || '__none__'}
-            group={group}
-            collapsed={isCollapsed(group.key)}
-            onToggle={() => toggleCollapse(group.key)}
-            activeId={activeId}
-            selected={selected}
-            dropHover={dropHoverKey === (group.key || '__none__')}
-            meta={meta}
-            renamingId={renamingId}
-            renameDraft={renameDraft}
-            renameRef={renameRef}
-            tagTarget={tagTarget}
-            tagDraft={tagDraft}
-            moveTarget={moveTarget}
-            projectOptions={projectOptions}
-            onSelect={onSelect}
-            onToggleSelect={toggleSelect}
-            onDelete={onDelete}
-            onRename={onRename}
-            onStartRename={startRename}
-            onCommitRename={commitRename}
-            setRenameDraft={setRenameDraft}
-            setRenamingId={setRenamingId}
-            setTagTarget={setTagTarget}
-            setTagDraft={setTagDraft}
-            setMoveTarget={setMoveTarget}
-            refreshMeta={refreshMeta}
-            onNewInProject={
-              onNewInProject
-                ? (path) =>
-                    onNewInProject(path, {
-                      setAsDefault: setDefaultOnNew && Boolean(path),
-                    })
-                : undefined
-            }
-            onSetSessionProject={onSetSessionProject}
-            onDragStartSession={onDragStartSession}
-            onDragOverProject={(e) => {
-              e.preventDefault()
-              e.dataTransfer.dropEffect = 'move'
-              setDropHoverKey(group.key || '__none__')
-            }}
-            onDragLeaveProject={() => setDropHoverKey(null)}
-            onDropProject={(e) => onDropOnProject(e, group.key ? group.path : null)}
-            onRemoveKnownProject={
-              group.key
-                ? () => setKnownProjects(removeKnownProject(group.path))
-                : undefined
-            }
-          />
-        ))}
-
-        <div className="px-2 mt-2 mb-2">
+        {/* Project browser — sticky above scrolling sessions */}
+        <div className="pt-0.5">
           {!addingProject ? (
             <button
               type="button"
@@ -506,6 +414,102 @@ export function Sidebar({
             </div>
           )}
         </div>
+      </div>
+
+      {/* Multi-select action bar */}
+      {selected.size > 0 && (
+        <div
+          className="px-2 py-1.5 border-b flex flex-wrap items-center gap-1 shrink-0"
+          style={{ borderColor: 'var(--border)', background: 'var(--bg-tertiary)' }}
+        >
+          <span className="text-[10px] font-semibold" style={{ color: 'var(--text-primary)' }}>
+            {selected.size} selected
+          </span>
+          <button
+            type="button"
+            className="text-[10px] px-1.5 py-0.5 rounded"
+            style={{ background: 'var(--bg-primary)', color: 'var(--text-secondary)' }}
+            onClick={() => moveSelectedTo(null)}
+          >
+            → No project
+          </button>
+          {projectOptions.slice(0, 4).map((p) => (
+            <button
+              key={p}
+              type="button"
+              className="text-[10px] px-1.5 py-0.5 rounded truncate max-w-[5.5rem]"
+              style={{ background: 'var(--bg-primary)', color: 'var(--text-secondary)' }}
+              title={p}
+              onClick={() => moveSelectedTo(p)}
+            >
+              → {p.split(/[/\\]/).filter(Boolean).pop()}
+            </button>
+          ))}
+          <button
+            type="button"
+            className="text-[10px] ml-auto"
+            style={{ color: 'var(--text-muted)' }}
+            onClick={clearSelection}
+          >
+            Clear
+          </button>
+        </div>
+      )}
+
+      <div className="flex-1 min-h-0 overflow-y-auto py-1">
+        {groups.map((group) => (
+          <ProjectSection
+            key={group.key || '__none__'}
+            group={group}
+            collapsed={isCollapsed(group.key)}
+            onToggle={() => toggleCollapse(group.key)}
+            activeId={activeId}
+            selected={selected}
+            dropHover={dropHoverKey === (group.key || '__none__')}
+            meta={meta}
+            renamingId={renamingId}
+            renameDraft={renameDraft}
+            renameRef={renameRef}
+            tagTarget={tagTarget}
+            tagDraft={tagDraft}
+            moveTarget={moveTarget}
+            projectOptions={projectOptions}
+            onSelect={onSelect}
+            onToggleSelect={toggleSelect}
+            onDelete={onDelete}
+            onRename={onRename}
+            onStartRename={startRename}
+            onCommitRename={commitRename}
+            setRenameDraft={setRenameDraft}
+            setRenamingId={setRenamingId}
+            setTagTarget={setTagTarget}
+            setTagDraft={setTagDraft}
+            setMoveTarget={setMoveTarget}
+            refreshMeta={refreshMeta}
+            onNewInProject={
+              onNewInProject
+                ? (path) =>
+                    onNewInProject(path, {
+                      setAsDefault: setDefaultOnNew && Boolean(path),
+                    })
+                : undefined
+            }
+            onSetSessionProject={onSetSessionProject}
+            onDragStartSession={onDragStartSession}
+            onDragOverProject={(e) => {
+              e.preventDefault()
+              e.dataTransfer.dropEffect = 'move'
+              setDropHoverKey(group.key || '__none__')
+            }}
+            onDragLeaveProject={() => setDropHoverKey(null)}
+            onDropProject={(e) => onDropOnProject(e, group.key ? group.path : null)}
+            onRemoveKnownProject={
+              group.key
+                ? () => setKnownProjects(removeKnownProject(group.path))
+                : undefined
+            }
+          />
+        ))}
 
         {hasMore && onLoadMore && (
           <div className="px-2 mb-2">
