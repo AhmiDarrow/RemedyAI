@@ -1,5 +1,5 @@
 ---
-name: youtube-chapter-markers
+name: video-chapter-markers
 version: 1.0.0
 description: >
   Create chapter markers and titles from a video outline or transcript.
@@ -15,13 +15,13 @@ tools:
   - file_write
 metadata:
   source: library
-  library_id: youtube-chapter-markers
+  library_id: video-chapter-markers
   official: true
   domain: content
   security_flags: []
 ---
 
-# Youtube Chapter Markers
+# Video Chapter Markers
 
 ## Steps
 1. Source outline/transcript.

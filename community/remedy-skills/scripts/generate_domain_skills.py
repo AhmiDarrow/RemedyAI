@@ -2246,7 +2246,7 @@ EXTRA = [
 """,
     ),
     skill(
-        "youtube-chapter-markers",
+        "video platforms-chapter-markers",
         "Create chapter markers and titles from a video outline or transcript.",
         ["content", "video"],
         ["file_read", "file_write"],
