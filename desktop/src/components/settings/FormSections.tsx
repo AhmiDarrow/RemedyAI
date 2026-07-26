@@ -876,12 +876,8 @@ export function SettingsFormSections(p: SettingsFormProps): ReactNode {
               {...sectionProps('tool-process')}
             >
               <div className="text-[10px] leading-snug mb-2" style={{ color: 'var(--text-muted)' }}>
-                Controls the <em>tool trail</em> only — the model&apos;s chat answer is always
-                complete (never truncated by this setting).{' '}
-                <strong style={{ color: 'var(--text-secondary)' }}>Full</strong> expands thinking
-                and shows complete raw args/results.{' '}
-                <strong style={{ color: 'var(--text-secondary)' }}>Full+</strong> adds advanced
-                continuity diagnostics.
+                How much <em>Process</em> detail to show under replies — same list, more depth.
+                The chat answer is always complete (never truncated by this setting).
               </div>
               <div className="flex gap-1 mb-1 flex-wrap">
                 {TOOL_PROCESS_MODES.map((m) => (

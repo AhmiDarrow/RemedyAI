@@ -150,16 +150,13 @@ function CodeBlock({
 function ThinkingPanel({
   text,
   openDefault = false,
-  /** Full/Full+: show complete thinking without tight height traps */
-  fullReveal = false,
 }: {
   text: string
   openDefault?: boolean
-  fullReveal?: boolean
 }) {
   const [open, setOpen] = useState(openDefault)
   const bodyRef = useRef<HTMLDivElement | null>(null)
-  // Keep expanded while streaming or when Full mode demands visibility.
+  // Keep expanded while streaming or when Full mode opens by default.
   useEffect(() => {
     if (openDefault) setOpen(true)
   }, [openDefault])
@@ -173,7 +170,7 @@ function ThinkingPanel({
     }
   }, [text, open, openDefault])
   if (!text.trim()) return null
-  // Flat strip with left accent — not a nested box-in-box.
+  // Flat strip with left accent — same look at every process mode.
   return (
     <div
       className={`thinking-panel mb-2 w-full min-w-0 ${open ? 'thinking-panel-open' : ''}`}
@@ -187,21 +184,13 @@ function ThinkingPanel({
         <span>
           Thinking
           {text.length > 80 ? ` · ${text.length.toLocaleString()} chars` : ''}
-          {fullReveal && open ? ' · full' : ''}
         </span>
         <span aria-hidden className="thinking-chevron">
           {open ? '▾' : '▸'}
         </span>
       </button>
       {open && (
-        <div
-          ref={bodyRef}
-          className={
-            fullReveal
-              ? 'thinking-panel-body thinking-panel-body-full'
-              : 'thinking-panel-body'
-          }
-        >
+        <div ref={bodyRef} className="thinking-panel-body">
           {text}
         </div>
       )}
@@ -244,7 +233,7 @@ const MessageBubble = memo(function MessageBubble({
     [rawText, isUser, isSystem],
   )
   const thinkingText = (msg.thinking || '') + (partialThinking || '')
-  const fullReveal = isFullProcessMode(toolProcessMode)
+  const openThinkingByDefault = isFullProcessMode(toolProcessMode)
   const showEdit =
     msg.role === 'user' && !msg.reverted && !!onEditUserMessage && !streaming
   const timeLabel = formatTime(msg.created_at)
@@ -387,9 +376,8 @@ const MessageBubble = memo(function MessageBubble({
             <ThinkingPanel
               text={thinkingText}
               openDefault={
-                Boolean(isStreamingPartial && partialThinking) || fullReveal
+                Boolean(isStreamingPartial && partialThinking) || openThinkingByDefault
               }
-              fullReveal={fullReveal}
             />
           )}
 
@@ -497,12 +485,12 @@ const MessageBubble = memo(function MessageBubble({
           )}
         </div>
       </div>
-      {/* Process under answer — Full stays expanded so nothing is buried */}
-      {histSteps.length > 0 && (
+      {/* Process under answer — same chrome at every Min/Med/Full depth */}
+      {histSteps.length > 0 && showsProcessTrace(toolProcessMode) && (
         <div
           className="process-under-answer w-full mt-1"
           style={{
-            maxWidth: fullReveal ? '100%' : 'min(var(--chat-max-width), 100%)',
+            maxWidth: 'min(var(--chat-max-width), 100%)',
             paddingLeft: 'calc(var(--chat-avatar) + 0.35rem)',
           }}
         >
@@ -703,9 +691,9 @@ export function MessageFeed({
             streaming={streaming}
             activeTools={activeTools}
             progress={taskProgress}
-            showToolDetails={showsProcessTrace(toolProcessMode)}
+            showToolDetails
           />
-          {showsProcessTrace(toolProcessMode) && processSteps.length > 0 && (
+          {processSteps.length > 0 && (
             <ProcessTrace mode={toolProcessMode} steps={processSteps} live />
           )}
         </div>

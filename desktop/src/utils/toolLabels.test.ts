@@ -27,8 +27,8 @@ describe('tool process modes', () => {
     expect(processDefaultCollapsed('off', true)).toBe(false)
   })
 
-  it('process trail visibility', () => {
-    expect(showsProcessTrace('off')).toBe(false)
+  it('process trail is always the same UI (depth varies by mode)', () => {
+    expect(showsProcessTrace('off')).toBe(true)
     expect(showsProcessTrace('medium')).toBe(true)
     expect(showsProcessTrace('full')).toBe(true)
     expect(showsAdvancedDiagnostics('full+')).toBe(true)

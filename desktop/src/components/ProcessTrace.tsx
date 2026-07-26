@@ -15,27 +15,35 @@ import {
 interface ProcessTraceProps {
   mode: ToolProcessMode
   steps: ProcessStep[]
-  /** Live turn (expanded by default when streaming) */
+  /** Live turn */
   live?: boolean
-  /** After turn: start collapsed (ignored for Full/Full+) */
+  /** Start with the Process panel collapsed */
   defaultCollapsed?: boolean
 }
 
-/** Medium-only preview length — Full never truncates. */
-const MEDIUM_PREVIEW = 600
+/** Shared list viewport — same chrome at every depth level. */
+const LIST_MAX_H = 'min(40vh, 22rem)'
+/** Medium (and min expand) preview cap; full/full+ never truncate. */
+const PREVIEW_CHARS = 720
 
-function previewText(text: string | undefined, mode: ToolProcessMode): string {
+function depthAllowsDetail(mode: ToolProcessMode): boolean {
+  return mode !== 'off'
+}
+
+function depthShowsFull(mode: ToolProcessMode): boolean {
+  return isFullProcessMode(mode)
+}
+
+function clipBody(text: string | undefined, mode: ToolProcessMode): string {
   if (!text) return ''
-  if (isFullProcessMode(mode)) return text
-  if (text.length <= MEDIUM_PREVIEW) return text
-  return `${text.slice(0, MEDIUM_PREVIEW)}…`
+  if (depthShowsFull(mode)) return text
+  if (text.length <= PREVIEW_CHARS) return text
+  return `${text.slice(0, PREVIEW_CHARS)}…`
 }
 
 /**
- * Provider process timeline with stick-to-bottom inside the frame
- * (thinking/tools/raw dumps follow unless user scrolls up).
- *
- * Full / Full+: complete raw args + results, steps open, no silent truncation.
+ * Tool process trail — one shared layout for Min / Med / Full / Full+.
+ * Modes only control how much detail is available, not a different UI.
  */
 export function ProcessTrace({
   mode,
@@ -43,11 +51,9 @@ export function ProcessTrace({
   live = false,
   defaultCollapsed = false,
 }: ProcessTraceProps) {
-  const full = isFullProcessMode(mode)
-  // Full modes never start collapsed — user must see all process output.
-  const [collapsed, setCollapsed] = useState(
-    full ? false : defaultCollapsed && !live,
-  )
+  const full = depthShowsFull(mode)
+  const allowDetail = depthAllowsDetail(mode)
+  const [collapsed, setCollapsed] = useState(defaultCollapsed && !live)
   const [openIds, setOpenIds] = useState<Set<string>>(() => new Set())
   const [copiedId, setCopiedId] = useState<string | null>(null)
 
@@ -65,7 +71,6 @@ export function ProcessTrace({
     deps: [stepSig, mode, collapsed],
   })
 
-  // Precompute file_write args as synthetic unified diffs (path-aware within turn).
   const formattedArgs = useMemo(() => {
     const prior = new Map<string, string>()
     const map = new Map<string, ReturnType<typeof formatToolArgsDisplay>>()
@@ -75,7 +80,7 @@ export function ProcessTrace({
     return map
   }, [steps, stepSig])
 
-  if (mode === 'off' || steps.length === 0) return null
+  if (steps.length === 0) return null
 
   const running = steps.filter((s) => s.status === 'running').length
   const done = steps.filter((s) => s.status === 'done').length
@@ -87,10 +92,8 @@ export function ProcessTrace({
         ? `${done} done · ${failed} error`
         : `${done} step${done === 1 ? '' : 's'}`
 
-  const allOpen = full
-
   const toggleStep = (id: string) => {
-    if (allOpen) return
+    if (!allowDetail || full) return
     setOpenIds((prev) => {
       const n = new Set(prev)
       if (n.has(id)) n.delete(id)
@@ -109,23 +112,15 @@ export function ProcessTrace({
     }
   }
 
-  const modeLabel =
-    mode === 'full+'
-      ? ' · full+ raw'
-      : full
-        ? ' · full raw'
-        : mode === 'medium'
-          ? ' · medium'
-          : ''
-
   return (
     <div
-      className="process-trace rounded-lg overflow-hidden text-[11px] my-1 relative"
+      className="process-trace rounded-lg overflow-hidden text-[11px] my-1 relative w-full"
       style={{
         border: '1px solid var(--border)',
         background: 'var(--bg-primary)',
-        maxWidth: full ? '100%' : 'min(var(--chat-max-width), 100%)',
+        maxWidth: 'min(var(--chat-max-width), 100%)',
       }}
+      data-process-mode={mode}
     >
       <button
         type="button"
@@ -138,7 +133,6 @@ export function ProcessTrace({
           Process
           <span className="font-normal ml-1.5" style={{ color: 'var(--text-muted)' }}>
             {summary}
-            {modeLabel}
           </span>
         </span>
         {collapsed ? <IconChevronDown size={12} /> : <IconChevronUp size={12} />}
@@ -149,24 +143,17 @@ export function ProcessTrace({
           <ul
             ref={setScroller}
             className="px-2 py-1.5 overflow-y-auto"
-            style={{
-              // Full: tall viewport so long dumps are readable; feed still scrolls.
-              maxHeight: full ? 'min(85vh, 56rem)' : '22rem',
-            }}
+            style={{ maxHeight: LIST_MAX_H }}
           >
-            <div ref={setContent} className="space-y-2">
+            <div ref={setContent} className="space-y-1">
               {steps.map((s) => {
+                const hasDetail =
+                  allowDetail && Boolean(s.argsText || s.resultText || s.error)
                 const detailOpen =
-                  allOpen
-                  || openIds.has(s.id)
-                  || (live && s.status === 'running')
-                const hasDetail = Boolean(s.argsText || s.resultText || s.error)
-                const showArgs = (full || mode === 'medium') && Boolean(s.argsText)
-                // Medium: always show a preview (was hidden when args > 800).
-                // Full: complete args, never truncated.
-                const argsShown = showArgs
-                const showResult =
-                  (mode === 'medium' || full) && Boolean(s.resultText || s.error)
+                  hasDetail
+                  && (full
+                    || openIds.has(s.id)
+                    || (live && s.status === 'running' && allowDetail))
                 const statusIcon =
                   s.status === 'running' ? '…' : s.status === 'error' ? '!' : '✓'
                 const statusColor =
@@ -199,12 +186,12 @@ export function ProcessTrace({
                         type="button"
                         className="flex-1 flex items-start gap-1.5 text-left min-w-0"
                         onClick={() => hasDetail && toggleStep(s.id)}
-                        disabled={!hasDetail || allOpen}
+                        disabled={!hasDetail || full}
                         style={{
                           background: 'transparent',
                           border: 'none',
                           color: 'var(--text-primary)',
-                          cursor: hasDetail && !allOpen ? 'pointer' : 'default',
+                          cursor: hasDetail && !full ? 'pointer' : 'default',
                         }}
                       >
                         <span
@@ -215,59 +202,65 @@ export function ProcessTrace({
                         </span>
                         <span className="min-w-0 flex-1">
                           <span className="font-medium">{s.label}</span>
-                          <span
-                            className="ml-1.5 font-mono text-[10px]"
-                            style={{ color: 'var(--text-muted)' }}
-                          >
-                            {s.name}
-                          </span>
+                          {allowDetail && (
+                            <span
+                              className="ml-1.5 font-mono text-[10px]"
+                              style={{ color: 'var(--text-muted)' }}
+                            >
+                              {s.name}
+                            </span>
+                          )}
                           {s.endedAt && s.startedAt && s.status !== 'running' && (
                             <span className="ml-1.5" style={{ color: 'var(--text-muted)' }}>
                               {Math.max(0, (s.endedAt - s.startedAt) / 1000).toFixed(1)}s
                             </span>
                           )}
-                          {full && s.resultText && (
+                          {hasDetail && !full && !detailOpen && (
                             <span className="ml-1.5" style={{ color: 'var(--text-muted)' }}>
-                              {s.resultText.length.toLocaleString()} chars
+                              · details
                             </span>
                           )}
                         </span>
                       </button>
-                      {full && rawDump && (
+                      {allowDetail && rawDump && (
                         <IconBtn
-                          title={copiedId === s.id ? 'Copied' : 'Copy full raw'}
+                          title={copiedId === s.id ? 'Copied' : 'Copy'}
                           onClick={() => void copyBlock(s.id, rawDump)}
                           active={copiedId === s.id}
                         >
-                          {copiedId === s.id ? <IconCheck size={12} /> : <IconCopy size={12} />}
+                          {copiedId === s.id ? (
+                            <IconCheck size={12} />
+                          ) : (
+                            <IconCopy size={12} />
+                          )}
                         </IconBtn>
                       )}
                     </div>
 
-                    {detailOpen && (argsShown || showResult) && (
+                    {detailOpen && (
                       <div className="mt-1 ml-4 space-y-1">
-                        {argsShown && (() => {
+                        {s.argsText && (() => {
                           const fmt = formattedArgs.get(s.id) || {
                             text: s.argsText || '',
                           }
-                          const body = previewText(fmt.text, mode)
+                          const body = clipBody(fmt.text, mode)
+                          const truncated =
+                            !full && (fmt.text?.length || 0) > PREVIEW_CHARS
                           return (
                             <div>
                               <div
                                 className="text-[9px] font-semibold mb-0.5 uppercase tracking-wide"
                                 style={{ color: 'var(--text-muted)' }}
                               >
-                                {fmt.caption || 'Args / code'}
-                                {!full && (fmt.text?.length || 0) > MEDIUM_PREVIEW
-                                  ? ' · preview'
-                                  : ''}
+                                {fmt.caption || 'Args'}
+                                {truncated ? ' · more available in Full' : ''}
                               </div>
                               <div
                                 className="rounded overflow-x-auto process-diff-wrap"
                                 style={{
                                   background: 'var(--bg-primary)',
                                   border: '1px solid var(--border)',
-                                  maxHeight: full ? 'none' : '14rem',
+                                  maxHeight: '12rem',
                                 }}
                               >
                                 <DiffCode
@@ -279,27 +272,27 @@ export function ProcessTrace({
                             </div>
                           )
                         })()}
-                        {showResult && (() => {
+                        {(s.resultText || s.error) && (() => {
                           const fmt = formatToolResultDisplay(s.name, s.resultText)
+                          const truncated =
+                            !full
+                            && !s.error
+                            && (fmt.text?.length || 0) > PREVIEW_CHARS
                           return (
                             <div>
                               <div
                                 className="text-[9px] font-semibold mb-0.5 uppercase tracking-wide"
                                 style={{ color: 'var(--text-muted)' }}
                               >
-                                {s.error ? 'Error' : 'Result / stdout'}
-                                {!full
-                                  && !s.error
-                                  && (fmt.text?.length || 0) > MEDIUM_PREVIEW
-                                  ? ' · preview'
-                                  : ''}
+                                {s.error ? 'Error' : 'Result'}
+                                {truncated ? ' · more available in Full' : ''}
                               </div>
                               <div
                                 className="rounded overflow-x-auto process-diff-wrap"
                                 style={{
                                   background: 'var(--bg-primary)',
                                   border: '1px solid var(--border)',
-                                  maxHeight: full ? 'none' : '14rem',
+                                  maxHeight: '12rem',
                                 }}
                               >
                                 {s.error ? (
@@ -307,11 +300,11 @@ export function ProcessTrace({
                                     className="text-[10px] p-1.5 m-0 whitespace-pre-wrap break-all font-mono"
                                     style={{ color: 'var(--error)', margin: 0 }}
                                   >
-                                    {previewText(s.error, mode)}
+                                    {clipBody(s.error, mode)}
                                   </pre>
                                 ) : (
                                   <DiffCode
-                                    text={previewText(fmt.text, mode)}
+                                    text={clipBody(fmt.text, mode)}
                                     className={fmt.className}
                                     compact
                                   />

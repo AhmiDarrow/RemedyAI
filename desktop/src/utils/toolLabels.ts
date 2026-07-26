@@ -1,16 +1,17 @@
 /** Human labels for built-in tools — language-agnostic icons pair with these. */
 
 /**
- * Tool-process visibility modes.
+ * Tool-process visibility — progressive detail in the **same** Process UI.
  *
- * Contract (always):
- * - The model's **chat answer** is never truncated or hidden by this setting.
- * - **Thinking** is always stored; only default open/closed changes with mode.
+ * Contract:
+ * - Chat answer is never truncated or hidden by this setting.
+ * - Thinking is always stored; Full/Full+ open it by default.
+ * - Min → Med → Full → Full+ only add more of the same trail (not alternate layouts).
  *
- * - **off (Min)**: answer + thinking (collapsed). Progress chips only — no process dump.
- * - **medium**: labeled tool steps, short previews (expand for more).
- * - **full**: ALL model-visible process output — complete args/stdout, expanded by default.
- * - **full+**: full raw process + advanced continuity diagnostics.
+ * - **Min (off)**: Process list of step labels/status only.
+ * - **Med**: same list; expand a step for short args/result previews.
+ * - **Full**: same list; full args/results, steps open by default.
+ * - **Full+**: Full + advanced diagnostics (settings / continuity internals).
  */
 export type ToolProcessMode = 'off' | 'medium' | 'full' | 'full+'
 
@@ -18,22 +19,22 @@ export const TOOL_PROCESS_MODES: { id: ToolProcessMode; label: string; hint: str
   {
     id: 'off',
     label: 'Min',
-    hint: 'Answer always full · thinking collapsible · process chips only',
+    hint: 'Same Process list — step names only (answer always full)',
   },
   {
     id: 'medium',
     label: 'Med',
-    hint: 'Answer always full · tool labels + short previews (expand for more)',
+    hint: 'Same Process list — click a step for short previews',
   },
   {
     id: 'full',
     label: 'Full',
-    hint: 'Answer + thinking open · complete raw tool args and every result — nothing truncated',
+    hint: 'Same Process list — full args/results, open by default',
   },
   {
     id: 'full+',
     label: 'Full+',
-    hint: 'Full raw process + advanced diagnostics (session quality, continuity internals)',
+    hint: 'Full process detail + advanced diagnostics elsewhere in Settings',
   },
 ]
 
@@ -46,10 +47,12 @@ export function isFullProcessMode(mode: ToolProcessMode | string | undefined): b
   return m === 'full' || m === 'full+' || m === 'fullplus' || m === 'full_plus'
 }
 
-/** Whether to render the Process trail (not just progress chips). */
-export function showsProcessTrace(mode: ToolProcessMode | string | undefined): boolean {
-  const m = String(mode || 'off').toLowerCase()
-  return m !== 'off' && m !== '' && m !== 'false' && m !== '0'
+/**
+ * Always render the Process trail when there are steps.
+ * Depth of detail is controlled inside ProcessTrace by mode.
+ */
+export function showsProcessTrace(_mode?: ToolProcessMode | string): boolean {
+  return true
 }
 
 /** Advanced diagnostics (session quality / internal continuity) only in Full+. */
@@ -58,7 +61,7 @@ export function showsAdvancedDiagnostics(mode: ToolProcessMode | string | undefi
   return m === 'full+' || m === 'fullplus' || m === 'full_plus' || m === 'debug'
 }
 
-/** After a turn, Full/Full+ stay open so nothing is buried. */
+/** After a turn, Full/Full+ start expanded; Min/Med start collapsed. */
 export function processDefaultCollapsed(
   mode: ToolProcessMode | string | undefined,
   live = false,
