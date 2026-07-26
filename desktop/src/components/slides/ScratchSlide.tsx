@@ -15,18 +15,39 @@ export function ScratchSlide({ sessionId }: { sessionId: string | null }) {
   const [status, setStatus] = useState('')
   const key = useMemo(() => storageKey(sessionId), [sessionId])
   const persistTimer = useRef<number | null>(null)
+  const textRef = useRef('')
+  const keyRef = useRef(key)
 
   useEffect(() => {
+    // Flush prior session's debounced text before switching keys
+    if (persistTimer.current != null) {
+      window.clearTimeout(persistTimer.current)
+      persistTimer.current = null
+      try {
+        localStorage.setItem(keyRef.current, textRef.current)
+      } catch {
+        /* ignore */
+      }
+    }
+    keyRef.current = key
     try {
-      setText(localStorage.getItem(key) || '')
+      const loaded = localStorage.getItem(key) || ''
+      setText(loaded)
+      textRef.current = loaded
       setStatus('')
     } catch {
       setText('')
+      textRef.current = ''
     }
     return () => {
       if (persistTimer.current != null) {
         window.clearTimeout(persistTimer.current)
         persistTimer.current = null
+        try {
+          localStorage.setItem(keyRef.current, textRef.current)
+        } catch {
+          /* ignore */
+        }
       }
     }
   }, [key])
@@ -42,6 +63,7 @@ export function ScratchSlide({ sessionId }: { sessionId: string | null }) {
   /** Immediate UI update; debounce localStorage writes while typing. */
   const save = (v: string, flush = false) => {
     setText(v)
+    textRef.current = v
     if (persistTimer.current != null) {
       window.clearTimeout(persistTimer.current)
       persistTimer.current = null

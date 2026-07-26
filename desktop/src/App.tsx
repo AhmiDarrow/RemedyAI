@@ -166,6 +166,17 @@ export default function App() {
   const patchWs = useCallback((patch: Partial<WorkspaceLayout>) => {
     setWsLayout((prev) => {
       const next = { ...prev, ...patch }
+      // Single WebView2 embed: only one rail may host Browser at a time
+      if (next.left === 'browser' && next.right === 'browser') {
+        if (patch.left === 'browser') {
+          next.right = prev.right === 'browser' ? 'files' : prev.right
+        } else if (patch.right === 'browser') {
+          next.left = prev.left === 'browser' ? 'files' : prev.left
+        } else {
+          // layout restore / bulk patch — prefer left browser, move right
+          next.right = 'files'
+        }
+      }
       saveWorkspaceLayout(next)
       return next
     })
@@ -208,7 +219,21 @@ export default function App() {
   const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>('high')
   const [approvalMode, setApprovalMode] = useState<ApprovalMode>('ask')
   const [toolProcessMode, setToolProcessMode] = useState<ToolProcessMode>('off')
-  const [planMode, setPlanMode] = useState(false)
+  /** Plan mode is per-session so switching chats does not stick Plan/Build. */
+  const [planModeBySession, setPlanModeBySession] = useState<Record<string, boolean>>({})
+  const planMode = Boolean(activeId && planModeBySession[activeId])
+  const setPlanMode = useCallback(
+    (value: boolean | ((prev: boolean) => boolean)) => {
+      if (!activeId) return
+      setPlanModeBySession((prev) => {
+        const cur = Boolean(prev[activeId])
+        const next = typeof value === 'function' ? value(cur) : value
+        if (cur === next) return prev
+        return { ...prev, [activeId]: next }
+      })
+    },
+    [activeId],
+  )
   const [panel, setPanel] = useState<'memory' | 'skills' | 'settings' | null>(null)
   /**
    * Settings always open in the **right** workspace rail.

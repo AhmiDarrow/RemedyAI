@@ -268,6 +268,22 @@ async def call_llm_stream(runtime, message: str,
                         }
                     )
 
+                # Mid-turn Memory Harness: re-slim after tool accumulation
+                if step > 0 and getattr(runtime, "_harness_mode", "auto") != "off":
+                    with suppress(Exception):
+                        from remedy.memory.harness.send_policy import (
+                            slim_messages_mid_turn,
+                        )
+
+                        messages[:] = slim_messages_mid_turn(
+                            runtime,
+                            messages,
+                            session_id=str(
+                                getattr(runtime, "_session_id", "") or session_id or ""
+                            ),
+                            tool_result_char_cap=int(_TOOL_RESULT_CHAR_CAP or 0),
+                        )
+
                 # Never send incomplete tool_calls/tool pairings (HTTP 400).
                 messages[:] = ensure_tool_call_pairings(messages)
                 # OpenAI-compatible providers (openai, deepseek, ollama, …) stream SSE.

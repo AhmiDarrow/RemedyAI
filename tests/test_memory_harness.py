@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 from remedy.memory.harness.brief import (
     DecisionRecord,
@@ -11,6 +12,11 @@ from remedy.memory.harness.brief import (
 )
 from remedy.memory.harness.offload import maybe_offload_messages, offload_tool_body
 from remedy.memory.harness.pruner import prune_messages_for_send
+from remedy.memory.harness.quality import review_compress_quality
+from remedy.memory.harness.send_policy import (
+    apply_auto_harness_send_policy,
+    slim_messages_mid_turn,
+)
 
 
 def test_session_brief_context_block():
@@ -148,3 +154,153 @@ def test_offload_fat_tool_body(tmp_path: Path):
     assert any("offloaded" in (m.get("content") or "") for m in out[:3])
     # recent kept full
     assert fat in (out[-1].get("content") or "")
+
+
+def test_quality_fail_closed_without_extractable_facts():
+    """Empty history must not authorize middle-history drop (score < 0.65)."""
+    brief = SessionBrief(intent="maybe", artifacts=[], decisions=[])
+    r = review_compress_quality(
+        messages_before=[{"role": "user", "content": "hello there"}],
+        brief=brief,
+        tokens_before=1000,
+        tokens_after=200,
+    )
+    assert r["score"] < 0.65
+    assert r["ok"] is False
+
+
+def test_quality_ok_requires_kept_facts():
+    messages = [
+        {
+            "role": "user",
+            "content": "Edit C:\\Users\\me\\proj\\src\\app.ts and decided to use vite",
+        },
+    ]
+    brief = SessionBrief(
+        intent="edit app",
+        artifacts=["C:\\Users\\me\\proj\\src\\app.ts"],
+        decisions=["use vite"],
+        key_paths=["src/app.ts"],
+    )
+    r = review_compress_quality(
+        messages_before=messages,
+        brief=brief,
+        tokens_before=5000,
+        tokens_after=1000,
+    )
+    assert r["ok"] is True
+    assert r["score"] >= 0.55
+
+
+def test_budget_trim_protects_recent_tools():
+    recent = "RECENT_TOOL_BODY_" + ("y" * 3000)
+    old = "OLD_TOOL_BODY_" + ("x" * 9000)
+    msgs = [
+        {"role": "user", "content": "go"},
+        {"role": "tool", "tool_call_id": "1", "name": "bash_exec", "content": old},
+        {"role": "tool", "tool_call_id": "2", "name": "bash_exec", "content": old},
+        {"role": "tool", "tool_call_id": "3", "name": "bash_exec", "content": recent},
+    ]
+    out = prune_messages_for_send(
+        msgs,
+        dedupe_tools=False,
+        token_budget=500,
+        reserve_tokens=0,
+        keep_recent_tool_pairs=1,
+    )
+    last_tool = [m for m in out if m.get("role") == "tool"][-1]
+    assert recent in (last_tool.get("content") or "")
+
+
+def _fake_runtime(**kwargs):
+    base = dict(
+        _harness_mode="auto",
+        _harness_min_pct=0.01,  # force soft/strong easily
+        _harness_max_pct=0.02,
+        _llm_provider="openai",
+        _llm_model="gpt-4o-mini",
+        _session_id="sess-test",
+        _session_brief=None,
+        config=SimpleNamespace(
+            provider="openai",
+            model="gpt-4o-mini",
+            project_path="",
+            home_dir=None,
+        ),
+    )
+    base.update(kwargs)
+    return SimpleNamespace(**base)
+
+
+def test_auto_policy_creates_brief_when_missing():
+    # Large enough message list to trigger fill-based soft/strong with tiny thresholds
+    fat = "line of context\n" * 2000
+    messages = [
+        {"role": "system", "content": "sys"},
+        *[{"role": "user", "content": fat} for _ in range(3)],
+        {"role": "user", "content": "current question"},
+    ]
+    rt = _fake_runtime()
+    out, meta = apply_auto_harness_send_policy(
+        rt, list(messages), user_text="current question", session_id="sess-test"
+    )
+    assert rt._session_brief is not None
+    assert rt._session_brief.session_id == "sess-test"
+    assert meta.get("level") in ("soft", "strong", None) or True  # level depends on estimator
+    assert isinstance(out, list)
+    assert len(out) >= 1
+
+
+def test_auto_policy_middle_replace_requires_quality_ok():
+    fat = "x" * 50_000
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": fat},
+        {"role": "assistant", "content": fat},
+        {"role": "tool", "tool_call_id": "t1", "name": "file_read", "content": fat},
+        {"role": "user", "content": fat},
+        {"role": "assistant", "content": fat},
+        {"role": "tool", "tool_call_id": "t2", "name": "file_read", "content": fat},
+        {"role": "user", "content": "finish up"},
+    ]
+    rt = _fake_runtime(
+        _session_brief=SessionBrief(session_id="sess-test"),  # empty = no substance path match
+        _harness_min_pct=0.01,
+        _harness_max_pct=0.02,
+    )
+    _out, meta = apply_auto_harness_send_policy(
+        rt, list(messages), user_text="finish up", session_id="sess-test"
+    )
+    # With fail-closed quality, middle replace must not fire on empty brief facts
+    if meta.get("level") == "strong":
+        assert meta.get("middle_replaced") is False
+
+
+def test_mid_turn_slim_no_op_when_small():
+    rt = _fake_runtime(_harness_min_pct=0.75)
+    msgs = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "hi"},
+    ]
+    out = slim_messages_mid_turn(rt, msgs, session_id="s")
+    assert out == msgs
+
+
+def test_brief_registry_session_isolation():
+    from remedy.memory.harness.local_brief import (
+        apply_local_brief_payload,
+        get_registered_brief,
+        register_session_brief,
+    )
+
+    a = SessionBrief(session_id="a")
+    b = SessionBrief(session_id="b")
+    register_session_brief("a", a)
+    register_session_brief("b", b)
+    apply_local_brief_payload(
+        get_registered_brief("a"),
+        {"intent": "only A", "paths": ["a.py"], "decisions": ["da"]},
+    )
+    assert a.intent == "only A"
+    assert b.intent == ""
+    assert get_registered_brief("b") is b

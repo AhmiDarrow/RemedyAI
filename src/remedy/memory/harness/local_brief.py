@@ -8,11 +8,33 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 _JSON_RE = re.compile(r"\{[\s\S]*\}")
+
+# session_id → SessionBrief (process-local; apply path is thread-safe)
+_brief_registry: dict[str, Any] = {}
+_brief_registry_lock = threading.Lock()
+
+
+def register_session_brief(session_id: str, brief: Any) -> None:
+    """Register brief so background jobs can apply without late-bound closures."""
+    sid = (session_id or "").strip()
+    if not sid or brief is None:
+        return
+    with _brief_registry_lock:
+        _brief_registry[sid] = brief
+
+
+def get_registered_brief(session_id: str) -> Any | None:
+    sid = (session_id or "").strip()
+    if not sid:
+        return None
+    with _brief_registry_lock:
+        return _brief_registry.get(sid)
 
 
 def _local_base_url() -> str:
@@ -55,7 +77,6 @@ def _parse_brief_json(text: str) -> dict[str, Any] | None:
     if not text:
         return None
     raw = text.strip()
-    # Strip fences
     if "```" in raw:
         raw = re.sub(r"```(?:json)?", "", raw).replace("```", "").strip()
     m = _JSON_RE.search(raw)
@@ -159,6 +180,39 @@ def run_local_brief_update_sync(
     return _parse_brief_json(str(res.get("text") or ""))
 
 
+def process_brief_update_job(job: Any) -> Any:
+    """Stable queue handler: run local complete + apply to registered session brief."""
+    p = getattr(job, "payload", None) or {}
+    data = run_local_brief_update_sync(
+        list(p.get("messages") or []),
+        intent_hint=str(p.get("intent_hint") or ""),
+        base_url=str(p.get("base_url") or "") or None,
+        timeout_s=float(p.get("timeout_s") or 25),
+    )
+    sid = str(p.get("session_id") or "")
+    brief = get_registered_brief(sid)
+    # Fallback: payload may carry a direct weak target key from same-process schedule
+    if brief is None and p.get("_brief_ref_id"):
+        with _brief_registry_lock:
+            brief = _brief_registry.get(str(p.get("_brief_ref_id")))
+    if data and brief is not None:
+        with _brief_registry_lock:
+            apply_local_brief_payload(brief, data)
+            try:
+                from remedy.memory.harness.quality import review_compress_quality
+
+                qres = review_compress_quality(
+                    messages_before=list(p.get("messages") or []),
+                    brief=brief,
+                )
+                score = qres.get("score")
+                if score is not None:
+                    brief.last_quality_score = float(score)
+            except Exception:
+                pass
+    return data
+
+
 def schedule_background_brief_update(
     runtime: Any,
     messages: list[dict[str, Any]],
@@ -178,48 +232,38 @@ def schedule_background_brief_update(
         pending = st.get("pending") or []
         if len(pending) > 2:
             return False
+
         brief = getattr(runtime, "_session_brief", None)
         if brief is None:
             return False
 
-        def _handler(job: Any) -> Any:
-            data = run_local_brief_update_sync(
-                list(job.payload.get("messages") or []),
-                intent_hint=str(job.payload.get("intent_hint") or ""),
-                base_url=str(job.payload.get("base_url") or "") or None,
-            )
-            if data and brief is not None:
-                apply_local_brief_payload(brief, data)
-                try:
-                    from remedy.memory.harness.quality import review_compress_quality
-
-                    qres = review_compress_quality(
-                        messages_before=list(job.payload.get("messages") or []),
-                        brief=brief,
-                    )
-                    score = qres.get("score")
-                    if score is not None:
-                        brief.last_quality_score = float(score)
-                except Exception:
-                    pass
-            return data
-
-        kind = "brief_update"
-        q.register(kind, _handler)
+        sid = str(
+            getattr(brief, "session_id", None)
+            or getattr(runtime, "_session_id", None)
+            or ""
+        )
+        if not sid:
+            sid = f"anon-{id(brief)}"
+            try:
+                brief.session_id = sid
+            except Exception:
+                pass
+        register_session_brief(sid, brief)
 
         job = LocalJob(
             role=LR.HELPER,
-            kind=kind,
+            kind="brief_update",
             payload={
                 "messages": list(messages[-30:]),
                 "intent_hint": intent_hint,
                 "base_url": _local_base_url(),
                 "level": level,
+                "session_id": sid,
             },
             priority=1 if level == "strong" else 0,
         )
         q.submit(job, wait=False)
-        logger.debug("Queued local brief_update job %s level=%s", job.job_id, level)
+        logger.debug("Queued local brief_update job %s level=%s sid=%s", job.job_id, level, sid)
         return True
     except Exception as e:
         logger.debug("schedule_background_brief_update failed: %s", e)

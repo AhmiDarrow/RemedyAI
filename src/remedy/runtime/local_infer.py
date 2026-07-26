@@ -124,15 +124,9 @@ def ensure_handlers_registered() -> None:
 
     def _brief_update(job: LocalJob) -> Any:
         """Session Brief refresh on local Qwen (Memory Harness background)."""
-        from remedy.memory.harness.local_brief import run_local_brief_update_sync
+        from remedy.memory.harness.local_brief import process_brief_update_job
 
-        p = job.payload or {}
-        return run_local_brief_update_sync(
-            list(p.get("messages") or []),
-            intent_hint=str(p.get("intent_hint") or ""),
-            base_url=str(p.get("base_url") or "") or None,
-            timeout_s=float(p.get("timeout_s") or 25),
-        )
+        return process_brief_update_job(job)
 
     q.register("vision_decode", _vision_decode)
     q.register("nano_classify", _nano_classify)

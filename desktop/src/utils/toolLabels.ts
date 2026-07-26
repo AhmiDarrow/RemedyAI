@@ -117,6 +117,8 @@ export type ProcessStep = {
   argsText?: string
   resultText?: string
   error?: string
+  /** Provider tool_call id when available (matches parallel same-name tools). */
+  callId?: string
 }
 
 export function stepsFromMessageTools(

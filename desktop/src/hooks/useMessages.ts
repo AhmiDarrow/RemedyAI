@@ -447,17 +447,15 @@ export function useMessages(sessionId: string | null) {
         },
         model,
         (thought) => appendPartialThinking(thought),
-        (name, args) => {
-          setActiveTools((prev) => {
-            if (prev.some((t) => t.name === name && t.status === 'running')) return prev
-            return [...prev, { name, status: 'running' }]
-          })
+        (name, args, callId) => {
+          setActiveTools((prev) => [...prev, { name, status: 'running' }])
           const step: ProcessStep = {
-            id: `${name}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            id: callId || `${name}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
             name,
             label: toolLabel(name),
             status: 'running',
             startedAt: Date.now(),
+            callId: callId || undefined,
             argsText:
               args && Object.keys(args).length
                 ? JSON.stringify(args, null, 2)
@@ -465,18 +463,25 @@ export function useMessages(sessionId: string | null) {
           }
           pushSteps([...processStepsRef.current, step])
         },
-        (name, preview, ok = true) => {
-          setActiveTools((prev) =>
-            prev.map((t) =>
-              t.name === name
-                ? { ...t, status: ok ? ('done' as const) : ('error' as const) }
-                : t,
-            ),
-          )
+        (name, preview, ok = true, callId) => {
+          setActiveTools((prev) => {
+            let done = false
+            return prev.map((t) => {
+              if (!done && t.name === name && t.status === 'running') {
+                done = true
+                return { ...t, status: ok ? ('done' as const) : ('error' as const) }
+              }
+              return t
+            })
+          })
           const prev = processStepsRef.current
           let hit = false
           const next = prev.map((s) => {
-            if (!hit && s.name === name && s.status === 'running') {
+            if (hit || s.status !== 'running') return s
+            const idMatch =
+              callId && (s.callId === callId || s.id === callId)
+            const nameMatch = !callId && s.name === name
+            if (idMatch || nameMatch) {
               hit = true
               return {
                 ...s,
@@ -484,18 +489,20 @@ export function useMessages(sessionId: string | null) {
                 endedAt: Date.now(),
                 resultText: preview,
                 error: ok ? undefined : preview || 'tool failed',
+                callId: s.callId || callId,
               }
             }
             return s
           })
           if (!hit) {
             next.push({
-              id: `${name}-done-${Date.now()}`,
+              id: callId || `${name}-done-${Date.now()}`,
               name,
               label: toolLabel(name),
               status: ok ? 'done' : 'error',
               startedAt: Date.now(),
               endedAt: Date.now(),
+              callId: callId || undefined,
               resultText: preview,
               error: ok ? undefined : preview || 'tool failed',
             })

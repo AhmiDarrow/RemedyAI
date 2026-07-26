@@ -33,6 +33,32 @@ def resolve_context_window_for_runtime(runtime: Any) -> int:
         return 128_000
 
 
+def _ensure_session_brief(runtime: Any, session_id: str = "") -> Any:
+    """Create SessionBrief on first auto-compress if missing."""
+    brief = getattr(runtime, "_session_brief", None)
+    if brief is not None:
+        return brief
+    from remedy.memory.harness.brief import SessionBrief
+
+    sid = session_id or str(getattr(runtime, "_session_id", "") or "")
+    brief = SessionBrief(session_id=sid)
+    runtime._session_brief = brief
+    return brief
+
+
+def _brief_has_substance(brief: Any) -> bool:
+    if brief is None:
+        return False
+    return bool(
+        (getattr(brief, "intent", None) or "").strip()
+        or (getattr(brief, "artifacts", None) or [])
+        or (getattr(brief, "decisions", None) or [])
+        or (getattr(brief, "decision_records", None) or [])
+        or (getattr(brief, "history_thread", None) or [])
+        or (getattr(brief, "key_paths", None) or [])
+    )
+
+
 def apply_auto_harness_send_policy(
     runtime: Any,
     messages: list[dict[str, Any]],
@@ -65,20 +91,21 @@ def apply_auto_harness_send_policy(
     from remedy.memory.harness.offload import maybe_offload_messages
     from remedy.memory.harness.pruner import prune_messages_for_send
 
+    cfg = getattr(runtime, "config", None)
     provider = str(
-        getattr(runtime.config, "provider", None)
-        or getattr(runtime.config, "llm_provider", "")
+        getattr(cfg, "provider", None)
+        or getattr(cfg, "llm_provider", None)
         or getattr(runtime, "_llm_provider", "")
         or ""
     )
     model = str(
-        getattr(runtime.config, "model", None)
-        or getattr(runtime.config, "llm_model", "")
+        getattr(cfg, "model", None)
+        or getattr(cfg, "llm_model", None)
         or getattr(runtime, "_llm_model", "")
         or ""
     )
     project_path = str(
-        getattr(runtime.config, "project_path", None)
+        getattr(cfg, "project_path", None)
         or getattr(runtime, "_project_path", None)
         or ""
     ) or None
@@ -86,6 +113,9 @@ def apply_auto_harness_send_policy(
     window = resolve_context_window_for_runtime(runtime)
     min_pct = float(getattr(runtime, "_harness_min_pct", 0.75) or 0.75)
     max_pct = float(getattr(runtime, "_harness_max_pct", 0.92) or 0.92)
+
+    # Pre-policy snapshot for quality scoring (ground truth before prune)
+    pre_prune: list[dict[str, Any]] = [dict(m) for m in messages]
 
     snap = build_context_snapshot(
         messages=messages,
@@ -100,7 +130,6 @@ def apply_auto_harness_send_policy(
         project_path=project_path,
     )
     runtime._last_context_snapshot = snap
-    runtime._last_send_messages = list(messages)
     est = snap.token_estimate
     level = snap.nudge
     meta["level"] = level
@@ -127,11 +156,19 @@ def apply_auto_harness_send_policy(
         )
 
     if not level:
+        runtime._last_send_messages = list(messages)
         with suppress(Exception):
             from remedy.core.metrics import default_registry
 
             default_registry.gauge("remedy_context_tokens_estimate").set(float(est))
         return messages, meta
+
+    # Ensure brief exists before any compress work
+    _ensure_session_brief(runtime, sid)
+    with suppress(Exception):
+        from remedy.memory.harness.local_brief import register_session_brief
+
+        register_session_brief(sid, runtime._session_brief)
 
     # Shared home for offload
     home = None
@@ -139,7 +176,6 @@ def apply_auto_harness_send_policy(
         home = getattr(getattr(runtime, "config", None), "home_dir", None)
 
     if level == "soft":
-        # Soft: collapse old tools + token budget prune (enforce lean send)
         budget = max(2048, int(window * max(0.55, min_pct - 0.05)))
         messages[:] = prune_messages_for_send(
             messages,
@@ -161,13 +197,13 @@ def apply_auto_harness_send_policy(
                 keep_recent_tools=6,
             )
         messages.insert(-1, compression_nudge_message("soft"))
-        # Background local brief (non-blocking)
         with suppress(Exception):
             from remedy.memory.harness.local_brief import schedule_background_brief_update
 
             meta["local_queued"] = schedule_background_brief_update(
                 runtime, messages, intent_hint=user_text, level="soft"
             )
+        runtime._last_send_messages = list(messages)
         with suppress(Exception):
             from remedy.core.metrics import default_registry
 
@@ -177,7 +213,7 @@ def apply_auto_harness_send_policy(
             default_registry.gauge("remedy_context_tokens_estimate").set(float(est))
         return messages, meta
 
-    # strong
+    # --- strong ---
     tokens_before = est
     hard_cap = max(4_000, (tool_result_char_cap or 64_000) // 4)
     budget = max(2048, int(window * max(0.45, min_pct - 0.15)))
@@ -203,54 +239,68 @@ def apply_auto_harness_send_policy(
 
     quality: dict[str, Any] = {}
     with suppress(Exception):
-        brief = getattr(runtime, "_session_brief", None)
-        if brief is not None:
-            from remedy.core.session_quality import get_session_quality
-            from remedy.memory.harness.quality import review_compress_quality
+        brief = _ensure_session_brief(runtime, sid)
+        from remedy.core.session_quality import get_session_quality
+        from remedy.memory.harness.quality import review_compress_quality
 
-            pre_hist = list(messages)
-            runtime._session_brief = heuristic_merge_from_history(
-                brief, messages, intent_hint=user_text
+        runtime._session_brief = heuristic_merge_from_history(
+            brief, pre_prune, intent_hint=user_text
+        )
+        with suppress(Exception):
+            runtime._session_brief.append_history_thread(
+                f"Auto-compress at ~{snap.fill_pct:.0%} fill "
+                f"({tokens_before} tok est). Intent: "
+                f"{(runtime._session_brief.intent or user_text or '')[:200]}",
+                decisions_why=list(runtime._session_brief.decisions[-3:]),
+                blockers=list(runtime._session_brief.blockers[-3:]),
             )
-            # Append cumulative thread entry for this strong event
-            with suppress(Exception):
-                runtime._session_brief.append_history_thread(
-                    f"Auto-compress at ~{snap.fill_pct:.0%} fill "
-                    f"({tokens_before} tok est). Intent: "
-                    f"{(runtime._session_brief.intent or user_text or '')[:200]}",
-                    decisions_why=list(runtime._session_brief.decisions[-3:]),
-                    blockers=list(runtime._session_brief.blockers[-3:]),
-                )
-            tokens_after = estimate_tokens(
-                messages, provider=provider or None, model=model or None
-            )
-            quality = review_compress_quality(
-                messages_before=pre_hist,
-                brief=runtime._session_brief,
-                tokens_before=tokens_before,
-                tokens_after=tokens_after,
-            )
-            score = quality.get("score")
-            if score is not None:
-                runtime._session_brief.last_quality_score = float(score)
-            get_session_quality(sid).record_compress(
-                tokens_before=tokens_before,
-                tokens_after=tokens_after,
-                quality=quality,
-                source="auto_strong",
-            )
-            meta["quality"] = quality
+        tokens_after_prune = estimate_tokens(
+            messages, provider=provider or None, model=model or None
+        )
+        # Score against *pre-prune* history so the gate is not self-fulfilling
+        quality = review_compress_quality(
+            messages_before=pre_prune,
+            brief=runtime._session_brief,
+            tokens_before=tokens_before,
+            tokens_after=tokens_after_prune,
+        )
+        score = quality.get("score")
+        if score is not None:
+            runtime._session_brief.last_quality_score = float(score)
+        get_session_quality(sid).record_compress(
+            tokens_before=tokens_before,
+            tokens_after=tokens_after_prune,
+            quality=quality,
+            source="auto_strong",
+        )
+        meta["quality"] = quality
 
-    # Quality gate: only replace middle history when brief looks solid
+    # Quality gate: only replace middle when brief is solid (fail-closed)
     score = float((quality or {}).get("score") or 0.0)
-    if score >= 0.65 and getattr(runtime, "_session_brief", None) is not None:
+    quality_ok = bool((quality or {}).get("ok"))
+    can_replace = (
+        quality_ok
+        and score >= 0.65
+        and _brief_has_substance(getattr(runtime, "_session_brief", None))
+    )
+    if can_replace:
         with suppress(Exception):
             messages[:] = _replace_middle_with_brief_pointer(
                 messages, runtime._session_brief
             )
             meta["middle_replaced"] = True
-    elif score < 0.5:
-        # Keep more fidelity — local/provider may improve brief later
+            # Re-measure after middle replace for accurate metrics
+            with suppress(Exception):
+                tokens_final = estimate_tokens(
+                    messages, provider=provider or None, model=model or None
+                )
+                if meta.get("quality") and isinstance(meta["quality"], dict):
+                    meta["quality"]["tokens_after"] = tokens_final
+                    if tokens_before > 0:
+                        meta["quality"]["token_reduction_pct"] = round(
+                            max(0.0, 1.0 - tokens_final / tokens_before) * 100, 1
+                        )
+    elif score < 0.5 or not quality_ok:
         with suppress(Exception):
             messages.insert(
                 -1,
@@ -266,7 +316,6 @@ def apply_auto_harness_send_policy(
 
     messages.insert(-1, compression_nudge_message("strong"))
 
-    # Background local brief (prefer free local over paid provider)
     local_ok = False
     with suppress(Exception):
         from remedy.memory.harness.local_brief import schedule_background_brief_update
@@ -276,12 +325,14 @@ def apply_auto_harness_send_policy(
         )
         meta["local_queued"] = local_ok
 
-    # Phase E: paid provider compress only if local unavailable and quality poor
+    # Phase E: when local queue unavailable and quality poor, heuristic enrich only
+    # (no paid provider call on the hot path — avoids latency + surprise $).
     if not local_ok and score < 0.55:
         with suppress(Exception):
-            _try_provider_brief_fallback(runtime, messages, user_text=user_text)
-            meta["provider_fallback"] = True
+            _try_heuristic_brief_fallback(runtime, pre_prune, user_text=user_text)
+            meta["heuristic_fallback"] = True
 
+    runtime._last_send_messages = list(messages)
     with suppress(Exception):
         from remedy.core.metrics import default_registry
 
@@ -293,6 +344,77 @@ def apply_auto_harness_send_policy(
     return messages, meta
 
 
+def slim_messages_mid_turn(
+    runtime: Any,
+    messages: list[dict[str, Any]],
+    *,
+    session_id: str = "",
+    tool_result_char_cap: int = 0,
+) -> list[dict[str, Any]]:
+    """Re-slim send-view between ReAct steps when fill is high.
+
+    Lighter than full auto policy: prune + offload only (no middle replace,
+    no history_thread spam). Safe to call every provider round.
+    """
+    if str(getattr(runtime, "_harness_mode", "auto") or "auto").lower() == "off":
+        return messages
+    if len(messages) < 6:
+        return messages
+
+    from remedy.memory.harness.compressor import estimate_tokens
+    from remedy.memory.harness.offload import maybe_offload_messages
+    from remedy.memory.harness.pruner import prune_messages_for_send
+
+    provider = str(
+        getattr(runtime, "_llm_provider", None)
+        or getattr(getattr(runtime, "config", None), "llm_provider", "")
+        or ""
+    )
+    model = str(
+        getattr(runtime, "_llm_model", None)
+        or getattr(getattr(runtime, "config", None), "llm_model", "")
+        or ""
+    )
+    window = resolve_context_window_for_runtime(runtime)
+    min_pct = float(getattr(runtime, "_harness_min_pct", 0.75) or 0.75)
+    est = estimate_tokens(messages, provider=provider or None, model=model or None)
+    fill = est / max(1, window)
+    if fill < max(0.55, min_pct - 0.15):
+        return messages
+
+    sid = session_id or str(getattr(runtime, "_session_id", "") or "")
+    home = None
+    with suppress(Exception):
+        home = getattr(getattr(runtime, "config", None), "home_dir", None)
+
+    # Stronger when above soft threshold
+    strong = fill >= min_pct
+    keep = 3 if strong else 6
+    hard_cap = max(4_000, (tool_result_char_cap or 64_000) // 4) if strong else 0
+    budget = max(2048, int(window * (0.45 if strong else 0.55)))
+    out = prune_messages_for_send(
+        messages,
+        max_tool_chars=hard_cap,
+        dedupe_tools=True,
+        collapse_completed_tools=True,
+        keep_recent_tool_pairs=keep,
+        token_budget=budget,
+        reserve_tokens=max(512, int(window * 0.08)),
+        provider=provider or None,
+        model=model or None,
+    )
+    with suppress(Exception):
+        out = maybe_offload_messages(
+            out,
+            session_id=sid,
+            home=home,
+            min_chars=4000 if strong else 8000,
+            keep_recent_tools=keep,
+        )
+    runtime._last_send_messages = list(out)
+    return out
+
+
 def _replace_middle_with_brief_pointer(
     messages: list[dict[str, Any]],
     brief: Any,
@@ -300,7 +422,6 @@ def _replace_middle_with_brief_pointer(
     """Keep system head + brief pointer + recent user/assistant tail + last user."""
     if len(messages) < 8:
         return messages
-    # Keep first system messages and last 6 messages (includes current user)
     head: list[dict[str, Any]] = []
     for m in messages:
         if m.get("role") == "system" and len(head) < 3:
@@ -319,36 +440,24 @@ def _replace_middle_with_brief_pointer(
             + (block or "(brief empty)")
         ),
     }
-    # Avoid duplicating tail systems
     return head + [mid] + [m for m in tail if m not in head]
 
 
-def _try_provider_brief_fallback(
+def _try_heuristic_brief_fallback(
     runtime: Any,
     messages: list[dict[str, Any]],
     *,
     user_text: str = "",
 ) -> None:
-    """Rare paid path: one structured compress via provider if local queue failed.
-
-    Synchronous short call — only when quality is already poor and local unavailable.
-    Best-effort; failures are silent.
-    """
+    """When local brief queue is unavailable: enrich brief from history (no paid call)."""
     brief = getattr(runtime, "_session_brief", None)
     if brief is None:
         return
-    # Prefer not to block long — skip if no API key
-    key = str(getattr(runtime, "_llm_api_key", "") or "")
-    if not key:
-        return
-    # Use heuristic only if we can't afford another call this turn
-    # Mark that fallback was considered; full LLM path deferred to compress_context tool
-    # to avoid doubling latency on the hot path. Enrich brief via heuristic merge.
     from remedy.memory.harness.compressor import heuristic_merge_from_history
 
     heuristic_merge_from_history(brief, messages, intent_hint=user_text)
     brief.append_history_thread(
-        f"Provider-side heuristic refresh (local brief unavailable). "
+        f"Heuristic refresh (local brief queue unavailable). "
         f"Focus: {(user_text or '')[:180]}",
         decisions_why=list(brief.decisions[-3:]),
         blockers=list(brief.blockers[-3:]),

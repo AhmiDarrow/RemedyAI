@@ -201,10 +201,16 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
             if not isinstance(args_obj, dict):
                 args_obj = {"value": args_obj}
             # Structured tool_call for UI process trace (args for full mode).
+            call_id_ui = str(tc.get("id") or fp or name or "tool")
             yield (
                 "@@tool_call:"
                 + json.dumps(
-                    {"name": name or "tool", "args": args_obj},
+                    {
+                        "name": name or "tool",
+                        "args": args_obj,
+                        "id": call_id_ui,
+                        "call_id": call_id_ui,
+                    },
                     default=str,
                     separators=(",", ":"),
                 )
@@ -295,6 +301,8 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
                     "name": name or "unknown",
                     "preview": preview,
                     "ok": ok,
+                    "id": call_id,
+                    "call_id": call_id,
                 },
                 default=str,
                 separators=(",", ":"),

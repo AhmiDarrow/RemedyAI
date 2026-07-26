@@ -17,7 +17,10 @@ from remedy.memory.harness.compressor import (
     should_nudge_compress,
 )
 from remedy.memory.harness.pruner import prune_messages_for_send
-from remedy.memory.harness.send_policy import apply_auto_harness_send_policy
+from remedy.memory.harness.send_policy import (
+    apply_auto_harness_send_policy,
+    slim_messages_mid_turn,
+)
 
 __all__ = [
     "SessionBrief",
@@ -27,4 +30,5 @@ __all__ = [
     "heuristic_merge_from_history",
     "prune_messages_for_send",
     "should_nudge_compress",
+    "slim_messages_mid_turn",
 ]

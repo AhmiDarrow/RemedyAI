@@ -38,8 +38,17 @@ export type StreamHandlers = {
   onDone: (data: { request_id: string; usage?: UsagePayload }) => void
   onError: (message: string) => void
   onThinking?: (text: string) => void
-  onToolCall?: (name: string, args?: Record<string, unknown>) => void
-  onToolResult?: (name: string, preview?: string, ok?: boolean) => void
+  onToolCall?: (
+    name: string,
+    args?: Record<string, unknown>,
+    callId?: string,
+  ) => void
+  onToolResult?: (
+    name: string,
+    preview?: string,
+    ok?: boolean,
+    callId?: string,
+  ) => void
   onUsage?: (usage: UsagePayload) => void
 }
 
@@ -68,8 +77,17 @@ export function streamMessage(
   onError: (message: string) => void,
   model?: string,
   onThinking?: (text: string) => void,
-  onToolCall?: (name: string, args?: Record<string, unknown>) => void,
-  onToolResult?: (name: string, preview?: string, ok?: boolean) => void,
+  onToolCall?: (
+    name: string,
+    args?: Record<string, unknown>,
+    callId?: string,
+  ) => void,
+  onToolResult?: (
+    name: string,
+    preview?: string,
+    ok?: boolean,
+    callId?: string,
+  ) => void,
   attachments?: AttachmentPayload[],
   onProgress?: (info: StreamProgress) => void,
   planMode?: boolean,
@@ -133,15 +151,28 @@ export function streamMessage(
                 payload.args && typeof payload.args === 'object' && !Array.isArray(payload.args)
                   ? (payload.args as Record<string, unknown>)
                   : undefined
-              onToolCall?.(payload.name, args)
+              const callId =
+                typeof payload.call_id === 'string'
+                  ? payload.call_id
+                  : typeof payload.id === 'string'
+                    ? payload.id
+                    : undefined
+              onToolCall?.(payload.name, args, callId)
             }
             break
           case 'tool_result':
             if (typeof payload.name === 'string' && payload.name) {
+              const callId =
+                typeof payload.call_id === 'string'
+                  ? payload.call_id
+                  : typeof payload.id === 'string'
+                    ? payload.id
+                    : undefined
               onToolResult?.(
                 payload.name,
                 typeof payload.preview === 'string' ? payload.preview : undefined,
                 typeof payload.ok === 'boolean' ? payload.ok : true,
+                callId,
               )
             }
             break

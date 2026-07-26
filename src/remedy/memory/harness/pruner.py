@@ -101,6 +101,7 @@ def prune_messages_for_send(
             budget=max(256, int(token_budget) - max(0, int(reserve_tokens))),
             provider=provider,
             model=model,
+            keep_recent_tools=max(1, int(keep_recent_tool_pairs)),
         )
     return out
 
@@ -178,8 +179,13 @@ def _shrink_to_token_budget(
     budget: int,
     provider: str | None = None,
     model: str | None = None,
+    keep_recent_tools: int = 4,
 ) -> list[dict[str, Any]]:
-    """Progressively cap tool/assistant bodies from oldest until under budget."""
+    """Progressively cap older tool bodies until under budget.
+
+    Protects the last ``keep_recent_tools`` tool messages (and does not chop
+    assistant prose until tools are already at the floor cap).
+    """
     try:
         from remedy.memory.harness.compressor import estimate_tokens
     except Exception:
@@ -190,12 +196,30 @@ def _shrink_to_token_budget(
     if est <= budget:
         return msgs
 
+    tool_idxs = [i for i, m in enumerate(msgs) if m.get("role") == "tool"]
+    protect_tools = set(tool_idxs[-max(1, int(keep_recent_tools)) :]) if tool_idxs else set()
+
+    # Phase 1: trim unprotected tools only
     caps = (8000, 4000, 2000, 800, 200)
     for cap in caps:
         for i, m in enumerate(msgs):
-            if m.get("role") not in ("tool", "assistant"):
+            if m.get("role") != "tool" or i in protect_tools:
                 continue
-            # Prefer trimming older tool noise first
+            content = m.get("content")
+            if isinstance(content, str) and len(content) > cap:
+                msgs[i] = dict(m)
+                msgs[i]["content"] = content[:cap] + "\n…[budget trim]"
+        est = estimate_tokens(msgs, provider=provider, model=model)
+        if est <= budget:
+            return msgs
+
+    # Phase 2: if still over, lightly trim older assistants (never last 2)
+    asst_idxs = [i for i, m in enumerate(msgs) if m.get("role") == "assistant"]
+    protect_asst = set(asst_idxs[-2:]) if asst_idxs else set()
+    for cap in (4000, 1500, 400):
+        for i, m in enumerate(msgs):
+            if m.get("role") != "assistant" or i in protect_asst:
+                continue
             content = m.get("content")
             if isinstance(content, str) and len(content) > cap:
                 msgs[i] = dict(m)

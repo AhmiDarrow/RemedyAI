@@ -128,10 +128,23 @@ def review_compress_quality(
     n_dec = len(decisions) or 0
     path_score = (len(paths_kept) / n_path) if n_path else 1.0
     dec_score = (len(dec_kept) / n_dec) if n_dec else 1.0
-    # Weight paths higher for coding agents; neutral high score if nothing extractable
-    score = (
-        0.65 * path_score + 0.35 * dec_score if (n_path or n_dec) else 0.85
-    )
+    # Fail-closed when nothing extractable: do not authorize middle-history drop.
+    # (Previously defaulted to 0.85, which always passed the 0.65 gate.)
+    if n_path or n_dec:
+        score = 0.65 * path_score + 0.35 * dec_score
+    else:
+        score = 0.40
+
+    brief_substance = False
+    if brief is not None:
+        brief_substance = bool(
+            (getattr(brief, "intent", None) or "").strip()
+            or (getattr(brief, "artifacts", None) or [])
+            or (getattr(brief, "decisions", None) or [])
+            or (getattr(brief, "decision_records", None) or [])
+            or (getattr(brief, "history_thread", None) or [])
+            or (getattr(brief, "key_paths", None) or [])
+        )
 
     # Token reduction bonus does not inflate quality — report separately
     reduction = 0.0
@@ -147,6 +160,16 @@ def review_compress_quality(
         summary_parts.append(
             f"tokens {tokens_before}→{tokens_after} ({reduction*100:.0f}% less est.)"
         )
+    if not (n_path or n_dec):
+        summary_parts.append("no extractable facts (fail-closed)")
+
+    path_loss_ok = len(paths_lost) <= max(2, n_path // 3) if n_path else True
+    ok = (
+        score >= 0.55
+        and path_loss_ok
+        and brief_substance
+        and (n_path + n_dec) > 0
+    )
 
     return {
         "score": round(min(1.0, max(0.0, score)), 3),
@@ -161,6 +184,7 @@ def review_compress_quality(
         "token_reduction_pct": round(reduction * 100, 1),
         "tokens_before": tokens_before,
         "tokens_after": tokens_after,
+        "brief_substance": brief_substance,
         "summary": ", ".join(summary_parts) or "no extractable facts",
-        "ok": score >= 0.55 and len(paths_lost) <= max(2, n_path // 3),
+        "ok": ok,
     }

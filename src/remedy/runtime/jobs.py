@@ -22,6 +22,10 @@ class LocalJob:
     job_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     created_at: float = field(default_factory=time.time)
     priority: int = 0  # higher runs first within queue
+    # Handler snapshot at submit time — avoids late-bound re-register races
+    _handler: Callable[["LocalJob"], Any] | None = field(
+        default=None, repr=False, compare=False
+    )
 
     def to_public(self) -> dict[str, Any]:
         return {
@@ -49,9 +53,10 @@ class LocalJobQueue:
             self._handlers[kind] = handler
 
     def _ensure_worker(self) -> None:
-        if self._worker_started:
-            return
-        self._worker_started = True
+        with self._lock:
+            if self._worker_started:
+                return
+            self._worker_started = True
 
         def _loop() -> None:
             while True:
@@ -64,7 +69,7 @@ class LocalJobQueue:
                         "_done_event", threading.Event()
                     )
                     result_box: dict[str, Any] = job.payload.setdefault("_result_box", {})
-                    handler = self._handlers.get(job.kind)
+                    handler = job._handler or self._handlers.get(job.kind)
                 try:
                     if handler is None:
                         result_box["error"] = f"No handler for job kind {job.kind!r}"
@@ -84,8 +89,16 @@ class LocalJobQueue:
 
     def submit(self, job: LocalJob, *, wait: bool = True, timeout: float = 120.0) -> Any:
         """Enqueue job; optionally wait for result (exclusive execution)."""
-        # Cap queue depth — drop lowest-priority oldest if flooded
+        done = threading.Event()
+        box: dict[str, Any] = {}
+        job.payload["_done_event"] = done
+        job.payload["_result_box"] = box
+        self._ensure_worker()
         with self._cond:
+            # Snapshot handler under lock so re-register mid-flight cannot rebind
+            if job._handler is None:
+                job._handler = self._handlers.get(job.kind)
+            # Cap queue depth — drop lowest-priority oldest if flooded
             if len(self._pending) >= 32:
                 self._pending.sort(key=lambda j: (j.priority, -j.created_at))
                 dropped = self._pending.pop(0)
@@ -95,12 +108,6 @@ class LocalJobQueue:
                     dropped.job_id,
                     dropped.kind,
                 )
-        done = threading.Event()
-        box: dict[str, Any] = {}
-        job.payload["_done_event"] = done
-        job.payload["_result_box"] = box
-        self._ensure_worker()
-        with self._cond:
             self._pending.append(job)
             self._pending.sort(key=lambda j: (-j.priority, j.created_at))
             self._cond.notify()

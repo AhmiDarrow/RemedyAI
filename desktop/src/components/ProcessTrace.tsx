@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   isFullProcessMode,
   type ProcessStep,
@@ -57,6 +57,15 @@ export function ProcessTrace({
   const [collapsed, setCollapsed] = useState(defaultCollapsed && !live)
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set())
   const [copiedId, setCopiedId] = useState<string | null>(null)
+
+  // Re-bind panel open/closed when Min/Med/Full changes (historical traces)
+  useEffect(() => {
+    if (live) {
+      setCollapsed(false)
+      return
+    }
+    setCollapsed(defaultCollapsed)
+  }, [mode, live, defaultCollapsed])
 
   const stepSig = steps
     .map(
