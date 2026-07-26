@@ -21,7 +21,14 @@ replace Authenticode for the **first** download from the browser.
 |------|--------|
 | Releases only from | `https://github.com/AhmiDarrow/RemedyAI/releases` |
 | Update metadata | `…/releases/latest/download/latest.json` (URL must match publisher) |
+| Installer asset name | **`Remedy.Desktop_{X.Y.Z}_x64-setup.exe`** (dots for spaces; never `Remedy_Desktop_`) |
+| Example URL | `…/releases/download/v0.14.4/Remedy.Desktop_0.14.4_x64-setup.exe` |
 | minisign public key (Tauri base64) | In `desktop/src-tauri/tauri.conf.json` → `plugins.updater.pubkey` |
+
+If auto-update reports `Download URL does not match signed latest.json asset`,
+compare the **got** URL filename to the table above. Rename the GitHub Release
+asset to the canonical `Remedy.Desktop_*` form (or re-run Desktop Release CI)
+so it matches `latest.json` — that is the intended ops fix.
 
 Current embedded pubkey (base64 minisign; also in `tauri.conf.json`):
 

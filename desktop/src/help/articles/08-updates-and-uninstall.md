@@ -13,6 +13,10 @@ The app queries **GitHub Releases** for this project only. Installs use the sign
 `latest.json` asset URL (must match) and a non-empty release signature field.
 Published desktop builds are **minisign**-signed in CI.
 
+**Installer filename on the release:** `Remedy.Desktop_{version}_x64-setup.exe`
+(dots where the product name has spaces — e.g. `Remedy.Desktop_0.14.4_x64-setup.exe`).
+That name must match the URL inside `latest.json` exactly.
+
 ## Switch to WebUI (not an uninstall)
 
 Logo menu / status bar **WebUI** / Settings → **Switch to WebUI**:

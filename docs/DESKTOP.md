@@ -329,12 +329,36 @@ User path (Ollama-style):
 
 Metadata: `https://github.com/AhmiDarrow/RemedyAI/releases/latest/download/latest.json`
 
+### Installer asset naming (agent + release ops)
+
+| Item | Canonical value |
+|------|-----------------|
+| Product title (release name) | `Remedy Desktop v{X.Y.Z}` |
+| Tag | `v{X.Y.Z}` |
+| NSIS file on disk (Tauri default) | `Remedy Desktop_{X.Y.Z}_x64-setup.exe` (space) |
+| **GitHub asset name / latest.json URL** | **`Remedy.Desktop_{X.Y.Z}_x64-setup.exe`** (dots for spaces) |
+| Metadata asset | `latest.json` (same release) |
+| Full installer URL | `https://github.com/AhmiDarrow/RemedyAI/releases/download/v{X.Y.Z}/Remedy.Desktop_{X.Y.Z}_x64-setup.exe` |
+
+**Rules (do not break auto-update):**
+
+1. Never publish `Remedy_Desktop_*` (underscore between product words) — only `Remedy.Desktop_*`.
+2. CI renames spaces → dots before upload (`.github/workflows/desktop-release.yml`).
+3. `latest.json` → `platforms.windows-x86_64.url` must equal the asset’s
+   `browser_download_url` **exactly** (signature is bound to that file).
+4. If a release asset is misnamed, the **easy fix** is rename the GitHub Release
+   asset to `Remedy.Desktop_{ver}_x64-setup.exe` (and ensure `latest.json` URL
+   matches). Prefer fixing the asset over disabling the URL match check.
+5. In-app install **re-reads** signed `latest.json` at download time so a stale
+   UI-held URL cannot fail after a multi-MB pull.
+
 | Piece | File |
 |-------|------|
 | Check + download + silent install | `desktop/src-tauri/src/lib.rs` |
 | Kill old / relaunch new | `desktop/src-tauri/windows/hooks.nsh` |
 | Progress UI | `desktop/src/components/UpdateScreen.tsx` |
 | CI `latest.json` + signed assets | `.github/workflows/desktop-release.yml` |
+| Version / URL stamp | `scripts/sync_version.py` → `scripts/latest.json` |
 
 **UAC:** Windows may still show one elevation prompt for the installer; that is
 outside the app’s control. After approval, install + relaunch are automatic.

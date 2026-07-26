@@ -1,10 +1,10 @@
 {
   "version": "v0.14.4",
-  "notes": "Remedy Desktop v0.14.4 \u2014 Windows installer",
-  "pub_date": "2026-07-26T02:16:45Z",
+  "notes": "Remedy Desktop v0.14.4 \u2014 signed Windows installer",
+  "pub_date": "2026-07-26T02:31:50Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUZ3ZLempYUXdCMXBRblpQU3NrVzVndjlPMXdWVm9MZUhIY3hMSXpoYjVRQnZuNTNNVklhc3krdWxPUTU0b0dNc0RVSUdSc1pWaE5jZ2NmLytRU21na1p0bmNFTlZWM2dBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg1MDMzMDk2CWZpbGU6UmVtZWR5IERlc2t0b3BfMC4xNC40X3g2NC1zZXR1cC5leGUKTGprVlBzb1c0UnFwVExaZlRaVVppcDUzSUp0ZW5OaGdtWDBLTlgyd202UUM0MENSVjA2Wll5aXMvVlZmeld5NmxXdWRxb2JFTFVLSi9NdjY4cnJpQmc9PQo=",
       "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.14.4/Remedy.Desktop_0.14.4_x64-setup.exe"
     }
   }

@@ -56,7 +56,7 @@ Remedy is built so **you** can run shell, files, skills, and a full agent on you
 | **Skills** | Imported packs land in **quarantine** (Zip Slip + stream size caps); cannot activate or run scripts until you **Trust**; skill script env is scrubbed of provider keys |
 | **Tool sandbox** | Subprocess environment scrubbed of secrets; Windows dangerous-command guards; clear security-blocked results |
 | **Messaging channels** | e.g. Telegram ignores chats when the allowlist is empty (unless you explicitly allow all) |
-| **Updates** | In-app updates use **minisign**-signed `latest.json` (publisher URL match); installers from this repo’s GitHub Releases — see [`docs/WINDOWS_SIGNING.md`](docs/WINDOWS_SIGNING.md) for pubkey |
+| **Updates** | In-app updates use **minisign**-signed `latest.json` (publisher URL match); installer asset name is **`Remedy.Desktop_{ver}_x64-setup.exe`** (dots for spaces) on GitHub Releases — see [`docs/WINDOWS_SIGNING.md`](docs/WINDOWS_SIGNING.md) / [`AGENTS.md`](AGENTS.md) |
 | **Web UI quit** | Full quit warns that the local server (and browser Web UI) stop; hide-to-tray does not |
 
 Chat content still goes to **the LLM provider you configure** (or stays local with Ollama). There is **no** Remedy cloud account required for core desktop use.

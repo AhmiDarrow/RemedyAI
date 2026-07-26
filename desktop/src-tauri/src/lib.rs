@@ -1498,16 +1498,29 @@ fn launch_install_progress_ui(from: &str, to: &str) {
 #[cfg(not(target_os = "windows"))]
 fn launch_install_progress_ui(_from: &str, _to: &str) {}
 
+/// Canonical Windows NSIS asset name on GitHub Releases.
+/// NSIS emits "Remedy Desktop_{ver}_x64-setup.exe"; CI renames spaces → dots so the
+/// published asset is always `Remedy.Desktop_{ver}_x64-setup.exe` (no spaces, no
+/// `Remedy_Desktop_`). `latest.json` URL must match that asset name exactly.
+#[allow(dead_code)]
+fn canonical_installer_name(version: &str) -> String {
+    let ver = version.trim().trim_start_matches('v').trim_start_matches('V');
+    format!("Remedy.Desktop_{ver}_x64-setup.exe")
+}
+
 /// Only this repository's release assets (not arbitrary GitHub releases).
-/// Pull the minisign signature from published latest.json for this exact asset URL.
+/// Fetch signed asset URL + minisign signature from published latest.json.
+/// Callers should **download the returned URL** (not a stale UI-held URL) so a
+/// check→install race cannot pair an old installer path with a new signature blob.
 /// Refuses install when the release is unsigned (owner can still install manually from GitHub).
-fn fetch_release_signature_for_url(download_url: &str) -> Result<String, String> {
+fn fetch_signed_release_asset() -> Result<(String /*url*/, String /*sig*/), String> {
     let meta_url =
         "https://github.com/AhmiDarrow/RemedyAI/releases/latest/download/latest.json";
     let resp = ureq::get(meta_url)
         .set("User-Agent", "RemedyDesktop-Updater/0.10")
         .set("Accept", "application/json")
         .set("Cache-Control", "no-cache")
+        .set("Pragma", "no-cache")
         .timeout(Duration::from_secs(20))
         .call()
         .map_err(|e| format!("Could not fetch latest.json for signature: {e}"))?;
@@ -1526,24 +1539,50 @@ fn fetch_release_signature_for_url(download_url: &str) -> Result<String, String>
     let url = plat
         .get("url")
         .and_then(|x| x.as_str())
-        .unwrap_or("");
+        .unwrap_or("")
+        .trim()
+        .to_string();
     let sig = plat
         .get("signature")
         .and_then(|x| x.as_str())
         .unwrap_or("")
         .trim()
         .to_string();
-    if url != download_url {
+    if url.is_empty() {
+        return Err("latest.json missing windows-x86_64.url".into());
+    }
+    if !is_trusted_download_url(&url) {
         return Err(format!(
-            "Download URL does not match signed latest.json asset.\n  got: {download_url}\n  expected: {url}"
+            "latest.json asset URL is not a trusted GitHub release host: {url}"
         ));
     }
+    // Normalize legacy underscore product segment if a bad publish ever lands.
+    let url = url.replace("Remedy_Desktop_", "Remedy.Desktop_");
     if sig.is_empty() {
         return Err(
             "Release is unsigned (empty signature in latest.json). \
              Install manually from GitHub Releases if you trust the asset."
                 .into(),
         );
+    }
+    Ok((url, sig))
+}
+
+/// Back-compat helper: require the client URL to match signed latest.json.
+/// Prefer [`fetch_signed_release_asset`] + download that URL (used by install path).
+#[allow(dead_code)]
+fn fetch_release_signature_for_url(download_url: &str) -> Result<String, String> {
+    let (url, sig) = fetch_signed_release_asset()?;
+    let got = download_url
+        .trim()
+        .replace("Remedy_Desktop_", "Remedy.Desktop_");
+    if !got.is_empty() && got != url {
+        return Err(format!(
+            "Download URL does not match signed latest.json asset.\n  got: {got}\n  expected: {url}\n\
+             Tip: installer assets must be named Remedy.Desktop_{{ver}}_x64-setup.exe \
+             (dots for spaces). Re-check/rename the GitHub Release asset or retry so the \
+             app re-reads latest.json."
+        ));
     }
     Ok(sig)
 }
@@ -1601,10 +1640,10 @@ static UPDATE_IN_FLIGHT: std::sync::atomic::AtomicBool = std::sync::atomic::Atom
 /// Sole relaunch owner: update script (+ NSIS marker /NOAUTOLAUNCH). No double window.
 #[tauri::command]
 fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), String> {
-    if download_url.is_empty() {
-        return Err("No download URL for this release".into());
-    }
-    if !is_trusted_download_url(&download_url) {
+    // Client may pass a URL from an earlier check; we always re-resolve the
+    // signed asset from latest.json before download so naming/version races
+    // (e.g. got v0.14.3 URL, expected v0.14.4) cannot fail after a multi-MB pull.
+    if !download_url.is_empty() && !is_trusted_download_url(&download_url) {
         return Err("Download URL is not a trusted GitHub release host".into());
     }
     if UPDATE_IN_FLIGHT.swap(true, std::sync::atomic::Ordering::SeqCst) {
@@ -1621,6 +1660,7 @@ fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), Stri
     // Stage 1 is in-app only. Stage 2 host is launched by the install script after exit.
     // Pre-stage the PS1 in TEMP so the script can start the install popup immediately.
     let _ = ensure_update_ui_ps1_in_temp();
+    let client_url = download_url;
     thread::spawn(move || {
         let result = (|| -> Result<(), String> {
             emit_progress_ver(
@@ -1631,6 +1671,25 @@ fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), Stri
                 &ver_from,
                 &ver_to,
             );
+
+            // Canonical signed URL wins. Normalize legacy Remedy_Desktop_ if needed.
+            let (signed_url, sig) = fetch_signed_release_asset()?;
+            let mut download_url = signed_url;
+            let client_norm = client_url
+                .trim()
+                .replace("Remedy_Desktop_", "Remedy.Desktop_");
+            if !client_norm.is_empty() && client_norm != download_url {
+                log::warn!(
+                    "Update URL from UI differed from signed latest.json; using signed asset.\n  ui: {client_norm}\n  signed: {download_url}"
+                );
+            }
+            if download_url.is_empty() {
+                if client_norm.is_empty() {
+                    return Err("No download URL for this release".into());
+                }
+                // latest.json had no URL (should not happen after fetch_signed checks).
+                download_url = client_norm;
+            }
 
             // Large installers: allow up to 10 minutes; still fail if connection stalls.
             let resp = ureq::get(&download_url)
@@ -1698,21 +1757,20 @@ fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), Stri
             // Reject HTML error pages / truncated downloads (NSIS packages are multi-MB).
             validate_installer_exe(&temp, 512 * 1024)?;
 
-            // Cryptographic trust: asset URL must match signed latest.json and
-            // carry a non-empty minisign signature (CI publishes both).
+            // Cryptographic trust: we already loaded signature with the signed URL.
             emit_progress(
                 &app_for_thread,
                 "installing",
                 100,
                 "Verifying release signature...",
             );
-            let sig = fetch_release_signature_for_url(&download_url)?;
             let sig_path = temp.with_extension("exe.sig");
             std::fs::write(&sig_path, format!("{sig}\n"))
                 .map_err(|e| format!("Cannot write signature file: {e}"))?;
             log::info!(
-                "Update signature present ({} chars) for trusted GitHub asset",
-                sig.len()
+                "Update signature present ({} chars) for trusted GitHub asset {}",
+                sig.len(),
+                download_url
             );
 
             emit_progress(
