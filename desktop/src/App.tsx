@@ -1,8 +1,8 @@
-import { useState, useCallback, useEffect, useMemo } from 'react'
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { Sidebar } from './components/Sidebar'
 import { ApprovalBanner } from './components/ApprovalBanner'
 import { MessageFeed } from './components/MessageFeed'
-import { Composer } from './components/Composer'
+import { Composer, type ComposerHandle } from './components/Composer'
 import { StatusBar, type ThinkingLevel, type ApprovalMode } from './components/StatusBar'
 import { TabBar } from './components/TabBar'
 import { MemoryPanel, SkillsPanel } from './components/Panels'
@@ -138,6 +138,12 @@ export default function App() {
   } = useMessages(activeId)
   /** Prefill for edit-and-resend; `key` forces re-apply even for identical text. */
   const [editDraft, setEditDraft] = useState<{ text: string; key: number } | null>(null)
+  /** Image viewer → composer attachment rail (markup becomes prompt attachment). */
+  const composerRef = useRef<ComposerHandle>(null)
+  const handleAttachMarkup = useCallback(async (file: File) => {
+    await composerRef.current?.addFiles([file])
+    composerRef.current?.focus()
+  }, [])
   // Don't carry an edit draft across session switches.
   useEffect(() => {
     setEditDraft(null)
@@ -1351,9 +1357,11 @@ export default function App() {
               onQuickPrompt={(text) => void handleSend(text)}
               onRegenerate={(id) => void handleRegenerate(id)}
               userName={userName}
+              onAttachMarkup={handleAttachMarkup}
             />
 
             <Composer
+              ref={composerRef}
               onSend={handleSend}
               onStop={stop}
               onCommand={handleCommand}

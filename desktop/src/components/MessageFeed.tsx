@@ -58,6 +58,11 @@ interface MessageFeedProps {
   onRegenerate?: (assistantMsgId: string) => void
   /** Display name for the human (avatar + label). */
   userName?: string
+  /**
+   * Attach a marked-up (or plain) image from the viewer to the next user prompt.
+   * Parent should route this into the composer attachment rail.
+   */
+  onAttachMarkup?: (file: File) => void | Promise<void>
 }
 
 /** Initials for avatar: "Alex" → A, "Mary Jane" → MJ */
@@ -513,6 +518,7 @@ export function MessageFeed({
   onQuickPrompt,
   onRegenerate,
   userName,
+  onAttachMarkup,
 }: MessageFeedProps) {
   const [lightbox, setLightbox] = useState<{ src: string; alt?: string } | null>(null)
 
@@ -778,6 +784,7 @@ export function MessageFeed({
         src={lightbox?.src ?? null}
         alt={lightbox?.alt}
         onClose={() => setLightbox(null)}
+        onAttachMarkup={onAttachMarkup}
       />
     </div>
   )

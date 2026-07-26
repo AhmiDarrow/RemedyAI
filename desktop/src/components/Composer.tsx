@@ -1,4 +1,11 @@
-import { useState, useRef, useCallback, useEffect } from 'react'
+import {
+  useState,
+  useRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  forwardRef,
+} from 'react'
 import { searchFiles, listCommands } from '../api/messages'
 import type { CommandDefinition } from '../types'
 import {
@@ -18,6 +25,7 @@ import {
   type VisionStatus,
 } from '../api/vision'
 import { IconPaperclip, IconSend, IconStop } from './icons'
+import { ImageLightbox } from './ImageLightbox'
 
 export interface AgentDef {
   name: string
@@ -74,6 +82,12 @@ interface ComposerProps {
   llmModel?: string
   /** Open Settings (optionally scrolled to vision later). */
   onOpenSettings?: () => void
+}
+
+/** Imperative API so the image viewer can attach markup to the prompt rail. */
+export type ComposerHandle = {
+  addFiles: (files: FileList | File[]) => Promise<void>
+  focus: () => void
 }
 
 type SuggestionItem = {
@@ -139,29 +153,35 @@ function savePromptHistory(entries: string[]) {
   }
 }
 
-export function Composer({
-  onSend,
-  onStop,
-  onCommand,
-  streaming,
-  disabled,
-  queue = [],
-  onCancelQueued,
-  onClearQueue,
-  onPromoteQueued,
-  onUpdateQueued,
-  planMode,
-  onTogglePlanMode,
-  agents = [],
-  editDraft,
-  sessionId,
-  ensureSession,
-  slashCommands: slashCommandsProp,
-  llmProvider = '',
-  llmModel = '',
-  onOpenSettings,
-}: ComposerProps) {
+export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer(
+  {
+    onSend,
+    onStop,
+    onCommand,
+    streaming,
+    disabled,
+    queue = [],
+    onCancelQueued,
+    onClearQueue,
+    onPromoteQueued,
+    onUpdateQueued,
+    planMode,
+    onTogglePlanMode,
+    agents = [],
+    editDraft,
+    sessionId,
+    ensureSession,
+    slashCommands: slashCommandsProp,
+    llmProvider = '',
+    llmModel = '',
+    onOpenSettings,
+  },
+  ref,
+) {
   const [input, setInput] = useState('')
+  const [previewImage, setPreviewImage] = useState<{ src: string; alt?: string } | null>(
+    null,
+  )
   const [suggestions, setSuggestions] = useState<SuggestionItem[]>([])
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [visionStatus, setVisionStatus] = useState<VisionStatus | null>(null)
@@ -318,7 +338,8 @@ export function Composer({
   const addFiles = useCallback(
     async (files: FileList | File[]) => {
       const list = Array.from(files).filter(Boolean)
-      if (!list.length || disabled || streaming) return
+      // Markup attach from image viewer is allowed while streaming (queued send).
+      if (!list.length || disabled) return
 
       setUploadError('')
       setAttachNotice('')
@@ -353,7 +374,16 @@ export function Composer({
         setUploading(false)
       }
     },
-    [disabled, streaming, resolveSession, flashAttached],
+    [disabled, resolveSession, flashAttached],
+  )
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      addFiles,
+      focus: () => textareaRef.current?.focus(),
+    }),
+    [addFiles],
   )
 
   /**
@@ -1077,11 +1107,20 @@ export function Composer({
                 title={a.path}
               >
                 {a.previewUrl ? (
-                  <img
-                    src={a.previewUrl}
-                    alt={a.name}
-                    className="w-10 h-10 rounded object-cover flex-shrink-0"
-                  />
+                  <button
+                    type="button"
+                    className="p-0 border-0 bg-transparent cursor-zoom-in flex-shrink-0"
+                    title="Open image viewer / markup"
+                    onClick={() =>
+                      setPreviewImage({ src: a.previewUrl!, alt: a.name })
+                    }
+                  >
+                    <img
+                      src={a.previewUrl}
+                      alt={a.name}
+                      className="w-10 h-10 rounded object-cover"
+                    />
+                  </button>
                 ) : (
                   <span
                     className="w-10 h-10 rounded flex items-center justify-center flex-shrink-0 text-base"
@@ -1254,6 +1293,17 @@ export function Composer({
           <IconStop size={14} />
         </button>
       </div>
+
+      <ImageLightbox
+        src={previewImage?.src ?? null}
+        alt={previewImage?.alt}
+        onClose={() => setPreviewImage(null)}
+        onAttachMarkup={async (file) => {
+          await addFiles([file])
+          setPreviewImage(null)
+          textareaRef.current?.focus()
+        }}
+      />
     </div>
   )
-}
+})

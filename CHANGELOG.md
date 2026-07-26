@@ -2,6 +2,15 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.14.10] — 2026-07-26
+
+### Feature: session image viewer + Snipping-Tool markup
+
+- Click any chat image to open a full-screen viewer (zoom, download).
+- Markup tools: pen, highlighter, arrow, rectangle, text — colors + stroke sizes.
+- **Attach markup to message** exports annotated PNG onto the composer attachment rail so you can point things out to Remedy.
+- Attachment chips also open the same viewer; docs in chat manual.
+
 ## [0.14.9] — 2026-07-26
 
 ### Fix: chat/tray/taskbar icons + faster export/import

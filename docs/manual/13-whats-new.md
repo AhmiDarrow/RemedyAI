@@ -2,7 +2,12 @@
 
 High-level product notes for owners. Full detail lives in repo `CHANGELOG.md`.
 
-Ship **one** installer/tag for the current series (**v0.14.9**).
+Ship **one** installer/tag for the current series (**v0.14.10**).
+
+## 0.14.10 — Image viewer + markup
+
+- Full-screen viewer for any chat image.
+- Snipping-Tool-style markup; attach annotated PNG to your next prompt.
 
 ## 0.14.9 — Icons + faster export/import
 

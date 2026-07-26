@@ -26,6 +26,27 @@
 | **@** | Search project files to attach references |
 | **/** | Slash command menu |
 | Drag / paste | Attach files or images |
+| **Click any chat image** | Open the **image viewer** |
+
+### Image viewer & markup
+
+Any image shown in the session (markdown previews, Comfy outputs, local paths via
+`/api/media`) opens in a full-screen viewer:
+
+| Tool | Shortcut | Purpose |
+|------|----------|---------|
+| **Pen** | `P` | Freehand draw |
+| **Highlight** | `H` | Semi-transparent marker |
+| **Arrow** | `A` | Point at a region |
+| **Box** | `R` | Rectangle callout |
+| **Text** | `T` | Place a short label |
+| **Undo** | `Ctrl+Z` | Remove last stroke |
+| **Zoom** | `+` / `−` / `0` | Enlarge / shrink / reset |
+
+**Attach markup to message** exports the annotated PNG and puts it on the composer
+attachment rail so you can explain or point something out in the next prompt
+(same path as 📎 / paste). Without markup, **Attach to message** still attaches
+the plain image.
 
 ## Sessions
 
