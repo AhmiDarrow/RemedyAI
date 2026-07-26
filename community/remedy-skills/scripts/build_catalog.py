@@ -42,12 +42,14 @@ def build_catalog(
     *,
     repo: str = "AhmiDarrow/remedy-skills",
     use_local: bool = True,
+    release_tag: str = "v1.0.0",
+    write_dist: bool = True,
 ) -> dict:
     skills_dir = skills_dir.resolve()
     entries: list[dict] = []
     now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     dist = skills_dir.parent / "dist"
-    if use_local:
+    if write_dist:
         dist.mkdir(parents=True, exist_ok=True)
 
     for skill_md in sorted(skills_dir.glob("*/SKILL.md")):
@@ -65,13 +67,15 @@ def build_catalog(
         zbytes = _zip_skill(skill_md.parent)
         sha = hashlib.sha256(zbytes).hexdigest()
         zip_name = f"{name}-{version}.zip"
-        if use_local:
+        if write_dist:
             (dist / zip_name).write_bytes(zbytes)
+        if use_local:
             download_url = f"local:{name}"
         else:
+            # Release tag is library release (v1.0.0), not each skill version.
             download_url = (
                 f"https://github.com/{repo}/releases/download/"
-                f"v{version}/{zip_name}"
+                f"{release_tag}/{zip_name}"
             )
 
         entries.append(
@@ -112,8 +116,16 @@ def main() -> None:
     p.add_argument("--output", type=Path, default=ROOT / "catalog.json")
     p.add_argument("--repo", default="AhmiDarrow/remedy-skills")
     p.add_argument("--github-urls", action="store_true")
+    p.add_argument("--release-tag", default="v1.0.0")
+    p.add_argument("--no-dist", action="store_true")
     args = p.parse_args()
-    cat = build_catalog(args.skills_dir, repo=args.repo, use_local=not args.github_urls)
+    cat = build_catalog(
+        args.skills_dir,
+        repo=args.repo,
+        use_local=not args.github_urls,
+        release_tag=args.release_tag,
+        write_dist=not args.no_dist,
+    )
     args.output.write_text(json.dumps(cat, indent=2) + "\n", encoding="utf-8")
     print(f"Wrote {args.output} ({len(cat['skills'])} skills)")
 
