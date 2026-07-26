@@ -330,9 +330,29 @@ def workspace_context_block(
     return "\n".join(lines)
 
 
+def new_project_dir() -> Path:
+    """Default first-run sandbox folder (guardrails without jailing to install dir)."""
+    # Prefer Documents on Windows; fall back to ~/.remedy/projects
+    try:
+        docs = Path.home() / "Documents" / "Remedy Projects" / "New Project"
+        return docs
+    except OSError:
+        return Path.home() / ".remedy" / "projects" / "New Project"
+
+
+def ensure_new_project_seed() -> Path:
+    """Create the New Project sandbox folder if missing; return resolved path."""
+    return ensure_project_dir(new_project_dir())
+
+
 def default_project_from_config(cfg: dict | None) -> Path:
-    """Pick project path from config dict / env / cwd."""
+    """Pick project path from config dict / env, else New Project seed.
+
+    Never falls back to process cwd (Desktop sidecars often run from install dir).
+    """
     cfg = cfg or {}
     env = os.environ.get("REMEDY_PROJECT_PATH") or os.environ.get("REMEDY_FILES_ROOT") or ""
     raw = cfg.get("project_path") or env or None
-    return resolve_project_path(raw if raw else None)
+    if is_unset_project_path(raw):
+        return ensure_new_project_seed()
+    return resolve_project_path(str(raw))

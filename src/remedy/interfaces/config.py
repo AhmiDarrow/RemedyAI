@@ -926,6 +926,11 @@ name = "Remedy"
 persona = "default"
 home_dir = "{home_dir.as_posix()}"
 
+# Default workspace: sandboxed New Project (not install dir / process cwd).
+# Remedy can use full machine access via access_scope; New Project is the safe start.
+# project_path = "~/Documents/Remedy Projects/New Project"
+# access_scope = "project"
+
 # First-run setup: false until `remedy setup` / desktop wizard / --skip-setup
 setup_completed = false
 

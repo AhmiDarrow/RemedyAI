@@ -72,21 +72,27 @@ export function useSessions() {
     loadMore,
     create: useCallback(async (title?: string) => {
       try {
-        // Stamp session with the configured default project folder.
+        // Stamp session with default project (New Project seed on server when unset).
+        // Multi-project: use createInProject / setProject — do not force install dir.
         let project_path: string | undefined
         if (projectPathCache.current !== null) {
           project_path = projectPathCache.current
         } else {
           try {
             const s = await getSettings()
-            project_path =
-              s.project_path && s.project_path !== '.' ? s.project_path : undefined
+            const raw = (s.project_path || '').trim()
+            // Empty / "." → omit; API seeds New Project sandbox
+            project_path = raw && raw !== '.' ? raw : undefined
             projectPathCache.current = project_path
           } catch {
             projectPathCache.current = undefined
           }
         }
-        const s = await createSession({ title, project_path })
+        const s = await createSession(
+          project_path !== undefined
+            ? { title, project_path }
+            : { title },
+        )
         setSessions((prev) => [s, ...prev])
         setActiveId(s.id)
         return s

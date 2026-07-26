@@ -78,14 +78,22 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         )
         from remedy.models import ChatSession as CS
 
-        # Inherit global project only when the client omits project_path (None).
+        # Inherit global project when client omits project_path (None).
         # Explicit "" / "." means no-project session (sidebar "No project" group).
+        # Unset global → seed Documents/Remedy Projects/New Project (sandbox).
+        from remedy.core.workspace import ensure_new_project_seed
+
         if req.project_path is not None:
             raw_project = req.project_path
         else:
             raw_project = load_config().get("project_path")
         project_path = None
-        if not is_unset_project_path(raw_project):
+        if req.project_path is None and is_unset_project_path(raw_project):
+            try:
+                project_path = str(ensure_new_project_seed())
+            except Exception:
+                project_path = str(ensure_new_project_seed())
+        elif not is_unset_project_path(raw_project):
             try:
                 project_path = str(ensure_project_dir(resolve_project_path(str(raw_project))))
             except Exception:
