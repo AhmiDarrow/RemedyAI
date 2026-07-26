@@ -1,4 +1,5 @@
 mod pty_host;
+mod browser_host;
 use std::env;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpStream};
@@ -2552,6 +2553,7 @@ pub fn run() {
             desktop_prefs: Arc::new(Mutex::new(load_desktop_prefs())),
         })
         .manage(pty_host::PtyState::default())
+        .manage(browser_host::BrowserState::default())
         .invoke_handler(tauri::generate_handler![
             open_data_folder,
             pick_folder,
@@ -2580,7 +2582,12 @@ pub fn run() {
             pty_host::pty_open,
             pty_host::pty_write,
             pty_host::pty_resize,
-            pty_host::pty_close
+            pty_host::pty_close,
+            browser_host::browser_navigate,
+            browser_host::browser_reload,
+            browser_host::browser_go_back,
+            browser_host::browser_go_forward,
+            browser_host::browser_current_url
         ])
         .setup(|app| {
             let _shell = app.handle().plugin(tauri_plugin_shell::init())?;

@@ -33,3 +33,4 @@ winreg = "0.55"
 # Native save/open dialogs (avoids multi-second PowerShell STA cold-start on export/import).
 rfd = "0.15"
 portable-pty = "0.9.0"
+url = "2.5.8"

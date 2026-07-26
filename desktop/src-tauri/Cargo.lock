@@ -80,6 +80,7 @@ dependencies = [
  "tauri-plugin-shell",
  "tauri-plugin-updater",
  "ureq",
+ "url",
  "winreg 0.55.0",
 ]
 

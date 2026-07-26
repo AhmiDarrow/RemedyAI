@@ -1,0 +1,10 @@
+[[permission]]
+identifier = "allow-browser"
+description = "Allow in-app browser window navigation"
+commands.allow = [
+  "browser_navigate",
+  "browser_reload",
+  "browser_go_back",
+  "browser_go_forward",
+  "browser_current_url",
+]
