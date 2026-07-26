@@ -155,133 +155,21 @@ async def call_llm_stream(runtime, message: str,
             *history,
             {"role": "user", "content": user_content},
         ]
-        # Continuity layer: single ContextSnapshot (tokens, policy, remedies, brief)
+        # Continuity / Memory Harness v2: enforce lean send-view + optional local brief
         with suppress(Exception):
             if runtime._harness_mode == "auto":
-                from remedy.core.context_snapshot import build_context_snapshot
-                from remedy.memory.harness.compressor import (
-                    compression_nudge_message,
-                    estimate_tokens,
-                    heuristic_merge_from_history,
+                from remedy.memory.harness.send_policy import (
+                    apply_auto_harness_send_policy,
                 )
-                from remedy.memory.harness.pruner import prune_messages_for_send
 
-                provider = str(
-                    getattr(runtime.config, "provider", None)
-                    or getattr(runtime.config, "llm_provider", "")
-                    or ""
-                )
-                model = str(
-                    getattr(runtime.config, "model", None)
-                    or getattr(runtime.config, "llm_model", "")
-                    or ""
-                )
-                project_path = str(
-                    getattr(runtime.config, "project_path", None)
-                    or getattr(runtime, "_project_path", None)
-                    or ""
-                ) or None
-                sid = str(getattr(runtime, "_session_id", "") or "")
-                snap = build_context_snapshot(
-                    messages=messages,
+                sid = str(getattr(runtime, "_session_id", "") or session_id or "")
+                messages, _hmeta = apply_auto_harness_send_policy(
+                    runtime,
+                    messages,
                     user_text=message or "",
-                    brief=getattr(runtime, "_session_brief", None),
                     session_id=sid,
-                    provider=provider or None,
-                    model=model or None,
-                    min_pct=runtime._harness_min_pct,
-                    max_pct=runtime._harness_max_pct,
-                    project_path=project_path,
+                    tool_result_char_cap=int(_TOOL_RESULT_CHAR_CAP or 0),
                 )
-                runtime._last_context_snapshot = snap
-                runtime._last_send_messages = list(messages)
-                est = snap.token_estimate
-                level = snap.nudge
-
-                # Inject policy + quality remedies + project pins as system notes
-                injects: list[str] = []
-                if snap.policy_system:
-                    injects.append(snap.policy_system)
-                if snap.remedy_system:
-                    injects.append(snap.remedy_system)
-                with suppress(Exception):
-                    from remedy.core.project_learning import pinned_constraints_block
-
-                    pin = pinned_constraints_block(project_path)
-                    if pin:
-                        injects.append(pin)
-                if injects:
-                    messages.insert(
-                        -1,
-                        {
-                            "role": "system",
-                            "content": "\n\n".join(injects),
-                        },
-                    )
-
-                if level == "strong":
-                    tokens_before = est
-                    messages[:] = prune_messages_for_send(
-                        messages,
-                        max_tool_chars=max(
-                            4_000, (_TOOL_RESULT_CHAR_CAP or 64_000) // 4
-                        ),
-                        dedupe_tools=True,
-                        collapse_completed_tools=True,
-                        keep_recent_tool_pairs=4,
-                    )
-                    with suppress(Exception):
-                        brief = getattr(runtime, "_session_brief", None)
-                        if brief is not None:
-                            from remedy.core.session_quality import get_session_quality
-                            from remedy.memory.harness.quality import (
-                                review_compress_quality,
-                            )
-
-                            pre_hist = list(messages)
-                            runtime._session_brief = heuristic_merge_from_history(
-                                brief, messages, intent_hint=message
-                            )
-                            tokens_after = estimate_tokens(
-                                messages,
-                                provider=provider or None,
-                                model=model or None,
-                            )
-                            q = review_compress_quality(
-                                messages_before=pre_hist,
-                                brief=runtime._session_brief,
-                                tokens_before=tokens_before,
-                                tokens_after=tokens_after,
-                            )
-                            get_session_quality(sid).record_compress(
-                                tokens_before=tokens_before,
-                                tokens_after=tokens_after,
-                                quality=q,
-                                source="auto_strong",
-                            )
-                    messages.insert(-1, compression_nudge_message("strong"))
-                    with suppress(Exception):
-                        from remedy.core.metrics import default_registry
-
-                        default_registry.counter(
-                            "remedy_context_auto_compress_total", level="strong"
-                        ).inc()
-                elif level == "soft":
-                    # Soft: structural collapse of old tools without hard cap first
-                    with suppress(Exception):
-                        messages[:] = prune_messages_for_send(
-                            messages,
-                            dedupe_tools=True,
-                            collapse_completed_tools=True,
-                            keep_recent_tool_pairs=6,
-                        )
-                    messages.insert(-1, compression_nudge_message(level))
-                with suppress(Exception):
-                    from remedy.core.metrics import default_registry
-
-                    default_registry.gauge("remedy_context_tokens_estimate").set(
-                        float(est)
-                    )
         all_tools = runtime._openai_tools()
         if plan_mode:
             from remedy.core.plan_store import PLAN_MODE_TOOL_NAMES

@@ -105,6 +105,43 @@ def prune_messages_for_send(
     return out
 
 
+def _outcome_line(content: str, *, name: str = "") -> str:
+    """Accuracy-preserving collapse: status, paths, error, first/last signals."""
+    text = (content or "").strip()
+    if not text:
+        return "(empty tool result)"
+    low = text[:800].lower()
+    errish = any(
+        k in low
+        for k in ("error", "failed", "traceback", "exception", "errno", "denied")
+    )
+    status = "ERR" if errish else "OK"
+    # Paths
+    try:
+        from remedy.memory.harness.compressor import extract_paths_from_text
+
+        paths = extract_paths_from_text(text, limit=4)
+    except Exception:
+        paths = []
+    path_s = ", ".join(paths[:3]) if paths else ""
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    first = (lines[0] if lines else text)[:140]
+    last = (lines[-1] if len(lines) > 1 else "")[:100]
+    bits = [f"{status}"]
+    if name:
+        bits.append(name)
+    if path_s:
+        bits.append(path_s)
+    bits.append(first)
+    if last and last != first:
+        bits.append(f"… {last}")
+    body = " · ".join(bits)
+    return (
+        f"{body}\n…[tool span collapsed — outcome retained; "
+        f"re-read path or re-run tool if full output needed]"
+    )
+
+
 def _collapse_old_tool_spans(
     messages: list[dict[str, Any]],
     *,
@@ -129,14 +166,8 @@ def _collapse_old_tool_spans(
             out.append(msg)
             continue
         m = dict(msg)
-        # Keep first line + error signal
-        first = content.strip().split("\n", 1)[0][:160]
-        errish = "error" in content[:400].lower() or "failed" in content[:400].lower()
-        m["content"] = (
-            f"{first}\n…[completed tool span collapsed — outcome retained"
-            + ("; had errors" if errish else "")
-            + "; re-run tool if full output needed]"
-        )
+        name = str(msg.get("name") or msg.get("tool_call_id") or "")
+        m["content"] = _outcome_line(content, name=name)
         out.append(m)
     return out
 

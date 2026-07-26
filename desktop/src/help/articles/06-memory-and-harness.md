@@ -43,15 +43,17 @@ Remedy keeps durable knowledge so it can remember facts, goals, and session cont
 
 Long chats fill the model context window. The harness:
 
-1. Tracks fill against min/max context percentages (Settings).  
-2. Can auto-compress when fill is high.  
-3. **`/compact`** forces a Session Brief so you keep continuity without raw history.  
+1. Tracks fill against min/max context percentages (Settings) using your **model’s real window**.  
+2. On **soft/strong** fill: **enforces** a leaner send-view (collapse old tool dumps, token budget) — stored chat is untouched.  
+3. Builds a **Session Brief** (intent, decisions with *why*, files, next steps) plus a **cumulative history thread** so multi-step compressions don’t wipe earlier reasoning.  
+4. Uses Remedy’s **on-device local model in the background** (when available) to refresh the brief **without** another paid API call and without blocking chat.  
+5. **`/compact`** forces a Session Brief pass + queues local enrichment.  
 
 **Harness modes** (Settings):
 
 | Mode | Behavior |
 |------|----------|
-| **Auto** | Compress when thresholds say so |
+| **Auto** | Enforce lean send-view + brief maintenance when thresholds say so |
 | **Manual** | Only when you `/compact` |
 | **Off** | No harness compression |
 

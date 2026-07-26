@@ -114,6 +114,27 @@ def register_memory_tools(runtime: Any) -> None:
             intent_hint=(focus or None),
         )
         brief = runtime._session_brief
+        # Cumulative history thread entry (manual /compact)
+        with suppress(Exception):
+            brief.append_history_thread(
+                f"Manual compress_context"
+                + (f" focus={focus[:120]}" if focus else "")
+                + f". Intent: {(brief.intent or focus or '')[:200]}",
+                decisions_why=list(brief.decisions[-4:]),
+                blockers=list(brief.blockers[-3:]),
+            )
+        # Prefer free local model brief enrichment (non-blocking for next turn)
+        with suppress(Exception):
+            from remedy.memory.harness.local_brief import (
+                schedule_background_brief_update,
+            )
+
+            schedule_background_brief_update(
+                runtime,
+                history,
+                intent_hint=focus or "",
+                level="strong",
+            )
         tokens_after = 0
         with suppress(Exception):
             from remedy.memory.harness.brief import brief_to_context_block
@@ -134,6 +155,9 @@ def register_memory_tools(runtime: Any) -> None:
                 tokens_before=tokens_before,
                 tokens_after=tokens_after,
             )
+            score = quality.get("score")
+            if score is not None:
+                brief.last_quality_score = float(score)
             get_session_quality(str(sid or "")).record_compress(
                 tokens_before=tokens_before,
                 tokens_after=tokens_after,
@@ -153,7 +177,8 @@ def register_memory_tools(runtime: Any) -> None:
             f"Context compressed (pass #{brief.compress_count}). "
             f"Intent: {brief.intent or '(set)'}. "
             f"Files: {len(brief.artifacts)}. "
-            f"Decisions: {len(brief.decisions)}."
+            f"Decisions: {len(brief.decisions)}. "
+            f"History thread: {len(brief.history_thread)}."
             f"{qline}"
         )
 
