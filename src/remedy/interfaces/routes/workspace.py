@@ -145,8 +145,6 @@ def register_workspace_routes(app: FastAPI, *, runtime=None, gateway=None, memor
             ".bmp": "image/bmp",
             ".ico": "image/x-icon",
         }
-        if suffix not in media_types:
-            raise HTTPException(415, f"unsupported media type: {suffix or 'none'}")
         # Cap huge files (chat previews)
         try:
             size = candidate.stat().st_size
@@ -155,15 +153,41 @@ def register_workspace_routes(app: FastAPI, *, runtime=None, gateway=None, memor
         if size > 25 * 1024 * 1024:
             raise HTTPException(413, "media too large (25 MB max)")
 
-        return FileResponse(
-            candidate,
-            media_type=media_types[suffix],
-            filename=candidate.name,
-            headers={
-                "Cache-Control": "private, max-age=120",
-                "X-Content-Type-Options": "nosniff",
-            },
-        )
+        # Known types stream as-is; unknown image-like files normalize to PNG via Pillow.
+        if suffix in media_types:
+            return FileResponse(
+                candidate,
+                media_type=media_types[suffix],
+                filename=candidate.name,
+                headers={
+                    "Cache-Control": "private, max-age=120",
+                    "X-Content-Type-Options": "nosniff",
+                },
+            )
+
+        try:
+            from io import BytesIO
+
+            from fastapi.responses import Response
+            from PIL import Image
+
+            with Image.open(candidate) as im:
+                im = im.convert("RGBA") if im.mode not in ("RGB", "RGBA") else im
+                buf = BytesIO()
+                im.save(buf, format="PNG", optimize=True)
+            return Response(
+                content=buf.getvalue(),
+                media_type="image/png",
+                headers={
+                    "Cache-Control": "private, max-age=120",
+                    "X-Content-Type-Options": "nosniff",
+                    "Content-Disposition": f'inline; filename="{candidate.stem}.png"',
+                },
+            )
+        except Exception as exc:
+            raise HTTPException(
+                415, f"unsupported media type: {suffix or 'none'} ({exc})"
+            ) from exc
 
     @app.get("/api/workspace")
     async def get_workspace(session_id: str | None = Query(default=None)):

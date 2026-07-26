@@ -31,7 +31,7 @@ export function ChatImage({ src, alt, onOpen }: ChatImageProps) {
       setResolved(src)
       return
     }
-    setResolved(null)
+    // Keep prior blob while re-resolving same/new path — avoids flicker on chat reflow
     void resolveChatMediaUrl(src)
       .then((url) => {
         if (!cancelled) setResolved(url)
@@ -39,7 +39,8 @@ export function ChatImage({ src, alt, onOpen }: ChatImageProps) {
       .catch((e: unknown) => {
         if (!cancelled) {
           setError(e instanceof Error ? e.message : String(e))
-          setResolved(null)
+          // only clear if we never had a good frame
+          setResolved((prev) => prev)
         }
       })
     return () => {
@@ -138,6 +139,15 @@ export function ChatImage({ src, alt, onOpen }: ChatImageProps) {
           alt={alt || 'image'}
           className="chat-img"
           loading="lazy"
+          decoding="async"
+          style={{
+            maxWidth: '100%',
+            maxHeight: 360,
+            minHeight: 48,
+            objectFit: 'contain',
+            borderRadius: 8,
+            display: 'block',
+          }}
         />
       </button>
       <div

@@ -1,4 +1,4 @@
 [[permission]]
 identifier = "allow-open-terminal"
-description = "Allow opening an external host terminal"
-commands.allow = ["open_terminal"]
+description = "Allow opening an external host terminal or OS path"
+commands.allow = ["open_terminal", "open_path"]

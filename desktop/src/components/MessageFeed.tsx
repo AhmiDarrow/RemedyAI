@@ -16,6 +16,7 @@ import { dayKey, dayLabel } from '../utils/relativeTime'
 import { TaskProgress, type TaskProgressInfo } from './TaskProgress'
 import { ImageLightbox } from './ImageLightbox'
 import { ChatImage } from './ChatImage'
+import { linkifyBareImagePaths } from '../utils/linkifyImages'
 import { RemedyLogo } from './RemedyLogo'
 import {
   IconBtn,
@@ -249,10 +250,12 @@ const MessageBubble = memo(function MessageBubble({
   const [expanded, setExpanded] = useState(false)
   const [copied, setCopied] = useState(false)
   // Answer text is never truncated by process mode (COLLAPSE_CHARS is infinite).
-  const displayText =
+  const rawDisplay =
     long && !expanded && !isStreamingPartial
       ? `${text.slice(0, COLLAPSE_CHARS).trimEnd()}…`
       : text
+  // Models often paste bare Windows paths — promote to markdown images for ChatImage.
+  const displayText = linkifyBareImagePaths(rawDisplay)
 
   const bubbleBg = isUser
     ? 'var(--chat-user-bg)'
@@ -410,6 +413,7 @@ const MessageBubble = memo(function MessageBubble({
                         if (!src) return null
                         return (
                           <ChatImage
+                            key={src}
                             src={src}
                             alt={alt}
                             onOpen={(url, a) => onOpenImage?.(url, a)}

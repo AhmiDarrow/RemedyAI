@@ -648,6 +648,48 @@ fn pick_folder() -> Result<Option<String>, String> {
     Ok(path.map(|p| p.to_string_lossy().to_string()))
 }
 
+/// Open a file or folder with the OS default app (Explorer / associated program).
+#[tauri::command]
+fn open_path(path: String) -> Result<String, String> {
+    let p = PathBuf::from(path.trim());
+    if !p.exists() {
+        return Err(format!("path not found: {}", p.display()));
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let status = Command::new("cmd")
+            .args(["/C", "start", "", &p.to_string_lossy()])
+            .status()
+            .map_err(|e| format!("open_path: {e}"))?;
+        if status.success() {
+            return Ok(format!("Opened {}", p.display()));
+        }
+        return Err(format!("open_path failed: {status}"));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let status = Command::new("open")
+            .arg(&p)
+            .status()
+            .map_err(|e| format!("open_path: {e}"))?;
+        if status.success() {
+            return Ok(format!("Opened {}", p.display()));
+        }
+        return Err(format!("open_path failed: {status}"));
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let status = Command::new("xdg-open")
+            .arg(&p)
+            .status()
+            .map_err(|e| format!("open_path: {e}"))?;
+        if status.success() {
+            return Ok(format!("Opened {}", p.display()));
+        }
+        return Err(format!("open_path failed: {status}"));
+    }
+}
+
 /// Open a host terminal at `cwd`.
 /// Windows (primary): **PowerShell** first (Windows PowerShell 5.1 / pwsh), then WT, then cmd.
 #[tauri::command]
@@ -2557,6 +2599,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             open_data_folder,
             pick_folder,
+            open_path,
             open_terminal,
             open_external_url,
             save_text_file,
