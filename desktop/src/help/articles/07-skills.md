@@ -48,10 +48,12 @@ disabled / deprecated
 
 | Skill | Use for |
 |-------|---------|
+| **project-etiquette** | Ship discipline for *any* project: test → docs → build → commit → CI → publish only if green |
 | **github** | PRs, issues, CI, releases via `gh` + git (safe defaults; no force-push unless you ask) |
 | **git-status** / **commit-message** | Local branch hygiene and commit text |
 | **comfyui** | Local image gen bootstrap + generate into chat |
 | **code-review** / **write-tests** | Engineering loops |
+| **session-handoff** | End-of-session notes so the next agent continues cleanly |
 
 ## ComfyUI (bundled)
 

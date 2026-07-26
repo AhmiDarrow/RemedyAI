@@ -2,7 +2,12 @@
 
 High-level product notes for owners. Full detail lives in repo `CHANGELOG.md`.
 
-Ship **one** installer/tag for the current series (**v0.14.7**).
+Ship **one** installer/tag for the current series (**v0.14.8**).
+
+## 0.14.8 — Project etiquette (ship skill)
+
+- Bundled **`project-etiquette`** skill: test → docs → build → commit → CI → publish only if green.
+- Same gate chain is default ship protocol in `AGENTS.md` (works for any serious project).
 
 ## 0.14.7 — Calmer update + install always starts
 

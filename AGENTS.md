@@ -2,6 +2,45 @@
 
 Durable facts for coding agents working in this repo. Prefer this file + `docs/` over chat memory when they conflict.
 
+## Project etiquette — ship sequence (default for this repo)
+
+When the user asks to **finish**, **ship**, **release**, or says some form of
+**“test everything → if it passes update everything → build → commit to CI → if
+CI passes publish to PyPI”**, follow this **gate chain**. Do not skip a gate.
+Do not publish before CI is green (unless the user explicitly overrides).
+
+This is the same discipline good teams use on *any* serious project; Remedy
+encodes it as skill **`project-etiquette`** (bundled) so chat sessions load it
+on demand.
+
+### Gate chain (in order)
+
+| # | Gate | Pass criteria | On fail |
+|---|------|---------------|---------|
+| 1 | **Fix / implement** | Requested behavior works; no known regressions you introduced | Keep fixing |
+| 2 | **Test** | Full suite (or documented subset) green; targeted tests for the change | Fix + re-run; **do not commit “red”** |
+| 3 | **Update project** | Version bump if shipping; code + assets consistent | Align versions / assets |
+| 4 | **Update documentation** | CHANGELOG + user/manual notes for user-visible change; run docs sync/check if the repo has it | Sync docs; re-check |
+| 5 | **Build** | Package / desktop / artifacts the project expects still build | Fix build; re-test if needed |
+| 6 | **Commit** | Clear conventional message; only intentional files | Split noise out of the commit |
+| 7 | **Push → CI** | Remote CI green for that commit | Fix on a follow-up commit; **do not publish** |
+| 8 | **Publish** (when asked) | Tag / PyPI / release only **after** CI success | Hold publish; report blocker |
+
+### Format conventions (this repo)
+
+- **Version surfaces:** `python scripts/sync_version.py {X.Y.Z}` (or `uv run python …`).
+- **Docs gate:** `python scripts/check_docs.py` (and `scripts/sync_help_manual.py` when manuals change).
+- **Tests:** `uv run pytest -q` (full); desktop `cd desktop && npm test && npm run build`.
+- **Python package:** `uv build` then, after CI green, `uv publish` (credentials via env / `~/.pypirc`).
+- **Desktop release:** git tag `v{X.Y.Z}` → GitHub Actions `desktop-release` (see naming rules below).
+- **Commit style:** complete sentences; `release:` / `fix:` / `docs:` prefixes as appropriate.
+- **Never:** force-push `master`/`main`; publish on red CI; leave version surfaces mismatched.
+
+### Skill pointer
+
+Activate **`project-etiquette`** for the full portable checklist (any repo) plus
+Remedy-specific commands. For handoffs between agents, also use **`session-handoff`**.
+
 ## Desktop installer / auto-update naming
 
 **Critical for in-app updates.** The signed `latest.json` URL must match the GitHub Release asset name **exactly**.

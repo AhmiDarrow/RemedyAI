@@ -20,6 +20,7 @@ def test_bundled_skills_exist():
     assert "design-critique" in names
     assert "comfyui" in names
     assert "github" in names
+    assert "project-etiquette" in names
     for d in dirs:
         assert (d / "SKILL.md").is_file()
     comfy = bundled_skills_dir() / "comfyui"
@@ -28,7 +29,11 @@ def test_bundled_skills_exist():
     body = gh.read_text(encoding="utf-8")
     assert "gh pr" in body or "gh " in body
     assert "force-push" in body.lower() or "force" in body.lower()
-
+    etiq = (bundled_skills_dir() / "project-etiquette" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    assert "CI green" in etiq or "CI" in etiq
+    assert "Publish" in etiq or "publish" in etiq
 
 def test_discover_defaults_loads_bundled(tmp_path: Path):
     reg = SkillRegistry()
@@ -41,11 +46,12 @@ def test_discover_defaults_loads_bundled(tmp_path: Path):
     assert reg.get("remember-me") is not None
     assert reg.get("comfyui") is not None
     assert reg.get("github") is not None
+    assert reg.get("project-etiquette") is not None
     # Seeded into user skills dir for customization
     assert (home / "skills" / "project-overview" / "SKILL.md").is_file()
     assert (home / "skills" / "comfyui" / "SKILL.md").is_file()
     assert (home / "skills" / "github" / "SKILL.md").is_file()
-
+    assert (home / "skills" / "project-etiquette" / "SKILL.md").is_file()
 
 def test_skills_meta_question_skips_tools():
     assert _message_wants_tools("what skills do you have?") is False

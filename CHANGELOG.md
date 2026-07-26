@@ -2,6 +2,15 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.14.8] — 2026-07-25
+
+### Docs: project etiquette ship skill
+
+- New bundled skill **project-etiquette**: portable gate chain
+  Fix → Test → Update project → Update docs → Build → Commit → CI green → Publish.
+- Root **AGENTS.md** documents the same sequence as default ship protocol.
+- Manuals list the skill; Remedy appendix maps gates to this repo's commands.
+
 ## [0.14.7] — 2026-07-26
 
 ### Fix: update UX calm + install must start before exit
