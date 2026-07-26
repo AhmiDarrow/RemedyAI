@@ -2,7 +2,12 @@
 
 High-level product notes for owners. Full detail lives in repo `CHANGELOG.md`.
 
-Ship **one** installer/tag for the current series (**v0.14.5**).
+Ship **one** installer/tag for the current series (**v0.14.6**).
+
+## 0.14.6 — Autoupdate install reliability + alpha logos
+
+- Multi-path install schedule (PowerShell + WScript + schtasks) so install runs after close.
+- Full alpha brand kit regenerated for public/ + Tauri icons.
 
 ## 0.14.5 — Stream queue · sticky answer · usage ticker · export
 

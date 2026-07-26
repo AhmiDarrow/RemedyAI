@@ -127,6 +127,19 @@ Fixed in **0.14.4+**: install-progress and update hosts spawn hidden PowerShell
 
 If you still see consoles on an older build, update manually from GitHub Releases.
 
+## Update downloaded but never installed / no restart
+
+If Remedy closed after download and nothing happened (no install popup, still on
+old build), the install script may have been killed with the app process
+(**0.14.4–0.14.5** Job Object race).
+
+| Check | Fix |
+|-------|-----|
+| Stuck at “closing” | Update to **0.14.6+** (multi-path install schedule) |
+| `%TEMP%\RemedyDesktop-Update.log` has no `BOOT` / `Update script started` | Confirm **0.14.6+**; otherwise install the `.exe` from GitHub Releases |
+| Close-to-tray only | Use tray → **Quit** if an old update left installers in `%TEMP%` |
+| Manual recovery | Run the newest `RemedyDesktop-Update-*.exe` in `%TEMP%`, or the release installer |
+
 ## SmartScreen / Unknown publisher
 
 - Install **only** from [RemedyAI Releases](https://github.com/AhmiDarrow/RemedyAI/releases).  

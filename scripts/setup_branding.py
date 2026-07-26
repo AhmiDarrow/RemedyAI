@@ -1,7 +1,7 @@
-"""Setup desktop branding from assets.
+"""Setup desktop branding from alpha assets.
 
-Generates all Tauri icon sizes from assets/remedy_icon.png and
-copies the logo for use in the splash screen.
+Generates all Tauri icon sizes from assets/remedy_icon.png (true RGBA alpha)
+and copies the wordmark logo for splash / About / Setup / TitleBar.
 
 Usage:
     python scripts/setup_branding.py
@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parent.parent
 ASSETS = ROOT / "assets"
 ICONS_DIR = ROOT / "desktop" / "src-tauri" / "icons"
 PUBLIC_DIR = ROOT / "desktop" / "public"
+DIST_DIR = ROOT / "desktop" / "dist"
 
 ICON_TARGETS: list[tuple[str, int]] = [
     ("32x32.png", 32),
@@ -35,15 +36,28 @@ ICON_TARGETS: list[tuple[str, int]] = [
     ("StoreLogo.png", 100),
 ]
 
-# Windows taskbar / shell pick small sizes — multi-res ICO (standard sizes only).
 ICO_SIZES: list[int] = [16, 24, 32, 48, 64, 128, 256]
 
-LOGO_SIZE = (512, 128)
+# Wordmark target box (preserves aspect; alpha canvas).
+LOGO_MAX = (640, 320)
 
 
 def _resize_square(img: Image.Image, size: int) -> Image.Image:
-    """High-quality square resize; keep alpha."""
-    return img.resize((size, size), Image.Resampling.LANCZOS)
+    """High-quality square resize on transparent canvas; keep alpha."""
+    src = img.convert("RGBA")
+    src.thumbnail((size, size), Image.Resampling.LANCZOS)
+    canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    x = (size - src.width) // 2
+    y = (size - src.height) // 2
+    canvas.paste(src, (x, y), src)
+    return canvas
+
+
+def _fit_rgba(img: Image.Image, max_w: int, max_h: int) -> Image.Image:
+    """Fit image into box preserving aspect ratio + alpha (no squash)."""
+    src = img.convert("RGBA")
+    src.thumbnail((max_w, max_h), Image.Resampling.LANCZOS)
+    return src
 
 
 def generate_icons(source: Path, icons_dir: Path) -> None:
@@ -56,8 +70,6 @@ def generate_icons(source: Path, icons_dir: Path) -> None:
         resized.save(dest, "PNG", optimize=True)
         print(f"  {name} ({size}x{size})")
 
-    # Multi-resolution .ico for taskbar / Start Menu / PE resource embed.
-    # Pillow resizes from the master when `sizes=` is set.
     ico_path = icons_dir / "icon.ico"
     master_img = _resize_square(img, 256)
     master_img.save(
@@ -71,43 +83,43 @@ def generate_icons(source: Path, icons_dir: Path) -> None:
     master_img.save(master_png, "PNG", optimize=True)
     print("  icon-256.png (256x256)")
 
-    # Refresh .icns as a multi-size PNG pack is hard without iconutil;
-    # write a clean 256 PNG-named icns replacement is invalid — keep PNG
-    # and regenerate via iconutil on macOS when available.
-    icns_path = icons_dir / "icon.icns"
-    # Store largest PNG bytes under icns only if missing valid data; on
-    # Windows builds the .ico path is what matters. Prefer overwrite with
-    # 512 PNG so stale medical bytes are not left around.
     _resize_square(img, 512).save(icons_dir / "icon-512.png", "PNG", optimize=True)
-    # Remove corrupt/stub icns so tauri does not embed garbage; macOS CI
-    # should run `iconutil`. Write a minimal valid path: copy 256 png as
-    # fallback named icon.icns only for non-mac builds is wrong format.
-    # Instead: always overwrite icon.icns with 512 RGBA PNG data labeled
-    # for tauri (some versions accept); better use pillow if available.
+    icns_path = icons_dir / "icon.icns"
     try:
-        # If pillow has ICNS, use it
         _resize_square(img, 512).save(icns_path, format="ICNS")
         print("  icon.icns (ICNS via Pillow)")
     except Exception:
-        # Force-delete stale medical icns so it cannot be preferred over ico
-        if icns_path.exists():
-            # Replace file content timestamp by rewriting as 256 PNG
-            # (tauri on Windows uses icon.ico primarily)
-            _resize_square(img, 256).save(icns_path.with_suffix(".png.bak"), "PNG")
-            print("  icon.icns left as-is (Pillow ICNS unsupported); use ico on Windows")
-        else:
-            print("  icon.icns skipped (generate on macOS with iconutil)")
+        print("  icon.icns skipped (generate on macOS with iconutil)")
 
 
 def setup_public_branding(icon_source: Path, logo_source: Path, public_dir: Path) -> None:
     """Write UI-facing public assets used by Vite/WebUI (logo, icon, favicons)."""
     public_dir.mkdir(parents=True, exist_ok=True)
 
+    # Wordmark (splash, About, Setup, TitleBar) — preserve 2:1 aspect + alpha.
     logo_img = Image.open(logo_source).convert("RGBA")
-    logo_resized = logo_img.resize(LOGO_SIZE, Image.Resampling.LANCZOS)
+    logo_resized = _fit_rgba(logo_img, LOGO_MAX[0], LOGO_MAX[1])
     logo_dest = public_dir / "logo.png"
     logo_resized.save(logo_dest, "PNG", optimize=True)
-    print(f"  logo.png -> {logo_dest} ({LOGO_SIZE[0]}x{LOGO_SIZE[1]})")
+    print(f"  logo.png -> {logo_dest} ({logo_resized.size[0]}x{logo_resized.size[1]})")
+
+    # Optional mono wordmarks for light/dark chrome (if masters exist).
+    for mono_name, out_name in (
+        ("remedy_logo_mono_light.png", "logo-mono-light.png"),
+        ("remedy_logo_mono_dark.png", "logo-mono-dark.png"),
+        ("remedy_icon_mono_light.png", "icon-mono-light.png"),
+        ("remedy_icon_mono_dark.png", "icon-mono-dark.png"),
+    ):
+        mono_src = ASSETS / mono_name
+        if mono_src.is_file():
+            m = Image.open(mono_src).convert("RGBA")
+            if "logo" in mono_name:
+                m = _fit_rgba(m, LOGO_MAX[0], LOGO_MAX[1])
+            else:
+                m = _resize_square(m, 256)
+            dest = public_dir / out_name
+            m.save(dest, "PNG", optimize=True)
+            print(f"  {out_name} -> {dest}")
 
     # Circuit-R monogram used by RemedyLogo, notifications, empty states.
     icon_img = Image.open(icon_source).convert("RGBA")
@@ -120,7 +132,6 @@ def setup_public_branding(icon_source: Path, logo_source: Path, public_dir: Path
     fav32.save(fav_path, "PNG", optimize=True)
     print(f"  favicon.png -> {fav_path}")
 
-    # Browser / WebView favicon.ico
     fav_ico = public_dir / "favicon.ico"
     sizes = [16, 32, 48]
     frames = [_resize_square(icon_img, s) for s in sizes]
@@ -131,6 +142,39 @@ def setup_public_branding(icon_source: Path, logo_source: Path, public_dir: Path
         append_images=frames[1:],
     )
     print(f"  favicon.ico -> {fav_ico}")
+
+    # Replace stock Vite SVG with a transparent PNG-backed hint (browsers use favicon.png).
+    fav_svg = public_dir / "favicon.svg"
+    fav_svg.write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">\n'
+        '  <image href="favicon.png" width="64" height="64" preserveAspectRatio="xMidYMid meet"/>\n'
+        "</svg>\n",
+        encoding="utf-8",
+    )
+    print("  favicon.svg -> references favicon.png")
+
+
+def sync_dist_branding(public_dir: Path, dist_dir: Path) -> None:
+    """Copy public brand files into Vite dist when present (local install webui)."""
+    if not dist_dir.is_dir():
+        return
+    for name in (
+        "logo.png",
+        "icon.png",
+        "favicon.png",
+        "favicon.ico",
+        "favicon.svg",
+        "logo-mono-light.png",
+        "logo-mono-dark.png",
+        "icon-mono-light.png",
+        "icon-mono-dark.png",
+    ):
+        src = public_dir / name
+        if src.is_file():
+            dest = dist_dir / name
+            dest.write_bytes(src.read_bytes())
+            print(f"  dist/{name}")
 
 
 def main() -> int:
@@ -144,18 +188,35 @@ def main() -> int:
         print(f"ERROR: {logo_src} not found")
         return 1
 
+    # Sanity: masters must be true alpha (not baked navy BG).
+    for label, path in (("icon", icon_src), ("logo", logo_src)):
+        im = Image.open(path).convert("RGBA")
+        a_min = im.getextrema()[3][0]
+        if a_min > 10:
+            print(
+                f"WARNING: {path.name} may lack transparency "
+                f"(alpha min={a_min}). Expected alpha masters."
+            )
+        else:
+            print(f"OK {label} master alpha_min={a_min} size={im.size}")
+
     print("=== Remedy Branding Setup ===\n")
 
-    print("[1/2] Generating icons from remedy_icon.png...")
+    print("[1/3] Generating Tauri icons from remedy_icon.png...")
     generate_icons(icon_src, ICONS_DIR)
     print()
 
-    print("[2/2] Setting up public logo + icon + favicons...")
+    print("[2/3] Setting up public logo + icon + favicons...")
     setup_public_branding(icon_src, logo_src, PUBLIC_DIR)
     print()
 
+    print("[3/3] Syncing desktop/dist when present...")
+    sync_dist_branding(PUBLIC_DIR, DIST_DIR)
+    print()
+
     print("=== Done! ===")
-    print("  UI: desktop/public/{logo,icon,favicon}.png")
+    print("  Masters: assets/remedy_{icon,logo}.png (+ mono variants)")
+    print("  UI: desktop/public/{logo,icon,favicon}.*")
     print("  Shell: desktop/src-tauri/icons/icon.ico (rebuild desktop to embed tray/taskbar).")
     return 0
 

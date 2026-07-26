@@ -1363,6 +1363,193 @@ fn updater_owns_relaunch_flag_path() -> PathBuf {
     env::temp_dir().join("RemedyDesktop-UpdaterOwnsRelaunch.flag")
 }
 
+/// Schedule the post-exit install script so it survives Tauri's Job Object.
+///
+/// Failure mode (0.14.4→0.14.5): `powershell -File` was spawned with DETACHED
+/// flags but still died with the parent when BREAKAWAY was refused — download
+/// finished, status stuck at "closing", install never ran (no log lines).
+///
+/// Strategy (first success wins; all are silent / no black CMD):
+/// 1. `powershell.exe` + CREATE_BREAKAWAY_FROM_JOB
+/// 2. `wscript.exe` + tiny .vbs `WScript.Shell.Run` (often outside the job)
+/// 3. One-shot `schtasks` 15s in the future (always outlives the app)
+#[cfg(target_os = "windows")]
+fn schedule_update_install_script(ps1_path: &str) -> Result<(), String> {
+    const DETACHED_PROCESS: u32 = 0x00000008;
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
+    const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x01000000;
+    let flags_breakaway =
+        DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB;
+    let flags_basic = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW;
+
+    let mut ok_count = 0u32;
+    let mut errors: Vec<String> = Vec::new();
+
+    // --- 1) Direct PowerShell with job breakaway ---
+    let try_ps = |flags: u32| -> Result<(), String> {
+        Command::new("powershell.exe")
+            .args([
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-WindowStyle",
+                "Hidden",
+                "-File",
+                ps1_path,
+            ])
+            .creation_flags(flags)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    };
+    if try_ps(flags_breakaway)
+        .or_else(|e1| {
+            log::warn!("update schedule: breakaway powershell failed: {e1}");
+            try_ps(flags_basic)
+        })
+        .is_ok()
+    {
+        ok_count += 1;
+        log::info!("update schedule: powershell spawn ok");
+    } else {
+        errors.push("powershell spawn failed".into());
+    }
+
+    // --- 2) WScript.Shell.Run via temp .vbs (hidden, often outlives Job) ---
+    let vbs = env::temp_dir().join(format!(
+        "RemedyDesktop-Update-Launch-{}.vbs",
+        std::process::id()
+    ));
+    let ps1_vbs = ps1_path.replace('"', "\"\"");
+    let vbs_body = format!(
+        "On Error Resume Next\r\n\
+         Dim sh: Set sh = CreateObject(\"WScript.Shell\")\r\n\
+         sh.Run \"powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"\"{ps1}\"\"\", 0, False\r\n",
+        ps1 = ps1_vbs
+    );
+    if std::fs::write(&vbs, vbs_body).is_ok() {
+        let vbs_s = vbs.to_string_lossy().to_string();
+        if Command::new("wscript.exe")
+            .args(["//B", "//Nologo", &vbs_s])
+            .creation_flags(flags_breakaway)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .or_else(|_| {
+                Command::new("wscript.exe")
+                    .args(["//B", "//Nologo", &vbs_s])
+                    .creation_flags(flags_basic)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()
+            })
+            .is_ok()
+        {
+            ok_count += 1;
+            log::info!("update schedule: wscript launch ok");
+        } else {
+            errors.push("wscript spawn failed".into());
+        }
+    } else {
+        errors.push("vbs write failed".into());
+    }
+
+    // --- 3) One-shot scheduled task — always outside the app Job ---
+    let task = format!("RemedyDesktopUpdate_{}", std::process::id());
+    let st = {
+        let out = Command::new("powershell.exe")
+            .args([
+                "-NoProfile",
+                "-Command",
+                "(Get-Date).AddSeconds(25).ToString('HH:mm')",
+            ])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output();
+        match out {
+            Ok(o) if o.status.success() => {
+                let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                if s.len() >= 4 {
+                    s
+                } else {
+                    "23:59".into()
+                }
+            }
+            _ => "23:59".into(),
+        }
+    };
+    let tr = format!(
+        "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"{}\"",
+        ps1_path
+    );
+    let _ = Command::new("schtasks.exe")
+        .args(["/Delete", "/TN", &task, "/F"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    let create_ok = Command::new("schtasks.exe")
+        .args([
+            "/Create",
+            "/TN",
+            &task,
+            "/TR",
+            &tr,
+            "/SC",
+            "ONCE",
+            "/ST",
+            &st,
+            "/F",
+            "/RL",
+            "LIMITED",
+        ])
+        .creation_flags(CREATE_NO_WINDOW)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if create_ok {
+        let _ = Command::new("schtasks.exe")
+            .args(["/Run", "/TN", &task])
+            .creation_flags(CREATE_NO_WINDOW)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+        ok_count += 1;
+        log::info!("update schedule: schtasks {task} created and run (ST={st})");
+        let cleanup = format!("Start-Sleep -Seconds 240; schtasks /Delete /TN \"{task}\" /F");
+        let _ = Command::new("powershell.exe")
+            .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &cleanup])
+            .creation_flags(flags_basic)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn();
+    } else {
+        errors.push("schtasks create/run failed".into());
+        log::warn!("update schedule: schtasks create failed");
+    }
+
+    if ok_count > 0 {
+        Ok(())
+    } else {
+        Err(errors.join(" | "))
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn schedule_update_install_script(_ps1_path: &str) -> Result<(), String> {
+    Err("updates are Windows-only".into())
+}
+
 fn write_updater_owns_relaunch_flag() {
     let path = updater_owns_relaunch_flag_path();
     let _ = std::fs::write(
@@ -2020,53 +2207,36 @@ exit 4
 "#
                 );
                 // Write a temp .ps1 so quoting of the installer path is reliable.
+                // Prepend an immediate log line so we can detect "script never started"
+                // (0.14.4→0.14.5 failure: status stuck at closing, no log lines).
+                let ps_body = format!(
+                    "{preamble}\n{body}\n",
+                    preamble = r#"$ErrorActionPreference = 'Continue'
+try {
+  $__boot = Join-Path $env:TEMP 'RemedyDesktop-Update.log'
+  Add-Content -LiteralPath $__boot -Value ((" {0:u} BOOT pid={1} script={2}" -f (Get-Date), $PID, $MyInvocation.MyCommand.Path)) -ErrorAction SilentlyContinue
+} catch {}
+"#,
+                    body = ps.trim()
+                );
                 let ps1 = env::temp_dir().join(format!(
                     "RemedyDesktop-Update-Run-{}.ps1",
                     std::process::id()
                 ));
-                std::fs::write(&ps1, ps.trim()).map_err(|e| {
+                std::fs::write(&ps1, ps_body).map_err(|e| {
                     format!("Cannot write update script: {e}")
                 })?;
                 let ps1_path = ps1.to_string_lossy().to_string();
-                // Direct powershell.exe + CREATE_NO_WINDOW + breakaway.
-                // No cmd.exe / start (those were the visible black consoles).
-                let schedule = |flags: u32| -> Result<(), String> {
-                    Command::new("powershell.exe")
-                        .args([
-                            "-NoProfile",
-                            "-ExecutionPolicy",
-                            "Bypass",
-                            "-WindowStyle",
-                            "Hidden",
-                            "-File",
-                            &ps1_path,
-                        ])
-                        .creation_flags(flags)
-                        .stdin(Stdio::null())
-                        .stdout(Stdio::null())
-                        .stderr(Stdio::null())
-                        .spawn()
-                        .map(|_| ())
-                        .map_err(|e| e.to_string())
-                };
-                let flags_breakaway = DETACHED_PROCESS
-                    | CREATE_NEW_PROCESS_GROUP
-                    | CREATE_NO_WINDOW
-                    | CREATE_BREAKAWAY_FROM_JOB;
-                let flags_basic =
-                    DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW;
-                if let Err(e1) = schedule(flags_breakaway) {
-                    log::warn!(
-                        "breakaway schedule failed ({e1}); retrying without BREAKAWAY_FROM_JOB"
-                    );
-                    schedule(flags_basic).map_err(|e2| {
-                        format!(
-                            "Failed to schedule installer (try the .exe from GitHub Releases): {e1} / {e2}"
-                        )
-                    })?;
-                }
+                // Job-object-safe schedule: WScript.Shell Run often outlives the
+                // Tauri Job when CREATE_BREAKAWAY_FROM_JOB is denied; also register
+                // a one-shot scheduled task as belt-and-suspenders.
+                schedule_update_install_script(&ps1_path).map_err(|e| {
+                    format!(
+                        "Failed to schedule installer (try the .exe from GitHub Releases): {e}"
+                    )
+                })?;
                 log::info!(
-                    "Update scheduled via detached script {}; log={}",
+                    "Update scheduled via multi-path host; script={} log={}",
                     ps1_path,
                     log_path
                 );
@@ -2078,8 +2248,10 @@ exit 4
                     .map_err(|e| format!("Failed to launch installer: {e}"))?;
             }
 
-            // Give the scheduler a beat to start, then exit so file locks clear.
-            thread::sleep(Duration::from_millis(600));
+            // Give the scheduler time to start (and for WMI/schtasks to register),
+            // then exit so file locks clear. Too short a delay was a failure mode
+            // when breakaway spawn was slow.
+            thread::sleep(Duration::from_millis(1800));
             app_for_thread.exit(0);
             Ok(())
         })();

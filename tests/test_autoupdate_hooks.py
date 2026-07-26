@@ -43,6 +43,11 @@ def test_lib_rs_two_stage_update_ux() -> None:
     assert "NOAUTOLAUNCH" in text
     assert "UpdaterOwnsRelaunch" in text or "updater_owns_relaunch" in text
     assert "Stop-RemedyAppOnly" in text
+    # Job-object-safe multi-path install schedule (0.14.6+)
+    assert "schedule_update_install_script" in text
+    assert "wscript.exe" in text
+    assert "schtasks.exe" in text
+    assert "CREATE_BREAKAWAY_FROM_JOB" in text
     # Download begin must not start the install host
     assert "launch_install_progress_ui(&ver_from, &ver_to);" in text
     # Ensure call is after closing phase, not at thread start with download

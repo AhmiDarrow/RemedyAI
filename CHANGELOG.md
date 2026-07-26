@@ -2,6 +2,19 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.14.6] — 2026-07-26
+
+### Fix: autoupdate install never ran after download + alpha logos everywhere
+
+- **Autoupdate (0.14.4→0.14.5 failure mode):** after download, install script
+  could die with the Tauri Job Object (status stuck at `closing`, no log lines).
+  Now schedules install via **three paths**: breakaway PowerShell, **WScript.Shell**
+  launch, and a **one-shot schtasks** run; longer post-schedule delay before exit;
+  BOOT line in update log proves the script started.
+- **Branding:** `setup_branding.py` regenerates Tauri icons + public logo/icon
+  favicons from true-alpha masters (preserve wordmark aspect; mono light/dark
+  variants in `public/`). Syncs into `desktop/dist` for local WebUI.
+
 ## [0.14.5] — 2026-07-26
 
 ### UX: stream queue, live usage, sticky answer, export speed
