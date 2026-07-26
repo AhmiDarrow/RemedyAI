@@ -265,6 +265,7 @@ def parse_steps_from_text(text: str) -> list[str]:
 
 
 # Tools allowed when the UI is in Plan mode (explore, no shell/file mutation).
+# Read/research tools only — no shell/file writes. Mirrors Grok/Claude plan mode.
 PLAN_MODE_TOOL_NAMES = frozenset(
     {
         "plan_save",
@@ -276,5 +277,39 @@ PLAN_MODE_TOOL_NAMES = frozenset(
         "skill_search",
         "skill_activate",
         "local_discover",
+        "file_read",
+        "list_dir",
+        "repo_search",
+        "web_fetch",
+        "web_search",
+        "media_read",
+        "vision_describe",
     }
 )
+
+PLAN_MODE_SYSTEM_ADDENDUM = """
+## Plan mode (active)
+
+You are in **Plan mode** — research and design only.
+
+**Allowed:** read files, list directories, search the repo, fetch web docs, memory/skills lookup, save plans.
+**Blocked:** shell, file write/edit, installs, git mutations, and other side-effect tools.
+
+Process:
+1. Research the codebase / docs as needed.
+2. Ask clarifying questions when requirements are ambiguous.
+3. Produce a clear structured plan (goal, numbered steps, risks, files/tools).
+4. Call `plan_save` with that structure.
+5. Do **not** claim work is implemented — wait for the user to **Approve → Build**.
+
+Prefer an ASCII outline in the chat reply, e.g.:
+
+```
+Plan: <title>
+Goal: …
+Steps:
+  1. …
+  2. …
+Risks: …
+```
+""".strip()

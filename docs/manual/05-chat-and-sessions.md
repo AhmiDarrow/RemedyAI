@@ -61,10 +61,12 @@ the plain image.
 
 | Mode | Use when |
 |------|----------|
-| **Plan** | Explore and design; **shell/file tools blocked**. Remedy can save a structured plan (`plan_save`) with steps + risks. |
+| **Plan** | Research & design like Grok/Claude plan mode: **read/search/list/fetch OK**; **writes/shell blocked**. Ask clarifying questions; save a structured plan (`plan_save`); ASCII outline in chat. |
 | **Build** | Implement changes, run tools, write files — follows the latest plan when present. |
 
-Status bar toggle or **Ctrl+B**. Desktop sends `plan_mode` to the local API so the server enforces the allowlist.
+Status bar toggle or **Ctrl+B** / Shift+Tab in composer. Desktop sends `plan_mode` so the server enforces the allowlist.
+
+**Plan banner** (above chat): **Approve → Build**, **Request changes**, refresh. Approve leaves Plan mode and seeds a kickoff prompt.
 
 **Structured plans** live under `~/.remedy/plans/`. Slash commands:
 
@@ -161,3 +163,17 @@ Settings → Appearance: system/dark/light themes, density, custom accent. Does 
 ## Related
 
 - [Commands](11-reference-commands) · [Shortcuts](12-reference-shortcuts) · [Memory & harness](06-memory-and-harness)
+
+## Three-frame workspace
+
+`
+[ left slide ] | chat | [ right slide ]
+`
+
+- **Left / right rails:** Sessions · Settings · Files · Terminal · Browser · Scratch
+- **⇄ Swap sides** centers above chat
+- Hide a side with **×**; reopen from the edge strip
+- Terminal / Browser / Scratch support **pop out** (↗) and **fullscreen** (⛶)
+- Open **session tabs** live only inside the **Sessions** slide (not above chat)
+- **Archive** filter + auto-hide sessions older than 30 days (not pinned/open)
+

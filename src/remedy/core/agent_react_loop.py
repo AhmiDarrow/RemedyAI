@@ -84,14 +84,9 @@ async def call_llm_stream(runtime, message: str,
                     + plan.summary_markdown()
                 )
             if plan_mode:
-                context = (
-                    (context or "")
-                    + "\n\n## Plan mode (active)\n"
-                    "You are exploring and planning — do **not** edit files, run shell, "
-                    "or mutate the system. Use plan_save to store a structured plan with "
-                    "clear steps and risks, then summarize for the user. "
-                    "They will switch to Build mode to execute."
-                )
+                from remedy.core.plan_store import PLAN_MODE_SYSTEM_ADDENDUM
+
+                context = (context or "") + "\n\n" + PLAN_MODE_SYSTEM_ADDENDUM
         history = await runtime._load_session_history(session_id, message)
         # Memory Harness L0: prune send-view only (stored transcript untouched)
         with suppress(Exception):

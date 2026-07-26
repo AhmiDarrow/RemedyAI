@@ -17,6 +17,7 @@ import {
   type WorkspaceLayout,
 } from './workspace/layoutPrefs'
 import { SLIDE_META, type SlideId } from './workspace/types'
+import { PlanBanner } from './components/PlanBanner'
 import { TokenCostTicker } from './components/TokenCostTicker'
 import { TimeTravelTimeline } from './components/TimeTravelTimeline'
 import {
@@ -1466,6 +1467,21 @@ export default function App() {
         <div className="flex-1 flex min-h-0">
           <div className="flex-1 flex flex-col min-w-0 min-h-0">
             <ApprovalBanner sessionId={activeId} />
+            <PlanBanner
+              planMode={planMode}
+              sessionId={activeId}
+              onApproveBuild={() => {
+                setPlanMode(false)
+                setEditDraft({
+                  text: 'Implement the approved plan. Follow the saved steps carefully.',
+                  key: Date.now(),
+                })
+              }}
+              onRequestChanges={(hint) => {
+                setPlanMode(true)
+                setEditDraft({ text: hint, key: Date.now() })
+              }}
+            />
             <MessageFeed
               messages={messages}
               partialText={partialText}
