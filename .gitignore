@@ -50,6 +50,16 @@ logs/
 scripts/_nanotoken_corpus/
 scripts/_nanotoken_*.log
 
+# Local debug / inspection artifacts (never ship)
+assets/inspect_*.png
+dog.png
+scripts/_cdp_*.py
+scripts/_inspect_*.ps1
+scripts/_test_*.py
+scripts/_verify_*.py
+desktop/tauri-dev-*.log
+*.log
+
 # Desktop build outputs (sidecar binaries, not source)
 desktop/bin/
 
