@@ -84,7 +84,12 @@ def _load_signed_local(catalog_path: Path, *, public_key_b64: str | None = None)
     return cat
 
 
-async def _http_get(url: str, *, timeout_s: float = 15.0) -> bytes:
+async def _http_get(
+    url: str,
+    *,
+    timeout_s: float = 15.0,
+    max_bytes: int = 8 * 1024 * 1024,
+) -> bytes:
     import aiohttp
 
     async with aiohttp.ClientSession() as session, session.get(
@@ -92,7 +97,14 @@ async def _http_get(url: str, *, timeout_s: float = 15.0) -> bytes:
     ) as resp:
         if resp.status != 200:
             raise RuntimeError(f"HTTP {resp.status} for {url}")
-        return await resp.read()
+        chunks: list[bytes] = []
+        total = 0
+        async for chunk in resp.content.iter_chunked(65536):
+            total += len(chunk)
+            if total > max_bytes:
+                raise RuntimeError(f"Response exceeds size limit ({max_bytes} bytes) for {url}")
+            chunks.append(chunk)
+        return b"".join(chunks)
 
 
 async def get_skills_catalog(
@@ -132,8 +144,20 @@ async def get_skills_catalog(
         sig = sig_bytes.decode("utf-8").strip()
         verify_catalog_signature(data, sig, public_key_b64=pubkey)
         cache_dir.mkdir(parents=True, exist_ok=True)
-        cache_file.write_bytes(data)
-        cache_sig.write_text(sig + "\n", encoding="utf-8")
+        # Atomic-ish cache write (temp + replace)
+        tmp_c = cache_dir / "catalog.json.tmp"
+        tmp_s = cache_dir / "catalog.json.sig.tmp"
+        tmp_c.write_bytes(data)
+        tmp_s.write_text(sig + "\n", encoding="utf-8")
+        tmp_c.replace(cache_file)
+        tmp_s.replace(cache_sig)
+        if pubkey != CATALOG_PUBLIC_KEY_B64 or url != DEFAULT_CATALOG_URL:
+            logger.warning(
+                "Skills catalog using non-default verify key and/or URL "
+                "(pubkey override=%s url=%s)",
+                pubkey != CATALOG_PUBLIC_KEY_B64,
+                url,
+            )
         cat = SkillsCatalog.model_validate(json.loads(data.decode("utf-8")))
         cat.source = "remote"
         return cat

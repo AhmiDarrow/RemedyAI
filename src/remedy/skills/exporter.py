@@ -185,16 +185,22 @@ class SkillExporter:
         self,
         zip_path: Path,
         dest_skills_dir: Path,
+        *,
+        replace_existing: bool = False,
     ) -> list[Skill]:
         """Import skills from a pack ZIP into dest with quarantine metadata.
 
         Imported skills start DISCOVERED + quarantine=true until the user
         promotes them via the Skills panel / API.
+
+        When ``replace_existing`` is True (library force/update), overwrite the
+        canonical skill directory instead of creating ``name-imported``.
         """
         from remedy.models import SkillKind, SkillStatus
+        from remedy.skills.library.security import is_safe_skill_name
         from remedy.skills.loader import load_skill_from_dir
 
-        dest_skills_dir = Path(dest_skills_dir).expanduser()
+        dest_skills_dir = Path(dest_skills_dir).expanduser().resolve()
         dest_skills_dir.mkdir(parents=True, exist_ok=True)
         extract_root = self.output_dir / "_import_extract"
         if extract_root.exists():
@@ -211,12 +217,28 @@ class SkillExporter:
                 skill = load_skill_from_dir(skill_md.parent)
             except Exception:
                 continue
-            name = skill.manifest.name or skill_md.parent.name
-            target = dest_skills_dir / name
+            name = (skill.manifest.name or skill_md.parent.name or "").strip()
+            if not is_safe_skill_name(name):
+                raise ValueError(
+                    f"Refusing unsafe skill name (must be a single path segment): {name!r}"
+                )
+            target = (dest_skills_dir / name).resolve()
+            try:
+                target.relative_to(dest_skills_dir)
+            except ValueError as exc:
+                raise ValueError(f"Skill path escapes skills dir: {name}") from exc
             if target.exists():
-                # Do not clobber; place alongside as name-imported
-                target = dest_skills_dir / f"{name}-imported"
-                skill.manifest.name = target.name
+                if replace_existing:
+                    shutil.rmtree(target, ignore_errors=True)
+                else:
+                    # Do not clobber; place alongside as name-imported
+                    alt = f"{name}-imported"
+                    if not is_safe_skill_name(alt):
+                        raise ValueError(f"Cannot derive safe import name from {name!r}")
+                    target = (dest_skills_dir / alt).resolve()
+                    skill.manifest.name = alt
+                    if target.exists():
+                        shutil.rmtree(target, ignore_errors=True)
             shutil.copytree(skill_md.parent, target, dirs_exist_ok=True)
             # Mark quarantine on disk frontmatter
             meta = dict(skill.manifest.metadata or {})

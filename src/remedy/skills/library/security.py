@@ -21,6 +21,17 @@ _ALLOWED_HOSTS = frozenset(
     }
 )
 
+# Safe skill directory / catalog id name
+SKILL_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$")
+
+
+def is_safe_skill_name(name: str) -> bool:
+    """True if name is a single safe path segment (no traversal)."""
+    n = (name or "").strip()
+    if not n or "/" in n or "\\" in n or ".." in n:
+        return False
+    return bool(SKILL_NAME_RE.fullmatch(n))
+
 
 def verify_catalog_signature(
     catalog_bytes: bytes,
@@ -49,7 +60,7 @@ def is_allowed_download_url(url: str) -> bool:
     if u.startswith("local:"):
         # local:skill-id — resolved against monorepo community pack
         sid = u[6:].strip()
-        return bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,80}", sid))
+        return is_safe_skill_name(sid)
 
     if not u.lower().startswith("https://"):
         return False
@@ -58,10 +69,36 @@ def is_allowed_download_url(url: str) -> bool:
     if host not in _ALLOWED_HOSTS:
         return False
     path = parsed.path or ""
-    # github.com/AhmiDarrow/remedy-skills/releases/download/...
+
+    # Official release download pages on github.com
     if host in ("github.com", "www.github.com"):
-        return f"/{LIBRARY_REPO}/releases/" in path or path.startswith(
-            f"/{LIBRARY_REPO}/releases/"
-        )
-    # CDN assets often include repo in path or query — require path contains repo owner
-    return "AhmiDarrow" in path or "remedy-skills" in path
+        # Strict: /AhmiDarrow/remedy-skills/releases/download/<tag>/<file>
+        prefix = f"/{LIBRARY_REPO}/releases/download/"
+        if not path.startswith(prefix):
+            return False
+        rest = path[len(prefix) :]
+        # tag/file — both single segments, no traversal
+        parts = [p for p in rest.split("/") if p]
+        if len(parts) != 2:
+            return False
+        tag, filename = parts
+        if ".." in tag or ".." in filename:
+            return False
+        if not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", tag):
+            return False
+        if not re.fullmatch(r"[A-Za-z0-9._+-]{1,200}", filename):
+            return False
+        return True
+
+    # GitHub release asset CDN — only as final hop after github.com release URL.
+    # Path is opaque (numeric IDs); require release-asset path shape, no path traversal.
+    if host in ("objects.githubusercontent.com", "release-assets.githubusercontent.com"):
+        if ".." in path:
+            return False
+        # Typical: /github-production-release-asset/... or similar under objects
+        cleaned = path.strip("/")
+        if not cleaned or len(cleaned) > 500:
+            return False
+        return True
+
+    return False

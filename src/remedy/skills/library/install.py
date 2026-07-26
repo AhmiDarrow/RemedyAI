@@ -10,9 +10,12 @@ from pathlib import Path
 from typing import Any
 
 from remedy.skills.library.catalog import SkillCatalogEntry, SkillsCatalog, get_skills_catalog
-from remedy.skills.library.security import is_allowed_download_url
+from remedy.skills.library.security import is_allowed_download_url, is_safe_skill_name
 
 logger = logging.getLogger(__name__)
+
+MAX_SKILL_ZIP_BYTES = 50 * 1024 * 1024  # 50 MiB
+MAX_CATALOG_BYTES = 8 * 1024 * 1024  # 8 MiB
 
 
 def _repo_skills_root() -> Path | None:
@@ -47,7 +50,12 @@ def _verify_checksum(data: bytes, checksum: str) -> None:
         raise ValueError("Checksum mismatch — download corrupted or tampered")
 
 
-async def _download_bytes(url: str, *, timeout_s: float = 60.0) -> bytes:
+async def _download_bytes(
+    url: str,
+    *,
+    timeout_s: float = 60.0,
+    max_bytes: int = MAX_SKILL_ZIP_BYTES,
+) -> bytes:
     import aiohttp
 
     async with aiohttp.ClientSession() as session, session.get(
@@ -55,14 +63,24 @@ async def _download_bytes(url: str, *, timeout_s: float = 60.0) -> bytes:
     ) as resp:
         if resp.status != 200:
             raise RuntimeError(f"Download failed HTTP {resp.status}")
-        # Reject redirect off allowlist final URL
+        # Always require the *final* URL to be allowlisted (no redirect off-list).
         final = str(resp.url)
-        if not is_allowed_download_url(final) and not is_allowed_download_url(url):
-            raise ValueError(f"Download URL not allowed: {final}")
-        return await resp.read()
+        if not is_allowed_download_url(final):
+            raise ValueError(f"Download final URL not allowed: {final}")
+        # Stream with hard size cap
+        chunks: list[bytes] = []
+        total = 0
+        async for chunk in resp.content.iter_chunked(65536):
+            total += len(chunk)
+            if total > max_bytes:
+                raise ValueError(f"Download exceeds size limit ({max_bytes} bytes)")
+            chunks.append(chunk)
+        return b"".join(chunks)
 
 
 def _zip_from_local_skill(skill_id: str) -> bytes:
+    if not is_safe_skill_name(skill_id):
+        raise ValueError(f"Invalid local skill id: {skill_id}")
     root = _repo_skills_root()
     if root is None:
         raise FileNotFoundError("Local community skills root not found")
@@ -76,7 +94,10 @@ def _zip_from_local_skill(skill_id: str) -> bytes:
         for f in skill_dir.rglob("*"):
             if f.is_file():
                 zf.write(f, f.relative_to(root).as_posix())
-    return buf.getvalue()
+    data = buf.getvalue()
+    if len(data) > MAX_SKILL_ZIP_BYTES:
+        raise ValueError("Local skill pack exceeds size limit")
+    return data
 
 
 async def resolve_skill_zip_bytes(entry: SkillCatalogEntry) -> bytes:
@@ -86,7 +107,11 @@ async def resolve_skill_zip_bytes(entry: SkillCatalogEntry) -> bytes:
     if url.startswith("local:"):
         data = _zip_from_local_skill(url[6:].strip())
     else:
-        data = await _download_bytes(url)
+        # Cap by catalog size when present (with slack), else global max
+        cap = MAX_SKILL_ZIP_BYTES
+        if entry.size_bytes and entry.size_bytes > 0:
+            cap = min(MAX_SKILL_ZIP_BYTES, max(entry.size_bytes * 2, entry.size_bytes + 1024))
+        data = await _download_bytes(url, max_bytes=cap)
     _verify_checksum(data, entry.checksum)
     return data
 
@@ -109,10 +134,14 @@ async def install_skill_from_catalog(
     if version and version != entry.version:
         raise ValueError(f"Version {version} not available (catalog has {entry.version})")
 
-    if entry.name in _bundled_skill_names() and not force:
+    if not is_safe_skill_name(entry.name):
+        raise ValueError(f"Catalog skill has unsafe name: {entry.name!r}")
+
+    # Never shadow bundled skills — even with force
+    if entry.name in _bundled_skill_names():
         raise ValueError(
-            f"Skill name '{entry.name}' conflicts with a bundled skill. "
-            "Choose another name or pass force (not recommended)."
+            f"Skill name '{entry.name}' conflicts with a bundled skill and cannot be "
+            "installed from the library."
         )
 
     if home is None:
@@ -130,16 +159,26 @@ async def install_skill_from_catalog(
 
     zip_data = await resolve_skill_zip_bytes(entry)
 
-
     from remedy.skills.exporter import SkillExporter
     from remedy.skills.shared import invalidate_shared_registry
+
+    # Drop old registry entry when replacing
+    if force and runtime is not None and hasattr(runtime, "skills") and hasattr(
+        runtime.skills, "remove"
+    ):
+        try:
+            runtime.skills.remove(entry.name)
+        except Exception:
+            pass
 
     tmp = Path(tempfile.mkdtemp(prefix="remedy-lib-install-"))
     try:
         zip_path = tmp / "skill.zip"
         zip_path.write_bytes(zip_data)
         exp = SkillExporter(tmp)
-        imported = exp.import_pack_quarantine(zip_path, dest_root)
+        imported = exp.import_pack_quarantine(
+            zip_path, dest_root, replace_existing=bool(force)
+        )
         if not imported:
             raise RuntimeError("Import produced no skills (invalid pack?)")
 
@@ -152,6 +191,8 @@ async def install_skill_from_catalog(
             meta["library_version"] = entry.version
             meta["security_flags"] = list(entry.security_flags or [])
             meta["quarantine"] = True
+            # Force library updates back to quarantine (re-Trust after update)
+            meta["trust"] = "library-update" if force else "library-install"
             skill.manifest.metadata = meta
             # Persist enriched frontmatter if path known
             try:
@@ -159,7 +200,6 @@ async def install_skill_from_catalog(
 
                 p = Path(skill.source_skill_dir or skill.manifest.path or "")
                 if p.is_dir():
-                    # re-load after import already wrote quarantine; update flags on disk
                     md = p / "SKILL.md"
                     if md.is_file():
                         import re
@@ -198,7 +238,12 @@ async def install_skill_from_catalog(
             "version": entry.version,
             "quarantine": True,
             "security_flags": entry.security_flags,
-            "message": "Installed in quarantine. Trust the skill in Skills → Installed to activate.",
+            "replaced": bool(force),
+            "message": (
+                "Installed in quarantine. Trust the skill in Skills → Installed to activate."
+                if not force
+                else "Updated and re-quarantined. Trust again after reviewing changes."
+            ),
         }
     finally:
         import shutil
