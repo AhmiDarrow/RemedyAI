@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
+  coerceRailMode,
   coerceSlideId,
   loadWorkspaceLayout,
   saveWorkspaceLayout,
@@ -28,15 +29,17 @@ function installMemoryLocalStorage() {
   })
 }
 
-describe('workspace layoutPrefs v2', () => {
+describe('workspace layoutPrefs v3', () => {
   beforeEach(() => {
     installMemoryLocalStorage()
     localStorage.clear()
   })
 
-  it('returns defaults when empty (right collapsed)', () => {
+  it('returns defaults when empty (left open, right thin)', () => {
     const L = loadWorkspaceLayout()
     expect(L.left).toBe('sessions')
+    expect(L.leftRail).toBe('open')
+    expect(L.rightRail).toBe('thin')
     expect(L.leftOpen).toBe(true)
     expect(L.rightOpen).toBe(false)
     expect(L.leftWidth).toBeGreaterThanOrEqual(200)
@@ -50,12 +53,16 @@ describe('workspace layoutPrefs v2', () => {
       rightWidth: 9999,
       leftOpen: false,
       rightOpen: true,
+      leftRail: 'icons',
+      rightRail: 'open',
     })
     const L = loadWorkspaceLayout()
     expect(L.left).toBe('files')
     expect(L.right).toBe('scratch')
     expect(L.leftWidth).toBe(200)
     expect(L.rightWidth).toBe(480)
+    expect(L.leftRail).toBe('icons')
+    expect(L.rightRail).toBe('open')
     expect(L.leftOpen).toBe(false)
     expect(L.rightOpen).toBe(true)
   })
@@ -63,33 +70,36 @@ describe('workspace layoutPrefs v2', () => {
   it('rejects unknown slide ids (prevents SLIDE_META crash)', () => {
     expect(coerceSlideId('not-a-slide', 'sessions')).toBe('sessions')
     expect(coerceSlideId('browser', 'sessions')).toBe('browser')
+    expect(coerceRailMode('bogus', 'thin')).toBe('thin')
+    expect(coerceRailMode('icons', 'thin')).toBe('icons')
     localStorage.setItem(
-      'remedy.workspaceLayout.v2',
-      JSON.stringify({ left: 'bogus', right: 42, leftWidth: 'x' }),
+      'remedy.workspaceLayout.v3',
+      JSON.stringify({ left: 'bogus', right: 42, leftWidth: 'x', leftRail: 'nope' }),
     )
     const L = loadWorkspaceLayout()
     expect(L.left).toBe('sessions')
     expect(L.right).toBe('settings')
     expect(L.leftWidth).toBe(280)
+    expect(L.leftRail).toBe('open') // coerceRailMode('nope') → leftOpen default true → open
   })
 
-  it('migrates v1 prefs and forces right closed', () => {
+  it('migrates v2 prefs to v3 rails', () => {
     localStorage.setItem(
-      'remedy.workspaceLayout.v1',
+      'remedy.workspaceLayout.v2',
       JSON.stringify({
         left: 'settings',
         right: 'terminal',
         leftWidth: 300,
         rightWidth: 320,
         leftOpen: true,
-        rightOpen: true,
+        rightOpen: false,
       }),
     )
     const L = loadWorkspaceLayout()
     expect(L.left).toBe('settings')
     expect(L.right).toBe('terminal')
-    expect(L.rightOpen).toBe(false)
-    // Persisted under v2
-    expect(localStorage.getItem('remedy.workspaceLayout.v2')).toBeTruthy()
+    expect(L.leftRail).toBe('open')
+    expect(L.rightRail).toBe('thin')
+    expect(localStorage.getItem('remedy.workspaceLayout.v3')).toBeTruthy()
   })
 })

@@ -639,13 +639,31 @@ fn dirs_next_home() -> Option<std::path::PathBuf> {
     std::env::var_os("HOME").map(std::path::PathBuf::from)
 }
 
-/// Native folder picker (rfd — no PowerShell cold-start).
+/// Resolve the primary desktop window (label "main", else first webview).
+fn primary_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
+    app.get_webview_window("main").or_else(|| {
+        app.webview_windows()
+            .into_iter()
+            .find(|(label, _)| label != "remedy-browser")
+            .map(|(_, w)| w)
+            .or_else(|| app.webview_windows().into_values().next())
+    })
+}
+
+/// Native folder picker (rfd — must run on the UI thread on Windows).
 #[tauri::command]
-fn pick_folder() -> Result<Option<String>, String> {
-    let path = rfd::FileDialog::new()
-        .set_title("Select project folder")
-        .pick_folder();
-    Ok(path.map(|p| p.to_string_lossy().to_string()))
+async fn pick_folder(app: AppHandle) -> Result<Option<String>, String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.run_on_main_thread(move || {
+        let path = rfd::FileDialog::new()
+            .set_title("Select project folder")
+            .pick_folder()
+            .map(|p| p.to_string_lossy().to_string());
+        let _ = tx.send(path);
+    })
+    .map_err(|e| format!("folder picker (main thread): {e}"))?;
+    rx.recv()
+        .map_err(|e| format!("folder picker channel: {e}"))
 }
 
 /// Open a file or folder with the OS default app (Explorer / associated program).
@@ -1088,20 +1106,18 @@ fn request_quit_app(app: AppHandle, state: State<'_, ServerState>) -> Result<ser
 
 #[tauri::command]
 fn show_main_window(app: AppHandle) -> Result<(), String> {
-    if let Some(w) = app.get_webview_window("main") {
-        let _ = w.show();
-        let _ = w.unminimize();
-        let _ = w.set_focus();
-    }
+    let w = primary_window(&app).ok_or_else(|| "no main window".to_string())?;
+    let _ = w.show();
+    let _ = w.unminimize();
+    let _ = w.set_focus();
     Ok(())
 }
 
 /// Reliable minimize from the custom title bar (avoids webview permission races).
 #[tauri::command]
 fn minimize_main_window(app: AppHandle) -> Result<(), String> {
-    if let Some(w) = app.get_webview_window("main") {
-        w.minimize().map_err(|e| format!("minimize failed: {e}"))?;
-    }
+    let w = primary_window(&app).ok_or_else(|| "no main window".to_string())?;
+    w.minimize().map_err(|e| format!("minimize failed: {e}"))?;
     Ok(())
 }
 
@@ -1159,22 +1175,19 @@ fn switch_to_web_ui(app: AppHandle) -> Result<String, String> {
 /// Maximize / restore from the custom title bar.
 #[tauri::command]
 fn toggle_maximize_main_window(app: AppHandle) -> Result<bool, String> {
-    if let Some(w) = app.get_webview_window("main") {
-        let max = w
-            .is_maximized()
-            .map_err(|e| format!("is_maximized failed: {e}"))?;
-        if max {
-            w.unmaximize()
-                .map_err(|e| format!("unmaximize failed: {e}"))?;
-        } else {
-            w.maximize()
-                .map_err(|e| format!("maximize failed: {e}"))?;
-        }
-        return w
-            .is_maximized()
-            .map_err(|e| format!("is_maximized failed: {e}"));
+    let w = primary_window(&app).ok_or_else(|| "no main window".to_string())?;
+    let max = w
+        .is_maximized()
+        .map_err(|e| format!("is_maximized failed: {e}"))?;
+    if max {
+        w.unmaximize()
+            .map_err(|e| format!("unmaximize failed: {e}"))?;
+    } else {
+        w.maximize()
+            .map_err(|e| format!("maximize failed: {e}"))?;
     }
-    Ok(false)
+    w.is_maximized()
+        .map_err(|e| format!("is_maximized failed: {e}"))
 }
 
 /// Close button: hide to tray when enabled, otherwise quit (sidecar stopped via CloseRequested).
@@ -1183,19 +1196,24 @@ fn request_close_main_window(
     app: AppHandle,
     state: State<'_, ServerState>,
 ) -> Result<(), String> {
-    let close_to_tray = state
-        .desktop_prefs
-        .lock()
-        .map(|p| p.close_to_tray)
-        .unwrap_or(true);
-    if let Some(w) = app.get_webview_window("main") {
-        if close_to_tray {
-            w.hide().map_err(|e| format!("hide failed: {e}"))?;
-            log::info!("request_close_main_window: hidden to tray");
-        } else {
-            // Triggers CloseRequested -> sidecar shutdown on full quit
-            w.close().map_err(|e| format!("close failed: {e}"))?;
-        }
+    // Always re-read disk so Settings changes apply without restart.
+    let fresh = load_desktop_prefs();
+    if let Ok(mut g) = state.desktop_prefs.lock() {
+        *g = DesktopPrefs {
+            close_to_tray: fresh.close_to_tray,
+            start_in_tray: fresh.start_in_tray,
+            skip_quit_server_warning: fresh.skip_quit_server_warning,
+        };
+    }
+    let close_to_tray = fresh.close_to_tray;
+    let w = primary_window(&app).ok_or_else(|| "no main window".to_string())?;
+    if close_to_tray {
+        w.hide().map_err(|e| format!("hide failed: {e}"))?;
+        log::info!("request_close_main_window: hidden to tray");
+    } else {
+        // Triggers CloseRequested -> sidecar shutdown on full quit
+        w.close().map_err(|e| format!("close failed: {e}"))?;
+        log::info!("request_close_main_window: close requested (full quit path)");
     }
     Ok(())
 }

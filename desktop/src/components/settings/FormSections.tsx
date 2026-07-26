@@ -1755,6 +1755,19 @@ export function SettingsFormSections(p: SettingsFormProps): ReactNode {
             <SettingsSection
               {...sectionProps('about')}
             >
+              <div
+                className="rounded-lg px-3 py-2 mb-3 text-xs leading-relaxed"
+                style={{
+                  background: 'var(--bg-tertiary)',
+                  border: '1px solid var(--border)',
+                  color: 'var(--text-secondary)',
+                }}
+              >
+                <div className="font-semibold mb-0.5" style={{ color: 'var(--text-primary)' }}>
+                  From the creator
+                </div>
+                My name is Ahmi, I hope you enjoy my Remedy.
+              </div>
               <div className="space-y-1" style={{ color: 'var(--text-secondary)' }}>
                 <div className="flex justify-between">
                   <span style={{ color: 'var(--text-muted)' }}>Version</span>

@@ -601,9 +601,9 @@ export function MessageFeed({
   return (
     <div
       ref={setScroller}
-      className="flex-1 overflow-y-auto message-feed py-2 min-h-0 relative"
+      className="flex-1 overflow-y-auto message-feed py-2 min-h-0 relative h-full"
     >
-      <div ref={setContent} className="message-feed-content">
+      <div ref={setContent} className="message-feed-content min-h-full flex flex-col">
       {planMode && (
         <div
           className="mx-4 mt-2 mb-2 px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-2"
@@ -745,10 +745,16 @@ export function MessageFeed({
 
       {!loading && visible.length === 0 && !streaming && (
         <div
-          className="flex flex-col items-center justify-center min-h-[14rem] gap-3 px-6 text-center py-10"
-          style={{ color: 'var(--text-muted)' }}
+          className="flex flex-col items-center justify-center gap-3 px-6 text-center"
+          style={{
+            color: 'var(--text-muted)',
+            minHeight: 'min(100%, 22rem)',
+            flex: 1,
+            paddingTop: '3rem',
+            paddingBottom: '3rem',
+          }}
         >
-          <RemedyLogo size={36} framed />
+          <RemedyLogo size={48} framed />
           <div className="text-lg font-medium" style={{ color: 'var(--text-primary)' }}>
             Your partner is ready
           </div>
@@ -776,6 +782,9 @@ export function MessageFeed({
             <code style={{ color: 'var(--accent)' }}>Shift+Enter</code> new line ·{' '}
             <code style={{ color: 'var(--accent)' }}>@</code> files ·{' '}
             <code style={{ color: 'var(--accent)' }}>/</code> commands
+          </div>
+          <div className="text-[0.7rem] max-w-sm leading-relaxed italic" style={{ color: 'var(--text-muted)' }}>
+            My name is Ahmi, I hope you enjoy my Remedy.
           </div>
         </div>
       )}

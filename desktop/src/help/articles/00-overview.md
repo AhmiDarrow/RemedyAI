@@ -47,6 +47,12 @@ Nothing in this architecture requires a Remedy cloud account. Chat content goes 
 
 Copyright **Ahmi Darrow**. Binding text: repo `LICENSE`; summary: `COMMERCIAL.md`. No license keys or phone-home in the app. Settings → **License** shows the same summary offline.
 
+## From the creator
+
+My name is Ahmi, I hope you enjoy my Remedy.
+
+(Also in the app: title-bar menu → **About Remedy**, and **Settings → About**.)
+
 ## Manual map
 
 | Chapter | Topic |

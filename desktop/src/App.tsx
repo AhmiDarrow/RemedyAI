@@ -180,6 +180,8 @@ export default function App() {
         rightWidth: prev.leftWidth,
         leftOpen: prev.rightOpen,
         rightOpen: prev.leftOpen,
+        leftRail: prev.rightRail,
+        rightRail: prev.leftRail,
       }
       saveWorkspaceLayout(next)
       return next
@@ -207,8 +209,8 @@ export default function App() {
   const [toolProcessMode, setToolProcessMode] = useState<ToolProcessMode>('off')
   const [planMode, setPlanMode] = useState(false)
   const [panel, setPanel] = useState<'memory' | 'skills' | 'settings' | null>(null)
+  /** Track recently opened sessions (for archive filter only — no chip strip UI). */
   const [openTabs, setOpenTabs] = useState<Set<string>>(new Set())
-  /** Stable list for Sessions open-chip strip (avoid new array every parent render). */
   const openTabIds = useMemo(() => [...openTabs], [openTabs])
   const [serverState, setServerState] = useState<ServerState>(isTauri() ? 'connecting' : 'ready')
   const [serverError, setServerError] = useState('')
@@ -669,10 +671,21 @@ export default function App() {
 
   const handleSelect = useCallback(
     (id: string) => {
+      if (!id) return
+      // Always set active — useMessages force-loads history on session change.
       setActiveId(id)
       setOpenTabs((prev) => {
         if (prev.has(id)) return prev
         return new Set([...prev, id])
+      })
+      // Keep sessions panel open so selection is obvious
+      setWsLayout((prev) => {
+        if (prev.left === 'sessions' && prev.leftRail !== 'open') {
+          const next = { ...prev, leftRail: 'open' as const, leftOpen: true }
+          saveWorkspaceLayout(next)
+          return next
+        }
+        return prev
       })
     },
     [setActiveId],
@@ -1339,12 +1352,12 @@ export default function App() {
         void bulkSetProject(ids, projectPath)
       }}
       onBrowseProject={async () => {
-        try {
-          const path = await tauriInvoke<string | null>('pick_folder')
-          return path && path.trim() ? path.trim() : null
-        } catch {
-          return null
+        if (!isTauri()) {
+          const typed = window.prompt('Project folder path')
+          return typed && typed.trim() ? typed.trim() : null
         }
+        const path = await tauriInvoke<string | null>('pick_folder')
+        return path && path.trim() ? path.trim() : null
       }}
       hasMore={sessionsHasMore}
       loadingMore={sessionsLoadingMore}
@@ -1359,7 +1372,6 @@ export default function App() {
       onExport={handleExport}
       onImport={() => void handleImport()}
       openTabIds={openTabIds}
-      onCloseTab={handleCloseTab}
       footer={
         <TokenCostTicker
           placement="sidebar"
@@ -1450,11 +1462,15 @@ export default function App() {
           side="left"
           active={wsLayout.left}
           width={wsLayout.leftWidth}
-          open={wsLayout.leftOpen}
+          railMode={wsLayout.leftRail}
           onSelect={(id) => patchWs({ left: id })}
           onWidth={(w) => patchWs({ leftWidth: w })}
-          onHide={() => patchWs({ leftOpen: false })}
-          onOpen={() => patchWs({ leftOpen: true })}
+          onRailMode={(mode) =>
+            patchWs({
+              leftRail: mode,
+              leftOpen: mode === 'open',
+            })
+          }
           onSwap={swapSides}
           onPopout={
             SLIDE_META[wsLayout.left]?.popout
@@ -1467,10 +1483,10 @@ export default function App() {
               : undefined
           }
         >
-          {wsLayout.leftOpen ? renderSlide(wsLayout.left) : null}
+          {wsLayout.leftRail === 'open' ? renderSlide(wsLayout.left) : null}
         </WorkspaceSide>
 
-        {/* Middle: chat only */}
+        {/* Middle: chat only — messages fill; composer pinned to bottom */}
         <div className="flex-1 flex flex-col min-w-0 relative min-h-0">
           {planMode && (
             <div
@@ -1481,74 +1497,89 @@ export default function App() {
             </div>
           )}
 
-          <ApprovalBanner sessionId={activeId} />
-          <PlanBanner
-            planMode={planMode}
-            sessionId={activeId}
-            onApproveBuild={() => {
-              setPlanMode(false)
-              setEditDraft({
-                text: 'Implement the approved plan. Follow the saved steps carefully.',
-                key: Date.now(),
-              })
-            }}
-            onRequestChanges={(hint) => {
-              setPlanMode(true)
-              setEditDraft({ text: hint, key: Date.now() })
-            }}
-          />
-          <MessageFeed
-            messages={messages}
-            partialText={partialText}
-            partialThinking={partialThinking}
-            streaming={streaming}
-            loading={messagesLoading}
-            planMode={planMode}
-            activeTools={activeTools}
-            processSteps={processSteps}
-            taskProgress={taskProgress}
-            toolProcessMode={toolProcessMode}
-            onEditUserMessage={handleEditUserMessage}
-            onQuickPrompt={(text) => void handleSend(text)}
-            onRegenerate={(id) => void handleRegenerate(id)}
-            userName={userName}
-            partnerName={partnerName}
-            onAttachMarkup={handleAttachMarkup}
-          />
+          <div className="shrink-0">
+            <ApprovalBanner sessionId={activeId} />
+            <PlanBanner
+              planMode={planMode}
+              sessionId={activeId}
+              onApproveBuild={() => {
+                setPlanMode(false)
+                setEditDraft({
+                  text: 'Implement the approved plan. Follow the saved steps carefully.',
+                  key: Date.now(),
+                })
+              }}
+              onRequestChanges={(hint) => {
+                setPlanMode(true)
+                setEditDraft({ text: hint, key: Date.now() })
+              }}
+            />
+          </div>
 
-          <Composer
-            ref={composerRef}
-            onSend={handleSend}
-            onStop={stop}
-            onCommand={handleCommand}
-            streaming={streaming}
-            queue={queue}
-            onCancelQueued={cancelQueued}
-            onClearQueue={clearQueue}
-            onPromoteQueued={promoteQueued}
-            onUpdateQueued={updateQueued}
-            disabled={serverState !== 'ready'}
-            planMode={planMode}
-            onTogglePlanMode={() => setPlanMode((p) => !p)}
-            agents={agentDefs}
-            editDraft={editDraft}
-            sessionId={activeId}
-            llmProvider={llmProvider}
-            llmModel={model}
-            onOpenSettings={() => {
-              patchWs({ right: 'settings', rightOpen: true })
-              setPanel(null)
-            }}
-            ensureSession={async () => {
-              if (activeId) return activeId
-              const s = await create()
-              if (s?.id) {
-                setActiveId(s.id)
-                setOpenTabs((prev) => new Set([...prev, s.id]))
-              }
-              return s?.id ?? null
-            }}
-          />
+          <div className="flex-1 min-h-0 flex flex-col">
+            <MessageFeed
+              messages={messages}
+              partialText={partialText}
+              partialThinking={partialThinking}
+              streaming={streaming}
+              loading={messagesLoading}
+              planMode={planMode}
+              activeTools={activeTools}
+              processSteps={processSteps}
+              taskProgress={taskProgress}
+              toolProcessMode={toolProcessMode}
+              onEditUserMessage={handleEditUserMessage}
+              onQuickPrompt={(text) => void handleSend(text)}
+              onRegenerate={(id) => void handleRegenerate(id)}
+              userName={userName}
+              partnerName={partnerName}
+              onAttachMarkup={handleAttachMarkup}
+            />
+          </div>
+
+          <div className="shrink-0 flex flex-col">
+            <TokenCostTicker
+              placement="sidebar"
+              run={displayRunUsage}
+              session={sessionUsage}
+              streaming={streaming}
+              model={model}
+              provider={llmProvider}
+            />
+            <Composer
+              ref={composerRef}
+              onSend={handleSend}
+              onStop={stop}
+              onCommand={handleCommand}
+              streaming={streaming}
+              queue={queue}
+              onCancelQueued={cancelQueued}
+              onClearQueue={clearQueue}
+              onPromoteQueued={promoteQueued}
+              onUpdateQueued={updateQueued}
+              disabled={serverState !== 'ready'}
+              planMode={planMode}
+              onTogglePlanMode={() => setPlanMode((p) => !p)}
+              agents={agentDefs}
+              editDraft={editDraft}
+              sessionId={activeId}
+              llmProvider={llmProvider}
+              llmModel={model}
+              onOpenSettings={() => {
+                patchWs({ right: 'settings', rightOpen: true, rightRail: 'open' })
+                setPanel(null)
+              }}
+              ensureSession={async () => {
+                if (activeId) return activeId
+                const s = await create()
+                if (s?.id) {
+                  setActiveId(s.id)
+                  setOpenTabs((prev) => new Set([...prev, s.id]))
+                }
+                return s?.id ?? null
+              }}
+            />
+          </div>
 
           <TimeTravelTimeline
             open={timeTravelOpen}
@@ -1574,8 +1605,8 @@ export default function App() {
             open={
               panel === 'settings' &&
               !(
-                (wsLayout.leftOpen && wsLayout.left === 'settings') ||
-                (wsLayout.rightOpen && wsLayout.right === 'settings')
+                (wsLayout.leftRail === 'open' && wsLayout.left === 'settings') ||
+                (wsLayout.rightRail === 'open' && wsLayout.right === 'settings')
               )
             }
             onClose={() => setPanel(null)}
@@ -1623,11 +1654,15 @@ export default function App() {
           side="right"
           active={wsLayout.right}
           width={wsLayout.rightWidth}
-          open={wsLayout.rightOpen}
+          railMode={wsLayout.rightRail}
           onSelect={(id) => patchWs({ right: id })}
           onWidth={(w) => patchWs({ rightWidth: w })}
-          onHide={() => patchWs({ rightOpen: false })}
-          onOpen={() => patchWs({ rightOpen: true })}
+          onRailMode={(mode) =>
+            patchWs({
+              rightRail: mode,
+              rightOpen: mode === 'open',
+            })
+          }
           onSwap={swapSides}
           onPopout={
             SLIDE_META[wsLayout.right]?.popout
@@ -1640,7 +1675,7 @@ export default function App() {
               : undefined
           }
         >
-          {wsLayout.rightOpen ? renderSlide(wsLayout.right) : null}
+          {wsLayout.rightRail === 'open' ? renderSlide(wsLayout.right) : null}
         </WorkspaceSide>
 
         {popout && (
@@ -1863,6 +1898,19 @@ export default function App() {
           <div className="text-sm font-semibold mb-1">About Remedy</div>
           <div className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>
             Your personal AI partner — knowledge, design, code, and get-it-done.
+          </div>
+          <div
+            className="text-xs mb-3 leading-relaxed rounded-lg px-3 py-2"
+            style={{
+              background: 'var(--bg-tertiary)',
+              color: 'var(--text-secondary)',
+              border: '1px solid var(--border)',
+            }}
+          >
+            <div className="font-semibold mb-0.5" style={{ color: 'var(--text-primary)' }}>
+              From the creator
+            </div>
+            My name is Ahmi, I hope you enjoy my Remedy.
           </div>
           <div className="text-xs space-y-1 mb-4" style={{ color: 'var(--text-secondary)' }}>
             <div>

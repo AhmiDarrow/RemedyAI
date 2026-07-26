@@ -2,6 +2,18 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.15.4] - 2026-07-26
+
+### Fix: window chrome, chat shell, sessions, browser, rails
+
+- **Title bar:** min / max / close reliable (dedicated drag region; primary window lookup; close-to-tray).
+- **Chat:** composer pinned to bottom; empty-session landing restored; token/cost ticker above composer.
+- **Sessions:** remove open-tab chips; force-load history on session select; project Browse… on UI thread.
+- **Browser:** embed in slide (iframe + external open); no blank WebView popup.
+- **Terminal:** block blinking cursor; click-to-focus.
+- **Rails:** thin → icons → open on left and right.
+- **About / docs:** “My name is Ahmi, I hope you enjoy my Remedy.”
+
 ## [0.15.3] - 2026-07-26
 
 ### Fix/Feature: shell layout, in-app terminal/browser, New Project, icons, images

@@ -1,22 +1,26 @@
 import type { ReactNode } from 'react'
 import { ALL_SLIDES, SLIDE_META, type SlideId } from '../../workspace/types'
+import type { RailMode } from '../../workspace/layoutPrefs'
 
 const RAIL_W = 36
+const THIN_W = 10
 
 /**
  * Outer-edge workspace rail + optional body.
- * Collapsed = rail only (icons still switch slides and expand the panel).
- * Swap lives in the panel header — never over the chat middle.
+ *
+ * Modes:
+ * - thin  — narrow strip; click expands to icons
+ * - icons — icon rail only; click icon opens panel
+ * - open  — icons + panel body; header × minimizes to thin
  */
 export function WorkspaceSide({
   side,
   active,
   width,
-  open,
+  railMode,
   onSelect,
   onWidth,
-  onHide,
-  onOpen,
+  onRailMode,
   onSwap,
   onPopout,
   onFullscreen,
@@ -25,17 +29,43 @@ export function WorkspaceSide({
   side: 'left' | 'right'
   active: SlideId
   width: number
-  open: boolean
+  railMode: RailMode
   onSelect: (id: SlideId) => void
   onWidth: (w: number) => void
-  onHide: () => void
-  onOpen: () => void
+  onRailMode: (mode: RailMode) => void
   onSwap?: () => void
   onPopout?: () => void
   onFullscreen?: () => void
   children?: ReactNode
 }) {
   const meta = SLIDE_META[active] ?? SLIDE_META.sessions
+  const open = railMode === 'open'
+  const thin = railMode === 'thin'
+
+  if (thin) {
+    return (
+      <button
+        type="button"
+        className="flex h-full min-h-0 shrink-0 items-center justify-center"
+        style={{
+          width: THIN_W,
+          background: 'var(--bg-tertiary)',
+          borderRight: side === 'left' ? '1px solid var(--border)' : undefined,
+          borderLeft: side === 'right' ? '1px solid var(--border)' : undefined,
+          color: 'var(--text-muted)',
+          cursor: 'pointer',
+          padding: 0,
+        }}
+        title={side === 'left' ? 'Expand left rail' : 'Expand right rail'}
+        aria-label={side === 'left' ? 'Expand left rail' : 'Expand right rail'}
+        onClick={() => onRailMode('icons')}
+      >
+        <span style={{ fontSize: 9, writingMode: 'vertical-rl', transform: side === 'right' ? 'rotate(180deg)' : undefined }}>
+          {side === 'left' ? '›' : '‹'}
+        </span>
+      </button>
+    )
+  }
 
   const rail = (
     <div
@@ -47,6 +77,18 @@ export function WorkspaceSide({
         borderLeft: side === 'right' ? '1px solid var(--border)' : undefined,
       }}
     >
+      <button
+        type="button"
+        title={open ? 'Minimize rail' : 'Open panel'}
+        className="w-7 h-6 rounded text-[10px] flex items-center justify-center mb-0.5"
+        style={{
+          color: 'var(--text-muted)',
+          border: '1px solid transparent',
+        }}
+        onClick={() => onRailMode(open ? 'thin' : 'open')}
+      >
+        {open ? (side === 'left' ? '‹' : '›') : (side === 'left' ? '›' : '‹')}
+      </button>
       {ALL_SLIDES.map((id) => {
         const m = SLIDE_META[id]
         const on = open && id === active
@@ -62,7 +104,7 @@ export function WorkspaceSide({
             }}
             onClick={() => {
               onSelect(id)
-              if (!open) onOpen()
+              if (!open) onRailMode('open')
             }}
           >
             {m.short}
@@ -73,7 +115,6 @@ export function WorkspaceSide({
   )
 
   if (!open) {
-    // Rail only on the outer edge
     return (
       <div className="flex h-full min-h-0 shrink-0" style={{ width: RAIL_W }}>
         {rail}
@@ -144,7 +185,12 @@ export function WorkspaceSide({
             ⛶
           </button>
         )}
-        <button type="button" className="px-1 opacity-70" title="Hide panel" onClick={onHide}>
+        <button
+          type="button"
+          className="px-1 opacity-70"
+          title="Minimize to thin rail"
+          onClick={() => onRailMode('thin')}
+        >
           ×
         </button>
       </div>

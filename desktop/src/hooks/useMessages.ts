@@ -140,12 +140,15 @@ export function useMessages(sessionId: string | null) {
     }
   }, [])
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts?: { force?: boolean }) => {
     if (!sessionId) {
       setMessages([])
+      setLoading(false)
       return
     }
-    if (streamingRef.current) return
+    // Always load when switching sessions (force). Only skip mid-stream refreshes
+    // for the same session — previously a stuck stream blocked all session switches.
+    if (streamingRef.current && !opts?.force) return
     setLoading(true)
     try {
       const msgs = await listMessages(sessionId)
@@ -157,8 +160,9 @@ export function useMessages(sessionId: string | null) {
     }
   }, [sessionId])
 
+  // Session change: always force-load history so list clicks work.
   useEffect(() => {
-    load()
+    void load({ force: true })
   }, [load])
 
   useEffect(() => {

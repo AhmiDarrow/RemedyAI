@@ -3,18 +3,18 @@
 ## Main window map
 
 ```
-┌ Title bar (logo menu) ──────────────────────────────┐
-│ Session tabs                                         │
-├ Sidebar ───┬─ Message feed ──────────────┬─ Panel ──┤
-│ sessions   │  bubbles + tools            │ Memory / │
-│            │  composer                   │ Skills / │
-│            │                             │ Settings │
-├────────────┴─────────────────────────────┴──────────┤
-│ Status: model · think · ask · Proc · Plan · panels  │
-└─────────────────────────────────────────────────────┘
+┌ Title bar (logo menu · min / max / close→tray) ─────┐
+├ rail ┬ left slide ┬─ Message feed (landing when empty) ┬ right ─┤
+│ icons│ sessions   │                                    │ slide  │
+│ thin │ …          │  usage ticker                      │        │
+│      │            │  composer (bottom)                 │        │
+├──────┴────────────┴────────────────────────────────────┴────────┤
+│ Status: model · think · ask · Proc · Plan · panels             │
+└────────────────────────────────────────────────────────────────┘
 ```
 
-**F1** / **Ctrl+/** open this Help wiki (not only a chat dump).
+**F1** / **Ctrl+/** open this Help wiki (not only a chat dump).  
+Minimize / maximize / close are the top-right buttons (close hides to tray when Always ready is on).
 
 ## Sending messages
 
@@ -49,9 +49,10 @@ puts the file on the composer rail so you can point things out to Remedy.
 
 ## Sessions
 
-- **New session** — Ctrl+N, logo menu, or `/new`  
-- **Open tabs** — only inside the **Sessions** slide (not above chat)  
-- **Archive** — filter + auto-hide after 30 days (not pinned/open); row toggle  
+- **New session** — Ctrl+N, logo menu, or `/new` (root session — no project)  
+- **Click a session** — loads that chat in the middle pane  
+- **Add project folder** — paste a path or **Browse…** (native folder picker)  
+- **Archive** — filter + auto-hide after 30 days (not pinned); row toggle  
 - **Auto-title** — from the first prompt  
 - **Rename / pin / search / tags** — session sidebar features  
 - **Export** — `/export` or command palette → `.txt`  
@@ -64,7 +65,9 @@ puts the file on the composer rail so you can point things out to Remedy.
 ```
 
 Rails: Sessions · Settings · Files · Terminal · Browser · Scratch.  
-**⇄ Swap sides** · hide/show · Terminal/Browser/Scratch pop out (↗) / fullscreen (⛶).
+Each side: **thin strip** (click → icons) → **icon rail** (click icon → open panel) → **×** minimizes to thin.  
+**⇄ Swap sides** · Terminal/Browser/Scratch can pop out (↗) / fullscreen (⛶).  
+Browser content loads **inside** the panel; sites that block embedding offer **Open externally**.
 
 ## Plan vs Build
 

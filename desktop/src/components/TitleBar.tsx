@@ -20,9 +20,24 @@ interface TitleBarProps {
   onMenuAction?: (action: AppMenuAction) => void
 }
 
+/** Prefer official window API; fall back to custom Rust commands. */
+async function withMainWindow<T>(
+  fn: (win: {
+    minimize: () => Promise<void>
+    toggleMaximize: () => Promise<void>
+    isMaximized: () => Promise<boolean>
+    close: () => Promise<void>
+    hide: () => Promise<void>
+  }) => Promise<T>,
+): Promise<T> {
+  const { getCurrentWindow } = await import('@tauri-apps/api/window')
+  return fn(getCurrentWindow())
+}
+
 /**
- * Custom themed window chrome. Wordmark logo opens the app menu
- * (Settings, About, Updates, …). Rest of the bar is drag-region.
+ * Custom themed window chrome. Wordmark logo opens the app menu.
+ * Drag region is a dedicated middle strip only — never wraps chrome buttons
+ * (WebView2 steals clicks if min/max/close sit inside app-region:drag).
  */
 export function TitleBar({
   title = 'Remedy',
@@ -80,50 +95,67 @@ export function TitleBar({
 
   const onMinimize = useCallback(() => {
     if (!inTauri) return
-    void tauriInvoke('minimize_main_window').catch(async (e) => {
-      console.warn('[remedy] minimize command failed, trying window API', e)
+    void (async () => {
       try {
-        const { getCurrentWindow } = await import('@tauri-apps/api/window')
-        await getCurrentWindow().minimize()
+        await withMainWindow((w) => w.minimize())
+        return
+      } catch (e) {
+        console.warn('[remedy] window.minimize failed, trying command', e)
+      }
+      try {
+        await tauriInvoke('minimize_main_window')
       } catch (e2) {
         console.warn('[remedy] minimize failed', e2)
       }
-    })
+    })()
   }, [inTauri])
 
   const onToggleMax = useCallback(() => {
     if (!inTauri) return
-    void tauriInvoke<boolean>('toggle_maximize_main_window')
-      .then((m) => setMaximized(Boolean(m)))
-      .catch(async (e) => {
-        console.warn('[remedy] maximize command failed, trying window API', e)
-        try {
-          const { getCurrentWindow } = await import('@tauri-apps/api/window')
-          const w = getCurrentWindow()
+    void (async () => {
+      try {
+        await withMainWindow(async (w) => {
           await w.toggleMaximize()
           setMaximized(await w.isMaximized())
-        } catch (e2) {
-          console.warn('[remedy] maximize failed', e2)
-        }
-      })
+        })
+        return
+      } catch (e) {
+        console.warn('[remedy] window.toggleMaximize failed, trying command', e)
+      }
+      try {
+        const m = await tauriInvoke<boolean>('toggle_maximize_main_window')
+        setMaximized(Boolean(m))
+      } catch (e2) {
+        console.warn('[remedy] maximize failed', e2)
+      }
+    })()
   }, [inTauri])
 
   const onClose = useCallback(() => {
     if (!inTauri) return
-    void tauriInvoke('request_close_main_window').catch(async (e) => {
-      console.warn('[remedy] close command failed, trying window API', e)
+    // Prefer Rust close-to-tray path; fall back to OS close (CloseRequested).
+    void (async () => {
       try {
-        const { getCurrentWindow } = await import('@tauri-apps/api/window')
-        await getCurrentWindow().close()
+        await tauriInvoke('request_close_main_window')
+        return
+      } catch (e) {
+        console.warn('[remedy] request_close_main_window failed, trying window API', e)
+      }
+      try {
+        await withMainWindow((w) => w.close())
       } catch (e2) {
         console.warn('[remedy] close failed', e2)
+        try {
+          await withMainWindow((w) => w.hide())
+        } catch {
+          /* last resort exhausted */
+        }
       }
-    })
+    })()
   }, [inTauri])
 
   const run = (action: AppMenuAction) => {
     setMenuOpen(false)
-    // Quit is handled by App (server-stop warning dialog) via onMenuAction
     onMenuAction?.(action)
   }
 
@@ -137,111 +169,112 @@ export function TitleBar({
         color: 'var(--text-primary)',
       }}
     >
-      <div
-        className="flex-1 flex items-center min-w-0 px-2 gap-1"
-        data-tauri-drag-region
-        onDoubleClick={(e) => {
-          if ((e.target as HTMLElement).closest('button')) return
-          onToggleMax()
-        }}
-      >
-        {/* Logo = app menu trigger (not drag region so clicks work). */}
-        <div className="relative flex-shrink-0" style={{ zIndex: 60 }}>
-          <button
-            ref={btnRef}
-            type="button"
-            className="titlebar-btn flex items-center px-1.5 rounded"
+      {/* Logo / menu — no-drag */}
+      <div className="titlebar-no-drag relative flex-shrink-0 flex items-center px-1" style={{ zIndex: 60 }}>
+        <button
+          ref={btnRef}
+          type="button"
+          className="titlebar-btn flex items-center px-1.5 rounded"
+          style={{
+            width: 'auto',
+            height: 32,
+            background: menuOpen ? 'var(--bg-tertiary)' : 'transparent',
+          }}
+          title="Remedy menu"
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          aria-label="Open Remedy menu"
+          onClick={(e) => {
+            e.stopPropagation()
+            e.preventDefault()
+            setMenuOpen((o) => !o)
+          }}
+        >
+          <img
+            src="/logo.png"
+            alt="Remedy"
+            draggable={false}
             style={{
+              height: 24,
               width: 'auto',
-              height: 32,
-              background: menuOpen ? 'var(--bg-tertiary)' : 'transparent',
+              maxWidth: 150,
+              objectFit: 'contain',
+              objectPosition: 'left center',
+              display: 'block',
             }}
-            title="Remedy menu"
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
-            aria-label="Open Remedy menu"
-            onClick={(e) => {
-              e.stopPropagation()
-              setMenuOpen((o) => !o)
+          />
+          <span
+            className="ml-0.5 text-[9px]"
+            style={{ color: 'var(--text-muted)' }}
+            aria-hidden
+          >
+            ▾
+          </span>
+        </button>
+
+        {menuOpen && (
+          <div
+            ref={menuRef}
+            role="menu"
+            className="titlebar-no-drag absolute top-full left-0 mt-1 z-[80] min-w-[200px] rounded-lg py-1 shadow-xl"
+            style={{
+              background: 'var(--bg-secondary)',
+              border: '1px solid var(--border)',
+              boxShadow: '0 8px 28px rgba(0,0,0,0.35)',
             }}
           >
-            <img
-              src="/logo.png"
-              alt="Remedy"
-              draggable={false}
-              style={{
-                height: 24,
-                width: 'auto',
-                maxWidth: 150,
-                objectFit: 'contain',
-                objectPosition: 'left center',
-                display: 'block',
-              }}
-            />
-            <span
-              className="ml-0.5 text-[9px]"
-              style={{ color: 'var(--text-muted)' }}
-              aria-hidden
-            >
-              ▾
-            </span>
-          </button>
-
-          {menuOpen && (
-            <div
-              ref={menuRef}
-              role="menu"
-              className="absolute top-full left-0 mt-1 z-[80] min-w-[200px] rounded-lg py-1 shadow-xl"
-              style={{
-                background: 'var(--bg-secondary)',
-                border: '1px solid var(--border)',
-                boxShadow: '0 8px 28px rgba(0,0,0,0.35)',
-              }}
-            >
-              <MenuItem label="New session" onClick={() => run('new_session')} shortcut="Ctrl+N" />
-              <MenuSep />
-              <MenuItem label="Settings…" onClick={() => run('settings')} shortcut="Ctrl+," />
-              <MenuItem label="Memory" onClick={() => run('memory')} />
-              <MenuItem label="Skills" onClick={() => run('skills')} />
-              <MenuItem label="Help / Owner's Manual…" onClick={() => run('help')} shortcut="F1" />
-              {isTauri() && (
-                <MenuItem
-                  label="Switch to WebUI…"
-                  onClick={() => run('switch_web_ui')}
-                />
-              )}
-              <MenuSep />
-              {updateAvailable ? (
-                <MenuItem
-                  label="Install update…"
-                  onClick={() => run('install_update')}
-                  accent
-                />
-              ) : (
-                <MenuItem label="Check for updates…" onClick={() => run('check_updates')} />
-              )}
+            <MenuItem label="New session" onClick={() => run('new_session')} shortcut="Ctrl+N" />
+            <MenuSep />
+            <MenuItem label="Settings…" onClick={() => run('settings')} shortcut="Ctrl+," />
+            <MenuItem label="Memory" onClick={() => run('memory')} />
+            <MenuItem label="Skills" onClick={() => run('skills')} />
+            <MenuItem label="Help / Owner's Manual…" onClick={() => run('help')} shortcut="F1" />
+            {isTauri() && (
               <MenuItem
-                label={version ? `About Remedy (v${version})` : 'About Remedy'}
-                onClick={() => run('about')}
+                label="Switch to WebUI…"
+                onClick={() => run('switch_web_ui')}
               />
-              <MenuSep />
-              <MenuItem label="Quit Remedy" onClick={() => run('quit')} danger />
-            </div>
-          )}
-        </div>
+            )}
+            <MenuSep />
+            {updateAvailable ? (
+              <MenuItem
+                label="Install update…"
+                onClick={() => run('install_update')}
+                accent
+              />
+            ) : (
+              <MenuItem label="Check for updates…" onClick={() => run('check_updates')} />
+            )}
+            <MenuItem
+              label={version ? `About Remedy (v${version})` : 'About Remedy'}
+              onClick={() => run('about')}
+            />
+            <MenuSep />
+            <MenuItem label="Quit Remedy" onClick={() => run('quit')} danger />
+          </div>
+        )}
+      </div>
 
-        {/* Drag filler — keeps title accessible to screen readers only */}
+      {/* Dedicated drag strip only — double-click maximizes */}
+      <div
+        className="flex-1 min-w-0 h-full"
+        data-tauri-drag-region
+        onDoubleClick={() => onToggleMax()}
+      >
         <span className="sr-only">{title}</span>
       </div>
 
-      <div className="flex titlebar-controls" style={{ zIndex: 50 }}>
+      {/* Window controls — must stay outside drag region */}
+      <div className="titlebar-controls titlebar-no-drag flex flex-shrink-0" style={{ zIndex: 70 }}>
         <button
           type="button"
           className="titlebar-btn"
           title="Minimize"
           aria-label="Minimize"
+          onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation()
+            e.preventDefault()
             onMinimize()
           }}
         >
@@ -254,8 +287,10 @@ export function TitleBar({
           className="titlebar-btn"
           title={maximized ? 'Restore' : 'Maximize'}
           aria-label={maximized ? 'Restore' : 'Maximize'}
+          onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation()
+            e.preventDefault()
             onToggleMax()
           }}
         >
@@ -287,8 +322,10 @@ export function TitleBar({
           className="titlebar-btn titlebar-btn-close"
           title="Close (hides to tray when Always ready is on)"
           aria-label="Close"
+          onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation()
+            e.preventDefault()
             onClose()
           }}
         >

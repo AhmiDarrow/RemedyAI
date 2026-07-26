@@ -70,7 +70,6 @@ export function Sidebar({
   onLoadMore,
   footer,
   openTabIds = [],
-  onCloseTab,
   embedded = false,
 }: SidebarProps) {
   const [query, setQuery] = useState('')
@@ -200,10 +199,23 @@ export function Sidebar({
     })
   }
 
+  const [browseError, setBrowseError] = useState('')
   const handleBrowseAdd = async () => {
-    if (!onBrowseProject) return
-    const path = await onBrowseProject()
-    if (path) void handleAddProject(path)
+    if (!onBrowseProject) {
+      setBrowseError('Folder picker unavailable')
+      return
+    }
+    setBrowseError('')
+    try {
+      const path = await onBrowseProject()
+      if (path) {
+        void handleAddProject(path)
+      } else {
+        setBrowseError('No folder selected')
+      }
+    } catch (e: unknown) {
+      setBrowseError(e instanceof Error ? e.message : 'Browse failed')
+    }
   }
 
   const projectOptions = useMemo(() => {
@@ -350,49 +362,6 @@ export function Sidebar({
             label="Archive"
           />
         </div>
-        {/* Open tabs — only live inside Sessions slide */}
-        {openTabIds.length > 0 && (
-          <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto">
-            {openTabIds.map((id) => {
-              const s = sessions.find((x) => x.id === id)
-              const title = s?.title || 'Untitled'
-              const active = id === activeId
-              return (
-                <div
-                  key={id}
-                  className="flex items-center gap-0.5 rounded pl-1.5 pr-0.5 py-0.5 text-[10px] max-w-full"
-                  style={{
-                    background: active ? 'var(--accent)' : 'var(--bg-primary)',
-                    color: active ? '#fff' : 'var(--text-secondary)',
-                    border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
-                  }}
-                >
-                  <button
-                    type="button"
-                    className="truncate max-w-[7rem] text-left"
-                    onClick={() => onSelect(id)}
-                    title={title}
-                  >
-                    {title}
-                  </button>
-                  {onCloseTab && (
-                    <button
-                      type="button"
-                      className="w-4 h-4 rounded flex items-center justify-center opacity-80 hover:opacity-100"
-                      title="Close tab"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        onCloseTab(id)
-                      }}
-                    >
-                      ×
-                    </button>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        )}
         <label
           className="flex items-center gap-1.5 text-[10px] cursor-pointer"
           style={{ color: 'var(--text-muted)' }}
@@ -476,11 +445,17 @@ export function Sidebar({
                   onClick={() => {
                     setAddingProject(false)
                     setAddProjectDraft('')
+                    setBrowseError('')
                   }}
                 >
                   Cancel
                 </button>
               </div>
+              {browseError && (
+                <div className="text-[10px]" style={{ color: 'var(--error)' }}>
+                  {browseError}
+                </div>
+              )}
             </div>
           )}
         </div>

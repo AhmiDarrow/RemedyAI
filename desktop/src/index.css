@@ -268,11 +268,20 @@ html.theme-animating body * {
 .titlebar {
   -webkit-user-select: none;
   user-select: none;
+  position: relative;
+  z-index: 100;
 }
+/* Only the dedicated middle strip is draggable — never logo/menu or min/max/close */
 .titlebar [data-tauri-drag-region] {
-  /* Windows pen/touch drag */
   app-region: drag;
   -webkit-app-region: drag;
+}
+.titlebar-no-drag,
+.titlebar-controls,
+.titlebar-btn {
+  app-region: no-drag !important;
+  -webkit-app-region: no-drag !important;
+  pointer-events: auto;
 }
 .titlebar-btn {
   appearance: none;
@@ -280,20 +289,15 @@ html.theme-animating body * {
   margin: 0;
   padding: 0;
   width: 46px;
-  /* Critical on WebView2: drag-region parent must not steal clicks */
-  app-region: no-drag;
-  -webkit-app-region: no-drag;
-  pointer-events: auto;
-  cursor: pointer;
   height: 100%;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   background: transparent;
   color: var(--text-secondary);
-  cursor: default;
-  app-region: no-drag;
-  -webkit-app-region: no-drag;
+  cursor: pointer;
+  position: relative;
+  z-index: 2;
 }
 .titlebar-btn:hover {
   background: var(--bg-tertiary);
@@ -304,8 +308,9 @@ html.theme-animating body * {
   color: #fff;
 }
 .titlebar-controls {
-  app-region: no-drag;
-  -webkit-app-region: no-drag;
+  height: 100%;
+  position: relative;
+  z-index: 2;
 }
 
 @keyframes remedy-progress-slide {

@@ -2,7 +2,17 @@
 
 High-level product notes for owners. Full detail lives in repo `CHANGELOG.md`.
 
-Ship **one** installer/tag for the current series (**v0.15.3**).
+Ship **one** installer/tag for the current series (**v0.15.4**).
+
+## 0.15.4 - Chrome, chat, rails, browser
+
+- **Title bar:** minimize / maximize / close work again (drag strip no longer steals clicks; close hides to tray).
+- **Chat:** prompt stays at the **bottom**; empty-session landing page restored; session list clicks always load history.
+- **Sessions:** open-tab chip strip removed; **Browse…** for project folders uses the native picker on the UI thread.
+- **Browser:** embedded panel (iframe), not a blank popup window.
+- **Terminal:** bright blinking block cursor; click to focus.
+- **Rails:** thin strip → icons → open panel (both sides).
+- **Usage ticker** above the composer; **About** includes Ahmi’s note.
 
 ## 0.15.3 - Shell + in-app tools
 

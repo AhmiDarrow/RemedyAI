@@ -64,12 +64,15 @@ export function TerminalSlide({ sessionId }: { sessionId?: string | null }) {
 
     const term = new Terminal({
       cursorBlink: true,
+      cursorStyle: 'block',
+      cursorWidth: 2,
       fontSize: 13,
       fontFamily: 'Consolas, "Cascadia Mono", "Courier New", monospace',
       theme: {
         background: '#0b0f14',
         foreground: '#e6edf3',
-        cursor: '#a78bfa',
+        cursor: '#c4b5fd',
+        cursorAccent: '#0b0f14',
         selectionBackground: '#3b3266',
       },
       allowProposedApi: true,
@@ -78,8 +81,19 @@ export function TerminalSlide({ sessionId }: { sessionId?: string | null }) {
     term.loadAddon(fit)
     term.open(el)
     fit.fit()
+    term.focus()
     termRef.current = term
     fitRef.current = fit
+
+    const focusTerm = () => {
+      try {
+        term.focus()
+      } catch {
+        /* */
+      }
+    }
+    el.addEventListener('mousedown', focusTerm)
+    el.addEventListener('click', focusTerm)
 
     const onData = term.onData((data) => {
       const id = ptyIdRef.current
@@ -139,6 +153,8 @@ export function TerminalSlide({ sessionId }: { sessionId?: string | null }) {
       cancelled = true
       onData.dispose()
       ro.disconnect()
+      el.removeEventListener('mousedown', focusTerm)
+      el.removeEventListener('click', focusTerm)
       void unData?.()
       void unExit?.()
       const id = ptyIdRef.current
@@ -190,7 +206,13 @@ export function TerminalSlide({ sessionId }: { sessionId?: string | null }) {
           Restart
         </button>
       </div>
-      <div ref={hostRef} className="flex-1 min-h-0 w-full" style={{ background: '#0b0f14' }} />
+      <div
+        ref={hostRef}
+        className="flex-1 min-h-0 w-full cursor-text"
+        style={{ background: '#0b0f14' }}
+        title="Click here, then type — blinking block cursor shows focus"
+        onMouseDown={() => termRef.current?.focus()}
+      />
     </div>
   )
 }
