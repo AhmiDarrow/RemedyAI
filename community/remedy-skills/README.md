@@ -1,64 +1,155 @@
-# remedy-skills
+# Remedy Skills
 
-Public **Skills → Library** for [RemedyAI](https://github.com/AhmiDarrow/RemedyAI).
+**Extra playbooks for your local AI partner — install only what you need.**
 
-Official packs are **installable workflows** (not stubs): each `skills/*/SKILL.md` has when-to-use guidance, concrete steps, tools, and a definition of done. They are **not** auto-bundled into Remedy — users install from **Skills → Library** and **Trust** before use.
+This is the public **Skills Library** for [Remedy](https://github.com/AhmiDarrow/RemedyAI).
+Skills are portable instruction packs the agent can load on demand — same idea as
+the ones that ship with the app, except **you** pick what lands on your machine.
+Nothing here runs, and nothing runs scripts, until you **Trust** it.
 
-- **Live release:** [v1.0.0](https://github.com/AhmiDarrow/remedy-skills/releases/tag/v1.0.0) (signed catalog + per-skill zips)
-- **Full list:** [SKILLS.md](./SKILLS.md) (auto-generated, always current)
+```text
+You  →  Skills → Library  →  Install (quarantine)  →  Trust  →  ready to use
+```
+
+- **[Latest catalog release](https://github.com/AhmiDarrow/remedy-skills/releases/latest)** — signed `catalog.json` + skill packs  
+- **[Full skill index](./SKILLS.md)** — every pack, grouped and alphabetical (kept current automatically)
+
+---
+
+## Continuity, not clutter
+
+Remedy already ships a small set of **bundled** skills for everyday partner work.
+This repo is the wider shelf: engineering, gaming, design, content, ops, and
+personal workflows — written as real procedures, not empty titles.
+
+The library stays **local-first**, same as Remedy itself:
+
+- **You choose** what to install — nothing bulk-dumps into the agent  
+- **Quarantine first** — packs land inert; scripts stay blocked until Trust  
+- **Signed catalog** — downloads limited to this project’s GitHub releases  
+- **Installs live on your PC** under `~/.remedy/skills/`
+
+Each skill says when to use it, the steps, tool hints, and what “done” looks like.
+
+---
 
 <!-- BEGIN AUTO-SKILLS-LIST -->
 
-### Skills in this library (**280**)
+## What’s in the library (280 skills)
 
-_Auto-updated 2026-07-26 22:56 UTC from skill packs. Full detail: [SKILLS.md](./SKILLS.md)._
+Snapshot of packs on this branch as of 2026-07-26. Descriptions and the full alphabetical list live in **[SKILLS.md](./SKILLS.md)**.
 
-| Area | Count | Sample skills |
-|------|------:|---------------|
-| backend | 22 | `api-client-sdk`, `api-contract-review`, `background-job-ui`, `backward-compat-api`, `cache-invalidation`, … (+17) |
-| content | 35 | `blog-post-draft`, `blog-post-outline`, `case-study-write`, `changelog-user-facing`, `community-ama-prep`, … (+30) |
-| data | 2 | `csv-data-cleanup`, `encoding-fix` |
-| design | 45 | `a11y-design-review`, `brand-voice-guide`, `call-to-action-copy`, `cli-ux-polish`, `color-system`, … (+40) |
-| docs | 5 | `adr-write`, `bug-report-template`, `feature-toggle-cleanup`, `markdown-doc-structure`, `retro-notes` |
-| frontend | 7 | `bundle-size-check`, `css-specificity-debug`, `email-template-review`, `frontend-a11y`, `i18n-extract`, … (+2) |
-| gaming | 34 | `boss-fight-design`, `combat-feel-tuning`, `game-accessibility`, `game-ai-behavior`, `game-audio-direction`, … (+29) |
-| git | 10 | `branch-hygiene`, `changelog-entry`, `cherry-pick-commit`, `codeowners-setup`, `conventional-commits`, … (+5) |
-| llm | 3 | `llm-cost-guardrails`, `rag-chunking`, `tool-use-spec` |
-| ops | 14 | `backup-restore-drill`, `ci-pipeline-review`, `container-image-harden`, `container-orchestration-review`, `incident-postmortem`, … (+9) |
-| other | 2 | `hello-library`, `license-compliance` |
-| personal | 54 | `accountability-partnership`, `boundary-setting`, `budget-snapshot`, `caregiver-checklist`, `celebration-plan`, … (+49) |
-| security | 16 | `audit-log-design`, `auth-session-review`, `cors-review`, `dependency-audit`, `enterprise-sso-notes`, … (+11) |
-| testing | 13 | `acceptance-criteria`, `benchmark-micro`, `browser-automation-safe`, `contract-test-api`, `coverage-gap`, … (+8) |
-| tooling | 18 | `algorithmic-complexity`, `cross-platform-paths`, `deadlock-debug`, `dev-environment-container`, `editorconfig-setup`, … (+13) |
+| Area | # | A few examples |
+|------|--:|----------------|
+| Backend & APIs | 22 | `api-client-sdk`, `api-contract-review`, `background-job-ui`, `backward-compat-api` · +18 more |
+| Content & writing | 35 | `blog-post-draft`, `blog-post-outline`, `case-study-write`, `changelog-user-facing` · +31 more |
+| Data | 2 | `csv-data-cleanup`, `encoding-fix` |
+| Design & UX | 45 | `a11y-design-review`, `brand-voice-guide`, `call-to-action-copy`, `cli-ux-polish` · +41 more |
+| Docs & process | 5 | `adr-write`, `bug-report-template`, `feature-toggle-cleanup`, `markdown-doc-structure` · +1 more |
+| Frontend | 7 | `bundle-size-check`, `css-specificity-debug`, `email-template-review`, `frontend-a11y` · +3 more |
+| Gaming | 34 | `boss-fight-design`, `combat-feel-tuning`, `game-accessibility`, `game-ai-behavior` · +30 more |
+| Git & release | 10 | `branch-hygiene`, `changelog-entry`, `cherry-pick-commit`, `codeowners-setup` · +6 more |
+| LLM & agents | 3 | `llm-cost-guardrails`, `rag-chunking`, `tool-use-spec` |
+| Ops & reliability | 14 | `backup-restore-drill`, `ci-pipeline-review`, `container-image-harden`, `container-orchestration-review` · +10 more |
+| Other | 2 | `hello-library`, `license-compliance` |
+| Personal assistant | 54 | `accountability-partnership`, `boundary-setting`, `budget-snapshot`, `caregiver-checklist` · +50 more |
+| Security | 16 | `audit-log-design`, `auth-session-review`, `cors-review`, `dependency-audit` · +12 more |
+| Testing | 13 | `acceptance-criteria`, `benchmark-micro`, `browser-automation-safe`, `contract-test-api` · +9 more |
+| Tooling & languages | 18 | `algorithmic-complexity`, `cross-platform-paths`, `deadlock-debug`, `dev-environment-container` · +14 more |
 
-**Total: 280** — see the [complete list](./SKILLS.md) (grouped + alphabetical).
+**280 total** — skim the [full list](./SKILLS.md), or open **Skills → Library** in Remedy Desktop and install only what you need.
 
 <!-- END AUTO-SKILLS-LIST -->
 
-## How clients load the catalog
+---
 
-Remedy verifies an **Ed25519** signature on `catalog.json` (release assets preferred). Installs download only from this repository’s release assets and land **quarantined** until Trust.
+## Try it
+
+About a minute if you already have Remedy Desktop with Skills Library support
+(see the main [Remedy repo](https://github.com/AhmiDarrow/RemedyAI)):
+
+1. Open **Skills** → **Library**
+2. Search or browse, then **Install** (lands in quarantine)
+3. Skim the pack — when you’re happy, **Trust**
+4. Ask Remedy to use that workflow in chat
+
+Prefer reading first? Start with the [full list](./SKILLS.md) or open any
+`skills/<name>/SKILL.md`.
+
+---
+
+## What’s in a skill
+
+A skill is a folder with a `SKILL.md` (short YAML frontmatter + the playbook),
+and sometimes a helper script. The agent sees the short description first, then
+loads the full body when the task matches — so you don’t pay for a wall of
+instructions on every turn.
+
+Packs here are meant to be **usable**: concrete steps, tool hints, and safety
+notes (no secrets; confirm before anything destructive).
+
+---
+
+## Security — you hold Trust
+
+Same posture as importing a ZIP in Remedy: power for the owner, not a free pass
+for random packs.
+
+| Layer | What we ship |
+|-------|----------------|
+| **Signed catalog** | Ed25519 signature checked before the client trusts the list |
+| **Release assets only** | Installs come from this repo’s GitHub releases (no random hosts) |
+| **Checksums** | SHA-256 of each zip required |
+| **Quarantine by default** | Scripts blocked until you **Trust** in Remedy |
+| **Zip safety** | Zip-slip protected extraction |
+
+Details: [SECURITY.md](./SECURITY.md).
+
+---
+
+## Contribute
+
+Ideas and PRs welcome when they stay practical and safe.
+
+1. Read [CONTRIBUTING.md](./CONTRIBUTING.md)
+2. Add `skills/<name>/SKILL.md` (scripts only when they actually help)
+3. Open a PR — validation CI should pass
+
+Please don’t ship secrets, or instructions that hinge on another product’s brand
+as the only path — keep guidance portable so anyone can follow it.
+
+---
 
 ## Maintainers
 
+After you add or edit skills:
+
 ```bash
-# After adding/editing skills:
-python scripts/generate_skills_list.py          # SKILLS.md + README section
-python scripts/build_catalog.py                 # catalog.json (+ list regen)
-# optional: local: dogfood URLs (default) or release URLs:
+python scripts/generate_skills_list.py   # SKILLS.md + README library section
+python scripts/build_catalog.py          # catalog.json (also refreshes the list)
+
+# Public release catalog (download URLs → this repo’s release assets):
 python scripts/build_catalog.py --github-urls --release-tag v1.0.0
-export REMEDY_SKILLS_SIGNING_KEY="..."          # base64 32-byte Ed25519 seed
+export REMEDY_SKILLS_SIGNING_KEY="..."   # base64 Ed25519 seed
 python scripts/sign_catalog.py
 ```
 
-`build_catalog.py` also regenerates the skills list unless you pass `--skip-docs`.
+CI keeps the docs honest:
 
-CI:
+| Workflow | Role |
+|----------|------|
+| **update-skills-list** | On skill changes → refresh `SKILLS.md` + README section |
+| **validate-skill-submission** | PR checks for new packs |
+| **catalog-sync** | On release → rebuild catalog, list, and signature |
 
-- **update-skills-list** — on push to `skills/**`, regenerates and commits `SKILLS.md` + README section
-- **validate-skill-submission** — PR checks for skill packs
-- **catalog-sync** — on release: rebuild catalog, list docs, sign
+---
 
-## Submit
+## License
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md) and [SECURITY.md](./SECURITY.md).
+Skill packs and catalog scripts in this repository follow the project’s
+source-available terms unless a pack says otherwise. Remedy the product is
+documented in the [main repo](https://github.com/AhmiDarrow/RemedyAI).
+
+---
+
+*Part of the Remedy local partner stack — continuity on your PC, library on your terms.*

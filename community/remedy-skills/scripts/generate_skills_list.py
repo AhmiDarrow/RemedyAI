@@ -125,30 +125,52 @@ def render_skills_md(rows: list[dict]) -> str:
 
 def render_readme_section(rows: list[dict]) -> str:
     """Compact section embedded in README between AUTO markers."""
-    now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
+    now = datetime.now(UTC).strftime("%Y-%m-%d")
     by_domain: dict[str, list[dict]] = defaultdict(list)
     for r in rows:
         by_domain[r["domain"]].append(r)
 
+    # Friendlier area labels for the README table
+    labels = {
+        "backend": "Backend & APIs",
+        "content": "Content & writing",
+        "data": "Data",
+        "design": "Design & UX",
+        "docs": "Docs & process",
+        "frontend": "Frontend",
+        "gaming": "Gaming",
+        "git": "Git & release",
+        "llm": "LLM & agents",
+        "ops": "Ops & reliability",
+        "other": "Other",
+        "personal": "Personal assistant",
+        "security": "Security",
+        "testing": "Testing",
+        "tooling": "Tooling & languages",
+    }
+
     lines = [
         BEGIN,
         "",
-        f"### Skills in this library (**{len(rows)}**)",
+        f"## What’s in the library ({len(rows)} skills)",
         "",
-        f"_Auto-updated {now} from skill packs. Full detail: [SKILLS.md](./SKILLS.md)._",
+        f"Snapshot of packs on this branch as of {now}. "
+        f"Descriptions and the full alphabetical list live in **[SKILLS.md](./SKILLS.md)**.",
         "",
-        "| Area | Count | Sample skills |",
-        "|------|------:|---------------|",
+        "| Area | # | A few examples |",
+        "|------|--:|----------------|",
     ]
     for domain in sorted(by_domain.keys()):
         items = by_domain[domain]
-        sample = ", ".join(f"`{r['name']}`" for r in items[:5])
-        if len(items) > 5:
-            sample += f", … (+{len(items) - 5})"
-        lines.append(f"| {domain} | {len(items)} | {sample} |")
+        sample = ", ".join(f"`{r['name']}`" for r in items[:4])
+        if len(items) > 4:
+            sample += f" · +{len(items) - 4} more"
+        label = labels.get(domain, domain.title())
+        lines.append(f"| {label} | {len(items)} | {sample} |")
     lines += [
         "",
-        f"**Total: {len(rows)}** — see the [complete list](./SKILLS.md) (grouped + alphabetical).",
+        f"**{len(rows)} total** — skim the [full list](./SKILLS.md), or open "
+        f"**Skills → Library** in Remedy Desktop and install only what you need.",
         "",
         END,
     ]
