@@ -2,7 +2,7 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
-## [0.15.3] - unreleased
+## [0.15.3] - 2026-07-26
 
 ### Fix/Feature: shell layout, in-app terminal/browser, New Project, icons, images
 
@@ -13,6 +13,7 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 - **Icons:** tray/taskbar/Start from `assets/remedy_icon_original.png`.
 - **Images:** bare path autolink to ChatImage; media normalize via Pillow; less flicker.
 - **Files:** open path, copy path, drag-to-chat; follows session project.
+- **Tests:** media attachments + Pillow normalize; New Session root contract; linkify paths; layout v2.
 
 ## [0.15.2] - 2026-07-26
 

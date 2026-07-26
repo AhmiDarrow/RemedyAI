@@ -2,9 +2,9 @@
 
 High-level product notes for owners. Full detail lives in repo `CHANGELOG.md`.
 
-Ship **one** installer/tag for the current series (**v0.15.3-unreleased**).
+Ship **one** installer/tag for the current series (**v0.15.3**).
 
-## 0.15.3 - Shell + in-app tools (unreleased)
+## 0.15.3 - Shell + in-app tools
 
 - True three-column workspace; in-app PowerShell and browser; original shell icons; path images.
 - **New Session = root** (no project). New Project folder is first-run only, not every session.

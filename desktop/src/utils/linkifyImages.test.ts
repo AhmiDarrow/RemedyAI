@@ -19,4 +19,17 @@ describe('linkifyBareImagePaths', () => {
     expect(linkifyBareImagePaths('file:///C:/a/b.png')).toContain('](file:///')
     expect(linkifyBareImagePaths('see assets/foo.webp')).toContain('![foo.webp](')
   })
+
+  it('wraps .remedy attachment paths with spaces', () => {
+    const t =
+      'C:\\Users\\Administrator\\.remedy\\attachments\\3ceca0f6\\Screenshot 2026-07-26 004244.png'
+    const out = linkifyBareImagePaths(t)
+    expect(out).toMatch(/!\[Screenshot 2026-07-26 004244\.png\]\(/)
+    expect(out).toContain('.remedy/attachments/')
+  })
+
+  it('leaves non-image paths alone', () => {
+    const t = 'Open C:\\Users\\x\\file.txt and README.md please'
+    expect(linkifyBareImagePaths(t)).toBe(t)
+  })
 })

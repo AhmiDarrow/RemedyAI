@@ -47,6 +47,50 @@ def test_create_explicit_no_project_does_not_inherit(client):
     assert body.get("project_path") in (None, "", ".")
 
 
+def test_create_empty_project_stays_root_even_with_global_default(
+    store: MemoryStore, tmp_path: Path, monkeypatch
+):
+    """Desktop New Session sends project_path='' — must not inherit config default."""
+    monkeypatch.setenv("REMEDY_API_AUTH", "0")
+    proj = tmp_path / "GlobalDefault"
+    proj.mkdir()
+    raw_cfg = {
+        "project_path": str(proj),
+        "home_dir": str(tmp_path / ".remedy"),
+        "access_scope": "project",
+    }
+    (tmp_path / ".remedy").mkdir(exist_ok=True)
+    monkeypatch.setattr(
+        "remedy.interfaces.routes.sessions.load_config",
+        lambda: dict(raw_cfg),
+    )
+    # sessions module may import load_config from api_support
+    monkeypatch.setattr(
+        "remedy.interfaces.api_support.load_config",
+        lambda: dict(raw_cfg),
+    )
+    cfg = AgentConfig(
+        name="test",
+        project_path=str(proj),
+        llm_provider="openai",
+        llm_model="test",
+        llm_api_key="x",
+        llm_base_url="http://127.0.0.1:9/v1",
+    )
+    runtime = BasicRuntime(cfg, memory=store)
+    app = create_app(runtime=runtime, memory=store, api_key="")
+    with TestClient(app) as c:
+        r = c.post("/api/sessions", json={"title": "Root", "project_path": ""})
+        assert r.status_code == 200
+        assert r.json().get("project_path") in (None, "", ".")
+
+        # Omitting field inherits global config project_path
+        r2 = c.post("/api/sessions", json={"title": "Inherit?"})
+        assert r2.status_code == 200
+        inherited = r2.json().get("project_path") or ""
+        assert "GlobalDefault" in str(inherited).replace("/", "\\")
+
+
 def test_create_with_project_path(client):
     c, tmp = client
     proj = tmp / "MyApp"

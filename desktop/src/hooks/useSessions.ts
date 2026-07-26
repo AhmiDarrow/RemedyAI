@@ -6,7 +6,7 @@ import {
   updateSession,
   bulkSetSessionProject,
 } from '../api/sessions'
-import { getSettings, updateSettings } from '../api/settings'
+import { updateSettings } from '../api/settings'
 import type { ChatSession } from '../types'
 import { addKnownProject } from '../utils/sessionProjects'
 
