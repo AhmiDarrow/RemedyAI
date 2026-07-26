@@ -542,14 +542,27 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
         style={{ maxWidth: 520, ...cardStyles }}
       >
         <div className="px-7 pt-7 pb-3 text-center">
+          <img
+            src="/logo.png"
+            alt="Remedy"
+            draggable={false}
+            style={{
+              height: 40,
+              width: 'auto',
+              maxWidth: 240,
+              objectFit: 'contain',
+              margin: '0 auto 10px',
+              display: 'block',
+            }}
+          />
           <div
-            className="text-3xl font-bold tracking-tight mb-1"
-            style={{ color: 'var(--accent)' }}
+            className="text-2xl font-bold tracking-tight mb-1"
+            style={{ color: 'var(--text-primary)' }}
           >
-            Remedy AI
+            Remedy
           </div>
           <div className="text-sm" style={mutedStyles}>
-            Local coding agent
+            Your local AI partner
           </div>
         </div>
 

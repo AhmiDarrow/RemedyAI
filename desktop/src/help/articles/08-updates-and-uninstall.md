@@ -31,9 +31,10 @@ Two-stage progress (by design):
 2. When download finishes, **Remedy closes** (that screen closes with it).  
 3. A **new** **Remedy Install Progress** popup appears for silent install + relaunch  
    (so you are not left on a blank desktop after the app exits).  
+   The host is a hidden PowerShell process — you should **not** see black CMD windows.  
 4. Update-mode uninstall keeps your **user data** (`/UPDATE` path).  
 5. App **relaunches once** when the pipeline succeeds (the installer does **not** also
-   auto-start — that used to open two Remedy windows); the install popup closes.  
+   auto-start - that used to open two Remedy windows); the install popup closes.  
 
 If download fails, use the release page manually:  
 https://github.com/AhmiDarrow/RemedyAI/releases

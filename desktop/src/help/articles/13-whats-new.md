@@ -1,8 +1,14 @@
-# What’s new (recent)
+# What's new (recent)
 
 High-level product notes for owners. Full detail lives in repo `CHANGELOG.md`.
 
-Ship **one** installer/tag for the current series (**v0.14.3**).
+Ship **one** installer/tag for the current series (**v0.14.4**).
+
+## 0.14.4 — Brand assets + silent update host
+
+- Alpha logo/icon kit wired through splash, Setup, About, Update screen, chat, tray.
+- Autoupdate install popup stays; **no black CMD flashes** (hidden PowerShell host).
+- Update status copy is ASCII-safe (no mojibake on Windows PowerShell 5.1).
 
 ## 0.14.3 — Chat images · session export · stay-on-task
 
@@ -10,7 +16,7 @@ Ship **one** installer/tag for the current series (**v0.14.3**).
 - Session **Export** uses a real Save dialog in the desktop shell.
 - Auto-approve + tool continuity fixes so short follow-ups keep agency.
 
-## 0.14.1 — Autoupdate: download UI → install popup → one restart
+## 0.14.1 — Autoupdate: download UI, install popup, one restart
 
 - Download progress stays **inside** Remedy.  
 - When Remedy closes, a **new** install-progress window shows silent install.  

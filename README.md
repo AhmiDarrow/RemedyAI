@@ -474,7 +474,7 @@ def teardown_plugin():
 git clone https://github.com/AhmiDarrow/RemedyAI.git
 cd RemedyAI
 uv sync --group dev
-uv run pytest -q          # full suite (560+ tests; currently ~810)
+uv run pytest -q          # full suite (560+ tests; currently ~812)
 cd desktop && npm test    # frontend unit tests (vitest)
 python scripts/check_docs.py  # docs stay synced with code (help, cmds, versions)
 uv run remedy --help
@@ -532,7 +532,7 @@ git tag vX.Y.Z && git push origin vX.Y.Z
 # Optional: publish Python package — uv build && uv publish
 ```
 
-See [CHANGELOG.md](CHANGELOG.md) for release notes. Current desktop series: **0.12.x**.
+See [CHANGELOG.md](CHANGELOG.md) for release notes. Current desktop series: **0.14.x**.
 
 **Signing (required for in-app auto-update):**
 

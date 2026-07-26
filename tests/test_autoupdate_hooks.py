@@ -49,6 +49,37 @@ def test_lib_rs_two_stage_update_ux() -> None:
     download_idx = text.find('emit_progress_ver(\n                &app_for_thread,\n                "downloading"')
     install_ui_idx = text.find("launch_install_progress_ui(&ver_from, &ver_to)")
     assert download_idx > 0 and install_ui_idx > download_idx
+    # No black CMD flashes on update path: spawn powershell + CREATE_NO_WINDOW
+    assert 'Command::new("powershell.exe")' in text
+    assert "CREATE_NO_WINDOW" in text
+    # Update hosts must not use cmd /c start (that flashed consoles)
+    assert "Never use cmd /c start" in text or "no `cmd /c start`" in text or "no cmd /c start" in text.lower()
+    # launch_install_progress_ui body must not spawn cmd.exe
+    start = text.find("fn launch_install_progress_ui")
+    end = text.find("\nfn ", start + 10)
+    body = text[start:end if end > start else start + 2500]
+    assert "cmd.exe" not in body
+    assert 'Command::new("cmd")' not in body
+
+
+def test_update_ui_ascii_status_copy() -> None:
+    """PS1 must stay ASCII-safe for Windows PowerShell 5.1 default encoding."""
+    text = UPDATE_UI.read_text(encoding="utf-8")
+    non_ascii = [c for c in text if ord(c) > 127]
+    assert not non_ascii, f"non-ASCII in update UI script: {non_ascii[:8]!r}"
+
+
+def test_hooks_silent_relaunch_uses_exec() -> None:
+    text = HOOKS.read_text(encoding="utf-8")
+    # Silent relaunch uses NSIS Exec (not cmd start)
+    assert 'Exec \'"$INSTDIR\\Remedy Desktop.exe"\'' in text
+    # Live code must not shell out via cmd start for relaunch (comments may mention it)
+    code_lines = [
+        ln for ln in text.splitlines() if ln.strip() and not ln.lstrip().startswith(";")
+    ]
+    code = "\n".join(code_lines).lower()
+    assert "cmd /c start" not in code
+    assert "exec " in code
 
 
 def test_autoupdate_pipeline_script_exists() -> None:

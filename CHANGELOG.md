@@ -2,6 +2,29 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.14.4] — 2026-07-25
+
+### Fix: brand assets in UI + silent autoupdate host
+
+- **Alpha brand kit wired end-to-end:** `assets/remedy_icon.png` /
+  `remedy_logo.png` (true alpha + brightened masters, mono light/dark variants)
+  regenerate into `desktop/public/{logo,icon,favicon}.*` and the full Tauri
+  icon set via `scripts/setup_branding.py`.
+- UI surfaces use the new art: boot splash, React splash, title-bar menu,
+  Setup wizard, About, Update screen, chat empty/bubbles (`RemedyLogo`),
+  favicon / tray / taskbar / installer icons.
+- Splash rendering uses smooth scaling (`image-rendering: auto`) so the logo
+  is not pixelated.
+- **Autoupdate: no black CMD flashes.** Install-progress host and detached
+  update script spawn `powershell.exe` directly with `CREATE_NO_WINDOW` +
+  breakaway flags (no `cmd /c start`). Progress UI keeps the WinForms popup;
+  console stays hidden.
+- **Autoupdate unicode cleanup:** status strings + `remedy-update-ui.ps1` are
+  ASCII-safe for Windows PowerShell 5.1 (no mojibake from ellipsis/arrows).
+- NSIS silent relaunch uses `Exec` instead of `cmd /c start`.
+- Docs gate: `check_docs.py` configures UTF-8 stdio so Windows cp1252 consoles
+  do not fail the hotkeys surface.
+
 ## [0.14.3] — 2026-07-25
 
 ### Fix: chat images + session export + agency continuity

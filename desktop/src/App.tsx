@@ -1566,7 +1566,15 @@ export default function App() {
           <img
             src="/logo.png"
             alt="Remedy"
-            style={{ height: 28, width: 'auto', marginBottom: 12 }}
+            draggable={false}
+            style={{
+              height: 36,
+              width: 'auto',
+              maxWidth: 220,
+              objectFit: 'contain',
+              marginBottom: 12,
+              display: 'block',
+            }}
           />
           <div className="text-sm font-semibold mb-1">About Remedy</div>
           <div className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>

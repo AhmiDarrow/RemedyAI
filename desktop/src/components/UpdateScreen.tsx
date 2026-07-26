@@ -2,11 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { DesktopUpdateInfo, UpdateProgress } from '../api/updates'
 import { startDesktopUpdate } from '../api/updates'
 import { tauriListen } from '../api/tauri'
+import logoSrc from '/logo.png'
 
 interface UpdateScreenProps {
   info: DesktopUpdateInfo
   onClose: () => void
-  /** When true (default), start download/install immediately — true one-click. */
+  /** When true (default), start download/install immediately - true one-click. */
   autoStart?: boolean
 }
 
@@ -20,7 +21,7 @@ type Phase = 'ready' | 'downloading' | 'closing' | 'installing' | 'relaunch' | '
 export function UpdateScreen({ info, onClose, autoStart = true }: UpdateScreenProps) {
   const [phase, setPhase] = useState<Phase>(autoStart && info.download_url ? 'downloading' : 'ready')
   const [percent, setPercent] = useState(0)
-  const [message, setMessage] = useState(autoStart ? 'Starting download…' : '')
+  const [message, setMessage] = useState(autoStart ? 'Starting download...' : '')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const startedRef = useRef(false)
@@ -33,22 +34,22 @@ export function UpdateScreen({ info, onClose, autoStart = true }: UpdateScreenPr
       if (p.phase === 'downloading') {
         setPhase('downloading')
         setPercent(typeof p.percent === 'number' ? p.percent : 0)
-        setMessage(p.message || 'Downloading…')
+        setMessage(p.message || 'Downloading...')
       } else if (p.phase === 'closing') {
         setPhase('closing')
         setPercent(100)
         setMessage(
           p.message
-            || 'Download complete. Remedy will close — a new window shows install progress.',
+            || 'Download complete. Remedy will close - a new window shows install progress.',
         )
       } else if (p.phase === 'installing') {
         // In-app rarely sees this (install runs after exit); keep for status events.
         setPhase('installing')
         setPercent(100)
-        setMessage(p.message || 'Installing…')
+        setMessage(p.message || 'Installing...')
       } else if (p.phase === 'relaunch') {
         setPhase('relaunch')
-        setMessage(p.message || 'Relaunching…')
+        setMessage(p.message || 'Relaunching...')
       } else if (p.phase === 'error') {
         setPhase('error')
         setError(p.message || 'Update failed')
@@ -74,7 +75,7 @@ export function UpdateScreen({ info, onClose, autoStart = true }: UpdateScreenPr
     setBusy(true)
     setError('')
     setPhase('downloading')
-    setMessage('Starting download…')
+    setMessage('Starting download...')
     setPercent(0)
     try {
       await startDesktopUpdate(info.download_url)
@@ -93,7 +94,7 @@ export function UpdateScreen({ info, onClose, autoStart = true }: UpdateScreenPr
     }
   }, [info.download_url])
 
-  // One-click: open this screen → install starts immediately.
+  // One-click: open this screen -> install starts immediately.
   useEffect(() => {
     if (autoStart && info.download_url) {
       void begin()
@@ -116,15 +117,29 @@ export function UpdateScreen({ info, onClose, autoStart = true }: UpdateScreenPr
         }}
       >
         <div className="text-center mb-6">
+          <img
+            src={logoSrc}
+            alt="Remedy"
+            draggable={false}
+            style={{
+              height: 36,
+              width: 'auto',
+              maxWidth: 220,
+              objectFit: 'contain',
+              margin: '0 auto 12px',
+              display: 'block',
+              imageRendering: 'auto',
+            }}
+          />
           <div className="text-2xl font-bold mb-1" style={{ color: 'var(--accent)' }}>
             Remedy Update
           </div>
           <div className="text-sm" style={{ color: 'var(--text-muted)' }}>
             {phase === 'ready' && 'A new version is ready to install'}
-            {phase === 'downloading' && 'Downloading update…'}
-            {phase === 'closing' && 'Download done — Remedy will close next'}
-            {phase === 'installing' && 'Installing…'}
-            {phase === 'relaunch' && 'Almost done — app will reopen…'}
+            {phase === 'downloading' && 'Downloading update...'}
+            {phase === 'closing' && 'Download done - Remedy will close next'}
+            {phase === 'installing' && 'Installing...'}
+            {phase === 'relaunch' && 'Almost done - app will reopen...'}
             {phase === 'error' && 'Update failed'}
           </div>
           {(phase === 'downloading' || phase === 'closing') && (
@@ -141,7 +156,7 @@ export function UpdateScreen({ info, onClose, autoStart = true }: UpdateScreenPr
         >
           <span style={{ color: 'var(--text-muted)' }}>Version</span>
           <span className="font-medium">
-            v{from} → <span style={{ color: 'var(--accent)' }}>v{to}</span>
+            v{from} {'->'} <span style={{ color: 'var(--accent)' }}>v{to}</span>
           </span>
         </div>
 
@@ -248,14 +263,14 @@ export function UpdateScreen({ info, onClose, autoStart = true }: UpdateScreenPr
               style={{ color: 'var(--text-muted)' }}
             >
               {phase === 'closing'
-                ? 'Closing Remedy… install progress opens next'
-                : 'Please wait — download runs inside Remedy'}
+                ? 'Closing Remedy... install progress opens next'
+                : 'Please wait - download runs inside Remedy'}
             </div>
           )}
         </div>
 
         <div className="mt-4 text-[0.65rem] text-center" style={{ color: 'var(--text-muted)' }}>
-          Download here → Remedy closes → install progress popup → one restart.
+          Download here, Remedy closes, install progress popup, then one restart.
         </div>
       </div>
     </div>

@@ -99,16 +99,22 @@ def generate_icons(source: Path, icons_dir: Path) -> None:
             print("  icon.icns skipped (generate on macOS with iconutil)")
 
 
-def setup_logo(source: Path, public_dir: Path) -> None:
+def setup_public_branding(icon_source: Path, logo_source: Path, public_dir: Path) -> None:
+    """Write UI-facing public assets used by Vite/WebUI (logo, icon, favicons)."""
     public_dir.mkdir(parents=True, exist_ok=True)
-    img = Image.open(source).convert("RGBA")
-    resized = img.resize(LOGO_SIZE, Image.Resampling.LANCZOS)
-    dest = public_dir / "logo.png"
-    resized.save(dest, "PNG", optimize=True)
-    print(f"  logo -> {dest} ({LOGO_SIZE[0]}x{LOGO_SIZE[1]})")
 
-    # Favicon multi-size from icon source (circuit monogram)
-    icon_img = Image.open(ASSETS / "remedy_icon.png").convert("RGBA")
+    logo_img = Image.open(logo_source).convert("RGBA")
+    logo_resized = logo_img.resize(LOGO_SIZE, Image.Resampling.LANCZOS)
+    logo_dest = public_dir / "logo.png"
+    logo_resized.save(logo_dest, "PNG", optimize=True)
+    print(f"  logo.png -> {logo_dest} ({LOGO_SIZE[0]}x{LOGO_SIZE[1]})")
+
+    # Circuit-R monogram used by RemedyLogo, notifications, empty states.
+    icon_img = Image.open(icon_source).convert("RGBA")
+    icon_dest = public_dir / "icon.png"
+    _resize_square(icon_img, 256).save(icon_dest, "PNG", optimize=True)
+    print(f"  icon.png -> {icon_dest} (256x256)")
+
     fav32 = _resize_square(icon_img, 32)
     fav_path = public_dir / "favicon.png"
     fav32.save(fav_path, "PNG", optimize=True)
@@ -144,11 +150,13 @@ def main() -> int:
     generate_icons(icon_src, ICONS_DIR)
     print()
 
-    print("[2/2] Setting up logo + favicons...")
-    setup_logo(logo_src, PUBLIC_DIR)
+    print("[2/2] Setting up public logo + icon + favicons...")
+    setup_public_branding(icon_src, logo_src, PUBLIC_DIR)
     print()
 
-    print("=== Done! Taskbar uses icons/icon.ico (rebuild desktop to embed). ===")
+    print("=== Done! ===")
+    print("  UI: desktop/public/{logo,icon,favicon}.png")
+    print("  Shell: desktop/src-tauri/icons/icon.ico (rebuild desktop to embed tray/taskbar).")
     return 0
 
 

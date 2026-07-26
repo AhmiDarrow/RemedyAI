@@ -29,6 +29,20 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+
+def _configure_stdio() -> None:
+    """Avoid UnicodeEncodeError on Windows cp1252 consoles (arrows in hotkeys)."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            reconf = getattr(stream, "reconfigure", None)
+            if callable(reconf):
+                reconf(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
+_configure_stdio()
+
 ROOT = Path(__file__).resolve().parent.parent
 MANUAL = ROOT / "docs" / "manual"
 ARTICLES = ROOT / "desktop" / "src" / "help" / "articles"
@@ -461,7 +475,7 @@ def run_checks(names: list[str] | None = None, *, quiet: bool = False) -> int:
         if not r.ok:
             failed += 1
             if r.fix_hint:
-                print(f"  → fix: {r.fix_hint}")
+                print(f"  -> fix: {r.fix_hint}")
 
     print()
     if failed:

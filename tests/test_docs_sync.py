@@ -59,11 +59,20 @@ def test_parse_catalog_ids() -> None:
 
 def test_check_docs_full_passes() -> None:
     """Full aggregator must exit 0 on a clean tree (same gate as CI)."""
+    import os
+
+    env = os.environ.copy()
+    # Windows runners/local consoles may default to cp1252; script also
+    # reconfigures stdio, but force UTF-8 for captured output stability.
+    env.setdefault("PYTHONIOENCODING", "utf-8")
     proc = subprocess.run(
         [sys.executable, str(SCRIPT)],
         cwd=ROOT,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=180,
+        env=env,
     )
     assert proc.returncode == 0, proc.stdout + "\n" + proc.stderr

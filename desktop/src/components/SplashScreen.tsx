@@ -141,8 +141,11 @@ export function SplashScreen({ onReady, onError }: SplashScreenProps) {
         src={logoSrc}
         alt="Remedy"
         className="w-[256px] h-auto"
+        draggable={false}
         style={{
-          imageRendering: 'pixelated',
+          // Smooth LANCZOS assets (not pixel art) — keep alpha edges crisp.
+          imageRendering: 'auto',
+          objectFit: 'contain',
           animation: 'splash-in 0.5s ease both',
         }}
       />

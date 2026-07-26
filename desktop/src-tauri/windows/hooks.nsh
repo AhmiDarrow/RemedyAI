@@ -1,5 +1,5 @@
 ; Auto-update pipeline + uninstall data options.
-; productName "Remedy Desktop" → main binary is typically "Remedy Desktop.exe"
+; productName "Remedy Desktop" -> main binary is typically "Remedy Desktop.exe"
 ; (some builds still ship as app.exe). Sidecar is remedy-desktop.exe.
 ;
 ; Uninstall UI: config / skills / full wipe checkboxes via PowerShell dialog
@@ -8,8 +8,8 @@
 ; CRITICAL: options-dialog failures must NEVER abort uninstall of the app.
 ; Exit codes from uninstall_options.ps1:
 ;   0 = continue (choices written)
-;   1 = user cancelled → Abort uninstall
-;   2+= dialog/script error → keep user data and continue uninstalling the app
+;   1 = user cancelled -> Abort uninstall
+;   2+= dialog/script error -> keep user data and continue uninstalling the app
 
 !macro _REMEDY_KILL_ALL
   DetailPrint "Closing running Remedy processes so files can be replaced..."
@@ -24,7 +24,7 @@
   ; PowerShell belt-and-suspenders by process name substring.
   nsExec::ExecToLog 'powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match ''^(app|remedy-desktop|Remedy Desktop)$'' -or ($_.Path -and $_.Path -like ''*Remedy Desktop*'') } | Stop-Process -Force -ErrorAction SilentlyContinue"'
   Sleep 2000
-  ; Second pass — Windows can take a moment to release file handles.
+  ; Second pass - Windows can take a moment to release file handles.
   nsExec::ExecToLog 'taskkill /F /T /IM "remedy-desktop.exe"'
   nsExec::ExecToLog 'taskkill /F /T /IM "app.exe"'
   nsExec::ExecToLog 'taskkill /F /T /IM "Remedy Desktop.exe"'
@@ -47,8 +47,8 @@
 
 !macro NSIS_HOOK_POSTINSTALL
   ; Scrub legacy HKCU Run keys from older builds (Defender Persistence.A!ml).
-  ; Use NSIS DeleteRegValue — not PowerShell Bypass (ML treats hidden PS+Run as suspicious).
-  ; Autostart (if user enables) uses Startup folder only — never registry Run.
+  ; Use NSIS DeleteRegValue - not PowerShell Bypass (ML treats hidden PS+Run as suspicious).
+  ; Autostart (if user enables) uses Startup folder only - never registry Run.
   DetailPrint "Removing legacy autostart registry entries if present..."
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "RemedyDesktop"
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Remedy Desktop"
@@ -58,7 +58,7 @@
   ; Interactive GUI installers show the finish page with:
   ;   - "Create desktop shortcut"
   ;   - "Run Remedy Desktop"
-  ; Never pre-launch there — it races the finish page and confuses users.
+  ; Never pre-launch there - it races the finish page and confuses users.
   ;
   ; Silent (/S), passive (/P), and update (/UPDATE) installs skip the finish page,
   ; so we relaunch here UNLESS the in-app updater owns relaunch.
@@ -91,12 +91,13 @@
   StrCmp $R7 "1" 0 skip_auto_launch
 
   DetailPrint "Silent/passive/update install: launching Remedy Desktop..."
+  ; Exec (not cmd /c start) avoids a visible black console flash.
   IfFileExists "$INSTDIR\Remedy Desktop.exe" 0 try_app_exe
-    nsExec::ExecToLog 'cmd /c start "" "$INSTDIR\Remedy Desktop.exe"'
+    Exec '"$INSTDIR\Remedy Desktop.exe"'
     Goto launch_done
   try_app_exe:
   IfFileExists "$INSTDIR\app.exe" 0 launch_done
-    nsExec::ExecToLog 'cmd /c start "" "$INSTDIR\app.exe"'
+    Exec '"$INSTDIR\app.exe"'
   Goto launch_done
 
   skip_auto_launch:
@@ -124,7 +125,7 @@
     Goto uninstall_options_done
   ${EndIf}
 
-  ; Silent (/S) or passive — no UI; keep data.
+  ; Silent (/S) or passive - no UI; keep data.
   IfSilent 0 not_silent_uninstall
     DetailPrint "Silent uninstall: keeping user data (use interactive uninstall for wipe options)."
     Goto uninstall_options_done
@@ -151,7 +152,7 @@
     StrCpy $R8 "$TEMP\RemedyDesktop-Uninstall\uninstall_options.ps1"
     Goto run_options_dialog
   skip_options_missing:
-    DetailPrint "Uninstall options scripts not found — keeping user data and continuing uninstall."
+    DetailPrint "Uninstall options scripts not found - keeping user data and continuing uninstall."
     Goto uninstall_options_done
 
   run_options_dialog:

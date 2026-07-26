@@ -85,7 +85,7 @@ those through the local API (`GET /api/media`) with your project path.
 |-------|-----|
 | Relative path outside project | Set **Project folder** in Settings to the repo that owns the files |
 | Absolute path outside access scope | Scope is `project` / `home` / `full` — expand scope or copy files into project |
-| Old build | Install **0.14.3+** (ChatImage + media route) |
+| Old build | Install **0.14.4+** (ChatImage + media route + alpha logos) |
 | Still blank | Open `%USERPROFILE%\.remedy\logs\errors.log` after expanding the image |
 
 Attachments (drag/drop screenshots) use a separate upload path and should always
@@ -98,9 +98,16 @@ dialog, nothing is written (expected).
 
 | Check | Fix |
 |-------|-----|
-| Old WebView-only download | Update to **0.14.3+** |
+| Old WebView-only download | Update to **0.14.4+** |
 | Empty session | Export needs at least one stored message |
 | API error toast | Confirm Connected status; check `remedy.log` for `/export` |
+
+## Update shows black CMD windows
+
+Fixed in **0.14.4+**: install-progress and update hosts spawn hidden PowerShell
+(no cmd /c start). You should only see the install-progress popup.
+
+If you still see consoles on an older build, update manually from GitHub Releases.
 
 ## SmartScreen / Unknown publisher
 

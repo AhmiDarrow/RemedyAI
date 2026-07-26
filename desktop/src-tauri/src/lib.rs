@@ -72,7 +72,7 @@ fn toml_bool(raw: &str, key: &str) -> Option<bool> {
     None
 }
 
-/// Wire format for `~/.remedy/desktop.json` (serde — no brittle string contains).
+/// Wire format for `~/.remedy/desktop.json` (serde - no brittle string contains).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
 struct DesktopPrefsFile {
     #[serde(default)]
@@ -84,7 +84,7 @@ struct DesktopPrefsFile {
 }
 
 fn load_desktop_prefs() -> DesktopPrefs {
-    // Defaults: always-ready partner UX — close hides to tray (does not kill).
+    // Defaults: always-ready partner UX - close hides to tray (does not kill).
     let mut prefs = DesktopPrefs {
         close_to_tray: true,
         start_in_tray: false,
@@ -115,7 +115,7 @@ fn load_desktop_prefs() -> DesktopPrefs {
             prefs.close_to_tray = v;
         }
         // start_in_tray: do NOT seed `true` from config.toml alone.
-        // Older Setup coupled "Start with Windows" → start_in_tray=true, so many
+        // Older Setup coupled "Start with Windows" -> start_in_tray=true, so many
         // installs always hid on launch. Only honor an explicit false here; an
         // explicit true requires desktop.json (written when the user checks the
         // "Start hidden in tray" box in Settings).
@@ -201,7 +201,7 @@ fn find_remedy() -> (String, String) {
     }
 
     let msg = format!(
-        "Sidecar not found — checked exe dir {:?}, cwd/bin/",
+        "Sidecar not found - checked exe dir {:?}, cwd/bin/",
         current_exe_dir()
     );
     log::error!("{}", msg);
@@ -250,7 +250,7 @@ fn find_webui_dir() -> Option<PathBuf> {
             return Some(c);
         }
     }
-    log::warn!("WebUI assets not found — browser WebUI will show helper page");
+    log::warn!("WebUI assets not found - browser WebUI will show helper page");
     None
 }
 
@@ -568,7 +568,7 @@ fn start_sidecar(process: &Arc<Mutex<Option<Child>>>, cmd: &str) -> Result<(), S
     Ok(())
 }
 
-/// Save plain text via native Save dialog (session export — WebView download is unreliable).
+/// Save plain text via native Save dialog (session export - WebView download is unreliable).
 #[tauri::command]
 fn save_text_file(default_name: String, contents: String) -> Result<Option<String>, String> {
     let name = if default_name.trim().is_empty() {
@@ -587,7 +587,7 @@ fn save_text_file(default_name: String, contents: String) -> Result<Option<Strin
     #[cfg(target_os = "windows")]
     {
         use std::fs;
-        // Escape for PowerShell single-quoted string: ' → ''
+        // Escape for PowerShell single-quoted string: ' -> ''
         let ps_name = name.replace('\'', "''");
         // Write contents to a temp file to avoid huge command-line payloads.
         let tmp = std::env::temp_dir().join(format!(
@@ -658,7 +658,7 @@ fn dirs_next_home() -> Option<std::path::PathBuf> {
 fn pick_folder() -> Result<Option<String>, String> {
     #[cfg(target_os = "windows")]
     {
-        // PowerShell FolderBrowserDialog — no extra crate; works from Tauri main thread spawn.
+        // PowerShell FolderBrowserDialog - no extra crate; works from Tauri main thread spawn.
         let script = r#"
 Add-Type -AssemblyName System.Windows.Forms | Out-Null
 $d = New-Object System.Windows.Forms.FolderBrowserDialog
@@ -722,7 +722,7 @@ if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
     Ok(None)
 }
 
-/// Startup-folder shortcut name (user-visible in Settings → Apps → Startup).
+/// Startup-folder shortcut name (user-visible in Settings -> Apps -> Startup).
 ///
 /// IMPORTANT: Do **not** use HKCU\...\Run. Writing that key from a background
 /// process is a classic malware pattern and triggers Windows Defender ML
@@ -744,13 +744,13 @@ fn windows_startup_lnk_path() -> PathBuf {
     windows_startup_dir().join("Remedy Desktop.lnk")
 }
 
-/// Names written by Remedy 0.10.19–0.10.21 under HKCU\...\Run (legacy only).
+/// Names written by Remedy 0.10.19-0.10.21 under HKCU\...\Run (legacy only).
 #[cfg(target_os = "windows")]
 const LEGACY_RUN_VALUE_NAMES: &[&str] = &["RemedyDesktop", "Remedy Desktop", "remedy-desktop"];
 
 /// Remove legacy HKCU Run entries left by older Remedy builds.
 ///
-/// Uses the Windows registry API directly — **no** hidden PowerShell with
+/// Uses the Windows registry API directly - **no** hidden PowerShell with
 /// `-ExecutionPolicy Bypass` (that pattern itself looks like malware to ML).
 /// We only **delete** values; Remedy never writes the Run key.
 #[cfg(target_os = "windows")]
@@ -797,7 +797,7 @@ fn set_launch_at_login(enabled: bool) -> Result<bool, String> {
             let startup = windows_startup_dir();
             std::fs::create_dir_all(&startup)
                 .map_err(|e| format!("create Startup folder: {e}"))?;
-            // User-visible shortcut only — shows under Settings → Apps → Startup.
+            // User-visible shortcut only - shows under Settings -> Apps -> Startup.
             // PowerShell is used only on explicit user toggle (not every launch).
             let ps = format!(
                 r#"
@@ -807,7 +807,7 @@ $s = $ws.CreateShortcut('{lnk}')
 $s.TargetPath = '{exe}'
 $s.WorkingDirectory = '{wd}'
 $s.WindowStyle = 1
-$s.Description = 'Remedy Desktop (optional Start with Windows — disable in Settings or Startup apps)'
+$s.Description = 'Remedy Desktop (optional Start with Windows - disable in Settings or Startup apps)'
 $s.Save()
 "#,
                 lnk = lnk_str,
@@ -826,7 +826,7 @@ $s.Save()
                     err.trim()
                 ));
             }
-            log::info!("Launch at login enabled via Startup folder → {}", lnk.display());
+            log::info!("Launch at login enabled via Startup folder -> {}", lnk.display());
         } else {
             if lnk.exists() {
                 let _ = std::fs::remove_file(&lnk);
@@ -986,7 +986,7 @@ fn switch_to_web_ui(app: AppHandle) -> Result<String, String> {
         thread::sleep(Duration::from_millis(200));
     }
 
-    // Hide to tray (keep sidecar alive) — same as close-to-tray.
+    // Hide to tray (keep sidecar alive) - same as close-to-tray.
     if let Some(w) = app.get_webview_window("main") {
         w.hide().map_err(|e| format!("hide to tray failed: {e}"))?;
         log::info!("switch_to_web_ui: desktop hidden to tray");
@@ -1056,7 +1056,7 @@ fn request_close_main_window(
             w.hide().map_err(|e| format!("hide failed: {e}"))?;
             log::info!("request_close_main_window: hidden to tray");
         } else {
-            // Triggers CloseRequested → sidecar shutdown on full quit
+            // Triggers CloseRequested -> sidecar shutdown on full quit
             w.close().map_err(|e| format!("close failed: {e}"))?;
         }
     }
@@ -1110,7 +1110,7 @@ fn open_data_folder() -> Result<String, String> {
 }
 
 // ---------------------------------------------------------------------------
-// In-app update (Ollama-style): check → download progress UI → install → relaunch
+// In-app update (Ollama-style): check -> download progress UI -> install -> relaunch
 // ---------------------------------------------------------------------------
 
 #[derive(serde::Serialize, Clone)]
@@ -1291,7 +1291,7 @@ fn get_local_api_token() -> Result<String, String> {
         .join("auth")
         .join("local_api_token");
     if !path.is_file() {
-        return Err("local API token not found — is the sidecar running?".into());
+        return Err("local API token not found - is the sidecar running?".into());
     }
     let raw = std::fs::read_to_string(&path).map_err(|e| format!("read token: {e}"))?;
     let tok = raw.trim().to_string();
@@ -1398,17 +1398,21 @@ fn ensure_update_ui_ps1_in_temp() -> PathBuf {
 ///
 /// UX contract:
 /// 1. In-app UpdateScreen = download only (dies with Remedy)
-/// 2. After Remedy closes → this host appears for install / relaunch
+/// 2. After Remedy closes -> this host appears for install / relaunch
 ///
 /// Must not be started at download begin (that confused users with one long window
 /// that vanished when the app exited). Called from the detached update script.
+///
+/// Spawns powershell.exe directly with CREATE_NO_WINDOW + breakaway flags so
+/// no black CMD console flashes. The WinForms UI still shows (WindowStyle Hidden
+/// only hides the console host; the form is owned by the STA process).
 #[cfg(target_os = "windows")]
 fn launch_install_progress_ui(from: &str, to: &str) {
     let status = update_status_path();
     write_update_status(
         "closing",
         90,
-        "Remedy closed. Installing update… leave this window open.",
+        "Remedy closed. Installing update - leave this window open.",
         from,
         to,
     );
@@ -1423,38 +1427,70 @@ fn launch_install_progress_ui(from: &str, to: &str) {
     let from_s = from.to_string();
     let to_s = to.to_string();
 
-    // `cmd /c start "" …` detaches from our process tree. -STA for WinForms.
-    let CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
-    let CREATE_BREAKAWAY_FROM_JOB: u32 = 0x01000000;
-    let flags = CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB;
-    let spawn = Command::new("cmd.exe")
-        .args([
-            "/C",
-            "start",
-            "Remedy Install Progress", // title
-            "powershell.exe",
-            "-NoProfile",
-            "-STA",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-WindowStyle",
-            "Normal",
-            "-File",
-            &ps1_s,
-            "-StatusPath",
-            &status_s,
-            "-From",
-            &from_s,
-            "-To",
-            &to_s,
-        ])
-        .creation_flags(flags)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn();
+    // Direct powershell spawn - no `cmd /c start` (that flashed 1-2 consoles).
+    const DETACHED_PROCESS: u32 = 0x00000008;
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
+    const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x01000000;
+    let flags_breakaway = DETACHED_PROCESS
+        | CREATE_NEW_PROCESS_GROUP
+        | CREATE_NO_WINDOW
+        | CREATE_BREAKAWAY_FROM_JOB;
+    let flags_basic = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW;
+
+    let mut cmd = Command::new("powershell.exe");
+    cmd.args([
+        "-NoProfile",
+        "-STA",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-WindowStyle",
+        "Hidden",
+        "-File",
+        &ps1_s,
+        "-StatusPath",
+        &status_s,
+        "-From",
+        &from_s,
+        "-To",
+        &to_s,
+    ])
+    .stdin(Stdio::null())
+    .stdout(Stdio::null())
+    .stderr(Stdio::null());
+
+    let spawn = cmd
+        .creation_flags(flags_breakaway)
+        .spawn()
+        .or_else(|e1| {
+            log::warn!(
+                "Install progress host breakaway spawn failed ({e1}); retrying without BREAKAWAY"
+            );
+            let mut retry = Command::new("powershell.exe");
+            retry
+                .args([
+                    "-NoProfile",
+                    "-STA",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-WindowStyle",
+                    "Hidden",
+                    "-File",
+                    &ps1_s,
+                    "-StatusPath",
+                    &status_s,
+                    "-From",
+                    &from_s,
+                    "-To",
+                    &to_s,
+                ])
+                .creation_flags(flags_basic)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+        });
     match spawn {
-        Ok(_) => log::info!("Install progress host launched: {from_s} → {to_s}"),
+        Ok(_) => log::info!("Install progress host launched: {from_s} -> {to_s}"),
         Err(e) => log::error!("Failed to launch install progress host: {e}"),
     }
 }
@@ -1517,7 +1553,7 @@ fn is_trusted_download_url(url: &str) -> bool {
     if url.starts_with("https://github.com/AhmiDarrow/RemedyAI/releases/") {
         return true;
     }
-    // CDN hostnames used by GitHub Releases — require our repo path segment when present.
+    // CDN hostnames used by GitHub Releases - require our repo path segment when present.
     // objects.githubusercontent.com URLs are signed and opaque; only accept when the
     // referrer path was already resolved from our latest.json (caller responsibility).
     // We still require HTTPS + known hosts (no open redirect to other schemes).
@@ -1535,7 +1571,7 @@ fn validate_installer_exe(path: &Path, min_bytes: u64) -> Result<(), String> {
     let meta = std::fs::metadata(path).map_err(|e| format!("Cannot stat installer: {e}"))?;
     if meta.len() < min_bytes {
         return Err(format!(
-            "Downloaded installer is too small ({} bytes) — likely not a real NSIS package",
+            "Downloaded installer is too small ({} bytes) - likely not a real NSIS package",
             meta.len()
         ));
     }
@@ -1558,9 +1594,9 @@ static UPDATE_IN_FLIGHT: std::sync::atomic::AtomicBool = std::sync::atomic::Atom
 
 /// Download the NSIS installer, run it silently (/S /UPDATE), exit so files can be replaced.
 ///
-/// Progress UX (two stages — intentional):
-/// 1. **In-app UpdateScreen** — download only (closes with Remedy)
-/// 2. **New popup** (install host) — appears after Remedy exits for install/relaunch
+/// Progress UX (two stages - intentional):
+/// 1. **In-app UpdateScreen** - download only (closes with Remedy)
+/// 2. **New popup** (install host) - appears after Remedy exits for install/relaunch
 ///
 /// Sole relaunch owner: update script (+ NSIS marker /NOAUTOLAUNCH). No double window.
 #[tauri::command]
@@ -1580,7 +1616,7 @@ fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), Stri
     let ver_to = desktop_update_result(ver_from.clone())
         .latest_version
         .clone();
-    // Clone Arc before spawn — State<'_, T> cannot be borrowed inside the worker.
+    // Clone Arc before spawn - State<'_, T> cannot be borrowed inside the worker.
     let process_slot = app.state::<ServerState>().process.clone();
     // Stage 1 is in-app only. Stage 2 host is launched by the install script after exit.
     // Pre-stage the PS1 in TEMP so the script can start the install popup immediately.
@@ -1591,7 +1627,7 @@ fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), Stri
                 &app_for_thread,
                 "downloading",
                 0,
-                "Connecting to update server…",
+                "Connecting to update server...",
                 &ver_from,
                 &ver_to,
             );
@@ -1654,7 +1690,7 @@ fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), Stri
                     &app_for_thread,
                     "downloading",
                     pct,
-                    &format!("Downloading update… {mb:.1} MB"),
+                    &format!("Downloading update... {mb:.1} MB"),
                 );
             }
             drop(file);
@@ -1668,7 +1704,7 @@ fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), Stri
                 &app_for_thread,
                 "installing",
                 100,
-                "Verifying release signature…",
+                "Verifying release signature...",
             );
             let sig = fetch_release_signature_for_url(&download_url)?;
             let sig_path = temp.with_extension("exe.sig");
@@ -1683,7 +1719,7 @@ fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), Stri
                 &app_for_thread,
                 "closing",
                 100,
-                "Download complete. Remedy will close — a new window shows install progress.",
+                "Download complete. Remedy will close - a new window shows install progress.",
             );
 
             // 1) Drop our Child handle for the sidecar.
@@ -1703,14 +1739,14 @@ fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), Stri
             // 3) Exit the UI process FIRST so app.exe / Remedy Desktop.exe unlock.
             //    Then the detached installer can overwrite install-dir files.
             //    (Launching NSIS while we still hold the main EXE caused
-            //    "Can't write …\remedy-desktop.exe" / partial aborts.)
-            // Progress host (I-A) already shows "Closing…" after this status write.
+            //    "Can't write ...\remedy-desktop.exe" / partial aborts.)
+            // Progress host (I-A) already shows "Closing..." after this status write.
             write_updater_owns_relaunch_flag();
             emit_progress_ver(
                 &app_for_thread,
                 "closing",
                 90,
-                "Closing Remedy so the installer can replace files…",
+                "Closing Remedy so the installer can replace files...",
                 &ver_from,
                 &ver_to,
             );
@@ -1727,6 +1763,9 @@ fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), Stri
                 // Critical: break away from the parent Job Object, otherwise
                 // app.exit() kills the update script and install never runs
                 // (user sees "updated" but still on the old binary).
+                //
+                // Spawn powershell.exe directly with CREATE_NO_WINDOW - never
+                // `cmd /c start` (that flashed two black console windows).
                 const DETACHED_PROCESS: u32 = 0x00000008;
                 const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
                 const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x01000000;
@@ -1755,6 +1794,8 @@ fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), Stri
                     .replace('\'', "''");
                 let ver_from_esc = ver_from.replace('\'', "''");
                 let ver_to_esc = ver_to.replace('\'', "''");
+                // ASCII-only script body: Windows PowerShell 5.1 may load .ps1 as
+                // system ANSI without BOM, which mojibakes Unicode ellipsis/arrows.
                 let ps = format!(
                     r#"
 $ErrorActionPreference = 'Continue'
@@ -1779,7 +1820,7 @@ function Set-UpdateStatus($phase, $percent, $message) {{
   ($obj | ConvertTo-Json -Compress) | Set-Content -LiteralPath $statusPath -Encoding UTF8 -ErrorAction SilentlyContinue
 }}
 function Stop-RemedyAppOnly {{
-  # Kill app shells only — never powershell hosts (progress UI / this script).
+  # Kill app shells only - never powershell hosts (progress UI / this script).
   Get-Process -ErrorAction SilentlyContinue | Where-Object {{
     $n = $_.ProcessName
     if ($n -match '^(powershell|pwsh|cmd)$') {{ return $false }}
@@ -1800,7 +1841,7 @@ try {{ Set-Content -LiteralPath $ownsFlag -Value 'owned_by=update_script' -Encod
 
 # Stage 2 host should already be up (launched from the app just before exit).
 # If missing (crash / race), start it now so install is never blank-desktop.
-Set-UpdateStatus 'closing' 88 'Remedy closed. Install progress running…'
+Set-UpdateStatus 'closing' 88 'Remedy closed. Install progress running...'
 $uiPs1 = Join-Path $env:TEMP 'remedy-update-ui.ps1'
 $uiAlive = $false
 try {{
@@ -1809,14 +1850,15 @@ try {{
   }}).Count -gt 0
 }} catch {{ $uiAlive = $false }}
 if (-not $uiAlive -and (Test-Path -LiteralPath $uiPs1)) {{
-  Log 'Install progress popup not found — launching stage 2 host now'
+  Log 'Install progress popup not found - launching stage 2 host now'
+  # Hidden console only; WinForms UI still paints. Never use cmd /c start.
   Start-Process -FilePath 'powershell.exe' -ArgumentList @(
-    '-NoProfile','-STA','-ExecutionPolicy','Bypass','-WindowStyle','Normal',
+    '-NoProfile','-STA','-ExecutionPolicy','Bypass','-WindowStyle','Hidden',
     '-File', $uiPs1,
     '-StatusPath', $statusPath,
     '-From', $verFrom,
     '-To', $verTo
-  ) -WindowStyle Normal | Out-Null
+  ) -WindowStyle Hidden | Out-Null
   Start-Sleep -Milliseconds 500
 }} else {{
   Log ("Install progress popup alive=$uiAlive")
@@ -1825,13 +1867,13 @@ if (-not $uiAlive -and (Test-Path -LiteralPath $uiPs1)) {{
 # Wait for the app process tree to die (file locks). Install popup stays open.
 Start-Sleep -Seconds 4
 Stop-RemedyAppOnly
-Set-UpdateStatus 'closing' 92 'Preparing installer…'
+Set-UpdateStatus 'closing' 92 'Preparing installer...'
 Start-Sleep -Seconds 2
 
 $installer = '{install_path}'
 if (-not (Test-Path -LiteralPath $installer)) {{
   Log 'ERROR: installer missing'
-  Set-UpdateStatus 'error' 0 'Installer file missing — try GitHub Releases.'
+  Set-UpdateStatus 'error' 0 'Installer file missing - try GitHub Releases.'
   exit 2
 }}
 
@@ -1863,7 +1905,7 @@ if ($priorDir -and (Test-Path -LiteralPath $priorDir)) {{
   $args += "/D=$priorDir"
   Log "Using /D=$priorDir"
 }}
-Set-UpdateStatus 'installing' 95 'Installing update… progress stays open until restart.'
+Set-UpdateStatus 'installing' 95 'Installing update - progress stays open until restart.'
 Log ("Starting NSIS: $installer $($args -join ' ')")
 $p = Start-Process -FilePath $installer -ArgumentList $args -PassThru -WindowStyle Hidden
 if (-not $p) {{
@@ -1879,7 +1921,7 @@ try {{
 $exitCode = 0
 try {{ $exitCode = $p.ExitCode }} catch {{ $exitCode = -1 }}
 Log "NSIS exit code: $exitCode"
-Set-UpdateStatus 'verifying' 98 'Verifying install…'
+Set-UpdateStatus 'verifying' 98 'Verifying install...'
 # Give file locks a moment after NSIS; avoid racing a half-written EXE.
 Start-Sleep -Seconds 3
 
@@ -1910,7 +1952,7 @@ if (-not $launch) {{
 if ($launch) {{
   # Single relaunch owner for in-app updates.
   Log "Relaunching once: $launch"
-  Set-UpdateStatus 'relaunch' 100 'Relaunching Remedy…'
+  Set-UpdateStatus 'relaunch' 100 'Relaunching Remedy...'
   # Ensure no second instance is already up before we start one.
   Stop-RemedyAppOnly
   Start-Sleep -Milliseconds 400
@@ -1922,7 +1964,7 @@ if ($launch) {{
   exit 0
 }}
 
-Log 'ERROR: no Remedy Desktop.exe found after install — not relaunching old build'
+Log 'ERROR: no Remedy Desktop.exe found after install - not relaunching old build'
 Set-UpdateStatus 'error' 0 'Install finished but Remedy.exe was not found. Install from GitHub Releases.'
 try {{ Remove-Item -LiteralPath $ownsFlag -Force -ErrorAction SilentlyContinue }} catch {{}}
 exit 4
@@ -1937,16 +1979,11 @@ exit 4
                     format!("Cannot write update script: {e}")
                 })?;
                 let ps1_path = ps1.to_string_lossy().to_string();
-                // `cmd /c start` + BREAKAWAY_FROM_JOB: script outlives app.exit().
-                // Empty title after `start` is required so the path is not treated as title.
+                // Direct powershell.exe + CREATE_NO_WINDOW + breakaway.
+                // No cmd.exe / start (those were the visible black consoles).
                 let schedule = |flags: u32| -> Result<(), String> {
-                    Command::new("cmd")
+                    Command::new("powershell.exe")
                         .args([
-                            "/C",
-                            "start",
-                            "",
-                            "/MIN",
-                            "powershell.exe",
                             "-NoProfile",
                             "-ExecutionPolicy",
                             "Bypass",
@@ -2127,7 +2164,7 @@ fn restart_server(app: AppHandle, state: State<'_, ServerState>) -> Result<Strin
             .map_err(|_| "sidecar cmd lock poisoned".to_string())?;
         guard
             .clone()
-            .ok_or_else(|| "Sidecar path unknown — restart the app".to_string())?
+            .ok_or_else(|| "Sidecar path unknown - restart the app".to_string())?
     };
 
     log::info!("Restarting remedy sidecar: {}", cmd);
@@ -2188,18 +2225,18 @@ pub fn run() {
             // Tray already uses icons/icon.png; taskbar often stuck on old embedded ICO.
             apply_window_icons(&app_handle);
 
-            // Tray menu (OS-native chrome; labels only — UI panels are themed in-app)
+            // Tray menu (OS-native chrome; labels only - UI panels are themed in-app)
             {
                 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
                 use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};
 
                 let show_i = MenuItem::with_id(app, "show", "Show Remedy", true, None::<&str>)?;
                 let settings_i =
-                    MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
+                    MenuItem::with_id(app, "settings", "Settings...", true, None::<&str>)?;
                 let updates_i = MenuItem::with_id(
                     app,
                     "check_updates",
-                    "Check for updates…",
+                    "Check for updates...",
                     true,
                     None::<&str>,
                 )?;
@@ -2214,7 +2251,7 @@ pub fn run() {
                 // Prefer tray from tauri.conf.json; attach menu + events
                 if let Some(tray) = app.tray_by_id("main") {
                     let _ = tray.set_menu(Some(menu.clone()));
-                    let _ = tray.set_tooltip(Some("Remedy — right-click for Settings"));
+                    let _ = tray.set_tooltip(Some("Remedy - right-click for Settings"));
                     let app_for_menu = app.handle().clone();
                     tray.on_menu_event(move |_tray, event| match event.id.as_ref() {
                         "show" => {
@@ -2287,12 +2324,12 @@ pub fn run() {
                         }
                     });
                 } else {
-                    log::warn!("No tray icon id 'main' — check tauri.conf.json trayIcon");
+                    log::warn!("No tray icon id 'main' - check tauri.conf.json trayIcon");
                 }
             }
 
             // One-time-per-session scrub of legacy HKCU Run keys via winreg (no PowerShell).
-            // Writing Run was Persistence.A!ml; we only delete leftovers from 0.10.19–0.10.21.
+            // Writing Run was Persistence.A!ml; we only delete leftovers from 0.10.19-0.10.21.
             #[cfg(target_os = "windows")]
             {
                 remove_legacy_run_key();
@@ -2369,7 +2406,7 @@ pub fn run() {
                 *state.sidecar_cmd.lock().unwrap() = Some(remedy_cmd.clone());
                 match start_sidecar(&state.process, &remedy_cmd) {
                     Ok(()) => {
-                        // First run seeds skills into ~/.remedy — allow extra time.
+                        // First run seeds skills into ~/.remedy - allow extra time.
                         if wait_for_health(Duration::from_secs(90)) {
                             log::info!("Remedy server ready");
                             let _ = app_handle.emit("server-ready", ());
@@ -2410,7 +2447,7 @@ pub fn run() {
                     }
                     let close_to_tray = fresh.close_to_tray;
                     if close_to_tray {
-                        // Hide to tray — server keeps running (Web UI stays alive).
+                        // Hide to tray - server keeps running (Web UI stays alive).
                         api.prevent_close();
                         let _ = window.hide();
                         log::info!("close_to_tray: window hidden (sidecar stays up)");
@@ -2438,7 +2475,7 @@ pub fn run() {
                         shutdown_sidecar(&state);
                     }
                 }
-                // Native OS file drops (Explorer → app). WebView2 often won't
+                // Native OS file drops (Explorer -> app). WebView2 often won't
                 // deliver HTML5 DataTransfer.files for external drops.
                 tauri::WindowEvent::DragDrop(DragDropEvent::Enter { paths, .. }) => {
                     let paths: Vec<String> = paths
@@ -2465,7 +2502,7 @@ pub fn run() {
                                 "Read {} dropped file(s) for composer",
                                 payloads.len()
                             );
-                            // Queue for polling (primary — WebView event delivery is flaky).
+                            // Queue for polling (primary - WebView event delivery is flaky).
                             {
                                 let pending = window.state::<ServerState>().pending_drops.clone();
                                 let mut q = pending.lock().unwrap_or_else(|e| e.into_inner());
@@ -2495,7 +2532,7 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {
-            // App-level exit (tray quit, process teardown) — window Destroyed may
+            // App-level exit (tray quit, process teardown) - window Destroyed may
             // not run if the process is exiting another way.
             match event {
                 tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit => {
