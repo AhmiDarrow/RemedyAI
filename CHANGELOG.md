@@ -9,7 +9,7 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 - **Shell:** true Left | Chat | Right; outer icon rails; right collapsed by default; swap in side headers (layout prefs v2).
 - **Terminal:** in-app PowerShell via ConPTY + xterm (auto-start); ACL for PTY commands.
 - **Browser:** in-app WebView2 window (not iframe); single URL chrome.
-- **Projects:** seed `Documents/Remedy Projects/New Project` when unset (not install cwd).
+- **Projects:** first-run only may seed `Documents/Remedy Projects/New Project` in config; **New Session = root** (no project) unless the user attaches one.
 - **Icons:** tray/taskbar/Start from `assets/remedy_icon_original.png`.
 - **Images:** bare path autolink to ChatImage; media normalize via Pillow; less flicker.
 - **Files:** open path, copy path, drag-to-chat; follows session project.

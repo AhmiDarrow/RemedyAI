@@ -341,18 +341,23 @@ def new_project_dir() -> Path:
 
 
 def ensure_new_project_seed() -> Path:
-    """Create the New Project sandbox folder if missing; return resolved path."""
+    """Create the New Project folder if missing (first-run helper only).
+
+    Do **not** call this for every new session — sessions without a project are root.
+    """
     return ensure_project_dir(new_project_dir())
 
 
 def default_project_from_config(cfg: dict | None) -> Path:
-    """Pick project path from config dict / env, else New Project seed.
+    """Pick project path from config dict / env, else user home (not process cwd).
 
-    Never falls back to process cwd (Desktop sidecars often run from install dir).
+    Unset project → home path for tools that need *a* root; access_scope becomes
+    **full** via :func:`effective_access_scope`. New Project is only for first-run
+    config seeding, not an implicit every-session workspace.
     """
     cfg = cfg or {}
     env = os.environ.get("REMEDY_PROJECT_PATH") or os.environ.get("REMEDY_FILES_ROOT") or ""
     raw = cfg.get("project_path") or env or None
     if is_unset_project_path(raw):
-        return ensure_new_project_seed()
+        return resolve_project_path(None)  # home, never install cwd
     return resolve_project_path(str(raw))
