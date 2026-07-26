@@ -1,13 +1,23 @@
 import type { ReactNode } from 'react'
 import { ALL_SLIDES, SLIDE_META, type SlideId } from '../../workspace/types'
 
+const RAIL_W = 36
+
+/**
+ * Outer-edge workspace rail + optional body.
+ * Collapsed = rail only (icons still switch slides and expand the panel).
+ * Swap lives in the panel header — never over the chat middle.
+ */
 export function WorkspaceSide({
   side,
   active,
   width,
+  open,
   onSelect,
   onWidth,
   onHide,
+  onOpen,
+  onSwap,
   onPopout,
   onFullscreen,
   children,
@@ -15,29 +25,31 @@ export function WorkspaceSide({
   side: 'left' | 'right'
   active: SlideId
   width: number
+  open: boolean
   onSelect: (id: SlideId) => void
   onWidth: (w: number) => void
   onHide: () => void
+  onOpen: () => void
+  onSwap?: () => void
   onPopout?: () => void
   onFullscreen?: () => void
-  children: ReactNode
+  children?: ReactNode
 }) {
-  // Defensive: corrupted layout prefs must not throw on meta.label
   const meta = SLIDE_META[active] ?? SLIDE_META.sessions
+
   const rail = (
     <div
-      className="flex flex-col items-center gap-0.5 py-1 shrink-0"
+      className="flex flex-col items-center gap-0.5 py-1 shrink-0 h-full"
       style={{
-        width: 36,
+        width: RAIL_W,
         background: 'var(--bg-tertiary)',
-        borderColor: 'var(--border)',
         borderRight: side === 'left' ? '1px solid var(--border)' : undefined,
         borderLeft: side === 'right' ? '1px solid var(--border)' : undefined,
       }}
     >
       {ALL_SLIDES.map((id) => {
         const m = SLIDE_META[id]
-        const on = id === active
+        const on = open && id === active
         return (
           <button
             key={id}
@@ -48,7 +60,10 @@ export function WorkspaceSide({
               background: on ? 'var(--accent)' : 'transparent',
               color: on ? '#fff' : 'var(--text-secondary)',
             }}
-            onClick={() => onSelect(id)}
+            onClick={() => {
+              onSelect(id)
+              if (!open) onOpen()
+            }}
           >
             {m.short}
           </button>
@@ -56,6 +71,15 @@ export function WorkspaceSide({
       })}
     </div>
   )
+
+  if (!open) {
+    // Rail only on the outer edge
+    return (
+      <div className="flex h-full min-h-0 shrink-0" style={{ width: RAIL_W }}>
+        {rail}
+      </div>
+    )
+  }
 
   const resizeHandle = (
     <div
@@ -89,6 +113,22 @@ export function WorkspaceSide({
         style={{ borderColor: 'var(--border)', color: 'var(--text-primary)' }}
       >
         <span className="truncate flex-1">{meta.label}</span>
+        {onSwap && (
+          <button
+            type="button"
+            className="px-1.5 py-0.5 rounded opacity-80 hover:opacity-100"
+            style={{
+              background: 'var(--bg-primary)',
+              border: '1px solid var(--border)',
+              color: 'var(--text-secondary)',
+              fontSize: 10,
+            }}
+            title="Swap left and right panels"
+            onClick={onSwap}
+          >
+            ⇄
+          </button>
+        )}
         {meta.popout && onPopout && (
           <button type="button" className="px-1 opacity-70" title="Pop out" onClick={onPopout}>
             ↗
@@ -113,7 +153,7 @@ export function WorkspaceSide({
   )
 
   return (
-    <div className="flex h-full min-h-0 shrink-0" style={{ width: width + 36 }}>
+    <div className="flex h-full min-h-0 shrink-0" style={{ width: width + RAIL_W }}>
       {side === 'left' ? (
         <>
           {rail}

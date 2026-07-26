@@ -1433,22 +1433,25 @@ export default function App() {
 
   return (
     <AppShell {...shellProps}>
-    <div className="flex flex-1 min-h-0" style={{ background: 'var(--bg-primary)' }}>
+    <div className="flex flex-col flex-1 min-h-0" style={{ background: 'var(--bg-primary)' }}>
       <CommandPalette
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}
         commands={paletteCommands}
       />
 
-      {/* Left slide */}
-      {wsLayout.leftOpen && (
+      {/* True three-column shell: Left | Chat | Right (rails on outer edges) */}
+      <div className="flex flex-1 min-h-0">
         <WorkspaceSide
           side="left"
           active={wsLayout.left}
           width={wsLayout.leftWidth}
+          open={wsLayout.leftOpen}
           onSelect={(id) => patchWs({ left: id })}
           onWidth={(w) => patchWs({ leftWidth: w })}
           onHide={() => patchWs({ leftOpen: false })}
+          onOpen={() => patchWs({ leftOpen: true })}
+          onSwap={swapSides}
           onPopout={
             SLIDE_META[wsLayout.left]?.popout
               ? () => setPopout({ id: wsLayout.left, fullscreen: false })
@@ -1460,122 +1463,87 @@ export default function App() {
               : undefined
           }
         >
-          {renderSlide(wsLayout.left)}
+          {wsLayout.leftOpen ? renderSlide(wsLayout.left) : null}
         </WorkspaceSide>
-      )}
-      {!wsLayout.leftOpen && (
-        <button
-          type="button"
-          className="shrink-0 px-1 text-xs border-r"
-          style={{
-            writingMode: 'vertical-rl',
-            background: 'var(--bg-tertiary)',
-            borderColor: 'var(--border)',
-            color: 'var(--text-muted)',
-          }}
-          onClick={() => patchWs({ leftOpen: true })}
-          title="Show left panel"
-        >
-          ◂ {(SLIDE_META[wsLayout.left] ?? SLIDE_META.sessions).label}
-        </button>
-      )}
 
-      {/* Middle: chat only */}
-      <div className="flex-1 flex flex-col min-w-0 relative min-h-0">
-        <div className="absolute top-1 left-1/2 -translate-x-1/2 z-10 flex gap-1">
-          <button
-            type="button"
-            className="px-2 py-0.5 rounded text-[10px] font-medium"
-            style={{
-              background: 'var(--bg-tertiary)',
-              border: '1px solid var(--border)',
-              color: 'var(--text-secondary)',
+        {/* Middle: chat only */}
+        <div className="flex-1 flex flex-col min-w-0 relative min-h-0">
+          {planMode && (
+            <div
+              className="absolute top-2 right-2 z-10 px-2 py-0.5 text-xs font-semibold rounded pointer-events-none"
+              style={{ background: 'var(--accent)', color: '#fff', opacity: 0.9 }}
+            >
+              Plan Mode
+            </div>
+          )}
+
+          <ApprovalBanner sessionId={activeId} />
+          <PlanBanner
+            planMode={planMode}
+            sessionId={activeId}
+            onApproveBuild={() => {
+              setPlanMode(false)
+              setEditDraft({
+                text: 'Implement the approved plan. Follow the saved steps carefully.',
+                key: Date.now(),
+              })
             }}
-            title="Swap left and right panels"
-            onClick={swapSides}
-          >
-            ⇄ Swap sides
-          </button>
-        </div>
-        {planMode && (
-          <div
-            className="absolute top-2 right-2 z-10 px-2 py-0.5 text-xs font-semibold rounded pointer-events-none"
-            style={{ background: 'var(--accent)', color: '#fff', opacity: 0.9 }}
-          >
-            Plan Mode
-          </div>
-        )}
+            onRequestChanges={(hint) => {
+              setPlanMode(true)
+              setEditDraft({ text: hint, key: Date.now() })
+            }}
+          />
+          <MessageFeed
+            messages={messages}
+            partialText={partialText}
+            partialThinking={partialThinking}
+            streaming={streaming}
+            loading={messagesLoading}
+            planMode={planMode}
+            activeTools={activeTools}
+            processSteps={processSteps}
+            taskProgress={taskProgress}
+            toolProcessMode={toolProcessMode}
+            onEditUserMessage={handleEditUserMessage}
+            onQuickPrompt={(text) => void handleSend(text)}
+            onRegenerate={(id) => void handleRegenerate(id)}
+            userName={userName}
+            onAttachMarkup={handleAttachMarkup}
+          />
 
-        <div className="flex-1 flex min-h-0">
-          <div className="flex-1 flex flex-col min-w-0 min-h-0">
-            <ApprovalBanner sessionId={activeId} />
-            <PlanBanner
-              planMode={planMode}
-              sessionId={activeId}
-              onApproveBuild={() => {
-                setPlanMode(false)
-                setEditDraft({
-                  text: 'Implement the approved plan. Follow the saved steps carefully.',
-                  key: Date.now(),
-                })
-              }}
-              onRequestChanges={(hint) => {
-                setPlanMode(true)
-                setEditDraft({ text: hint, key: Date.now() })
-              }}
-            />
-            <MessageFeed
-              messages={messages}
-              partialText={partialText}
-              partialThinking={partialThinking}
-              streaming={streaming}
-              loading={messagesLoading}
-              planMode={planMode}
-              activeTools={activeTools}
-              processSteps={processSteps}
-              taskProgress={taskProgress}
-              toolProcessMode={toolProcessMode}
-              onEditUserMessage={handleEditUserMessage}
-              onQuickPrompt={(text) => void handleSend(text)}
-              onRegenerate={(id) => void handleRegenerate(id)}
-              userName={userName}
-              onAttachMarkup={handleAttachMarkup}
-            />
-
-            <Composer
-              ref={composerRef}
-              onSend={handleSend}
-              onStop={stop}
-              onCommand={handleCommand}
-              streaming={streaming}
-              queue={queue}
-              onCancelQueued={cancelQueued}
-              onClearQueue={clearQueue}
-              onPromoteQueued={promoteQueued}
-              onUpdateQueued={updateQueued}
-              disabled={serverState !== 'ready'}
-              planMode={planMode}
-              onTogglePlanMode={() => setPlanMode((p) => !p)}
-              agents={agentDefs}
-              editDraft={editDraft}
-              sessionId={activeId}
-              llmProvider={llmProvider}
-              llmModel={model}
-              onOpenSettings={() => {
-                patchWs({ right: 'settings', rightOpen: true })
-                setPanel('settings')
-              }}
-              ensureSession={async () => {
-                if (activeId) return activeId
-                const s = await create()
-                if (s?.id) {
-                  setActiveId(s.id)
-                  setOpenTabs((prev) => new Set([...prev, s.id]))
-                }
-                return s?.id ?? null
-              }}
-            />
-          </div>
+          <Composer
+            ref={composerRef}
+            onSend={handleSend}
+            onStop={stop}
+            onCommand={handleCommand}
+            streaming={streaming}
+            queue={queue}
+            onCancelQueued={cancelQueued}
+            onClearQueue={clearQueue}
+            onPromoteQueued={promoteQueued}
+            onUpdateQueued={updateQueued}
+            disabled={serverState !== 'ready'}
+            planMode={planMode}
+            onTogglePlanMode={() => setPlanMode((p) => !p)}
+            agents={agentDefs}
+            editDraft={editDraft}
+            sessionId={activeId}
+            llmProvider={llmProvider}
+            llmModel={model}
+            onOpenSettings={() => {
+              patchWs({ right: 'settings', rightOpen: true })
+              setPanel(null)
+            }}
+            ensureSession={async () => {
+              if (activeId) return activeId
+              const s = await create()
+              if (s?.id) {
+                setActiveId(s.id)
+                setOpenTabs((prev) => new Set([...prev, s.id]))
+              }
+              return s?.id ?? null
+            }}
+          />
 
           <TimeTravelTimeline
             open={timeTravelOpen}
@@ -1596,7 +1564,7 @@ export default function App() {
             onClose={() => setPanel(null)}
             onOpenHelp={openHelp}
           />
-          {/* Avoid mounting Settings twice when the workspace slide already embeds it */}
+          {/* Avoid mounting Settings twice when a workspace slide already embeds it */}
           <SettingsPanel
             open={
               panel === 'settings' &&
@@ -1646,47 +1614,29 @@ export default function App() {
           />
         </div>
 
-        {/* Right slide */}
-        {wsLayout.rightOpen && (
-          <WorkspaceSide
-            side="right"
-            active={wsLayout.right}
-            width={wsLayout.rightWidth}
-            onSelect={(id) => {
-              patchWs({ right: id })
-            }}
-            onWidth={(w) => patchWs({ rightWidth: w })}
-            onHide={() => patchWs({ rightOpen: false })}
-            onPopout={
-              SLIDE_META[wsLayout.right]?.popout
-                ? () => setPopout({ id: wsLayout.right, fullscreen: false })
-                : undefined
-            }
-            onFullscreen={
-              SLIDE_META[wsLayout.right]?.popout
-                ? () => setPopout({ id: wsLayout.right, fullscreen: true })
-                : undefined
-            }
-          >
-            {renderSlide(wsLayout.right)}
-          </WorkspaceSide>
-        )}
-        {!wsLayout.rightOpen && (
-          <button
-            type="button"
-            className="shrink-0 px-1 text-xs border-l"
-            style={{
-              writingMode: 'vertical-rl',
-              background: 'var(--bg-tertiary)',
-              borderColor: 'var(--border)',
-              color: 'var(--text-muted)',
-            }}
-            onClick={() => patchWs({ rightOpen: true })}
-            title="Show right panel"
-          >
-            {(SLIDE_META[wsLayout.right] ?? SLIDE_META.settings).label} ▸
-          </button>
-        )}
+        <WorkspaceSide
+          side="right"
+          active={wsLayout.right}
+          width={wsLayout.rightWidth}
+          open={wsLayout.rightOpen}
+          onSelect={(id) => patchWs({ right: id })}
+          onWidth={(w) => patchWs({ rightWidth: w })}
+          onHide={() => patchWs({ rightOpen: false })}
+          onOpen={() => patchWs({ rightOpen: true })}
+          onSwap={swapSides}
+          onPopout={
+            SLIDE_META[wsLayout.right]?.popout
+              ? () => setPopout({ id: wsLayout.right, fullscreen: false })
+              : undefined
+          }
+          onFullscreen={
+            SLIDE_META[wsLayout.right]?.popout
+              ? () => setPopout({ id: wsLayout.right, fullscreen: true })
+              : undefined
+          }
+        >
+          {wsLayout.rightOpen ? renderSlide(wsLayout.right) : null}
+        </WorkspaceSide>
 
         {popout && (
           <PopoutOverlay
@@ -1700,8 +1650,9 @@ export default function App() {
             {renderSlide(popout.id)}
           </PopoutOverlay>
         )}
+      </div>
 
-        <StatusBar
+      <StatusBar
           sessionId={activeId}
           streaming={streaming}
           model={model}
@@ -1841,7 +1792,6 @@ export default function App() {
             {switchToast}
           </div>
         )}
-      </div>
     </div>
 
     <UserNamePrompt

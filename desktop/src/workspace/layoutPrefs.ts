@@ -9,7 +9,9 @@ export type WorkspaceLayout = {
   rightOpen: boolean
 }
 
-const KEY = 'remedy.workspaceLayout.v1'
+/** v2: true three-column shell; migrates off broken v1 nested-right layouts. */
+const KEY = 'remedy.workspaceLayout.v2'
+const LEGACY_KEY = 'remedy.workspaceLayout.v1'
 
 const DEFAULTS: WorkspaceLayout = {
   left: 'sessions',
@@ -36,10 +38,9 @@ function clampWidth(n: unknown, fallback: number): number {
   return Math.min(480, Math.max(200, Math.floor(v)))
 }
 
-export function loadWorkspaceLayout(): WorkspaceLayout {
+function parseLayout(raw: string | null): WorkspaceLayout | null {
+  if (!raw) return null
   try {
-    const raw = localStorage.getItem(KEY)
-    if (!raw) return { ...DEFAULTS }
     const p = JSON.parse(raw) as Partial<WorkspaceLayout>
     return {
       left: coerceSlideId(p.left, DEFAULTS.left),
@@ -47,8 +48,26 @@ export function loadWorkspaceLayout(): WorkspaceLayout {
       leftWidth: clampWidth(p.leftWidth, DEFAULTS.leftWidth),
       rightWidth: clampWidth(p.rightWidth, DEFAULTS.rightWidth),
       leftOpen: p.leftOpen !== false,
+      // Right starts collapsed by default; only true if explicitly saved open
       rightOpen: Boolean(p.rightOpen),
     }
+  } catch {
+    return null
+  }
+}
+
+export function loadWorkspaceLayout(): WorkspaceLayout {
+  try {
+    const v2 = parseLayout(localStorage.getItem(KEY))
+    if (v2) return v2
+    // One-shot migrate widths/slides from v1; force right closed (layout was broken)
+    const v1 = parseLayout(localStorage.getItem(LEGACY_KEY))
+    if (v1) {
+      const migrated: WorkspaceLayout = { ...v1, rightOpen: false }
+      saveWorkspaceLayout(migrated)
+      return migrated
+    }
+    return { ...DEFAULTS }
   } catch {
     return { ...DEFAULTS }
   }

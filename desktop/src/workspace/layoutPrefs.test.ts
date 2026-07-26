@@ -28,13 +28,13 @@ function installMemoryLocalStorage() {
   })
 }
 
-describe('workspace layoutPrefs', () => {
+describe('workspace layoutPrefs v2', () => {
   beforeEach(() => {
     installMemoryLocalStorage()
     localStorage.clear()
   })
 
-  it('returns defaults when empty', () => {
+  it('returns defaults when empty (right collapsed)', () => {
     const L = loadWorkspaceLayout()
     expect(L.left).toBe('sessions')
     expect(L.leftOpen).toBe(true)
@@ -64,12 +64,32 @@ describe('workspace layoutPrefs', () => {
     expect(coerceSlideId('not-a-slide', 'sessions')).toBe('sessions')
     expect(coerceSlideId('browser', 'sessions')).toBe('browser')
     localStorage.setItem(
-      'remedy.workspaceLayout.v1',
+      'remedy.workspaceLayout.v2',
       JSON.stringify({ left: 'bogus', right: 42, leftWidth: 'x' }),
     )
     const L = loadWorkspaceLayout()
     expect(L.left).toBe('sessions')
     expect(L.right).toBe('settings')
     expect(L.leftWidth).toBe(280)
+  })
+
+  it('migrates v1 prefs and forces right closed', () => {
+    localStorage.setItem(
+      'remedy.workspaceLayout.v1',
+      JSON.stringify({
+        left: 'settings',
+        right: 'terminal',
+        leftWidth: 300,
+        rightWidth: 320,
+        leftOpen: true,
+        rightOpen: true,
+      }),
+    )
+    const L = loadWorkspaceLayout()
+    expect(L.left).toBe('settings')
+    expect(L.right).toBe('terminal')
+    expect(L.rightOpen).toBe(false)
+    // Persisted under v2
+    expect(localStorage.getItem('remedy.workspaceLayout.v2')).toBeTruthy()
   })
 })
