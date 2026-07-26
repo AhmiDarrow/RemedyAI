@@ -32,4 +32,12 @@ describe('linkifyBareImagePaths', () => {
     const t = 'Open C:\\Users\\x\\file.txt and README.md please'
     expect(linkifyBareImagePaths(t)).toBe(t)
   })
+
+  it('unwraps backtick-wrapped attachment image paths', () => {
+    const t =
+      'Attached:\n- `C:\\Users\\Administrator\\.remedy\\attachments\\x\\shot.png` (shot.png, image/png, 12 B)'
+    const out = linkifyBareImagePaths(t)
+    expect(out).toMatch(/!\[shot\.png\]\(/)
+    expect(out).not.toMatch(/`C:\\Users/)
+  })
 })

@@ -188,6 +188,7 @@ Settings → Appearance: system/dark/light themes, density, custom accent. Does 
 - Hide a side with **×**; reopen from the edge strip
 - Terminal / Browser / Scratch support **pop out** (↗) and **fullscreen** (⛶). Exit with the top bar buttons or **Esc**.
 - Browser **⌂ Home** defaults to the Remedy GitHub page (change in **Settings → Project workspace → Browser homepage**).
+- **Images** in chat (attach, paste, or paths the model writes) always render as previews — independent of which model you use.
 - Open **session tabs** live only inside the **Sessions** slide (not above chat)
 - **Archive** filter + auto-hide sessions older than 30 days (not pinned/open)
 

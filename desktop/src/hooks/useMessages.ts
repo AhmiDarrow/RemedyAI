@@ -56,8 +56,11 @@ export function useMessages(sessionId: string | null) {
   /** RAF-batched stream text (avoids re-render every token). */
   const partialBufRef = useRef('')
   const partialRafRef = useRef<number | null>(null)
+  /** Full assistant text for this turn (optimistic commit before listMessages). */
+  const streamAccumRef = useRef('')
   const thinkingBufRef = useRef('')
   const thinkingRafRef = useRef<number | null>(null)
+  const thinkingAccumRef = useRef('')
   /** Latest sendTurn for queue drain (avoids stale closures). */
   const sendTurnRef = useRef<
     | ((
@@ -81,6 +84,7 @@ export function useMessages(sessionId: string | null) {
   const appendPartialToken = useCallback(
     (token: string) => {
       if (!token) return
+      streamAccumRef.current += token
       partialBufRef.current += token
       if (partialRafRef.current == null) {
         partialRafRef.current =
@@ -103,6 +107,7 @@ export function useMessages(sessionId: string | null) {
   const appendPartialThinking = useCallback(
     (thought: string) => {
       if (!thought) return
+      thinkingAccumRef.current += thought
       thinkingBufRef.current += thought
       if (thinkingRafRef.current == null) {
         thinkingRafRef.current =
@@ -141,6 +146,30 @@ export function useMessages(sessionId: string | null) {
       thinkingBufRef.current = ''
       setPartialThinking((prev) => prev + left)
     }
+  }, [])
+
+  /** Hard-clear stream buffers at turn start (no flush into UI). */
+  const clearStreamAccum = useCallback(() => {
+    if (partialRafRef.current != null) {
+      if (typeof cancelAnimationFrame === 'function') {
+        cancelAnimationFrame(partialRafRef.current)
+      } else {
+        clearTimeout(partialRafRef.current)
+      }
+      partialRafRef.current = null
+    }
+    if (thinkingRafRef.current != null) {
+      if (typeof cancelAnimationFrame === 'function') {
+        cancelAnimationFrame(thinkingRafRef.current)
+      } else {
+        clearTimeout(thinkingRafRef.current)
+      }
+      thinkingRafRef.current = null
+    }
+    partialBufRef.current = ''
+    thinkingBufRef.current = ''
+    streamAccumRef.current = ''
+    thinkingAccumRef.current = ''
   }, [])
 
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -229,14 +258,30 @@ export function useMessages(sessionId: string | null) {
       sendLockRef.current = true
       streamingRef.current = true
 
+      // Match server-side attachment display: markdown images so ChatImage renders.
       let display = text.trim()
       if (hasAtt) {
-        const lines = (attachments || []).map(
-          (a) => `- ${a.name || a.path}${a.mime ? ` (${a.mime})` : ''}`,
-        )
-        display = display
-          ? `${display}\n\n📎 Attachments:\n${lines.join('\n')}`
-          : `📎 Attachments:\n${lines.join('\n')}`
+        const imgs: string[] = []
+        const lines: string[] = []
+        for (const a of attachments || []) {
+          const name = a.name || a.path.split(/[/\\]/).pop() || 'file'
+          const path = (a.path || '').replace(/\\/g, '/')
+          if (a.is_image && path) {
+            imgs.push(
+              /[\s()]/.test(path) ? `![${name}](<${path}>)` : `![${name}](${path})`,
+            )
+          }
+          lines.push(`- ${name}${a.mime ? ` (${a.mime})` : ''}`)
+        }
+        const block = [
+          ...(imgs.length ? imgs : []),
+          imgs.length ? '' : null,
+          '📎 Attachments:',
+          ...lines,
+        ]
+          .filter((x) => x != null)
+          .join('\n')
+        display = display ? `${display}\n\n${block}` : block
       }
 
       const userMsg: ChatMessage = {
@@ -255,8 +300,7 @@ export function useMessages(sessionId: string | null) {
       setMessages((prev) => [...prev, userMsg])
 
       setStreaming(true)
-      partialBufRef.current = ''
-      thinkingBufRef.current = ''
+      clearStreamAccum()
       setPartialText('')
       setPartialThinking('')
       setActiveTools([])
@@ -272,6 +316,32 @@ export function useMessages(sessionId: string | null) {
         doneReceived = true
         resetStreamBuffers()
         const stepsSnapshot = [...processStepsRef.current]
+        const assistantText = streamAccumRef.current
+        const thinkingText = thinkingAccumRef.current || null
+        // Optimistic: promote stream into a permanent bubble immediately (no blank gap).
+        if (assistantText.trim() && sessionIdRef.current === targetId) {
+          const optimistic: ChatMessage = {
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            content: assistantText,
+            thinking: thinkingText,
+            tool_calls: stepsSnapshot.map((s) => ({
+              name: s.name,
+              args: s.argsText ? safeParseArgs(s.argsText) : {},
+            })),
+            tool_results: stepsSnapshot.map((s) => ({
+              name: s.name,
+              output: s.resultText || '',
+              error: s.error,
+            })),
+            model: model || null,
+            agent: null,
+            tokens: null,
+            created_at: new Date().toISOString(),
+            reverted: false,
+          }
+          setMessages((prev) => [...prev, optimistic])
+        }
         setStreaming(false)
         setStreamCtrl(null)
         streamCtrlRef.current = null
@@ -281,6 +351,8 @@ export function useMessages(sessionId: string | null) {
         setTaskProgress(null)
         streamingRef.current = false
         sendLockRef.current = false
+        streamAccumRef.current = ''
+        thinkingAccumRef.current = ''
         // Drop results if the user already switched sessions.
         if (sessionIdRef.current !== targetId) {
           setProcessSteps([])
@@ -312,7 +384,7 @@ export function useMessages(sessionId: string | null) {
           }
           setMessages(msgs)
         } catch {
-          /* keep optimistic */
+          /* keep optimistic assistant bubble */
         }
         setProcessSteps([])
         processStepsRef.current = []
@@ -458,6 +530,7 @@ export function useMessages(sessionId: string | null) {
       appendPartialToken,
       appendPartialThinking,
       resetStreamBuffers,
+      clearStreamAccum,
       drainQueue,
     ],
   )

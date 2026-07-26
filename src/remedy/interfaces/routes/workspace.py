@@ -81,7 +81,7 @@ def register_workspace_routes(app: FastAPI, *, runtime=None, gateway=None, memor
         """
         from fastapi.responses import FileResponse
 
-        raw = (path or "").strip().strip('"').strip("'")
+        raw = (path or "").strip().strip('"').strip("'").strip("<>")
         if raw.lower().startswith("file:"):
             raw = raw[5:].lstrip("/\\")
             # file:///C:/Users/... → C:/Users/...
@@ -117,6 +117,9 @@ def register_workspace_routes(app: FastAPI, *, runtime=None, gateway=None, memor
         with contextlib.suppress(Exception):
             home = Path(load_config().get("home_dir") or (Path.home() / ".remedy"))
             roots.append(home.expanduser().resolve())
+        # Always allow default ~/.remedy (session attachments) even if home_dir differs
+        with contextlib.suppress(Exception):
+            roots.append((Path.home() / ".remedy").resolve())
         # Always allow reading under the default project if configured
         with contextlib.suppress(Exception):
             pp = load_config().get("project_path")

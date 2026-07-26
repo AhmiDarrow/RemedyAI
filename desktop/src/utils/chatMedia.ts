@@ -32,6 +32,7 @@ export function isLocalMediaPath(src: string): boolean {
 }
 
 export function normalizeLocalMediaPath(src: string): string {
+  // Angle-bracket markdown targets: ![alt](<C:/path with space.png>)
   let s = (src || '').trim().replace(/^<|>$/g, '')
   if (s.toLowerCase().startsWith('file:')) {
     s = s.slice(5)

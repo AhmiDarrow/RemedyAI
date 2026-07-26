@@ -144,11 +144,40 @@ def save_upload(
     }
 
 
+def markdown_image_embed(name: str, path: str) -> str:
+    """Markdown image for chat display (provider-agnostic).
+
+    Uses forward slashes and angle-bracket targets when the path has spaces
+    or parens so CommonMark/GFM parsers keep the whole path.
+    """
+    alt = (name or Path(path).name or "image").replace("]", "").replace("\n", " ")
+    p = str(path or "").replace("\\", "/").strip()
+    if not p:
+        return ""
+    if any(ch in p for ch in (" ", "(", ")", "[", "]")):
+        return f"![{alt}](<{p}>)"
+    return f"![{alt}]({p})"
+
+
 def build_attachment_prompt_block(attachments: list[dict[str, Any]]) -> str:
-    """Human-readable block appended to the user message for history + tools."""
+    """Human-readable block appended to the user message for history + tools.
+
+    Images are embedded as markdown ``![…](path)`` so the chat UI renders them
+    for **every** model (display is independent of provider vision).
+    """
     if not attachments:
         return ""
-    lines = ["", "---", "Attached files (saved for this session):"]
+    lines = ["", "---"]
+    # Inline previews first — MessageFeed / ChatImage render these regardless of LLM.
+    for a in attachments:
+        name = str(a.get("name") or Path(str(a.get("path", ""))).name or "file")
+        path = str(a.get("path") or "")
+        mime = str(a.get("mime") or "unknown")
+        if path and (a.get("is_image") or is_image(mime)):
+            emb = markdown_image_embed(name, path)
+            if emb:
+                lines.append(emb)
+    lines.append("Attached files (saved for this session):")
     for a in attachments:
         name = a.get("name") or Path(str(a.get("path", ""))).name
         path = a.get("path") or ""
@@ -158,7 +187,8 @@ def build_attachment_prompt_block(attachments: list[dict[str, Any]]) -> str:
         lines.append(f"- `{path}` ({name}, {mime}, {size_s})")
     lines.append(
         "Use `file_read` on these paths when you need the full content. "
-        "Image files may also be provided as vision input when supported."
+        "Images above are shown in chat; vision-capable models (or the local "
+        "visual decoder) can also understand their pixels."
     )
     return "\n".join(lines)
 

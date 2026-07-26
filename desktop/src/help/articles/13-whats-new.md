@@ -2,7 +2,13 @@
 
 High-level product notes for owners. Full detail lives in repo `CHANGELOG.md`.
 
-Ship **one** installer/tag for the current series (**v0.15.5**).
+Ship **one** installer/tag for the current series (**v0.15.6**).
+
+## 0.15.6 - Images in chat for every model
+
+- Drag/drop or paste an image → it **shows in the chat bubble** (markdown preview), not only a file path.
+- Works with any chat model; vision understanding still uses the provider or local visual decoder when available.
+- Stream finish is smoother (no empty flash before the reply lands).
 
 ## 0.15.5 - Popout exit, embed browser, homepage
 

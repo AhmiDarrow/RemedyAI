@@ -2,6 +2,15 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.15.6] - 2026-07-26
+
+### Fix: images always display in chat + smoother stream finish
+
+- **Attachments:** image files are stored/shown as markdown `![…](path)` so chat renders previews for **every** model (display is independent of provider vision).
+- **Optimistic UI:** send bubble shows image previews immediately; stream finish promotes the assistant reply without a blank gap before `listMessages` returns.
+- **Legacy messages:** backtick-wrapped attachment paths are linkified into images; media API always allows `~/.remedy` attachment roots.
+- **Tests:** attachment markdown embed + linkify backtick unwrap.
+
 ## [0.15.5] - 2026-07-26
 
 ### Fix/Feature: popout exit chrome, embedded browser, browser homepage

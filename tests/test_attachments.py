@@ -5,9 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from remedy.interfaces.attachments import (
+    build_attachment_prompt_block,
     build_multimodal_user_content,
     is_image,
     is_probably_text,
+    markdown_image_embed,
     sanitize_filename,
     save_upload,
 )
@@ -66,6 +68,36 @@ def test_mime_helpers():
     assert is_probably_text("text/plain", "a.txt")
     assert is_probably_text("application/octet-stream", "main.py")
     assert is_image("image/png")
+
+
+def test_markdown_image_embed_spaces_and_slashes():
+    assert markdown_image_embed("a.png", r"C:\tmp\a.png") == "![a.png](C:/tmp/a.png)"
+    emb = markdown_image_embed("shot.png", r"C:\Users\Me\shot 1.png")
+    assert emb.startswith("![shot.png](<")
+    assert "shot 1.png" in emb
+    assert emb.endswith(">)")
+
+
+def test_attachment_block_embeds_images_for_chat_display(tmp_path: Path):
+    """Images must appear as markdown so the UI can render them (any model)."""
+    home = tmp_path / "home"
+    home.mkdir()
+    png = (
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00"
+        b"\x00\x01\x01\x00\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    meta = save_upload(
+        session_id="sess-img",
+        filename="dot.png",
+        data=png,
+        content_type="image/png",
+        home_dir=home,
+    )
+    block = build_attachment_prompt_block([meta])
+    assert "![" in block
+    assert "dot.png" in block
+    assert meta["path"].replace("\\", "/") in block.replace("\\", "/")
 
 
 def test_save_upload_keeps_original_name_on_reupload(tmp_path: Path):
