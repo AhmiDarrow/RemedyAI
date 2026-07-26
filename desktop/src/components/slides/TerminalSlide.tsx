@@ -1,49 +1,105 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { apiFetch } from '../../api/client'
 import { isTauri, tauriInvoke } from '../../api/tauri'
 
 /**
- * Terminal slide MVP: themed console surface + open system terminal.
- * Full in-app PTY can follow; avoids heavy native deps for this ship.
+ * Terminal slide: open **PowerShell** in the project cwd (primary on Windows).
  */
-export function TerminalSlide({ projectPath }: { projectPath?: string | null }) {
+export function TerminalSlide({ sessionId }: { sessionId?: string | null }) {
+  const [cwd, setCwd] = useState('')
   const [log, setLog] = useState(
-    'Remedy Terminal (MVP)\nOpen an external terminal in the project folder, or use bash tools in chat.\n',
+    'Remedy Terminal\nOpens PowerShell in your project folder (pwsh → Windows PowerShell → WT → cmd).\n',
   )
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const q = sessionId
+          ? `?session_id=${encodeURIComponent(sessionId)}`
+          : ''
+        const data = await apiFetch<{ project_path?: string }>(`/workspace${q}`)
+        if (!cancelled && data.project_path) setCwd(data.project_path)
+      } catch {
+        /* keep empty → Rust uses process cwd */
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [sessionId])
 
   const openExternal = async () => {
-    const cwd = projectPath || undefined
-    setLog((l) => l + `\n> open terminal${cwd ? ` @ ${cwd}` : ''}…\n`)
+    setBusy(true)
+    const target = cwd.trim()
+    setLog((l) => l + `\n> open terminal${target ? ` @ ${target}` : ''}…\n`)
     try {
-      if (isTauri()) {
-        // Prefer shell open of cmd/powershell in cwd if available later; fallback message
-        await tauriInvoke('plugin:shell|open', {
-          path: 'cmd.exe',
-        }).catch(async () => {
-          // Best-effort: tell user to use chat bash
-          setLog((l) => l + 'Could not spawn host shell. Use chat bash_exec or install a PTY build.\n')
-        })
-      } else {
-        setLog((l) => l + 'External terminal is desktop-only.\n')
+      if (!isTauri()) {
+        setLog((l) => l + 'Desktop app required for host terminal.\n')
+        return
       }
+      const msg = await tauriInvoke<string>('open_terminal', {
+        cwd: target || null,
+      })
+      setLog((l) => l + `${msg}\n`)
     } catch (e: unknown) {
       setLog((l) => l + `Error: ${e instanceof Error ? e.message : String(e)}\n`)
+    } finally {
+      setBusy(false)
     }
   }
 
   return (
     <div className="flex flex-col h-full min-h-0 text-xs font-mono">
       <div
-        className="px-2 py-1.5 border-b flex gap-1 shrink-0"
+        className="px-2 py-1.5 border-b flex flex-col gap-1 shrink-0"
         style={{ borderColor: 'var(--border)' }}
       >
-        <button
-          type="button"
-          className="px-2 py-0.5 rounded text-[11px] font-sans"
-          style={{ background: 'var(--accent)', color: '#fff' }}
-          onClick={() => void openExternal()}
-        >
-          Open system terminal
-        </button>
+        <div className="flex gap-1 items-center">
+          <button
+            type="button"
+            className="px-2 py-0.5 rounded text-[11px] font-sans font-medium"
+            style={{
+              background: 'var(--accent)',
+              color: '#fff',
+              opacity: busy ? 0.7 : 1,
+            }}
+            disabled={busy}
+            onClick={() => void openExternal()}
+          >
+            {busy ? 'Opening…' : 'Open PowerShell here'}
+          </button>
+          <button
+            type="button"
+            className="px-2 py-0.5 rounded text-[11px] font-sans"
+            style={{
+              background: 'var(--bg-primary)',
+              border: '1px solid var(--border)',
+              color: 'var(--text-secondary)',
+            }}
+            onClick={() =>
+              setLog(
+                'Remedy Terminal\nOpens PowerShell in your project folder (pwsh → Windows PowerShell → WT → cmd).\n',
+              )
+            }
+          >
+            Clear log
+          </button>
+        </div>
+        <input
+          value={cwd}
+          onChange={(e) => setCwd(e.target.value)}
+          className="w-full rounded px-1.5 py-1 font-sans outline-none"
+          style={{
+            background: 'var(--bg-primary)',
+            border: '1px solid var(--border)',
+            color: 'var(--text-primary)',
+            fontSize: 11,
+          }}
+          placeholder="Working directory (project path)"
+          spellCheck={false}
+        />
       </div>
       <pre
         className="flex-1 min-h-0 overflow-auto p-2 m-0 whitespace-pre-wrap"

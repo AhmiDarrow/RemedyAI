@@ -646,6 +646,175 @@ fn pick_folder() -> Result<Option<String>, String> {
     Ok(path.map(|p| p.to_string_lossy().to_string()))
 }
 
+/// Open a host terminal at `cwd`.
+/// Windows (primary): **PowerShell** first (Windows PowerShell 5.1 / pwsh), then WT, then cmd.
+#[tauri::command]
+fn open_terminal(cwd: Option<String>) -> Result<String, String> {
+    let dir = cwd
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .filter(|p| p.is_dir())
+        .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let dir_s = dir.to_string_lossy().to_string();
+
+    #[cfg(target_os = "windows")]
+    {
+        // New console window so a GUI/Tauri parent still shows a real shell.
+        const CREATE_NEW_CONSOLE: u32 = 0x00000010;
+        let cd_cmd = format!(
+            "Set-Location -LiteralPath '{}'",
+            dir_s.replace('\'', "''")
+        );
+        // 1) PowerShell 7+ if installed, 2) Windows PowerShell 5.1 (always on Win10+)
+        for (exe, label) in [("pwsh.exe", "PowerShell 7+"), ("powershell.exe", "Windows PowerShell")]
+        {
+            let mut c = Command::new(exe);
+            c.args(["-NoExit", "-NoLogo", "-Command", &cd_cmd]);
+            c.creation_flags(CREATE_NEW_CONSOLE);
+            if c.spawn().is_ok() {
+                return Ok(format!("Opened {label} in {dir_s}"));
+            }
+        }
+        // Optional: Windows Terminal hosting PowerShell in project dir
+        if Command::new("wt.exe")
+            .args(["-d", &dir_s, "powershell.exe", "-NoExit", "-NoLogo"])
+            .spawn()
+            .is_ok()
+        {
+            return Ok(format!("Opened Windows Terminal (PowerShell) in {dir_s}"));
+        }
+        // Last resort: cmd
+        let status = Command::new("cmd.exe")
+            .args(["/c", "start", "cmd.exe", "/k", &format!("cd /d \"{dir_s}\"")])
+            .status()
+            .map_err(|e| format!("open terminal failed: {e}"))?;
+        if status.success() {
+            return Ok(format!("Opened cmd in {dir_s}"));
+        }
+        return Err(format!("Could not open a terminal (exit {status})"));
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let script = format!(
+            "tell application \"Terminal\" to do script \"cd {}\"",
+            dir_s.replace('\\', "\\\\").replace('"', "\\\"")
+        );
+        let status = Command::new("osascript")
+            .args(["-e", &script])
+            .status()
+            .map_err(|e| format!("open terminal failed: {e}"))?;
+        if status.success() {
+            return Ok(format!("Opened Terminal in {dir_s}"));
+        }
+        return Err(format!("osascript failed: {status}"));
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        for term in ["x-terminal-emulator", "gnome-terminal", "konsole", "xterm"] {
+            let r = Command::new(term)
+                .arg("--working-directory")
+                .arg(&dir_s)
+                .spawn();
+            if r.is_ok() {
+                return Ok(format!("Opened {term} in {dir_s}"));
+            }
+        }
+        return Err("No terminal emulator found".into());
+    }
+
+    #[allow(unreachable_code)]
+    Err("open_terminal unsupported on this platform".into())
+}
+
+/// Open a URL in an external browser. Prefer Firefox when installed if `prefer_firefox`.
+#[tauri::command]
+fn open_external_url(url: String, prefer_firefox: Option<bool>) -> Result<String, String> {
+    let url = url.trim().to_string();
+    if url.is_empty() {
+        return Err("empty url".into());
+    }
+    if !(url.starts_with("http://") || url.starts_with("https://") || url.starts_with("about:")) {
+        return Err("only http(s) URLs allowed".into());
+    }
+    let want_ff = prefer_firefox.unwrap_or(true);
+
+    #[cfg(target_os = "windows")]
+    {
+        if want_ff {
+            let candidates = [
+                r"C:\Program Files\Mozilla Firefox\firefox.exe",
+                r"C:\Program Files (x86)\Mozilla Firefox\firefox.exe",
+            ];
+            for c in candidates {
+                if Path::new(c).is_file() {
+                    let r = Command::new(c).arg(&url).spawn();
+                    if r.is_ok() {
+                        return Ok(format!("Opened in Firefox: {url}"));
+                    }
+                }
+            }
+            // PATH firefox
+            if Command::new("firefox").arg(&url).spawn().is_ok() {
+                return Ok(format!("Opened in Firefox: {url}"));
+            }
+        }
+        let status = Command::new("cmd")
+            .args(["/C", "start", "", &url])
+            .status()
+            .map_err(|e| format!("open url failed: {e}"))?;
+        if status.success() {
+            return Ok(format!("Opened default browser: {url}"));
+        }
+        return Err(format!("open url exited {status}"));
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        if want_ff {
+            let r = Command::new("open")
+                .args(["-a", "Firefox", &url])
+                .status();
+            if let Ok(s) = r {
+                if s.success() {
+                    return Ok(format!("Opened in Firefox: {url}"));
+                }
+            }
+        }
+        let status = Command::new("open")
+            .arg(&url)
+            .status()
+            .map_err(|e| format!("open url failed: {e}"))?;
+        if status.success() {
+            return Ok(format!("Opened default browser: {url}"));
+        }
+        return Err(format!("open exited {status}"));
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        if want_ff {
+            if Command::new("firefox").arg(&url).spawn().is_ok() {
+                return Ok(format!("Opened in Firefox: {url}"));
+            }
+        }
+        let status = Command::new("xdg-open")
+            .arg(&url)
+            .status()
+            .map_err(|e| format!("open url failed: {e}"))?;
+        if status.success() {
+            return Ok(format!("Opened default browser: {url}"));
+        }
+        return Err(format!("xdg-open exited {status}"));
+    }
+
+    #[allow(unreachable_code)]
+    Err("open_external_url unsupported".into())
+}
+
 /// Startup-folder shortcut name (user-visible in Settings -> Apps -> Startup).
 ///
 /// IMPORTANT: Do **not** use HKCU\...\Run. Writing that key from a background
@@ -2384,6 +2553,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             open_data_folder,
             pick_folder,
+            open_terminal,
+            open_external_url,
             save_text_file,
             open_text_file,
             set_launch_at_login,
