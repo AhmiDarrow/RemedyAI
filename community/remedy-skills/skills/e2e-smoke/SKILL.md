@@ -24,7 +24,7 @@ metadata:
 
 ## Steps
 1. Identify the #1 user journey.
-2. Use existing Playwright/Cypress/etc., or a minimal checklist/script.
+2. Use existing the browser test runner/browser tests/etc., or a minimal checklist/script.
 3. Run against local/staging as documented.
 4. Capture artifacts on failure.
 5. State clearly what smoke does **not** prove.

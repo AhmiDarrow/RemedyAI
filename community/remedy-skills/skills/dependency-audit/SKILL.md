@@ -24,7 +24,7 @@ metadata:
 
 ## Steps
 1. Detect lockfiles (package-lock, pnpm-lock, Cargo.lock, uv.lock, go.mod, poetry.lock).
-2. Run ecosystem audit tools when present: `npm audit`, `pnpm audit`, `pip-audit`/`uv`, `cargo audit`, `govulncheck`.
+2. Run ecosystem audit tools when present: `Node audit tools`, `Node audit tools`, `Python audit tools`/`uv`, `Rust audit tools`, `Go vulnerability scanners`.
 3. Summarize **high/critical** first: package, issue, fixed version.
 4. Recommend minimal upgrade path; avoid mass major bumps without tests.
 5. Flag clearly abandoned deps when easy to see.

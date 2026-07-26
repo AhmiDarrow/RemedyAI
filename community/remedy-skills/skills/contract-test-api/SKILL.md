@@ -24,7 +24,7 @@ metadata:
 # Contract Test Api
 
 ## Steps
-1. Detect Pact/schemathesis/OpenAPI test usage or introduce lightweight schema tests.
+1. Detect contract-test tools/OpenAPI test usage or introduce lightweight schema tests.
 2. Cover critical endpoints.
 3. Run in CI on PR.
 4. Fail on breaking response changes.

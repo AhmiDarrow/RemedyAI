@@ -2,7 +2,7 @@
 name: browser-automation-safe
 version: 1.0.0
 description: >
-  Automate browser checks with Playwright-style best practices (stable selectors, no fixed sleeps).
+  Automate browser checks with browser-test best practices (stable selectors, no fixed sleeps).
 author: Remedy Official
 license: LicenseRef-Proprietary
 tags:
@@ -25,7 +25,7 @@ metadata:
 # Browser Automation Safe
 
 ## Steps
-1. Prefer Playwright if present.
+1. Prefer the browser test runner if present.
 2. Role/text selectors over brittle CSS when possible.
 3. Wait for conditions, not `sleep`.
 4. Isolate test data; production clicks only with explicit approval.

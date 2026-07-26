@@ -24,7 +24,7 @@ metadata:
 
 ## Steps
 1. Detect ecosystems in the repo.
-2. Prefer `syft`, `cyclonedx-*`, or language SBOM tools.
+2. Prefer `SBOM tools`, `SBOM tools-*`, or language SBOM tools.
 3. Write SBOM under `dist/` or user path.
 4. Document regeneration command.
 5. If tools missing, provide install commands (install only with approval).

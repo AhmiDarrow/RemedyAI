@@ -233,7 +233,7 @@ SKILLS += [
         """
 ## Steps
 1. Detect lockfiles (package-lock, pnpm-lock, Cargo.lock, uv.lock, go.mod, poetry.lock).
-2. Run ecosystem audit tools when present: `npm audit`, `pnpm audit`, `pip-audit`/`uv`, `cargo audit`, `govulncheck`.
+2. Run ecosystem audit tools when present: `Node audit tools`, `Node audit tools`, `Python audit tools`/`uv`, `Rust audit tools`, `Go vulnerability scanners`.
 3. Summarize **high/critical** first: package, issue, fixed version.
 4. Recommend minimal upgrade path; avoid mass major bumps without tests.
 5. Flag clearly abandoned deps when easy to see.
@@ -249,7 +249,7 @@ Severity table + recommended actions.
         ["bash_exec", "file_read"],
         """
 ## Steps
-1. Prefer `gitleaks`, `trufflehog`, or `git secrets` if installed.
+1. Prefer `secret scanners`, `secret scanners`, or `secret scanners` if installed.
 2. Otherwise search for common patterns (AWS keys, `ghp_`, `sk-`, private key headers) and **redact** middles in output.
 3. Check history only as needed; warn about force-push rewrites.
 4. Remediation order: **rotate** → remove from tree → history purge only if requested.
@@ -366,7 +366,7 @@ Parsing JSON before verifying signatures breaks many providers.
         """
 ## Steps
 1. Detect ecosystems in the repo.
-2. Prefer `syft`, `cyclonedx-*`, or language SBOM tools.
+2. Prefer `SBOM tools`, `SBOM tools-*`, or language SBOM tools.
 3. Write SBOM under `dist/` or user path.
 4. Document regeneration command.
 5. If tools missing, provide install commands (install only with approval).
@@ -426,7 +426,7 @@ SKILLS += [
         """
 ## Steps
 1. Identify the #1 user journey.
-2. Use existing Playwright/Cypress/etc., or a minimal checklist/script.
+2. Use existing the browser test runner/browser tests/etc., or a minimal checklist/script.
 3. Run against local/staging as documented.
 4. Capture artifacts on failure.
 5. State clearly what smoke does **not** prove.
@@ -448,12 +448,12 @@ SKILLS += [
     ),
     skill(
         "browser-automation-safe",
-        "Automate browser checks with Playwright-style best practices (stable selectors, no fixed sleeps).",
+        "Automate browser checks with browser-test best practices (stable selectors, no fixed sleeps).",
         ["browser", "e2e", "testing"],
         ["bash_exec", "file_read", "file_write"],
         """
 ## Steps
-1. Prefer Playwright if present.
+1. Prefer the browser test runner if present.
 2. Role/text selectors over brittle CSS when possible.
 3. Wait for conditions, not `sleep`.
 4. Isolate test data; production clicks only with explicit approval.
@@ -518,7 +518,7 @@ SKILLS += [
         """
 ## Steps
 1. Production build; note sizes.
-2. Analyzer if present (visualizer/source-map-explorer).
+2. Analyzer if present (visualizer/bundle analyzers).
 3. List heavy/duplicate deps.
 4. Propose dynamic import and lighter alternatives.
 5. Measure before/after.
@@ -600,7 +600,7 @@ SKILLS += [
         ["file_read", "file_write", "bash_exec"],
         """
 ## Steps
-1. Use existing visual tool if any (Playwright screenshots, Chromatic, etc.).
+1. Use existing visual tool if any (browser screenshots, visual review tools, etc.).
 2. Cover a few critical screens only.
 3. Disable animations; stabilize fonts when possible.
 4. Document approval workflow for intentional changes.
@@ -805,8 +805,8 @@ Cross-tenant read/write is typically **critical**.
 SKILLS += [
     skill(
         "dockerfile-harden",
-        "Write or harden Dockerfiles: multi-stage, non-root, pin bases, no secrets in layers.",
-        ["docker", "devops"],
+        "Write or harden container image recipes: multi-stage, non-root, pin bases, no secrets in layers.",
+        ["container tooling", "devops"],
         ["file_read", "file_write"],
         """
 ## Checklist
@@ -820,8 +820,8 @@ SKILLS += [
     ),
     skill(
         "compose-dev-env",
-        "Provide docker compose for local dependencies with healthchecks and sane ports.",
-        ["docker", "devops"],
+        "Provide local multi-service containers for local dependencies with healthchecks and sane ports.",
+        ["container tooling", "devops"],
         ["file_read", "file_write"],
         """
 ## Steps
@@ -849,7 +849,7 @@ SKILLS += [
     ),
     skill(
         "k8s-manifest-review",
-        "Review Kubernetes manifests for probes, resources, securityContext, and rollout safety.",
+        "Review container orchestration manifests for probes, resources, securityContext, and rollout safety.",
         ["k8s", "devops"],
         ["file_read"],
         """
@@ -864,7 +864,7 @@ SKILLS += [
     ),
     skill(
         "terraform-plan-review",
-        "Review Terraform plans for destroys, public exposure, and IAM blast radius before apply.",
+        "Review infrastructure-as-code plans for destroys, public exposure, and IAM blast radius before apply.",
         ["iac", "devops"],
         ["bash_exec", "file_read"],
         """
@@ -925,7 +925,7 @@ SKILLS += [
         ["file_read", "file_write"],
         """
 ## Steps
-1. Detect OpenTelemetry/tracing setup.
+1. Detect distributed tracing/tracing setup.
 2. Span HTTP/DB/tool calls with useful attributes.
 3. Propagate context across async/threads.
 4. Sampling suitable for prod.
@@ -1367,7 +1367,7 @@ SKILLS += [
         """
 ## Steps
 1. Choose 1–3 endpoints + realistic mix.
-2. Use k6/vegeta/hey/locust if available.
+2. Use load generators/vegeta/hey/locust if available.
 3. Ramp; watch p95 and error rate.
 4. Stop on error storms; capture bottleneck hypothesis.
 5. Report numbers + next optimizations.
@@ -1484,9 +1484,9 @@ Don't overload shared prod/staging without permission.
 """,
     ),
     skill(
-        "devcontainer-setup",
-        "Add a devcontainer for reproducible contributor environments.",
-        ["tooling", "docker"],
+        "dev environment container-setup",
+        "Add a dev environment container for reproducible contributor environments.",
+        ["tooling", "container tooling"],
         ["file_read", "file_write"],
         """
 ## Steps
@@ -1808,7 +1808,7 @@ Use mature libraries; misconfiguration is common.
         ["file_read", "file_write", "bash_exec"],
         """
 ## Steps
-1. Detect Pact/schemathesis/OpenAPI test usage or introduce lightweight schema tests.
+1. Detect contract-test tools/OpenAPI test usage or introduce lightweight schema tests.
 2. Cover critical endpoints.
 3. Run in CI on PR.
 4. Fail on breaking response changes.
@@ -1822,7 +1822,7 @@ Use mature libraries; misconfiguration is common.
         """
 ## Steps
 1. Find repeated test setup.
-2. Introduce factories with overrides (factory_boy, fishery, rosie, etc. or simple helpers).
+2. Introduce factories with overrides (factory helpers, etc. or simple helpers).
 3. Keep defaults valid minimal objects.
 4. Refactor a few tests to prove ergonomics.
 """,

@@ -1,13 +1,13 @@
 ---
-name: devcontainer-setup
+name: dev environment container-setup
 version: 1.0.0
 description: >
-  Add a devcontainer for reproducible contributor environments.
+  Add a dev environment container for reproducible contributor environments.
 author: Remedy Official
 license: LicenseRef-Proprietary
 tags:
   - tooling
-  - docker
+  - container tooling
 kind: native
 status: discovered
 tools:
@@ -15,7 +15,7 @@ tools:
   - file_write
 metadata:
   source: library
-  library_id: devcontainer-setup
+  library_id: dev environment container-setup
   official: true
   security_flags: []
 ---

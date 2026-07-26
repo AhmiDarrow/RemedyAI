@@ -1,8 +1,36 @@
 {
   "version": "1",
-  "generated_at": "2026-07-26T22:33:46Z",
+  "generated_at": "2026-07-26T22:45:46Z",
   "repository": "AhmiDarrow/remedy-skills",
   "skills": [
+    {
+      "id": "a11y-design-review",
+      "name": "a11y-design-review",
+      "description": "Design-side accessibility review: contrast, focus order, targets, motion, content structure.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "design",
+        "a11y"
+      ],
+      "download_url": "local:a11y-design-review",
+      "size_bytes": 798,
+      "checksum": "sha256:d17c95bca37d775bedb0039db383a02f8b1e078c3f8bf043cbeb114a1fe7780f",
+      "requires": [],
+      "tools": [
+        "file_read"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
     {
       "id": "acceptance-criteria",
       "name": "acceptance-criteria",
@@ -23,8 +51,36 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "accountability-partnership",
+      "name": "accountability-partnership",
+      "description": "Set up an accountability partnership: cadence, metrics, check-in template.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "habits"
+      ],
+      "download_url": "local:accountability-partnership",
+      "size_bytes": 747,
+      "checksum": "sha256:f5537f89f31e2a2e1a4aff7abbe10f05edac471d1570d68239e67a516b180696",
+      "requires": [],
+      "tools": [
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -52,8 +108,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -79,8 +135,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -109,8 +165,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -137,8 +193,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -166,8 +222,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -194,8 +250,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -223,8 +279,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -252,8 +308,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -280,8 +336,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -310,8 +366,125 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "blog-post-draft",
+      "name": "blog-post-draft",
+      "description": "Write a full blog draft from an outline with scannable structure and clear CTA.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "content",
+        "writing"
+      ],
+      "download_url": "local:blog-post-draft",
+      "size_bytes": 781,
+      "checksum": "sha256:7f17c735acb2190f27c5bdc1b327e93cc542a52a96eb5ffcf50a581957766972",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "blog-post-outline",
+      "name": "blog-post-outline",
+      "description": "Outline a blog post: angle, outline, sources, CTA, SEO basics without keyword stuffing.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "content",
+        "writing"
+      ],
+      "download_url": "local:blog-post-outline",
+      "size_bytes": 775,
+      "checksum": "sha256:68cebfaa7143b6e0d4a97cd7f94d6d2dd48a865d6231399e3ebfc8ec6d36d581",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "boss-fight-design",
+      "name": "boss-fight-design",
+      "description": "Design a boss encounter with phases, tells, accessibility options, and rewards.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "gaming",
+        "combat",
+        "design"
+      ],
+      "download_url": "local:boss-fight-design",
+      "size_bytes": 857,
+      "checksum": "sha256:745dd2e7d7110936fffc74e81f9546f9c3ba62724e71fb9bd4686c5a368420db",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "boundary-setting",
+      "name": "boundary-setting",
+      "description": "Help articulate personal or work boundaries with scripts and follow-through.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "communication"
+      ],
+      "download_url": "local:boundary-setting",
+      "size_bytes": 762,
+      "checksum": "sha256:c33f7cfc9bf2106c0e3ba14e02a3ee3ba33b37973f999c6b72c7977ad612c69a",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -337,8 +510,37 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "brand-voice-guide",
+      "name": "brand-voice-guide",
+      "description": "Write a brand voice guide: principles, tone spectrum, examples do/don't.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "design",
+        "writing"
+      ],
+      "download_url": "local:brand-voice-guide",
+      "size_bytes": 772,
+      "checksum": "sha256:b92e8ebc950605ae5b17d2f5ff69fc09aa1b29036f3648bf7a20c3fa936b0922",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -348,7 +550,7 @@
     {
       "id": "browser-automation-safe",
       "name": "browser-automation-safe",
-      "description": "Automate browser checks with Playwright-style best practices (stable selectors, no fixed sleeps).",
+      "description": "Automate browser checks with browser-test best practices (stable selectors, no fixed sleeps).",
       "version": "1.0.0",
       "author": "Remedy Official",
       "tags": [
@@ -358,7 +560,7 @@
       ],
       "download_url": "local:browser-automation-safe",
       "size_bytes": 851,
-      "checksum": "sha256:facaf959c960663e14991222156e745a6fe62529455e85a1502990fa7a3de6ad",
+      "checksum": "sha256:7e33357c5ec1a536b1ccab08a37029da17e1a7f2638df8317e74b35dda9a60d3",
       "requires": [],
       "tools": [
         "bash_exec",
@@ -368,8 +570,37 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "budget-snapshot",
+      "name": "budget-snapshot",
+      "description": "Create a simple budget snapshot: income, fixed costs, variable, goals (no bank logins).",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "finance"
+      ],
+      "download_url": "local:budget-snapshot",
+      "size_bytes": 794,
+      "checksum": "sha256:7f9d34fb9a4d2f06483567ec2b20812902ba3969450cc212e97bb90136d70ac5",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -397,8 +628,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -416,8 +647,8 @@
         "perf"
       ],
       "download_url": "local:bundle-size-check",
-      "size_bytes": 767,
-      "checksum": "sha256:1c965107b4dbc8dfc32c86f97e81827433fd2cebd53a8cf32b8869f5bcb19ed9",
+      "size_bytes": 764,
+      "checksum": "sha256:cf4ac9037a8041beb7f6ccd880a65844f69dbce5383ddaa6548bc1e04a370f9f",
       "requires": [],
       "tools": [
         "bash_exec",
@@ -426,8 +657,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -455,8 +686,124 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "call-to-action-copy",
+      "name": "call-to-action-copy",
+      "description": "Write CTAs matched to funnel stage with friction-aware wording.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "content",
+        "ux",
+        "marketing"
+      ],
+      "download_url": "local:call-to-action-copy",
+      "size_bytes": 807,
+      "checksum": "sha256:34cfbb41d6643be4554c8d0f4ba4bdbd9f8aa8e387cfb82a4b80c5aebe59a92d",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "caregiver-checklist",
+      "name": "caregiver-checklist",
+      "description": "Build a caregiver checklist for appointments, meds schedules placeholders, and notes (non-clinical).",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "home"
+      ],
+      "download_url": "local:caregiver-checklist",
+      "size_bytes": 800,
+      "checksum": "sha256:aae54872b5368c9e9a39bd048d5ae72ea1491c38655915a0616953a5a70ad199",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "case-study-write",
+      "name": "case-study-write",
+      "description": "Write a case study: problem, approach, results, proof, lessons.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "content",
+        "marketing"
+      ],
+      "download_url": "local:case-study-write",
+      "size_bytes": 774,
+      "checksum": "sha256:7297961797653ed70b1b0ddbcc372bb97340d87fccc2dce357638753769052d9",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "celebration-plan",
+      "name": "celebration-plan",
+      "description": "Plan a celebration (birthday, launch, milestone): constraints, program, budget.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "planning"
+      ],
+      "download_url": "local:celebration-plan",
+      "size_bytes": 744,
+      "checksum": "sha256:9cb8d5a4b992f72ca6a4c2ba5ba01bb6ab462dc19297719f34b2cc246c74b504",
+      "requires": [],
+      "tools": [
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -485,8 +832,37 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "changelog-user-facing",
+      "name": "changelog-user-facing",
+      "description": "Turn engineering notes into user-facing release notes people understand.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "content",
+        "product"
+      ],
+      "download_url": "local:changelog-user-facing",
+      "size_bytes": 788,
+      "checksum": "sha256:44b01e2009e8ad3b0dbef92a3aabf3be3ec5d549d0f4c283e372219618e1e60a",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -512,8 +888,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -541,8 +917,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -570,8 +946,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -599,8 +975,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -608,18 +984,18 @@
       "status": "published"
     },
     {
-      "id": "compose-dev-env",
-      "name": "compose-dev-env",
-      "description": "Provide docker compose for local dependencies with healthchecks and sane ports.",
+      "id": "color-system",
+      "name": "color-system",
+      "description": "Define or refine a color system: roles (bg, text, accent, danger), contrast, dark mode.",
       "version": "1.0.0",
       "author": "Remedy Official",
       "tags": [
-        "docker",
-        "devops"
+        "design",
+        "ui"
       ],
-      "download_url": "local:compose-dev-env",
-      "size_bytes": 772,
-      "checksum": "sha256:48ec8a968611cd1729fcb416ffd3854964464166b6b98694336554e3f7c74093",
+      "download_url": "local:color-system",
+      "size_bytes": 813,
+      "checksum": "sha256:6550560711a6bcbd9f79330d0e96e2123fa5bcb0d1cb3df8a34ca987b04f24df",
       "requires": [],
       "tools": [
         "file_read",
@@ -628,8 +1004,383 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "combat-feel-tuning",
+      "name": "combat-feel-tuning",
+      "description": "Tune combat feel: input buffer, hitstop, feedback, and readability without engine-specific jargon lock-in.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "gaming",
+        "combat"
+      ],
+      "download_url": "local:combat-feel-tuning",
+      "size_bytes": 901,
+      "checksum": "sha256:15c4c7c62259ccb90140b62b7d94838478ea37080f6407af1aa9a1dcd794fb4c",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "community-ama-prep",
+      "name": "community-ama-prep",
+      "description": "Prepare an AMA: themes, banned topics, moderation, answer bank.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "content",
+        "community"
+      ],
+      "download_url": "local:community-ama-prep",
+      "size_bytes": 758,
+      "checksum": "sha256:bbdbd9de6b00f2b91c7a2ac4118dc99b7a0d25adc09d219cfdfbef9848a9084b",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "community-guidelines",
+      "name": "community-guidelines",
+      "description": "Draft community guidelines: values, allowed/not allowed, enforcement ladder.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "content",
+        "community"
+      ],
+      "download_url": "local:community-guidelines",
+      "size_bytes": 793,
+      "checksum": "sha256:c7ee345e455363e07c3e7a46079046c2cccaa7d607dca70b88eb3a5c1d4fb223",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "concept-art-brief",
+      "name": "concept-art-brief",
+      "description": "Write a concept art brief: subject, silhouette goals, palette, orthos, deliverables.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "design",
+        "art"
+      ],
+      "download_url": "local:concept-art-brief",
+      "size_bytes": 789,
+      "checksum": "sha256:0bcf362084065cac16b23bf7d517e0747ee6f12732dc8b67cbfe9b4d743f9454",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "conflict-deescalation",
+      "name": "conflict-deescalation",
+      "description": "Prepare de-escalation language for personal or workplace conflict (non-clinical).",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "communication"
+      ],
+      "download_url": "local:conflict-deescalation",
+      "size_bytes": 773,
+      "checksum": "sha256:0da69654533cc7c1b53c60235b6bb7cc2d2d368f687cea6535a5a97e8bc0c0eb",
+      "requires": [],
+      "tools": [
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "container-image-harden",
+      "name": "container-image-harden",
+      "description": "Write or harden container image recipes: multi-stage, non-root, pin bases, no secrets in layers.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "container tooling",
+        "devops"
+      ],
+      "download_url": "local:container-image-harden",
+      "size_bytes": 784,
+      "checksum": "sha256:b1178af4899f489949953da6a33be68880ac75b5f89aeb48f24c4bca1e2178b9",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "container-orchestration-review",
+      "name": "container-orchestration-review",
+      "description": "Review container orchestration manifests for probes, resources, securityContext, and rollout safety.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "k8s",
+        "devops"
+      ],
+      "download_url": "local:container-orchestration-review",
+      "size_bytes": 806,
+      "checksum": "sha256:d02fe03b225482901849a75e5e5d9e5e73dbb32daca8bc8d7835b2c21fac4115",
+      "requires": [],
+      "tools": [
+        "file_read"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "content-audit",
+      "name": "content-audit",
+      "description": "Audit existing content: freshness, accuracy, duplicates, SEO cannibalization, prune plan.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "content",
+        "quality"
+      ],
+      "download_url": "local:content-audit",
+      "size_bytes": 772,
+      "checksum": "sha256:b7fa1265da5c216384eaf7f10351f0512dd3099da147f6f76a3dcb4b0f140367",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "content-edit-pass",
+      "name": "content-edit-pass",
+      "description": "Edit for clarity, structure, and brevity while preserving author voice.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "content",
+        "writing"
+      ],
+      "download_url": "local:content-edit-pass",
+      "size_bytes": 774,
+      "checksum": "sha256:94379216d9d042ce294d99e6670ab685b58cebd7df0957060c4f4375fb9fbf96",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "content-hooks",
+      "name": "content-hooks",
+      "description": "Generate non-clickbait content hooks for an article or video topic.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "content",
+        "writing"
+      ],
+      "download_url": "local:content-hooks",
+      "size_bytes": 719,
+      "checksum": "sha256:09bf55dca22dee16b0cc68e3f994022f1f7899b4cbff73ecff8a5486cb5a98c5",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "content-localization",
+      "name": "content-localization",
+      "description": "Prepare content for localization: freeze strings, context notes, do-not-translate list.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "content",
+        "i18n"
+      ],
+      "download_url": "local:content-localization",
+      "size_bytes": 788,
+      "checksum": "sha256:87995c3f1ac3dd4afd48f6962d7cc3f6c4f187a59694cc21d1b46b5728863f39",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "content-repurpose",
+      "name": "content-repurpose",
+      "description": "Repurpose one long asset into multiple channel formats without sounding duplicate.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "content",
+        "marketing"
+      ],
+      "download_url": "local:content-repurpose",
+      "size_bytes": 782,
+      "checksum": "sha256:281ba376eaceaa20292dbb2e4a7b91bfb37414838a1bee519555ba9bb06148a7",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "content-strategy",
+      "name": "content-strategy",
+      "description": "Draft a content strategy: pillars, channels, cadence, voice, measurement.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "content",
+        "marketing"
+      ],
+      "download_url": "local:content-strategy",
+      "size_bytes": 787,
+      "checksum": "sha256:e980a6fdf9c71d32bcb6cb5d965c84bb3017c7a3f3436a8fd0392816643ef9a9",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -647,8 +1398,8 @@
         "api"
       ],
       "download_url": "local:contract-test-api",
-      "size_bytes": 759,
-      "checksum": "sha256:72c7d5cea55fb10ae8f460ea25c6c811cb8b8a52265fdf5783136f27505b09b8",
+      "size_bytes": 754,
+      "checksum": "sha256:ea86a7df6fdc9a719ac36b84a5d7a274f93f873061c0f193736f9c92554e9a72",
       "requires": [],
       "tools": [
         "file_read",
@@ -658,8 +1409,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -687,8 +1438,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -716,8 +1467,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -745,8 +1496,37 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "creative-constraint-sprint",
+      "name": "creative-constraint-sprint",
+      "description": "Run a creative sprint with constraints: timebox, output, critique, ship.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "design",
+        "content",
+        "creative"
+      ],
+      "download_url": "local:creative-constraint-sprint",
+      "size_bytes": 792,
+      "checksum": "sha256:f5a8f588de5c0dbaf9b095e29ece5d7c458c1411e411a1990d352cda61943fde",
+      "requires": [],
+      "tools": [
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -774,8 +1554,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -803,8 +1583,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -832,8 +1612,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -862,8 +1642,67 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "daily-planning",
+      "name": "daily-planning",
+      "description": "Build a realistic daily plan from priorities, calendar constraints, and energy.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "productivity"
+      ],
+      "download_url": "local:daily-planning",
+      "size_bytes": 796,
+      "checksum": "sha256:67e152b8a441ee06f5b64e4bf45330af2d78c519f2aef0063bbfd0e3bdd9ca3c",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "dashboard-ui-design",
+      "name": "dashboard-ui-design",
+      "description": "Design dashboards: metrics hierarchy, density, empty/loading/error, drill-down.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "design",
+        "ui",
+        "data"
+      ],
+      "download_url": "local:dashboard-ui-design",
+      "size_bytes": 802,
+      "checksum": "sha256:436b6b68d1e2243b99a80851ae40c1de80330a21838bad8af2f2bbeb2feb9913",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -891,8 +1730,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -920,8 +1759,37 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "data-viz-design",
+      "name": "data-viz-design",
+      "description": "Design charts/graphs for honesty: scales, color, annotations, accessibility.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "design",
+        "data"
+      ],
+      "download_url": "local:data-viz-design",
+      "size_bytes": 788,
+      "checksum": "sha256:513d2016c06dba4d8ef8d8987ab8cb637686db47c6b604d65cfbdfc6a2c967d4",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -949,8 +1817,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -979,8 +1847,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -1008,8 +1876,37 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "decision-log-personal",
+      "name": "decision-log-personal",
+      "description": "Log a personal or work decision with options, criteria, choice, review date.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "decisions"
+      ],
+      "download_url": "local:decision-log-personal",
+      "size_bytes": 747,
+      "checksum": "sha256:c1975a1a4217896579582814bc0f8e01530b7fe93b7ad38e5be25a6f123e810f",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -1027,8 +1924,8 @@
         "deps"
       ],
       "download_url": "local:dependency-audit",
-      "size_bytes": 895,
-      "checksum": "sha256:62335153ae194a38521649cc9517e70b94971aae4fa43d8613463d351bfbca4d",
+      "size_bytes": 903,
+      "checksum": "sha256:cbb0b22afa986e13d4ae3a00fd0ccb61fa8fa2e36d0159a5538c98a08767b179",
       "requires": [],
       "tools": [
         "bash_exec",
@@ -1037,8 +1934,123 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "design-brief",
+      "name": "design-brief",
+      "description": "Write a design brief: problem, audience, constraints, success metrics, deliverables.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "design",
+        "product"
+      ],
+      "download_url": "local:design-brief",
+      "size_bytes": 763,
+      "checksum": "sha256:dc0b80f7c4b3b57d37cd91d7730d93184877f7f12f31fb80ac5b9c2a62853684",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "design-critique-session",
+      "name": "design-critique-session",
+      "description": "Facilitate a design critique: goals, evidence, actionable feedback, decisions.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "design",
+        "process"
+      ],
+      "download_url": "local:design-critique-session",
+      "size_bytes": 815,
+      "checksum": "sha256:4e3f2a411a509652f5c940d8131301f2ceeac1060a5df84cb74e3cde1956e0d4",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "design-handoff",
+      "name": "design-handoff",
+      "description": "Prepare design-to-engineering handoff: specs, assets, behavior notes, open questions.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "design",
+        "process"
+      ],
+      "download_url": "local:design-handoff",
+      "size_bytes": 770,
+      "checksum": "sha256:d980249b1d5a3d624451e570d48af21d52b4d830819c345a0e66f4fc3e0b66ed",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "design-system-audit",
+      "name": "design-system-audit",
+      "description": "Audit UI against an existing design system: drift, one-offs, missing components.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "design",
+        "ui"
+      ],
+      "download_url": "local:design-system-audit",
+      "size_bytes": 783,
+      "checksum": "sha256:88334a66229ff09a5a47a2d5f5716276a8117fcd0f38874d2b017d324b27aa75",
+      "requires": [],
+      "tools": [
+        "file_read"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -1066,8 +2078,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -1075,18 +2087,18 @@
       "status": "published"
     },
     {
-      "id": "devcontainer-setup",
-      "name": "devcontainer-setup",
-      "description": "Add a devcontainer for reproducible contributor environments.",
+      "id": "dev environment container-setup",
+      "name": "dev environment container-setup",
+      "description": "Add a dev environment container for reproducible contributor environments.",
       "version": "1.0.0",
       "author": "Remedy Official",
       "tags": [
         "tooling",
-        "docker"
+        "container tooling"
       ],
-      "download_url": "local:devcontainer-setup",
-      "size_bytes": 713,
-      "checksum": "sha256:bb8f419297deacdb07b0b35c84a106078e448713961330e1918719ed495e716c",
+      "download_url": "local:dev environment container-setup",
+      "size_bytes": 719,
+      "checksum": "sha256:432a114c261b3e85d815b0a631e736952f4ea080676aa526cf245dfa30a85d72",
       "requires": [],
       "tools": [
         "file_read",
@@ -1095,8 +2107,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -1104,18 +2116,18 @@
       "status": "published"
     },
     {
-      "id": "dockerfile-harden",
-      "name": "dockerfile-harden",
-      "description": "Write or harden Dockerfiles: multi-stage, non-root, pin bases, no secrets in layers.",
+      "id": "difficult-conversation",
+      "name": "difficult-conversation",
+      "description": "Prepare a difficult conversation: goals, script, boundaries, outcomes.",
       "version": "1.0.0",
       "author": "Remedy Official",
       "tags": [
-        "docker",
-        "devops"
+        "personal",
+        "communication"
       ],
-      "download_url": "local:dockerfile-harden",
-      "size_bytes": 754,
-      "checksum": "sha256:910a6b38b2396c0bf534d3ae34e443003f60a63c7cb42821744aabf69b8da97b",
+      "download_url": "local:difficult-conversation",
+      "size_bytes": 775,
+      "checksum": "sha256:e931e41dce767dfde71eada4a5c73132063210883be819666140f19968e5e913",
       "requires": [],
       "tools": [
         "file_read",
@@ -1124,8 +2136,37 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "digital-declutter",
+      "name": "digital-declutter",
+      "description": "Plan a digital declutter: files, inbox, photos, subscriptions\u2014with batch rules.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "productivity"
+      ],
+      "download_url": "local:digital-declutter",
+      "size_bytes": 756,
+      "checksum": "sha256:1c1b3f66769a108b243fa59c5e0781307e9f57cc67fa482feb095e01d69b9339",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -1153,8 +2194,37 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "documentation-tutorial",
+      "name": "documentation-tutorial",
+      "description": "Write a task-oriented tutorial with prerequisites, steps, verification, troubleshooting.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "content",
+        "docs"
+      ],
+      "download_url": "local:documentation-tutorial",
+      "size_bytes": 814,
+      "checksum": "sha256:25fd21a03a057efc079837600a04a1fa4c4df5dc8daed7ccef9022a853aa232b",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -1172,8 +2242,8 @@
         "e2e"
       ],
       "download_url": "local:e2e-smoke",
-      "size_bytes": 761,
-      "checksum": "sha256:e464102681e9abb7b0d0590d63c8db483d407422930fb921f0f7881c2494f3b2",
+      "size_bytes": 763,
+      "checksum": "sha256:5dc29ecf646cf5115855886cf1a055ad8d6f9feea168a1f8b20679a65fd14b8e",
       "requires": [],
       "tools": [
         "bash_exec",
@@ -1182,8 +2252,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -1210,8 +2280,66 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "editorial-calendar",
+      "name": "editorial-calendar",
+      "description": "Build an editorial calendar with themes, owners, statuses, and deadlines.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "content",
+        "planning"
+      ],
+      "download_url": "local:editorial-calendar",
+      "size_bytes": 807,
+      "checksum": "sha256:711f5edfd82432d7c3c2ee8e2ebb047cd0a2e2ffe83c9f65fdffa7f73bc30f5c",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "email-draft",
+      "name": "email-draft",
+      "description": "Draft clear emails: purpose first, short paragraphs, explicit ask, tone control.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "writing"
+      ],
+      "download_url": "local:email-draft",
+      "size_bytes": 745,
+      "checksum": "sha256:81cd2969e53f7c7c5f4f7a36c7f58d5a00bdf6276a99ce564c788281005eaf39",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -1238,8 +2366,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -1267,8 +2395,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -1297,8 +2425,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -1326,8 +2454,182 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "error-state-design",
+      "name": "error-state-design",
+      "description": "Design error and recovery UI that is calm, specific, and actionable.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "design",
+        "ux"
+      ],
+      "download_url": "local:error-state-design",
+      "size_bytes": 806,
+      "checksum": "sha256:9531e2a632758998bb1eb0cedf3434918e65d41f1543f4eb71297edf71c2dc3b",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "event-planning",
+      "name": "event-planning",
+      "description": "Plan an event: guest list, venue constraints, timeline, budget, day-of run of show.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "planning"
+      ],
+      "download_url": "local:event-planning",
+      "size_bytes": 756,
+      "checksum": "sha256:18ceaa726bb8b2c6d2feb0896c5d0150c6ad8de2fbd0ab44c74c68156b271935",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "expense-categorize",
+      "name": "expense-categorize",
+      "description": "Categorize a list of expenses and summarize by category with outliers.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "finance"
+      ],
+      "download_url": "local:expense-categorize",
+      "size_bytes": 751,
+      "checksum": "sha256:f8b8cff9845545767ebf2a94eda9efc4671e60ff2b052859c4895400f28a69a2",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "fact-check-pass",
+      "name": "fact-check-pass",
+      "description": "Fact-check a draft: claims, numbers, links, attribution, uncertainty language.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "content",
+        "quality"
+      ],
+      "download_url": "local:fact-check-pass",
+      "size_bytes": 775,
+      "checksum": "sha256:1d8502b2ec244d216f4b64de3bcba899739064fb08b17fee02e631311f7cf5ad",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "web_search"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "family-logistics",
+      "name": "family-logistics",
+      "description": "Coordinate family logistics: shared calendar norms, chores, handoffs, emergency info sheet.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "home"
+      ],
+      "download_url": "local:family-logistics",
+      "size_bytes": 762,
+      "checksum": "sha256:aa649687a15555259127d7b7fbc6eaed5d3456da939b5b2e6ef791766ca3be7d",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "faq-generation",
+      "name": "faq-generation",
+      "description": "Generate FAQs from product behavior, support tickets, and objections.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "content",
+        "support"
+      ],
+      "download_url": "local:faq-generation",
+      "size_bytes": 777,
+      "checksum": "sha256:9fc18874f23ad9b25cb2ec6ec49ba2e1d72a26b00505b9f9f244370582eebff4",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -1355,8 +2657,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -1385,8 +2687,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -1414,8 +2716,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -1432,8 +2734,8 @@
         "testing"
       ],
       "download_url": "local:fixture-factory",
-      "size_bytes": 762,
-      "checksum": "sha256:0e9c92f09c4c2c08c0c0688b6a65536324a031906b5ea39d61954b0fe5d6a0e2",
+      "size_bytes": 752,
+      "checksum": "sha256:ed5ead788836391b28abf730a35751f5efa41207da531e1478fc91f1e82c253c",
       "requires": [],
       "tools": [
         "file_read",
@@ -1442,8 +2744,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -1472,8 +2774,66 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "flashcard-set",
+      "name": "flashcard-set",
+      "description": "Create flashcards (Q/A) from notes for spaced practice.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "learning"
+      ],
+      "download_url": "local:flashcard-set",
+      "size_bytes": 758,
+      "checksum": "sha256:c7005d88c3f885f0f97f86a5f7077e1b244a5ee0f4ca4220ec4199c1a12a0270",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "focus-block",
+      "name": "focus-block",
+      "description": "Design a deep-work focus block: environment, timers, distraction rules, shutdown.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "productivity"
+      ],
+      "download_url": "local:focus-block",
+      "size_bytes": 732,
+      "checksum": "sha256:591f560a587a5e79a7a78f2d882a24f2689f8a89678273dadfa418a754500fce",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -1501,8 +2861,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -1531,8 +2891,802 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "game-accessibility",
+      "name": "game-accessibility",
+      "description": "Apply game accessibility: colorblind, subtitle, input remapping, difficulty assists.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "gaming",
+        "a11y"
+      ],
+      "download_url": "local:game-accessibility",
+      "size_bytes": 844,
+      "checksum": "sha256:23fab266243bdc41d7f8c22f31e96fbf81f00f57f1d3cd23d749f447f0e2dcf6",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "game-ai-behavior",
+      "name": "game-ai-behavior",
+      "description": "Design enemy or NPC AI behaviors: states, perception, difficulty layers.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "gaming",
+        "ai",
+        "systems"
+      ],
+      "download_url": "local:game-ai-behavior",
+      "size_bytes": 868,
+      "checksum": "sha256:aebb76c9513c6307155059603d72cbc0ba9248fb4cbe6a3cdf098146b877d866",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "game-audio-direction",
+      "name": "game-audio-direction",
+      "description": "Write audio direction: music intensity layers, SFX categories, mix priorities, implementation checklist.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "gaming",
+        "audio",
+        "design"
+      ],
+      "download_url": "local:game-audio-direction",
+      "size_bytes": 887,
+      "checksum": "sha256:705a58803b302c1edc5081e22cf864add2ef9563f4ff480a8396f7626d0ddb32",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "game-bug-triage",
+      "name": "game-bug-triage",
+      "description": "Triage gameplay bugs by repro, severity, blocker status, and regression risk.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "gaming",
+        "qa"
+      ],
+      "download_url": "local:game-bug-triage",
+      "size_bytes": 798,
+      "checksum": "sha256:6bbc87ea00e52842a36d9267339a481881af97587fcfe7c1af6c4e6b7f487505",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write",
+        "bash_exec"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "game-build-checklist",
+      "name": "game-build-checklist",
+      "description": "Pre-ship game build checklist: content locks, known issues, platform cert hygiene (generic).",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "gaming",
+        "release"
+      ],
+      "download_url": "local:game-build-checklist",
+      "size_bytes": 876,
+      "checksum": "sha256:24106823cacdbb8af8badad35c1c698784b6b0b9fb80a091ecae7609fd2f81cf",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "bash_exec"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "game-building-tools",
+      "name": "game-building-tools",
+      "description": "Design player building tools: snap, validation, budgets, sharing limits.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "gaming",
+        "systems"
+      ],
+      "download_url": "local:game-building-tools",
+      "size_bytes": 790,
+      "checksum": "sha256:7f531d94815aa75b6127c5b86b54007ae77459d3b94bf8df9c08abdd539cf263",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "game-camera-feel",
+      "name": "game-camera-feel",
+      "description": "Tune camera feel: follow lag, collision, aim assist notes, comfort options.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "gaming",
+        "feel"
+      ],
+      "download_url": "local:game-camera-feel",
+      "size_bytes": 772,
+      "checksum": "sha256:d929082072ff295bbb80a0fba1d0da9536c780eca53e16ce9d78153a06e39d61",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "game-cinematic-brief",
+      "name": "game-cinematic-brief",
+      "description": "Brief a game cinematic: emotion, camera beats, length, audio, handoff to animation.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "gaming",
+        "cinematic"
+      ],
+      "download_url": "local:game-cinematic-brief",
+      "size_bytes": 811,
+      "checksum": "sha256:0c4604f72a363649bdb089499aaf0c7b56b2a9721534460565e315732fbb4d54",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "game-crafting-system",
+      "name": "game-crafting-system",
+      "description": "Design crafting: recipes, stations, discovery, economy impact.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "gaming",
+        "systems"
+      ],
+      "download_url": "local:game-crafting-system",
+      "size_bytes": 787,
+      "checksum": "sha256:1ff7be694ccc96dae84728fcee7fe01ff1bd24a98a5a86ceafb286a6bd8ed53a",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "game-design-document",
+      "name": "game-design-document",
+      "description": "Draft or update a game design document: pillars, loop, progression, risk, and vertical slice scope.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "gaming",
+        "design",
+        "docs"
+      ],
+      "download_url": "local:game-design-document",
+      "size_bytes": 1011,
+      "checksum": "sha256:04f2a8b6be5a274454bcd7013dff097455e1a0b046fd93a859c234f293fddaa4",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "game-dialogue-pass",
+      "name": "game-dialogue-pass",
+      "description": "Write or edit game dialogue for voice, subtext, length budgets, and VO notes.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "gaming",
+        "narrative",
+        "writing"
+      ],
+      "download_url": "local:game-dialogue-pass",
+      "size_bytes": 811,
+      "checksum": "sha256:93e5feb4038b25478762ccd6e0cba3d30f0917f6f334f7171bea78cf238ffb1f",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "game-difficulty-design",
+      "name": "game-difficulty-design",
+      "description": "Design difficulty modes and dynamic assists without breaking the fantasy.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "gaming",
+        "design"
+      ],
+      "download_url": "local:game-difficulty-design",
+      "size_bytes": 825,
+      "checksum": "sha256:e10bf14605bd859267563314f04dc190d4c51e6b6082dc6365555fbf8a3e7a2f",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "game-economy-balance",
+      "name": "game-economy-balance",
+      "description": "Balance a game economy: sinks/faucets, inflation risks, and progression pacing.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "gaming",
+        "design",
+        "systems"
+      ],
+      "download_url": "local:game-economy-balance",
+      "size_bytes": 934,
+      "checksum": "sha256:24d8465da7d63ad2024b86face31fc655ef0a523fecc8e6c8ef8103e9aacbb63",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write",
+        "bash_exec"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "game-input-mapping",
+      "name": "game-input-mapping",
+      "description": "Design input mapping for keyboard/mouse/gamepad with conflicts and rebinding.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "gaming",
+        "input"
+      ],
+      "download_url": "local:game-input-mapping",
+      "size_bytes": 803,
+      "checksum": "sha256:4ec3e94360528f26a850dc2ae17a0a46a772d9e9b65f6edb38e52447ff3ab92b",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "game-liveops-calendar",
+      "name": "game-liveops-calendar",
+      "description": "Plan live-ops events: cadence, rewards, economy impact, and rollback.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "gaming",
+        "liveops"
+      ],
+      "download_url": "local:game-liveops-calendar",
+      "size_bytes": 811,
+      "checksum": "sha256:321cf535a65cca4f1632f66e3555a3d8a0065985bcad26e2850fd9b072f5adb9",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "game-localization-prep",
+      "name": "game-localization-prep",
+      "description": "Prepare game strings for localization: keys, variables, length expansion, voice notes.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "gaming",
+        "i18n"
+      ],
+      "download_url": "local:game-localization-prep",
+      "size_bytes": 850,
+      "checksum": "sha256:8abe1ad90c211623ffc4b051dd51b3f8effd0a6265f232f2f762749d7e2ed7d2",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "game-loop-design",
+      "name": "game-loop-design",
+      "description": "Design or tighten a core gameplay loop with hooks, rewards, and failure states.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "gaming",
+        "design"
+      ],
+      "download_url": "local:game-loop-design",
+      "size_bytes": 895,
+      "checksum": "sha256:a1ef58c34802562cb65826f5836d5298fe2a83668d3994a84c189d47f47c86f9",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "game-narrative-bible",
+      "name": "game-narrative-bible",
+      "description": "Create a narrative bible: world rules, characters, tone, continuity constraints.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "gaming",
+        "narrative"
+      ],
+      "download_url": "local:game-narrative-bible",
+      "size_bytes": 825,
+      "checksum": "sha256:e6586e6e1d6428ceb0d0c7067d5f0b0b9bc45131e372055730a09e3c90d82886",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "game-netcode-notes",
+      "name": "game-netcode-notes",
+      "description": "Document netcode approach at a design level: prediction, reconciliation, lag compensation caveats.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "gaming",
+        "multiplayer"
+      ],
+      "download_url": "local:game-netcode-notes",
+      "size_bytes": 836,
+      "checksum": "sha256:559f2b497f5069a55ec3c62bcf06d0f6b126354143160716e737fe534e1b91ec",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "game-perf-budget",
+      "name": "game-perf-budget",
+      "description": "Set performance budgets: frame time, memory, streaming, and content limits.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "gaming",
+        "perf"
+      ],
+      "download_url": "local:game-perf-budget",
+      "size_bytes": 826,
+      "checksum": "sha256:90c74fd969eeb0329508afd72701dbb39af8ada5416c31f68df5339d28c68a39",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "game-save-system",
+      "name": "game-save-system",
+      "description": "Design save/load: slots, versioning, cloud caveats, corruption recovery.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "gaming",
+        "systems"
+      ],
+      "download_url": "local:game-save-system",
+      "size_bytes": 816,
+      "checksum": "sha256:be04938d0e6ab97ecd9c32860e3a1138220f98de2bbcf74c9415bc09f3b65ca8",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "game-season-pass-structure",
+      "name": "game-season-pass-structure",
+      "description": "Structure a season pass track: free/premium split ethics, pacing, rewards (no pay-to-win).",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "gaming",
+        "liveops"
+      ],
+      "download_url": "local:game-season-pass-structure",
+      "size_bytes": 819,
+      "checksum": "sha256:aa7b26e6cedf18ce98f2b1f4bf8292761c3a726a8333dca3a3086aff5356f593",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "game-telemetry-events",
+      "name": "game-telemetry-events",
+      "description": "Define gameplay telemetry events for funnels, balance, and crash context (privacy-aware).",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "gaming",
+        "ops",
+        "privacy"
+      ],
+      "download_url": "local:game-telemetry-events",
+      "size_bytes": 857,
+      "checksum": "sha256:1df824b0c7ca20f867bcb8570f5e02e3fd45327097dc766104564cbab733d699",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "game-tutorial-flow",
+      "name": "game-tutorial-flow",
+      "description": "Design an onboarding/tutorial that teaches verbs in context with skip options.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "gaming",
+        "ux",
+        "design"
+      ],
+      "download_url": "local:game-tutorial-flow",
+      "size_bytes": 808,
+      "checksum": "sha256:fd0f4661cf7e9a9c49c71870644604fe7bd634785fa6c01c3f611d715b2a6683",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "game-ui-hud",
+      "name": "game-ui-hud",
+      "description": "Design HUD/information architecture: diegetic vs non-diegetic, clutter budget, combat readability.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "gaming",
+        "ui",
+        "design"
+      ],
+      "download_url": "local:game-ui-hud",
+      "size_bytes": 819,
+      "checksum": "sha256:1b68713b53c1c419995b67da81b9f10978844c28f29b92f5fb6db4cc8b153620",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "game-vfx-checklist",
+      "name": "game-vfx-checklist",
+      "description": "Define VFX readability and performance budgets for abilities and environments.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "gaming",
+        "art",
+        "perf"
+      ],
+      "download_url": "local:game-vfx-checklist",
+      "size_bytes": 818,
+      "checksum": "sha256:f2b808a1a81afec8c44e0217c249954439c1a1fb152591876d23fa9585ab9cba",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "gift-ideas",
+      "name": "gift-ideas",
+      "description": "Suggest gift ideas from interests, budget, and constraints (no purchase required).",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "social"
+      ],
+      "download_url": "local:gift-ideas",
+      "size_bytes": 750,
+      "checksum": "sha256:5e22b22ce94a800f3fe73971c6377a2e0bb83a8d9079537cce8a11dcc5541c74",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -1560,8 +3714,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -1588,8 +3742,37 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "goal-breakdown",
+      "name": "goal-breakdown",
+      "description": "Break a large goal into milestones, weekly outcomes, and first concrete actions.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "planning"
+      ],
+      "download_url": "local:goal-breakdown",
+      "size_bytes": 745,
+      "checksum": "sha256:6dcf12b87dc6b4fc17e91dcb55978aa68911bb5f6b796b262e1d524fb3dd0b02",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -1617,8 +3800,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -1645,8 +3828,36 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "gratitude-practice",
+      "name": "gratitude-practice",
+      "description": "Set up a short gratitude practice with prompts and streak-free consistency tips.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "wellness"
+      ],
+      "download_url": "local:gratitude-practice",
+      "size_bytes": 755,
+      "checksum": "sha256:9fbefa805a694df85683f1f92909af293d9e01daba1b79946eb9bda558606994",
+      "requires": [],
+      "tools": [
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -1674,8 +3885,66 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "habit-design",
+      "name": "habit-design",
+      "description": "Design a habit loop: cue, routine, reward, tracking, restart plan.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "habits"
+      ],
+      "download_url": "local:habit-design",
+      "size_bytes": 743,
+      "checksum": "sha256:9b21a895c517f69e8f56738379da724076153287faed2e31ab69359834369756",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "headline-options",
+      "name": "headline-options",
+      "description": "Generate headline options optimized for clarity and curiosity without clickbait.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "content",
+        "writing"
+      ],
+      "download_url": "local:headline-options",
+      "size_bytes": 783,
+      "checksum": "sha256:49f201e73fe45ef6f4588b8dcad708ac9adad0a28ecaa650adaad29d87e9b7bf",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -1703,8 +3972,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -1730,8 +3999,66 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "home-project-plan",
+      "name": "home-project-plan",
+      "description": "Plan a home project: scope, materials, steps, safety, contingency.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "home"
+      ],
+      "download_url": "local:home-project-plan",
+      "size_bytes": 760,
+      "checksum": "sha256:3040a846c8386d1b1e7cb02a58fd5deac4d9f7cce5b3db6cf083d9725dfacad5",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "household-chores-plan",
+      "name": "household-chores-plan",
+      "description": "Create a household chore plan with cadence and ownership.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "home"
+      ],
+      "download_url": "local:household-chores-plan",
+      "size_bytes": 760,
+      "checksum": "sha256:488b799f0c7cb18315b1a97e0c47010be7eeb2812e90ef60777cb6d018c733e7",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -1759,8 +4086,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -1789,8 +4116,37 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "iconography-guide",
+      "name": "iconography-guide",
+      "description": "Create icon rules: optical size, stroke, metaphor consistency, accessibility.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "design",
+        "ui"
+      ],
+      "download_url": "local:iconography-guide",
+      "size_bytes": 807,
+      "checksum": "sha256:7af31db122cd61be1145d78f73097513ddffaa1c857b5acc0d1dfde6d1501986",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -1818,8 +4174,37 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "illustration-brief",
+      "name": "illustration-brief",
+      "description": "Write an illustration brief: story, style constraints, sizes, deliverables.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "design",
+        "art"
+      ],
+      "download_url": "local:illustration-brief",
+      "size_bytes": 758,
+      "checksum": "sha256:196b1c642272d4be44a786356f2d13c0be582fed59859c6dc65ee6eaf2a29457",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -1847,8 +4232,181 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "information-architecture",
+      "name": "information-architecture",
+      "description": "Organize information architecture: nav, labels, findability, card sorting notes.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "design",
+        "ux"
+      ],
+      "download_url": "local:information-architecture",
+      "size_bytes": 804,
+      "checksum": "sha256:cffb5fd94705a9d92fafa6a09a39c493115ddd10a4e74ea0bcea9db301f3ddec",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "interaction-states",
+      "name": "interaction-states",
+      "description": "Specify full interaction states for components: default, hover, focus, active, disabled, error, loading.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "design",
+        "ui"
+      ],
+      "download_url": "local:interaction-states",
+      "size_bytes": 779,
+      "checksum": "sha256:1ef871e845da85c3e95a0bcca3a3ea90b270c5cd15923b9647aee6198870ab02",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "interview-prep",
+      "name": "interview-prep",
+      "description": "Prepare for an interview: stories (STAR), questions to ask, research brief.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "career"
+      ],
+      "download_url": "local:interview-prep",
+      "size_bytes": 774,
+      "checksum": "sha256:a719a950224ced687194e6b4069b11eba189e03d570ca69f1da764170d819030",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "interview-questions",
+      "name": "interview-questions",
+      "description": "Prepare interview questions for customers, candidates, or experts with follow-ups.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "content",
+        "research"
+      ],
+      "download_url": "local:interview-questions",
+      "size_bytes": 772,
+      "checksum": "sha256:9cd8c5bea6f58534b3e6faf288a42d0867c876d11c9fb047febbdd01c45eb01e",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "job-application-tailor",
+      "name": "job-application-tailor",
+      "description": "Tailor a resume bullet set and cover note to a job description without fabricating experience.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "career"
+      ],
+      "download_url": "local:job-application-tailor",
+      "size_bytes": 807,
+      "checksum": "sha256:e29266c9ca9daa7d5ecbf30f64bc80b411a4a70ed41b80ffb4b5e721959ac244",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "journal-prompts",
+      "name": "journal-prompts",
+      "description": "Provide journal prompts for reflection, goals, or stress processing (not therapy).",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "wellness"
+      ],
+      "download_url": "local:journal-prompts",
+      "size_bytes": 781,
+      "checksum": "sha256:dc98f3f6a9ecfa5d71d2d5b2d3dd018072d84bb01508bc2e002192c9255cf26f",
+      "requires": [],
+      "tools": [
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -1876,8 +4434,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -1885,27 +4443,86 @@
       "status": "published"
     },
     {
-      "id": "k8s-manifest-review",
-      "name": "k8s-manifest-review",
-      "description": "Review Kubernetes manifests for probes, resources, securityContext, and rollout safety.",
+      "id": "landing-page-copy",
+      "name": "landing-page-copy",
+      "description": "Write landing page copy: hero, proof, benefits, objections, CTA.",
       "version": "1.0.0",
       "author": "Remedy Official",
       "tags": [
-        "k8s",
-        "devops"
+        "content",
+        "marketing"
       ],
-      "download_url": "local:k8s-manifest-review",
-      "size_bytes": 780,
-      "checksum": "sha256:01296ea33107a3585463b371f2278eceec8b37926e1ea17122d3807d7349396c",
+      "download_url": "local:landing-page-copy",
+      "size_bytes": 762,
+      "checksum": "sha256:b4fb00531081169fc7b0c52571fca48f9822686d3b77a0c602fcaeb52cd3c6c2",
       "requires": [],
       "tools": [
-        "file_read"
+        "file_read",
+        "file_write"
       ],
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "learning-curriculum",
+      "name": "learning-curriculum",
+      "description": "Build a learning curriculum for a skill: modules, resources types, practice projects.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "learning"
+      ],
+      "download_url": "local:learning-curriculum",
+      "size_bytes": 794,
+      "checksum": "sha256:898edb1c3025a46bfac3a55e1fcebee06a87d1eb2dca622021a7957597c78d74",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "level-design-brief",
+      "name": "level-design-brief",
+      "description": "Produce a level design brief: layout goals, encounters, pacing, and greybox checklist.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "gaming",
+        "level-design"
+      ],
+      "download_url": "local:level-design-brief",
+      "size_bytes": 860,
+      "checksum": "sha256:31f859f758f8a178d95545018f2d938aa13b13f852a6f4100cc2e44e521e4e11",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -1933,8 +4550,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -1962,8 +4579,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -1981,8 +4598,8 @@
         "testing"
       ],
       "download_url": "local:load-test-plan",
-      "size_bytes": 831,
-      "checksum": "sha256:12b87a4ad7ee2a1c9f9679c50405a0641eb658eb1ce50e2b12e7e9e86601de9f",
+      "size_bytes": 836,
+      "checksum": "sha256:5ba35e704f7362611aef1d767199e698c0b453b93a5c0cc9925bf26664f77ed2",
       "requires": [],
       "tools": [
         "file_read",
@@ -1992,8 +4609,37 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "local-container-stack",
+      "name": "local-container-stack",
+      "description": "Provide local multi-service containers for local dependencies with healthchecks and sane ports.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "container tooling",
+        "devops"
+      ],
+      "download_url": "local:local-container-stack",
+      "size_bytes": 795,
+      "checksum": "sha256:34d2409755683e1e66881923a8f4f273342dc42baa228e9f6253440142ef620b",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -2021,8 +4667,66 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "logo-usage-rules",
+      "name": "logo-usage-rules",
+      "description": "Document logo usage: clear space, min size, on dark/light, misuse examples.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "design",
+        "brand"
+      ],
+      "download_url": "local:logo-usage-rules",
+      "size_bytes": 774,
+      "checksum": "sha256:7083d8a8a6106ee0b13b3ef11276fd3722cc302a0621cf74dc63eb7f9ad252af",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "loot-table-design",
+      "name": "loot-table-design",
+      "description": "Design loot tables with drop rates, pity systems, and economy safety.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "gaming",
+        "systems"
+      ],
+      "download_url": "local:loot-table-design",
+      "size_bytes": 817,
+      "checksum": "sha256:5a6d4a4263acc6e34eb10fff04b799bd2c71a8af9e24613ea5dfa23b553b6580",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -2049,8 +4753,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -2077,8 +4781,66 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "meeting-agenda",
+      "name": "meeting-agenda",
+      "description": "Create a meeting agenda with purpose, topics, times, and decisions needed.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "work"
+      ],
+      "download_url": "local:meeting-agenda",
+      "size_bytes": 747,
+      "checksum": "sha256:fffd21b61608875de93da5ee571fc43935774ea141f73d8a3bf8a330866ed14f",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "meeting-notes",
+      "name": "meeting-notes",
+      "description": "Turn discussion into structured notes: decisions, actions, owners, dates.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "work"
+      ],
+      "download_url": "local:meeting-notes",
+      "size_bytes": 741,
+      "checksum": "sha256:c77a0f048be3b4f690f88db2b653cbac2bb533d7da7df6a6a806b2db348ac16b",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -2106,8 +4868,37 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "message-draft-personal",
+      "name": "message-draft-personal",
+      "description": "Draft personal messages (thanks, apology, invite, check-in) with tone options.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "communication"
+      ],
+      "download_url": "local:message-draft-personal",
+      "size_bytes": 763,
+      "checksum": "sha256:203023938d4b82ffcae3f1389bfb2cef7aca3debb35c568963671fadc175ade2",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -2135,8 +4926,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -2165,8 +4956,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -2194,8 +4985,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -2224,8 +5015,123 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "moodboard-direction",
+      "name": "moodboard-direction",
+      "description": "Assemble a written moodboard direction: themes, keywords, references categories (no brand copying).",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "design",
+        "creative"
+      ],
+      "download_url": "local:moodboard-direction",
+      "size_bytes": 814,
+      "checksum": "sha256:80c4d313683cc865ad91e5ae84f563012112a43e093811abf2dde72a6c212674",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "morning-shutdown-rituals",
+      "name": "morning-shutdown-rituals",
+      "description": "Design morning and end-of-day rituals that fit a real schedule.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "productivity"
+      ],
+      "download_url": "local:morning-shutdown-rituals",
+      "size_bytes": 769,
+      "checksum": "sha256:48677c366e77c0948a8d2f3d089a9a1b9118e196ba6d26e4e25a02abae864413",
+      "requires": [],
+      "tools": [
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "motion-design-spec",
+      "name": "motion-design-spec",
+      "description": "Specify motion: purpose, duration, easing, reduced-motion fallback.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "design",
+        "ui"
+      ],
+      "download_url": "local:motion-design-spec",
+      "size_bytes": 776,
+      "checksum": "sha256:336abbc7f388bd5d6cdf98d0fa1f8d6a1c06e4e9d8623e46278611bf7adb0388",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "move-house-plan",
+      "name": "move-house-plan",
+      "description": "Plan a household move: timeline, inventory, vendors, change-of-address checklist.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "planning"
+      ],
+      "download_url": "local:move-house-plan",
+      "size_bytes": 773,
+      "checksum": "sha256:8fdcf8ee618f39ff22d674a308dd09c07dadae60d0292068de65be3ac90d6201",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -2252,8 +5158,95 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "multiplayer-session-design",
+      "name": "multiplayer-session-design",
+      "description": "Design multiplayer session flow: matchmaking intent, disconnects, host migration, fairness.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "gaming",
+        "multiplayer"
+      ],
+      "download_url": "local:multiplayer-session-design",
+      "size_bytes": 851,
+      "checksum": "sha256:41e5fca362d9e7d5ab3f266e526fe2b2243cc6c073c1b03538ff244c92145d46",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "negotiation-prep",
+      "name": "negotiation-prep",
+      "description": "Prepare a negotiation: BATNA, range, script, concessions.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "career"
+      ],
+      "download_url": "local:negotiation-prep",
+      "size_bytes": 726,
+      "checksum": "sha256:43d6e1dfb80b35b7561da8bc3968906007e65a6a1fc7c3e43d53a2ba0ede93b3",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "newsletter-issue",
+      "name": "newsletter-issue",
+      "description": "Plan and draft a newsletter issue: sections, links, subject lines, preview text.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "content",
+        "email"
+      ],
+      "download_url": "local:newsletter-issue",
+      "size_bytes": 801,
+      "checksum": "sha256:4135df42e3455f70d35e04f9ff48706f43aca65a694cdc4c263320a5e52835fe",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -2282,8 +5275,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -2311,8 +5304,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -2340,8 +5333,38 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "onboarding-ui-flow",
+      "name": "onboarding-ui-flow",
+      "description": "Design product onboarding UI: progressive disclosure, skip, value moments.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "design",
+        "ux",
+        "product"
+      ],
+      "download_url": "local:onboarding-ui-flow",
+      "size_bytes": 785,
+      "checksum": "sha256:054b89c9207dc367ba07576bc361a8c3b932fc84a78ad0f2edfd622306e6405f",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -2370,8 +5393,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -2398,8 +5421,37 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "packing-list",
+      "name": "packing-list",
+      "description": "Generate a packing list by trip type, climate, and activities.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "travel"
+      ],
+      "download_url": "local:packing-list",
+      "size_bytes": 735,
+      "checksum": "sha256:96ad9f49e213dd4f9beaa03b3744aa539e440d41cbf158c6f4405723d67b31b4",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -2427,8 +5479,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -2456,8 +5508,65 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "password-hygiene",
+      "name": "password-hygiene",
+      "description": "Personal password hygiene checklist: unique passwords, manager use, 2FA\u2014without handling secrets.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "security"
+      ],
+      "download_url": "local:password-hygiene",
+      "size_bytes": 789,
+      "checksum": "sha256:e62e3f843ed63b54552fe9a5e60c50df15d4874db7eec6db6551b8b74b9081fd",
+      "requires": [],
+      "tools": [
+        "file_read"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "payment-webhook-flow",
+      "name": "payment-webhook-flow",
+      "description": "Implement payment webhooks with verification and idempotent entitlement updates.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "payments",
+        "backend"
+      ],
+      "download_url": "local:payment-webhook-flow",
+      "size_bytes": 767,
+      "checksum": "sha256:03dcfa36a0d17bff5bc063c99a771a3037cc2afe761ad3422f5ee0cce02045bf",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -2485,8 +5594,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -2514,8 +5623,210 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "persona-profile",
+      "name": "persona-profile",
+      "description": "Build research-backed personas (or proto-personas) with goals, frustrations, contexts.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "design",
+        "research"
+      ],
+      "download_url": "local:persona-profile",
+      "size_bytes": 809,
+      "checksum": "sha256:34d32481cfc15f59e6e1b52685de04a39d4ec8b6ad16b0af9650d32e4786dd2f",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "personal-crm",
+      "name": "personal-crm",
+      "description": "Lightweight personal CRM: people notes, last contact, follow-ups (privacy first).",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "social"
+      ],
+      "download_url": "local:personal-crm",
+      "size_bytes": 757,
+      "checksum": "sha256:69284f746dadcef52b5ef0167f1d0e14b9d5a068920a3a403f4a4e2e5d8c31a9",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "personal-inventory",
+      "name": "personal-inventory",
+      "description": "Run a personal inventory session: commitments, energy, obligations, free capacity.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "planning"
+      ],
+      "download_url": "local:personal-inventory",
+      "size_bytes": 764,
+      "checksum": "sha256:1dd162b061fb228567d07972dc9f93ddc3645268f6a5d1d1334906522dccae26",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "personal-okr",
+      "name": "personal-okr",
+      "description": "Write personal OKRs: objective, key results, weekly check-ins.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "planning"
+      ],
+      "download_url": "local:personal-okr",
+      "size_bytes": 732,
+      "checksum": "sha256:57fe4f3f510aa5ded9ffbb1947096fa31258edaf8608eb98344d67f74c78a1f4",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "personal-values-exercise",
+      "name": "personal-values-exercise",
+      "description": "Facilitate a values clarification exercise and translate into weekly choices.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "wellness"
+      ],
+      "download_url": "local:personal-values-exercise",
+      "size_bytes": 790,
+      "checksum": "sha256:9fd3fc382117abf1e42d4c0dee6f299872d5107f5b4d81ab6fc8d4ad5ea9a553",
+      "requires": [],
+      "tools": [
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "pet-care-routine",
+      "name": "pet-care-routine",
+      "description": "Create a pet care routine: feeding, walks, meds placeholders, emergency contacts.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "home"
+      ],
+      "download_url": "local:pet-care-routine",
+      "size_bytes": 777,
+      "checksum": "sha256:37e767600c6c1a0437af715e15dc678baeb962276d5b73b69169550c52b59671",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "photo-art-direction",
+      "name": "photo-art-direction",
+      "description": "Art-direct photoshoots or stock selection: subject, lighting, crop, usage rights checklist.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "design",
+        "content"
+      ],
+      "download_url": "local:photo-art-direction",
+      "size_bytes": 796,
+      "checksum": "sha256:2b57df0a46b06822d48ba5e76d4d6dae90e9b01e814cb6635bc195d8b94fb4d2",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -2543,8 +5854,124 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "playtest-protocol",
+      "name": "playtest-protocol",
+      "description": "Run a structured playtest: goals, tasks, observation notes, and debrief actions.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "gaming",
+        "research"
+      ],
+      "download_url": "local:playtest-protocol",
+      "size_bytes": 818,
+      "checksum": "sha256:659277cdb77f22c18a2ace9ea40a405f7e9a36c58d4d513697a7736afa7f2f26",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "podcast-episode-plan",
+      "name": "podcast-episode-plan",
+      "description": "Plan a podcast episode: cold open, segments, guests prep, show notes.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "content",
+        "audio"
+      ],
+      "download_url": "local:podcast-episode-plan",
+      "size_bytes": 779,
+      "checksum": "sha256:3b318a8e95ef989699bbb47691955d9a64c2662ba6fcef7ef7be08b32c505dc2",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "portfolio-case-layout",
+      "name": "portfolio-case-layout",
+      "description": "Structure a portfolio case study page: problem, process, outcome, images.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "design",
+        "career"
+      ],
+      "download_url": "local:portfolio-case-layout",
+      "size_bytes": 766,
+      "checksum": "sha256:663a2a190d2b024a54f7f73c03140aeab706283291b743bb9529bd986c413c29",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "poster-layout",
+      "name": "poster-layout",
+      "description": "Design a poster layout brief: hierarchy, margins, type, print specs.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "design",
+        "print"
+      ],
+      "download_url": "local:poster-layout",
+      "size_bytes": 721,
+      "checksum": "sha256:a24fa7537fb2f86a82d11719881e6d89f4f65d6d3dc91beddca234d29efef190",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -2573,8 +6000,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -2603,8 +6030,183 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "presentation-deck-structure",
+      "name": "presentation-deck-structure",
+      "description": "Structure a presentation deck: story arc, slide budget, speaker notes.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "design",
+        "content",
+        "speaking"
+      ],
+      "download_url": "local:presentation-deck-structure",
+      "size_bytes": 818,
+      "checksum": "sha256:f8c723a861059955bda03c7d9039868ca70ec3ea2823f894ef347d392a499078",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "press-release",
+      "name": "press-release",
+      "description": "Draft a press release: headline, lede, body, boilerplate, quotes, links.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "content",
+        "comms"
+      ],
+      "download_url": "local:press-release",
+      "size_bytes": 786,
+      "checksum": "sha256:c48f9abaa49394af502bdcdea28481c379ab00338a2e182ee576888ad7428abc",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "print-layout-basics",
+      "name": "print-layout-basics",
+      "description": "Lay out print-ready pages: margins, bleed, hierarchy, export checklist.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "design",
+        "print"
+      ],
+      "download_url": "local:print-layout-basics",
+      "size_bytes": 783,
+      "checksum": "sha256:9f35754e84d62b3b5b3c9257cb622507a73ea6b26bdb56eaf4faf89f4d5f2e27",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "priority-matrix",
+      "name": "priority-matrix",
+      "description": "Sort tasks with urgency/importance and recommend what to defer or drop.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "productivity"
+      ],
+      "download_url": "local:priority-matrix",
+      "size_bytes": 765,
+      "checksum": "sha256:b599c4f84fb59eceb8b565f8d31167bb653a6d30927089d6f211041618463f43",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "privacy-checkup",
+      "name": "privacy-checkup",
+      "description": "Walk through a personal privacy checkup: app permissions, sharing, data downloads.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "privacy"
+      ],
+      "download_url": "local:privacy-checkup",
+      "size_bytes": 770,
+      "checksum": "sha256:d425b4d4c4e21689033f08f459b6be156961b4cbf895f05be49849e5eedd69b9",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "progression-curve",
+      "name": "progression-curve",
+      "description": "Design player progression curves: XP, unlocks, soft gates, and catch-up.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "gaming",
+        "systems"
+      ],
+      "download_url": "local:progression-curve",
+      "size_bytes": 818,
+      "checksum": "sha256:e39f207d178014bec7f60c704041eb552277b455670c12cea5340315aa51ec19",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -2633,8 +6235,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -2663,8 +6265,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -2693,8 +6295,38 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "quest-design",
+      "name": "quest-design",
+      "description": "Design quests/missions with objectives, gates, rewards, and failure paths.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "gaming",
+        "narrative",
+        "design"
+      ],
+      "download_url": "local:quest-design",
+      "size_bytes": 822,
+      "checksum": "sha256:da0a087edfff299aab10e21db305b01133358a190c8c42520bffb6dcf37763c2",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -2722,8 +6354,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -2751,8 +6383,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -2780,8 +6412,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -2810,8 +6442,37 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "reading-notes",
+      "name": "reading-notes",
+      "description": "Produce structured reading notes: summary, key ideas, quotes, actions.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "learning"
+      ],
+      "download_url": "local:reading-notes",
+      "size_bytes": 747,
+      "checksum": "sha256:4291149b1b43268d0c2205a55f7db7642d71c0e4e415528f66fc9bf418b3365e",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -2837,8 +6498,37 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "recipe-plan-meals",
+      "name": "recipe-plan-meals",
+      "description": "Plan meals for N days given constraints (time, diet, servings) with shopping list.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "food"
+      ],
+      "download_url": "local:recipe-plan-meals",
+      "size_bytes": 751,
+      "checksum": "sha256:f1d06594af94280b8cc15c051af5d52a58dcdea89c53c2a10bcc76270558d36a",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -2866,8 +6556,37 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "release-announcement",
+      "name": "release-announcement",
+      "description": "Write a product release announcement for blog/email/in-app.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "content",
+        "product"
+      ],
+      "download_url": "local:release-announcement",
+      "size_bytes": 793,
+      "checksum": "sha256:4ad61afdaec58d5fb346f43a16d37e2ff6841641e149ed89b1e4251c9732838b",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -2895,8 +6614,96 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "reminder-system",
+      "name": "reminder-system",
+      "description": "Design a reminder system: what belongs on calendar vs tasks vs checklists.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "productivity"
+      ],
+      "download_url": "local:reminder-system",
+      "size_bytes": 759,
+      "checksum": "sha256:044d2c889fb92935c55322659df52968f0e1440ee3b81cc970ee12877ae92697",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "research-digest",
+      "name": "research-digest",
+      "description": "Digest multiple sources into a brief with citations and confidence levels.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "research"
+      ],
+      "download_url": "local:research-digest",
+      "size_bytes": 765,
+      "checksum": "sha256:718863be6b34226af04f07971257d9c3aab610b3b3692ae0e8863b52849db3ac",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "web_search",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "responsive-design-spec",
+      "name": "responsive-design-spec",
+      "description": "Specify responsive behavior across breakpoints: reflow, collapse, priority content.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "design",
+        "ui"
+      ],
+      "download_url": "local:responsive-design-spec",
+      "size_bytes": 804,
+      "checksum": "sha256:40476e1e40251dd9bb020743cee1deb1063392eab4346ad52170d039859f98af",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -2924,8 +6731,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -2951,8 +6758,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -2980,8 +6787,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -3010,8 +6817,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -3039,8 +6846,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -3058,8 +6865,8 @@
         "supply-chain"
       ],
       "download_url": "local:sbom-generate",
-      "size_bytes": 778,
-      "checksum": "sha256:d61a8bb57d1a3112efb16a18033546e23f21f3d8b77852c4360cf8ee1ea880c6",
+      "size_bytes": 775,
+      "checksum": "sha256:044b219d4d3b40e08440d186e9093042fd10939e94bff2c1e831abefc02f4323",
       "requires": [],
       "tools": [
         "bash_exec",
@@ -3068,8 +6875,38 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "script-to-storyboard",
+      "name": "script-to-storyboard",
+      "description": "Turn a script into a shot list / storyboard frames description.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "content",
+        "video",
+        "design"
+      ],
+      "download_url": "local:script-to-storyboard",
+      "size_bytes": 774,
+      "checksum": "sha256:d7b8e9b0a66b351ed13d4061a57676dfd6db0e33de5b86b3bef07b7102f1c58e",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -3097,8 +6934,37 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "second-brain-notes",
+      "name": "second-brain-notes",
+      "description": "Organize notes into a simple personal knowledge system: inbox, projects, areas, archives.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "learning"
+      ],
+      "download_url": "local:second-brain-notes",
+      "size_bytes": 767,
+      "checksum": "sha256:8e2630b6b20e03cfa30462824971c0000731cb5b308a4d6527a9a35a684c46d4",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -3116,8 +6982,8 @@
         "secrets"
       ],
       "download_url": "local:secret-scan-guidance",
-      "size_bytes": 914,
-      "checksum": "sha256:131b4dfd2f1cfd8d37ccab6b74e3afc8dc673828b1a325da4177fe711851b86b",
+      "size_bytes": 906,
+      "checksum": "sha256:614580511dc252b6a7c0a912a6da6dde25f7c7fdff69f9de6fb33553d1c093e9",
       "requires": [],
       "tools": [
         "bash_exec",
@@ -3126,8 +6992,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -3156,8 +7022,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -3185,8 +7051,66 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "seo-content-brief",
+      "name": "seo-content-brief",
+      "description": "Create an SEO content brief: intent, outline, questions to answer, internal links (no stuffing).",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "content",
+        "seo"
+      ],
+      "download_url": "local:seo-content-brief",
+      "size_bytes": 820,
+      "checksum": "sha256:6c7528a0b8de0773e782a07bc2f565b955f80f5dafb048e21b7007cfe893d9b7",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "short-form-script",
+      "name": "short-form-script",
+      "description": "Write a short-form vertical video script under a target duration with on-screen text.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "content",
+        "video"
+      ],
+      "download_url": "local:short-form-script",
+      "size_bytes": 744,
+      "checksum": "sha256:c54fb795f98a91f082e70ddb1d046668358e9987e2a21a1273b6c5c879d4e49a",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -3214,8 +7138,37 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "sleep-routine",
+      "name": "sleep-routine",
+      "description": "Design a sleep routine: wind-down, environment, schedule consistency (general wellness).",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "wellness"
+      ],
+      "download_url": "local:sleep-routine",
+      "size_bytes": 789,
+      "checksum": "sha256:329e6407b5f7192bda5fafa2e40023dce2bbefb47d4f5555e5f52ee71a2b5bce",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -3242,8 +7195,66 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "social-post-pack",
+      "name": "social-post-pack",
+      "description": "Create a pack of social posts for one announcement across lengths and CTAs.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "content",
+        "social"
+      ],
+      "download_url": "local:social-post-pack",
+      "size_bytes": 803,
+      "checksum": "sha256:8f85ca4f40346f986feba1e9cce475bc63fcd1509bb1aad586288c353a9a5bfd",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "spacing-layout-grid",
+      "name": "spacing-layout-grid",
+      "description": "Define spacing scale and layout grid for consistent composition.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "design",
+        "ui"
+      ],
+      "download_url": "local:spacing-layout-grid",
+      "size_bytes": 766,
+      "checksum": "sha256:11e83cced9ccbd3784a55a5a6237fdcf27707572fde69fd5188614f2b24020c2",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -3272,37 +7283,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
-      "compatible_remedy": [
-        ">=0.15.0"
-      ],
-      "security_flags": [],
-      "status": "published"
-    },
-    {
-      "id": "stripe-webhook-flow",
-      "name": "stripe-webhook-flow",
-      "description": "Implement payment webhooks with verification and idempotent entitlement updates.",
-      "version": "1.0.0",
-      "author": "Remedy Official",
-      "tags": [
-        "payments",
-        "backend"
-      ],
-      "download_url": "local:stripe-webhook-flow",
-      "size_bytes": 766,
-      "checksum": "sha256:740b6450083b80192d30dc4ad0669cc42d2dc5d3303650b2454bee1051e5e87a",
-      "requires": [],
-      "tools": [
-        "file_read",
-        "file_write"
-      ],
-      "rating": 0.0,
-      "installs": 0,
-      "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -3330,8 +7312,66 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "style-guide-writing",
+      "name": "style-guide-writing",
+      "description": "Create a writing style guide: voice, grammar choices, inclusive language, examples.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "content",
+        "writing"
+      ],
+      "download_url": "local:style-guide-writing",
+      "size_bytes": 788,
+      "checksum": "sha256:1a146f28a16ede215efc1ee1a46af285b5d9b77421562e73228be016ef056243",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "subscription-audit",
+      "name": "subscription-audit",
+      "description": "Audit subscriptions from a user-provided list: keep, cancel, downgrade recommendations.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "finance"
+      ],
+      "download_url": "local:subscription-audit",
+      "size_bytes": 761,
+      "checksum": "sha256:420715b8a8e3e94011abf60538b89a0b1968c00812db7c8f0f5f699f4740b87a",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -3341,7 +7381,7 @@
     {
       "id": "terraform-plan-review",
       "name": "terraform-plan-review",
-      "description": "Review Terraform plans for destroys, public exposure, and IAM blast radius before apply.",
+      "description": "Review infrastructure-as-code plans for destroys, public exposure, and IAM blast radius before apply.",
       "version": "1.0.0",
       "author": "Remedy Official",
       "tags": [
@@ -3349,8 +7389,8 @@
         "devops"
       ],
       "download_url": "local:terraform-plan-review",
-      "size_bytes": 781,
-      "checksum": "sha256:3378e3051d6e54494b4bf8dc5c9a16497a56e88ef8e74310a4812b86219ddb2a",
+      "size_bytes": 791,
+      "checksum": "sha256:78cfb890dfc57e87a55aabe6993cf08e726bfdc4c06f734ca44c7fe1404af1a8",
       "requires": [],
       "tools": [
         "bash_exec",
@@ -3359,8 +7399,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -3388,8 +7428,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -3417,8 +7457,66 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "thumbnail-concept",
+      "name": "thumbnail-concept",
+      "description": "Concept thumbnails: focal subject, text overlay limits, contrast, A/B ideas.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "content",
+        "design"
+      ],
+      "download_url": "local:thumbnail-concept",
+      "size_bytes": 768,
+      "checksum": "sha256:3e62029f64236cdded71389ae00eaacbcf2ac0828a9c48d2778977f0a874c929",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "time-audit",
+      "name": "time-audit",
+      "description": "Guide a time audit: log categories, find leaks, redesign week.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "productivity"
+      ],
+      "download_url": "local:time-audit",
+      "size_bytes": 744,
+      "checksum": "sha256:fcb3dc5c1526cca8b3b59687d0af3e315d3571c2dcf7f75b16946d19c942a792",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -3446,8 +7544,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -3465,8 +7563,8 @@
         "observability"
       ],
       "download_url": "local:tracing-spans",
-      "size_bytes": 749,
-      "checksum": "sha256:f25a0b63a5156588fd3735eb8433c1cc083cb2a5d153e947ba78aec56b230c9b",
+      "size_bytes": 743,
+      "checksum": "sha256:a93bbd73291f8487b9493b8bd9e9ccd9802e4b4464ae92bc16b9fbb8b25c5dbd",
       "requires": [],
       "tools": [
         "file_read",
@@ -3475,8 +7573,66 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "transcript-cleanup",
+      "name": "transcript-cleanup",
+      "description": "Clean a transcript: speakers, paragraphs, filler removal, summary bullets.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "content",
+        "writing"
+      ],
+      "download_url": "local:transcript-cleanup",
+      "size_bytes": 774,
+      "checksum": "sha256:f86429cb7155a7f850b7e68cc73ea6d1e46ff90ce2199f1709504bf2e9118a75",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "travel-itinerary",
+      "name": "travel-itinerary",
+      "description": "Build a travel itinerary: logistics, buffers, offline notes, packing constraints.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "travel"
+      ],
+      "download_url": "local:travel-itinerary",
+      "size_bytes": 770,
+      "checksum": "sha256:b1ceba1337e6f80bd59d227dd7d68b0282bff2f84a36431f19d3f7007ad1a0e9",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -3505,8 +7661,124 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "typography-system",
+      "name": "typography-system",
+      "description": "Set type scale, line height, and pairing rules for UI or editorial layouts.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "design",
+        "ui"
+      ],
+      "download_url": "local:typography-system",
+      "size_bytes": 811,
+      "checksum": "sha256:a3e55fec9e7f54ef7098582a587703e3da50b739051b4d3282230441d732a445",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "ui-kit-inventory",
+      "name": "ui-kit-inventory",
+      "description": "Inventory UI components and document missing states for a kit.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "design",
+        "ui"
+      ],
+      "download_url": "local:ui-kit-inventory",
+      "size_bytes": 741,
+      "checksum": "sha256:a7cf62b6d7bc8f2c6d34e3f01234a9216f26708eb3a1c2cf23f86a07cd2e967e",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "usability-test-plan",
+      "name": "usability-test-plan",
+      "description": "Plan a usability test: tasks, metrics, script, and synthesis template.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "design",
+        "research"
+      ],
+      "download_url": "local:usability-test-plan",
+      "size_bytes": 800,
+      "checksum": "sha256:e160e22ae3294359582b38a8dd4b01c6997bc5284dd4d65d9660749e06f8914a",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "user-journey-map",
+      "name": "user-journey-map",
+      "description": "Map a user journey: stages, emotions, pain points, opportunities.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "design",
+        "research"
+      ],
+      "download_url": "local:user-journey-map",
+      "size_bytes": 762,
+      "checksum": "sha256:1f198ae6ccb8113fff9a099a574f65e3f50853007e8dab85eec4d5830d0a9c3b",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -3533,8 +7805,125 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "ux-copy-microcopy",
+      "name": "ux-copy-microcopy",
+      "description": "Write UI microcopy: buttons, errors, empty states, confirmations\u2014clear and human.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "design",
+        "writing",
+        "ux"
+      ],
+      "download_url": "local:ux-copy-microcopy",
+      "size_bytes": 817,
+      "checksum": "sha256:22e39b365ead5e5207950200fe31f096c8aa03fb74d0d180f0ce571d35c7fbf2",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "video-edit-checklist",
+      "name": "video-edit-checklist",
+      "description": "Checklist for editing a video cut: pacing, audio, captions, exports.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "content",
+        "video"
+      ],
+      "download_url": "local:video-edit-checklist",
+      "size_bytes": 797,
+      "checksum": "sha256:cc62c9cf8a2d3ac260800de626e371aa8b9c162b1491ab3d74aca60a59fcecbf",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "video-script",
+      "name": "video-script",
+      "description": "Write a video script with visual column, VO/dialogue, timing, and B-roll notes.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "content",
+        "video"
+      ],
+      "download_url": "local:video-script",
+      "size_bytes": 788,
+      "checksum": "sha256:c6ea6d4cf933c2daa65c74c7d6c4c1d8f159b6f3820fa58c441a6cbd9db0cd38",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "visual-hierarchy-pass",
+      "name": "visual-hierarchy-pass",
+      "description": "Improve visual hierarchy on a screen: type scale, weight, spacing, focal point.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "design",
+        "ui"
+      ],
+      "download_url": "local:visual-hierarchy-pass",
+      "size_bytes": 804,
+      "checksum": "sha256:e66d306a3d8e2c24698a4bb1d9a79ae6e9ca4253352674d4be07d3b14ce390e6",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -3552,8 +7941,8 @@
         "testing"
       ],
       "download_url": "local:visual-regression-setup",
-      "size_bytes": 825,
-      "checksum": "sha256:9676feb8e551e60466f095fc308e949f12147063529562f7d22597ea293013dd",
+      "size_bytes": 821,
+      "checksum": "sha256:11b5a43a18628b93da0c4fe282af248028e1b7b96598699723cc3dd717d5314f",
       "requires": [],
       "tools": [
         "file_read",
@@ -3563,8 +7952,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -3592,8 +7981,8 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
@@ -3621,8 +8010,124 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:33:46Z",
-      "published_at": "2026-07-26T22:33:46Z",
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "weekly-review",
+      "name": "weekly-review",
+      "description": "Run a weekly review: wins, open loops, priorities, calendar look-ahead.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "productivity"
+      ],
+      "download_url": "local:weekly-review",
+      "size_bytes": 768,
+      "checksum": "sha256:d94fb0acc0dfe8d6763fdb50d419e122e50da43d540307745c817949f2791306",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "wireframe-flow",
+      "name": "wireframe-flow",
+      "description": "Produce low-fidelity wireframe flows for a user task (text or simple structure).",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "design",
+        "ux"
+      ],
+      "download_url": "local:wireframe-flow",
+      "size_bytes": 764,
+      "checksum": "sha256:5475510d5807985c2fdbe2c4e9bd8cd287c10cee9e76912ef552a722b408fc0c",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "workout-plan-basic",
+      "name": "workout-plan-basic",
+      "description": "Draft a basic workout plan with warm-up, main work, recovery (not medical advice).",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "personal",
+        "fitness"
+      ],
+      "download_url": "local:workout-plan-basic",
+      "size_bytes": 840,
+      "checksum": "sha256:a10ea3df5a2ec0c0efebe607226c9448d24cf2cdbfe67ff7a701f6f5dcaf35b0",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "youtube-chapter-markers",
+      "name": "youtube-chapter-markers",
+      "description": "Create chapter markers and titles from a video outline or transcript.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "content",
+        "video"
+      ],
+      "download_url": "local:youtube-chapter-markers",
+      "size_bytes": 767,
+      "checksum": "sha256:a045100b545e978633913acd890ef959ec9b51a34f7a68be8f581f16832d6c50",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:45:46Z",
+      "published_at": "2026-07-26T22:45:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],

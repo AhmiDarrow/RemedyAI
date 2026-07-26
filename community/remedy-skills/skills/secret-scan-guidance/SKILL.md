@@ -23,7 +23,7 @@ metadata:
 # Secret Scan Guidance
 
 ## Steps
-1. Prefer `gitleaks`, `trufflehog`, or `git secrets` if installed.
+1. Prefer `secret scanners`, `secret scanners`, or `secret scanners` if installed.
 2. Otherwise search for common patterns (AWS keys, `ghp_`, `sk-`, private key headers) and **redact** middles in output.
 3. Check history only as needed; warn about force-push rewrites.
 4. Remediation order: **rotate** → remove from tree → history purge only if requested.

@@ -23,7 +23,7 @@ metadata:
 # Tracing Spans
 
 ## Steps
-1. Detect OpenTelemetry/tracing setup.
+1. Detect distributed tracing/tracing setup.
 2. Span HTTP/DB/tool calls with useful attributes.
 3. Propagate context across async/threads.
 4. Sampling suitable for prod.

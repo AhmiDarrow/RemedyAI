@@ -7,18 +7,27 @@ when-to-use guidance, concrete steps, tool lists, and a definition of done. They
 **not** auto-bundled into Remedy — users install from the Library tab and **Trust**
 before scripts/agent use.
 
-Coverage themes (100+ official packs):
+Coverage (~280 official packs; **no third-party product branding** in skill text):
 
 | Area | Examples |
 |------|----------|
-| Git / release | pr-description, changelog-entry, release-checklist, rebase-onto-main, git-bisect-helper |
-| Security | dependency-audit, secret-scan-guidance, owasp-web-checklist, auth-session-review, webhook-verify |
-| Testing | test-selection, flaky-test-triage, e2e-smoke, browser-automation-safe, contract-test-api |
-| Frontend | frontend-a11y, react-performance, bundle-size-check, i18n-extract, form-validation-ux |
-| Backend / API | api-contract-review, db-migration-safe, idempotent-api, queue-consumer-safe, multi-tenant-isolation |
-| Ops | dockerfile-harden, ci-pipeline-review, k8s-manifest-review, incident-postmortem, runbook-write |
+| Git / release | pr-description, changelog-entry, release-checklist, rebase-onto-main |
+| Security | dependency-audit, secret-scan-guidance, owasp-web-checklist, payment-webhook-flow |
+| Testing / frontend | test-selection, e2e-smoke, frontend-a11y, react-performance |
+| Backend / ops | api-contract-review, db-migration-safe, container-image-harden, incident-postmortem |
+| **Gaming** | game-design-document, game-loop-design, boss-fight-design, playtest-protocol, loot-table-design |
+| **Design** | design-brief, color-system, wireframe-flow, design-handoff, data-viz-design |
+| **Content** | content-strategy, blog-post-draft, video-script, newsletter-issue, content-edit-pass |
+| **Personal assistant** | daily-planning, weekly-review, email-draft, travel-itinerary, job-application-tailor |
 | LLM apps | prompt-eval-harness, rag-chunking, tool-use-spec, llm-cost-guardrails |
-| Privacy / product | data-export-user, data-deletion-user, feature-flag-rollout, permissions-matrix |
+
+Regenerate domain packs:
+
+```bash
+python scripts/generate_domain_skills.py
+python scripts/scrub_brands.py   # keep copy brand-free
+python scripts/build_catalog.py && python scripts/sign_catalog.py
+```
 
 Regenerate skill set (maintainers):
 

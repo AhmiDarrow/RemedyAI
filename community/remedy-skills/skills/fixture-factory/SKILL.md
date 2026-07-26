@@ -23,7 +23,7 @@ metadata:
 
 ## Steps
 1. Find repeated test setup.
-2. Introduce factories with overrides (factory_boy, fishery, rosie, etc. or simple helpers).
+2. Introduce factories with overrides (factory helpers, etc. or simple helpers).
 3. Keep defaults valid minimal objects.
 4. Refactor a few tests to prove ergonomics.
 

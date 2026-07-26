@@ -2,7 +2,7 @@
 name: terraform-plan-review
 version: 1.0.0
 description: >
-  Review Terraform plans for destroys, public exposure, and IAM blast radius before apply.
+  Review infrastructure-as-code plans for destroys, public exposure, and IAM blast radius before apply.
 author: Remedy Official
 license: LicenseRef-Proprietary
 tags:
@@ -20,7 +20,7 @@ metadata:
   security_flags: []
 ---
 
-# Terraform Plan Review
+# infrastructure-as-code Plan Review
 
 ## Steps
 1. Read plan (no apply).

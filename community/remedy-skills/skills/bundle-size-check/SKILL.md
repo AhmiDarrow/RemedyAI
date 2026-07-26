@@ -24,7 +24,7 @@ metadata:
 
 ## Steps
 1. Production build; note sizes.
-2. Analyzer if present (visualizer/source-map-explorer).
+2. Analyzer if present (visualizer/bundle analyzers).
 3. List heavy/duplicate deps.
 4. Propose dynamic import and lighter alternatives.
 5. Measure before/after.

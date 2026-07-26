@@ -25,7 +25,7 @@ metadata:
 
 ## Steps
 1. Choose 1–3 endpoints + realistic mix.
-2. Use k6/vegeta/hey/locust if available.
+2. Use load generators/vegeta/hey/locust if available.
 3. Ramp; watch p95 and error rate.
 4. Stop on error storms; capture bottleneck hypothesis.
 5. Report numbers + next optimizations.

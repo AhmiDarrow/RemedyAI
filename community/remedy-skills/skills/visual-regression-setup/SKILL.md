@@ -24,7 +24,7 @@ metadata:
 # Visual Regression Setup
 
 ## Steps
-1. Use existing visual tool if any (Playwright screenshots, Chromatic, etc.).
+1. Use existing visual tool if any (browser screenshots, visual review tools, etc.).
 2. Cover a few critical screens only.
 3. Disable animations; stabilize fonts when possible.
 4. Document approval workflow for intentional changes.

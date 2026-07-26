@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sign catalog.json with Ed25519 (PyNaCl). Secret: base64 32-byte seed."""
+"""Sign catalog.json with Ed25519 (Ed25519). Secret: base64 32-byte seed."""
 
 from __future__ import annotations
 
