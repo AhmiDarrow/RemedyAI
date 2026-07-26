@@ -226,6 +226,8 @@ export default function App() {
   const [showSetupWizard, setShowSetupWizard] = useState(false)
   const [showUpdateScreen, setShowUpdateScreen] = useState(false)
   const [userName, setUserName] = useState('')
+  /** Partner display name (settings.name) for assistant avatar initials */
+  const [partnerName, setPartnerName] = useState('Remedy')
   const [askUserName, setAskUserName] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
   const [appVersion, setAppVersion] = useState('')
@@ -620,6 +622,8 @@ export default function App() {
         setToolProcessMode(normalizeToolProcess(settings.tool_process ?? settings.show_tool_calls))
         const un = (settings.user_name || '').trim()
         setUserName(un)
+        const pn = (settings.name || '').trim()
+        if (pn) setPartnerName(pn)
         if (settings.version) setAppVersion(String(settings.version))
         if (!needsWizard && !un) {
           try {
@@ -1508,6 +1512,7 @@ export default function App() {
             onQuickPrompt={(text) => void handleSend(text)}
             onRegenerate={(id) => void handleRegenerate(id)}
             userName={userName}
+            partnerName={partnerName}
             onAttachMarkup={handleAttachMarkup}
           />
 

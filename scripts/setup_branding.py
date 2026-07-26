@@ -160,20 +160,18 @@ def generate_icons(source: Path, icons_dir: Path) -> None:
     master_img.save(master_png, "PNG", optimize=True)
     print("  icon-256.png (256x256)")
 
-    # Tray: bold plate (not template-tinted thin monogram).
-    # Ship 32 + 64; conf points at 32, OS may pick @2x when available as icon.png plate.
+    # Tray / taskbar: same original art (no alternate monogram plate).
     for tray_name, tray_size in (
         ("tray-icon.png", 32),
         ("tray-icon@2x.png", 64),
         ("tray-icon-48.png", 48),
     ):
-        plate = _plate_icon(img, tray_size)
-        plate.save(icons_dir / tray_name, "PNG", optimize=True)
-        print(f"  {tray_name} ({tray_size}x{tray_size} plate)")
+        _resize_square(img, tray_size).save(icons_dir / tray_name, "PNG", optimize=True)
+        print(f"  {tray_name} ({tray_size}x{tray_size} original)")
 
-    # Optional larger plate for high-DPI tray / about
+    # Optional plate variant still available for high-contrast UI spots
     _plate_icon(img, 256).save(icons_dir / "icon-plate-256.png", "PNG", optimize=True)
-    print("  icon-plate-256.png (256x256 plate)")
+    print("  icon-plate-256.png (256x256 plate, optional)")
 
     _resize_square(img, 512).save(icons_dir / "icon-512.png", "PNG", optimize=True)
     icns_path = icons_dir / "icon.icns"
@@ -276,18 +274,25 @@ def sync_dist_branding(public_dir: Path, dist_dir: Path) -> None:
 
 
 def main() -> int:
-    icon_src = ASSETS / "remedy_icon.png"
+    # Shell (tray / taskbar / Start / desktop shortcut) uses the original icon art.
+    shell_src = ASSETS / "remedy_icon_original.png"
+    if not shell_src.is_file():
+        shell_src = ASSETS / "remedy_icon.png"
+    # In-app UI monogram can still use the processed alpha icon when present.
+    ui_icon_src = ASSETS / "remedy_icon.png"
+    if not ui_icon_src.is_file():
+        ui_icon_src = shell_src
     logo_src = ASSETS / "remedy_logo.png"
 
-    if not icon_src.exists():
-        print(f"ERROR: {icon_src} not found")
+    if not shell_src.exists():
+        print(f"ERROR: {shell_src} not found")
         return 1
     if not logo_src.exists():
         print(f"ERROR: {logo_src} not found")
         return 1
 
     # Sanity: masters must be true alpha (not baked navy BG).
-    for label, path in (("icon", icon_src), ("logo", logo_src)):
+    for label, path in (("shell", shell_src), ("ui", ui_icon_src), ("logo", logo_src)):
         im = Image.open(path).convert("RGBA")
         a_min = im.getextrema()[3][0]
         if a_min > 10:
@@ -300,12 +305,19 @@ def main() -> int:
 
     print("=== Remedy Branding Setup ===\n")
 
-    print("[1/3] Generating Tauri icons from remedy_icon.png...")
-    generate_icons(icon_src, ICONS_DIR)
+    print(f"[1/3] Generating Tauri shell icons from {shell_src.name}...")
+    generate_icons(shell_src, ICONS_DIR)
     print()
 
     print("[2/3] Setting up public logo + icon + favicons...")
-    setup_public_branding(icon_src, logo_src, PUBLIC_DIR)
+    setup_public_branding(ui_icon_src, logo_src, PUBLIC_DIR)
+    # Also ship original-derived public icon for consistency with shell
+    try:
+        orig = Image.open(shell_src).convert("RGBA")
+        _resize_square(orig, 256).save(PUBLIC_DIR / "icon.png", "PNG", optimize=True)
+        print("  icon.png (from original shell master)")
+    except Exception as exc:
+        print(f"  icon.png original skip: {exc}")
     print()
 
     print("[3/3] Syncing desktop/dist when present...")
@@ -313,7 +325,7 @@ def main() -> int:
     print()
 
     print("=== Done! ===")
-    print("  Masters: assets/remedy_{icon,logo}.png (+ mono variants)")
+    print(f"  Shell master: {shell_src.name}")
     print("  UI: desktop/public/{logo,icon,favicon}.*")
     print("  Shell: desktop/src-tauri/icons/icon.ico (rebuild desktop to embed tray/taskbar).")
     return 0
