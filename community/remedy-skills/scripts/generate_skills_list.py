@@ -32,23 +32,27 @@ def _parse_skill_md(path: Path) -> dict:
 
 
 def _primary_domain(tags: list[str]) -> str:
-    """Bucket skills for readable grouping."""
+    """Bucket skills for readable grouping.
+
+    Prefer more specific domains when multiple tags match (security before design, etc.).
+    """
     tags_l = [t.lower() for t in tags]
+    # First match wins — order by specificity (narrow/high-signal first)
     order = [
         ("gaming", ("gaming", "combat", "level-design", "liveops", "narrative", "multiplayer", "godot", "gdscript", "engine", "pixel-art", "pixellab", "assets")),
-        ("design", ("design", "ui", "ux", "art", "brand", "print", "creative")),
-        ("content", ("content", "writing", "marketing", "video", "audio", "social", "comms", "community", "seo")),
-        ("personal", ("personal", "productivity", "habits", "career", "wellness", "home", "travel", "food", "fitness", "learning", "social", "finance", "planning", "privacy")),
-        ("security", ("security", "secrets", "auth", "privacy", "supply-chain")),
+        ("security", ("security", "secrets", "auth", "supply-chain", "owasp", "threat")),
         ("testing", ("testing", "e2e", "qa", "browser")),
-        ("frontend", ("frontend", "react", "css", "a11y", "i18n")),
+        ("llm", ("llm", "rag", "cost")),
+        ("git", ("git", "pr", "versioning", "conventional-commits")),
+        ("ops", ("ops", "devops", "ci", "docker", "k8s", "reliability", "observability", "sre", "iac", "container")),
         ("backend", ("backend", "api", "database", "graphql", "grpc")),
-        ("ops", ("ops", "devops", "ci", "docker", "k8s", "reliability", "observability", "sre", "iac")),
-        ("git", ("git", "pr", "release", "versioning")),
-        ("llm", ("llm", "rag", "tools", "cost")),
+        ("frontend", ("frontend", "react", "css", "a11y", "i18n")),
         ("data", ("data", "csv", "search")),
-        ("docs", ("docs", "architecture", "process", "product")),
-        ("tooling", ("tooling", "python", "node", "typescript", "go", "rust", "packaging", "quality", "monorepo", "cli", "windows", "upgrade", "config", "network", "perf", "concurrency", "payments", "enterprise")),
+        ("content", ("content", "writing", "marketing", "video", "audio", "comms", "seo", "copy")),
+        ("design", ("design", "ui", "ux", "art", "brand", "print", "creative")),
+        ("docs", ("docs", "architecture", "process", "product", "adr")),
+        ("personal", ("personal", "productivity", "habits", "career", "wellness", "home", "travel", "food", "fitness", "learning", "finance", "planning")),
+        ("tooling", ("tooling", "python", "node", "typescript", "go", "rust", "packaging", "quality", "monorepo", "cli", "windows", "upgrade", "config", "network", "perf", "concurrency", "payments", "enterprise", "release")),
     ]
     for label, keys in order:
         if any(k in tags_l for k in keys):
