@@ -1,0 +1,34 @@
+{
+  "version": "1",
+  "generated_at": "2026-07-26T22:12:49Z",
+  "repository": "AhmiDarrow/remedy-skills",
+  "skills": [
+    {
+      "id": "hello-library",
+      "name": "hello-library",
+      "description": "Demo community skill from the Remedy Skills Library. Prints a short greeting via its script \u2014 safe for quarantine/trust smoke tests.",
+      "version": "1.0.0",
+      "author": "Remedy",
+      "tags": [
+        "demo",
+        "library",
+        "example"
+      ],
+      "download_url": "local:hello-library",
+      "size_bytes": 850,
+      "checksum": "sha256:ae5f903069990b0d574c567d0512a4d9861b8155118562a5dae7733c6439f1b6",
+      "requires": [],
+      "tools": [],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:12:49Z",
+      "published_at": "2026-07-26T22:12:49Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    }
+  ]
+}

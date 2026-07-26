@@ -1,0 +1,35 @@
+name: Update catalog
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install deps
+        run: pip install pyyaml packaging pynacl
+      - name: Build catalog (GitHub release URLs)
+        run: python scripts/build_catalog.py --github-urls --output catalog.json
+      - name: Sign catalog
+        env:
+          REMEDY_SKILLS_SIGNING_KEY: ${{ secrets.REMEDY_SKILLS_SIGNING_KEY }}
+        run: |
+          if [ -z "$REMEDY_SKILLS_SIGNING_KEY" ]; then
+            echo "REMEDY_SKILLS_SIGNING_KEY secret not set — skip sign"
+            exit 1
+          fi
+          python scripts/sign_catalog.py --catalog catalog.json
+      - name: Upload catalog artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: skills-catalog
+          path: |
+            catalog.json
+            catalog.json.sig

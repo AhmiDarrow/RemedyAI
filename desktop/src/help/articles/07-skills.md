@@ -4,7 +4,10 @@ Skills are portable packages (`SKILL.md` + optional scripts) that teach Remedy s
 
 ## Skills panel
 
-Open **Skills** on the status bar:
+Open **Skills** on the status bar. Two tabs:
+
+- **Installed** — your local skills (bundled, learned, imported).
+- **Library** — browse the signed community catalog (`AhmiDarrow/remedy-skills`), install into quarantine, then **Trust**.
 
 | UI | Meaning |
 |----|---------|
@@ -17,7 +20,14 @@ Open **Skills** on the status bar:
 | **Edit MD** | Open an embedded CodeMirror editor for the skill’s `SKILL.md` body |
 | **Export Pack** | Bundle selected (or all) skills into a portable `.zip` |
 | **Import Pack** | Load a pack ZIP; imports stay quarantined until you promote |
+| **Library → Install** | Download from signed catalog; always quarantined first |
+| **Library → Trust** | Clear quarantine and activate after you reviewed the skill |
 | Feedback | Success / fail signals for ranking |
+
+### Skills Library (community)
+
+The library catalog is **Ed25519-signed**. Remedy verifies the signature before listing skills. Installs only use GitHub release assets for `AhmiDarrow/remedy-skills` (or a local monorepo seed for development). Scripts stay blocked until you Trust.
+
 
 API highlights:
 

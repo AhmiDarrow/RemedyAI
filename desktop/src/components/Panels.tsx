@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, type ComponentType } from 'react'
+import { SkillsLibrary } from './SkillsLibrary'
 
 interface PanelProps {
   open: boolean
@@ -407,6 +408,7 @@ export function SkillsPanel({
   onClose: () => void
   onOpenHelp?: (articleId?: string) => void
 }) {
+  const [panelTab, setPanelTab] = useState<'installed' | 'library'>('installed')
   const [skills, setSkills] = useState<SkillRow[]>([])
   const [learning, setLearning] = useState<LearningSummary | null>(null)
   const [loading, setLoading] = useState(false)
@@ -642,6 +644,41 @@ export function SkillsPanel({
           Skills guide in Help wiki →
         </button>
       )}
+      <div className="mb-2 flex gap-1 border-b pb-2" style={{ borderColor: 'var(--border)' }}>
+        <button
+          type="button"
+          className="text-[11px] px-2 py-1 rounded"
+          style={{
+            background: panelTab === 'installed' ? 'var(--bg-tertiary)' : 'transparent',
+            border: panelTab === 'installed' ? '1px solid var(--border)' : '1px solid transparent',
+            color: panelTab === 'installed' ? 'var(--accent)' : 'var(--text-muted)',
+            fontWeight: panelTab === 'installed' ? 600 : 400,
+          }}
+          onClick={() => setPanelTab('installed')}
+        >
+          Installed
+        </button>
+        <button
+          type="button"
+          className="text-[11px] px-2 py-1 rounded"
+          style={{
+            background: panelTab === 'library' ? 'var(--bg-tertiary)' : 'transparent',
+            border: panelTab === 'library' ? '1px solid var(--border)' : '1px solid transparent',
+            color: panelTab === 'library' ? 'var(--accent)' : 'var(--text-muted)',
+            fontWeight: panelTab === 'library' ? 600 : 400,
+          }}
+          onClick={() => setPanelTab('library')}
+        >
+          Library
+        </button>
+      </div>
+      {panelTab === 'library' ? (
+        <div className="flex-1 min-h-0" style={{ minHeight: 280 }}>
+          <SkillsLibrary onInstalled={() => load()} />
+        </div>
+      ) : null}
+      {panelTab === 'installed' ? (
+      <>
       <div className="mb-2 flex gap-1 items-center">
         <input
           value={filter}
@@ -1005,6 +1042,8 @@ export function SkillsPanel({
           </div>
         ))
       )}
+      </>
+      ) : null}
     </Panel>
   )
 }
