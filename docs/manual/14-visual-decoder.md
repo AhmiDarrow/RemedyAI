@@ -48,7 +48,7 @@ Vision and optional local Router refine need the server — which is why auto-st
 
 They never appear as separate chat partners. See [Continuity workers](17-nanoswarm) for the operator guide.
 
-`GET /api/nanoswarm/status` · Settings (Full+) · `/harness` in chat.
+`GET /api/nanoswarm/status` · `/harness` in chat (dev/diagnostics).
 
 ## When it runs (images)
 

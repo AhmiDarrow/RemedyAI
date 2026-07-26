@@ -28,7 +28,7 @@ import type { ModelInfo } from '../App'
 import type { Density } from '../utils/chatPrefs'
 import {
   normalizeToolProcess,
-  showsAdvancedDiagnostics,
+
   type ToolProcessMode,
 } from '../utils/toolLabels'
 import { sectionMatchesSearch } from './SettingsSection'
@@ -195,18 +195,12 @@ export function SettingsPanel({
     try {
       const vs = await getVisionStatus()
       setVision(vs)
-      // Internal continuity metrics only when Tool process is Full+
-      if (showsAdvancedDiagnostics(toolProcess)) {
-        const sw = await getNanoSwarmStatus().catch(() => null)
-        if (sw) setSwarm(sw)
-      } else {
-        setSwarm(null)
-      }
+      setSwarm(null)
       return vs
     } catch {
       return null
     }
-  }, [toolProcess])
+  }, [])
 
   const startVisionInstallPoll = useCallback(() => {
     stopVisionPoll()

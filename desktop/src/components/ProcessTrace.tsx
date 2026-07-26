@@ -39,10 +39,10 @@ function clipFull(text: string | undefined): string {
 }
 
 /**
- * Tool process trail — one chrome for Min / Med / Full / Full+.
+ * Tool process trail — one chrome for Min / Med / Full.
  *
  * - Min:  step labels + status
- * - Med:  labels + always-visible path/cmd/result summary (real info, not empty tabs)
+ * - Med:  labels + always-visible path/cmd/result summary
  * - Full: same rows + full args/results open; follows growth while live
  */
 export function ProcessTrace({

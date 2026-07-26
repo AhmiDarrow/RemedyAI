@@ -302,28 +302,11 @@ async def handle_slash_command(
                     quality_line += f"\nAvg compress quality: {q.get('avg_compress_quality')}"
             except Exception:
                 pass
-            # Advanced internals only when tool process is full+
-            advanced = ""
-            try:
-                from remedy.interfaces.api_support import load_config
-
-                tp = str((load_config() or {}).get("tool_process") or "off").lower()
-                if tp in ("full+", "fullplus", "debug"):
-                    from remedy.nanoswarm import get_swarm
-
-                    st = get_swarm().status()
-                    advanced = (
-                        f"\n\n**Advanced (Full+)** · continuity events {st.get('event_count')} · "
-                        f"local model `{st.get('local_model_id')}`"
-                    )
-            except Exception:
-                pass
             return {
                 "text": (
                     f"**Memory** · compress passes: {brief.compress_count}\n\n"
                     f"{block}"
                     f"{quality_line}"
-                    f"{advanced}"
                 )
             }
         except Exception as e:

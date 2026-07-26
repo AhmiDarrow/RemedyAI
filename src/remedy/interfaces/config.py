@@ -991,7 +991,7 @@ sarcasm_mode = false
 # --- Partner controls (also on status bar / Settings → Security & power) ---
 # approval_mode = "ask"     # ask (safe default) | auto (work-until-done, full owner power)
 # thinking_level = "high"   # off | low | medium | high
-# tool_process = "off"      # off | medium | full | full+
+# tool_process = "off"      # off | medium | full
 # web_tools_enabled = false # opt-in public web_fetch (SSRF-guarded)
 # http_bootstrap = true     # browser loopback token; desktop prefers IPC
 

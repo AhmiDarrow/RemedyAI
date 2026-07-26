@@ -721,12 +721,10 @@ export function StatusBar({
             className="px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide"
             title={
               toolProcessMode === 'off'
-                ? 'Min — answer always full · process chips only (click → Med)'
+                ? 'Min — step names only (click → Med)'
                 : toolProcessMode === 'medium'
-                  ? 'Med — tool labels + short previews (click → Full)'
-                  : toolProcessMode === 'full'
-                    ? 'Full — all model process output, nothing truncated (click → Full+)'
-                    : 'Full+ — full raw + advanced diagnostics (click → Min)'
+                  ? 'Med — path/command + short results (click → Full)'
+                  : 'Full — complete process output (click → Min)'
             }
             aria-label={`Tool process ${toolProcessMode}`}
             style={{
@@ -745,9 +743,7 @@ export function StatusBar({
               ? 'Min'
               : toolProcessMode === 'medium'
                 ? 'Med'
-                : toolProcessMode === 'full+'
-                  ? 'Full+'
-                  : 'Full'}
+                : 'Full'}
           </button>
 
           <ThemeSwitcher currentId={themeId} currentTheme={theme} onChange={onThemeChange} />

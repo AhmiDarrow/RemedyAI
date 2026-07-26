@@ -86,7 +86,7 @@ The desktop app bundles the full Remedy server as a sidecar, so everything runs 
 |---------|-------------|
 | **Chat UI** | Streaming markdown bubbles (you right / Remedy left); shrink-wrap size; stick-to-bottom unless you scroll up (**↓** resumes) |
 | **Your name** | Settings + first-run: what Remedy calls you; avatar initials in chat |
-| **Tool process** | **Min / Med / Full / Full+** — answer always complete; Full shows all tool args/results (Settings + status bar) |
+| **Tool process** | **Min / Med / Full** — answer always complete; Full shows all tool args/results (Settings + status bar) |
 | **Icons** | Copy / edit / send / attach as icons (language-neutral); image lightbox |
 | **Prompt history** | **↑ / ↓** in the composer for previous prompts (shell-style) |
 | **Sessions** | Tabs; auto-title from first prompt; rename; search / pin / tags |

@@ -23,7 +23,7 @@ import { HOTKEYS } from '../../hotkeys'
 import type { ModelInfo } from '../../App'
 import type { Density } from '../../utils/chatPrefs'
 import {
-  showsAdvancedDiagnostics,
+
   TOOL_PROCESS_MODES,
   type ToolProcessMode,
 } from '../../utils/toolLabels'
@@ -903,47 +903,6 @@ export function SettingsFormSections(p: SettingsFormProps): ReactNode {
               <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
                 {TOOL_PROCESS_MODES.find((m) => m.id === toolProcess)?.hint}
               </div>
-              {showsAdvancedDiagnostics(toolProcess) && swarm?.bots ? (
-                <div
-                  className="rounded-md px-2 py-1.5 mt-2 text-[10px] space-y-0.5"
-                  style={{
-                    background: 'var(--bg-tertiary)',
-                    border: '1px solid var(--border)',
-                    color: 'var(--text-secondary)',
-                  }}
-                >
-                  <div
-                    className="flex justify-between gap-2 font-medium"
-                    style={{ color: 'var(--text-primary)' }}
-                  >
-                    <span>Advanced · continuity activity</span>
-                    <span>{swarm.event_count ?? 0} events</span>
-                  </div>
-                  <div style={{ color: 'var(--text-muted)' }}>
-                    Internal: context measure · patterns · memory brief · skills · router
-                    {swarm.local_model_id ? ` · local ${swarm.local_model_id}` : ''}
-                  </div>
-                  {typeof (swarm.bots.memory as { last_fill_pct?: number })?.last_fill_pct ===
-                  'number' ? (
-                    <div>
-                      Context fill ~
-                      {Math.round(
-                        Number(
-                          (swarm.bots.memory as { last_fill_pct?: number }).last_fill_pct || 0,
-                        ) * 100,
-                      )}
-                      % · estimate{' '}
-                      {String(
-                        (swarm.bots.token as { last_method?: string })?.last_method || 'heuristic',
-                      )}
-                    </div>
-                  ) : null}
-                  <div style={{ color: 'var(--text-muted)' }}>
-                    Use /harness in chat for session quality baselines (tokens saved, stuck /
-                    re-explain rates, compress quality).
-                  </div>
-                </div>
-              ) : null}
             </SettingsSection>
 
             {/* Local vision — user-facing; no swarm branding */}

@@ -121,18 +121,17 @@ On long tool runs, Remedy auto-saves **checkpoints** under `~/.remedy/checkpoint
 
 If a long task soft-fails, open the latest checkpoint (or ask “show last checkpoint”) to resume without losing done/next context.
 
-## Tool process (Min / Med / Full / Full+)
+## Tool process (Min / Med / Full)
 
 Controls the **tool trail** under assistant messages. The model’s **chat answer is always complete** — process mode never hides or truncates what the model said to you.
 
 | Mode | You see |
 |------|---------|
-| **Min** (default) | Progress chips · thinking collapsible |
-| **Med** | Labels + status + short previews (expand a step for more) |
-| **Full** | Thinking open · complete raw args and every tool result |
-| **Full+** | Full raw + advanced continuity diagnostics |
+| **Min** (default) | Process step names + status |
+| **Med** | Same list + path/command one-liners and short results |
+| **Full** | Same list + complete args/results (expanded by default) |
 
-Change via status bar or Settings. Full/Full+ keep process expanded after the turn so nothing important is buried.
+Change via status bar or Settings. Full keeps process expanded after the turn so nothing important is buried.
 
 ## Thinking & approvals
 

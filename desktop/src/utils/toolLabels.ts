@@ -3,17 +3,13 @@
 /**
  * Tool-process visibility — progressive detail in the **same** Process UI.
  *
- * Contract:
- * - Chat answer is never truncated or hidden by this setting.
- * - Thinking is always stored; Full/Full+ open it by default.
- * - Min → Med → Full → Full+ only add more of the same trail (not alternate layouts).
+ * - **Min (off)**: step names + status only.
+ * - **Med**: path/command one-liners + short result body.
+ * - **Full**: complete args/results, open by default.
  *
- * - **Min (off)**: Process list — step names + status only.
- * - **Med**: same list + always-visible path/command/result one-liners (and short result body).
- * - **Full**: same list + full args/results open; follows new output while live.
- * - **Full+**: Full + advanced diagnostics (settings / continuity internals).
+ * Chat answer is never truncated. (Legacy `full+` maps to Full.)
  */
-export type ToolProcessMode = 'off' | 'medium' | 'full' | 'full+'
+export type ToolProcessMode = 'off' | 'medium' | 'full'
 
 export const TOOL_PROCESS_MODES: { id: ToolProcessMode; label: string; hint: string }[] = [
   {
@@ -31,20 +27,16 @@ export const TOOL_PROCESS_MODES: { id: ToolProcessMode; label: string; hint: str
     label: 'Full',
     hint: 'Same list with complete args/results (auto-scrolls while live)',
   },
-  {
-    id: 'full+',
-    label: 'Full+',
-    hint: 'Full process detail + advanced diagnostics in Settings',
-  },
 ]
 
 /** Cycle order for status-bar Proc button. */
-export const TOOL_PROCESS_CYCLE: ToolProcessMode[] = ['off', 'medium', 'full', 'full+']
+export const TOOL_PROCESS_CYCLE: ToolProcessMode[] = ['off', 'medium', 'full']
 
-/** Full or Full+ — never truncate process dumps; expand by default. */
+/** Full — never truncate process dumps; expand by default. */
 export function isFullProcessMode(mode: ToolProcessMode | string | undefined): boolean {
   const m = String(mode || '').toLowerCase()
-  return m === 'full' || m === 'full+' || m === 'fullplus' || m === 'full_plus'
+  // Legacy full+ treated as full
+  return m === 'full' || m === 'full+' || m === 'fullplus' || m === 'full_plus' || m === 'debug'
 }
 
 /**
@@ -55,13 +47,12 @@ export function showsProcessTrace(_mode?: ToolProcessMode | string): boolean {
   return true
 }
 
-/** Advanced diagnostics (session quality / internal continuity) only in Full+. */
-export function showsAdvancedDiagnostics(mode: ToolProcessMode | string | undefined): boolean {
-  const m = String(mode || '').toLowerCase()
-  return m === 'full+' || m === 'fullplus' || m === 'full_plus' || m === 'debug'
+/** @deprecated Full+ removed — always false (dev diagnostics not user-facing). */
+export function showsAdvancedDiagnostics(_mode?: ToolProcessMode | string): boolean {
+  return false
 }
 
-/** After a turn, Full/Full+ start expanded; Min/Med start collapsed. */
+/** After a turn, Full starts expanded; Min/Med start collapsed. */
 export function processDefaultCollapsed(
   mode: ToolProcessMode | string | undefined,
   live = false,
@@ -88,7 +79,6 @@ export function toolLabel(name: string | undefined | null): string {
   if (!n) return 'Using tool'
   const key = n.toLowerCase()
   if (LABELS[key]) return LABELS[key]
-  // snake_case → Title words
   const pretty = n
     .replace(/[_-]+/g, ' ')
     .replace(/\b\w/g, (c) => c.toUpperCase())
@@ -98,9 +88,20 @@ export function toolLabel(name: string | undefined | null): string {
 export function normalizeToolProcess(raw: unknown): ToolProcessMode {
   const s = String(raw ?? 'off').trim().toLowerCase()
   if (s === 'medium' || s === 'med') return 'medium'
-  if (s === 'full+' || s === 'fullplus' || s === 'full_plus' || s === 'debug') return 'full+'
-  if (s === 'full' || s === 'on' || s === 'true' || s === '1' || s === 'yes') return 'full'
-  // legacy show_tool_calls true
+  // full+ / debug → full (removed user-facing Full+)
+  if (
+    s === 'full'
+    || s === 'full+'
+    || s === 'fullplus'
+    || s === 'full_plus'
+    || s === 'debug'
+    || s === 'on'
+    || s === 'true'
+    || s === '1'
+    || s === 'yes'
+  ) {
+    return 'full'
+  }
   if (raw === true) return 'full'
   if (s === 'min' || s === 'minimal' || s === 'off' || s === 'none') return 'off'
   return 'off'
@@ -113,9 +114,7 @@ export type ProcessStep = {
   status: 'running' | 'done' | 'error'
   startedAt: number
   endedAt?: number
-  /** Short or full dump of args */
   argsText?: string
-  /** Short or full dump of result */
   resultText?: string
   error?: string
 }
@@ -144,7 +143,6 @@ export function stepsFromMessageTools(
       error: res?.error,
     })
   })
-  // Results without matching calls
   if (!toolCalls.length && toolResults.length) {
     toolResults.forEach((r, i) => {
       steps.push({

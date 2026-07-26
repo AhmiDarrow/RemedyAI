@@ -43,7 +43,7 @@ Remedy tracks more than “tokens left”:
 - **Continuity quality** — did compression keep the right paths and decisions?  
 - **Stuck / re-explain rates** — silent signals that recovery guidance should kick in  
 
-Advanced diagnostics (Full+ tool process) can show continuity activity. Normal use never requires that.
+Normal use never requires internal continuity diagnostics (`/harness` for operators).
 
 ## Compression is fidelity under budget
 

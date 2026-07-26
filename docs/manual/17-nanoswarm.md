@@ -2,7 +2,7 @@
 
 This chapter is for **owners and operators** who want to understand what runs
 under the hood. In normal chat you still talk to **one Remedy** — not a cast of
-agents. Full+ tool process can surface diagnostics; everyday use does not.
+agents. Everyday use does not surface internal diagnostics.
 
 ## Why it exists
 
@@ -86,7 +86,7 @@ any vendor merge tables.
 |------|--------|
 | Harness mode **auto** | ContextSnapshot + compress nudges on |
 | Harness **off** | Skips snapshot continuity pass |
-| Tool process **Full+** | Continuity activity visible in UI |
+| `/harness` in chat | Continuity / session quality (operators) |
 | `REMEDY_LIVE_MODELS=0` | Disable live provider model listing |
 | `REMEDY_BPE=0` | Disable owned BPE; heuristic token estimates |
 | Vision enable + auto_start | Local Qwen with Remedy |

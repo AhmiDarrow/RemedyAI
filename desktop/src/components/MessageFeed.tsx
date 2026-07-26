@@ -53,7 +53,7 @@ interface MessageFeedProps {
   activeTools?: ActiveTool[]
   processSteps?: ProcessStep[]
   taskProgress?: TaskProgressInfo | null
-  /** off | medium | full | full+ — never hides the chat answer */
+  /** off | medium | full — never hides the chat answer */
   toolProcessMode?: ToolProcessMode
   onEditUserMessage?: (msgId: string, content: string) => void
   onQuickPrompt?: (text: string) => void
