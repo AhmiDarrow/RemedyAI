@@ -1,8 +1,1716 @@
 {
   "version": "1",
-  "generated_at": "2026-07-26T22:12:49Z",
+  "generated_at": "2026-07-26T22:33:46Z",
   "repository": "AhmiDarrow/remedy-skills",
   "skills": [
+    {
+      "id": "acceptance-criteria",
+      "name": "acceptance-criteria",
+      "description": "Write testable acceptance criteria for a feature or bugfix.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "product",
+        "testing"
+      ],
+      "download_url": "local:acceptance-criteria",
+      "size_bytes": 706,
+      "checksum": "sha256:078b05b3184ecd37c59cffbf8d3427ba51b4dd4015942031ae2ffbd4ecced236",
+      "requires": [],
+      "tools": [
+        "file_read"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "adr-write",
+      "name": "adr-write",
+      "description": "Write an Architecture Decision Record for a significant technical choice.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "docs",
+        "architecture"
+      ],
+      "download_url": "local:adr-write",
+      "size_bytes": 709,
+      "checksum": "sha256:9d22ddcf5f3038b4ea0fbc8a6dff87d93d5995c540f8264991a53ab5186d88cb",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "algorithmic-complexity",
+      "name": "algorithmic-complexity",
+      "description": "Find accidental quadratic patterns and propose better data structures.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "perf"
+      ],
+      "download_url": "local:algorithmic-complexity",
+      "size_bytes": 723,
+      "checksum": "sha256:89fb8f9af2e88788ebe5383937a45f6226525a9a4a8fa072cefe836b075d129c",
+      "requires": [],
+      "tools": [
+        "file_read"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "api-client-sdk",
+      "name": "api-client-sdk",
+      "description": "Generate or refresh a typed client from OpenAPI for consumers.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "api",
+        "docs"
+      ],
+      "download_url": "local:api-client-sdk",
+      "size_bytes": 731,
+      "checksum": "sha256:a660eb5de693ef0cb4302a3ad442af1f36d8ad03fb1ae6c3147fbc293ee656b8",
+      "requires": [],
+      "tools": [
+        "bash_exec",
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "api-contract-review",
+      "name": "api-contract-review",
+      "description": "Review HTTP APIs for validation, authz, status codes, pagination, and error shape consistency.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "api",
+        "backend"
+      ],
+      "download_url": "local:api-contract-review",
+      "size_bytes": 813,
+      "checksum": "sha256:17d84937bef85e9151fe2aaaadbe5996e974a6eec64fed7bff7b8a3c2f2081fe",
+      "requires": [],
+      "tools": [
+        "file_read"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "audit-log-design",
+      "name": "audit-log-design",
+      "description": "Design audit logs for sensitive admin/user actions.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "security",
+        "ops"
+      ],
+      "download_url": "local:audit-log-design",
+      "size_bytes": 734,
+      "checksum": "sha256:16f77566ef85a4b7959ba44fcceb7b379a9bb4e375efce038a7a38e5da30c4c9",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "auth-session-review",
+      "name": "auth-session-review",
+      "description": "Review login, session, JWT, or OAuth handling for common authentication flaws.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "security",
+        "auth"
+      ],
+      "download_url": "local:auth-session-review",
+      "size_bytes": 874,
+      "checksum": "sha256:2843c8674010ccf18725bde59e34b83ac1939cc875b39144b1b872473a18ac0e",
+      "requires": [],
+      "tools": [
+        "file_read"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "background-job-ui",
+      "name": "background-job-ui",
+      "description": "Expose long-running job progress/status to users with authz and safe errors.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "backend",
+        "product"
+      ],
+      "download_url": "local:background-job-ui",
+      "size_bytes": 752,
+      "checksum": "sha256:e2a8c51e9184336c3a018d3e4951b7456377f9109560b2ff32096767b83922f3",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "backup-restore-drill",
+      "name": "backup-restore-drill",
+      "description": "Plan or execute a non-destructive backup restore drill and document RTO/RPO.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "ops",
+        "reliability"
+      ],
+      "download_url": "local:backup-restore-drill",
+      "size_bytes": 767,
+      "checksum": "sha256:88856c5180d6a3b4362410065be2bb5e635ec60884cde401169532980140e820",
+      "requires": [],
+      "tools": [
+        "bash_exec",
+        "file_read"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "backward-compat-api",
+      "name": "backward-compat-api",
+      "description": "Plan backward-compatible API evolution and deprecation windows.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "api",
+        "release"
+      ],
+      "download_url": "local:backward-compat-api",
+      "size_bytes": 699,
+      "checksum": "sha256:bf6e8e5bc000b3de0e1cff5f7a4be19e2cd71e81ab34be637637617b3c7cb030",
+      "requires": [],
+      "tools": [
+        "file_read"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "benchmark-micro",
+      "name": "benchmark-micro",
+      "description": "Create a trustworthy microbenchmark for a profiled hot function.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "perf",
+        "testing"
+      ],
+      "download_url": "local:benchmark-micro",
+      "size_bytes": 738,
+      "checksum": "sha256:10ffd76a3274788c339be1483759afb9f266153f4dddaca782ba046428eab041",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write",
+        "bash_exec"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "branch-hygiene",
+      "name": "branch-hygiene",
+      "description": "Prune merged local branches, fetch --prune, and name a clean branch for the next task.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "git"
+      ],
+      "download_url": "local:branch-hygiene",
+      "size_bytes": 831,
+      "checksum": "sha256:c8d360f95f2ded87cdf07cd15498400d3a7cf68d139dab5fbc8fe3b772fe10cc",
+      "requires": [],
+      "tools": [
+        "bash_exec"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "browser-automation-safe",
+      "name": "browser-automation-safe",
+      "description": "Automate browser checks with Playwright-style best practices (stable selectors, no fixed sleeps).",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "browser",
+        "e2e",
+        "testing"
+      ],
+      "download_url": "local:browser-automation-safe",
+      "size_bytes": 851,
+      "checksum": "sha256:facaf959c960663e14991222156e745a6fe62529455e85a1502990fa7a3de6ad",
+      "requires": [],
+      "tools": [
+        "bash_exec",
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "bug-report-template",
+      "name": "bug-report-template",
+      "description": "Turn a vague bug into a reproducible report: environment, steps, expected/actual.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "product",
+        "docs"
+      ],
+      "download_url": "local:bug-report-template",
+      "size_bytes": 732,
+      "checksum": "sha256:43fd929a329494f9c668ff40b7790df2cec8adc1fbe0ce6b42fd6c4484ae18f5",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "bundle-size-check",
+      "name": "bundle-size-check",
+      "description": "Find JS bundle size regressions and propose splits or dependency cuts.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "frontend",
+        "perf"
+      ],
+      "download_url": "local:bundle-size-check",
+      "size_bytes": 767,
+      "checksum": "sha256:1c965107b4dbc8dfc32c86f97e81827433fd2cebd53a8cf32b8869f5bcb19ed9",
+      "requires": [],
+      "tools": [
+        "bash_exec",
+        "file_read"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "cache-invalidation",
+      "name": "cache-invalidation",
+      "description": "Design cache keys and invalidation to prevent stale reads and stampedes.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "backend",
+        "perf"
+      ],
+      "download_url": "local:cache-invalidation",
+      "size_bytes": 773,
+      "checksum": "sha256:8c5f22aba3533090ed5f713820f026075c1da034fbdbbcf409ad9eaa8777c371",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "changelog-entry",
+      "name": "changelog-entry",
+      "description": "Author a Keep-a-Changelog entry from commits/diff for a version bump or release.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "docs",
+        "release"
+      ],
+      "download_url": "local:changelog-entry",
+      "size_bytes": 942,
+      "checksum": "sha256:6cf3c940adbc4685a99a06ef6846453944a7701393a4aa77878faf1c66e0872a",
+      "requires": [],
+      "tools": [
+        "bash_exec",
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "cherry-pick-commit",
+      "name": "cherry-pick-commit",
+      "description": "Cherry-pick specific commits onto the current branch with careful conflict resolution.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "git"
+      ],
+      "download_url": "local:cherry-pick-commit",
+      "size_bytes": 816,
+      "checksum": "sha256:f97c4c00be4cf8f368f77ffb36dfd9bfb7a49713c680d01a88dd9c6913765aa9",
+      "requires": [],
+      "tools": [
+        "bash_exec"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "ci-pipeline-review",
+      "name": "ci-pipeline-review",
+      "description": "Review CI pipelines for caching, secret hygiene, required checks, and runtime.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "ci",
+        "devops"
+      ],
+      "download_url": "local:ci-pipeline-review",
+      "size_bytes": 802,
+      "checksum": "sha256:796718087c5ac5e5f194ce70513e7f9c902c4a8b7ce2e7418b9a1d3f5ae26ef4",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "cli-ux-polish",
+      "name": "cli-ux-polish",
+      "description": "Polish CLI help, flags, exit codes, and non-interactive CI mode.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "cli",
+        "ux"
+      ],
+      "download_url": "local:cli-ux-polish",
+      "size_bytes": 720,
+      "checksum": "sha256:80262c2714c4a92cacfc229b85dc1e621c21675f3b75b4a6181c2d418cba049d",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "codeowners-setup",
+      "name": "codeowners-setup",
+      "description": "Create CODEOWNERS for critical paths and align with review rules.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "git",
+        "process"
+      ],
+      "download_url": "local:codeowners-setup",
+      "size_bytes": 727,
+      "checksum": "sha256:d0ed932076ba003229d31ac6b0267f5505e56accdcd7d887ced781e02a7e3fc7",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "compose-dev-env",
+      "name": "compose-dev-env",
+      "description": "Provide docker compose for local dependencies with healthchecks and sane ports.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "docker",
+        "devops"
+      ],
+      "download_url": "local:compose-dev-env",
+      "size_bytes": 772,
+      "checksum": "sha256:48ec8a968611cd1729fcb416ffd3854964464166b6b98694336554e3f7c74093",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "contract-test-api",
+      "name": "contract-test-api",
+      "description": "Add consumer/provider contract tests so API changes don't silently break clients.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "testing",
+        "api"
+      ],
+      "download_url": "local:contract-test-api",
+      "size_bytes": 759,
+      "checksum": "sha256:72c7d5cea55fb10ae8f460ea25c6c811cb8b8a52265fdf5783136f27505b09b8",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write",
+        "bash_exec"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "conventional-commits",
+      "name": "conventional-commits",
+      "description": "Propose or write Conventional Commit messages (feat/fix/docs/chore) matching the diff.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "git",
+        "docs"
+      ],
+      "download_url": "local:conventional-commits",
+      "size_bytes": 931,
+      "checksum": "sha256:70cf3259a2db3c3d8f7def9eff88217ee166436cadb609559a2390c2b9693fec",
+      "requires": [],
+      "tools": [
+        "bash_exec",
+        "file_read"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "cors-review",
+      "name": "cors-review",
+      "description": "Review CORS settings for overly broad origins and credentialed cross-origin risks.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "security",
+        "web"
+      ],
+      "download_url": "local:cors-review",
+      "size_bytes": 740,
+      "checksum": "sha256:08bfd599c27fd360ce20e00ed67efc7790f04e6bfd856b131546fd2e6dcf5801",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "coverage-gap",
+      "name": "coverage-gap",
+      "description": "Find coverage gaps on changed critical code and add focused tests.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "testing"
+      ],
+      "download_url": "local:coverage-gap",
+      "size_bytes": 757,
+      "checksum": "sha256:a07678d9d42f59dd2e8897272b19646e1e11b7aae9fb498f82d0cd262b094619",
+      "requires": [],
+      "tools": [
+        "bash_exec",
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "cron-job-design",
+      "name": "cron-job-design",
+      "description": "Design scheduled jobs with overlap locks, idempotency, and failure alerts.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "backend",
+        "ops"
+      ],
+      "download_url": "local:cron-job-design",
+      "size_bytes": 740,
+      "checksum": "sha256:9212f4b7268da166cb18679547d763f07592826fdcd768e1b8f72e4874592c49",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "cross-platform-paths",
+      "name": "cross-platform-paths",
+      "description": "Fix Windows/macOS/Linux path bugs using pathlib and safe joins.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "windows",
+        "quality"
+      ],
+      "download_url": "local:cross-platform-paths",
+      "size_bytes": 769,
+      "checksum": "sha256:73a9f8a05adc399aa2b84691f70dde2257696fd037a86cee78f61273535ca97d",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "css-specificity-debug",
+      "name": "css-specificity-debug",
+      "description": "Debug why a CSS rule loses (specificity, order, layers) and fix cleanly.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "frontend",
+        "css"
+      ],
+      "download_url": "local:css-specificity-debug",
+      "size_bytes": 780,
+      "checksum": "sha256:61fe1ae117ab0f6515180c80783a0bcf5835a2062087fd9588d1d77c647f669e",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "csv-data-cleanup",
+      "name": "csv-data-cleanup",
+      "description": "Profile and clean CSV/TSV data: encoding, types, nulls, dedupe, report.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "data",
+        "csv"
+      ],
+      "download_url": "local:csv-data-cleanup",
+      "size_bytes": 786,
+      "checksum": "sha256:a8f757f426fbcad6d9993e0017e5d377b37b446f4c82bcc56f97ef6d3b90dbce",
+      "requires": [],
+      "tools": [
+        "bash_exec",
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "data-deletion-user",
+      "name": "data-deletion-user",
+      "description": "Implement account deletion with re-auth, cascade/anonymize, and session revoke.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "privacy",
+        "backend"
+      ],
+      "download_url": "local:data-deletion-user",
+      "size_bytes": 740,
+      "checksum": "sha256:1d01ca1bab673569f964f2058f66780c96be038f511c62239fe60c109f5fbc6f",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "data-export-user",
+      "name": "data-export-user",
+      "description": "Implement authenticated user data export with async processing if large.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "privacy",
+        "backend"
+      ],
+      "download_url": "local:data-export-user",
+      "size_bytes": 723,
+      "checksum": "sha256:d789a79b0327858ae7c45dda8fc5c622d34320eff9f0e27ddcac0b120ab8145b",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "datetime-timezone",
+      "name": "datetime-timezone",
+      "description": "Fix datetime bugs by storing UTC and converting only at the edge.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "quality",
+        "backend"
+      ],
+      "download_url": "local:datetime-timezone",
+      "size_bytes": 739,
+      "checksum": "sha256:41006c4bbe7658a237fedbef1030b62118d40e90931f6424c482389c8068b1a0",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "db-migration-safe",
+      "name": "db-migration-safe",
+      "description": "Write or review DB migrations using expand/contract safety and rollback notes.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "database",
+        "backend"
+      ],
+      "download_url": "local:db-migration-safe",
+      "size_bytes": 808,
+      "checksum": "sha256:539d7a97ece8ee891bb892823e9873e0b36dac1492c4ecf9de24c6190070f4e5",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write",
+        "bash_exec"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "deadlock-debug",
+      "name": "deadlock-debug",
+      "description": "Debug deadlocks via stack dumps and lock-order fixes.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "debug",
+        "concurrency"
+      ],
+      "download_url": "local:deadlock-debug",
+      "size_bytes": 720,
+      "checksum": "sha256:7ee89047ce15da3c7fb51a587153a66a548daca3737b69fff2fe378e5927b6d6",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "bash_exec"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "dependency-audit",
+      "name": "dependency-audit",
+      "description": "Audit project dependencies for known vulnerabilities and outdated high-risk packages.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "security",
+        "deps"
+      ],
+      "download_url": "local:dependency-audit",
+      "size_bytes": 895,
+      "checksum": "sha256:62335153ae194a38521649cc9517e70b94971aae4fa43d8613463d351bfbca4d",
+      "requires": [],
+      "tools": [
+        "bash_exec",
+        "file_read"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "design-token-sync",
+      "name": "design-token-sync",
+      "description": "Replace one-off colors/spacing with design tokens / CSS variables already in the project.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "frontend",
+        "design"
+      ],
+      "download_url": "local:design-token-sync",
+      "size_bytes": 791,
+      "checksum": "sha256:ba23d851f40d02f92aff0da7e324007f3f8e91eb594bc5d93ec8b7835d80aa30",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "devcontainer-setup",
+      "name": "devcontainer-setup",
+      "description": "Add a devcontainer for reproducible contributor environments.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "tooling",
+        "docker"
+      ],
+      "download_url": "local:devcontainer-setup",
+      "size_bytes": 713,
+      "checksum": "sha256:bb8f419297deacdb07b0b35c84a106078e448713961330e1918719ed495e716c",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "dockerfile-harden",
+      "name": "dockerfile-harden",
+      "description": "Write or harden Dockerfiles: multi-stage, non-root, pin bases, no secrets in layers.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "docker",
+        "devops"
+      ],
+      "download_url": "local:dockerfile-harden",
+      "size_bytes": 754,
+      "checksum": "sha256:910a6b38b2396c0bf534d3ae34e443003f60a63c7cb42821744aabf69b8da97b",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "docs-api-examples",
+      "name": "docs-api-examples",
+      "description": "Add runnable request/response examples to API docs for the hardest endpoints.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "docs",
+        "api"
+      ],
+      "download_url": "local:docs-api-examples",
+      "size_bytes": 725,
+      "checksum": "sha256:4bba5db23f0534d548f2b37c9d9d931ace870079ea372fa2faf4795f2cca2617",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "e2e-smoke",
+      "name": "e2e-smoke",
+      "description": "Define or run a short end-to-end smoke path for the critical user journey.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "testing",
+        "e2e"
+      ],
+      "download_url": "local:e2e-smoke",
+      "size_bytes": 761,
+      "checksum": "sha256:e464102681e9abb7b0d0590d63c8db483d407422930fb921f0f7881c2494f3b2",
+      "requires": [],
+      "tools": [
+        "bash_exec",
+        "file_read"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "editorconfig-setup",
+      "name": "editorconfig-setup",
+      "description": "Add .editorconfig aligned with project formatters.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "tooling"
+      ],
+      "download_url": "local:editorconfig-setup",
+      "size_bytes": 729,
+      "checksum": "sha256:52a745573ffc4a64ea1591001160a33f91022eb7765fc3348e305080be1bca4f",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "email-template-review",
+      "name": "email-template-review",
+      "description": "Review HTML emails for client safety, plain-text parts, and injection.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "frontend",
+        "email"
+      ],
+      "download_url": "local:email-template-review",
+      "size_bytes": 720,
+      "checksum": "sha256:f2cdc225aa2fc70ec3fa9b94a7ddd1779d88a8a2236c90cea69fc7aeca03287c",
+      "requires": [],
+      "tools": [
+        "file_read"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "empty-state-design",
+      "name": "empty-state-design",
+      "description": "Add clear empty/error/no-results states with next actions.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "frontend",
+        "ux"
+      ],
+      "download_url": "local:empty-state-design",
+      "size_bytes": 732,
+      "checksum": "sha256:7183e06f1a5490d5ed39642f3180f2928c998ac33e3333d9aa4b9fe0c51f1106",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "encoding-fix",
+      "name": "encoding-fix",
+      "description": "Fix Unicode/encoding issues (UTF-8, BOM, mislabeled files).",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "data",
+        "debug"
+      ],
+      "download_url": "local:encoding-fix",
+      "size_bytes": 775,
+      "checksum": "sha256:a04d329c7a5a182e445dba5d62bfc8da1e228d1648aaf9165567fee603eafa83",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write",
+        "bash_exec"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "env-config-12factor",
+      "name": "env-config-12factor",
+      "description": "Refactor configuration to env-based 12-factor style with validated startup.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "backend",
+        "config"
+      ],
+      "download_url": "local:env-config-12factor",
+      "size_bytes": 746,
+      "checksum": "sha256:1c8e228e6790ba3bc6bcfcbb7063cd5c56849121775163b49437e1d8b441f917",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "feature-flag-rollout",
+      "name": "feature-flag-rollout",
+      "description": "Add a feature flag with default-off rollout, metrics, and removal plan.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "product",
+        "release"
+      ],
+      "download_url": "local:feature-flag-rollout",
+      "size_bytes": 740,
+      "checksum": "sha256:41cc4a725f200084b6b091a4433610dc503f934dc63e27fd31d06d293f29b069",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "feature-toggle-cleanup",
+      "name": "feature-toggle-cleanup",
+      "description": "Find stale feature flags and remove dead code paths safely.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "product",
+        "quality"
+      ],
+      "download_url": "local:feature-toggle-cleanup",
+      "size_bytes": 755,
+      "checksum": "sha256:25b7a8b825f95130120bee5f56b0ba617a93f83bda20fd3564c6a5f7998ef499",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write",
+        "bash_exec"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "file-upload-secure",
+      "name": "file-upload-secure",
+      "description": "Harden file uploads: authz, size/type checks, safe storage keys, download posture.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "security",
+        "backend"
+      ],
+      "download_url": "local:file-upload-secure",
+      "size_bytes": 830,
+      "checksum": "sha256:67ab9c8186bbb3436520f4ead122f74a73f01e087a67e207544d31580d1be24b",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "fixture-factory",
+      "name": "fixture-factory",
+      "description": "Create maintainable test factories/fixtures instead of brittle object literals everywhere.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "testing"
+      ],
+      "download_url": "local:fixture-factory",
+      "size_bytes": 762,
+      "checksum": "sha256:0e9c92f09c4c2c08c0c0688b6a65536324a031906b5ea39d61954b0fe5d6a0e2",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "flaky-test-triage",
+      "name": "flaky-test-triage",
+      "description": "Reproduce and fix flaky tests: races, time, order dependence, shared state.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "testing",
+        "debug"
+      ],
+      "download_url": "local:flaky-test-triage",
+      "size_bytes": 821,
+      "checksum": "sha256:4ec5c286fd23141733467e78a7dea41931fd04de51f63577b24ab821ef1236cf",
+      "requires": [],
+      "tools": [
+        "bash_exec",
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "form-validation-ux",
+      "name": "form-validation-ux",
+      "description": "Improve form validation and error mapping UX (inline errors, double-submit, a11y).",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "frontend",
+        "ux"
+      ],
+      "download_url": "local:form-validation-ux",
+      "size_bytes": 772,
+      "checksum": "sha256:11a2336af72f72a96998074195446a072ad71008f1729655af82445002cccbfc",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "frontend-a11y",
+      "name": "frontend-a11y",
+      "description": "Audit and fix high-impact accessibility issues in UI code (names, keyboard, semantics).",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "frontend",
+        "a11y"
+      ],
+      "download_url": "local:frontend-a11y",
+      "size_bytes": 794,
+      "checksum": "sha256:4b50be05539ae6613b38cc63b0d63be92c8b772ffb4b67ef39810f00c38621b2",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write",
+        "bash_exec"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "git-bisect-helper",
+      "name": "git-bisect-helper",
+      "description": "Drive git bisect with a clear good/bad test command to find a regression-introducing commit.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "git",
+        "debug"
+      ],
+      "download_url": "local:git-bisect-helper",
+      "size_bytes": 835,
+      "checksum": "sha256:553e1bf8a6666eaacd8b5fed7211dbef0e2ce62ff7daa2d8e2dcbef1770900a4",
+      "requires": [],
+      "tools": [
+        "bash_exec",
+        "file_read"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "go-module-hygiene",
+      "name": "go-module-hygiene",
+      "description": "Tidy Go modules and verify reproducible builds/tests.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "go"
+      ],
+      "download_url": "local:go-module-hygiene",
+      "size_bytes": 705,
+      "checksum": "sha256:8c4ad345e0c82b8c8704a7f499673ea2d930e0c80af70e022a55bd45efde269b",
+      "requires": [],
+      "tools": [
+        "bash_exec",
+        "file_read"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "graceful-shutdown",
+      "name": "graceful-shutdown",
+      "description": "Implement SIGTERM-aware graceful shutdown and drain for servers/workers.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "backend",
+        "reliability"
+      ],
+      "download_url": "local:graceful-shutdown",
+      "size_bytes": 756,
+      "checksum": "sha256:2ce9358f73861e61322c590057ac3cf09e378ed736d4726d99a84543aa1b5d19",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "graphql-schema-review",
+      "name": "graphql-schema-review",
+      "description": "Review GraphQL schemas/resolvers for authz, N+1, pagination, and deprecations.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "api",
+        "graphql"
+      ],
+      "download_url": "local:graphql-schema-review",
+      "size_bytes": 721,
+      "checksum": "sha256:e32b4d922c0a7ec2564bf173f7caac3254abd78c939b479d1a47984a2726d3e5",
+      "requires": [],
+      "tools": [
+        "file_read"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "grpc-api-design",
+      "name": "grpc-api-design",
+      "description": "Design/review gRPC protos with versioning, deadlines, and idempotency.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "api",
+        "grpc"
+      ],
+      "download_url": "local:grpc-api-design",
+      "size_bytes": 727,
+      "checksum": "sha256:ae68e7165de26fbbf175179e8a1abcdda68a08e96e5c3aff652ac4b6ac0fabc7",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "health-endpoints",
+      "name": "health-endpoints",
+      "description": "Add liveness vs readiness endpoints with appropriate dependency checks.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "backend",
+        "ops"
+      ],
+      "download_url": "local:health-endpoints",
+      "size_bytes": 724,
+      "checksum": "sha256:fb5e8d59e63a59b5bd3c76d800526e655beab3ee393298625a1f8d4112de27c5",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
     {
       "id": "hello-library",
       "name": "hello-library",
@@ -22,8 +1730,1899 @@
       "rating": 0.0,
       "installs": 0,
       "reviews_count": 0,
-      "updated_at": "2026-07-26T22:12:49Z",
-      "published_at": "2026-07-26T22:12:49Z",
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "http-debugging",
+      "name": "http-debugging",
+      "description": "Debug HTTP failures with curl -v, status/headers, and TLS basics (redact auth).",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "network",
+        "debug"
+      ],
+      "download_url": "local:http-debugging",
+      "size_bytes": 769,
+      "checksum": "sha256:b3c42c26733735e86073f45b13cda8c8c7d3e1e90372cc51201e3a4fe17994a1",
+      "requires": [],
+      "tools": [
+        "bash_exec",
+        "file_read"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "i18n-extract",
+      "name": "i18n-extract",
+      "description": "Extract UI strings into i18n catalogs and find missing locale keys.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "frontend",
+        "i18n"
+      ],
+      "download_url": "local:i18n-extract",
+      "size_bytes": 759,
+      "checksum": "sha256:4932f8e47652d9486703943e03a99a7bae233b966317d0589029a1292efa015c",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write",
+        "bash_exec"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "idempotent-api",
+      "name": "idempotent-api",
+      "description": "Make a mutating endpoint safely retryable with idempotency keys.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "api",
+        "reliability"
+      ],
+      "download_url": "local:idempotent-api",
+      "size_bytes": 766,
+      "checksum": "sha256:852997c26507ce2154365610ccfc91a8f3715ec28b4c8515e79fd0afbb350ad6",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "incident-postmortem",
+      "name": "incident-postmortem",
+      "description": "Write a blameless postmortem with timeline, root cause, and owned actions.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "ops",
+        "docs"
+      ],
+      "download_url": "local:incident-postmortem",
+      "size_bytes": 740,
+      "checksum": "sha256:a45bf56dd5e2660ab0eb29f7bf6f367af2660cf96e974acbe8030f145f4dce1d",
+      "requires": [],
+      "tools": [
+        "file_write",
+        "file_read"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "json-schema-design",
+      "name": "json-schema-design",
+      "description": "Design tight JSON Schema / Zod / Pydantic models with bounds and examples.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "api",
+        "data"
+      ],
+      "download_url": "local:json-schema-design",
+      "size_bytes": 764,
+      "checksum": "sha256:f6b9e2bf96a0d84760dacbd876b09efa23ed3a1ef7f4964b017a403c2b933708",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "k8s-manifest-review",
+      "name": "k8s-manifest-review",
+      "description": "Review Kubernetes manifests for probes, resources, securityContext, and rollout safety.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "k8s",
+        "devops"
+      ],
+      "download_url": "local:k8s-manifest-review",
+      "size_bytes": 780,
+      "checksum": "sha256:01296ea33107a3585463b371f2278eceec8b37926e1ea17122d3807d7349396c",
+      "requires": [],
+      "tools": [
+        "file_read"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "license-compliance",
+      "name": "license-compliance",
+      "description": "Summarize third-party licenses and flag strong copyleft risk for distribution.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "legal",
+        "deps"
+      ],
+      "download_url": "local:license-compliance",
+      "size_bytes": 824,
+      "checksum": "sha256:39adc39eeb6ec00c267058f2947d882a05c6d869c3bada8ec55894005a65a450",
+      "requires": [],
+      "tools": [
+        "bash_exec",
+        "file_read"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "llm-cost-guardrails",
+      "name": "llm-cost-guardrails",
+      "description": "Add token/cost/latency guardrails and sensible model routing.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "llm",
+        "cost"
+      ],
+      "download_url": "local:llm-cost-guardrails",
+      "size_bytes": 773,
+      "checksum": "sha256:b00bdff6877d33631b60d8c51dcd8af3c2e7080c20f241eb45e796570a263291",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "load-test-plan",
+      "name": "load-test-plan",
+      "description": "Design and run a minimal load test on critical endpoints with clear stop conditions.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "perf",
+        "testing"
+      ],
+      "download_url": "local:load-test-plan",
+      "size_bytes": 831,
+      "checksum": "sha256:12b87a4ad7ee2a1c9f9679c50405a0641eb658eb1ce50e2b12e7e9e86601de9f",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write",
+        "bash_exec"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "log-level-triage",
+      "name": "log-level-triage",
+      "description": "Triage production issues from logs: timeline, correlation IDs, dependency health.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "ops",
+        "debug"
+      ],
+      "download_url": "local:log-level-triage",
+      "size_bytes": 781,
+      "checksum": "sha256:91e77fb61c009056a95a5648d072988d20b691c91fb63e433f8efcb5dd89f58d",
+      "requires": [],
+      "tools": [
+        "bash_exec",
+        "file_read"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "makefile-tasks",
+      "name": "makefile-tasks",
+      "description": "Add Makefile/task targets wrapping real project commands (setup/test/lint/run).",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "tooling"
+      ],
+      "download_url": "local:makefile-tasks",
+      "size_bytes": 723,
+      "checksum": "sha256:6432a8943b71eb0427cb18d06a71725b1a586400a0f63d7d636813234a9c554d",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "markdown-doc-structure",
+      "name": "markdown-doc-structure",
+      "description": "Restructure Markdown documentation for clear heading hierarchy and working links.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "docs"
+      ],
+      "download_url": "local:markdown-doc-structure",
+      "size_bytes": 752,
+      "checksum": "sha256:2bbf84d7e16cec5ad81c0bf0dc1de289db151112bbbc3b3609e0c622fe5016be",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "memory-leak-hunt",
+      "name": "memory-leak-hunt",
+      "description": "Find memory growth in long-running services via profiles and retained allocations.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "perf",
+        "debug"
+      ],
+      "download_url": "local:memory-leak-hunt",
+      "size_bytes": 768,
+      "checksum": "sha256:0c59af19bfab1787bcc78a5dc5be86169226968ef38a480d459ff5ee080b9e71",
+      "requires": [],
+      "tools": [
+        "bash_exec",
+        "file_read"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "metrics-instrumentation",
+      "name": "metrics-instrumentation",
+      "description": "Add RED/USE-style metrics without high-cardinality label explosions.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "ops",
+        "observability"
+      ],
+      "download_url": "local:metrics-instrumentation",
+      "size_bytes": 774,
+      "checksum": "sha256:22989760f36436fdec0d640d951a87fa973709a8cec18e87ff52999c2d470197",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "migration-data-backfill",
+      "name": "migration-data-backfill",
+      "description": "Plan batched data backfills that won't lock production tables.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "database",
+        "ops"
+      ],
+      "download_url": "local:migration-data-backfill",
+      "size_bytes": 758,
+      "checksum": "sha256:c4b0e2a4753e52b3b0f953e005f20b1ed5c66c3bd72227fb4a5405f5084b1118",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write",
+        "bash_exec"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "money-calculations",
+      "name": "money-calculations",
+      "description": "Implement money math with integers/decimals, explicit rounding, and currency codes.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "backend",
+        "finance"
+      ],
+      "download_url": "local:money-calculations",
+      "size_bytes": 745,
+      "checksum": "sha256:bf2d7c11ef2c0a358d06e820a8d4e61fd9436bb8686a53e414886a021fd27a92",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "monorepo-task-runner",
+      "name": "monorepo-task-runner",
+      "description": "Fix monorepo task graphs (turbo/nx/pnpm) for filtered build/test.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "monorepo",
+        "tooling"
+      ],
+      "download_url": "local:monorepo-task-runner",
+      "size_bytes": 755,
+      "checksum": "sha256:3dab7ddeebd778c2a58c5c97f9937044073f46096061da02f23254882ceba7ef",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write",
+        "bash_exec"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "multi-tenant-isolation",
+      "name": "multi-tenant-isolation",
+      "description": "Audit multi-tenant isolation for cross-tenant data leaks.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "security",
+        "backend"
+      ],
+      "download_url": "local:multi-tenant-isolation",
+      "size_bytes": 798,
+      "checksum": "sha256:9c20a8f5db6f495e5de98f028843022ca6004619ea0cd613eafdfe55708e0d2a",
+      "requires": [],
+      "tools": [
+        "file_read"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "nodejs-upgrade",
+      "name": "nodejs-upgrade",
+      "description": "Plan and execute a Node.js runtime upgrade with CI and dependency checks.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "node",
+        "upgrade"
+      ],
+      "download_url": "local:nodejs-upgrade",
+      "size_bytes": 737,
+      "checksum": "sha256:3dc309484b5d8dc174f70cf5e60aa5654e65ea144e1365f64eba7bb9c0188420",
+      "requires": [],
+      "tools": [
+        "bash_exec",
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "oauth-app-setup",
+      "name": "oauth-app-setup",
+      "description": "Configure OAuth/OIDC clients correctly (PKCE, redirects, scopes, token storage).",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "auth",
+        "security"
+      ],
+      "download_url": "local:oauth-app-setup",
+      "size_bytes": 739,
+      "checksum": "sha256:2686eb84de980686a998e250f7406d67f938cee8f1e023218bd5d78ca77f6281",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "onboarding-checklist",
+      "name": "onboarding-checklist",
+      "description": "Design a dismissible first-run checklist that drives activation.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "product",
+        "ux"
+      ],
+      "download_url": "local:onboarding-checklist",
+      "size_bytes": 734,
+      "checksum": "sha256:c6ef800469b874e57f1e3e72fd9b27027f04803846deddd2dffe01d46d5c16d8",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "openapi-sync",
+      "name": "openapi-sync",
+      "description": "Regenerate or manually sync OpenAPI with implemented routes and flag breaking changes.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "api",
+        "docs"
+      ],
+      "download_url": "local:openapi-sync",
+      "size_bytes": 765,
+      "checksum": "sha256:59be52720fa4cfa9e2c7a65f12e8566b0f7d22d030deb5c0955b33fe6ebc1571",
+      "requires": [],
+      "tools": [
+        "bash_exec",
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "owasp-web-checklist",
+      "name": "owasp-web-checklist",
+      "description": "Security-review a web change against practical OWASP-style controls (injection, XSS, authz, CSRF, SSRF).",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "security",
+        "web"
+      ],
+      "download_url": "local:owasp-web-checklist",
+      "size_bytes": 917,
+      "checksum": "sha256:7efe429f53ea839a2e56db3c46baa48119182f92fe9a2fa686d60f2313b25c5d",
+      "requires": [],
+      "tools": [
+        "file_read"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "pagination-standard",
+      "name": "pagination-standard",
+      "description": "Add stable list pagination (cursor preferred) with enforced max limits.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "api",
+        "backend"
+      ],
+      "download_url": "local:pagination-standard",
+      "size_bytes": 750,
+      "checksum": "sha256:671b49c6136c8b5810fe881b7669d05a18124b5ad9e84420e0d71622ebc665a1",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "pagination-ui",
+      "name": "pagination-ui",
+      "description": "Implement accessible list pagination or load-more with URL state.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "frontend",
+        "ux"
+      ],
+      "download_url": "local:pagination-ui",
+      "size_bytes": 737,
+      "checksum": "sha256:e988c41f2f7f5e8cf8984afbda7766011ec2320f11ba02365223d831f2f8ebfa",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "perf-profile-cpu",
+      "name": "perf-profile-cpu",
+      "description": "Capture and interpret a CPU profile to find hot functions before optimizing.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "perf",
+        "debug"
+      ],
+      "download_url": "local:perf-profile-cpu",
+      "size_bytes": 757,
+      "checksum": "sha256:bcd2a5b58dbdccba2ad239f3c0482f1b132fd190cc38f65294ec927661496095",
+      "requires": [],
+      "tools": [
+        "bash_exec",
+        "file_read"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "permissions-matrix",
+      "name": "permissions-matrix",
+      "description": "Build a role\u00d7action permission matrix and verify server enforcement.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "security",
+        "product"
+      ],
+      "download_url": "local:permissions-matrix",
+      "size_bytes": 729,
+      "checksum": "sha256:617bd476920acc69c3991994ba17874e5574338928e34df79e42303ee29578c1",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "pii-data-handling",
+      "name": "pii-data-handling",
+      "description": "Minimize and protect PII: access, logs redaction, retention, deletion paths.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "security",
+        "privacy"
+      ],
+      "download_url": "local:pii-data-handling",
+      "size_bytes": 781,
+      "checksum": "sha256:60e59ce9513a0958e5035bd33001529084ecc11d87380586c11a5e89f462f3fd",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "pr-description",
+      "name": "pr-description",
+      "description": "Draft a precise PR title and body from branch commits and diff. Use before opening or updating a pull request.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "git",
+        "pr",
+        "docs"
+      ],
+      "download_url": "local:pr-description",
+      "size_bytes": 1088,
+      "checksum": "sha256:ad5533d22aab19469f9a7b688482ad3b308e8b71d2acd5234d866e98854580c8",
+      "requires": [],
+      "tools": [
+        "bash_exec",
+        "file_read"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "pre-commit-hooks",
+      "name": "pre-commit-hooks",
+      "description": "Configure pre-commit/husky hooks for format, lint, and optional secret scan.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "tooling",
+        "quality"
+      ],
+      "download_url": "local:pre-commit-hooks",
+      "size_bytes": 741,
+      "checksum": "sha256:47e66313b9dc74662e22c68849274cb3ac9cbcbdeeca96133eb87b352db48ad2",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write",
+        "bash_exec"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "prompt-eval-harness",
+      "name": "prompt-eval-harness",
+      "description": "Build a small regression suite for prompts/agent behaviors with deterministic checks.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "llm",
+        "testing"
+      ],
+      "download_url": "local:prompt-eval-harness",
+      "size_bytes": 804,
+      "checksum": "sha256:e342cd349b02d81b76b32cd9b7f1e3f763a3231795ef1d0252c980015379adc4",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write",
+        "bash_exec"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "python-packaging",
+      "name": "python-packaging",
+      "description": "Package Python projects with pyproject entry points and a clean build/install check.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "python",
+        "packaging"
+      ],
+      "download_url": "local:python-packaging",
+      "size_bytes": 762,
+      "checksum": "sha256:17470f74bd8a21516e9ab35a0f0e1b694f3a69795e36e8229ce3023bc5a47f15",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write",
+        "bash_exec"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "python-typing-pass",
+      "name": "python-typing-pass",
+      "description": "Raise typing quality on selected Python modules until mypy/pyright is clean.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "python",
+        "quality"
+      ],
+      "download_url": "local:python-typing-pass",
+      "size_bytes": 772,
+      "checksum": "sha256:e0d2e8bc81ef80dbee090ea673dde256c9ccb0025521acd450a51d8a5a3c6a42",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write",
+        "bash_exec"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "queue-consumer-safe",
+      "name": "queue-consumer-safe",
+      "description": "Build safe queue consumers: ack semantics, retries, DLQ, idempotent handlers.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "backend",
+        "ops"
+      ],
+      "download_url": "local:queue-consumer-safe",
+      "size_bytes": 783,
+      "checksum": "sha256:55d2c872ed43762402af6e71da9f9ed77812b097eae000180eb7ce5421ca378a",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "rag-chunking",
+      "name": "rag-chunking",
+      "description": "Design document chunking and metadata for higher-quality RAG retrieval.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "llm",
+        "rag"
+      ],
+      "download_url": "local:rag-chunking",
+      "size_bytes": 750,
+      "checksum": "sha256:31aa99405cfe49e2cb41084d04fd4565a8f102338904fab75aba0ed32f560357",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "rate-limit-design",
+      "name": "rate-limit-design",
+      "description": "Design rate limits for public/auth endpoints with clear 429 behavior.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "backend",
+        "security"
+      ],
+      "download_url": "local:rate-limit-design",
+      "size_bytes": 780,
+      "checksum": "sha256:195b822480584bce4d75c01aee2b801d3fdb5adff81d9913c8b070ae360adbfe",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "react-performance",
+      "name": "react-performance",
+      "description": "Fix common React performance issues after identifying hot components.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "frontend",
+        "react",
+        "perf"
+      ],
+      "download_url": "local:react-performance",
+      "size_bytes": 787,
+      "checksum": "sha256:be21916939b8c9299efd0ec982e29482c9b501b01b9bcaa5b483b46daa2c7ddb",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "rebase-onto-main",
+      "name": "rebase-onto-main",
+      "description": "Update the current branch onto latest main/master via rebase or merge with conflict handling.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "git"
+      ],
+      "download_url": "local:rebase-onto-main",
+      "size_bytes": 852,
+      "checksum": "sha256:e7e69b5145af65d6b28768bac37c4394ab1a000f485b2761a1d07b6a42b5d5b6",
+      "requires": [],
+      "tools": [
+        "bash_exec"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "regex-safety",
+      "name": "regex-safety",
+      "description": "Review regexes for ReDoS and correctness on untrusted input.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "security",
+        "quality"
+      ],
+      "download_url": "local:regex-safety",
+      "size_bytes": 702,
+      "checksum": "sha256:8aa477ce0fbd7b6e85699239312368ce5298d1a6cf8f714dc080c069e1b86394",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "release-checklist",
+      "name": "release-checklist",
+      "description": "Execute a pre-release gate: dirty tree, version alignment, tests, docs, remaining ship steps.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "release",
+        "ci"
+      ],
+      "download_url": "local:release-checklist",
+      "size_bytes": 953,
+      "checksum": "sha256:895a616b2efe706252991e5349f34dc9f7c109cb0582b4fd3b44a2fbe436a7a9",
+      "requires": [],
+      "tools": [
+        "bash_exec",
+        "file_read"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "responsive-ui-pass",
+      "name": "responsive-ui-pass",
+      "description": "Fix layout breakage across mobile/tablet/desktop widths.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "frontend",
+        "css"
+      ],
+      "download_url": "local:responsive-ui-pass",
+      "size_bytes": 767,
+      "checksum": "sha256:32c9c97b0ef21d63fcae0db410fbcec0821c7a12dc92db07b1a4dba9127e7772",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "retro-notes",
+      "name": "retro-notes",
+      "description": "Run a lightweight blameless retro and produce concrete action items.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "process"
+      ],
+      "download_url": "local:retro-notes",
+      "size_bytes": 692,
+      "checksum": "sha256:e26e3b41a2813fce05e20109d54a7a0e7ed5b10502adc7a50a15915f6973ce7b",
+      "requires": [],
+      "tools": [
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "runbook-write",
+      "name": "runbook-write",
+      "description": "Author an on-call runbook: health checks, common failures, deploy/rollback.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "docs",
+        "ops"
+      ],
+      "download_url": "local:runbook-write",
+      "size_bytes": 760,
+      "checksum": "sha256:b96d7fcb31f3a1cd4a5bfd6a92e65e27c6345ba8e146234113c0965b975c8f6b",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "rust-clippy-fix",
+      "name": "rust-clippy-fix",
+      "description": "Run Clippy and fix correctness-oriented lints; re-test.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "rust",
+        "quality"
+      ],
+      "download_url": "local:rust-clippy-fix",
+      "size_bytes": 718,
+      "checksum": "sha256:4adf41287f5722f8b3647531fff709cb13629e2a17e08d2b846ecedcee28d1e0",
+      "requires": [],
+      "tools": [
+        "bash_exec",
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "saml-sso-notes",
+      "name": "saml-sso-notes",
+      "description": "Enterprise SAML SSO integration checklist (metadata, assertions, JIT).",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "auth",
+        "enterprise"
+      ],
+      "download_url": "local:saml-sso-notes",
+      "size_bytes": 732,
+      "checksum": "sha256:0ed781d706e29ce632021eb599f06b76666c34f413f1921e81593e1459cc2012",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "sbom-generate",
+      "name": "sbom-generate",
+      "description": "Generate a Software Bill of Materials (CycloneDX/SPDX) using available tooling.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "security",
+        "supply-chain"
+      ],
+      "download_url": "local:sbom-generate",
+      "size_bytes": 778,
+      "checksum": "sha256:d61a8bb57d1a3112efb16a18033546e23f21f3d8b77852c4360cf8ee1ea880c6",
+      "requires": [],
+      "tools": [
+        "bash_exec",
+        "file_read"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "search-indexing",
+      "name": "search-indexing",
+      "description": "Design app search indexing and sync (FTS or search engine) with relevance checks.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "backend",
+        "search"
+      ],
+      "download_url": "local:search-indexing",
+      "size_bytes": 741,
+      "checksum": "sha256:c83827155e943031d3ba3ecd0dd0397f8e728644d26aa9e78d91895f2dbc3d5a",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "secret-scan-guidance",
+      "name": "secret-scan-guidance",
+      "description": "Find likely leaked secrets in the tree and guide rotation without printing secret values.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "security",
+        "secrets"
+      ],
+      "download_url": "local:secret-scan-guidance",
+      "size_bytes": 914,
+      "checksum": "sha256:131b4dfd2f1cfd8d37ccab6b74e3afc8dc673828b1a325da4177fe711851b86b",
+      "requires": [],
+      "tools": [
+        "bash_exec",
+        "file_read"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "semver-bump",
+      "name": "semver-bump",
+      "description": "Recommend major/minor/patch from the change set and apply a consistent version bump.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "release",
+        "versioning"
+      ],
+      "download_url": "local:semver-bump",
+      "size_bytes": 895,
+      "checksum": "sha256:3fb0611dccd69348823cde567419b01a3b883667993c2940be6ba375d247ffc4",
+      "requires": [],
+      "tools": [
+        "bash_exec",
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "seo-basics",
+      "name": "seo-basics",
+      "description": "Apply basic technical SEO checks to marketing/docs pages.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "frontend",
+        "marketing"
+      ],
+      "download_url": "local:seo-basics",
+      "size_bytes": 684,
+      "checksum": "sha256:85e6bc1126e9636d4c07d58787503cf87aa6e35ea6d3d52d2f44d4a2d2231f4f",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "sla-error-budget",
+      "name": "sla-error-budget",
+      "description": "Define practical SLIs/SLOs and an error-budget policy for a service.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "ops",
+        "sre"
+      ],
+      "download_url": "local:sla-error-budget",
+      "size_bytes": 724,
+      "checksum": "sha256:1deb88f881c64a9ea1d2bc7121a381747b4efb6bdaf17033edc847475b78e29b",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "snapshot-test-discipline",
+      "name": "snapshot-test-discipline",
+      "description": "Tame snapshot tests: reduce scope, review diffs, avoid golden files that hide bugs.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "testing"
+      ],
+      "download_url": "local:snapshot-test-discipline",
+      "size_bytes": 774,
+      "checksum": "sha256:980d9a7788b4c5fa7f476ef1cf9538a9004e821ff638d56a2987fc543af390ef",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "sql-query-review",
+      "name": "sql-query-review",
+      "description": "Review SQL/ORM usage for N+1, injection, and missing indexes.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "database",
+        "perf",
+        "security"
+      ],
+      "download_url": "local:sql-query-review",
+      "size_bytes": 808,
+      "checksum": "sha256:68107403149cf3aa8aa75f934ff8b134aa30a968aaac8f27fcb332240dd54ee3",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "bash_exec"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "stripe-webhook-flow",
+      "name": "stripe-webhook-flow",
+      "description": "Implement payment webhooks with verification and idempotent entitlement updates.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "payments",
+        "backend"
+      ],
+      "download_url": "local:stripe-webhook-flow",
+      "size_bytes": 766,
+      "checksum": "sha256:740b6450083b80192d30dc4ad0669cc42d2dc5d3303650b2454bee1051e5e87a",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "structured-logging",
+      "name": "structured-logging",
+      "description": "Introduce structured logging with levels, correlation IDs, and secret redaction.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "ops",
+        "quality"
+      ],
+      "download_url": "local:structured-logging",
+      "size_bytes": 750,
+      "checksum": "sha256:9e724ed4545bc9b88282c97df414d8f5c850deb22e0dd6248b198b99ae5cd61c",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "terraform-plan-review",
+      "name": "terraform-plan-review",
+      "description": "Review Terraform plans for destroys, public exposure, and IAM blast radius before apply.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "iac",
+        "devops"
+      ],
+      "download_url": "local:terraform-plan-review",
+      "size_bytes": 781,
+      "checksum": "sha256:3378e3051d6e54494b4bf8dc5c9a16497a56e88ef8e74310a4812b86219ddb2a",
+      "requires": [],
+      "tools": [
+        "bash_exec",
+        "file_read"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "test-selection",
+      "name": "test-selection",
+      "description": "Select and run the smallest high-value tests for the current change set.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "testing",
+        "ci"
+      ],
+      "download_url": "local:test-selection",
+      "size_bytes": 774,
+      "checksum": "sha256:7388022b5bbb8744eb7fcf27f5abb67b6f652c6a5a9845114b5f884a5e2912d4",
+      "requires": [],
+      "tools": [
+        "bash_exec",
+        "file_read"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "threat-model-lite",
+      "name": "threat-model-lite",
+      "description": "Write a one-page threat model for a feature: assets, actors, entry points, mitigations.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "security",
+        "design"
+      ],
+      "download_url": "local:threat-model-lite",
+      "size_bytes": 781,
+      "checksum": "sha256:56c943554a6e0fd7af3e98e917120d9865f54659bf44edf22a1f5e595f620c04",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "tool-use-spec",
+      "name": "tool-use-spec",
+      "description": "Specify safe tool/function contracts: schemas, side effects, confirmations, timeouts.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "llm",
+        "tools"
+      ],
+      "download_url": "local:tool-use-spec",
+      "size_bytes": 735,
+      "checksum": "sha256:c90df521e73cbf08e4d01d0d1cad5bfdb1084b6767f9cd36552aea4b64dbffa0",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "tracing-spans",
+      "name": "tracing-spans",
+      "description": "Add distributed tracing spans across request and outbound calls.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "ops",
+        "observability"
+      ],
+      "download_url": "local:tracing-spans",
+      "size_bytes": 749,
+      "checksum": "sha256:f25a0b63a5156588fd3735eb8433c1cc083cb2a5d153e947ba78aec56b230c9b",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "ts-strict-migration",
+      "name": "ts-strict-migration",
+      "description": "Incrementally enable TypeScript strictness without a big-bang freeze.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "typescript",
+        "quality"
+      ],
+      "download_url": "local:ts-strict-migration",
+      "size_bytes": 760,
+      "checksum": "sha256:963dc65754e0bc58ff411d50c3c5a8f105d4e8d7ca2aab67b59bd545eaf8d599",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write",
+        "bash_exec"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "user-story-split",
+      "name": "user-story-split",
+      "description": "Split an epic into vertical, testable user stories with acceptance criteria.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "product",
+        "planning"
+      ],
+      "download_url": "local:user-story-split",
+      "size_bytes": 727,
+      "checksum": "sha256:cfa740824b85a06b5f851f24192eb1e874a3e1503b381bce58a7361b6fcaf4d4",
+      "requires": [],
+      "tools": [
+        "file_read"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "visual-regression-setup",
+      "name": "visual-regression-setup",
+      "description": "Add a small visual regression set for critical screens with stable snapshots.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "frontend",
+        "testing"
+      ],
+      "download_url": "local:visual-regression-setup",
+      "size_bytes": 825,
+      "checksum": "sha256:9676feb8e551e60466f095fc308e949f12147063529562f7d22597ea293013dd",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write",
+        "bash_exec"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "webhook-verify",
+      "name": "webhook-verify",
+      "description": "Implement or review webhook receivers: signature verification, raw body, replay protection, idempotency.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "security",
+        "api"
+      ],
+      "download_url": "local:webhook-verify",
+      "size_bytes": 826,
+      "checksum": "sha256:858a0dbe53a4df7a43d4f9fbc87c81305568d05ad828db385aa544388c879de6",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "file_write"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
+      "compatible_remedy": [
+        ">=0.15.0"
+      ],
+      "security_flags": [],
+      "status": "published"
+    },
+    {
+      "id": "websocket-debug",
+      "name": "websocket-debug",
+      "description": "Diagnose WebSocket handshake, auth, ping/pong, and reconnect storms.",
+      "version": "1.0.0",
+      "author": "Remedy Official",
+      "tags": [
+        "network",
+        "debug"
+      ],
+      "download_url": "local:websocket-debug",
+      "size_bytes": 755,
+      "checksum": "sha256:14fcabf9d18729e9cf7084bd1db6c0784e57d4420c1d6a735b73e261999452aa",
+      "requires": [],
+      "tools": [
+        "file_read",
+        "bash_exec"
+      ],
+      "rating": 0.0,
+      "installs": 0,
+      "reviews_count": 0,
+      "updated_at": "2026-07-26T22:33:46Z",
+      "published_at": "2026-07-26T22:33:46Z",
       "compatible_remedy": [
         ">=0.15.0"
       ],
