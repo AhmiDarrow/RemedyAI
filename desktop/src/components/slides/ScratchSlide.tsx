@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { isTauri, tauriInvoke } from '../../api/tauri'
 
 function storageKey(sessionId: string | null) {
@@ -14,6 +14,7 @@ export function ScratchSlide({ sessionId }: { sessionId: string | null }) {
   const [preview, setPreview] = useState(false)
   const [status, setStatus] = useState('')
   const key = useMemo(() => storageKey(sessionId), [sessionId])
+  const persistTimer = useRef<number | null>(null)
 
   useEffect(() => {
     try {
@@ -22,10 +23,15 @@ export function ScratchSlide({ sessionId }: { sessionId: string | null }) {
     } catch {
       setText('')
     }
+    return () => {
+      if (persistTimer.current != null) {
+        window.clearTimeout(persistTimer.current)
+        persistTimer.current = null
+      }
+    }
   }, [key])
 
-  const save = (v: string) => {
-    setText(v)
+  const persistNow = (v: string) => {
     try {
       localStorage.setItem(key, v)
     } catch {
@@ -33,7 +39,30 @@ export function ScratchSlide({ sessionId }: { sessionId: string | null }) {
     }
   }
 
+  /** Immediate UI update; debounce localStorage writes while typing. */
+  const save = (v: string, flush = false) => {
+    setText(v)
+    if (persistTimer.current != null) {
+      window.clearTimeout(persistTimer.current)
+      persistTimer.current = null
+    }
+    if (flush) {
+      persistNow(v)
+      return
+    }
+    persistTimer.current = window.setTimeout(() => {
+      persistTimer.current = null
+      persistNow(v)
+    }, 250)
+  }
+
   const download = async () => {
+    // Flush any debounced persist so disk export matches the textarea.
+    if (persistTimer.current != null) {
+      window.clearTimeout(persistTimer.current)
+      persistTimer.current = null
+    }
+    persistNow(text)
     const name = `scratch-${(sessionId || 'global').slice(0, 8)}.md`
     if (isTauri()) {
       try {
@@ -93,7 +122,7 @@ export function ScratchSlide({ sessionId }: { sessionId: string | null }) {
           className="px-1.5 py-0.5 rounded"
           style={{ color: 'var(--error)' }}
           onClick={() => {
-            if (window.confirm('Clear this scratch pad?')) save('')
+            if (window.confirm('Clear this scratch pad?')) save('', true)
           }}
         >
           Clear

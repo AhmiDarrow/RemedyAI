@@ -67,6 +67,18 @@ def test_plan_mode_tool_names_exclude_shell():
     assert "file_read" in PLAN_MODE_TOOL_NAMES
     assert "list_dir" in PLAN_MODE_TOOL_NAMES
     assert "repo_search" in PLAN_MODE_TOOL_NAMES
+    assert "web_search" in PLAN_MODE_TOOL_NAMES
+    assert "media_read" in PLAN_MODE_TOOL_NAMES
+    assert "vision_describe" in PLAN_MODE_TOOL_NAMES
+    # High-impact / mutating tools must stay out
+    for blocked in (
+        "skill_run",
+        "job_run",
+        "mission_start",
+        "comfyui",
+        "apply_patch",
+    ):
+        assert blocked not in PLAN_MODE_TOOL_NAMES
     assert "Approve" in PLAN_MODE_SYSTEM_ADDENDUM or "plan_save" in PLAN_MODE_SYSTEM_ADDENDUM
 
 

@@ -1,0 +1,30 @@
+import { describe, expect, it } from 'vitest'
+import { isOpenableBrowserUrl, normalizeBrowserUrl } from './browserUrl'
+
+describe('browserUrl', () => {
+  it('prefixes https for bare hosts', () => {
+    expect(normalizeBrowserUrl('example.com/path')).toBe('https://example.com/path')
+    expect(normalizeBrowserUrl('  github.com  ')).toBe('https://github.com')
+  })
+
+  it('preserves http(s) and about:', () => {
+    expect(normalizeBrowserUrl('http://localhost:3000')).toBe('http://localhost:3000')
+    expect(normalizeBrowserUrl('https://x.ai')).toBe('https://x.ai')
+    expect(normalizeBrowserUrl('about:blank')).toBe('about:blank')
+  })
+
+  it('blocks dangerous schemes', () => {
+    expect(normalizeBrowserUrl('javascript:alert(1)')).toBe('')
+    expect(normalizeBrowserUrl('data:text/html,hi')).toBe('')
+    expect(normalizeBrowserUrl('file:///C:/Windows')).toBe('')
+    expect(normalizeBrowserUrl('')).toBe('')
+  })
+
+  it('isOpenableBrowserUrl matches external open allowlist', () => {
+    expect(isOpenableBrowserUrl('https://a.com')).toBe(true)
+    expect(isOpenableBrowserUrl('http://a.com')).toBe(true)
+    expect(isOpenableBrowserUrl('about:blank')).toBe(true)
+    expect(isOpenableBrowserUrl('javascript:x')).toBe(false)
+    expect(isOpenableBrowserUrl('file:///x')).toBe(false)
+  })
+})

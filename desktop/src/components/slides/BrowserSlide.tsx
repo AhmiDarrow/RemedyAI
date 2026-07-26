@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react'
 import { isTauri, tauriInvoke } from '../../api/tauri'
+import { isOpenableBrowserUrl, normalizeBrowserUrl } from '../../utils/browserUrl'
 
 const HOME = 'https://github.com/AhmiDarrow/RemedyAI'
 
@@ -13,16 +14,12 @@ export function BrowserSlide() {
   const [frameBlocked, setFrameBlocked] = useState(false)
   const [status, setStatus] = useState('')
 
-  const normalize = (raw: string) => {
-    let u = raw.trim()
-    if (!u) return ''
-    if (!/^https?:\/\//i.test(u) && !u.startsWith('about:')) u = `https://${u}`
-    return u
-  }
-
   const go = (raw: string) => {
-    const u = normalize(raw)
-    if (!u) return
+    const u = normalizeBrowserUrl(raw)
+    if (!u) {
+      setStatus('Enter an http(s) URL')
+      return
+    }
     setUrl(u)
     setActive(u)
     setFrameBlocked(false)
@@ -31,8 +28,11 @@ export function BrowserSlide() {
 
   const openExternal = useCallback(
     async (preferFirefox: boolean) => {
-      const u = normalize(url) || active
-      if (!u) return
+      const u = normalizeBrowserUrl(url) || active
+      if (!u || !isOpenableBrowserUrl(u)) {
+        setStatus('Enter an http(s) URL')
+        return
+      }
       setStatus(preferFirefox ? 'Opening Firefox…' : 'Opening browser…')
       try {
         if (isTauri()) {

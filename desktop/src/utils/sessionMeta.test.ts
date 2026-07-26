@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import {
   DEFAULT_AUTO_ARCHIVE_DAYS,
   getAllSessionMeta,
+  getAutoArchiveDays,
   isSessionArchived,
+  setAutoArchiveDays,
   setSessionMeta,
   toggleSessionArchive,
   toggleSessionPin,
@@ -81,5 +83,22 @@ describe('sessionMeta archive rules', () => {
     toggleSessionPin('s5')
     expect(getAllSessionMeta()['s5']?.pinned).toBe(true)
     expect(getAllSessionMeta()['s5']?.archived).toBe(false)
+  })
+
+  it('missing auto-archive key uses default (not Number(null)===0)', () => {
+    expect(localStorage.getItem('remedy.autoArchiveDays')).toBeNull()
+    expect(getAutoArchiveDays()).toBe(DEFAULT_AUTO_ARCHIVE_DAYS)
+    // Explicit empty string also falls back
+    localStorage.setItem('remedy.autoArchiveDays', '')
+    expect(getAutoArchiveDays()).toBe(DEFAULT_AUTO_ARCHIVE_DAYS)
+  })
+
+  it('setAutoArchiveDays 0 disables age-based archive', () => {
+    setAutoArchiveDays(0)
+    expect(getAutoArchiveDays()).toBe(0)
+    const old = new Date(Date.now() - 400 * 864e5).toISOString()
+    expect(isSessionArchived({ id: 's6', updated_at: old }, {}, { days: 0 })).toBe(
+      false,
+    )
   })
 })

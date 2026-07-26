@@ -2,14 +2,24 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
-## [0.15.1] — 2026-07-26
+## [0.15.2] - 2026-07-26
+
+### Fix: workspace harden, plan banner after approve, browser URL safety
+
+- **Workspace layout:** coerce unknown slide ids from localStorage so `SLIDE_META` never crashes.
+- **Plan banner:** keep last plan after Approve -> Build (Plan ready) until Hide/session change; poll only in Plan mode.
+- **Browser:** shared URL normalizer blocks javascript/data/file schemes; bare hosts still get https://.
+- **Scratch:** debounce localStorage writes while typing; flush on Save/Clear.
+- **Tests:** browserUrl, archive-days default, invalid layout slides, expanded plan-mode allowlist.
+
+## [0.15.1] - 2026-07-26
 
 ### Fix: workspace polish, archive days bug, quieter plan banner
 
 - **Auto-archive:** missing localStorage key no longer disables age-based archive (Number(null)===0 bug).
 - **Plan banner:** poll only in Plan mode (8s); clear when leaving Plan.
 - **Settings:** no dual mount when slide embeds Settings.
-- **Terminal:** prefer PowerShell (pwsh → Windows PowerShell) in project cwd.
+- **Terminal:** prefer PowerShell (pwsh -> Windows PowerShell) in project cwd.
 - **Browser / Scratch:** Firefox-prefer external open; scratch preview/save/clear.
 - **Tests:** sessionMeta archive rules, layoutPrefs, plan research tools.
 

@@ -1,4 +1,4 @@
-import type { SlideId } from './types'
+import { ALL_SLIDES, type SlideId } from './types'
 
 export type WorkspaceLayout = {
   left: SlideId
@@ -20,16 +20,32 @@ const DEFAULTS: WorkspaceLayout = {
   rightOpen: false,
 }
 
+const SLIDE_SET = new Set<string>(ALL_SLIDES)
+
+/** Coerce untrusted / corrupted localStorage values to a known slide. */
+export function coerceSlideId(value: unknown, fallback: SlideId): SlideId {
+  if (typeof value === 'string' && SLIDE_SET.has(value)) {
+    return value as SlideId
+  }
+  return fallback
+}
+
+function clampWidth(n: unknown, fallback: number): number {
+  const v = Number(n)
+  if (!Number.isFinite(v)) return fallback
+  return Math.min(480, Math.max(200, Math.floor(v)))
+}
+
 export function loadWorkspaceLayout(): WorkspaceLayout {
   try {
     const raw = localStorage.getItem(KEY)
     if (!raw) return { ...DEFAULTS }
     const p = JSON.parse(raw) as Partial<WorkspaceLayout>
     return {
-      left: p.left || DEFAULTS.left,
-      right: p.right || DEFAULTS.right,
-      leftWidth: Math.min(480, Math.max(200, Number(p.leftWidth) || DEFAULTS.leftWidth)),
-      rightWidth: Math.min(480, Math.max(200, Number(p.rightWidth) || DEFAULTS.rightWidth)),
+      left: coerceSlideId(p.left, DEFAULTS.left),
+      right: coerceSlideId(p.right, DEFAULTS.right),
+      leftWidth: clampWidth(p.leftWidth, DEFAULTS.leftWidth),
+      rightWidth: clampWidth(p.rightWidth, DEFAULTS.rightWidth),
       leftOpen: p.leftOpen !== false,
       rightOpen: Boolean(p.rightOpen),
     }
@@ -40,8 +56,16 @@ export function loadWorkspaceLayout(): WorkspaceLayout {
 
 export function saveWorkspaceLayout(layout: WorkspaceLayout) {
   try {
-    localStorage.setItem(KEY, JSON.stringify(layout))
+    const safe: WorkspaceLayout = {
+      left: coerceSlideId(layout.left, DEFAULTS.left),
+      right: coerceSlideId(layout.right, DEFAULTS.right),
+      leftWidth: clampWidth(layout.leftWidth, DEFAULTS.leftWidth),
+      rightWidth: clampWidth(layout.rightWidth, DEFAULTS.rightWidth),
+      leftOpen: Boolean(layout.leftOpen),
+      rightOpen: Boolean(layout.rightOpen),
+    }
+    localStorage.setItem(KEY, JSON.stringify(safe))
   } catch {
-    /* */
+    /* quota / private mode */
   }
 }

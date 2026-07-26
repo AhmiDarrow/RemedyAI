@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { loadWorkspaceLayout, saveWorkspaceLayout } from './layoutPrefs'
+import {
+  coerceSlideId,
+  loadWorkspaceLayout,
+  saveWorkspaceLayout,
+} from './layoutPrefs'
 
 function installMemoryLocalStorage() {
   const store = new Map<string, string>()
@@ -54,5 +58,18 @@ describe('workspace layoutPrefs', () => {
     expect(L.rightWidth).toBe(480)
     expect(L.leftOpen).toBe(false)
     expect(L.rightOpen).toBe(true)
+  })
+
+  it('rejects unknown slide ids (prevents SLIDE_META crash)', () => {
+    expect(coerceSlideId('not-a-slide', 'sessions')).toBe('sessions')
+    expect(coerceSlideId('browser', 'sessions')).toBe('browser')
+    localStorage.setItem(
+      'remedy.workspaceLayout.v1',
+      JSON.stringify({ left: 'bogus', right: 42, leftWidth: 'x' }),
+    )
+    const L = loadWorkspaceLayout()
+    expect(L.left).toBe('sessions')
+    expect(L.right).toBe('settings')
+    expect(L.leftWidth).toBe(280)
   })
 })

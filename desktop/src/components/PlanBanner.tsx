@@ -27,7 +27,6 @@ export function PlanBanner({
   onRequestChanges: (hint: string) => void
 }) {
   const [plan, setPlan] = useState<TaskPlan | null>(null)
-  const [err, setErr] = useState('')
 
   const refresh = useCallback(async () => {
     if (!sessionId) {
@@ -43,15 +42,14 @@ export function PlanBanner({
           ? (data as { plan?: TaskPlan | null }).plan
           : (data as TaskPlan)
       setPlan(p && p.id ? p : null)
-      setErr('')
     } catch {
-      // endpoint may 404 when empty
-      setPlan(null)
+      // endpoint may 404 when empty — keep prior plan if user already loaded one
+      if (planMode) setPlan(null)
     }
-  }, [sessionId])
+  }, [sessionId, planMode])
 
-  // Only hit the local API while Plan mode is on (or once after approve when plan still shown).
-  // Avoids 4s polling / provider-adjacent noise when the user is in normal Build chat.
+  // Poll only in Plan mode (avoids provider-adjacent noise in Build chat).
+  // After Approve → Build, keep the last plan in memory for "Plan ready" until Hide / session change.
   useEffect(() => {
     if (!planMode) return
     void refresh()
@@ -59,10 +57,10 @@ export function PlanBanner({
     return () => window.clearInterval(t)
   }, [planMode, refresh])
 
-  // Drop stale plan card when leaving Plan mode so we do not keep polling or UI chrome.
+  // Session switch: drop stale plan chrome from another conversation.
   useEffect(() => {
-    if (!planMode) setPlan(null)
-  }, [planMode])
+    setPlan(null)
+  }, [sessionId])
 
   if (!planMode && !plan) return null
 
@@ -114,7 +112,6 @@ export function PlanBanner({
           Research with read-only tools, then save a plan. Ask questions if anything is unclear.
         </div>
       )}
-      {err && <div style={{ color: 'var(--error)' }}>{err}</div>}
       <div className="flex flex-wrap gap-1.5">
         <button
           type="button"

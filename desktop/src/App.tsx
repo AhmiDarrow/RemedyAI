@@ -1450,12 +1450,12 @@ export default function App() {
           onWidth={(w) => patchWs({ leftWidth: w })}
           onHide={() => patchWs({ leftOpen: false })}
           onPopout={
-            SLIDE_META[wsLayout.left].popout
+            SLIDE_META[wsLayout.left]?.popout
               ? () => setPopout({ id: wsLayout.left, fullscreen: false })
               : undefined
           }
           onFullscreen={
-            SLIDE_META[wsLayout.left].popout
+            SLIDE_META[wsLayout.left]?.popout
               ? () => setPopout({ id: wsLayout.left, fullscreen: true })
               : undefined
           }
@@ -1476,7 +1476,7 @@ export default function App() {
           onClick={() => patchWs({ leftOpen: true })}
           title="Show left panel"
         >
-          ◂ {SLIDE_META[wsLayout.left].label}
+          ◂ {(SLIDE_META[wsLayout.left] ?? SLIDE_META.sessions).label}
         </button>
       )}
 
@@ -1658,12 +1658,12 @@ export default function App() {
             onWidth={(w) => patchWs({ rightWidth: w })}
             onHide={() => patchWs({ rightOpen: false })}
             onPopout={
-              SLIDE_META[wsLayout.right].popout
+              SLIDE_META[wsLayout.right]?.popout
                 ? () => setPopout({ id: wsLayout.right, fullscreen: false })
                 : undefined
             }
             onFullscreen={
-              SLIDE_META[wsLayout.right].popout
+              SLIDE_META[wsLayout.right]?.popout
                 ? () => setPopout({ id: wsLayout.right, fullscreen: true })
                 : undefined
             }
@@ -1684,13 +1684,13 @@ export default function App() {
             onClick={() => patchWs({ rightOpen: true })}
             title="Show right panel"
           >
-            {SLIDE_META[wsLayout.right].label} ▸
+            {(SLIDE_META[wsLayout.right] ?? SLIDE_META.settings).label} ▸
           </button>
         )}
 
         {popout && (
           <PopoutOverlay
-            title={SLIDE_META[popout.id].label}
+            title={(SLIDE_META[popout.id] ?? SLIDE_META.sessions).label}
             fullscreen={popout.fullscreen}
             onClose={() => setPopout(null)}
             onToggleFullscreen={() =>

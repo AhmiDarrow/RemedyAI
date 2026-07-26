@@ -22,7 +22,8 @@ export function WorkspaceSide({
   onFullscreen?: () => void
   children: ReactNode
 }) {
-  const meta = SLIDE_META[active]
+  // Defensive: corrupted layout prefs must not throw on meta.label
+  const meta = SLIDE_META[active] ?? SLIDE_META.sessions
   const rail = (
     <div
       className="flex flex-col items-center gap-0.5 py-1 shrink-0"
