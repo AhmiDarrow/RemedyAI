@@ -63,6 +63,8 @@ interface SettingsPanelProps {
   onToolProcessChange?: (mode: ToolProcessMode) => void
   /** Open Help wiki, optionally on a specific article id. */
   onOpenHelp?: (articleId?: string) => void
+  /** Fill parent slide (no fixed 300px column / side border). */
+  embedded?: boolean
 }
 
 export function SettingsPanel({
@@ -84,6 +86,7 @@ export function SettingsPanel({
   onOpenHelp,
   toolProcessMode,
   onToolProcessChange,
+  embedded = false,
 }: SettingsPanelProps) {
   const [settings, setSettings] = useState<Settings | null>(null)
   const [loading, setLoading] = useState(false)
@@ -634,26 +637,28 @@ export function SettingsPanel({
 
   return (
     <div
-      className="flex flex-col border-l"
+      className={`flex flex-col h-full min-h-0 ${embedded ? '' : 'border-l'}`}
       style={{
-        width: 300,
-        minWidth: 300,
+        width: embedded ? '100%' : 300,
+        minWidth: embedded ? 0 : 300,
         background: 'var(--bg-secondary)',
         borderColor: 'var(--border)',
       }}
     >
       <div
-        className="flex items-center justify-between px-3 py-2 border-b text-xs font-medium"
+        className="flex items-center justify-between px-3 py-2 border-b text-xs font-medium shrink-0"
         style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}
       >
         <span>Settings</span>
-        <button
-          onClick={onClose}
-          className="px-1 rounded"
-          style={{ color: 'var(--text-muted)' }}
-        >
-          {'\u00D7'}
-        </button>
+        {!embedded && (
+          <button
+            onClick={onClose}
+            className="px-1 rounded"
+            style={{ color: 'var(--text-muted)' }}
+          >
+            {'\u00D7'}
+          </button>
+        )}
       </div>
 
       <div className="px-3 pt-2 pb-1 border-b" style={{ borderColor: 'var(--border)' }}>
