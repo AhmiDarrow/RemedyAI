@@ -1,6 +1,6 @@
 [[permission]]
 identifier = "allow-window-chrome"
-description = "Custom title bar: minimize, maximize, close/hide-to-tray, show."
+description = "Window chrome helpers: show, minimize, drag, maximize, close/hide-to-tray, quit."
 commands.allow = [
   "show_main_window",
   "minimize_main_window",

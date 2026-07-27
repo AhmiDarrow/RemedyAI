@@ -1,11 +1,5 @@
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type MouseEvent as ReactMouseEvent,
-} from 'react'
-import { isTauri, tauriInvoke } from '../api/tauri'
+import { useEffect, useRef, useState } from 'react'
+import { isTauri } from '../api/tauri'
 
 export type AppMenuAction =
   | 'settings'
@@ -26,13 +20,10 @@ interface TitleBarProps {
 }
 
 /**
- * Single in-app chrome bar: brand wordmark menu + drag region + window controls.
- * Requires `decorations: false` so OS chrome is not stacked above this bar.
+ * In-app menu strip (logo → app menu). Window min/max/close are **OS decorations**
+ * so WebView2 never owns those hit-tests (avoids the recurring sticky-drag bug).
  *
- * Windows + WebView2: do NOT use `data-tauri-drag-region` for the whole bar.
- * CSS drag regions poison hit-testing after move/maximize/restore. Drag is
- * started only via explicit `startDragging()` on the middle strip mousedown.
- * Logo + window controls are always `app-region: no-drag` with higher z-index.
+ * Requires `decorations: true` in tauri.conf.json.
  */
 export function TitleBar({
   version,
@@ -40,10 +31,8 @@ export function TitleBar({
   onMenuAction,
 }: TitleBarProps) {
   const [menuOpen, setMenuOpen] = useState(false)
-  const [maximized, setMaximized] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
-  const rootRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!menuOpen) return
@@ -63,191 +52,13 @@ export function TitleBar({
     }
   }, [menuOpen])
 
-  const refreshMaximized = useCallback(() => {
-    if (!isTauri()) return
-    tauriInvoke<boolean>('is_main_window_maximized')
-      .then((v) => setMaximized(Boolean(v)))
-      .catch(() => {})
-  }, [])
-
-  /** Force WebView hit-test refresh after geometry changes (Windows drag-region bug). */
-  const reflowChrome = useCallback(() => {
-    const el = rootRef.current
-    if (!el) return
-    // Toggle a harmless property so layout/hit-test rebuilds without flicker.
-    const prev = el.style.transform
-    el.style.transform = 'translateZ(0)'
-    void el.offsetHeight
-    el.style.transform = prev
-  }, [])
-
-  const syncChrome = useCallback(() => {
-    refreshMaximized()
-    // Double rAF: wait until native resize/move settles.
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        reflowChrome()
-        refreshMaximized()
-      })
-    })
-  }, [refreshMaximized, reflowChrome])
-
-  // Event-driven maximize state + hit-test resync (not a sticky CSS drag region).
-  useEffect(() => {
-    if (!isTauri()) return
-    let cancelled = false
-    const unsubs: Array<() => void> = []
-
-    syncChrome()
-
-    ;(async () => {
-      try {
-        const { getCurrentWindow } = await import('@tauri-apps/api/window')
-        if (cancelled) return
-        const win = getCurrentWindow()
-        const onGeo = () => {
-          if (!cancelled) syncChrome()
-        }
-        unsubs.push(await win.onResized(onGeo))
-        unsubs.push(await win.onMoved(onGeo))
-        unsubs.push(await win.onScaleChanged(onGeo))
-        unsubs.push(
-          await win.onFocusChanged(() => {
-            if (!cancelled) syncChrome()
-          }),
-        )
-      } catch {
-        // Fall back to light polling if window events unavailable.
-        const id = window.setInterval(() => {
-          if (!cancelled) refreshMaximized()
-        }, 2000)
-        unsubs.push(() => window.clearInterval(id))
-      }
-    })()
-
-    // Rare fallback poll (icon can desync if events missed).
-    const pollId = window.setInterval(() => {
-      if (!cancelled) refreshMaximized()
-    }, 4000)
-
-    return () => {
-      cancelled = true
-      window.clearInterval(pollId)
-      for (const u of unsubs) {
-        try {
-          u()
-        } catch {
-          /* ignore */
-        }
-      }
-    }
-  }, [syncChrome, refreshMaximized])
-
   const run = (action: AppMenuAction) => {
     setMenuOpen(false)
     onMenuAction?.(action)
   }
 
-  /** Explicit window drag — avoids CSS app-region sticky hit-test after move. */
-  const onDragMouseDown = (e: ReactMouseEvent) => {
-    if (!isTauri()) return
-    if (e.button !== 0) return
-    if ((e.target as HTMLElement).closest('button')) return
-    e.preventDefault()
-    void (async () => {
-      try {
-        const { getCurrentWindow } = await import('@tauri-apps/api/window')
-        await getCurrentWindow().startDragging()
-      } catch {
-        // Fallback: custom command path if API import fails mid-session.
-        try {
-          await tauriInvoke('start_dragging_main_window')
-        } catch {
-          /* ignore */
-        }
-      }
-      // After drag ends, OS may fire move; sync anyway.
-      syncChrome()
-    })()
-  }
-
-  const onDragDoubleClick = (e: ReactMouseEvent) => {
-    if ((e.target as HTMLElement).closest('button')) return
-    if (!isTauri()) return
-    e.preventDefault()
-    void tauriInvoke<boolean>('toggle_maximize_main_window')
-      .then((v) => {
-        setMaximized(Boolean(v))
-        syncChrome()
-      })
-      .catch(() => {})
-  }
-
-  const winBtn = (label: string, onClick: () => void, hoverBg?: string) => (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      className="titlebar-winbtn flex items-center justify-center flex-shrink-0"
-      style={{
-        width: 46,
-        height: 36,
-        background: 'transparent',
-        border: 'none',
-        color: 'var(--text-secondary)',
-        cursor: 'pointer',
-        fontSize: 12,
-        lineHeight: 1,
-      }}
-      onMouseDown={(e) => {
-        // Never let the drag strip steal the click.
-        e.stopPropagation()
-      }}
-      onClick={(e) => {
-        e.stopPropagation()
-        e.preventDefault()
-        onClick()
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.background = hoverBg || 'var(--bg-tertiary)'
-        if (hoverBg) e.currentTarget.style.color = '#fff'
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.background = 'transparent'
-        e.currentTarget.style.color = 'var(--text-secondary)'
-      }}
-    >
-      {label === 'Minimize' && (
-        <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
-          <path d="M1 5h8" stroke="currentColor" strokeWidth="1.2" />
-        </svg>
-      )}
-      {label === 'Maximize' && !maximized && (
-        <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
-          <rect x="1.5" y="1.5" width="7" height="7" fill="none" stroke="currentColor" strokeWidth="1.2" />
-        </svg>
-      )}
-      {label === 'Maximize' && maximized && (
-        <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
-          <path
-            d="M3 3h5v5H3V3zm-1.5 1.5V9.5H7"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.1"
-          />
-        </svg>
-      )}
-      {label === 'Close' && (
-        <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
-          <path d="M2 2l6 6M8 2L2 8" stroke="currentColor" strokeWidth="1.2" />
-        </svg>
-      )}
-    </button>
-  )
-
   return (
     <div
-      ref={rootRef}
       className="titlebar flex items-center flex-shrink-0 select-none"
       style={{
         height: 36,
@@ -255,10 +66,10 @@ export function TitleBar({
         borderBottom: '1px solid var(--border)',
         color: 'var(--text-primary)',
         paddingLeft: 0,
-        paddingRight: 0,
+        paddingRight: 8,
       }}
     >
-      {/* Logo / app menu — never a drag region */}
+      {/* Logo / app menu */}
       <div className="titlebar-logo relative flex-shrink-0 flex items-stretch h-full">
         <button
           ref={btnRef}
@@ -275,11 +86,7 @@ export function TitleBar({
           aria-haspopup="menu"
           aria-expanded={menuOpen}
           aria-label="Open Remedy menu"
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={(e) => {
-            e.stopPropagation()
-            setMenuOpen((o) => !o)
-          }}
+          onClick={() => setMenuOpen((o) => !o)}
         >
           <img
             src="/logo.png"
@@ -339,36 +146,17 @@ export function TitleBar({
         )}
       </div>
 
-      {/* Empty drag strip: explicit startDragging only (no data-tauri-drag-region). */}
-      <div
-        className="titlebar-drag flex-1 min-w-0 h-full"
-        onMouseDown={onDragMouseDown}
-        onDoubleClick={onDragDoubleClick}
-      />
+      {/* Spacer — window min/max/close live in the OS title bar (decorations: true). */}
+      <div className="flex-1 min-w-0 h-full" aria-hidden />
 
-      {isTauri() && (
-        <div className="titlebar-controls flex items-stretch flex-shrink-0 h-full">
-          {winBtn('Minimize', () => {
-            void tauriInvoke('minimize_main_window')
-              .then(() => syncChrome())
-              .catch(() => {})
-          })}
-          {winBtn('Maximize', () => {
-            void tauriInvoke<boolean>('toggle_maximize_main_window')
-              .then((v) => {
-                setMaximized(Boolean(v))
-                syncChrome()
-              })
-              .catch(() => {})
-          })}
-          {winBtn(
-            'Close',
-            () => {
-              void tauriInvoke('request_close_main_window').catch(() => {})
-            },
-            'var(--error, #e81123)',
-          )}
-        </div>
+      {version && (
+        <span
+          className="text-[10px] tabular-nums flex-shrink-0 pr-1"
+          style={{ color: 'var(--text-muted)' }}
+          title={`Remedy v${version}`}
+        >
+          v{version}
+        </span>
       )}
     </div>
   )

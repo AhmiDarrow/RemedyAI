@@ -3,7 +3,8 @@
   "identifier": "default",
   "description": "enables the default permissions plus shell and updater",
   "windows": [
-    "main"
+    "main",
+    "remedy-browser-embed"
   ],
   "permissions": [
     "core:default",

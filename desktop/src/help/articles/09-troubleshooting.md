@@ -21,6 +21,23 @@ turned on **start hidden** whenever login-at-startup was enabled.
 3. **Save**, fully Quit, relaunch — the main window should open normally.  
 4. Tray-only start is only when that box is checked (stored in `%USERPROFILE%\.remedy\desktop.json`).
 
+## Title bar min / max / close unresponsive
+
+**0.18.6+** uses the **OS title bar** for window controls. If buttons still misbehave,
+that is Windows chrome (not WebView drag-region residue). Fully Quit and relaunch.
+
+Older undecorated builds could lose clicks after move/maximize; install the latest.
+
+## Built-in Browser stays blank / “does not load”
+
+The Browser rail uses a **child WebView2** (not an iframe). Common causes:
+
+1. **Rail too narrow** — expand Browser to a full panel (not icon-only), then press **Go**.  
+2. **Stale embed** — press **Go** again, or **✕** close then **⌂** home.  
+3. **WebView2 Runtime** — Edge/WebView2 must be installed (Windows 11 usually has it). Reinstall [WebView2 Evergreen](https://developer.microsoft.com/microsoft-edge/webview2/) if embed errors mention WebView2.  
+4. Use **↗** to open the same URL in the system browser as a fallback.  
+5. Check `%LOCALAPPDATA%\com.remedy.desktop\logs\` for `browser embed` / `add_child` lines.
+
 ## Telegram / messengers not realtime / “stuck syncing”
 
 Telegram allows **only one** `getUpdates` long-poll per bot token. Two Remedy windows, a leftover `remedy serve`, or `tauri:dev` plus an installed desktop all fighting the same bot produce HTTP **409** and feel like chat is dead or endlessly catching up.

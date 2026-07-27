@@ -72,7 +72,7 @@ function isTauri(): boolean {
   return !!(w.__TAURI__ || w.__TAURI_INTERNALS__ || w.isTauri)
 }
 
-/** Window shell: themed custom title bar + content (replaces white OS chrome). */
+/** Window shell: OS decorations for min/max/close + in-app menu strip. */
 function AppShell({
   children,
   version,

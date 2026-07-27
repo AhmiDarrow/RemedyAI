@@ -4,6 +4,20 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.18.6] - 2026-07-27
+
+### Fix: OS window chrome (end WebView title-bar hit-test loop)
+
+- **Min / max / close are OS decorations** again — never fake buttons inside WebView2.
+- In-app strip is logo menu + version only (no CSS drag regions, no sticky hit-tests).
+- Ends the recurring “title bar dead after move/maximize” class of bugs.
+
+### Fix: built-in Browser embed
+
+- Auto-load homepage when the Browser rail has size; wait for layout before navigate.
+- Recreate stale child webview; about:blank then navigate; delayed re-paint.
+- Capability includes `remedy-browser-embed`; clearer errors + system-browser fallback.
+
 ## [0.18.5] - 2026-07-27
 
 ### Fix: Telegram poller stuck after restart (false “live” PID)

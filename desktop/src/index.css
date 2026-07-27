@@ -264,38 +264,19 @@ html.theme-animating body * {
   }
 }
 
-/* Unified chrome: logo + drag region + window controls (decorations: false).
-   Never put -webkit-app-region: drag on the whole bar — after move/maximize on
-   Windows WebView2, sticky drag hit-tests break min/max/close. Drag is started
-   only via startDragging() on the middle strip (TitleBar.tsx). */
+/* App menu strip under the OS title bar (decorations: true).
+   Min/max/close are native — never WebView hit-tests. No CSS drag regions. */
 .titlebar {
   -webkit-user-select: none;
   user-select: none;
   position: relative;
   z-index: 100;
-  -webkit-app-region: no-drag;
-  app-region: no-drag;
 }
-.titlebar-logo,
-.titlebar-controls {
+.titlebar-logo {
   position: relative;
   z-index: 3;
-  -webkit-app-region: no-drag;
-  app-region: no-drag;
 }
-.titlebar-drag {
-  position: relative;
-  z-index: 1;
-  /* Intentionally NOT app-region: drag — see TitleBar startDragging(). */
-  -webkit-app-region: no-drag;
-  app-region: no-drag;
-  cursor: default;
-}
-/* Buttons / menu must never start a window drag. */
-.titlebar button,
-.titlebar .titlebar-winbtn {
-  -webkit-app-region: no-drag;
-  app-region: no-drag;
+.titlebar button {
   position: relative;
   z-index: 4;
 }

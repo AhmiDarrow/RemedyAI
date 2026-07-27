@@ -19,9 +19,9 @@ function readBounds(el: HTMLElement | null): Bounds | null {
   if (!el || !el.isConnected) return null
   const style = window.getComputedStyle(el)
   if (
-    style.display === 'none' ||
-    style.visibility === 'hidden' ||
-    Number(style.opacity) === 0
+    style.display === 'none'
+    || style.visibility === 'hidden'
+    || Number(style.opacity) === 0
   ) {
     return null
   }
@@ -38,6 +38,10 @@ function readBounds(el: HTMLElement | null): Bounds | null {
   }
 }
 
+/** Delay hide so rail↔popout remounts do not flash-hide the native child. */
+let embedMountCount = 0
+let hideTimer: ReturnType<typeof setTimeout> | null = null
+
 /**
  * Embedded WebView2 (Chromium) browser **inside** the Browser slide.
  * Separate OS popup only when the user clicks ↗ (system browser).
@@ -47,9 +51,11 @@ export function BrowserSlide() {
   const [home, setHome] = useState(DEFAULT_BROWSER_HOME)
   const [url, setUrl] = useState(DEFAULT_BROWSER_HOME)
   const [activeUrl, setActiveUrl] = useState(DEFAULT_BROWSER_HOME)
-  const [status, setStatus] = useState('Enter a URL and press Go')
+  const [status, setStatus] = useState('Loading homepage…')
   const [loaded, setLoaded] = useState(false)
   const [busy, setBusy] = useState(false)
+  const autoStarted = useRef(false)
+  const goRef = useRef<(raw: string) => Promise<void>>(async () => {})
 
   // Settings → browser_home_url (default: Remedy GitHub)
   useEffect(() => {
@@ -116,12 +122,23 @@ export function BrowserSlide() {
     }
   }, [pushBounds])
 
-  // Hide embed when this Browser slide instance unmounts (rail ↔ popout
-  // remounts the other instance, which re-shows + rebounds).
+  // Track mounts so hide is deferred across remount (popout / StrictMode).
   useEffect(() => {
+    if (!isTauri()) return
+    embedMountCount += 1
+    if (hideTimer) {
+      clearTimeout(hideTimer)
+      hideTimer = null
+    }
     return () => {
-      if (!isTauri()) return
-      void tauriInvoke('browser_hide').catch(() => {})
+      embedMountCount = Math.max(0, embedMountCount - 1)
+      if (hideTimer) clearTimeout(hideTimer)
+      hideTimer = setTimeout(() => {
+        hideTimer = null
+        if (embedMountCount === 0) {
+          void tauriInvoke('browser_hide').catch(() => {})
+        }
+      }, 80)
     }
   }, [])
 
@@ -136,12 +153,12 @@ export function BrowserSlide() {
         if (open) {
           setLoaded(true)
           await tauriInvoke('browser_show').catch(() => {})
-          // Wait a frame so popout chrome has laid out above us
           await new Promise<void>((r) => requestAnimationFrame(() => r()))
           await pushBounds()
           await new Promise<void>((r) => requestAnimationFrame(() => r()))
           await pushBounds()
           setStatus('Browser ready')
+          autoStarted.current = true
         }
       } catch {
         /* */
@@ -167,9 +184,16 @@ export function BrowserSlide() {
         setStatus('Web UI iframe (desktop embeds WebView2)')
         return
       }
-      const b = readBounds(hostRef.current)
+      // Wait for layout if the rail just opened (bounds often 0 for a frame).
+      let b = readBounds(hostRef.current)
       if (!b) {
-        setStatus('Browser panel too small — expand the Browser rail')
+        for (let i = 0; i < 16 && !b; i++) {
+          await new Promise<void>((r) => requestAnimationFrame(() => r()))
+          b = readBounds(hostRef.current)
+        }
+      }
+      if (!b) {
+        setStatus('Browser panel too small — expand the Browser rail, then press Go')
         return
       }
       setBusy(true)
@@ -182,7 +206,6 @@ export function BrowserSlide() {
         setActiveUrl(nav || u)
         setLoaded(true)
         setStatus('Loaded in Remedy (WebView2)')
-        // Re-sync bounds after layout settles (critical in popout / fullscreen)
         const resync = () => void pushBounds()
         window.requestAnimationFrame(resync)
         window.setTimeout(resync, 50)
@@ -199,6 +222,35 @@ export function BrowserSlide() {
     },
     [pushBounds],
   )
+  goRef.current = go
+
+  // Auto-load homepage once the host has a real size (desktop only).
+  useEffect(() => {
+    if (!isTauri() || autoStarted.current) return
+    let cancelled = false
+    let attempts = 0
+    const tick = () => {
+      if (cancelled || autoStarted.current) return
+      attempts += 1
+      const b = readBounds(hostRef.current)
+      if (b) {
+        autoStarted.current = true
+        void goRef.current(home)
+        return
+      }
+      if (attempts < 40) {
+        window.setTimeout(tick, 50)
+      } else {
+        setStatus('Expand Browser rail, then press Go (or ↗ for system browser)')
+      }
+    }
+    // Defer one frame so flex layout can measure
+    const id = window.requestAnimationFrame(() => tick())
+    return () => {
+      cancelled = true
+      window.cancelAnimationFrame(id)
+    }
+  }, [home])
 
   const closeEmbed = useCallback(async () => {
     if (!isTauri()) {
@@ -209,6 +261,7 @@ export function BrowserSlide() {
     try {
       await tauriInvoke('browser_close')
       setLoaded(false)
+      autoStarted.current = false
       setStatus('Browser closed')
     } catch (e: unknown) {
       setStatus(e instanceof Error ? e.message : String(e))
@@ -341,9 +394,14 @@ export function BrowserSlide() {
               Embedded browser
             </div>
             <p className="max-w-sm text-[11px] leading-relaxed">
-              WebView2 (Chromium) loads <strong>inside</strong> this panel. Press{' '}
-              <strong>Go</strong>. Use <strong>↗</strong> only for an external system-browser popup.
+              WebView2 loads inside this panel automatically. Press <strong>Go</strong> to
+              retry, or <strong>↗</strong> for the system browser.
             </p>
+            {busy && (
+              <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                Loading…
+              </p>
+            )}
           </div>
         )}
         {/* Desktop: native child webview paints here. Web UI fallback: iframe. */}

@@ -9,6 +9,7 @@ use tauri::{
     AppHandle, LogicalPosition, LogicalSize, Manager, State, WebviewUrl,
 };
 use tauri::webview::WebviewBuilder;
+use tauri::utils::config::Color;
 use url::Url;
 
 const LABEL: &str = "remedy-browser-embed";
@@ -50,13 +51,25 @@ fn normalize_url(raw: &str) -> Result<String, String> {
 }
 
 fn main_window(app: &AppHandle) -> Result<tauri::Window, String> {
-    app.get_window("main")
-        .or_else(|| app.get_webview("main").map(|w| w.window()))
-        .or_else(|| {
-            app.get_webview_window("main")
-                .and_then(|ww| app.get_window(ww.label()))
-        })
-        .ok_or_else(|| "main window not found".to_string())
+    // Prefer explicit Window handle; WebviewWindow apps often only register via webview.
+    if let Some(w) = app.get_window("main") {
+        return Ok(w);
+    }
+    if let Some(wv) = app.get_webview("main") {
+        return Ok(wv.window());
+    }
+    if let Some(ww) = app.get_webview_window("main") {
+        // WebviewWindow shares label with its primary webview.
+        if let Some(wv) = app.get_webview(ww.label()) {
+            return Ok(wv.window());
+        }
+    }
+    // Last resort: any window (single-window desktop).
+    if let Some((_, w)) = app.windows().into_iter().next() {
+        log::warn!("browser: using fallback window label={}", w.label());
+        return Ok(w);
+    }
+    Err("main window not found — cannot embed browser".into())
 }
 
 fn clamp_bounds(b: &BrowserBounds) -> BrowserBounds {
@@ -66,6 +79,15 @@ fn clamp_bounds(b: &BrowserBounds) -> BrowserBounds {
         width: b.width.max(80.0),
         height: b.height.max(80.0),
     }
+}
+
+fn apply_bounds(wv: &tauri::Webview, b: &BrowserBounds) -> Result<(), String> {
+    wv.set_position(LogicalPosition::new(b.x, b.y))
+        .map_err(|e| format!("set_position: {e}"))?;
+    wv.set_size(LogicalSize::new(b.width, b.height))
+        .map_err(|e| format!("set_size: {e}"))?;
+    let _ = wv.show();
+    Ok(())
 }
 
 fn destroy_embed(app: &AppHandle) {
@@ -122,13 +144,25 @@ pub fn browser_set_bounds(
         *g = Some(b.clone());
     }
     if let Some(wv) = app.get_webview(LABEL) {
-        wv.set_position(LogicalPosition::new(b.x, b.y))
-            .map_err(|e| format!("set_position: {e}"))?;
-        wv.set_size(LogicalSize::new(b.width, b.height))
-            .map_err(|e| format!("set_size: {e}"))?;
-        let _ = wv.show();
+        apply_bounds(&wv, &b)?;
     }
     Ok(())
+}
+
+fn schedule_reload(wv: tauri::Webview, url: String, delay_ms: u64) {
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+        if let Ok(u) = url.parse::<Url>() {
+            if let Err(e) = wv.navigate(u) {
+                log::warn!("browser delayed navigate failed: {e}");
+            }
+        }
+        let _ = wv.show();
+        // Force paint if WebView2 stayed white (known multiwebview glitch).
+        let _ = wv.eval(
+            "try{if(!document.body||document.body.childElementCount===0){location.reload()}}catch(e){}",
+        );
+    });
 }
 
 /// Open or navigate the **embedded** WebView2 inside the main window.
@@ -163,25 +197,23 @@ pub async fn browser_navigate(
         *g = Some(b.clone());
     }
 
-    // Already embedded — navigate + re-bounds
+    // Already embedded — navigate + re-bounds; recreate if navigate fails (stale child).
     if let Some(wv) = app.get_webview(LABEL) {
-        wv.set_position(LogicalPosition::new(b.x, b.y))
-            .map_err(|e| format!("set_position: {e}"))?;
-        wv.set_size(LogicalSize::new(b.width, b.height))
-            .map_err(|e| format!("set_size: {e}"))?;
-        wv.navigate(parsed.clone())
-            .map_err(|e| format!("navigate: {e}"))?;
-        let _ = wv.show();
-        // Second paint — mitigates multiwebview white flash on some GPUs
-        let wv2 = wv.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(150));
-            let _ = wv2.eval(
-                "try{if(!document.body||document.body.childElementCount===0)location.reload()}catch(e){}",
-            );
-        });
-        log::info!("browser embed navigate {url}");
-        return Ok(url);
+        if let Err(e) = apply_bounds(&wv, &b) {
+            log::warn!("browser bounds on existing embed failed: {e}");
+        }
+        match wv.navigate(parsed.clone()) {
+            Ok(()) => {
+                let _ = wv.show();
+                schedule_reload(wv.clone(), url.clone(), 200);
+                log::info!("browser embed navigate {url}");
+                return Ok(url);
+            }
+            Err(e) => {
+                log::warn!("browser navigate on existing embed failed ({e}); recreating");
+                destroy_embed(&app);
+            }
+        }
     }
 
     // Close any legacy popup first
@@ -190,7 +222,11 @@ pub async fn browser_navigate(
     }
 
     let window = main_window(&app)?;
-    let builder = WebviewBuilder::new(LABEL, WebviewUrl::External(parsed));
+    // about:blank first → then navigate: avoids multiwebview white-screen on some GPUs.
+    let blank: Url = "about:blank".parse().map_err(|e: url::ParseError| e.to_string())?;
+    let builder = WebviewBuilder::new(LABEL, WebviewUrl::External(blank))
+        .focused(true)
+        .background_color(Color(255, 255, 255, 255));
 
     // add_child already runs builder on main thread internally
     let wv = window
@@ -199,19 +235,21 @@ pub async fn browser_navigate(
             LogicalPosition::new(b.x, b.y),
             LogicalSize::new(b.width, b.height),
         )
-        .map_err(|e| format!("embed browser (add_child): {e}"))?;
+        .map_err(|e| {
+            log::error!("browser add_child failed: {e}");
+            format!(
+                "embed browser failed: {e}. Try ↗ system browser, or reinstall WebView2 Runtime."
+            )
+        })?;
 
     let _ = wv.show();
-    // Re-navigate after create — known multiwebview white-screen workaround
-    let wv2 = wv.clone();
-    let url_reload = url.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(250));
-        if let Ok(u) = url_reload.parse::<Url>() {
-            let _ = wv2.navigate(u);
-        }
-        let _ = wv2.show();
-    });
+    // Immediate navigate to target
+    if let Err(e) = wv.navigate(parsed) {
+        log::warn!("browser initial navigate failed: {e}");
+    }
+    // Delayed re-navigate + paint (known multiwebview white-screen workaround)
+    schedule_reload(wv.clone(), url.clone(), 120);
+    schedule_reload(wv.clone(), url.clone(), 400);
 
     log::info!(
         "browser embed created {url} @ ({},{}) {}x{}",
