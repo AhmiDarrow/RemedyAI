@@ -5,7 +5,7 @@
 Knowledge, design, code, and get-it-done work. One continuous partner — not a thin chat wrapper, not a farm of bots.  
 **Not** a medical product; the name means unsticking problems and finishing requests.
 
-**[Download for Windows](https://github.com/AhmiDarrow/RemedyAI/releases/latest)** · **[Owner’s manual (GitHub)](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/00-overview.md)** · **F1** in-app · **0.15.x**
+**[Download latest for Windows](https://github.com/AhmiDarrow/RemedyAI/releases/latest)** · **[Owner’s manual (GitHub)](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/00-overview.md)** · **F1** in-app
 
 ---
 
@@ -174,7 +174,7 @@ Format: [agentskills.io](https://agentskills.io) · Lifecycle: [SKILL_LIFECYCLE.
 
 ## Install
 
-1. [Download the Windows installer](https://github.com/AhmiDarrow/RemedyAI/releases/latest)  
+1. [Download the **latest** Windows installer](https://github.com/AhmiDarrow/RemedyAI/releases/latest)  
 2. Run Setup → provider + optional workspace + optional local vision  
 3. **F1** Help · `/help` commands  
 
@@ -260,7 +260,7 @@ python scripts/check_docs.py
 cd desktop && npm run tauri:dev   # full shell (set REMEDY_DEV_ROOT to repo)
 ```
 
-Release: `python scripts/sync_version.py 0.15.x` · `python scripts/sync_help_manual.py` · `python scripts/check_docs.py` · tag `vX.Y.Z` · GitHub Actions.  
+Release: `python scripts/sync_version.py X.Y.Z` · `python scripts/sync_help_manual.py` · `python scripts/check_docs.py` · tag `vX.Y.Z` · GitHub Actions.  
 Signing: [AGENTS.md](AGENTS.md) · [WINDOWS_SIGNING.md](docs/WINDOWS_SIGNING.md)
 
 ---
