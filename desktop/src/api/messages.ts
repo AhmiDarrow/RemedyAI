@@ -98,20 +98,30 @@ export function streamMessage(
   ;(async () => {
     try {
       await ensureApiToken()
-      const res = await fetch(`${getApiBase()}/sessions/${sessionId}/messages/stream`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...authHeaders(),
-        },
-        body: JSON.stringify({
-          message,
-          model,
-          attachments: attachments?.length ? attachments : undefined,
-          plan_mode: Boolean(planMode),
-        }),
-        signal: controller.signal,
-      })
+      const doFetch = () =>
+        fetch(`${getApiBase()}/sessions/${sessionId}/messages/stream`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...authHeaders(),
+          },
+          body: JSON.stringify({
+            message,
+            model,
+            attachments: attachments?.length ? attachments : undefined,
+            plan_mode: Boolean(planMode),
+          }),
+          signal: controller.signal,
+        })
+
+      let res = await doFetch()
+      // After update / server restart the cached token can be stale — re-bootstrap once.
+      if (res.status === 401) {
+        const { clearApiToken, ensureApiToken: reAuth } = await import('./client')
+        clearApiToken()
+        await reAuth()
+        res = await doFetch()
+      }
 
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))

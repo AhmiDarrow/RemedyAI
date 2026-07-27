@@ -2,6 +2,12 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.15.9] - 2026-07-27
+
+### Fix: Skills Library tab visibility + first-session chat hang
+
+- **Skills tabs:** full-width segmented control (**My skills** | **Library**) so Library is obvious after auto-update.
+- **First chat:** wait for session list after server ready; ensure model from settings before stream; surface createSession failures; re-bootstrap API token on 401 stream (post-update).
 ## [0.15.8] - 2026-07-27
 
 ### Feature: Skills Library (signed catalog) + Skills panel polish

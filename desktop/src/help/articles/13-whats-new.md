@@ -2,7 +2,12 @@
 
 High-level product notes for owners. Full detail lives in repo `CHANGELOG.md`.
 
-Ship **one** installer/tag for the current series (**v0.15.8**).
+Ship **one** installer/tag for the current series (**v0.15.9**).
+
+## 0.15.9 - Skills Library tab + first-session fix
+
+- **My skills | Library** segmented control at top of Skills panel (Library is easy to miss as a muted text button).
+- First message after boot waits for sessions/model and recovers stale auth after update.
 
 ## 0.15.8 - Skills Library
 

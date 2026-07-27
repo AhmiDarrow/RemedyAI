@@ -662,38 +662,55 @@ export function SkillsPanel({
 
   return (
     <Panel open={open} onClose={onClose} title="Skills">
-      <div className="mb-2 flex items-center gap-1">
-        {(
-          [
-            ['installed', 'Installed'],
-            ['library', 'Library'],
-          ] as const
-        ).map(([id, label]) => (
-          <button
-            key={id}
-            type="button"
-            className="text-[11px] px-2.5 py-1 rounded"
-            style={{
-              background: panelTab === id ? 'var(--bg-tertiary)' : 'transparent',
-              border: panelTab === id ? '1px solid var(--border)' : '1px solid transparent',
-              color: panelTab === id ? 'var(--accent)' : 'var(--text-muted)',
-              fontWeight: panelTab === id ? 600 : 400,
-            }}
-            onClick={() => setPanelTab(id)}
-          >
-            {label}
-          </button>
-        ))}
-        <div className="flex-1" />
+      <div className="mb-2 flex items-center gap-1.5">
+        <div
+          className="flex flex-1 rounded-md p-0.5 gap-0.5"
+          style={{
+            background: 'var(--bg-primary)',
+            border: '1px solid var(--border)',
+          }}
+          role="tablist"
+          aria-label="Skills views"
+        >
+          {(
+            [
+              ['installed', 'My skills'],
+              ['library', 'Library'],
+            ] as const
+          ).map(([id, label]) => {
+            const on = panelTab === id
+            return (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                aria-selected={on}
+                className="flex-1 text-[11px] px-2 py-1.5 rounded"
+                style={{
+                  background: on ? 'var(--accent)' : 'transparent',
+                  color: on ? '#fff' : 'var(--text-secondary)',
+                  fontWeight: on ? 600 : 500,
+                  border: 'none',
+                }}
+                onClick={() => setPanelTab(id)}
+              >
+                {label}
+              </button>
+            )
+          })}
+        </div>
         {onOpenHelp && (
           <button
             type="button"
             onClick={() => onOpenHelp('07-skills')}
-            className="text-[10px] px-1.5 py-0.5 rounded"
-            style={{ color: 'var(--text-muted)' }}
+            className="text-[11px] px-2 py-1.5 rounded shrink-0"
+            style={{
+              border: '1px solid var(--border)',
+              color: 'var(--text-muted)',
+            }}
             title="Skills help"
           >
-            ?
+            Help
           </button>
         )}
       </div>

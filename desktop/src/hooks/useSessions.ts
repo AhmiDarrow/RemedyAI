@@ -78,7 +78,11 @@ export function useSessions() {
         setSessions((prev) => [s, ...prev])
         setActiveId(s.id)
         return s
-      } catch {
+      } catch (e: unknown) {
+        console.warn(
+          '[remedy] createSession failed',
+          e instanceof Error ? e.message : e,
+        )
         return null
       }
     }, []),

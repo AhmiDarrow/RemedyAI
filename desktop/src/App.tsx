@@ -644,7 +644,13 @@ export default function App() {
         }
       }
       if (cancelled) return
-      void sessionsPromise
+      // Wait for session list so activeId is set before the user can send.
+      try {
+        await sessionsPromise
+      } catch {
+        /* refresh already swallows */
+      }
+      if (cancelled) return
 
       if (!settings) {
         // Fresh / wiped installs: still open setup so the user is not stuck on
@@ -713,6 +719,10 @@ export default function App() {
         }
         if (!settings?.llm_model && modelsData?.default) {
           setModel(modelsData.default)
+        }
+        // Prefer settings/provider picker model so first send is not empty-model.
+        if (settings?.llm_model) {
+          setModel(settings.llm_model)
         }
         void listCommands().catch(() => null)
       } catch (e: unknown) {
@@ -1019,8 +1029,32 @@ export default function App() {
       if (text.startsWith('/') && !attachments?.length) {
         await handleCommand(text)
       } else {
-        const sid = activeId || (await create())?.id
-        if (!sid) return
+        let sid = activeId
+        if (!sid) {
+          const created = await create()
+          sid = created?.id ?? null
+          if (sid) setOpenTabs((prev) => new Set([...prev, sid!]))
+        }
+        if (!sid) {
+          notify('Chat not ready', {
+            body: 'Could not open a session — wait a second for the local server, then try New Session.',
+          })
+          return
+        }
+        // Ensure a model id is set before streaming (first paint race after boot).
+        let useModel = model
+        if (!useModel?.trim()) {
+          try {
+            const s = await getSettings()
+            if (s.llm_model) {
+              useModel = s.llm_model
+              setModel(s.llm_model)
+            }
+            if (s.llm_provider) setLlmProvider(s.llm_provider)
+          } catch {
+            /* keep empty — server may still default */
+          }
+        }
         // Optimistic auto-title from first prompt (server also renames placeholders).
         const sess = sessions.find((s) => s.id === sid)
         if (sess && isPlaceholderTitle(sess.title) && (text.trim() || attachments?.length)) {
@@ -1038,13 +1072,13 @@ export default function App() {
           setPlanMode(false)
         }
         // While streaming, send() queues (after) or interrupts based on opts.mode.
-        void send(text, model, sid, attachments, usePlan, opts)
+        void send(text, useModel, sid, attachments, usePlan, opts)
         window.setTimeout(() => {
           void refreshSessions()
         }, 1200)
       }
     },
-    [send, model, handleCommand, activeId, create, sessions, rename, refreshSessions, planMode],
+    [send, model, handleCommand, activeId, create, sessions, rename, refreshSessions, planMode, notify, setLlmProvider],
   )
 
   const handleEditUserMessage = useCallback(
