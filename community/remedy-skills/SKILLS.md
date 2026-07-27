@@ -1,24 +1,24 @@
 # Skills list
 
-_Auto-generated from `skills/*/SKILL.md` — **282** skills. Last updated: 2026-07-26 23:30 UTC. Do not edit by hand; run `python scripts/generate_skills_list.py` or `python scripts/build_catalog.py`._
+_Auto-generated from `skills/*/SKILL.md` — **282** skills. Last updated: 2026-07-27 04:10 UTC. Do not edit by hand; run `python scripts/generate_skills_list.py` or `python scripts/build_catalog.py`._
 
 ## Summary by area
 
 | Area | Count |
 |------|------:|
-| backend | 22 |
-| content | 35 |
-| data | 2 |
-| design | 45 |
-| docs | 5 |
-| frontend | 7 |
+| backend | 19 |
+| content | 39 |
+| data | 4 |
+| design | 29 |
+| docs | 8 |
+| frontend | 14 |
 | gaming | 36 |
-| git | 10 |
+| git | 8 |
 | llm | 3 |
-| ops | 14 |
+| ops | 20 |
 | other | 2 |
-| personal | 54 |
-| security | 16 |
+| personal | 50 |
+| security | 19 |
 | testing | 13 |
 | tooling | 18 |
 
@@ -33,22 +33,19 @@ _Auto-generated from `skills/*/SKILL.md` — **282** skills. Last updated: 2026-
 | [`background-job-ui`](skills/background-job-ui/SKILL.md) | Expose long-running job progress/status to users with authz and safe errors. |
 | [`backward-compat-api`](skills/backward-compat-api/SKILL.md) | Plan backward-compatible API evolution and deprecation windows. |
 | [`cache-invalidation`](skills/cache-invalidation/SKILL.md) | Design cache keys and invalidation to prevent stale reads and stampedes. |
-| [`cron-job-design`](skills/cron-job-design/SKILL.md) | Design scheduled jobs with overlap locks, idempotency, and failure alerts. |
+| [`data-deletion-user`](skills/data-deletion-user/SKILL.md) | Implement account deletion with re-auth, cascade/anonymize, and session revoke. |
+| [`data-export-user`](skills/data-export-user/SKILL.md) | Implement authenticated user data export with async processing if large. |
 | [`datetime-timezone`](skills/datetime-timezone/SKILL.md) | Fix datetime bugs by storing UTC and converting only at the edge. |
 | [`db-migration-safe`](skills/db-migration-safe/SKILL.md) | Write or review DB migrations using expand/contract safety and rollback notes. |
 | [`docs-api-examples`](skills/docs-api-examples/SKILL.md) | Add runnable request/response examples to API docs for the hardest endpoints. |
 | [`env-config-12factor`](skills/env-config-12factor/SKILL.md) | Refactor configuration to env-based 12-factor style with validated startup. |
-| [`graceful-shutdown`](skills/graceful-shutdown/SKILL.md) | Implement SIGTERM-aware graceful shutdown and drain for servers/workers. |
 | [`graphql-schema-review`](skills/graphql-schema-review/SKILL.md) | Review GraphQL schemas/resolvers for authz, N+1, pagination, and deprecations. |
 | [`grpc-api-design`](skills/grpc-api-design/SKILL.md) | Design/review gRPC protos with versioning, deadlines, and idempotency. |
-| [`health-endpoints`](skills/health-endpoints/SKILL.md) | Add liveness vs readiness endpoints with appropriate dependency checks. |
-| [`idempotent-api`](skills/idempotent-api/SKILL.md) | Make a mutating endpoint safely retryable with idempotency keys. |
 | [`json-schema-design`](skills/json-schema-design/SKILL.md) | Design tight JSON Schema / Zod / Pydantic models with bounds and examples. |
-| [`migration-data-backfill`](skills/migration-data-backfill/SKILL.md) | Plan batched data backfills that won't lock production tables. |
+| [`money-calculations`](skills/money-calculations/SKILL.md) | Implement money math with integers/decimals, explicit rounding, and currency codes. |
 | [`openapi-sync`](skills/openapi-sync/SKILL.md) | Regenerate or manually sync OpenAPI with implemented routes and flag breaking changes. |
 | [`pagination-standard`](skills/pagination-standard/SKILL.md) | Add stable list pagination (cursor preferred) with enforced max limits. |
 | [`payment-webhook-flow`](skills/payment-webhook-flow/SKILL.md) | Implement payment webhooks with verification and idempotent entitlement updates. |
-| [`queue-consumer-safe`](skills/queue-consumer-safe/SKILL.md) | Build safe queue consumers: ack semantics, retries, DLQ, idempotent handlers. |
 | [`search-indexing`](skills/search-indexing/SKILL.md) | Design app search indexing and sync (FTS or search engine) with relevance checks. |
 
 ## Content
@@ -57,6 +54,8 @@ _Auto-generated from `skills/*/SKILL.md` — **282** skills. Last updated: 2026-
 |-------|-------------|
 | [`blog-post-draft`](skills/blog-post-draft/SKILL.md) | Write a full blog draft from an outline with scannable structure and clear CTA. |
 | [`blog-post-outline`](skills/blog-post-outline/SKILL.md) | Outline a blog post: angle, outline, sources, CTA, SEO basics without keyword stuffing. |
+| [`brand-voice-guide`](skills/brand-voice-guide/SKILL.md) | Write a brand voice guide: principles, tone spectrum, examples do/don't. |
+| [`call-to-action-copy`](skills/call-to-action-copy/SKILL.md) | Write CTAs matched to funnel stage with friction-aware wording. |
 | [`case-study-write`](skills/case-study-write/SKILL.md) | Write a case study: problem, approach, results, proof, lessons. |
 | [`changelog-user-facing`](skills/changelog-user-facing/SKILL.md) | Turn engineering notes into user-facing release notes people understand. |
 | [`community-ama-prep`](skills/community-ama-prep/SKILL.md) | Prepare an AMA: themes, banned topics, moderation, answer bank. |
@@ -64,29 +63,31 @@ _Auto-generated from `skills/*/SKILL.md` — **282** skills. Last updated: 2026-
 | [`content-audit`](skills/content-audit/SKILL.md) | Audit existing content: freshness, accuracy, duplicates, SEO cannibalization, prune plan. |
 | [`content-edit-pass`](skills/content-edit-pass/SKILL.md) | Edit for clarity, structure, and brevity while preserving author voice. |
 | [`content-hooks`](skills/content-hooks/SKILL.md) | Generate non-clickbait content hooks for an article or video topic. |
-| [`content-localization`](skills/content-localization/SKILL.md) | Prepare content for localization: freeze strings, context notes, do-not-translate list. |
 | [`content-repurpose`](skills/content-repurpose/SKILL.md) | Repurpose one long asset into multiple channel formats without sounding duplicate. |
 | [`content-strategy`](skills/content-strategy/SKILL.md) | Draft a content strategy: pillars, channels, cadence, voice, measurement. |
+| [`creative-constraint-sprint`](skills/creative-constraint-sprint/SKILL.md) | Run a creative sprint with constraints: timebox, output, critique, ship. |
 | [`documentation-tutorial`](skills/documentation-tutorial/SKILL.md) | Write a task-oriented tutorial with prerequisites, steps, verification, troubleshooting. |
 | [`editorial-calendar`](skills/editorial-calendar/SKILL.md) | Build an editorial calendar with themes, owners, statuses, and deadlines. |
 | [`email-draft`](skills/email-draft/SKILL.md) | Draft clear emails: purpose first, short paragraphs, explicit ask, tone control. |
 | [`fact-check-pass`](skills/fact-check-pass/SKILL.md) | Fact-check a draft: claims, numbers, links, attribution, uncertainty language. |
 | [`faq-generation`](skills/faq-generation/SKILL.md) | Generate FAQs from product behavior, support tickets, and objections. |
-| [`gift-ideas`](skills/gift-ideas/SKILL.md) | Suggest gift ideas from interests, budget, and constraints (no purchase required). |
 | [`headline-options`](skills/headline-options/SKILL.md) | Generate headline options optimized for clarity and curiosity without clickbait. |
 | [`interview-questions`](skills/interview-questions/SKILL.md) | Prepare interview questions for customers, candidates, or experts with follow-ups. |
 | [`landing-page-copy`](skills/landing-page-copy/SKILL.md) | Write landing page copy: hero, proof, benefits, objections, CTA. |
 | [`newsletter-issue`](skills/newsletter-issue/SKILL.md) | Plan and draft a newsletter issue: sections, links, subject lines, preview text. |
-| [`personal-crm`](skills/personal-crm/SKILL.md) | Lightweight personal CRM: people notes, last contact, follow-ups (privacy first). |
+| [`photo-art-direction`](skills/photo-art-direction/SKILL.md) | Art-direct photoshoots or stock selection: subject, lighting, crop, usage rights checklist. |
 | [`podcast-episode-plan`](skills/podcast-episode-plan/SKILL.md) | Plan a podcast episode: cold open, segments, guests prep, show notes. |
+| [`presentation-deck-structure`](skills/presentation-deck-structure/SKILL.md) | Structure a presentation deck: story arc, slide budget, speaker notes. |
 | [`press-release`](skills/press-release/SKILL.md) | Draft a press release: headline, lede, body, boilerplate, quotes, links. |
 | [`release-announcement`](skills/release-announcement/SKILL.md) | Write a product release announcement for blog/email/in-app. |
-| [`seo-basics`](skills/seo-basics/SKILL.md) | Apply basic technical SEO checks to marketing/docs pages. |
+| [`script-to-storyboard`](skills/script-to-storyboard/SKILL.md) | Turn a script into a shot list / storyboard frames description. |
 | [`seo-content-brief`](skills/seo-content-brief/SKILL.md) | Create an SEO content brief: intent, outline, questions to answer, internal links (no stuffing). |
 | [`short-form-script`](skills/short-form-script/SKILL.md) | Write a short-form vertical video script under a target duration with on-screen text. |
 | [`social-post-pack`](skills/social-post-pack/SKILL.md) | Create a pack of social posts for one announcement across lengths and CTAs. |
 | [`style-guide-writing`](skills/style-guide-writing/SKILL.md) | Create a writing style guide: voice, grammar choices, inclusive language, examples. |
+| [`thumbnail-concept`](skills/thumbnail-concept/SKILL.md) | Concept thumbnails: focal subject, text overlay limits, contrast, A/B ideas. |
 | [`transcript-cleanup`](skills/transcript-cleanup/SKILL.md) | Clean a transcript: speakers, paragraphs, filler removal, summary bullets. |
+| [`ux-copy-microcopy`](skills/ux-copy-microcopy/SKILL.md) | Write UI microcopy: buttons, errors, empty states, confirmations—clear and human. |
 | [`video-chapter-markers`](skills/video-chapter-markers/SKILL.md) | Create chapter markers and titles from a video outline or transcript. |
 | [`video-edit-checklist`](skills/video-edit-checklist/SKILL.md) | Checklist for editing a video cut: pacing, audio, captions, exports. |
 | [`video-script`](skills/video-script/SKILL.md) | Write a video script with visual column, VO/dialogue, timing, and B-roll notes. |
@@ -96,29 +97,22 @@ _Auto-generated from `skills/*/SKILL.md` — **282** skills. Last updated: 2026-
 | Skill | Description |
 |-------|-------------|
 | [`csv-data-cleanup`](skills/csv-data-cleanup/SKILL.md) | Profile and clean CSV/TSV data: encoding, types, nulls, dedupe, report. |
+| [`dashboard-ui-design`](skills/dashboard-ui-design/SKILL.md) | Design dashboards: metrics hierarchy, density, empty/loading/error, drill-down. |
+| [`data-viz-design`](skills/data-viz-design/SKILL.md) | Design charts/graphs for honesty: scales, color, annotations, accessibility. |
 | [`encoding-fix`](skills/encoding-fix/SKILL.md) | Fix Unicode/encoding issues (UTF-8, BOM, mislabeled files). |
 
 ## Design
 
 | Skill | Description |
 |-------|-------------|
-| [`a11y-design-review`](skills/a11y-design-review/SKILL.md) | Design-side accessibility review: contrast, focus order, targets, motion, content structure. |
-| [`brand-voice-guide`](skills/brand-voice-guide/SKILL.md) | Write a brand voice guide: principles, tone spectrum, examples do/don't. |
-| [`call-to-action-copy`](skills/call-to-action-copy/SKILL.md) | Write CTAs matched to funnel stage with friction-aware wording. |
 | [`cli-ux-polish`](skills/cli-ux-polish/SKILL.md) | Polish CLI help, flags, exit codes, and non-interactive CI mode. |
 | [`color-system`](skills/color-system/SKILL.md) | Define or refine a color system: roles (bg, text, accent, danger), contrast, dark mode. |
 | [`concept-art-brief`](skills/concept-art-brief/SKILL.md) | Write a concept art brief: subject, silhouette goals, palette, orthos, deliverables. |
-| [`creative-constraint-sprint`](skills/creative-constraint-sprint/SKILL.md) | Run a creative sprint with constraints: timebox, output, critique, ship. |
-| [`dashboard-ui-design`](skills/dashboard-ui-design/SKILL.md) | Design dashboards: metrics hierarchy, density, empty/loading/error, drill-down. |
-| [`data-viz-design`](skills/data-viz-design/SKILL.md) | Design charts/graphs for honesty: scales, color, annotations, accessibility. |
 | [`design-brief`](skills/design-brief/SKILL.md) | Write a design brief: problem, audience, constraints, success metrics, deliverables. |
 | [`design-critique-session`](skills/design-critique-session/SKILL.md) | Facilitate a design critique: goals, evidence, actionable feedback, decisions. |
 | [`design-handoff`](skills/design-handoff/SKILL.md) | Prepare design-to-engineering handoff: specs, assets, behavior notes, open questions. |
 | [`design-system-audit`](skills/design-system-audit/SKILL.md) | Audit UI against an existing design system: drift, one-offs, missing components. |
-| [`design-token-sync`](skills/design-token-sync/SKILL.md) | Replace one-off colors/spacing with design tokens / CSS variables already in the project. |
-| [`empty-state-design`](skills/empty-state-design/SKILL.md) | Add clear empty/error/no-results states with next actions. |
 | [`error-state-design`](skills/error-state-design/SKILL.md) | Design error and recovery UI that is calm, specific, and actionable. |
-| [`form-validation-ux`](skills/form-validation-ux/SKILL.md) | Improve form validation and error mapping UX (inline errors, double-submit, a11y). |
 | [`iconography-guide`](skills/iconography-guide/SKILL.md) | Create icon rules: optical size, stroke, metaphor consistency, accessibility. |
 | [`illustration-brief`](skills/illustration-brief/SKILL.md) | Write an illustration brief: story, style constraints, sizes, deliverables. |
 | [`information-architecture`](skills/information-architecture/SKILL.md) | Organize information architecture: nav, labels, findability, card sorting notes. |
@@ -128,23 +122,16 @@ _Auto-generated from `skills/*/SKILL.md` — **282** skills. Last updated: 2026-
 | [`motion-design-spec`](skills/motion-design-spec/SKILL.md) | Specify motion: purpose, duration, easing, reduced-motion fallback. |
 | [`onboarding-checklist`](skills/onboarding-checklist/SKILL.md) | Design a dismissible first-run checklist that drives activation. |
 | [`onboarding-ui-flow`](skills/onboarding-ui-flow/SKILL.md) | Design product onboarding UI: progressive disclosure, skip, value moments. |
-| [`pagination-ui`](skills/pagination-ui/SKILL.md) | Implement accessible list pagination or load-more with URL state. |
 | [`persona-profile`](skills/persona-profile/SKILL.md) | Build research-backed personas (or proto-personas) with goals, frustrations, contexts. |
-| [`photo-art-direction`](skills/photo-art-direction/SKILL.md) | Art-direct photoshoots or stock selection: subject, lighting, crop, usage rights checklist. |
 | [`portfolio-case-layout`](skills/portfolio-case-layout/SKILL.md) | Structure a portfolio case study page: problem, process, outcome, images. |
 | [`poster-layout`](skills/poster-layout/SKILL.md) | Design a poster layout brief: hierarchy, margins, type, print specs. |
-| [`presentation-deck-structure`](skills/presentation-deck-structure/SKILL.md) | Structure a presentation deck: story arc, slide budget, speaker notes. |
 | [`print-layout-basics`](skills/print-layout-basics/SKILL.md) | Lay out print-ready pages: margins, bleed, hierarchy, export checklist. |
 | [`responsive-design-spec`](skills/responsive-design-spec/SKILL.md) | Specify responsive behavior across breakpoints: reflow, collapse, priority content. |
-| [`script-to-storyboard`](skills/script-to-storyboard/SKILL.md) | Turn a script into a shot list / storyboard frames description. |
 | [`spacing-layout-grid`](skills/spacing-layout-grid/SKILL.md) | Define spacing scale and layout grid for consistent composition. |
-| [`threat-model-lite`](skills/threat-model-lite/SKILL.md) | Write a one-page threat model for a feature: assets, actors, entry points, mitigations. |
-| [`thumbnail-concept`](skills/thumbnail-concept/SKILL.md) | Concept thumbnails: focal subject, text overlay limits, contrast, A/B ideas. |
 | [`typography-system`](skills/typography-system/SKILL.md) | Set type scale, line height, and pairing rules for UI or editorial layouts. |
 | [`ui-kit-inventory`](skills/ui-kit-inventory/SKILL.md) | Inventory UI components and document missing states for a kit. |
 | [`usability-test-plan`](skills/usability-test-plan/SKILL.md) | Plan a usability test: tasks, metrics, script, and synthesis template. |
 | [`user-journey-map`](skills/user-journey-map/SKILL.md) | Map a user journey: stages, emotions, pain points, opportunities. |
-| [`ux-copy-microcopy`](skills/ux-copy-microcopy/SKILL.md) | Write UI microcopy: buttons, errors, empty states, confirmations—clear and human. |
 | [`visual-hierarchy-pass`](skills/visual-hierarchy-pass/SKILL.md) | Improve visual hierarchy on a screen: type scale, weight, spacing, focal point. |
 | [`wireframe-flow`](skills/wireframe-flow/SKILL.md) | Produce low-fidelity wireframe flows for a user task (text or simple structure). |
 
@@ -154,21 +141,31 @@ _Auto-generated from `skills/*/SKILL.md` — **282** skills. Last updated: 2026-
 |-------|-------------|
 | [`adr-write`](skills/adr-write/SKILL.md) | Write an Architecture Decision Record for a significant technical choice. |
 | [`bug-report-template`](skills/bug-report-template/SKILL.md) | Turn a vague bug into a reproducible report: environment, steps, expected/actual. |
+| [`changelog-entry`](skills/changelog-entry/SKILL.md) | Author a Keep-a-Changelog entry from commits/diff for a version bump or release. |
+| [`feature-flag-rollout`](skills/feature-flag-rollout/SKILL.md) | Add a feature flag with default-off rollout, metrics, and removal plan. |
 | [`feature-toggle-cleanup`](skills/feature-toggle-cleanup/SKILL.md) | Find stale feature flags and remove dead code paths safely. |
 | [`markdown-doc-structure`](skills/markdown-doc-structure/SKILL.md) | Restructure Markdown documentation for clear heading hierarchy and working links. |
 | [`retro-notes`](skills/retro-notes/SKILL.md) | Run a lightweight blameless retro and produce concrete action items. |
+| [`user-story-split`](skills/user-story-split/SKILL.md) | Split an epic into vertical, testable user stories with acceptance criteria. |
 
 ## Frontend
 
 | Skill | Description |
 |-------|-------------|
+| [`a11y-design-review`](skills/a11y-design-review/SKILL.md) | Design-side accessibility review: contrast, focus order, targets, motion, content structure. |
 | [`bundle-size-check`](skills/bundle-size-check/SKILL.md) | Find JS bundle size regressions and propose splits or dependency cuts. |
+| [`content-localization`](skills/content-localization/SKILL.md) | Prepare content for localization: freeze strings, context notes, do-not-translate list. |
 | [`css-specificity-debug`](skills/css-specificity-debug/SKILL.md) | Debug why a CSS rule loses (specificity, order, layers) and fix cleanly. |
+| [`design-token-sync`](skills/design-token-sync/SKILL.md) | Replace one-off colors/spacing with design tokens / CSS variables already in the project. |
 | [`email-template-review`](skills/email-template-review/SKILL.md) | Review HTML emails for client safety, plain-text parts, and injection. |
+| [`empty-state-design`](skills/empty-state-design/SKILL.md) | Add clear empty/error/no-results states with next actions. |
+| [`form-validation-ux`](skills/form-validation-ux/SKILL.md) | Improve form validation and error mapping UX (inline errors, double-submit, a11y). |
 | [`frontend-a11y`](skills/frontend-a11y/SKILL.md) | Audit and fix high-impact accessibility issues in UI code (names, keyboard, semantics). |
 | [`i18n-extract`](skills/i18n-extract/SKILL.md) | Extract UI strings into i18n catalogs and find missing locale keys. |
+| [`pagination-ui`](skills/pagination-ui/SKILL.md) | Implement accessible list pagination or load-more with URL state. |
 | [`react-performance`](skills/react-performance/SKILL.md) | Fix common React performance issues after identifying hot components. |
 | [`responsive-ui-pass`](skills/responsive-ui-pass/SKILL.md) | Fix layout breakage across mobile/tablet/desktop widths. |
+| [`seo-basics`](skills/seo-basics/SKILL.md) | Apply basic technical SEO checks to marketing/docs pages. |
 
 ## Gaming
 
@@ -216,11 +213,9 @@ _Auto-generated from `skills/*/SKILL.md` — **282** skills. Last updated: 2026-
 | Skill | Description |
 |-------|-------------|
 | [`branch-hygiene`](skills/branch-hygiene/SKILL.md) | Prune merged local branches, fetch --prune, and name a clean branch for the next task. |
-| [`changelog-entry`](skills/changelog-entry/SKILL.md) | Author a Keep-a-Changelog entry from commits/diff for a version bump or release. |
 | [`cherry-pick-commit`](skills/cherry-pick-commit/SKILL.md) | Cherry-pick specific commits onto the current branch with careful conflict resolution. |
 | [`codeowners-setup`](skills/codeowners-setup/SKILL.md) | Create CODEOWNERS for critical paths and align with review rules. |
 | [`conventional-commits`](skills/conventional-commits/SKILL.md) | Propose or write Conventional Commit messages (feat/fix/docs/chore) matching the diff. |
-| [`feature-flag-rollout`](skills/feature-flag-rollout/SKILL.md) | Add a feature flag with default-off rollout, metrics, and removal plan. |
 | [`git-bisect-helper`](skills/git-bisect-helper/SKILL.md) | Drive git bisect with a clear good/bad test command to find a regression-introducing commit. |
 | [`pr-description`](skills/pr-description/SKILL.md) | Draft a precise PR title and body from branch commits and diff. Use before opening or updating a pull request. |
 | [`rebase-onto-main`](skills/rebase-onto-main/SKILL.md) | Update the current branch onto latest main/master via rebase or merge with conflict handling. |
@@ -242,10 +237,16 @@ _Auto-generated from `skills/*/SKILL.md` — **282** skills. Last updated: 2026-
 | [`ci-pipeline-review`](skills/ci-pipeline-review/SKILL.md) | Review CI pipelines for caching, secret hygiene, required checks, and runtime. |
 | [`container-image-harden`](skills/container-image-harden/SKILL.md) | Write or harden container image recipes: multi-stage, non-root, pin bases, no secrets in layers. |
 | [`container-orchestration-review`](skills/container-orchestration-review/SKILL.md) | Review container orchestration manifests for probes, resources, securityContext, and rollout safety. |
+| [`cron-job-design`](skills/cron-job-design/SKILL.md) | Design scheduled jobs with overlap locks, idempotency, and failure alerts. |
+| [`graceful-shutdown`](skills/graceful-shutdown/SKILL.md) | Implement SIGTERM-aware graceful shutdown and drain for servers/workers. |
+| [`health-endpoints`](skills/health-endpoints/SKILL.md) | Add liveness vs readiness endpoints with appropriate dependency checks. |
+| [`idempotent-api`](skills/idempotent-api/SKILL.md) | Make a mutating endpoint safely retryable with idempotency keys. |
 | [`incident-postmortem`](skills/incident-postmortem/SKILL.md) | Write a blameless postmortem with timeline, root cause, and owned actions. |
 | [`local-container-stack`](skills/local-container-stack/SKILL.md) | Provide local multi-service containers for local dependencies with healthchecks and sane ports. |
 | [`log-level-triage`](skills/log-level-triage/SKILL.md) | Triage production issues from logs: timeline, correlation IDs, dependency health. |
 | [`metrics-instrumentation`](skills/metrics-instrumentation/SKILL.md) | Add RED/USE-style metrics without high-cardinality label explosions. |
+| [`migration-data-backfill`](skills/migration-data-backfill/SKILL.md) | Plan batched data backfills that won't lock production tables. |
+| [`queue-consumer-safe`](skills/queue-consumer-safe/SKILL.md) | Build safe queue consumers: ack semantics, retries, DLQ, idempotent handlers. |
 | [`release-checklist`](skills/release-checklist/SKILL.md) | Execute a pre-release gate: dirty tree, version alignment, tests, docs, remaining ship steps. |
 | [`runbook-write`](skills/runbook-write/SKILL.md) | Author an on-call runbook: health checks, common failures, deploy/rollback. |
 | [`sla-error-budget`](skills/sla-error-budget/SKILL.md) | Define practical SLIs/SLOs and an error-budget policy for a service. |
@@ -271,8 +272,6 @@ _Auto-generated from `skills/*/SKILL.md` — **282** skills. Last updated: 2026-
 | [`celebration-plan`](skills/celebration-plan/SKILL.md) | Plan a celebration (birthday, launch, milestone): constraints, program, budget. |
 | [`conflict-deescalation`](skills/conflict-deescalation/SKILL.md) | Prepare de-escalation language for personal or workplace conflict (non-clinical). |
 | [`daily-planning`](skills/daily-planning/SKILL.md) | Build a realistic daily plan from priorities, calendar constraints, and energy. |
-| [`data-deletion-user`](skills/data-deletion-user/SKILL.md) | Implement account deletion with re-auth, cascade/anonymize, and session revoke. |
-| [`data-export-user`](skills/data-export-user/SKILL.md) | Implement authenticated user data export with async processing if large. |
 | [`decision-log-personal`](skills/decision-log-personal/SKILL.md) | Log a personal or work decision with options, criteria, choice, review date. |
 | [`difficult-conversation`](skills/difficult-conversation/SKILL.md) | Prepare a difficult conversation: goals, script, boundaries, outcomes. |
 | [`digital-declutter`](skills/digital-declutter/SKILL.md) | Plan a digital declutter: files, inbox, photos, subscriptions—with batch rules. |
@@ -281,6 +280,7 @@ _Auto-generated from `skills/*/SKILL.md` — **282** skills. Last updated: 2026-
 | [`family-logistics`](skills/family-logistics/SKILL.md) | Coordinate family logistics: shared calendar norms, chores, handoffs, emergency info sheet. |
 | [`flashcard-set`](skills/flashcard-set/SKILL.md) | Create flashcards (Q/A) from notes for spaced practice. |
 | [`focus-block`](skills/focus-block/SKILL.md) | Design a deep-work focus block: environment, timers, distraction rules, shutdown. |
+| [`gift-ideas`](skills/gift-ideas/SKILL.md) | Suggest gift ideas from interests, budget, and constraints (no purchase required). |
 | [`goal-breakdown`](skills/goal-breakdown/SKILL.md) | Break a large goal into milestones, weekly outcomes, and first concrete actions. |
 | [`gratitude-practice`](skills/gratitude-practice/SKILL.md) | Set up a short gratitude practice with prompts and streak-free consistency tips. |
 | [`habit-design`](skills/habit-design/SKILL.md) | Design a habit loop: cue, routine, reward, tracking, restart plan. |
@@ -293,17 +293,15 @@ _Auto-generated from `skills/*/SKILL.md` — **282** skills. Last updated: 2026-
 | [`meeting-agenda`](skills/meeting-agenda/SKILL.md) | Create a meeting agenda with purpose, topics, times, and decisions needed. |
 | [`meeting-notes`](skills/meeting-notes/SKILL.md) | Turn discussion into structured notes: decisions, actions, owners, dates. |
 | [`message-draft-personal`](skills/message-draft-personal/SKILL.md) | Draft personal messages (thanks, apology, invite, check-in) with tone options. |
-| [`money-calculations`](skills/money-calculations/SKILL.md) | Implement money math with integers/decimals, explicit rounding, and currency codes. |
 | [`morning-shutdown-rituals`](skills/morning-shutdown-rituals/SKILL.md) | Design morning and end-of-day rituals that fit a real schedule. |
 | [`move-house-plan`](skills/move-house-plan/SKILL.md) | Plan a household move: timeline, inventory, vendors, change-of-address checklist. |
 | [`negotiation-prep`](skills/negotiation-prep/SKILL.md) | Prepare a negotiation: BATNA, range, script, concessions. |
 | [`packing-list`](skills/packing-list/SKILL.md) | Generate a packing list by trip type, climate, and activities. |
-| [`password-hygiene`](skills/password-hygiene/SKILL.md) | Personal password hygiene checklist: unique passwords, manager use, 2FA—without handling secrets. |
+| [`personal-crm`](skills/personal-crm/SKILL.md) | Lightweight personal CRM: people notes, last contact, follow-ups (privacy first). |
 | [`personal-inventory`](skills/personal-inventory/SKILL.md) | Run a personal inventory session: commitments, energy, obligations, free capacity. |
 | [`personal-okr`](skills/personal-okr/SKILL.md) | Write personal OKRs: objective, key results, weekly check-ins. |
 | [`personal-values-exercise`](skills/personal-values-exercise/SKILL.md) | Facilitate a values clarification exercise and translate into weekly choices. |
 | [`pet-care-routine`](skills/pet-care-routine/SKILL.md) | Create a pet care routine: feeding, walks, meds placeholders, emergency contacts. |
-| [`pii-data-handling`](skills/pii-data-handling/SKILL.md) | Minimize and protect PII: access, logs redaction, retention, deletion paths. |
 | [`priority-matrix`](skills/priority-matrix/SKILL.md) | Sort tasks with urgency/importance and recommend what to defer or drop. |
 | [`privacy-checkup`](skills/privacy-checkup/SKILL.md) | Walk through a personal privacy checkup: app permissions, sharing, data downloads. |
 | [`reading-notes`](skills/reading-notes/SKILL.md) | Produce structured reading notes: summary, key ideas, quotes, actions. |
@@ -315,7 +313,6 @@ _Auto-generated from `skills/*/SKILL.md` — **282** skills. Last updated: 2026-
 | [`subscription-audit`](skills/subscription-audit/SKILL.md) | Audit subscriptions from a user-provided list: keep, cancel, downgrade recommendations. |
 | [`time-audit`](skills/time-audit/SKILL.md) | Guide a time audit: log categories, find leaks, redesign week. |
 | [`travel-itinerary`](skills/travel-itinerary/SKILL.md) | Build a travel itinerary: logistics, buffers, offline notes, packing constraints. |
-| [`user-story-split`](skills/user-story-split/SKILL.md) | Split an epic into vertical, testable user stories with acceptance criteria. |
 | [`weekly-review`](skills/weekly-review/SKILL.md) | Run a weekly review: wins, open loops, priorities, calendar look-ahead. |
 | [`workout-plan-basic`](skills/workout-plan-basic/SKILL.md) | Draft a basic workout plan with warm-up, main work, recovery (not medical advice). |
 
@@ -332,12 +329,15 @@ _Auto-generated from `skills/*/SKILL.md` — **282** skills. Last updated: 2026-
 | [`file-upload-secure`](skills/file-upload-secure/SKILL.md) | Harden file uploads: authz, size/type checks, safe storage keys, download posture. |
 | [`multi-tenant-isolation`](skills/multi-tenant-isolation/SKILL.md) | Audit multi-tenant isolation for cross-tenant data leaks. |
 | [`owasp-web-checklist`](skills/owasp-web-checklist/SKILL.md) | Security-review a web change against practical OWASP-style controls (injection, XSS, authz, CSRF, SSRF). |
+| [`password-hygiene`](skills/password-hygiene/SKILL.md) | Personal password hygiene checklist: unique passwords, manager use, 2FA—without handling secrets. |
 | [`permissions-matrix`](skills/permissions-matrix/SKILL.md) | Build a role×action permission matrix and verify server enforcement. |
+| [`pii-data-handling`](skills/pii-data-handling/SKILL.md) | Minimize and protect PII: access, logs redaction, retention, deletion paths. |
 | [`rate-limit-design`](skills/rate-limit-design/SKILL.md) | Design rate limits for public/auth endpoints with clear 429 behavior. |
 | [`regex-safety`](skills/regex-safety/SKILL.md) | Review regexes for ReDoS and correctness on untrusted input. |
 | [`sbom-generate`](skills/sbom-generate/SKILL.md) | Generate a Software Bill of Materials (CycloneDX/SPDX) using available tooling. |
 | [`secret-scan-guidance`](skills/secret-scan-guidance/SKILL.md) | Find likely leaked secrets in the tree and guide rotation without printing secret values. |
 | [`sql-query-review`](skills/sql-query-review/SKILL.md) | Review SQL/ORM usage for N+1, injection, and missing indexes. |
+| [`threat-model-lite`](skills/threat-model-lite/SKILL.md) | Write a one-page threat model for a feature: assets, actors, entry points, mitigations. |
 | [`webhook-verify`](skills/webhook-verify/SKILL.md) | Implement or review webhook receivers: signature verification, raw body, replay protection, idempotency. |
 
 ## Testing

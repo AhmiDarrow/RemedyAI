@@ -37,23 +37,23 @@ Each skill says when to use it, the steps, tool hints, and what “done” looks
 
 ## What’s in the library (282 skills)
 
-Snapshot of packs on this branch as of 2026-07-26. Descriptions and the full alphabetical list live in **[SKILLS.md](./SKILLS.md)**.
+Snapshot of packs on this branch as of 2026-07-27. Descriptions and the full alphabetical list live in **[SKILLS.md](./SKILLS.md)**.
 
 | Area | # | A few examples |
 |------|--:|----------------|
-| Backend & APIs | 22 | `api-client-sdk`, `api-contract-review`, `background-job-ui`, `backward-compat-api` · +18 more |
-| Content & writing | 35 | `blog-post-draft`, `blog-post-outline`, `case-study-write`, `changelog-user-facing` · +31 more |
-| Data | 2 | `csv-data-cleanup`, `encoding-fix` |
-| Design & UX | 45 | `a11y-design-review`, `brand-voice-guide`, `call-to-action-copy`, `cli-ux-polish` · +41 more |
-| Docs & process | 5 | `adr-write`, `bug-report-template`, `feature-toggle-cleanup`, `markdown-doc-structure` · +1 more |
-| Frontend | 7 | `bundle-size-check`, `css-specificity-debug`, `email-template-review`, `frontend-a11y` · +3 more |
+| Backend & APIs | 19 | `api-client-sdk`, `api-contract-review`, `background-job-ui`, `backward-compat-api` · +15 more |
+| Content & writing | 39 | `blog-post-draft`, `blog-post-outline`, `brand-voice-guide`, `call-to-action-copy` · +35 more |
+| Data | 4 | `csv-data-cleanup`, `dashboard-ui-design`, `data-viz-design`, `encoding-fix` |
+| Design & UX | 29 | `cli-ux-polish`, `color-system`, `concept-art-brief`, `design-brief` · +25 more |
+| Docs & process | 8 | `adr-write`, `bug-report-template`, `changelog-entry`, `feature-flag-rollout` · +4 more |
+| Frontend | 14 | `a11y-design-review`, `bundle-size-check`, `content-localization`, `css-specificity-debug` · +10 more |
 | Gaming | 36 | `boss-fight-design`, `combat-feel-tuning`, `game-accessibility`, `game-ai-behavior` · +32 more |
-| Git & release | 10 | `branch-hygiene`, `changelog-entry`, `cherry-pick-commit`, `codeowners-setup` · +6 more |
+| Git & release | 8 | `branch-hygiene`, `cherry-pick-commit`, `codeowners-setup`, `conventional-commits` · +4 more |
 | LLM & agents | 3 | `llm-cost-guardrails`, `rag-chunking`, `tool-use-spec` |
-| Ops & reliability | 14 | `backup-restore-drill`, `ci-pipeline-review`, `container-image-harden`, `container-orchestration-review` · +10 more |
+| Ops & reliability | 20 | `backup-restore-drill`, `ci-pipeline-review`, `container-image-harden`, `container-orchestration-review` · +16 more |
 | Other | 2 | `hello-library`, `license-compliance` |
-| Personal assistant | 54 | `accountability-partnership`, `boundary-setting`, `budget-snapshot`, `caregiver-checklist` · +50 more |
-| Security | 16 | `audit-log-design`, `auth-session-review`, `cors-review`, `dependency-audit` · +12 more |
+| Personal assistant | 50 | `accountability-partnership`, `boundary-setting`, `budget-snapshot`, `caregiver-checklist` · +46 more |
+| Security | 19 | `audit-log-design`, `auth-session-review`, `cors-review`, `dependency-audit` · +15 more |
 | Testing | 13 | `acceptance-criteria`, `benchmark-micro`, `browser-automation-safe`, `contract-test-api` · +9 more |
 | Tooling & languages | 18 | `algorithmic-complexity`, `cross-platform-paths`, `deadlock-debug`, `dev-environment-container` · +14 more |
 
