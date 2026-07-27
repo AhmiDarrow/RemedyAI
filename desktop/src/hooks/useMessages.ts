@@ -244,7 +244,19 @@ export function useMessages(sessionId: string | null) {
   // Session change: always force-load history so list clicks work.
   // Abort any in-flight stream and clear stuck flags so a dead stream cannot blank the feed.
   // Drop the send queue — queued items are for the previous session context.
+  // Cancel previous session's server turn only if it was actively streaming
+  // (avoid extra HTTP on every idle tab hop).
+  const prevSessionForAbortRef = useRef<string | null>(null)
+  const prevStreamingForAbortRef = useRef(false)
   useEffect(() => {
+    const prev = prevSessionForAbortRef.current
+    const wasStreaming =
+      prevStreamingForAbortRef.current || streamingRef.current || sendLockRef.current
+    if (prev && prev !== sessionId && wasStreaming) {
+      void abortSession(prev).catch(() => {})
+    }
+    prevSessionForAbortRef.current = sessionId || null
+    prevStreamingForAbortRef.current = false
     try {
       streamCtrlRef.current?.abort()
     } catch {
@@ -622,8 +634,12 @@ export function useMessages(sessionId: string | null) {
           mode,
         }
         if (mode === 'interrupt') {
-          // Stop current stream, then send this first (ahead of after-queue).
+          // Stop current stream + server turn, then send this first (ahead of after-queue).
+          const sidAbort = sessionIdRef.current
           streamCtrlRef.current?.abort()
+          if (sidAbort) {
+            void abortSession(sidAbort).catch(() => {})
+          }
           resetStreamBuffers()
           setStreaming(false)
           setStreamCtrl(null)
@@ -679,6 +695,11 @@ export function useMessages(sessionId: string | null) {
     },
     [sessionId, sendTurn, resetStreamBuffers, drainQueue],
   )
+
+  // Track streaming for session-switch abort (only abort if work was live).
+  useEffect(() => {
+    if (streaming) prevStreamingForAbortRef.current = true
+  }, [streaming])
 
   const stop = useCallback(() => {
     const sid = sessionIdRef.current

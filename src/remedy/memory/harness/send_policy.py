@@ -114,9 +114,6 @@ def apply_auto_harness_send_policy(
     min_pct = float(getattr(runtime, "_harness_min_pct", 0.75) or 0.75)
     max_pct = float(getattr(runtime, "_harness_max_pct", 0.92) or 0.92)
 
-    # Pre-policy snapshot for quality scoring (ground truth before prune)
-    pre_prune: list[dict[str, Any]] = [dict(m) for m in messages]
-
     snap = build_context_snapshot(
         messages=messages,
         user_text=user_text or "",
@@ -137,6 +134,12 @@ def apply_auto_harness_send_policy(
     meta["fill_pct"] = snap.fill_pct
     meta["context_window"] = window
 
+    # Ground-truth history for compress quality — only when soft/strong runs
+    # (skip expensive shallow copy on the common no-compress path).
+    pre_prune: list[dict[str, Any]] | None = None
+    if level:
+        pre_prune = [dict(m) for m in messages]
+
     # Inject policy + remedies + project pins
     injects: list[str] = []
     if snap.policy_system:
@@ -156,12 +159,15 @@ def apply_auto_harness_send_policy(
         )
 
     if not level:
+        # Common path: no compress — skip pre_prune work entirely
         runtime._last_send_messages = list(messages)
         with suppress(Exception):
             from remedy.core.metrics import default_registry
 
             default_registry.gauge("remedy_context_tokens_estimate").set(float(est))
         return messages, meta
+
+    assert pre_prune is not None
 
     # Ensure brief exists before any compress work
     _ensure_session_brief(runtime, sid)

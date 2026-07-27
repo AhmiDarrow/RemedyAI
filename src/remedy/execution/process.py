@@ -106,6 +106,49 @@ async def create_hidden_subprocess_exec(
     )
 
 
+def kill_process_tree(proc: Any) -> None:
+    """Kill *proc* and, on Windows, attempt to kill its child tree.
+
+    Accepts ``asyncio.subprocess.Process`` or ``subprocess.Popen``.
+    Safe to call if the process already exited.
+    """
+    if proc is None:
+        return
+    pid = getattr(proc, "pid", None)
+    # Prefer tree kill on Windows so pwsh/cmd children die with the shell.
+    if sys.platform == "win32" and pid:
+        try:
+            # /T = tree, /F = force; CREATE_NO_WINDOW so no flash
+            subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                capture_output=True,
+                timeout=5,
+                **hidden_subprocess_kwargs(),
+            )
+            return
+        except Exception:
+            pass
+    try:
+        if getattr(proc, "returncode", None) is not None:
+            return  # already exited (asyncio Process)
+    except Exception:
+        pass
+    try:
+        if hasattr(proc, "poll") and proc.poll() is not None:
+            return
+    except Exception:
+        pass
+    try:
+        proc.kill()
+    except ProcessLookupError:
+        return
+    except Exception:
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+
+
 def win_shell_prefix() -> list[str]:
     """Argv prefix for running a shell command string on Windows without a window.
 

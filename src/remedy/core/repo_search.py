@@ -59,11 +59,18 @@ class SearchHit:
     text: str
 
 
-def _resolve_start(root: Path, path: str) -> tuple[Path, Path, str | None]:
+def _resolve_start(
+    root: Path,
+    path: str,
+    *,
+    allowed_roots: list[Path] | None = None,
+    access_scope: str = "project",
+) -> tuple[Path, Path, str | None]:
     """Return (display_root, start, error).
 
-    Absolute *path* is allowed and becomes the search start (multi-tree / no
-    focus folder). Relative paths resolve under *root*.
+    Absolute *path* is allowed when it stays under *allowed_roots* (or full
+    scope). Relative paths resolve under *root*. Callers that already jailed
+    via ``resolve_tool_path`` may pass the resolved path without extra roots.
     """
     root = root.expanduser()
     try:
@@ -80,6 +87,24 @@ def _resolve_start(root: Path, path: str) -> tuple[Path, Path, str | None]:
             start = p.absolute()
         if not start.exists():
             return root, start, "error: path not found"
+        # When allowed_roots provided, enforce jail (fail closed).
+        if allowed_roots is not None:
+            scope = (access_scope or "project").strip().lower()
+            if scope not in ("full", "machine", "all", "unrestricted"):
+                ok = False
+                for r in allowed_roots:
+                    try:
+                        rr = r.resolve() if r.exists() else Path(r).absolute()
+                    except OSError:
+                        rr = Path(r).absolute()
+                    try:
+                        start.relative_to(rr)
+                        ok = True
+                        break
+                    except ValueError:
+                        continue
+                if not ok:
+                    return root, start, "error: path outside root"
         display_root = start if start.is_dir() else start.parent
         return display_root, start, None
 
@@ -106,9 +131,16 @@ def search_repo(
     prefer_system_rg: bool = False,
     force_python: bool = False,
     home_dir: str | Path | None = None,
+    allowed_roots: list[Path] | None = None,
+    access_scope: str = "project",
 ) -> tuple[list[SearchHit], str]:
     """Search under *root*/*path* (or absolute *path*). Returns (hits, engine_label)."""
-    display_root, start, err = _resolve_start(Path(root), path)
+    display_root, start, err = _resolve_start(
+        Path(root),
+        path,
+        allowed_roots=allowed_roots,
+        access_scope=access_scope,
+    )
     if err:
         return [], err
 

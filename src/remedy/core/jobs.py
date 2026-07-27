@@ -20,15 +20,9 @@ class JobResult:
 
 
 def _resolve_job_path(runtime: Any, path: str = ".") -> Path:
+    """Resolve path under runtime access scope. Fail closed (no raw absolute escape)."""
     raw = (path or ".").strip() or "."
-    try:
-        return runtime.resolve_tool_path(raw)
-    except Exception:
-        p = Path(raw).expanduser()
-        try:
-            return p.resolve()
-        except OSError:
-            return p.absolute()
+    return runtime.resolve_tool_path(raw)
 
 
 async def run_explore_job(
@@ -43,7 +37,15 @@ async def run_explore_job(
     from remedy.core.repo_search import format_hits, search_repo
 
     root = runtime.effective_project_path()
-    target = _resolve_job_path(runtime, path)
+    try:
+        target = _resolve_job_path(runtime, path)
+    except Exception as e:
+        return JobResult(
+            kind="explore",
+            ok=False,
+            summary=f"error: path not allowed or unresolvable: {path} ({e})",
+            details={"path": path},
+        )
     parts: list[str] = [f"Explore job under {target}"]
 
     # Fingerprint + orientation for this path (not mandatory project root)
@@ -115,16 +117,28 @@ async def run_explore_job(
         parts.append(f"list error: {e}")
 
     if (query or "").strip():
-        search_path = str(target) if target.exists() else (path or ".")
-        home = getattr(getattr(runtime, "config", None), "home_dir", None)
-        hits, engine = search_repo(
-            root,
-            query.strip(),
-            path=search_path,
-            max_matches=30,
-            home_dir=home,
-        )
-        parts.append(format_hits(hits, engine=engine, pattern=query.strip()))
+        if not target.exists():
+            parts.append(f"error: path not found for search: {target}")
+        else:
+            search_path = str(target)
+            home = getattr(getattr(runtime, "config", None), "home_dir", None)
+            roots = None
+            scope = "project"
+            try:
+                roots = runtime.allowed_roots()
+                scope = runtime.access_scope()
+            except Exception:
+                pass
+            hits, engine = search_repo(
+                root,
+                query.strip(),
+                path=search_path,
+                max_matches=30,
+                home_dir=home,
+                allowed_roots=roots,
+                access_scope=scope,
+            )
+            parts.append(format_hits(hits, engine=engine, pattern=query.strip()))
     elif not any(p.startswith("Listing:") or p.startswith("File:") for p in parts):
         parts.append("(no query — pass query= to search)")
 
@@ -157,8 +171,13 @@ async def run_verify_job(
             workdir = _resolve_job_path(runtime, path)
             if workdir.is_file():
                 workdir = workdir.parent
-        except Exception:
-            workdir = root
+        except Exception as e:
+            return JobResult(
+                kind="verify",
+                ok=False,
+                summary=f"error: path not allowed or unresolvable: {path} ({e})",
+                details={"path": path},
+            )
 
     cmd = (command or "").strip()
     if not cmd:
@@ -183,6 +202,44 @@ async def run_verify_job(
             kind="verify",
             ok=False,
             summary=f"Blocked by security policy: {danger}",
+        )
+    # Same Ask-mode gate as bash_exec — fail closed (never swallow and run shell).
+    from remedy.core.approvals import APPROVALS
+    from remedy.core.turn_context import turn_session_id
+
+    try:
+        ask_reason = APPROVALS.needs_ask(cmd, tool_name="bash_exec")
+        sid = turn_session_id(runtime)
+        if ask_reason and not APPROVALS.is_approved(
+            "bash_exec", cmd, session_id=sid
+        ):
+            item = APPROVALS.create(
+                tool_name="bash_exec",
+                command=cmd,
+                reason=ask_reason,
+                session_id=sid,
+            )
+            return JobResult(
+                kind="verify",
+                ok=False,
+                summary=(
+                    f"APPROVAL_REQUIRED id={item.id}\n"
+                    f"reason={ask_reason}\n"
+                    f"command={cmd[:400]}\n"
+                    "Do not invent success. Tell the user this needs approval in the UI "
+                    f"(or /approve {item.id}). After they approve, retry job_run/mission_verify."
+                ),
+                details={"approval_id": item.id},
+            )
+    except Exception as e:
+        return JobResult(
+            kind="verify",
+            ok=False,
+            summary=(
+                f"APPROVAL_CHECK_FAILED: {e}\n"
+                "Shell verify was not run (fail closed). Retry or use bash_exec after approval."
+            ),
+            details={"error": str(e)},
         )
     roots = runtime.allowed_roots()
     sandbox = SubprocessSandbox(allowed_paths=roots or [root, workdir])
@@ -219,7 +276,15 @@ async def run_diff_job(runtime: Any, *, path: str = ".") -> JobResult:
     from remedy.execution.process import win_shell_prefix
     from remedy.execution.sandbox import SubprocessSandbox
 
-    workdir = _resolve_job_path(runtime, path)
+    try:
+        workdir = _resolve_job_path(runtime, path)
+    except Exception as e:
+        return JobResult(
+            kind="diff",
+            ok=False,
+            summary=f"error: path not allowed or unresolvable: {path} ({e})",
+            details={"path": path},
+        )
     if workdir.is_file():
         workdir = workdir.parent
     roots = runtime.allowed_roots()

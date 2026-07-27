@@ -50,10 +50,19 @@ _PACKS: dict[str, dict[str, Any]] = {
             "Prefer tools over monologue: file_edit (multi-hunk via edits=) for "
             "precise edits, repo_search for discovery (absolute path= when multi-tree), "
             "file_write for new files, bash_exec with timeout_seconds/workdir for builds. "
-            "Use job_run explore/verify/diff for surveys. Keep going until finished."
+            "When ≥2 independent modules/paths, use spread_run (parallel silent workers) "
+            "instead of long serial list_dir loops. "
+            "Use job_run explore/verify/diff for a single survey. Keep going until finished."
         ),
         "prefer_tools": True,
-        "suggest_tools": ["file_edit", "repo_search", "file_read", "bash_exec", "job_run"],
+        "suggest_tools": [
+            "file_edit",
+            "repo_search",
+            "file_read",
+            "bash_exec",
+            "job_run",
+            "spread_run",
+        ],
     },
     "autonomous": {
         "id": "autonomous",
@@ -64,7 +73,8 @@ _PACKS: dict[str, dict[str, Any]] = {
             "(stack fingerprint may auto-fill; e.g. pytest -q or Godot headless smoke).\n"
             "2) Prefer file_edit / multi-hunk edits=; repo_search for discovery; "
             "file_write only for new files. Use absolute paths when juggling trees.\n"
-            "3) job_run kind=explore to survey; kind=verify for tests; kind=diff for git.\n"
+            "3) Cover ground fast: spread_run when ≥2 independent trees/modules; "
+            "else job_run kind=explore|verify|diff for a single survey.\n"
             "4) mission_update after each step; mission_verify before claiming done "
             "(do not claim complete if verify failed).\n"
             "5) On failure: read errors (path:line), file_edit fixes, re-verify "
@@ -81,6 +91,7 @@ _PACKS: dict[str, dict[str, Any]] = {
             "file_edit",
             "repo_search",
             "job_run",
+            "spread_run",
             "bash_exec",
         ],
     },

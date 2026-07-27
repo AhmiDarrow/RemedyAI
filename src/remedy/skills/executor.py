@@ -184,13 +184,16 @@ class SkillExecutor:
 
         try:
             from remedy.execution.process import create_hidden_subprocess_exec
+            from remedy.execution.sandbox import scrub_subprocess_env
 
+            # Never pass provider keys / REMEDY_* into skill shell (same as run_script).
+            child_env = scrub_subprocess_env(env)
             proc = await create_hidden_subprocess_exec(
                 *command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=cwd,
-                env=env,
+                env=child_env,
             )
             try:
                 stdout, stderr = await asyncio.wait_for(

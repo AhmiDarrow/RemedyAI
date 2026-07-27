@@ -241,9 +241,10 @@ class MemoryStore:
         )
 
     async def close(self) -> None:
-        if self._db is not None:
-            self._db.close()
-            self._db = None
+        with self._locked():
+            if self._db is not None:
+                self._db.close()
+                self._db = None
 
     async def __aenter__(self) -> MemoryStore:
         await self.initialize()
@@ -443,10 +444,13 @@ class MemoryStore:
         return self._row_to_entry(row)
 
     async def delete(self, entry_id: str | UUID) -> bool:
-        db = self._ensure_db()
-        cursor = db.execute("DELETE FROM memory_entries WHERE id = ?", (str(entry_id),))
-        db.commit()
-        return cursor.rowcount > 0
+        with self._locked():
+            db = self._ensure_db()
+            cursor = db.execute(
+                "DELETE FROM memory_entries WHERE id = ?", (str(entry_id),)
+            )
+            db.commit()
+            return cursor.rowcount > 0
 
     async def list_by_type(
         self, entry_type: MemoryEntryType, limit: int = 50, offset: int = 0
@@ -573,29 +577,30 @@ class MemoryStore:
 
     async def create_handoff(self, note: HandoffNote) -> HandoffNote:
         """Persist a handoff note and optionally save it as a memory entry."""
-        db = self._ensure_db()
-        db.execute(
-            """
-            INSERT OR REPLACE INTO handoff_notes
-                (id, title, content, tags, from_session, to_session,
-                 context_summary, action_items, decisions, created_at, acknowledged)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                str(note.id),
-                note.title,
-                note.content,
-                json.dumps(note.tags),
-                note.from_session,
-                note.to_session,
-                note.context_summary,
-                json.dumps(note.action_items),
-                json.dumps(note.decisions),
-                note.created_at.isoformat(),
-                int(note.acknowledged),
-            ),
-        )
-        db.commit()
+        with self._locked():
+            db = self._ensure_db()
+            db.execute(
+                """
+                INSERT OR REPLACE INTO handoff_notes
+                    (id, title, content, tags, from_session, to_session,
+                     context_summary, action_items, decisions, created_at, acknowledged)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(note.id),
+                    note.title,
+                    note.content,
+                    json.dumps(note.tags),
+                    note.from_session,
+                    note.to_session,
+                    note.context_summary,
+                    json.dumps(note.action_items),
+                    json.dumps(note.decisions),
+                    note.created_at.isoformat(),
+                    int(note.acknowledged),
+                ),
+            )
+            db.commit()
 
         # Stable memory id = handoff id so re-saving the same note does not
         # duplicate rows in memory_entries.
@@ -767,42 +772,43 @@ class MemoryStore:
     # -- user profile ---------------------------------------------------------
 
     async def save_user_profile(self, profile: UserProfile) -> None:
-        db = self._ensure_db()
-        now = datetime.now(UTC).isoformat()
-        db.execute(
-            "INSERT OR REPLACE INTO user_profile (user_id, profile_json, updated_at) VALUES (?, ?, ?)",
-            (profile.user_id, profile.model_dump_json(indent=2), now),
-        )
-
-        db.execute(
-            "DELETE FROM user_facts WHERE user_id = ?", (profile.user_id,)
-        )
-        db.execute(
-            "DELETE FROM user_traits WHERE user_id = ?", (profile.user_id,)
-        )
-
-        for fact in profile.facts:
+        with self._locked():
+            db = self._ensure_db()
+            now = datetime.now(UTC).isoformat()
             db.execute(
-                "INSERT OR REPLACE INTO user_facts (id, user_id, fact, category, confidence, "
-                "source, created_at, last_referenced, reference_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (str(fact.id), profile.user_id, fact.fact, fact.category, fact.confidence,
-                 fact.source, fact.created_at.isoformat(), fact.last_referenced.isoformat(),
-                 fact.reference_count),
+                "INSERT OR REPLACE INTO user_profile (user_id, profile_json, updated_at) VALUES (?, ?, ?)",
+                (profile.user_id, profile.model_dump_json(indent=2), now),
             )
 
-        for key, trait in profile.traits.items():
-            import json as _json
             db.execute(
-                "INSERT OR REPLACE INTO user_traits (user_id, key, value_json, confidence, "
-                "source, first_observed, last_updated, observation_count) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (profile.user_id, key, _json.dumps(trait.value, default=str),
-                 trait.confidence, trait.source,
-                 trait.first_observed.isoformat(), trait.last_updated.isoformat(),
-                 trait.observation_count),
+                "DELETE FROM user_facts WHERE user_id = ?", (profile.user_id,)
+            )
+            db.execute(
+                "DELETE FROM user_traits WHERE user_id = ?", (profile.user_id,)
             )
 
-        db.commit()
+            for fact in profile.facts:
+                db.execute(
+                    "INSERT OR REPLACE INTO user_facts (id, user_id, fact, category, confidence, "
+                    "source, created_at, last_referenced, reference_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (str(fact.id), profile.user_id, fact.fact, fact.category, fact.confidence,
+                     fact.source, fact.created_at.isoformat(), fact.last_referenced.isoformat(),
+                     fact.reference_count),
+                )
+
+            for key, trait in profile.traits.items():
+                import json as _json
+                db.execute(
+                    "INSERT OR REPLACE INTO user_traits (user_id, key, value_json, confidence, "
+                    "source, first_observed, last_updated, observation_count) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (profile.user_id, key, _json.dumps(trait.value, default=str),
+                     trait.confidence, trait.source,
+                     trait.first_observed.isoformat(), trait.last_updated.isoformat(),
+                     trait.observation_count),
+                )
+
+            db.commit()
 
     async def load_user_profile(self, user_id: str = "default") -> UserProfile | None:
         db = self._ensure_db()
@@ -905,47 +911,61 @@ class MemoryStore:
             return self._row_to_session(row)
 
     async def update_chat_session(self, session_id: str, **fields: Any) -> ChatSession | None:
-        db = self._ensure_db()
-        allowed = {
-            "title",
-            "model",
-            "agent",
-            "project_path",
-            "llm_provider",
-            "message_count",
-            "origin_channel",
-            "external_chat_id",
-            "external_user",
-        }
-        updates: dict[str, Any] = {}
-        for k, v in fields.items():
-            if k not in allowed:
-                continue
-            # project_path may be cleared to NULL (no-project sessions)
-            if k == "project_path":
-                if v is None or str(v).strip() in ("", ".", "./"):
-                    updates[k] = None
-                else:
+        with self._locked():
+            db = self._ensure_db()
+            allowed = {
+                "title",
+                "model",
+                "agent",
+                "project_path",
+                "llm_provider",
+                "message_count",
+                "origin_channel",
+                "external_chat_id",
+                "external_user",
+            }
+            updates: dict[str, Any] = {}
+            for k, v in fields.items():
+                if k not in allowed:
+                    continue
+                # project_path may be cleared to NULL (no-project sessions)
+                if k == "project_path":
+                    if v is None or str(v).strip() in ("", ".", "./"):
+                        updates[k] = None
+                    else:
+                        updates[k] = v
+                elif v is not None:
                     updates[k] = v
-            elif v is not None:
-                updates[k] = v
-        if not updates:
-            return await self.get_chat_session(session_id)
-        updates["updated_at"] = datetime.now(UTC).isoformat()
-        set_clause = ", ".join(f"{k} = ?" for k in updates)
-        values = list(updates.values()) + [session_id]
-        db.execute(
-            f"UPDATE chat_sessions SET {set_clause} WHERE id = ?", values
-        )
-        db.commit()
-        return await self.get_chat_session(session_id)
+            if not updates:
+                row = db.execute(
+                    "SELECT * FROM chat_sessions WHERE id = ?", (session_id,)
+                ).fetchone()
+                if row is None:
+                    return None
+                return self._row_to_session(row)
+            updates["updated_at"] = datetime.now(UTC).isoformat()
+            set_clause = ", ".join(f"{k} = ?" for k in updates)
+            values = list(updates.values()) + [session_id]
+            db.execute(
+                f"UPDATE chat_sessions SET {set_clause} WHERE id = ?", values
+            )
+            db.commit()
+            row = db.execute(
+                "SELECT * FROM chat_sessions WHERE id = ?", (session_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            return self._row_to_session(row)
 
     async def delete_chat_session(self, session_id: str) -> bool:
-        db = self._ensure_db()
-        db.execute("DELETE FROM chat_messages WHERE session_id = ?", (session_id,))
-        cursor = db.execute("DELETE FROM chat_sessions WHERE id = ?", (session_id,))
-        db.commit()
-        return cursor.rowcount > 0
+        with self._locked():
+            db = self._ensure_db()
+            db.execute("DELETE FROM chat_messages WHERE session_id = ?", (session_id,))
+            cursor = db.execute(
+                "DELETE FROM chat_sessions WHERE id = ?", (session_id,)
+            )
+            db.commit()
+            return cursor.rowcount > 0
 
     async def list_chat_sessions(
         self, limit: int = 50, offset: int = 0

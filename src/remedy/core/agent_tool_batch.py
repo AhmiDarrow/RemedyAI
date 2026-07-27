@@ -66,19 +66,14 @@ _WRITE_TOOLS = frozenset({"file_write", "file_edit", "file_edit_batch"})
 
 
 def _write_path_key(name: str, args: dict[str, Any]) -> str | None:
-    """Normalized path key for serializing concurrent writes to the same file."""
+    """Lock key so concurrent writes never clobber the same (or batch) paths.
+
+    All write tools share one wave-local key so ``file_edit`` cannot race
+    ``file_edit_batch`` (path keys alone miss batch multi-path edits).
+    """
     if name not in _WRITE_TOOLS:
         return None
-    raw = str(args.get("path") or "").strip()
-    if not raw and name == "file_edit_batch":
-        # Batch may touch many paths; serialize whole batch under a global write lock.
-        return "__batch_write__"
-    if not raw:
-        return None
-    try:
-        return str(Path(raw).expanduser().resolve()).lower()
-    except Exception:
-        return raw.replace("\\", "/").lower()
+    return "__all_writes__"
 
 
 async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
@@ -329,6 +324,8 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
             '"code": "TOOL_' in content_str
             or content_str.startswith("Error")
             or "TOOL_EXCEPTION" in content_str
+            or "APPROVAL_REQUIRED" in content_str
+            or "APPROVAL_CHECK_FAILED" in content_str
         )
         yield (
             "@@tool_result:"

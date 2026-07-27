@@ -197,10 +197,12 @@ class Gateway:
 
         # Skip heavy memory upsert for messenger MESSAGE events — chat_sessions /
         # chat_messages already persist the turn (avoids double SQLite write + lag).
+        # Also skip pure system heartbeats (would write ~1.4k junk rows/day).
         ch = event.channel.value if hasattr(event.channel, "value") else str(event.channel)
         kind = event.kind.value if hasattr(event.kind, "value") else str(event.kind)
         messenger_msg = kind == "message" and ch not in ("cli", "web", "api")
-        if self.memory and not messenger_msg:
+        skip_persist = messenger_msg or kind in ("heartbeat", "ping", "health")
+        if self.memory and not skip_persist:
             try:
                 mem_entry = MemoryEntry(
                     entry_type=MemoryEntryType.SYSTEM,

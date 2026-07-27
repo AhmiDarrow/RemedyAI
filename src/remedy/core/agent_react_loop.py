@@ -25,6 +25,7 @@ from remedy.core.react_policy import (
     _looks_like_pseudo_tools,
     _parse_pseudo_tool_calls,
     _tool_call_fingerprint,
+    batch_has_approval_required,
     batch_has_empty_search,
     batch_has_tool_errors,
     looks_like_false_progress,
@@ -670,8 +671,11 @@ async def call_llm_stream(runtime, message: str,
                         ):
                             recovery_nudge_done = True
                             empty = batch_has_empty_search(batch_tool_msgs)
+                            need_appr = batch_has_approval_required(batch_tool_msgs)
                             messages.append(
-                                recovery_nudge_message(empty_search=empty)
+                                recovery_nudge_message(
+                                    empty_search=empty, approval=need_appr
+                                )
                             )
                             with suppress(Exception):
                                 md = runtime._maybe_auto_checkpoint(
@@ -937,11 +941,16 @@ async def call_llm_stream(runtime, message: str,
                 ):
                     recovery_nudge_done = True
                     empty = batch_has_empty_search(batch_tool_msgs)
-                    messages.append(recovery_nudge_message(empty_search=empty))
+                    need_appr = batch_has_approval_required(batch_tool_msgs)
+                    messages.append(
+                        recovery_nudge_message(empty_search=empty, approval=need_appr)
+                    )
                     logger.info(
-                        "Injected tool recovery nudge after step %d (empty_search=%s)",
+                        "Injected tool recovery nudge after step %d "
+                        "(empty_search=%s approval=%s)",
                         step + 1,
                         empty,
+                        need_appr,
                     )
                     with suppress(Exception):
                         runtime._maybe_auto_checkpoint(

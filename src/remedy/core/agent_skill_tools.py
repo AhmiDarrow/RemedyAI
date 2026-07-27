@@ -141,7 +141,9 @@ def register_skill_tools(runtime: Any) -> None:
 
         run_cmd = f"skill_run {nm} {script or ''}".strip()
         ask_reason = APPROVALS.needs_ask(run_cmd, tool_name="skill_run")
-        sid = getattr(runtime, "_session_id", None)
+        from remedy.core.turn_context import turn_session_id
+
+        sid = turn_session_id(runtime)
         if ask_reason and not APPROVALS.is_approved(
             "skill_run", run_cmd, session_id=sid
         ):

@@ -128,7 +128,22 @@ def ensure_handlers_registered() -> None:
 
         return process_brief_update_job(job)
 
+    def _text_job(job: LocalJob) -> Any:
+        """Generic local text complete (spread_plan, worker_summarize)."""
+        p = job.payload or {}
+        prompt = str(p.get("prompt") or "")
+        return local_text_complete(
+            prompt,
+            base_url=str(p.get("base_url") or ""),
+            max_tokens=int(p.get("max_tokens") or 64),
+            temperature=float(p.get("temperature") or 0.0),
+            timeout_s=float(p.get("timeout_s") or 20),
+            system=str(p.get("system") or "") or None,
+        )
+
     q.register("vision_decode", _vision_decode)
     q.register("nano_classify", _nano_classify)
     q.register("brief_update", _brief_update)
+    q.register("spread_plan", _text_job)
+    q.register("worker_summarize", _text_job)
     _handlers_ready = True

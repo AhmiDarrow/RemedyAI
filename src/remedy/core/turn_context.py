@@ -5,16 +5,22 @@ The desktop and messenger gateways share one BasicRuntime. Mutable fields like
 each stream also binds ContextVars so concurrent awaits see the correct session
 and project jail. ``POST /sessions/{id}/abort`` sets the turn's Event so the
 ReAct loop can stop without relying only on client SSE disconnect.
+
+In-flight shell/sandbox processes are registered per session and killed when
+the turn is aborted so Stop / session switch does not leave tools running.
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import threading
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -35,12 +41,30 @@ _turn_workspace: ContextVar[TurnWorkspace | None] = ContextVar(
 
 # session_id -> list of abort events (overlapping streams rare but possible)
 _registry: dict[str, list[asyncio.Event]] = {}
+# session_id -> live subprocesses for this turn (killed on abort)
+_session_procs: dict[str, list[Any]] = {}
 _lock = threading.Lock()
 
 
 def current_session_id(fallback: str | None = None) -> str | None:
     sid = _turn_session_id.get()
     return sid if sid else fallback
+
+
+def turn_session_id(runtime: Any = None, fallback: str | None = None) -> str | None:
+    """Session id for this coroutine turn (ContextVar first, then runtime).
+
+    Prefer this for approvals / telemetry so concurrent tabs do not steal
+    each other's session-scoped fingerprints.
+    """
+    sid = _turn_session_id.get()
+    if sid:
+        return sid
+    if runtime is not None:
+        raw = getattr(runtime, "_session_id", None)
+        if raw is not None and str(raw).strip():
+            return str(raw).strip()
+    return fallback if fallback and str(fallback).strip() else None
 
 
 def current_turn_workspace() -> TurnWorkspace | None:
@@ -50,6 +74,10 @@ def current_turn_workspace() -> TurnWorkspace | None:
 def is_turn_aborted() -> bool:
     ev = _turn_abort.get()
     return bool(ev is not None and ev.is_set())
+
+
+def current_abort_event() -> asyncio.Event | None:
+    return _turn_abort.get()
 
 
 def begin_turn(
@@ -94,6 +122,9 @@ def end_turn(
                 lst.remove(ev)
             if not lst and sid in _registry:
                 del _registry[sid]
+            # Drop any leftover proc handles for this session if no turns remain
+            if sid not in _registry:
+                _session_procs.pop(sid, None)
     with contextlib.suppress(Exception):
         _turn_session_id.reset(tok_s)
     with contextlib.suppress(Exception):
@@ -103,8 +134,64 @@ def end_turn(
             _turn_workspace.reset(tok_w)
 
 
+def register_turn_process(proc: Any) -> None:
+    """Track a live child process for the current turn (killed on abort)."""
+    sid = current_session_id()
+    if not sid or proc is None:
+        return
+    with _lock:
+        lst = _session_procs.setdefault(sid, [])
+        if proc not in lst:
+            lst.append(proc)
+
+
+def unregister_turn_process(proc: Any) -> None:
+    sid = current_session_id()
+    if not sid or proc is None:
+        return
+    with _lock:
+        lst = _session_procs.get(sid) or []
+        if proc in lst:
+            lst.remove(proc)
+        if not lst and sid in _session_procs:
+            del _session_procs[sid]
+
+
+def _kill_proc(proc: Any) -> None:
+    """Best-effort kill of asyncio or stdlib process (incl. Windows tree)."""
+    if proc is None:
+        return
+    try:
+        from remedy.execution.process import kill_process_tree
+
+        kill_process_tree(proc)
+    except Exception:
+        with contextlib.suppress(Exception):
+            if hasattr(proc, "kill"):
+                proc.kill()
+            elif hasattr(proc, "terminate"):
+                proc.terminate()
+
+
+def kill_session_processes(session_id: str) -> int:
+    """Kill all registered subprocesses for ``session_id``. Returns count."""
+    sid = str(session_id or "").strip()
+    if not sid:
+        return 0
+    with _lock:
+        procs = list(_session_procs.pop(sid, []) or [])
+    n = 0
+    for proc in procs:
+        try:
+            _kill_proc(proc)
+            n += 1
+        except Exception:
+            logger.debug("kill_session_processes failed", exc_info=True)
+    return n
+
+
 def abort_session(session_id: str) -> int:
-    """Signal all in-flight turns for ``session_id``. Returns count notified."""
+    """Signal all in-flight turns and kill their shell children. Returns events notified."""
     sid = str(session_id or "").strip()
     if not sid:
         return 0
@@ -113,6 +200,7 @@ def abort_session(session_id: str) -> int:
     for ev in events:
         with contextlib.suppress(Exception):
             ev.set()
+    kill_session_processes(sid)
     return len(events)
 
 

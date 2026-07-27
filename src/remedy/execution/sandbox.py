@@ -7,9 +7,11 @@ All backends share the ExecutionResult contract.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from remedy.core.security import check_dangerous_command
 
@@ -151,7 +153,23 @@ class SubprocessSandbox(Sandbox):
         safe_env = scrub_subprocess_env(env)
 
         try:
-            from remedy.execution.process import create_hidden_subprocess_exec
+            from remedy.core.turn_context import (
+                current_abort_event,
+                is_turn_aborted,
+                register_turn_process,
+                unregister_turn_process,
+            )
+            from remedy.execution.process import (
+                create_hidden_subprocess_exec,
+                kill_process_tree,
+            )
+
+            if is_turn_aborted():
+                return ExecutionResult(
+                    exit_code=-1,
+                    stderr="Aborted before start (session stop)",
+                    duration_ms=(time.monotonic() - start) * 1000,
+                )
 
             proc = await create_hidden_subprocess_exec(
                 *command,
@@ -160,12 +178,28 @@ class SubprocessSandbox(Sandbox):
                 cwd=str(workdir) if workdir else None,
                 env=safe_env,
             )
+            register_turn_process(proc)
 
             try:
-                stdout, stderr = await asyncio.wait_for(
-                    proc.communicate(),
-                    timeout=timeout_seconds,
+                stdout, stderr = await _communicate_or_abort(
+                    proc,
+                    timeout_seconds=timeout_seconds,
+                    abort_event=current_abort_event(),
                 )
+                if stdout is None and stderr is None:
+                    # Aborted or timed out — process already killed
+                    elapsed = (time.monotonic() - start) * 1000
+                    if is_turn_aborted():
+                        return ExecutionResult(
+                            exit_code=-1,
+                            stderr="Aborted (session stop) — shell killed",
+                            duration_ms=elapsed,
+                        )
+                    return ExecutionResult(
+                        exit_code=-1,
+                        stderr=f"Command timed out after {timeout_seconds}s",
+                        duration_ms=elapsed,
+                    )
                 elapsed = (time.monotonic() - start) * 1000
                 return ExecutionResult(
                     exit_code=proc.returncode or 0,
@@ -173,14 +207,8 @@ class SubprocessSandbox(Sandbox):
                     stderr=stderr.decode("utf-8", errors="replace") if stderr else "",
                     duration_ms=elapsed,
                 )
-            except TimeoutError:
-                proc.kill()
-                elapsed = (time.monotonic() - start) * 1000
-                return ExecutionResult(
-                    exit_code=-1,
-                    stderr=f"Command timed out after {timeout_seconds}s",
-                    duration_ms=elapsed,
-                )
+            finally:
+                unregister_turn_process(proc)
         except FileNotFoundError as e:
             elapsed = (time.monotonic() - start) * 1000
             return ExecutionResult(
@@ -195,3 +223,56 @@ class SubprocessSandbox(Sandbox):
                 stderr=f"OS error: {e}",
                 duration_ms=elapsed,
             )
+
+
+async def _communicate_or_abort(
+    proc: asyncio.subprocess.Process,
+    *,
+    timeout_seconds: float,
+    abort_event: asyncio.Event | None,
+) -> tuple[bytes | None, bytes | None]:
+    """Wait for process I/O, abort event, or timeout. Returns (None, None) if killed."""
+    from remedy.execution.process import kill_process_tree
+
+    comm = asyncio.create_task(proc.communicate())
+    waiters: set[asyncio.Task[Any]] = {comm}
+    abort_task: asyncio.Task[None] | None = None
+    if abort_event is not None:
+        abort_task = asyncio.create_task(abort_event.wait())
+        waiters.add(abort_task)
+
+    done, pending = await asyncio.wait(
+        waiters,
+        timeout=max(0.05, float(timeout_seconds)),
+        return_when=asyncio.FIRST_COMPLETED,
+    )
+
+    # Timeout — nothing finished
+    if not done:
+        kill_process_tree(proc)
+        for t in pending:
+            t.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await comm
+        return None, None
+
+    # Abort won
+    if abort_task is not None and abort_task in done and not comm.done():
+        kill_process_tree(proc)
+        comm.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await comm
+        if abort_task and not abort_task.done():
+            abort_task.cancel()
+        return None, None
+
+    # Communicate finished
+    if abort_task is not None and not abort_task.done():
+        abort_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await abort_task
+    try:
+        return await comm
+    except Exception:
+        kill_process_tree(proc)
+        return None, None

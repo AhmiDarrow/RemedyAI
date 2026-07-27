@@ -135,6 +135,38 @@ def build_context_snapshot(
         "ambiguous": bool(intent_out.get("ambiguous")),
     }
 
+    # Spread planner — HEURISTICS ONLY on the hot path.
+    # Never block chat on local Qwen (use_local only when the model calls spread_run).
+    try:
+        from remedy.core.spread.planner import plan_spread
+
+        spread_plan = plan_spread(
+            user_text or "",
+            intent=intent,
+            project_path=project_path,
+            use_local=False,
+        )
+        snap.signals["spread"] = spread_plan.to_public()
+        if spread_plan.spread:
+            hint = spread_plan.system_hint()
+            if hint:
+                snap.policy_system = (
+                    (snap.policy_system + "\n" if snap.policy_system else "") + hint
+                )
+            # Bias tool suggestions toward spread when fan-out is useful
+            tools = list(pack.get("suggest_tools") or [])
+            if "spread_run" not in tools:
+                tools = ["spread_run", *tools]
+            snap.signals["policy"]["suggest_tools"] = tools
+            try:
+                from remedy.core.metrics import default_registry
+
+                default_registry.counter("remedy_spread_plans_total").inc()
+            except Exception:
+                pass
+    except Exception as e:
+        snap.signals["spread_error"] = str(e)
+
     # Pattern nanobot window (per-session) → stuck recovery when tools fail
     pat_rate: float | None = None
     pat_n = 0

@@ -60,6 +60,10 @@ _DEFAULT_SYSTEM_PROMPT = (
     "That hangs the UI — always use native tool_calls.\n"
     "- NEVER emit DSML/XML tool markup (tool_calls, invoke, invoke_parameter) as chat text.\n"
     "- Prefer parallel tool calls for independent reads; avoid repeating the same call.\n"
+    "- When ≥2 independent modules/paths/areas: prefer **spread_run** (silent fan-out "
+    "workers → one digest) over long serial list_dir/file_read loops. "
+    "Use single **job_run** for one survey; direct tools for one-file edits. "
+    "Never spread for pure chat. Workers cannot nest.\n"
     "- After tool results, synthesize a clear final answer when the task is done. "
     "Never stall, loop, or stop mid-task because of artificial step pressure.\n"
     "- If information is already in context (provider block, skills list, history), use it.\n"
@@ -90,6 +94,14 @@ RECOVERY_NUDGE = (
     "Recover now: read the Error/Suggestion lines, then list_dir on the parent or "
     "use an absolute path, try an alternate path, or adjust the shell command. "
     "Finish the user's task with corrected tool calls."
+)
+
+# When the failure is Ask-mode approval — do NOT invent alternate commands.
+APPROVAL_NUDGE = (
+    "A tool needs partner approval (APPROVAL_REQUIRED). Do not invent success, "
+    "do not switch to a different shell command to bypass Ask mode, and do not "
+    "claim the work finished. Tell the user clearly what is waiting for approval "
+    "in the UI (or /approve <id>). After they approve, retry the SAME tool/command."
 )
 
 # When repo_search returns no hits (appended by format_hits); also available for loop.
@@ -746,6 +758,10 @@ def tool_content_is_error(content: str | None) -> bool:
         return True
     if s.startswith("Blocked by security"):
         return True
+    # Ask-mode / partner approval stops — not soft success.
+    # Match anywhere (spread digests / batch reports bury the marker past prefixes).
+    if "APPROVAL_REQUIRED" in s or "APPROVAL_CHECK_FAILED" in s:
+        return True
     # Empty / failed discovery — recover, do not invent paths
     low = s[:500].lower()
     if s.startswith("No matches for ") or "no matches for" in low[:80]:
@@ -799,8 +815,27 @@ def batch_has_empty_search(tool_messages: list[dict[str, Any]]) -> bool:
     return False
 
 
-def recovery_nudge_message(*, empty_search: bool = False) -> dict[str, str]:
+def batch_has_approval_required(tool_messages: list[dict[str, Any]]) -> bool:
+    """True if any tool result is waiting on partner approval."""
+    for msg in tool_messages:
+        if not isinstance(msg, dict) or msg.get("role") != "tool":
+            continue
+        content = msg.get("content")
+        if isinstance(content, str) and (
+            "APPROVAL_REQUIRED" in content or "APPROVAL_CHECK_FAILED" in content
+        ):
+            return True
+    return False
+
+
+def recovery_nudge_message(
+    *,
+    empty_search: bool = False,
+    approval: bool = False,
+) -> dict[str, str]:
     """User-role message that triggers one automatic recovery attempt."""
+    if approval:
+        return {"role": "user", "content": APPROVAL_NUDGE}
     if empty_search:
         return {"role": "user", "content": EMPTY_SEARCH_NUDGE + "\n" + RECOVERY_NUDGE}
     return {"role": "user", "content": RECOVERY_NUDGE}

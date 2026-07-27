@@ -27,6 +27,7 @@ Access scope (`project` / `home` / `full`) is a **security** control, separate f
 | **`list_dir`** | Browse a directory (relative or absolute) |
 | **`bash_exec`** | Builds, tests, git (approval mode still applies; cwd defaults to focus/home) |
 | **`job_run`** | Silent **explore** or **verify** job — returns a summary, not a second chat persona |
+| **`spread_run`** | Silent **fan-out** of several jobs in parallel (cover more ground) — one merged digest |
 | **`mission_*`** | Durable checklist + verify for work-alone builds |
 | **`web_fetch`** | Optional HTTP fetch — enable `web_tools_enabled: true` in config |
 
@@ -46,8 +47,31 @@ Access scope (`project` / `home` / `full`) is a **security** control, separate f
 ### Explore / verify jobs
 
 - **`job_run kind=explore`:** tree sample + stack fingerprint + orientation pointers + optional search under `path=` (absolute OK).
-- **`job_run kind=verify`:** runs a command (or fingerprint default) with local PATH and longer timeout.
+- **`job_run kind=verify`:** runs a command (or fingerprint default) with local PATH and longer timeout. Same Ask-mode approval gate as `bash_exec`.
 - **`job_run kind=diff`:** `git status` / `diff --stat` summary.
+
+### Spread (parallel silent workers)
+
+When a request spans **independent** modules/paths (or you say “in parallel” / “cover more ground”), Remedy can **fan out**:
+
+- **`spread_run`** — runs several silent workers at once (explore / search / verify / diff / review), then returns **one merged digest** to the main agent.
+- You still talk to **one Remedy** — workers are not separate chat personas.
+- Workers are **depth-1** (they cannot spawn more workers).
+- Most workers are **non-LLM** jobs (fast). Optional local Qwen only refines the plan or compresses long digests when the server is already up.
+- Continuity may inject a **[Spread]** system hint when fan-out looks useful; pure chat and single-file edits do not spread.
+
+Config (optional, under `~/.remedy/config.toml`):
+
+```toml
+[spread]
+enabled = true
+max_workers = 4
+max_tasks = 6
+use_local_plan = true
+```
+
+**When spread is faster:** independent branches and noisy surveys.  
+**When it is not:** serial edit→test chains; always-on fan-out on every message (disabled by design).
 
 ## Missions (work alone)
 

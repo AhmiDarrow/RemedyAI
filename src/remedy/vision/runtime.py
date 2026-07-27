@@ -27,6 +27,8 @@ _last_used: float = 0.0
 _running_cache: dict[str, Any] = {"ts": 0.0, "value": False, "key": ""}
 _RUNNING_CACHE_TTL_S = 2.5
 _HEALTH_TIMEOUT_S = 0.35
+# vision.json mtime cache — avoid re-reading JSON on every is_running() call
+_vision_json_cache: dict[str, Any] = {"path": "", "mtime": -1.0, "data": {}}
 
 
 def _port_open(host: str, port: int, timeout: float = 0.15) -> bool:
@@ -59,6 +61,29 @@ def _health(base_url: str, timeout: float = _HEALTH_TIMEOUT_S) -> bool:
             return False
 
 
+def _load_vision_json_cached(home_dir: str | Path | None = None) -> dict[str, Any]:
+    """Load vision.json using mtime — skip disk parse when unchanged."""
+    from remedy.vision.config import vision_json_path
+
+    path = vision_json_path(home_dir)
+    path_s = str(path)
+    try:
+        mtime = path.stat().st_mtime if path.is_file() else -1.0
+    except OSError:
+        mtime = -1.0
+    if (
+        _vision_json_cache.get("path") == path_s
+        and float(_vision_json_cache.get("mtime") or -2) == mtime
+    ):
+        data = _vision_json_cache.get("data")
+        return dict(data) if isinstance(data, dict) else {}
+    state = load_vision_json(home_dir)
+    _vision_json_cache["path"] = path_s
+    _vision_json_cache["mtime"] = mtime
+    _vision_json_cache["data"] = state
+    return state
+
+
 def is_running(
     home_dir: str | Path | None = None,
     *,
@@ -73,7 +98,7 @@ def is_running(
     Results are cached briefly so Settings/status polls cannot freeze the API.
     """
     global _proc
-    state = load_vision_json(home_dir)
+    state = _load_vision_json_cached(home_dir)
     host = str(state.get("host") or DEFAULT_HOST)
     port = int(state.get("port") or DEFAULT_PORT)
     base = str(state.get("base_url") or f"http://{host}:{port}/v1")
@@ -119,6 +144,8 @@ def invalidate_running_cache() -> None:
     _running_cache["ts"] = 0.0
     _running_cache["value"] = False
     _running_cache["key"] = ""
+    _vision_json_cache["mtime"] = -2.0
+    _vision_json_cache["data"] = {}
 
 
 def mark_used() -> None:

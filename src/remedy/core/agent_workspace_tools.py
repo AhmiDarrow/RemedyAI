@@ -142,9 +142,10 @@ def register_workspace_tools(runtime: Any) -> None:
 
     async def file_write(path: str, content: str = "") -> str:
         from remedy.core.approvals import APPROVALS
+        from remedy.core.turn_context import turn_session_id
 
         ask_reason = APPROVALS.needs_ask(f"write {path}", tool_name="file_write")
-        sid = getattr(runtime, "_session_id", None)
+        sid = turn_session_id(runtime)
         if ask_reason and not APPROVALS.is_approved(
             "file_write", f"write {path}", session_id=sid
         ):
@@ -247,8 +248,10 @@ def register_workspace_tools(runtime: Any) -> None:
                 tool_name="file_edit",
                 suggestion="Skip reserved device paths.",
             )
+        from remedy.core.turn_context import turn_session_id
+
         ask_reason = APPROVALS.needs_ask(f"edit {path}", tool_name="file_edit")
-        sid = getattr(runtime, "_session_id", None)
+        sid = turn_session_id(runtime)
         if ask_reason and not APPROVALS.is_approved(
             "file_edit", f"edit {path}", session_id=sid
         ):
@@ -401,8 +404,10 @@ def register_workspace_tools(runtime: Any) -> None:
                 code="INVALID_EDITS",
                 tool_name="file_edit_batch",
             )
+        from remedy.core.turn_context import turn_session_id
+
         reports: list[str] = []
-        sid = getattr(runtime, "_session_id", None)
+        sid = turn_session_id(runtime)
         for i, item in enumerate(items[:40]):
             if not isinstance(item, dict):
                 reports.append(f"[{i}] skip: not an object")
@@ -419,7 +424,15 @@ def register_workspace_tools(runtime: Any) -> None:
             if ask_reason and not APPROVALS.is_approved(
                 "file_edit", f"edit {p}", session_id=sid
             ):
-                reports.append(f"[{i}] {p}: APPROVAL_REQUIRED")
+                item = APPROVALS.create(
+                    tool_name="file_edit",
+                    command=f"edit {p}",
+                    reason=ask_reason,
+                    session_id=sid,
+                )
+                reports.append(
+                    f"[{i}] {p}: APPROVAL_REQUIRED id={item.id} reason={ask_reason}"
+                )
                 continue
             try:
                 target = runtime.resolve_tool_path(p)
@@ -474,14 +487,23 @@ def register_workspace_tools(runtime: Any) -> None:
         root = runtime.effective_project_path()
         raw_path = (path or ".").strip() or "."
         search_path = raw_path
-        try:
-            if raw_path not in (".", "./", ""):
+        # Fail closed: never fall back to raw absolute paths outside jail.
+        if raw_path not in (".", "./", ""):
+            try:
                 resolved = runtime.resolve_tool_path(raw_path)
-                if resolved.exists():
-                    search_path = str(resolved)
-                    _note_path(resolved)
-        except Exception:
-            search_path = raw_path
+            except Exception as e:
+                return format_tool_error(
+                    f"path not allowed or unresolvable: {raw_path} ({e})",
+                    code="PATH_DENIED",
+                    tool_name="repo_search",
+                    suggestion=(
+                        "Use a path under the project/access scope, or list_dir "
+                        "on '.' to discover valid paths."
+                    ),
+                )
+            search_path = str(resolved)
+            if resolved.exists():
+                _note_path(resolved)
 
         home = getattr(getattr(runtime, "config", None), "home_dir", None)
         sym = (symbol or "").strip()
@@ -652,8 +674,10 @@ def register_workspace_tools(runtime: Any) -> None:
                 ),
             )
         # Partner trust: bash_exec always asks in ask-mode (high-impact tool)
+        from remedy.core.turn_context import turn_session_id
+
         ask_reason = APPROVALS.needs_ask(command, tool_name="bash_exec")
-        sid = getattr(runtime, "_session_id", None)
+        sid = turn_session_id(runtime)
         if ask_reason and not APPROVALS.is_approved(
             "bash_exec", command, session_id=sid
         ):
@@ -950,6 +974,12 @@ def register_workspace_tools(runtime: Any) -> None:
         from remedy.core.agent_mission_tools import register_mission_tools
 
         register_mission_tools(runtime)
+    except Exception:
+        pass
+    try:
+        from remedy.core.agent_spread_tools import register_spread_tools
+
+        register_spread_tools(runtime)
     except Exception:
         pass
     try:
