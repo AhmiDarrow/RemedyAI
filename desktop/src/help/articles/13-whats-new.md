@@ -2,11 +2,19 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current series: **v0.18.2**.
+Current series: **v0.18.3**.
 
 ## Contents
 
-- [0.18.2](#0182---spread-run-fix) · [0.18.1](#0181---run-until-finished--title-bar) · [0.18.0](#0180---spread--library-suggest) · [0.17.0](#0170---coding-agency--process-trail) · [0.16.0](#0160---messengers--polish) · older below
+- [0.18.3](#0183---provider-switch--stability) · [0.18.2](#0182---spread-run-fix) · [0.18.1](#0181---run-until-finished--title-bar) · [0.18.0](#0180---spread--library-suggest) · [0.17.0](#0170---coding-agency--process-trail) · [0.16.0](#0160---messengers--polish) · older below
+
+## 0.18.3 - Provider switch + stability
+
+- **Status bar provider/model switch** sticks for the session (no more DeepSeek API + Grok model name mismatch).
+- **Missing model / HTTP 404** stops cleanly with “switch model” (no soft-retry spam).
+- **Quit warning “Don’t show again”** is saved before exit.
+- **Update check on launch** after the local server is ready.
+- **Fewer Windows cmd flashes** during search/spread/git tool work.
 
 ## 0.18.2 - Spread run fix
 

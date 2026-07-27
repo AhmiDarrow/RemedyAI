@@ -4,44 +4,17 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
-### Fix: “Don’t show quit warning again” persists
+## [0.18.3] - 2026-07-27
 
-- Saving the flag was fire-and-forget before `quit_app` killed the process, so
-  `desktop.json` often never wrote. Prefs are **awaited** before quit; disk flag
-  is re-checked on next quit / app start.
+### Fix: session provider switch, quit prefs, launch update check, console flash
 
-### Fix: status-bar provider switch stuck on previous API host
-
-- Per-session provider (e.g. DeepSeek → Grok) is applied on **each message**, not
-  only model name. Previously global config provider stayed DeepSeek while the
-  UI sent `grok-4.5` → HTTP 400 “supported models are deepseek-…”.
-- Session `llm_provider` from PUT `/sessions/{id}/llm` wins over config until you
-  change the global default.
-
-### Fix: stop spinning on dead/missing model (not “tool budget”)
-
-- HTTP **404** / model-not-found / no-access errors **hard-stop** with a clear
-  “switch model” message instead of soft-retrying until the turn looks stuck.
-- Soft API retries capped; after one forced final-answer attempt fails, stop
-  (no walls of `[LLM notice — HTTP 404; continuing]`).
-
-### Fix: no console flash on tool / spread workers (Windows)
-
-- **`repo_search` / ripgrep** (used heavily by `spread_run` explore/search) now spawn with
-  `CREATE_NO_WINDOW` + hidden STARTUPINFO — was the common cmd-window flash.
-- Diff jobs call **`git` directly** (hidden) instead of through a shell one-liner.
-- Hidden-process helper also sets **SW_HIDE** with CREATE_NO_WINDOW for shell/rg children.
-
-### Fix: update check on launch
-
-- Desktop runs **one automatic update check** shortly after the local server is ready
-  (previously deferred 25s from mount and easy to miss while still “connecting”).
-- 30‑minute background re-checks and manual **Check for updates** unchanged.
-
-### Docs
-
-- **What's new** (`docs/manual/13-whats-new.md` / F1): owner notes for **0.18.1** and **0.18.2**
-  (no version bump — docs-only).
+- **Status-bar provider switch:** each chat turn uses the session’s provider + key +
+  base URL (not model name alone on the old host — fixes DeepSeek 400 with `grok-4.5`).
+- **Missing model / 404:** hard-stop with “switch model” instead of soft-retry spam.
+- **Quit warning “Don’t show again”:** prefs saved to disk **before** process exit.
+- **Update check on launch:** one check ~2s after server ready (plus 30m interval).
+- **Windows console flash:** hidden spawn for `rg`/search/spread and direct `git` diff jobs.
+- **Docs / What's new:** owner notes for 0.18.1–0.18.3.
 
 ## [0.18.2] - 2026-07-27
 
