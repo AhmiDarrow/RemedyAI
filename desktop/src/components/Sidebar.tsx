@@ -812,10 +812,32 @@ function ProjectSection({
                     />
                   ) : (
                     <span
-                      className="truncate flex-1 min-w-0 text-[13px] font-medium leading-snug"
+                      className="truncate flex-1 min-w-0 text-[13px] font-medium leading-snug flex items-center gap-1"
                       title={s.title || 'New Session'}
                     >
-                      {s.title || 'New Session'}
+                      {s.origin_channel && (
+                        <span
+                          className="flex-shrink-0 text-[9px] px-1 rounded"
+                          style={{
+                            background: 'color-mix(in srgb, var(--accent) 22%, transparent)',
+                            color: 'var(--accent)',
+                          }}
+                          title={`From ${s.origin_channel}`}
+                        >
+                          {s.origin_channel === 'telegram'
+                            ? 'TG'
+                            : s.origin_channel === 'discord'
+                              ? 'DC'
+                              : s.origin_channel === 'slack'
+                                ? 'SL'
+                                : s.origin_channel === 'mattermost'
+                                  ? 'MM'
+                                  : s.origin_channel === 'whatsapp'
+                                    ? 'WA'
+                                    : s.origin_channel.slice(0, 2).toUpperCase()}
+                        </span>
+                      )}
+                      <span className="truncate">{s.title || 'New Session'}</span>
                     </span>
                   )}
                   {onRename && !isRenaming && (

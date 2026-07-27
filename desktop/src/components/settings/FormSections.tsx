@@ -29,7 +29,10 @@ import {
 } from '../../utils/toolLabels'
 import { SettingsSection } from '../SettingsSection'
 import type { SettingsSectionId } from '../../utils/settingsSearch'
+import type { MessengerInfo } from '../../api/settings'
+import type { MessengerDraftMap } from '../../utils/messengerDrafts'
 import { Field, PERSONAS } from './shared'
+import { MessengersSection } from './MessengersSection'
 
 export interface SettingsFormProps {
   sectionProps: (id: SettingsSectionId) => {
@@ -145,6 +148,9 @@ export interface SettingsFormProps {
   models: ModelInfo[]
   onOpenHelp?: (articleId?: string) => void
   settings: Settings | null
+  messengers?: MessengerInfo[]
+  messengerDrafts?: MessengerDraftMap
+  setMessengerDrafts?: Dispatch<SetStateAction<MessengerDraftMap>>
 }
 
 export function SettingsFormSections(p: SettingsFormProps): ReactNode {
@@ -194,6 +200,9 @@ export function SettingsFormSections(p: SettingsFormProps): ReactNode {
     customAccent, onCustomAccentChange,
     updateInfo, checkingUpdates, updateStatus, onCheckUpdates, onInstallUpdate,
     onOpenHelp, settings,
+    messengers = [],
+    messengerDrafts = {},
+    setMessengerDrafts,
   } = p
 
   return (
@@ -1448,21 +1457,20 @@ export function SettingsFormSections(p: SettingsFormProps): ReactNode {
               </div>
             </SettingsSection>
 
-            {/* Messaging channels honesty */}
-            <SettingsSection
-              {...sectionProps('channels')}
-            >
-              <div className="text-[10px] leading-snug space-y-1" style={{ color: 'var(--text-muted)' }}>
-                <p style={{ margin: 0 }}>
-                  Desktop chat uses the <strong style={{ color: 'var(--text-secondary)' }}>local API</strong>.
-                  Telegram / Discord / Slack gateways are <strong style={{ color: 'var(--text-secondary)' }}>CLI / config only</strong> today
-                  (<code>enabled_channels</code> + bot tokens in <code>config.toml</code>).
-                </p>
-                <p style={{ margin: 0 }}>
-                  Not a first-class Settings surface yet — see Help → CLI &amp; API if you wire messengers.
-                </p>
-              </div>
-            </SettingsSection>
+            {setMessengerDrafts ? (
+              <MessengersSection
+                sectionProps={sectionProps('channels')}
+                messengers={messengers}
+                messengerDrafts={messengerDrafts}
+                setMessengerDrafts={setMessengerDrafts}
+              />
+            ) : (
+              <SettingsSection {...sectionProps('channels')}>
+                <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                  Messenger settings unavailable.
+                </div>
+              </SettingsSection>
+            )}
 
             {/* License */}
             <SettingsSection

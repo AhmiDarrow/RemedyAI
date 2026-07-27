@@ -195,3 +195,7 @@ class SettingsUpdateRequest(BaseModel):
     skills_active_budget: int | None = Field(default=None, ge=10, le=500)
     # In-app Browser slide homepage (http/https); empty → Remedy GitHub default
     browser_home_url: str | None = None
+    # Messenger connectors (desktop Settings → Messengers)
+    enabled_channels: list[str] | None = None
+    # Per-messenger updates: { "telegram": { "bot_token": "…", "allow_chat_ids": "…", "clear_token": false } }
+    messengers: dict[str, dict] | None = None

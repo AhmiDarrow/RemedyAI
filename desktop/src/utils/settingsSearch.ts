@@ -93,9 +93,10 @@ export const SETTINGS_SECTION_META: Record<
     keywords: 'mcp host server external client',
   },
   channels: {
-    title: 'Messaging channels',
-    summary: 'CLI / config only',
-    keywords: 'telegram discord slack channel bot gateway',
+    title: 'Messengers',
+    summary: 'Telegram, Discord, WhatsApp…',
+    keywords:
+      'telegram discord slack mattermost whatsapp teams matrix signal messenger channel bot gateway continuity',
   },
   about: {
     title: 'About',

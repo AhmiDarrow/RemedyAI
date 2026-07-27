@@ -203,6 +203,16 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             "needs_setup": not setup_completed,
             "config_path": str(config_path) if config_path else str(_default_config_path()),
         }
+        try:
+            from remedy.interfaces.messenger_settings import messengers_for_settings_response
+
+            out["enabled_channels"], out["messengers"] = messengers_for_settings_response(
+                cfg, home_path
+            )
+        except Exception as exc:
+            logger.debug("settings messengers: %s", exc)
+            out["enabled_channels"] = ["cli"]
+            out["messengers"] = []
         # Visual decoder summary only (full detail via /api/vision/status).
         # Always use light=True — full get_status used to block the event loop
         # for seconds when llama-server was down, freezing /api/status polls.
@@ -432,6 +442,14 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                 vision_tbl["force_decode"] = bool(vision_force_decode)
             cfg["vision"] = vision_tbl
 
+        messengers_update = updates.pop("messengers", None)
+        if "enabled_channels" in updates and updates["enabled_channels"] is not None:
+            from remedy.interfaces.messenger_settings import normalize_enabled_channels
+
+            updates["enabled_channels"] = normalize_enabled_channels(
+                updates["enabled_channels"]
+            )
+
         # Secrets go ONLY to the secure store — never into config.toml.
         incoming_key = updates.pop("llm_api_key", None)
         cfg.update(updates)
@@ -449,6 +467,16 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                     save_api_key(str(incoming_key).strip(), home=home_path)
                 except Exception as exc:
                     logger.debug("xAI settings key sync: %s", exc)
+
+        if isinstance(messengers_update, dict):
+            try:
+                from remedy.interfaces.messenger_settings import apply_messengers_update
+
+                apply_messengers_update(
+                    cfg, messengers_update, home_path=home_path
+                )
+            except Exception:
+                logger.exception("messenger settings update failed")
 
         # Keep profile.display_name in sync so the agent addresses the user correctly.
         if "user_name" in updates and updates["user_name"] is not None:

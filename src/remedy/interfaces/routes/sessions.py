@@ -44,11 +44,12 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
     ):
         if memory is None:
             return {"sessions": [], "offset": offset, "limit": limit, "has_more": False}
+        from remedy.interfaces.session_public import session_to_public
+
         sessions = await memory.list_chat_sessions(limit=limit, offset=offset)
-        # Hint for client pagination (page may be full)
         has_more = len(sessions) >= limit
         return {
-            "sessions": sessions,
+            "sessions": [session_to_public(s) for s in sessions],
             "offset": offset,
             "limit": limit,
             "has_more": has_more,
@@ -107,6 +108,9 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             "project_path": saved.project_path,
             "llm_provider": getattr(saved, "llm_provider", None),
             "message_count": saved.message_count,
+            "origin_channel": getattr(saved, "origin_channel", None),
+            "external_chat_id": getattr(saved, "external_chat_id", None),
+            "external_user": getattr(saved, "external_user", None),
             "created_at": saved.created_at.isoformat() if saved.created_at else None,
             "updated_at": saved.updated_at.isoformat() if saved.updated_at else None,
         }
@@ -126,6 +130,9 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             "project_path": session.project_path,
             "llm_provider": getattr(session, "llm_provider", None),
             "message_count": session.message_count,
+            "origin_channel": getattr(session, "origin_channel", None),
+            "external_chat_id": getattr(session, "external_chat_id", None),
+            "external_user": getattr(session, "external_user", None),
             "created_at": session.created_at.isoformat() if session.created_at else None,
             "updated_at": session.updated_at.isoformat() if session.updated_at else None,
         }
@@ -832,4 +839,8 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             media_type="text/event-stream",
             headers=sse_headers(),
         )
+
+    from remedy.interfaces.routes.session_events import register_session_event_routes
+
+    register_session_event_routes(app)
 

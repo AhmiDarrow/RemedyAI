@@ -545,4 +545,20 @@ def scrub_config_secrets(cfg: dict[str, Any]) -> dict[str, Any]:
     out.pop("provider_keys", None)
     if "llm_api_key" in out:
         out["llm_api_key"] = ""
+    # Scrub messenger tokens from channel tables (prefer secret store)
+    try:
+        from remedy.gateway.messengers import SECRET_FIELD_KEYS, messenger_ids
+
+        for mid in messenger_ids():
+            sec = out.get(mid)
+            if not isinstance(sec, dict):
+                continue
+            cleaned = dict(sec)
+            for k in list(cleaned.keys()):
+                kl = str(k).lower()
+                if kl in SECRET_FIELD_KEYS or kl.endswith("_token") or kl.endswith("_password"):
+                    cleaned[k] = ""
+            out[mid] = cleaned
+    except Exception:
+        pass
     return out

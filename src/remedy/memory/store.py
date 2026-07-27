@@ -123,11 +123,16 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
     project_path TEXT,
     llm_provider TEXT,
     message_count INTEGER NOT NULL DEFAULT 0,
+    origin_channel TEXT,
+    external_chat_id TEXT,
+    external_user TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_chat_sessions_updated ON chat_sessions(updated_at);
+CREATE INDEX IF NOT EXISTS idx_chat_sessions_origin
+    ON chat_sessions(origin_channel, external_chat_id);
 
 CREATE TABLE IF NOT EXISTS chat_messages (
     id TEXT PRIMARY KEY,
@@ -216,6 +221,20 @@ class MemoryStore:
             self._db.execute(
                 "ALTER TABLE chat_sessions ADD COLUMN llm_provider TEXT"
             )
+        for col, decl in (
+            ("origin_channel", "TEXT"),
+            ("external_chat_id", "TEXT"),
+            ("external_user", "TEXT"),
+        ):
+            if col not in cols:
+                self._db.execute(
+                    f"ALTER TABLE chat_sessions ADD COLUMN {col} {decl}"
+                )
+        # Index for messenger session lookup (safe to re-run)
+        self._db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_chat_sessions_origin "
+            "ON chat_sessions(origin_channel, external_chat_id)"
+        )
 
     async def close(self) -> None:
         if self._db is not None:
@@ -809,6 +828,9 @@ class MemoryStore:
             project_path=row["project_path"],
             llm_provider=row["llm_provider"] if "llm_provider" in keys else None,
             message_count=row["message_count"],
+            origin_channel=row["origin_channel"] if "origin_channel" in keys else None,
+            external_chat_id=row["external_chat_id"] if "external_chat_id" in keys else None,
+            external_user=row["external_user"] if "external_user" in keys else None,
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"]),
         )
@@ -835,11 +857,13 @@ class MemoryStore:
         session.updated_at = datetime.now(UTC)
         db.execute(
             """INSERT INTO chat_sessions (id, title, model, agent, project_path,
-               llm_provider, message_count, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               llm_provider, message_count, origin_channel, external_chat_id,
+               external_user, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 session.id, session.title, session.model, session.agent,
                 session.project_path, session.llm_provider, session.message_count,
+                session.origin_channel, session.external_chat_id, session.external_user,
                 session.created_at.isoformat(), session.updated_at.isoformat(),
             ),
         )
@@ -864,6 +888,9 @@ class MemoryStore:
             "project_path",
             "llm_provider",
             "message_count",
+            "origin_channel",
+            "external_chat_id",
+            "external_user",
         }
         updates: dict[str, Any] = {}
         for k, v in fields.items():
@@ -904,6 +931,26 @@ class MemoryStore:
             (limit, offset),
         ).fetchall()
         return [self._row_to_session(r) for r in rows]
+
+    async def find_session_by_external(
+        self,
+        origin_channel: str,
+        external_chat_id: str,
+    ) -> ChatSession | None:
+        """Look up a messenger session by platform identity."""
+        db = self._ensure_db()
+        ch = str(origin_channel or "").strip().lower()
+        ext = str(external_chat_id or "").strip()
+        if not ch or not ext:
+            return None
+        row = db.execute(
+            "SELECT * FROM chat_sessions WHERE origin_channel = ? AND external_chat_id = ? "
+            "ORDER BY updated_at DESC LIMIT 1",
+            (ch, ext),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_session(row)
 
     # -- chat messages --------------------------------------------------------
 

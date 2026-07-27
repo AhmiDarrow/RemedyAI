@@ -736,6 +736,40 @@ export default function App() {
     }
   }, [serverState, refreshModels, refreshSessions])
 
+  // Realtime session sync (messenger + multi-surface): refresh list / active thread
+  useEffect(() => {
+    if (serverState !== 'ready') return
+    let unsub: (() => void) | undefined
+    let debounce: ReturnType<typeof setTimeout> | null = null
+    const scheduleRefresh = (sessionId?: string) => {
+      if (debounce) clearTimeout(debounce)
+      debounce = setTimeout(() => {
+        void refreshSessions()
+        if (sessionId && sessionId === activeId) {
+          void reloadMessages(sessionId)
+        }
+      }, 200)
+    }
+    void import('./api/sessionEvents').then(({ subscribeSessionEvents }) => {
+      unsub = subscribeSessionEvents({
+        onEvent: (ev) => {
+          if (
+            ev.type === 'session_created'
+            || ev.type === 'session_updated'
+            || ev.type === 'message_added'
+            || ev.type === 'session_deleted'
+          ) {
+            scheduleRefresh(ev.session_id)
+          }
+        },
+      })
+    })
+    return () => {
+      if (debounce) clearTimeout(debounce)
+      unsub?.()
+    }
+  }, [serverState, refreshSessions, activeId, reloadMessages])
+
   const handleNewSession = useCallback(async () => {
     const s = await create()
     if (s) {

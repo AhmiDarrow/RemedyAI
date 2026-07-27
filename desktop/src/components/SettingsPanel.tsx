@@ -1,6 +1,12 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { invoke } from '@tauri-apps/api/core'
-import { getSettings, updateSettings, type Settings, type SettingsUpdate } from '../api/settings'
+import {
+  getSettings,
+  updateSettings,
+  type MessengerInfo,
+  type Settings,
+  type SettingsUpdate,
+} from '../api/settings'
 import {
   getVisionStatus,
   type VisionStatus,
@@ -39,6 +45,11 @@ import {
 } from '../utils/settingsSearch'
 import { PERSONAS, pickProjectFolder } from './settings/shared'
 import { SettingsFormSections } from './settings/FormSections'
+import {
+  draftsFromMessengers,
+  messengersUpdateFromDrafts,
+  type MessengerDraftMap,
+} from '../utils/messengerDrafts'
 
 interface SettingsPanelProps {
   open: boolean
@@ -147,6 +158,8 @@ export function SettingsPanel({
   const [enabledModels, setEnabledModels] = useState<Record<string, string[]>>({})
   const [catalogExpand, setCatalogExpand] = useState<string | null>(null)
   const [skillsBudget, setSkillsBudget] = useState(80)
+  const [messengers, setMessengers] = useState<MessengerInfo[]>([])
+  const [messengerDrafts, setMessengerDrafts] = useState<MessengerDraftMap>({})
 
   const primaryProviders = useMemo(
     () => catalog.filter((p) => !p.advanced),
@@ -289,6 +302,11 @@ export function SettingsPanel({
       setSarcasmMode(Boolean(s.sarcasm_mode))
       setWebToolsEnabled(Boolean(s.web_tools_enabled))
       setHttpBootstrap(s.http_bootstrap !== false)
+      {
+        const list = Array.isArray(s.messengers) ? s.messengers : []
+        setMessengers(list)
+        setMessengerDrafts(draftsFromMessengers(list))
+      }
       {
         const am = String(s.approval_mode || 'ask').toLowerCase()
         setApprovalMode(am === 'auto' ? 'auto' : 'ask')
@@ -564,6 +582,8 @@ export function SettingsPanel({
     if (apiKey) {
       updates.llm_api_key = apiKey
     }
+    const msgBody = messengersUpdateFromDrafts(messengers, messengerDrafts)
+    if (msgBody) updates.messengers = msgBody
     try {
       try {
         await invoke('set_launch_at_login', { enabled: launchAtLogin })
@@ -768,6 +788,9 @@ export function SettingsPanel({
               setCatalogExpand={setCatalogExpand}
               skillsBudget={skillsBudget}
               setSkillsBudget={setSkillsBudget}
+              messengers={messengers}
+              messengerDrafts={messengerDrafts}
+              setMessengerDrafts={setMessengerDrafts}
               primaryProviders={primaryProviders}
               advancedProviders={advancedProviders}
               activeMeta={activeMeta ?? FALLBACK_PROVIDERS[0]}

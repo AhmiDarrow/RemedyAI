@@ -75,6 +75,12 @@ class ChannelKind(StrEnum):
     TELEGRAM = "telegram"
     DISCORD = "discord"
     SLACK = "slack"
+    MATTERMOST = "mattermost"
+    WHATSAPP = "whatsapp"
+    TEAMS = "teams"
+    MATRIX = "matrix"
+    GOOGLE_CHAT = "google_chat"
+    SIGNAL = "signal"
     WEB = "web"
     API = "api"
 
@@ -303,6 +309,19 @@ class ChatSession(BaseModel):
     # Per-session LLM override (tabs stay independent)
     llm_provider: str | None = Field(default=None)
     message_count: int = Field(default=0)
+    # Messenger origin (empty for pure desktop sessions)
+    origin_channel: str | None = Field(
+        default=None,
+        description="Messenger channel id when session started remotely (telegram, discord, …)",
+    )
+    external_chat_id: str | None = Field(
+        default=None,
+        description="Platform chat/channel/room id for messenger sessions",
+    )
+    external_user: str | None = Field(
+        default=None,
+        description="Optional remote user handle for display",
+    )
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 

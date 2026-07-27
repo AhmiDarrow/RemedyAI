@@ -71,6 +71,35 @@ export interface Settings {
   needs_setup?: boolean
   llm_ready?: boolean
   xai_auth?: XaiAuthInfo
+  /** Active channel ids (cli, telegram, …) */
+  enabled_channels?: string[]
+  /** Messenger connector status from catalog (no raw secrets) */
+  messengers?: MessengerInfo[]
+}
+
+export interface MessengerFieldSchema {
+  key: string
+  label: string
+  kind: 'secret' | 'text' | 'bool' | 'list' | 'url' | string
+  placeholder?: string
+  help?: string
+  required?: boolean
+}
+
+export interface MessengerInfo {
+  id: string
+  name: string
+  description?: string
+  status: 'ready' | 'partial' | 'planned' | string
+  enabled: boolean
+  token_set: boolean
+  inbound?: boolean
+  outbound?: boolean
+  docs_url?: string
+  badge?: string
+  max_reply_chars?: number
+  fields?: Record<string, unknown>
+  field_schema?: MessengerFieldSchema[]
 }
 
 export interface SettingsUpdate {
@@ -107,6 +136,8 @@ export interface SettingsUpdate {
   last_model_by_provider?: Record<string, string>
   skills_active_budget?: number
   browser_home_url?: string
+  enabled_channels?: string[]
+  messengers?: Record<string, Record<string, unknown>>
 }
 
 export async function getSettings(): Promise<Settings> {

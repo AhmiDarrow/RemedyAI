@@ -1098,7 +1098,9 @@ def _cmd_serve(args) -> None:
                 n_skills += runtime.skills.discover(str(p), recurse=True)
 
         gateway = Gateway(runtime=runtime, memory_store=memory)
-        gateway.register_handler(runtime.handle_event)
+        from remedy.gateway.serve_bootstrap import attach_messengers_to_gateway
+
+        attach_messengers_to_gateway(runtime, gateway)
         await gateway.start()
 
         return runtime, gateway, memory, n_skills

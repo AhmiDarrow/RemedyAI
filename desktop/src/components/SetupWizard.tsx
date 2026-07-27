@@ -19,6 +19,8 @@ import {
   formatDownloadGb,
   type VisionStatus,
 } from '../api/vision'
+import type { MessengerInfo } from '../api/settings'
+import { MessengersWizardStep } from './setup/MessengersWizardStep'
 
 const PERSONAS = [
   { id: 'balanced', name: 'Balanced', description: 'Helpful and adaptable to the task' },
@@ -32,8 +34,16 @@ interface SetupWizardProps {
   onComplete: () => void
 }
 
-type Step = 'welcome' | 'provider' | 'workspace' | 'persona' | 'vision' | 'finish'
-const STEPS: Step[] = ['welcome', 'provider', 'workspace', 'persona', 'vision', 'finish']
+type Step = 'welcome' | 'provider' | 'workspace' | 'persona' | 'messengers' | 'vision' | 'finish'
+const STEPS: Step[] = [
+  'welcome',
+  'provider',
+  'workspace',
+  'persona',
+  'messengers',
+  'vision',
+  'finish',
+]
 
 export function SetupWizard({ open, onComplete }: SetupWizardProps) {
   const [step, setStep] = useState<Step>('welcome')
@@ -64,6 +74,9 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
   const [visionInstallPct, setVisionInstallPct] = useState<number | null>(null)
   const visionPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const finishAbortRef = useRef(false)
+  const [wizardMessengers, setWizardMessengers] = useState<MessengerInfo[]>([])
+  const [messengerEnabled, setMessengerEnabled] = useState<Record<string, boolean>>({})
+  const [messengerTokens, setMessengerTokens] = useState<Record<string, string>>({})
 
   const stepIndex = STEPS.indexOf(step)
   const primaryProviders = useMemo(() => catalog.filter((p) => !p.advanced), [catalog])
@@ -142,6 +155,9 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
             setModel(demo.default_model)
             setBaseUrl(demo.base_url)
           }
+        }
+        if (Array.isArray(s.messengers)) {
+          setWizardMessengers(s.messengers)
         }
       } catch {
         // offline — keep demo default
@@ -301,6 +317,14 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
     } catch {
       /* updateSettings will surface the real error */
     }
+    const messengersBody: Record<string, Record<string, unknown>> = {}
+    for (const [id, on] of Object.entries(messengerEnabled)) {
+      if (!on) continue
+      const entry: Record<string, unknown> = { enabled: true }
+      const tok = (messengerTokens[id] || '').trim()
+      if (tok) entry.bot_token = tok
+      messengersBody[id] = entry
+    }
     await updateSettings({
       llm_provider: provider,
       llm_model: model,
@@ -315,6 +339,9 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
       close_to_tray: true,
       vision_enabled: enableVision,
       vision_model_id: 'qwen2.5-vl-3b',
+      ...(Object.keys(messengersBody).length > 0
+        ? { messengers: messengersBody }
+        : {}),
     })
   }, [
     apiKey,
@@ -326,6 +353,8 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
     userName,
     launchAtLogin,
     enableVision,
+    messengerEnabled,
+    messengerTokens,
   ])
 
   /** Start vision download and poll with live UI; if backgroundOnly, return after start. */
@@ -528,6 +557,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
     provider: 'Provider',
     workspace: 'Folder',
     persona: 'Style',
+    messengers: 'Chat apps',
     vision: 'Vision',
     finish: 'Ready',
   }
@@ -957,6 +987,20 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                 </div>
               </div>
             </div>
+          )}
+
+          {step === 'messengers' && (
+            <MessengersWizardStep
+              messengers={wizardMessengers}
+              enabled={messengerEnabled}
+              onToggle={(id, on) =>
+                setMessengerEnabled((prev) => ({ ...prev, [id]: on }))
+              }
+              tokens={messengerTokens}
+              onTokenChange={(id, token) =>
+                setMessengerTokens((prev) => ({ ...prev, [id]: token }))
+              }
+            />
           )}
 
           {step === 'vision' && (

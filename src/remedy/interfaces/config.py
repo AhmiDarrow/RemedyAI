@@ -971,8 +971,9 @@ memory_db_path = "{home_dir.joinpath('memory.db').as_posix()}"
 # Soft cap for skills in the hot catalog (Settings → Provider catalog)
 # skills_active_budget = 80
 
-# Channels (CLI/config only today — desktop chat uses the local API):
-# cli, telegram, discord, slack, web, api
+# Messaging channels (also Settings → Messengers). Tokens live in the secure store.
+# Desktop sessions share the same memory.db — messenger chats appear in the sidebar.
+# cli, telegram, discord, slack, mattermost, whatsapp, teams, matrix, google_chat, signal, web, api
 enabled_channels = ["cli"]
 
 # MCP *client* server list (advanced). Desktop also exposes Remedy as MCP *host*.
@@ -1017,17 +1018,42 @@ default_timeout = 30
 max_retries = 3
 retry_backoff = 1.0
 
-# Messaging channels — tokens via env/config only (not full desktop UI yet)
+# Messengers — non-secret fields only (bot tokens via Settings / secret store)
 [telegram]
-bot_token = ""
+allow_chat_ids = []
+allow_all = false
 
 [discord]
-bot_token = ""
 channel_id = ""
+guild_id = ""
 
 [slack]
-bot_token = ""
 channel_id = ""
+
+[mattermost]
+base_url = ""
+team_id = ""
+channel_id = ""
+
+[whatsapp]
+phone_number_id = ""
+allow_from = []
+
+[teams]
+app_id = ""
+tenant_id = ""
+
+[matrix]
+homeserver = ""
+user_id = ""
+room_id = ""
+
+[google_chat]
+space_id = ""
+
+[signal]
+cli_path = "signal-cli"
+account = ""
 
 # Local visual decoder (llama-server + Qwen2.5-VL 3B) — opt-in; not downloaded until enabled
 [vision]

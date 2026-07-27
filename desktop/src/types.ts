@@ -7,6 +7,10 @@ export interface ChatSession {
   /** Per-session provider override */
   llm_provider?: string | null
   message_count: number
+  /** Messenger origin when session started on Telegram/Discord/etc. */
+  origin_channel?: string | null
+  external_chat_id?: string | null
+  external_user?: string | null
   created_at: string
   updated_at: string
 }
