@@ -1023,13 +1023,14 @@ class MemoryStore:
             if not include_reverted:
                 where += " AND reverted = 0"
             # Nested select: take newest first, then chronological for callers.
+            # Explicit rowid AS _rid — SELECT * does not expose rowid to the outer query.
             sql = (
                 f"SELECT * FROM ("
-                f"  SELECT * FROM chat_messages WHERE {where} "
+                f"  SELECT *, rowid AS _rid FROM chat_messages WHERE {where} "
                 f"  ORDER BY created_at DESC, rowid DESC "
                 f"  LIMIT ? OFFSET ?"
                 f") AS recent "
-                f"ORDER BY created_at ASC, rowid ASC"
+                f"ORDER BY created_at ASC, _rid ASC"
             )
             params.extend([limit, offset])
             rows = db.execute(sql, params).fetchall()
