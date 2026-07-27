@@ -36,6 +36,23 @@ def _is_allowed_botframework_service_url(url: str) -> bool:
     return any(host == s[1:] or host.endswith(s) for s in _BF_SERVICE_HOST_SUFFIXES)
 
 
+def _jwt_payload_unverified(token: str) -> dict[str, Any] | None:
+    """Decode JWT payload without signature verify (structure + claim checks only)."""
+    import base64
+    import json
+
+    parts = (token or "").split(".")
+    if len(parts) != 3:
+        return None
+    try:
+        pad = "=" * (-len(parts[1]) % 4)
+        raw = base64.urlsafe_b64decode(parts[1] + pad)
+        data = json.loads(raw.decode("utf-8"))
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
 class TeamsChannel(HttpSessionMixin, ChannelAdapter):
     """Outbound uses Bot Framework connector; inbound via /api/webhooks/teams."""
 
@@ -139,11 +156,53 @@ class TeamsChannel(HttpSessionMixin, ChannelAdapter):
         except Exception:
             pass
 
+    def verify_inbound_auth(self, authorization: str | None) -> bool:
+        """Lightweight Bot Framework JWT gate (no PyJWT dependency).
+
+        Requires Bearer JWT when ``app_id`` is configured. Checks ``aud`` claim
+        matches app_id when present. Full signature verification against Azure
+        OpenID keys is not performed here (optional future enhancement).
+        Set ``REMEDY_TEAMS_SKIP_JWT=1`` only for local tunnel debugging.
+        """
+        import os
+
+        if str(os.environ.get("REMEDY_TEAMS_SKIP_JWT", "")).strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        ):
+            return True
+        if not self.app_id:
+            # Stub / misconfigured — do not accept public traffic
+            return False
+        auth = (authorization or "").strip()
+        if not auth.lower().startswith("bearer "):
+            logger.warning("Teams webhook missing Bearer Authorization")
+            return False
+        token = auth[7:].strip()
+        claims = _jwt_payload_unverified(token)
+        if not claims:
+            logger.warning("Teams webhook Authorization is not a JWT")
+            return False
+        aud = claims.get("aud")
+        # aud may be str or list
+        auds: list[str]
+        if isinstance(aud, list):
+            auds = [str(a) for a in aud]
+        elif aud is not None:
+            auds = [str(aud)]
+        else:
+            auds = []
+        if auds and self.app_id not in auds and f"api://{self.app_id}" not in auds:
+            logger.warning("Teams JWT aud mismatch (expected app_id)")
+            return False
+        return True
+
     async def handle_activity(self, activity: dict[str, Any]) -> bool:
         """Handle Bot Framework activity JSON from webhook.
 
-        Auth: allowlist/allow_all + trusted serviceUrl hosts. Full Azure AD JWT
-        validation can be layered later; empty allowlist without allow_all drops.
+        Auth: Bearer JWT structure + aud, allowlist/allow_all, trusted serviceUrl.
         """
         if (activity.get("type") or "") != "message":
             return False

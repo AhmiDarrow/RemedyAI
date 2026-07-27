@@ -164,6 +164,19 @@ class Gateway:
         """Send an event through the gateway and collect responses."""
         if not self._check_rate_limit(event.channel):
             logger.warning("Rate limit exceeded for %s", event.channel.value)
+            # User-visible feedback on messengers (silent drop felt like a hang).
+            with contextlib.suppress(Exception):
+                payload = event.payload or {}
+                target = (
+                    str(payload.get("chat_id") or payload.get("channel_id") or "")
+                    or str(event.session_id or "")
+                    or None
+                )
+                await self.send_to(
+                    event.channel,
+                    "You're sending messages too quickly. Wait a few seconds and try again.",
+                    target,
+                )
             return [{"error": "rate_limited"}]
 
         self._event_counter += 1

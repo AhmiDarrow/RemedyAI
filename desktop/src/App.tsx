@@ -129,6 +129,9 @@ export default function App() {
     messages,
     loading: messagesLoading,
     loadError: messagesLoadError,
+    hasOlder: messagesHasOlder,
+    loadingOlder: messagesLoadingOlder,
+    loadOlder: loadOlderMessages,
     streaming,
     partialText,
     partialThinking,
@@ -1732,6 +1735,9 @@ export default function App() {
               userName={userName}
               partnerName={partnerName}
               onAttachMarkup={handleAttachMarkup}
+              hasOlder={messagesHasOlder}
+              loadingOlder={messagesLoadingOlder}
+              onLoadOlder={() => void loadOlderMessages()}
             />
           </div>
 

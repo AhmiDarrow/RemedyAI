@@ -127,7 +127,18 @@ class BasicRuntime(AgentRuntime):
         return is_unset_project_path(getattr(self, "_project_path_raw", None))
 
     def effective_project_path(self) -> Path:
-        """Active workspace root for tools / context (session or default)."""
+        """Active workspace root for tools / context (session or default).
+
+        Prefers per-turn ContextVar when concurrent streams share this runtime.
+        """
+        try:
+            from remedy.core.turn_context import current_turn_workspace
+
+            ws = current_turn_workspace()
+            if ws is not None and ws.active_path:
+                return ensure_project_dir(Path(ws.active_path))
+        except Exception:
+            pass
         try:
             return ensure_project_dir(self._active_project_path)
         except Exception:
@@ -135,9 +146,18 @@ class BasicRuntime(AgentRuntime):
 
     def access_scope(self) -> str:
         """Configured scope, or **full** when no project folder is set."""
+        raw = getattr(self, "_project_path_raw", None)
+        try:
+            from remedy.core.turn_context import current_turn_workspace
+
+            ws = current_turn_workspace()
+            if ws is not None:
+                raw = ws.project_raw
+        except Exception:
+            pass
         return effective_access_scope(
             getattr(self, "_access_scope", None),
-            getattr(self, "_project_path_raw", None),
+            raw,
         )
 
     def allowed_roots(self) -> list[Path]:
@@ -600,7 +620,13 @@ class BasicRuntime(AgentRuntime):
         if session_id:
             self._session_id = session_id
 
-        tok_s, tok_a = begin_turn(session_id)
+        # Pin workspace to this coroutine so concurrent messenger/desktop turns
+        # do not steal each other's project jail across awaits.
+        tok_s, tok_a, tok_w = begin_turn(
+            session_id,
+            project_raw=getattr(self, "_project_path_raw", None),
+            active_path=getattr(self, "_active_project_path", None) or "",
+        )
         self._streaming = True
         try:
             if not self._llm_api_key:
@@ -622,7 +648,7 @@ class BasicRuntime(AgentRuntime):
                 yield chunk
         finally:
             self._streaming = False
-            end_turn(session_id, tok_s, tok_a)
+            end_turn(session_id, tok_s, tok_a, tok_w)
             self._llm_model = prev_model
             self._plan_mode = False
             # Soft end-of-turn checkpoint if substantial tool work happened

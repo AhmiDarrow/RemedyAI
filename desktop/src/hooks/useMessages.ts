@@ -11,6 +11,10 @@ import { abortSession } from '../api/sessions'
 import type { ChatMessage } from '../types'
 import { toolLabel, type ProcessStep } from '../utils/toolLabels'
 import { emptyUsage, type UsageSnapshot } from '../utils/tokenCost'
+import { clearChatMediaCache } from '../utils/chatMedia'
+
+/** Newest-window page size (matches server newest-first window). */
+const MESSAGE_PAGE = 250
 
 export type ActiveTool = { name: string; status: 'running' | 'done' | 'error' }
 
@@ -174,12 +178,15 @@ export function useMessages(sessionId: string | null) {
   }, [])
 
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [hasOlder, setHasOlder] = useState(false)
+  const [loadingOlder, setLoadingOlder] = useState(false)
 
   const load = useCallback(async (opts?: { force?: boolean }) => {
     if (!sessionId) {
       setMessages([])
       setLoading(false)
       setLoadError(null)
+      setHasOlder(false)
       return
     }
     // Always load when switching sessions (force). Only skip mid-stream refreshes
@@ -189,10 +196,11 @@ export function useMessages(sessionId: string | null) {
     setLoading(true)
     setLoadError(null)
     try {
-      const msgs = await listMessages(loadId)
+      const msgs = await listMessages(loadId, MESSAGE_PAGE, 0)
       // Ignore stale responses after a session switch.
       if (sessionIdRef.current !== loadId) return
       setMessages(Array.isArray(msgs) ? msgs : [])
+      setHasOlder(Array.isArray(msgs) && msgs.length >= MESSAGE_PAGE)
     } catch (e: unknown) {
       if (sessionIdRef.current !== loadId) return
       const msg = e instanceof Error ? e.message : String(e)
@@ -200,12 +208,38 @@ export function useMessages(sessionId: string | null) {
       setLoadError(msg || 'Failed to load messages')
       // Clear so we never show another session's transcript under a load failure.
       setMessages([])
+      setHasOlder(false)
     } finally {
       if (sessionIdRef.current === loadId) {
         setLoading(false)
       }
     }
   }, [sessionId])
+
+  const loadOlder = useCallback(async () => {
+    const loadId = sessionIdRef.current
+    if (!loadId || loadingOlder || !hasOlder) return
+    setLoadingOlder(true)
+    try {
+      // Newest-window: offset skips that many newest messages → older page.
+      const offset = messages.length
+      const older = await listMessages(loadId, MESSAGE_PAGE, offset)
+      if (sessionIdRef.current !== loadId) return
+      const list = Array.isArray(older) ? older : []
+      setHasOlder(list.length >= MESSAGE_PAGE)
+      if (list.length) {
+        setMessages((prev) => {
+          const seen = new Set(prev.map((m) => m.id))
+          const fresh = list.filter((m) => !seen.has(m.id))
+          return [...fresh, ...prev]
+        })
+      }
+    } catch (e: unknown) {
+      console.warn('[remedy] loadOlder failed', e instanceof Error ? e.message : e)
+    } finally {
+      if (sessionIdRef.current === loadId) setLoadingOlder(false)
+    }
+  }, [hasOlder, loadingOlder, messages.length])
 
   // Session change: always force-load history so list clicks work.
   // Abort any in-flight stream and clear stuck flags so a dead stream cannot blank the feed.
@@ -229,6 +263,8 @@ export function useMessages(sessionId: string | null) {
     streamCtrlRef.current = null
     setQueue([])
     queueRef.current = []
+    setHasOlder(false)
+    clearChatMediaCache()
     void load({ force: true })
   }, [load])
 
@@ -799,6 +835,9 @@ export function useMessages(sessionId: string | null) {
     messages,
     loading,
     loadError,
+    hasOlder,
+    loadingOlder,
+    loadOlder,
     streaming,
     partialText,
     partialThinking,

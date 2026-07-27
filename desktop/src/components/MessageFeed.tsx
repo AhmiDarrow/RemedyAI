@@ -68,6 +68,10 @@ interface MessageFeedProps {
    * Parent should route this into the composer attachment rail.
    */
   onAttachMarkup?: (file: File) => void | Promise<void>
+  /** Older history available beyond the newest window. */
+  hasOlder?: boolean
+  loadingOlder?: boolean
+  onLoadOlder?: () => void
 }
 
 /** Initials for avatar: "Alex" → A, "Mary Jane" → MJ */
@@ -535,6 +539,9 @@ export function MessageFeed({
   userName,
   partnerName = 'Remedy',
   onAttachMarkup,
+  hasOlder = false,
+  loadingOlder = false,
+  onLoadOlder,
 }: MessageFeedProps) {
   const [lightbox, setLightbox] = useState<{ src: string; alt?: string } | null>(null)
 
@@ -644,6 +651,26 @@ export function MessageFeed({
           role="alert"
         >
           Could not load chat history: {loadError}
+        </div>
+      )}
+
+      {hasOlder && !loading && (
+        <div className="flex justify-center px-4 py-2">
+          <button
+            type="button"
+            disabled={loadingOlder}
+            onClick={() => onLoadOlder?.()}
+            className="text-xs px-3 py-1.5 rounded-full border"
+            style={{
+              color: 'var(--text-muted)',
+              borderColor: 'var(--border)',
+              background: 'var(--bg-tertiary)',
+              opacity: loadingOlder ? 0.6 : 1,
+              cursor: loadingOlder ? 'wait' : 'pointer',
+            }}
+          >
+            {loadingOlder ? 'Loading earlier…' : 'Load earlier messages'}
+          </button>
         </div>
       )}
 

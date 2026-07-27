@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import json
 import logging
+from collections import OrderedDict
 
 from remedy.gateway.channels.allowlist import is_allowed, parse_ids
 from remedy.gateway.channels.base_http import HttpSessionMixin
@@ -36,7 +37,8 @@ class SlackChannel(HttpSessionMixin, ChannelAdapter):
             self._allowed = self._allowed | frozenset({self.channel_id})
         self.allow_all = bool(allow_all)
         self._ws_task: asyncio.Task | None = None
-        self._seen: set[str] = set()
+        # Ordered dedupe of event ids (oldest dropped first — not set-order).
+        self._seen: OrderedDict[str, None] = OrderedDict()
 
     async def start(self) -> None:
         await super().start()
@@ -149,9 +151,9 @@ class SlackChannel(HttpSessionMixin, ChannelAdapter):
         if eid:
             if eid in self._seen:
                 return
-            self._seen.add(eid)
-            if len(self._seen) > 500:
-                self._seen = set(list(self._seen)[-200:])
+            self._seen[eid] = None
+            while len(self._seen) > 500:
+                self._seen.popitem(last=False)
         if not is_allowed(
             allowlist=self._allowed,
             allow_all=self.allow_all,

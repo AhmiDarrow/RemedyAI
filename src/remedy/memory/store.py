@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -186,6 +187,8 @@ class MemoryStore:
     def __init__(self, db_path: str | Path) -> None:
         self._db_path = Path(db_path).expanduser().resolve()
         self._db: sqlite3.Connection | None = None
+        # Serialize multi-coroutine access (messenger + desktop concurrent writes).
+        self._lock = threading.RLock()
 
     @property
     def path(self) -> Path:
@@ -196,18 +199,19 @@ class MemoryStore:
     async def initialize(self) -> None:
         """Open the database and ensure the schema exists."""
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._db = sqlite3.connect(str(self._db_path), check_same_thread=False)
-        self._db.row_factory = sqlite3.Row
-        # Speed-oriented pragmas (safe for single-writer desktop agent use).
-        self._db.execute("PRAGMA journal_mode=WAL")
-        self._db.execute("PRAGMA synchronous=NORMAL")
-        self._db.execute("PRAGMA temp_store=MEMORY")
-        self._db.execute("PRAGMA cache_size=-65536")  # ~64 MiB page cache
-        self._db.execute("PRAGMA mmap_size=268435456")  # 256 MiB mmap when OS allows
-        self._db.execute("PRAGMA busy_timeout=5000")
-        self._db.executescript(_SCHEMA)
-        self._migrate_schema()
-        self._db.commit()
+        with self._lock:
+            self._db = sqlite3.connect(str(self._db_path), check_same_thread=False)
+            self._db.row_factory = sqlite3.Row
+            # Speed-oriented pragmas (safe for single-writer desktop agent use).
+            self._db.execute("PRAGMA journal_mode=WAL")
+            self._db.execute("PRAGMA synchronous=NORMAL")
+            self._db.execute("PRAGMA temp_store=MEMORY")
+            self._db.execute("PRAGMA cache_size=-65536")  # ~64 MiB page cache
+            self._db.execute("PRAGMA mmap_size=268435456")  # 256 MiB mmap when OS allows
+            self._db.execute("PRAGMA busy_timeout=5000")
+            self._db.executescript(_SCHEMA)
+            self._migrate_schema()
+            self._db.commit()
 
     def _migrate_schema(self) -> None:
         """Best-effort additive migrations for existing desktop DBs."""
@@ -253,6 +257,10 @@ class MemoryStore:
             raise RuntimeError("MemoryStore not initialized. Call await initialize() first.")
         return self._db
 
+    def _locked(self) -> threading.RLock:
+        """Hold across multi-statement transactions (execute + commit)."""
+        return self._lock
+
     # -- memory entry CRUD ---------------------------------------------------
 
     def _row_to_entry(self, row: sqlite3.Row) -> MemoryEntry:
@@ -271,9 +279,12 @@ class MemoryStore:
 
     async def upsert(self, entry: MemoryEntry) -> MemoryEntry:
         """Insert or update a memory entry. Returns the saved entry."""
-        db = self._ensure_db()
         entry.updated_at = datetime.now(UTC)
+        with self._locked():
+            db = self._ensure_db()
+            return self._upsert_unlocked(db, entry)
 
+    def _upsert_unlocked(self, db: sqlite3.Connection, entry: MemoryEntry) -> MemoryEntry:
         db.execute(
             """
             INSERT INTO memory_entries (id, entry_type, title, content, tags, metadata,
@@ -349,6 +360,10 @@ class MemoryStore:
         """
         if not entries:
             return 0
+        with self._locked():
+            return self._upsert_many_unlocked(entries)
+
+    def _upsert_many_unlocked(self, entries: list[MemoryEntry]) -> int:
         db = self._ensure_db()
         now = datetime.now(UTC)
         rows = []
@@ -852,40 +867,42 @@ class MemoryStore:
         )
 
     async def create_chat_session(self, session: ChatSession) -> ChatSession:
-        db = self._ensure_db()
         session.created_at = datetime.now(UTC)
         session.updated_at = datetime.now(UTC)
-        try:
-            db.execute(
-                """INSERT INTO chat_sessions (id, title, model, agent, project_path,
-                   llm_provider, message_count, origin_channel, external_chat_id,
-                   external_user, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    session.id, session.title, session.model, session.agent,
-                    session.project_path, session.llm_provider, session.message_count,
-                    session.origin_channel, session.external_chat_id, session.external_user,
-                    session.created_at.isoformat(), session.updated_at.isoformat(),
-                ),
-            )
-            db.commit()
-            return session
-        except sqlite3.IntegrityError:
-            # Concurrent create (messenger dual-delivery / race) — return existing.
-            db.rollback()
-            existing = await self.get_chat_session(session.id)
-            if existing is not None:
-                return existing
-            raise
+        with self._locked():
+            db = self._ensure_db()
+            try:
+                db.execute(
+                    """INSERT INTO chat_sessions (id, title, model, agent, project_path,
+                       llm_provider, message_count, origin_channel, external_chat_id,
+                       external_user, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        session.id, session.title, session.model, session.agent,
+                        session.project_path, session.llm_provider, session.message_count,
+                        session.origin_channel, session.external_chat_id, session.external_user,
+                        session.created_at.isoformat(), session.updated_at.isoformat(),
+                    ),
+                )
+                db.commit()
+                return session
+            except sqlite3.IntegrityError:
+                # Concurrent create (messenger dual-delivery / race) — return existing.
+                db.rollback()
+        existing = await self.get_chat_session(session.id)
+        if existing is not None:
+            return existing
+        raise sqlite3.IntegrityError(f"chat_session create race for {session.id}")
 
     async def get_chat_session(self, session_id: str) -> ChatSession | None:
-        db = self._ensure_db()
-        row = db.execute(
-            "SELECT * FROM chat_sessions WHERE id = ?", (session_id,)
-        ).fetchone()
-        if row is None:
-            return None
-        return self._row_to_session(row)
+        with self._locked():
+            db = self._ensure_db()
+            row = db.execute(
+                "SELECT * FROM chat_sessions WHERE id = ?", (session_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            return self._row_to_session(row)
 
     async def update_chat_session(self, session_id: str, **fields: Any) -> ChatSession | None:
         db = self._ensure_db()
@@ -963,25 +980,26 @@ class MemoryStore:
     # -- chat messages --------------------------------------------------------
 
     async def add_chat_message(self, msg: ChatMessage) -> ChatMessage:
-        db = self._ensure_db()
         msg.created_at = datetime.now(UTC)
-        db.execute(
-            """INSERT INTO chat_messages (id, session_id, role, content, thinking,
-               tool_calls, tool_results, model, agent, tokens, created_at, reverted)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                str(msg.id), msg.session_id, msg.role.value, msg.content,
-                msg.thinking, json.dumps(msg.tool_calls),
-                json.dumps(msg.tool_results), msg.model, msg.agent,
-                msg.tokens, msg.created_at.isoformat(), int(msg.reverted),
-            ),
-        )
-        db.execute(
-            "UPDATE chat_sessions SET message_count = message_count + 1, "
-            "updated_at = ? WHERE id = ?",
-            (datetime.now(UTC).isoformat(), msg.session_id),
-        )
-        db.commit()
+        with self._locked():
+            db = self._ensure_db()
+            db.execute(
+                """INSERT INTO chat_messages (id, session_id, role, content, thinking,
+                   tool_calls, tool_results, model, agent, tokens, created_at, reverted)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    str(msg.id), msg.session_id, msg.role.value, msg.content,
+                    msg.thinking, json.dumps(msg.tool_calls),
+                    json.dumps(msg.tool_results), msg.model, msg.agent,
+                    msg.tokens, msg.created_at.isoformat(), int(msg.reverted),
+                ),
+            )
+            db.execute(
+                "UPDATE chat_sessions SET message_count = message_count + 1, "
+                "updated_at = ? WHERE id = ?",
+                (datetime.now(UTC).isoformat(), msg.session_id),
+            )
+            db.commit()
         return msg
 
     async def get_chat_messages(
@@ -998,23 +1016,24 @@ class MemoryStore:
         **latest** turns for long sessions — not the oldest page.
         ``offset`` skips that many newest messages (for older-page loads).
         """
-        db = self._ensure_db()
-        where = "session_id = ?"
-        params: list[Any] = [session_id]
-        if not include_reverted:
-            where += " AND reverted = 0"
-        # Nested select: take newest first, then chronological for callers.
-        sql = (
-            f"SELECT * FROM ("
-            f"  SELECT * FROM chat_messages WHERE {where} "
-            f"  ORDER BY created_at DESC, rowid DESC "
-            f"  LIMIT ? OFFSET ?"
-            f") AS recent "
-            f"ORDER BY created_at ASC, rowid ASC"
-        )
-        params.extend([limit, offset])
-        rows = db.execute(sql, params).fetchall()
-        return [self._row_to_message(r) for r in rows]
+        with self._locked():
+            db = self._ensure_db()
+            where = "session_id = ?"
+            params: list[Any] = [session_id]
+            if not include_reverted:
+                where += " AND reverted = 0"
+            # Nested select: take newest first, then chronological for callers.
+            sql = (
+                f"SELECT * FROM ("
+                f"  SELECT * FROM chat_messages WHERE {where} "
+                f"  ORDER BY created_at DESC, rowid DESC "
+                f"  LIMIT ? OFFSET ?"
+                f") AS recent "
+                f"ORDER BY created_at ASC, rowid ASC"
+            )
+            params.extend([limit, offset])
+            rows = db.execute(sql, params).fetchall()
+            return [self._row_to_message(r) for r in rows]
 
     async def get_chat_message(self, msg_id: str) -> ChatMessage | None:
         db = self._ensure_db()

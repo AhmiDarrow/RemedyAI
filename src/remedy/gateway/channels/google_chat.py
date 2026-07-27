@@ -75,12 +75,40 @@ class GoogleChatChannel(HttpSessionMixin, ChannelAdapter):
     async def send_typing(self, target: str | None = None) -> None:
         return
 
+    def verify_inbound_auth(self, authorization: str | None) -> bool:
+        """Require Bearer token matching configured access_token when set.
+
+        Google Chat HTTP push can use app-level bearer verification. When no
+        access_token is configured, reject (channel is stub / outbound-only).
+        """
+        import hmac as _hmac
+
+        if not self.access_token:
+            return False
+        auth = (authorization or "").strip()
+        if not auth.lower().startswith("bearer "):
+            # Some Google Chat deployments only use allowlist + private URL.
+            # Still require a token when configured — use REMEDY_GCHAT_ALLOW_NO_AUTH=1
+            # only for local tunnel debugging.
+            import os
+
+            if str(os.environ.get("REMEDY_GCHAT_ALLOW_NO_AUTH", "")).strip().lower() in (
+                "1",
+                "true",
+                "yes",
+                "on",
+            ):
+                return True
+            logger.warning("Google Chat webhook missing Bearer Authorization")
+            return False
+        presented = auth[7:].strip()
+        return _hmac.compare_digest(presented, self.access_token)
+
     async def handle_event(self, data: dict[str, Any]) -> bool:
         """Handle Chat app event (MESSAGE).
 
         Fail closed when allowlist is empty and allow_all is off (same policy as
-        Telegram). Full Google Chat JWT verification is environment-specific;
-        operators should set allow_ids or enable allow_all only behind a private URL.
+        Telegram). Auth is enforced at the webhook route via verify_inbound_auth.
         """
         etype = data.get("type") or data.get("eventType") or ""
         msg = data.get("message") or {}

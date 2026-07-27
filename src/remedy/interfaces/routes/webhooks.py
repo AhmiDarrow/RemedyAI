@@ -50,6 +50,9 @@ def register_webhook_routes(app: FastAPI, *, gateway=None, **_kw) -> None:
         ch = _ch(gateway, "TEAMS")
         if ch is None:
             raise HTTPException(503, "Teams channel not active")
+        auth = request.headers.get("Authorization")
+        if hasattr(ch, "verify_inbound_auth") and not ch.verify_inbound_auth(auth):
+            raise HTTPException(401, "teams auth failed")
         try:
             activity = await request.json()
         except Exception as exc:
@@ -73,11 +76,10 @@ def register_webhook_routes(app: FastAPI, *, gateway=None, **_kw) -> None:
             raise HTTPException(400, "invalid body")
         # Chat verification handshake — only when channel is configured.
         if data.get("type") == "URL_VERIFICATION" or data.get("challenge"):
-            if not getattr(ch, "access_token", None) and not getattr(ch, "allow_all", False):
-                # Still answer challenge so Google can complete registration, but
-                # do not process messages without token/allowlist.
-                pass
             return {"challenge": data.get("challenge") or data.get("token") or "ok"}
+        auth = request.headers.get("Authorization")
+        if hasattr(ch, "verify_inbound_auth") and not ch.verify_inbound_auth(auth):
+            raise HTTPException(401, "google_chat auth failed")
         ok = await ch.handle_event(data)
         return {"ok": True, "handled": bool(ok)}
 

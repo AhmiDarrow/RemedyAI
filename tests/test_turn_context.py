@@ -9,6 +9,7 @@ import pytest
 from remedy.core.turn_context import (
     abort_session,
     begin_turn,
+    current_turn_workspace,
     end_turn,
     is_session_streaming,
     is_turn_aborted,
@@ -17,7 +18,7 @@ from remedy.core.turn_context import (
 
 @pytest.mark.asyncio
 async def test_abort_sets_event_and_clears_registry():
-    tok_s, tok_a = begin_turn("sess-1")
+    tok_s, tok_a, tok_w = begin_turn("sess-1", project_raw=None, active_path="/tmp/ws")
     try:
         assert is_session_streaming("sess-1")
         assert not is_turn_aborted()
@@ -25,13 +26,22 @@ async def test_abort_sets_event_and_clears_registry():
         assert n == 1
         assert is_turn_aborted()
     finally:
-        end_turn("sess-1", tok_s, tok_a)
+        end_turn("sess-1", tok_s, tok_a, tok_w)
     assert not is_session_streaming("sess-1")
 
 
 @pytest.mark.asyncio
 async def test_abort_unknown_session_is_noop():
     assert abort_session("missing") == 0
+
+
+@pytest.mark.asyncio
+async def test_turn_workspace_isolated():
+    t1 = begin_turn("a", project_raw="/proj-a", active_path="/proj-a")
+    assert current_turn_workspace() is not None
+    assert current_turn_workspace().active_path == "/proj-a"
+    end_turn("a", *t1)
+    assert current_turn_workspace() is None
 
 
 def test_create_session_integrity_race(tmp_path):
