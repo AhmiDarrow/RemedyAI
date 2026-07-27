@@ -804,7 +804,8 @@ export function MessageFeed({
             paddingBottom: '3rem',
           }}
         >
-          <RemedyLogo size={48} framed />
+          {/* Monogram only — no rounded plate; ~20% larger than prior 77px. */}
+          <RemedyLogo size={92} variant="auto" title="Remedy" />
           <div className="text-lg font-medium" style={{ color: 'var(--text-primary)' }}>
             Your partner is ready
           </div>
