@@ -260,6 +260,39 @@ def register_skill_tools(runtime: Any) -> None:
             )
         return "\n".join(lines) if lines else "(no matching skills)"
 
+    async def skill_library_search(query: str = "", limit: int = 5) -> str:
+        """Rank Skills Library packs (cache only). Does not install."""
+        from pathlib import Path
+
+        from remedy.skills.library.suggest import rank_library_skills
+
+        home = getattr(getattr(runtime, "config", None), "home_dir", None)
+        installed: set[str] = set()
+        reg = getattr(runtime, "skills", None)
+        if reg is not None and hasattr(reg, "_by_name"):
+            installed = {str(n) for n in (reg._by_name or {})}
+        hits = rank_library_skills(
+            query or "",
+            home=Path(home).expanduser() if home else None,
+            installed_names=installed,
+            limit=max(1, min(int(limit or 5), 10)),
+            mark_suppressed=False,
+        )
+        if not hits:
+            return (
+                "(no library matches — catalog cache empty or query too weak; "
+                "open Skills → Library to refresh catalog)"
+            )
+        lines = [
+            f"- {h.name} (score={h.score:.2f}, id={h.id}): {h.description[:140]}"
+            for h in hits
+        ]
+        lines.append(
+            "_Not installed. User installs via Skills → Library (quarantine then Trust). "
+            "Do not invent skill bodies._"
+        )
+        return "\n".join(lines)
+
     runtime.tool_registry.register_builtin_handler(
         "skill_activate",
         "Load full instructions for a skill pack (progressive disclosure). "
@@ -315,6 +348,20 @@ def register_skill_tools(runtime: Any) -> None:
             "properties": {
                 "query": {"type": "string", "description": "Task keywords"},
                 "limit": {"type": "integer", "description": "Max results (default 8)"},
+            },
+        },
+    )
+    runtime.tool_registry.register_builtin_handler(
+        "skill_library_search",
+        "Search the signed Skills Library catalog (cache only) for packs not yet "
+        "installed. Returns top matches — does not install. Prefer skill_search for "
+        "installed skills first.",
+        skill_library_search,
+        {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Task keywords"},
+                "limit": {"type": "integer", "description": "Max results (default 5)"},
             },
         },
     )

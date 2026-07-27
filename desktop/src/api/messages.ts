@@ -93,6 +93,7 @@ export function streamMessage(
   onProgress?: (info: StreamProgress) => void,
   planMode?: boolean,
   onUsage?: (usage: UsagePayload) => void,
+  onLibrarySuggest?: (payload: Record<string, unknown>) => void,
 ): AbortController {
   const controller = new AbortController()
 
@@ -208,6 +209,11 @@ export function streamMessage(
               model: typeof payload.model === 'string' ? payload.model : null,
               provider: typeof payload.provider === 'string' ? payload.provider : null,
             })
+            break
+          case 'library_suggest':
+            if (payload && typeof payload === 'object') {
+              onLibrarySuggest?.(payload)
+            }
             break
           case 'done':
             finished = true

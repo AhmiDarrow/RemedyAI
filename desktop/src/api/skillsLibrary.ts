@@ -70,3 +70,44 @@ export async function checkLibraryUpdates(): Promise<{
 }> {
   return apiFetch('/skills/library/updates')
 }
+
+export type LibrarySuggest = {
+  id: string
+  name: string
+  description: string
+  score?: number
+  version?: string
+  tags?: string[]
+  reason?: string
+  system_hint?: string
+}
+
+export async function fetchLibrarySuggest(
+  q: string,
+  sessionId?: string,
+): Promise<{
+  suggestion: LibrarySuggest | null
+  results?: LibrarySuggest[]
+  source?: string
+  index_size?: number
+  needs_refresh?: boolean
+}> {
+  const params = new URLSearchParams()
+  if (q.trim()) params.set('q', q.trim())
+  if (sessionId) params.set('session_id', sessionId)
+  const qs = params.toString() ? `?${params}` : ''
+  return apiFetch(`/skills/library/suggest${qs}`)
+}
+
+export async function dismissLibrarySuggest(
+  skillId: string,
+  sessionId?: string,
+): Promise<void> {
+  await apiFetch('/skills/library/suggest/dismiss', {
+    method: 'POST',
+    body: JSON.stringify({
+      skill_id: skillId,
+      session_id: sessionId || '',
+    }),
+  })
+}

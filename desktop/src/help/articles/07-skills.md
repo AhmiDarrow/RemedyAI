@@ -73,11 +73,24 @@ The **comfyui** skill can run **from a blank machine** (with your approval for d
 
 If nothing is installed, ask Remedy to set up local ComfyUI for images; it follows the skill bootstrap instead of only probing a missing server.
 
+## Library skill check (soft suggest)
+
+On tool-ish turns, Remedy may **quietly notice** a signed Library pack that is **not
+installed** but looks relevant (name/description/tags from the **cached** catalog only —
+no network on the chat path).
+
+- You may see a small **Library** chip under the composer, or a continuity note to the model.  
+- **Never auto-installs.** Install still goes through **Skills → Library** (quarantine → Trust).  
+- Pure chat (“hi”, “thanks”) never triggers it.  
+- Dismiss or install → same skill will not re-nag that session.  
+- Config: `[skills.library_suggest]` (`enabled`, `min_score`, `min_query_chars`, `local_rerank`).
+
 ## How the agent uses skills
 
 Tools (for the model, not usually typed by you):
 
 - `skill_search` — find relevant packs  
+- `skill_library_search` — search Library catalog (cache; no install)
 - `skill_activate` — load full instructions into context  
 - `skill_run` — execute skill scripts (blocked if quarantined)  
 

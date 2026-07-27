@@ -144,6 +144,23 @@ def ensure_handlers_registered() -> None:
     q.register("vision_decode", _vision_decode)
     q.register("nano_classify", _nano_classify)
     q.register("brief_update", _brief_update)
+    def _library_rerank(job: LocalJob) -> Any:
+        """Optional next-turn library pick (config skills.library_suggest.local_rerank)."""
+        p = job.payload or {}
+        prompt = str(p.get("prompt") or "")
+        return local_text_complete(
+            prompt,
+            base_url=str(p.get("base_url") or ""),
+            max_tokens=int(p.get("max_tokens") or 24),
+            temperature=0.0,
+            timeout_s=float(p.get("timeout_s") or 12),
+            system=str(
+                p.get("system")
+                or "Reply with one skill id from the list, or NONE. No other text."
+            ),
+        )
+
     q.register("spread_plan", _text_job)
     q.register("worker_summarize", _text_job)
+    q.register("library_rerank", _library_rerank)
     _handlers_ready = True

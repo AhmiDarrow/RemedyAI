@@ -12,6 +12,7 @@ import type { ChatMessage } from '../types'
 import { toolLabel, type ProcessStep } from '../utils/toolLabels'
 import { emptyUsage, type UsageSnapshot } from '../utils/tokenCost'
 import { clearChatMediaCache } from '../utils/chatMedia'
+import type { LibrarySuggest } from '../api/skillsLibrary'
 
 /** Newest-window page size (matches server newest-first window). */
 const MESSAGE_PAGE = 250
@@ -48,6 +49,7 @@ export function useMessages(sessionId: string | null) {
   const [runUsage, setRunUsage] = useState<UsageSnapshot | null>(null)
   const [streamCtrl, setStreamCtrl] = useState<AbortController | null>(null)
   const [queue, setQueue] = useState<QueuedSend[]>([])
+  const [librarySuggest, setLibrarySuggest] = useState<LibrarySuggest | null>(null)
   const streamingRef = useRef(false)
   const sendLockRef = useRef(false)
   const processStepsRef = useRef<ProcessStep[]>([])
@@ -588,6 +590,22 @@ export function useMessages(sessionId: string | null) {
             provider: usage.provider ?? null,
           })
         },
+        (payload) => {
+          if (sessionIdRef.current !== targetId) return
+          const id = typeof payload.id === 'string' ? payload.id : ''
+          const name = typeof payload.name === 'string' ? payload.name : ''
+          if (!id || !name) return
+          setLibrarySuggest({
+            id,
+            name,
+            description:
+              typeof payload.description === 'string' ? payload.description : '',
+            score: typeof payload.score === 'number' ? payload.score : undefined,
+            version:
+              typeof payload.version === 'string' ? payload.version : undefined,
+            reason: typeof payload.reason === 'string' ? payload.reason : undefined,
+          })
+        },
       )
 
       streamCtrlRef.current = ctrl
@@ -852,6 +870,8 @@ export function useMessages(sessionId: string | null) {
     setMessages((prev) => [...prev, userMsg, assistantMsg])
   }, [])
 
+  const clearLibrarySuggest = useCallback(() => setLibrarySuggest(null), [])
+
   return {
     messages,
     loading,
@@ -867,6 +887,8 @@ export function useMessages(sessionId: string | null) {
     taskProgress,
     runUsage,
     queue,
+    librarySuggest,
+    clearLibrarySuggest,
     send,
     stop,
     cancelQueued,

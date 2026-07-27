@@ -52,7 +52,10 @@ _PACKS: dict[str, dict[str, Any]] = {
             "file_write for new files, bash_exec with timeout_seconds/workdir for builds. "
             "When ≥2 independent modules/paths, use spread_run (parallel silent workers) "
             "instead of long serial list_dir loops. "
-            "Use job_run explore/verify/diff for a single survey. Keep going until finished."
+            "Use job_run explore/verify/diff for a single survey. "
+            "Prefer installed skill_activate; if continuity shows [Library] a pack is "
+            "not installed — tell the user, do not invent its body. "
+            "Keep going until finished."
         ),
         "prefer_tools": True,
         "suggest_tools": [

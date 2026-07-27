@@ -18,6 +18,7 @@ import {
 } from './workspace/layoutPrefs'
 import { SLIDE_META, type SlideId } from './workspace/types'
 import { PlanBanner } from './components/PlanBanner'
+import { LibrarySuggestChip } from './components/LibrarySuggestChip'
 import { TokenCostTicker } from './components/TokenCostTicker'
 import { TimeTravelTimeline } from './components/TimeTravelTimeline'
 import {
@@ -140,6 +141,8 @@ export default function App() {
     taskProgress,
     runUsage,
     queue,
+    librarySuggest,
+    clearLibrarySuggest,
     send,
     stop,
     cancelQueued,
@@ -1752,6 +1755,15 @@ export default function App() {
               streaming={streaming}
               model={model}
               provider={llmProvider}
+            />
+            <LibrarySuggestChip
+              suggestion={librarySuggest}
+              sessionId={activeId}
+              onDismiss={clearLibrarySuggest}
+              onOpenLibrary={() => {
+                setPanel('skills')
+                clearLibrarySuggest()
+              }}
             />
             <Composer
               ref={composerRef}

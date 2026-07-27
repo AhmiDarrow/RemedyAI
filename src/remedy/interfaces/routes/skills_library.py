@@ -17,6 +17,11 @@ class LibraryInstallBody(BaseModel):
     force: bool = False
 
 
+class LibraryDismissBody(BaseModel):
+    skill_id: str
+    session_id: str = ""
+
+
 def register_skills_library_routes(
     app: FastAPI, *, runtime=None, gateway=None, memory=None
 ) -> None:
@@ -59,6 +64,74 @@ def register_skills_library_routes(
             "results": [r.model_dump() for r in results],
             "source": cat.source,
         }
+
+    @app.get("/api/skills/library/suggest")
+    async def library_suggest(
+        q: str = Query(default=""),
+        session_id: str = Query(default=""),
+        mark: bool = Query(default=False),
+    ) -> dict[str, Any]:
+        """Cache-only soft suggestion for a task (never installs)."""
+        from remedy.skills.library.suggest import (
+            build_library_index,
+            rank_library_skills,
+            suggest_library_skill,
+        )
+        from remedy.skills.shared import get_shared_registry
+
+        installed: set[str] = set()
+        top_score = None
+        try:
+            reg = get_shared_registry()
+            if hasattr(reg, "_by_name"):
+                installed = {str(n) for n in (reg._by_name or {})}
+            if q and hasattr(reg, "match_skills"):
+                ranked = reg.match_skills(q, limit=3) or []
+                if ranked:
+                    top_score = float(ranked[0][1])
+        except Exception:
+            pass
+        idx = build_library_index(_home())
+        if mark:
+            hit = suggest_library_skill(
+                q,
+                intent="tool",
+                home=_home(),
+                installed_names=installed,
+                installed_top_score=top_score,
+                session_id=session_id or None,
+                mark_suggested=True,
+            )
+            return {
+                "query": q,
+                "suggestion": hit.to_public() if hit else None,
+                "source": idx.source,
+                "index_size": len(idx),
+                "needs_refresh": idx.needs_refresh,
+            }
+        hits = rank_library_skills(
+            q,
+            home=_home(),
+            installed_names=installed,
+            limit=5,
+            session_id=session_id or None,
+            mark_suppressed=False,
+        )
+        return {
+            "query": q,
+            "suggestion": hits[0].to_public() if hits else None,
+            "results": [h.to_public() for h in hits],
+            "source": idx.source,
+            "index_size": len(idx),
+            "needs_refresh": idx.needs_refresh,
+        }
+
+    @app.post("/api/skills/library/suggest/dismiss")
+    async def library_suggest_dismiss(body: LibraryDismissBody) -> dict[str, Any]:
+        from remedy.skills.library.suggest import suppress_suggest
+
+        suppress_suggest(body.session_id or "_default", body.skill_id)
+        return {"ok": True, "skill_id": body.skill_id}
 
     @app.post("/api/skills/library/install")
     async def library_install(body: LibraryInstallBody) -> dict[str, Any]:

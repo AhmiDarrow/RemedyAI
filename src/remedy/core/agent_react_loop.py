@@ -173,6 +173,18 @@ async def call_llm_stream(runtime, message: str,
                     session_id=sid,
                     tool_result_char_cap=int(_TOOL_RESULT_CHAR_CAP or 0),
                 )
+                # Soft library skill tip for desktop chip (cache-ranked; not an install)
+                with suppress(Exception):
+                    snap = getattr(runtime, "_last_context_snapshot", None)
+                    lib = (getattr(snap, "signals", None) or {}).get("library_suggest")
+                    if isinstance(lib, dict) and lib.get("id"):
+                        import json as _json
+
+                        yield (
+                            "@@library_suggest:"
+                            + _json.dumps(lib, default=str, separators=(",", ":"))
+                            + "\n"
+                        )
         all_tools = runtime._openai_tools()
         if plan_mode:
             from remedy.core.plan_store import PLAN_MODE_TOOL_NAMES

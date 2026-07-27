@@ -699,6 +699,21 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                             )
                             + "\n\n"
                         )
+                    elif token.startswith("@@library_suggest:"):
+                        raw = token[len("@@library_suggest:") :].strip()
+                        try:
+                            payload = json.loads(raw)
+                        except Exception:
+                            payload = {}
+                        if isinstance(payload, dict) and payload.get("id"):
+                            yield (
+                                "event: library_suggest\ndata: "
+                                + json.dumps(
+                                    {"type": "library_suggest", **payload},
+                                    default=str,
+                                )
+                                + "\n\n"
+                            )
                     elif token.startswith("@@progress:"):
                         # Generic task/job progress for the desktop progress bar.
                         raw = token[len("@@progress:") :]

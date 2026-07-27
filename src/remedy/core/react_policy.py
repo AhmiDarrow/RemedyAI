@@ -48,6 +48,8 @@ _DEFAULT_SYSTEM_PROMPT = (
     "use an absolute path under the user's Desktop (e.g. C:\\\\Users\\\\…\\\\Desktop\\\\file.txt).\n"
     "- **skill_activate**: pass skill=<catalog id only>. Do not invent skill names from "
     "the user prompt. Do not pass a free-form `name` that collides with the tool id.\n"
+    "- **[Library] tips**: if continuity mentions a not-installed library pack, do not "
+    "pretend it is installed or invent its procedure — invite Install → Trust in Skills.\n"
     "- Project work (review, files, shell, debug, implement): use the function-calling API.\n"
     "- Local apps/services (ComfyUI, Ollama, skill deps): use **local_discover** "
     "(scan / one) or the dedicated tool (e.g. comfyui). "

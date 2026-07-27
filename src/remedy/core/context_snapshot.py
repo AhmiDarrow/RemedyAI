@@ -135,6 +135,39 @@ def build_context_snapshot(
         "ambiguous": bool(intent_out.get("ambiguous")),
     }
 
+    # Library skill check — cache-only rank; never HTTP / never auto-install
+    try:
+        from remedy.skills.shared import get_shared_registry
+
+        home = None
+        cfg_lib: dict = {}
+        with suppress(Exception):
+            from remedy.interfaces.config import load_config
+
+            cfg_lib = load_config() or {}
+            if isinstance(cfg_lib, dict) and cfg_lib.get("home_dir"):
+                home = cfg_lib.get("home_dir")
+        reg = None
+        with suppress(Exception):
+            reg = get_shared_registry()
+        lib = swarm.skill.suggest_library(
+            user_text or "",
+            intent=intent,
+            registry=reg,
+            home=home,
+            session_id=session_id or "",
+            cfg=cfg_lib if isinstance(cfg_lib, dict) else None,
+        )
+        if lib:
+            snap.signals["library_suggest"] = lib
+            hint = str(lib.get("system_hint") or "").strip()
+            if hint:
+                snap.policy_system = (
+                    (snap.policy_system + "\n" if snap.policy_system else "") + hint
+                )
+    except Exception as e:
+        snap.signals["library_suggest_error"] = str(e)
+
     # Spread planner — HEURISTICS ONLY on the hot path.
     # Never block chat on local Qwen (use_local only when the model calls spread_run).
     try:

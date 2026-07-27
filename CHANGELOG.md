@@ -11,6 +11,12 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 - **Hardening:** path-jail fail-closed on `repo_search` / jobs; verify/job shell uses same Ask approvals as `bash_exec`; `APPROVAL_REQUIRED` treated as tool error; gateway skips heartbeat memory rows; skill bash env scrub; MemoryStore lock on profile/session writes; desktop interrupt/session-switch calls `abortSession`.
 - **Snappy abort:** session stop kills in-flight shell process trees; approvals use turn ContextVar session id; vision.json mtime-cached; harness skips pre_prune copy when no compress.
 
+### Skills: library skill check (soft suggest)
+
+- Cache-only rank of signed Skills Library index on tool-ish turns; at most one Install tip (never auto-install/Trust).
+- Continuity `[Library]` note + SSE `library_suggest` chip; dismiss suppress per session.
+- Speculative prep refreshes catalog in background; optional `library_rerank` local job (off by default).
+
 ## [0.17.0] - 2026-07-27
 
 ### Feature: Language-agnostic coding agency

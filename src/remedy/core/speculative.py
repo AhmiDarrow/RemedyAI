@@ -169,6 +169,43 @@ def _prep(
     except Exception:
         logger.debug("speculative skill rank failed", exc_info=True)
 
+    # 4b) Library index: background catalog refresh + prefetch rank (cache-first)
+    try:
+        from pathlib import Path
+
+        from remedy.nanoswarm import get_swarm
+        from remedy.skills.library.suggest import (
+            build_library_index,
+            schedule_catalog_refresh,
+        )
+
+        home = None
+        try:
+            from remedy.interfaces.config import load_config
+
+            cfg = load_config() or {}
+            if isinstance(cfg, dict) and cfg.get("home_dir"):
+                home = cfg.get("home_dir")
+        except Exception:
+            home = None
+        home_p = Path(home).expanduser() if home else Path.home() / ".remedy"
+        idx = build_library_index(home_p)
+        if idx.needs_refresh or len(idx) == 0:
+            schedule_catalog_refresh(home_p)
+        if (user_text or "").strip():
+            get_swarm().skill.prefetch_library(user_text, home=home_p)
+            try:
+                from remedy.core.metrics import default_registry
+
+                if idx.build_ms:
+                    default_registry.histogram(
+                        "remedy_library_index_build_ms"
+                    ).observe(idx.build_ms / 1000.0)
+            except Exception:
+                pass
+    except Exception:
+        logger.debug("speculative library warm failed", exc_info=True)
+
     # 5) Token nanobot: keep calibrator warm with last message window size
     try:
         from remedy.nanoswarm.token_nanobot import get_token_nanobot
