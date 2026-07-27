@@ -371,18 +371,34 @@ def create_app(
 
 
 def find_webui_dir() -> Path | None:
-    """Locate built desktop SPA assets for browser WebUI mode."""
+    """Locate built desktop SPA assets for browser WebUI mode.
+
+    Prefer **live** ``desktop/dist`` (Vite build) over staged sidecar ``webui/``
+    so ``npm run build`` updates WebUI without hunting stale target/debug copies.
+    """
     env = (os.environ.get("REMEDY_WEBUI_DIR") or "").strip()
     candidates: list[Path] = []
     if env:
         candidates.append(Path(env).expanduser())
-    # Repo layout: src/remedy/interfaces/api.py → parents[3] = repo root
+    # Dev: monorepo checkout root (tauri:dev sets this)
+    dev_root = (os.environ.get("REMEDY_DEV_ROOT") or "").strip()
+    if dev_root:
+        candidates.append(Path(dev_root).expanduser().resolve() / "desktop" / "dist")
+    # Repo layout: src/remedy/interfaces/api.py → parents include repo root
     here = Path(__file__).resolve()
     for parent in here.parents:
         candidates.append(parent / "desktop" / "dist")
-        candidates.append(parent / "ui")
-        candidates.append(parent / "webui")
-    # Next to frozen sidecar (packaged next to remedy-desktop.exe)
+    # Tauri debug externalBin lives at desktop/src-tauri/target/debug/*.exe
+    # → desktop/dist is parents[3]/dist (prefer over staged webui/)
+    if getattr(sys, "frozen", False):
+        try:
+            exe = Path(sys.executable).resolve()
+            # .../desktop/src-tauri/target/debug/remedy-desktop.exe
+            desktop_pkg = exe.parents[3]
+            candidates.append(desktop_pkg / "dist")
+        except (IndexError, OSError):
+            pass
+    # Staged copies next to frozen sidecar (packaged installs; after live dist)
     if getattr(sys, "frozen", False):
         exe_dir = Path(sys.executable).resolve().parent
         candidates.extend(
@@ -390,13 +406,16 @@ def find_webui_dir() -> Path | None:
                 exe_dir / "ui",
                 exe_dir / "webui",
                 exe_dir / "desktop" / "dist",
-                # Tauri resource dir (sibling of externalBin on some layouts)
                 exe_dir / "resources" / "webui",
                 exe_dir.parent / "webui",
                 exe_dir.parent / "resources" / "webui",
             ]
         )
-    # Meipass / _MEIPASS bundle (PyInstaller onefile extract)
+    # Non-dist fallbacks (legacy layouts)
+    for parent in here.parents:
+        candidates.append(parent / "ui")
+        candidates.append(parent / "webui")
+    # Meipass / _MEIPASS bundle (PyInstaller onefile extract) — last resort
     meipass = getattr(sys, "_MEIPASS", None)
     if meipass:
         mp = Path(meipass)
@@ -466,10 +485,15 @@ def _mount_web_ui(app: FastAPI) -> None:
         app.mount("/assets", StaticFiles(directory=str(assets)), name="webui-assets")
 
     index = web_dir / "index.html"
+    # HTML entry must revalidate so browsers pick up new hashed asset names after rebuild.
+    _html_headers = {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+    }
 
     def _spa_file(full_path: str = ""):
         if full_path in ("", ".", "/"):
-            return FileResponse(index)
+            return FileResponse(index, headers=_html_headers)
         if (
             full_path.startswith("api")
             or full_path.startswith("docs")
@@ -486,14 +510,14 @@ def _mount_web_ui(app: FastAPI) -> None:
         try:
             candidate.relative_to(web_dir.resolve())
         except ValueError:
-            return FileResponse(index)
+            return FileResponse(index, headers=_html_headers)
         if candidate.is_file():
             return FileResponse(candidate)
-        return FileResponse(index)
+        return FileResponse(index, headers=_html_headers)
 
     @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
     async def webui_index():
-        return FileResponse(index)
+        return FileResponse(index, headers=_html_headers)
 
     # SPA deep-link fallback (exclude /api, /docs, /dashboard)
     @app.api_route("/{full_path:path}", methods=["GET", "HEAD"], include_in_schema=False)
