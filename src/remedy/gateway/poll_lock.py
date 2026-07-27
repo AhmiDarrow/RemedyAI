@@ -1,8 +1,8 @@
 """Exclusive long-poll ownership so only one Remedy process polls a messenger bot.
 
 Telegram returns HTTP 409 when two getUpdates pollers share a bot token — realtime
-dies for the loser and feels like "sync stuck". Hold a PID lock file under
-``~/.remedy/locks/``.
+dies for the loser and feels like "sync stuck". Hold a PID + heartbeat lock file
+under ``~/.remedy/locks/``.
 """
 
 from __future__ import annotations
@@ -16,22 +16,38 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+# If the lock owner stops heartbeating, another process may take over.
+STALE_LOCK_SECONDS = 90.0
+
 
 def _pid_alive(pid: int) -> bool:
+    """True only if the OS process is still running (not merely OpenProcess-able).
+
+    On Windows, ``OpenProcess`` can succeed for *exited* PIDs that still have a
+    kernel object (common after crash/restart). Use ``GetExitCodeProcess`` and
+    require ``STILL_ACTIVE`` (259).
+    """
     if pid <= 0:
         return False
     if sys.platform == "win32":
         try:
             import ctypes
+            from ctypes import wintypes
 
             kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
-            # Windows PROCESS_QUERY_LIMITED_INFORMATION
-            access = 0x1000
+            access = 0x1000  # PROCESS_QUERY_LIMITED_INFORMATION
             handle = kernel32.OpenProcess(access, False, pid)
             if not handle:
                 return False
-            kernel32.CloseHandle(handle)
-            return True
+            try:
+                code = wintypes.DWORD()
+                ok = kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+                if not ok:
+                    return False
+                # 259 = STILL_ACTIVE
+                return int(code.value) == 259
+            finally:
+                kernel32.CloseHandle(handle)
         except Exception:
             return False
     try:
@@ -39,6 +55,21 @@ def _pid_alive(pid: int) -> bool:
         return True
     except OSError:
         return False
+
+
+def _parse_lock_payload(raw: str) -> tuple[int, float] | None:
+    parts = (raw or "").strip().split()
+    if not parts:
+        return None
+    try:
+        pid = int(parts[0])
+    except ValueError:
+        return None
+    ts = 0.0
+    if len(parts) >= 2:
+        with contextlib.suppress(ValueError):
+            ts = float(parts[1])
+    return pid, ts
 
 
 class MessengerPollLock:
@@ -59,23 +90,35 @@ class MessengerPollLock:
             logger.warning("%s poll lock mkdir failed: %s", self.channel, e)
             return True  # fail open so a single broken FS path still works
 
-        # Stale lock: previous owner dead — remove so we can take over cleanly.
+        # Stale lock: previous owner dead, or heartbeat expired → remove.
         if self.path.is_file():
             try:
-                raw = self.path.read_text(encoding="utf-8").strip()
-                old_pid = int(raw.split()[0])
-                if old_pid != os.getpid() and _pid_alive(old_pid):
-                    logger.warning(
-                        "%s poll lock held by live pid=%s — this process will not "
-                        "long-poll (avoid HTTP 409). Quit the other Remedy instance "
-                        "or wait for it to exit.",
-                        self.channel,
-                        old_pid,
-                    )
-                    return False
-                if old_pid != os.getpid() and not _pid_alive(old_pid):
-                    with contextlib.suppress(OSError):
-                        self.path.unlink(missing_ok=True)
+                raw = self.path.read_text(encoding="utf-8")
+                parsed = _parse_lock_payload(raw)
+                if parsed is not None:
+                    old_pid, old_ts = parsed
+                    now = time.time()
+                    stale_hb = old_ts > 0 and (now - old_ts) > STALE_LOCK_SECONDS
+                    if old_pid != os.getpid() and _pid_alive(old_pid) and not stale_hb:
+                        logger.warning(
+                            "%s poll lock held by live pid=%s — this process will not "
+                            "long-poll (avoid HTTP 409). Quit the other Remedy instance "
+                            "or wait for it to exit.",
+                            self.channel,
+                            old_pid,
+                        )
+                        return False
+                    if old_pid != os.getpid() and (not _pid_alive(old_pid) or stale_hb):
+                        why = "stale heartbeat" if stale_hb and _pid_alive(old_pid) else "dead pid"
+                        logger.info(
+                            "%s poll lock reclaim (%s pid=%s age=%.0fs)",
+                            self.channel,
+                            why,
+                            old_pid,
+                            (now - old_ts) if old_ts else -1,
+                        )
+                        with contextlib.suppress(OSError):
+                            self.path.unlink(missing_ok=True)
             except (OSError, ValueError, IndexError):
                 pass
 
@@ -110,10 +153,7 @@ class MessengerPollLock:
                     )
                     return False
 
-            self._fh.seek(0)
-            self._fh.truncate()
-            self._fh.write(f"{os.getpid()} {time.time():.0f}\n")
-            self._fh.flush()
+            self._write_payload()
             self.held = True
             logger.info(
                 "%s poll lock acquired (pid=%s path=%s)",
@@ -130,6 +170,21 @@ class MessengerPollLock:
                 self._fh = None
             # Fail closed on lock errors: better missed poll than dual 409 thrash.
             return False
+
+    def _write_payload(self) -> None:
+        if self._fh is None:
+            return
+        with contextlib.suppress(OSError):
+            self._fh.seek(0)
+            self._fh.truncate()
+            self._fh.write(f"{os.getpid()} {time.time():.0f}\n")
+            self._fh.flush()
+
+    def heartbeat(self) -> None:
+        """Refresh lock timestamp so peers know this poller is still alive."""
+        if not self.held or self._fh is None:
+            return
+        self._write_payload()
 
     def release(self) -> None:
         if not self.held and self._fh is None:

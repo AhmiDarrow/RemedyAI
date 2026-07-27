@@ -2,11 +2,16 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current series: **v0.18.4**.
+Current series: **v0.18.5**.
 
 ## Contents
 
-- [0.18.4](#0184---messenger-realtime--sync) · [0.18.3](#0183---provider-switch--stability) · [0.18.2](#0182---spread-run-fix) · [0.18.1](#0181---run-until-finished--title-bar) · [0.18.0](#0180---spread--library-suggest) · [0.17.0](#0170---coding-agency--process-trail) · [0.16.0](#0160---messengers--polish) · older below
+- [0.18.5](#0185---telegram-poll-lock-recovery) · [0.18.4](#0184---messenger-realtime--sync) · [0.18.3](#0183---provider-switch--stability) · [0.18.2](#0182---spread-run-fix) · [0.18.1](#0181---run-until-finished--title-bar) · [0.18.0](#0180---spread--library-suggest) · [0.17.0](#0170---coding-agency--process-trail) · [0.16.0](#0160---messengers--polish) · older below
+
+## 0.18.5 - Telegram poll lock recovery
+
+- **Messenger stays live after restarts:** a dead process can no longer “own” the Telegram poll forever on Windows.
+- **Auto-recover** if a second instance or crash left the bot lock behind (heartbeat + retry).
 
 ## 0.18.4 - Messenger realtime + sync
 

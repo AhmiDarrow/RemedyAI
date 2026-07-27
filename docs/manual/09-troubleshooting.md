@@ -28,8 +28,9 @@ Telegram allows **only one** `getUpdates` long-poll per bot token. Two Remedy wi
 1. Fully **Quit** every Remedy (tray → Quit) and stop any extra CLI `remedy serve`.  
 2. Relaunch **one** instance only.  
 3. In `%USERPROFILE%\.remedy\logs\remedy.log` look for `telegram poll lock acquired` and **no** repeated `getUpdates 409`.  
-4. Second instance should log that long-poll was **not** started (poll lock held).  
-5. If 409s continue with a single Remedy, something else (another machine, webhook, or second install) is still polling that bot.
+4. Second instance should log that long-poll was deferred / not started (poll lock held) — on **0.18.5+** it **retries** every ~20s if the owner dies.  
+5. If 409s continue with a single Remedy, something else (another machine, webhook, or second install) is still polling that bot.  
+6. **Stuck after upgrade (0.18.4):** a dead Windows PID could keep the lock. Install **0.18.5+**, fully Quit, delete `%USERPROFILE%\.remedy\locks\telegram_getupdates.lock` if it remains, relaunch.
 
 **Desktop → Telegram:** replies you send in a `msg:telegram:…` session are mirrored outbound on **0.18.4+**. Older builds only answered messages that arrived *from* Telegram.
 

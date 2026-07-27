@@ -41,6 +41,7 @@ class TelegramChannel(ChannelAdapter):
         self.allow_all = bool(allow_all)
         self._home_dir = home_dir
         self._poll_task: asyncio.Task | None = None
+        self._lock_retry_task: asyncio.Task | None = None
         self._poll_lock = None  # MessengerPollLock
         self._last_update_id: int = 0
         self._session = None  # aiohttp.ClientSession
@@ -49,6 +50,7 @@ class TelegramChannel(ChannelAdapter):
         )
         self._conflict_until = 0.0
         self._last_err_log = 0.0
+        self._last_heartbeat = 0.0
 
     async def _ensure_session(self):
         import aiohttp
@@ -75,19 +77,36 @@ class TelegramChannel(ChannelAdapter):
             len(self.chat_ids),
             self.allow_all,
         )
-        # Only one process may long-poll this bot (avoids 409 + "stuck sync").
+        started = await self._try_start_poller()
+        if not started:
+            # Owner may be a dead PID that Windows still "OpenProcess"s, or a
+            # temporary second instance — keep retrying so messenger recovers.
+            logger.error(
+                "Telegram long-poll deferred — another process holds the bot lock "
+                "(or a stale lock). Will retry every 20s until acquired."
+            )
+            self._lock_retry_task = asyncio.create_task(self._lock_retry_loop())
+
+    async def _try_start_poller(self) -> bool:
+        """Acquire exclusive lock and start getUpdates. Return False if locked out."""
+        if self._poll_task is not None and not self._poll_task.done():
+            return True
         from remedy.gateway.poll_lock import (
             MessengerPollLock,
             load_update_offset,
         )
 
-        self._poll_lock = MessengerPollLock(self._home_dir, "telegram")
-        if not self._poll_lock.try_acquire():
-            logger.error(
-                "Telegram long-poll NOT started — another Remedy process owns the bot. "
-                "Close the other app/sidecar (only one getUpdates poller is allowed)."
-            )
-            return
+        if self._poll_lock is not None and getattr(self._poll_lock, "held", False):
+            pass
+        else:
+            if self._poll_lock is not None:
+                with contextlib.suppress(Exception):
+                    self._poll_lock.release()
+            self._poll_lock = MessengerPollLock(self._home_dir, "telegram")
+            if not self._poll_lock.try_acquire():
+                self._poll_lock = None
+                return False
+
         # Resume offset so restarts do not re-process a huge backlog ("catch-up flood").
         self._last_update_id = load_update_offset(self._home_dir, "telegram")
         if self._last_update_id:
@@ -110,8 +129,31 @@ class TelegramChannel(ChannelAdapter):
                 await self._drain_backlog_without_handling()
         self._poll_task = asyncio.create_task(self._poll_loop())
         logger.info("Telegram long-poll task scheduled")
+        return True
+
+    async def _lock_retry_loop(self) -> None:
+        """Retry exclusive poll ownership until we get it or channel stops."""
+        while self._running:
+            await asyncio.sleep(20.0)
+            if not self._running:
+                return
+            if self._poll_task is not None and not self._poll_task.done():
+                return
+            try:
+                if await self._try_start_poller():
+                    logger.info("Telegram long-poll acquired after retry")
+                    return
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Telegram poll lock retry failed")
 
     async def stop(self) -> None:
+        if self._lock_retry_task is not None:
+            self._lock_retry_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._lock_retry_task
+            self._lock_retry_task = None
         if self._poll_task is not None:
             self._poll_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -185,6 +227,11 @@ class TelegramChannel(ChannelAdapter):
         while self._running:
             try:
                 now = time.monotonic()
+                # Heartbeat lock file so peers can reclaim if we hang/crash.
+                if self._poll_lock is not None and now - self._last_heartbeat > 20.0:
+                    with contextlib.suppress(Exception):
+                        self._poll_lock.heartbeat()
+                    self._last_heartbeat = now
                 if now < self._conflict_until:
                     await asyncio.sleep(min(5.0, self._conflict_until - now))
                     continue
@@ -247,7 +294,8 @@ class TelegramChannel(ChannelAdapter):
             if now - self._last_err_log > 20:
                 logger.warning(
                     "Telegram getUpdates 409 (another poller). "
-                    "Only one Remedy instance should own the bot. Backing off 25s."
+                    "Only one Remedy instance should own the bot "
+                    "(or a leftover serve / other machine). Backing off 25s."
                 )
                 self._last_err_log = now
             await asyncio.sleep(5.0)

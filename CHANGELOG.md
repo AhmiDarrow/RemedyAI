@@ -4,6 +4,16 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.18.5] - 2026-07-27
+
+### Fix: Telegram poller stuck after restart (false “live” PID)
+
+- **Windows PID liveness:** use `GetExitCodeProcess` / `STILL_ACTIVE` so a *dead*
+  process that still has an open kernel object no longer holds the poll lock forever.
+- **Heartbeat + stale reclaim (90s):** crashed pollers free the bot without a reboot.
+- **Retry every 20s** if long-poll was deferred at startup (second instance / stale lock).
+- Symptom fixed: Settings shows Telegram enabled but no inbound until full reinstall.
+
 ## [0.18.4] - 2026-07-27
 
 ### Fix: messenger realtime / Telegram↔desktop sync
