@@ -47,8 +47,10 @@ Execute **in order**. After any failure, stop advancement until that gate is gre
 
 ### 3. Update the project
 
-- Bump version if this is a release (semver: patch for fixes, minor for features).
-- Align version surfaces if the repo has more than one (package.json, Cargo.toml, …).
+- Bump version **only when shipping a real release** (semver: patch for fixes, minor for features).
+- **Do not bump version for docs-only fixes** (manuals, What's new catch-up, README typos, help sync).
+  Commit as `docs:` on the current version; users get the notes on the next real release or from git/F1 after rebuild.
+- Align version surfaces if the repo has more than one (package.json, Cargo.toml, …) **when you do bump**.
 - Keep assets/config consistent with the change.
 
 ### 4. Update documentation
@@ -57,6 +59,7 @@ Execute **in order**. After any failure, stop advancement until that gate is gre
 - Developer-facing change → README / architecture notes as the repo expects.
 - Run any **docs sync/check** scripts the project provides.
 - Docs should describe **what the user does**, not only internal renames.
+- Docs-only → no `sync_version.py`, no PyPI, no release tag unless the user explicitly asks.
 
 ### 5. Build
 
