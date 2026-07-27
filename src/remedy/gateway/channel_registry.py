@@ -29,8 +29,17 @@ def _sec(cfg: dict[str, Any], channel: str) -> dict[str, Any]:
 
 
 def _home(cfg: dict[str, Any]) -> Path | None:
+    """Resolve Remedy home for poll locks / offsets (must be stable across processes)."""
+    import os
+
     h = cfg.get("home_dir")
-    return Path(str(h)).expanduser() if h else None
+    if h:
+        return Path(str(h)).expanduser()
+    env = (os.environ.get("REMEDY_HOME") or "").strip()
+    if env:
+        return Path(env).expanduser()
+    # Default matches CLI/desktop --home fallback so dual instances share one lock.
+    return Path.home() / ".remedy"
 
 
 def _secret(cfg: dict, channel: str, key: str, home: Path | None, override: str = "") -> str:
@@ -71,6 +80,7 @@ def register_messenger_channels(
                     bot_token=tok,
                     chat_ids=parse_list_field(s.get("allow_chat_ids") or s.get("chat_ids")),
                     allow_all=bool(s.get("allow_all")),
+                    home_dir=str(home) if home else None,
                 )
             )
             registered.append("telegram")

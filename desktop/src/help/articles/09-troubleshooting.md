@@ -21,6 +21,18 @@ turned on **start hidden** whenever login-at-startup was enabled.
 3. **Save**, fully Quit, relaunch — the main window should open normally.  
 4. Tray-only start is only when that box is checked (stored in `%USERPROFILE%\.remedy\desktop.json`).
 
+## Telegram / messengers not realtime / “stuck syncing”
+
+Telegram allows **only one** `getUpdates` long-poll per bot token. Two Remedy windows, a leftover `remedy serve`, or `tauri:dev` plus an installed desktop all fighting the same bot produce HTTP **409** and feel like chat is dead or endlessly catching up.
+
+1. Fully **Quit** every Remedy (tray → Quit) and stop any extra CLI `remedy serve`.  
+2. Relaunch **one** instance only.  
+3. In `%USERPROFILE%\.remedy\logs\remedy.log` look for `telegram poll lock acquired` and **no** repeated `getUpdates 409`.  
+4. Second instance should log that long-poll was **not** started (poll lock held).  
+5. If 409s continue with a single Remedy, something else (another machine, webhook, or second install) is still polling that bot.
+
+**Desktop → Telegram:** replies you send in a `msg:telegram:…` session are mirrored outbound on **0.18.4+**. Older builds only answered messages that arrived *from* Telegram.
+
 ## Status bar flips Connected ↔ Disconnected
 
 Usually the local API event loop was blocked (historically: visual decoder health checks against a dead `llama-server` port). Fixed builds use a cheap `/api/ping` probe and non-blocking vision status.

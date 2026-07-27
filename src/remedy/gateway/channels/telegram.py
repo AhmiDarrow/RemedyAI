@@ -32,13 +32,16 @@ class TelegramChannel(ChannelAdapter):
         bot_token: str = "",
         chat_ids: list[str] | None = None,
         allow_all: bool = False,
+        home_dir: str | None = None,
     ) -> None:
         super().__init__(ChannelKind.TELEGRAM, gateway)
         self.bot_token = (bot_token or "").strip()
         self.chat_ids: list[str] = [str(c).strip() for c in (chat_ids or []) if str(c).strip()]
         self._allowed = frozenset(self.chat_ids)
         self.allow_all = bool(allow_all)
+        self._home_dir = home_dir
         self._poll_task: asyncio.Task | None = None
+        self._poll_lock = None  # MessengerPollLock
         self._last_update_id: int = 0
         self._session = None  # aiohttp.ClientSession
         self._api_base = (
@@ -72,6 +75,23 @@ class TelegramChannel(ChannelAdapter):
             len(self.chat_ids),
             self.allow_all,
         )
+        # Only one process may long-poll this bot (avoids 409 + "stuck sync").
+        from remedy.gateway.poll_lock import (
+            MessengerPollLock,
+            load_update_offset,
+        )
+
+        self._poll_lock = MessengerPollLock(self._home_dir, "telegram")
+        if not self._poll_lock.try_acquire():
+            logger.error(
+                "Telegram long-poll NOT started — another Remedy process owns the bot. "
+                "Close the other app/sidecar (only one getUpdates poller is allowed)."
+            )
+            return
+        # Resume offset so restarts do not re-process a huge backlog ("catch-up flood").
+        self._last_update_id = load_update_offset(self._home_dir, "telegram")
+        if self._last_update_id:
+            logger.info("Telegram resume offset update_id=%s", self._last_update_id)
         # Prefer getUpdates; drop any leftover webhook so we don't fight webhooks.
         try:
             session = await self._ensure_session()
@@ -83,6 +103,11 @@ class TelegramChannel(ChannelAdapter):
                     logger.debug("Telegram deleteWebhook ok")
         except Exception:
             logger.debug("Telegram deleteWebhook failed", exc_info=True)
+        # No saved offset: drain backlog without replaying into sessions (avoids
+        # "stuck catching up" after first install / wipe of offset file).
+        if self._last_update_id <= 0:
+            with contextlib.suppress(Exception):
+                await self._drain_backlog_without_handling()
         self._poll_task = asyncio.create_task(self._poll_loop())
         logger.info("Telegram long-poll task scheduled")
 
@@ -92,6 +117,10 @@ class TelegramChannel(ChannelAdapter):
             with contextlib.suppress(asyncio.CancelledError):
                 await self._poll_task
             self._poll_task = None
+        if self._poll_lock is not None:
+            with contextlib.suppress(Exception):
+                self._poll_lock.release()
+            self._poll_lock = None
         await self._close_session()
         await super().stop()
 
@@ -129,6 +158,28 @@ class TelegramChannel(ChannelAdapter):
                 _ = resp.status
         except Exception:
             pass
+
+    async def _drain_backlog_without_handling(self) -> None:
+        """Advance offset past pending updates without creating sessions/replies."""
+        from remedy.gateway.poll_lock import save_update_offset
+
+        drained = 0
+        for _ in range(50):  # max 50 * 100 = 5000 updates
+            batch = await self._get_updates(timeout=0)
+            if not batch:
+                break
+            for update in batch:
+                uid = update.get("update_id")
+                if isinstance(uid, int):
+                    self._last_update_id = max(self._last_update_id, uid)
+                    drained += 1
+            save_update_offset(self._home_dir, self._last_update_id, "telegram")
+        if drained:
+            logger.info(
+                "Telegram drained %d backlog update(s); resume at update_id=%s",
+                drained,
+                self._last_update_id,
+            )
 
     async def _poll_loop(self) -> None:
         while self._running:
@@ -210,15 +261,23 @@ class TelegramChannel(ChannelAdapter):
         uid = update.get("update_id")
         if isinstance(uid, int):
             self._last_update_id = max(self._last_update_id, uid)
+            with contextlib.suppress(Exception):
+                from remedy.gateway.poll_lock import save_update_offset
+
+                save_update_offset(self._home_dir, self._last_update_id, "telegram")
 
         msg = update.get("message") or update.get("edited_message") or {}
+        # Ignore service messages and bot echoes (no text).
         text = msg.get("text")
         if not text:
+            return
+        # Never re-process bot's own outbound (safety if Telegram ever delivers them).
+        from_user = msg.get("from") or {}
+        if from_user.get("is_bot"):
             return
 
         chat = msg.get("chat") or {}
         chat_id = str(chat.get("id", ""))
-        from_user = msg.get("from") or {}
         user_id = str(from_user.get("id") or "")
         source_id = user_id or chat_id
 

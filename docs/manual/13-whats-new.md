@@ -2,11 +2,19 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current series: **v0.18.3**.
+Current series: **v0.18.4**.
 
 ## Contents
 
-- [0.18.3](#0183---provider-switch--stability) · [0.18.2](#0182---spread-run-fix) · [0.18.1](#0181---run-until-finished--title-bar) · [0.18.0](#0180---spread--library-suggest) · [0.17.0](#0170---coding-agency--process-trail) · [0.16.0](#0160---messengers--polish) · older below
+- [0.18.4](#0184---messenger-realtime--sync) · [0.18.3](#0183---provider-switch--stability) · [0.18.2](#0182---spread-run-fix) · [0.18.1](#0181---run-until-finished--title-bar) · [0.18.0](#0180---spread--library-suggest) · [0.17.0](#0170---coding-agency--process-trail) · [0.16.0](#0160---messengers--polish) · older below
+
+## 0.18.4 - Messenger realtime + sync
+
+- **Telegram realtime:** only one Remedy process may long-poll the bot (stops HTTP 409 “another poller” thrash).
+- **No catch-up flood** on restart — update offset is saved; first run drains backlog without replaying into chat.
+- **Desktop replies reach Telegram** when you chat in a messenger session (was inbound-only).
+- **Smoother live sync** while a reply is streaming (no force full-thread reload mid-turn).
+- **Concurrent sessions:** safer provider/model bind across tabs and messengers.
 
 ## 0.18.3 - Provider switch + stability
 

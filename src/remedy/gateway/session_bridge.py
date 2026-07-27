@@ -308,3 +308,49 @@ async def handle_messenger_event(
 def outbound_chunks(text: str, channel: str | ChannelKind) -> list[str]:
     ch = _channel_value(channel)
     return split_message(text, ch)
+
+
+async def mirror_desktop_reply_to_messenger(
+    gateway: Any,
+    session: Any,
+    text: str,
+) -> bool:
+    """Push a desktop assistant reply to the session's origin messenger chat.
+
+    Telegram→desktop is handled by the gateway poll path. Desktop→Telegram was
+    missing: users chatting in a ``msg:telegram:…`` session only saw replies
+    locally. Best-effort; never raises into the chat stream.
+    """
+    if gateway is None or not (text or "").strip():
+        return False
+    ch = _channel_value(getattr(session, "origin_channel", None))
+    target = str(getattr(session, "external_chat_id", None) or "").strip()
+    if not ch or not target or not is_messenger_channel(ch):
+        return False
+    try:
+        kind = ChannelKind(ch)
+    except Exception:
+        logger.debug("mirror: unknown channel %s", ch)
+        return False
+    ok_any = False
+    try:
+        for part in outbound_chunks(text, ch):
+            sent = await gateway.send_to(kind, part, target=target)
+            ok_any = ok_any or bool(sent)
+        if ok_any:
+            logger.info(
+                "Mirrored desktop reply to %s chat_id=%s (%d chars)",
+                ch,
+                target,
+                len(text),
+            )
+        else:
+            logger.warning(
+                "Mirror to %s chat_id=%s failed (channel down or send error)",
+                ch,
+                target,
+            )
+    except Exception:
+        logger.exception("mirror_desktop_reply_to_messenger failed ch=%s", ch)
+        return False
+    return ok_any

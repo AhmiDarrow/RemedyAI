@@ -476,6 +476,22 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                 role=ChatMessageRole.ASSISTANT,
                 content=response_text,
             ))
+            # Desktop reply → Telegram/Discord/etc. when session is messenger-origin.
+            with contextlib.suppress(Exception):
+                from remedy.gateway.session_bridge import mirror_desktop_reply_to_messenger
+                from remedy.interfaces.session_events import publish_session_event
+
+                ex = await memory.get_chat_session(session_id)
+                if ex is not None:
+                    await mirror_desktop_reply_to_messenger(gateway, ex, response_text)
+                    if getattr(ex, "origin_channel", None):
+                        await publish_session_event(
+                            "message_added",
+                            session_id,
+                            origin_channel=getattr(ex, "origin_channel", None),
+                            title=getattr(ex, "title", None),
+                            role="assistant",
+                        )
 
         return {
             "request_id": request_id,
@@ -852,6 +868,26 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                         model=req.model or getattr(runtime, "_llm_model", None),
                         tokens=tok,
                     ))
+                    # Desktop→messenger: mirror so Telegram users see desktop replies.
+                    with contextlib.suppress(Exception):
+                        from remedy.gateway.session_bridge import (
+                            mirror_desktop_reply_to_messenger,
+                        )
+                        from remedy.interfaces.session_events import publish_session_event
+
+                        ex = await memory.get_chat_session(session_id)
+                        if ex is not None:
+                            await mirror_desktop_reply_to_messenger(
+                                gateway, ex, full_response
+                            )
+                            if getattr(ex, "origin_channel", None):
+                                await publish_session_event(
+                                    "message_added",
+                                    session_id,
+                                    origin_channel=getattr(ex, "origin_channel", None),
+                                    title=getattr(ex, "title", None),
+                                    role="assistant",
+                                )
 
                 done_payload: dict = {"type": "done", "request_id": request_id}
                 if isinstance(final_usage, dict):

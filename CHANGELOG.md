@@ -4,6 +4,19 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.18.4] - 2026-07-27
+
+### Fix: messenger realtime / Telegram↔desktop sync
+
+- **Exclusive poll lock** (`~/.remedy/locks/telegram_getupdates.lock`) so only one
+  Remedy process long-polls the bot (stops HTTP 409 thrash / “realtime dead”).
+- **Persist Telegram update offset** so restarts do not re-flood backlog catch-up.
+- **First-run backlog drain** without replaying into sessions when no offset exists.
+- **Desktop→Telegram mirror:** assistant replies in `msg:telegram:…` sessions are
+  sent back to the remote chat (was inbound-only).
+- **SSE sync:** do not force-reload the active thread while a local stream is live
+  (avoids fighting partial text / “stuck catching up” feel).
+
 ### Fix: concurrent session LLM isolation + stream tracking
 
 - **LLM turn lock:** streams serialize provider bind for the whole turn (no mid-stream

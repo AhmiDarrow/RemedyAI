@@ -802,6 +802,10 @@ export default function App() {
   refreshSessionsRef.current = refreshSessions
   const reloadMessagesRef = useRef(reloadMessages)
   reloadMessagesRef.current = reloadMessages
+  // Avoid force-reloading the active thread while a local stream is mid-flight —
+  // that fought partialText and felt like "sync stuck" / catch-up thrash.
+  const streamingRefForSync = useRef(streaming)
+  streamingRefForSync.current = streaming
 
   useEffect(() => {
     if (serverState !== 'ready') return
@@ -813,7 +817,12 @@ export default function App() {
       debounce = setTimeout(() => {
         void refreshSessionsRef.current()
         // load() takes { force }, not session id — force-refresh active thread only
-        if (sessionId && sessionId === activeIdRef.current) {
+        // when we are not streaming that thread (messenger inbound mid-desktop turn).
+        if (
+          sessionId
+          && sessionId === activeIdRef.current
+          && !streamingRefForSync.current
+        ) {
           void reloadMessagesRef.current({ force: true })
         }
       }, 400)
