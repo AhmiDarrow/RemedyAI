@@ -162,3 +162,11 @@ in the [main repo](https://github.com/AhmiDarrow/RemedyAI).
 ---
 
 *Part of the Remedy local partner stack — continuity on your PC, library on your terms.*
+
+---
+
+## Support
+
+If this library helps you, you can support development on Patreon:
+
+**[patreon.com/cw/AhmiDarrow](https://www.patreon.com/cw/AhmiDarrow)**
