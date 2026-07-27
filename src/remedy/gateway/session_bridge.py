@@ -266,11 +266,13 @@ async def handle_messenger_event(
                     runtime,
                     model_override=getattr(session, "model", None),
                     provider_override=getattr(session, "llm_provider", None),
+                    llm_only=True,
                 )
             async for chunk in runtime.stream_response(
                 message,
                 session_id=session.id,
                 model=getattr(session, "model", None),
+                provider=getattr(session, "llm_provider", None),
             ):
                 if chunk is not None:
                     text = str(chunk)

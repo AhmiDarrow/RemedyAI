@@ -4,6 +4,16 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Fix: concurrent session LLM isolation + stream tracking
+
+- **LLM turn lock:** streams serialize provider bind for the whole turn (no mid-stream
+  host/key races across tabs/messengers).
+- **Per-session streaming set** (not one global `_streaming` bool) — switch provider on
+  tab B while A streams is allowed; only *this* session blocks on 409.
+- **Chat turns use `llm_only` sync** — do not thrash approval/project/harness from
+  config mid concurrent work.
+- Session LLM bind happens **under** the lock inside `stream_response`.
+
 ### Fix: force-answer nudge once; messenger/legacy stream honor session LLM
 
 - Do not append “Stop calling tools…” every ReAct step (context bloat / stuck feel).

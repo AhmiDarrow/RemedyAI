@@ -7,6 +7,7 @@ through the ToolRegistry.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import suppress
@@ -94,6 +95,10 @@ class BasicRuntime(AgentRuntime):
         self._llm_base_url: str = config.llm_base_url or "https://api.openai.com/v1"
         self._llm_provider: str = getattr(config, "llm_provider", "openai") or "openai"
         self._provider: ProviderAdapter = get_provider(self._llm_provider)
+        # Sessions actively streaming (not a single global bool).
+        self._streaming_sessions: set[str] = set()
+        # Serialize LLM bind + stream: one shared provider binding per process.
+        self._llm_turn_lock: asyncio.Lock | None = None
         # Absolute safety total (multi-epoch). Soft epoch size is separate.
         self._max_react_steps = _MAX_REACT_STEPS
         self._epoch_react_steps = _REACT_EPOCH_STEPS
@@ -616,6 +621,7 @@ class BasicRuntime(AgentRuntime):
         attachments: list[dict[str, Any]] | None = None,
         *,
         plan_mode: bool = False,
+        provider: str | None = None,
     ) -> AsyncIterator[str]:
         """Stream tokens from the LLM for real-time SSE delivery.
 
@@ -624,80 +630,138 @@ class BasicRuntime(AgentRuntime):
         Falls back to the echo-style fallback when no API key is configured.
 
         *plan_mode*: restrict tools to planning helpers (plan_save, goals, memory search).
+        *provider* / *model*: per-session bind applied **under** the LLM turn lock.
         """
         await self._apply_session_workspace(session_id)
 
         from remedy.core.turn_context import begin_turn, end_turn, is_turn_aborted
 
-        # Snapshot full LLM binding so concurrent sessions / messenger turns
-        # cannot leave the wrong provider+key sticky after this turn.
-        prev_llm = (
-            str(getattr(self, "_llm_provider", "") or ""),
-            str(getattr(self, "_llm_model", "") or ""),
-            str(getattr(self, "_llm_base_url", "") or ""),
-            str(getattr(self, "_llm_api_key", "") or ""),
-        )
-        if model and str(model).strip():
-            self._llm_model = str(model).strip()
+        # One shared provider binding per process: hold lock for the whole turn so
+        # concurrent sessions cannot interleave reconfigure_llm mid-stream.
+        if self._llm_turn_lock is None:
+            self._llm_turn_lock = asyncio.Lock()
+        lock = self._llm_turn_lock
 
-        # Fresh per-turn tool trace for auto-learn + checkpoints
-        self._turn_tool_steps = []
-        self._last_auto_checkpoint_n = 0
-        self._plan_mode = bool(plan_mode)
-        if session_id:
-            self._session_id = session_id
+        async with lock:
+            # Snapshot full LLM binding; restore after so the next waiter sees
+            # a clean baseline (routes re-apply session provider on entry).
+            prev_llm = (
+                str(getattr(self, "_llm_provider", "") or ""),
+                str(getattr(self, "_llm_model", "") or ""),
+                str(getattr(self, "_llm_base_url", "") or ""),
+                str(getattr(self, "_llm_api_key", "") or ""),
+            )
+            # Bind session LLM under the lock (not before acquire — race).
+            prov = (provider or "").strip() or None
+            mod = (model or "").strip() or None
+            if not prov and not mod and session_id and self.memory is not None:
+                with suppress(Exception):
+                    sess = await self.memory.get_chat_session(str(session_id))
+                    if sess is not None:
+                        prov = (getattr(sess, "llm_provider", None) or None)
+                        if prov:
+                            prov = str(prov).strip() or None
+                        if not mod:
+                            mod = (getattr(sess, "model", None) or None)
+                            if mod:
+                                mod = str(mod).strip() or None
+            if prov or mod:
+                with suppress(Exception):
+                    from remedy.interfaces.api_support import (
+                        _sync_runtime_llm_from_config,
+                    )
 
-        # Pin workspace to this coroutine so concurrent messenger/desktop turns
-        # do not steal each other's project jail across awaits.
-        tok_s, tok_a, tok_w = begin_turn(
-            session_id,
-            project_raw=getattr(self, "_project_path_raw", None),
-            active_path=getattr(self, "_active_project_path", None) or "",
-        )
-        self._streaming = True
-        try:
-            if not self._llm_api_key:
-                yield (
-                    "[LLM not connected — no API key. "
-                    "Open Settings, enter your provider key, Save, then resend.]\n"
-                )
-                return
+                    _sync_runtime_llm_from_config(
+                        self,
+                        model_override=mod,
+                        provider_override=prov,
+                        llm_only=True,
+                    )
+            elif mod:
+                self._llm_model = mod
 
-            async for chunk in self._call_llm_stream(
-                message,
-                session_id=session_id,
-                attachments=attachments,
-                plan_mode=bool(plan_mode),
-            ):
-                if is_turn_aborted():
-                    yield "@@aborted\n"
-                    break
-                yield chunk
-        finally:
-            self._streaming = False
-            end_turn(session_id, tok_s, tok_a, tok_w)
-            # Restore pre-turn provider/model/url/key (not model-only).
+            # Fresh per-turn tool trace for auto-learn + checkpoints
+            self._turn_tool_steps = []
+            self._last_auto_checkpoint_n = 0
+            self._plan_mode = bool(plan_mode)
+            sid_key = str(session_id or "").strip() or "_anon"
+            if session_id:
+                self._session_id = session_id
+
+            # Pin workspace to this coroutine so concurrent messenger/desktop turns
+            # do not steal each other's project jail across awaits.
+            tok_s, tok_a, tok_w = begin_turn(
+                session_id,
+                project_raw=getattr(self, "_project_path_raw", None),
+                active_path=getattr(self, "_active_project_path", None) or "",
+            )
+            self._streaming_sessions.add(sid_key)
+            try:
+                if not self._llm_api_key:
+                    yield (
+                        "[LLM not connected — no API key. "
+                        "Open Settings, enter your provider key, Save, then resend.]\n"
+                    )
+                    return
+
+                async for chunk in self._call_llm_stream(
+                    message,
+                    session_id=session_id,
+                    attachments=attachments,
+                    plan_mode=bool(plan_mode),
+                ):
+                    if is_turn_aborted():
+                        yield "@@aborted\n"
+                        break
+                    yield chunk
+            finally:
+                self._streaming_sessions.discard(sid_key)
+                end_turn(session_id, tok_s, tok_a, tok_w)
+                # Restore pre-turn provider/model/url/key (not model-only).
+                with suppress(Exception):
+                    self.reconfigure_llm(
+                        provider=prev_llm[0] or None,
+                        model=prev_llm[1] or None,
+                        base_url=prev_llm[2] or None,
+                        api_key=prev_llm[3] if prev_llm[3] else None,
+                    )
+                self._plan_mode = False
+                # Soft end-of-turn checkpoint if substantial tool work happened
+                if not plan_mode and not is_turn_aborted():
+                    with suppress(Exception):
+                        steps = list(getattr(self, "_turn_tool_steps", None) or [])
+                        if len(steps) >= 4:
+                            self._maybe_auto_checkpoint(
+                                reason="turn_end",
+                                title=(message or "Task")[:80],
+                                force=True,
+                            )
+                    # Post-turn: distill multi-step successes into probation skills
+                    with suppress(Exception):
+                        self._maybe_auto_learn_from_turn(message, session_id)
+
+    @property
+    def _streaming(self) -> bool:
+        """True if any session is mid-stream (back-compat for routes/abort)."""
+        return bool(getattr(self, "_streaming_sessions", None))
+
+    @_streaming.setter
+    def _streaming(self, value: bool) -> None:
+        """Legacy setter: False clears all; True is a no-op without session id."""
+        if not value:
             with suppress(Exception):
-                self.reconfigure_llm(
-                    provider=prev_llm[0] or None,
-                    model=prev_llm[1] or None,
-                    base_url=prev_llm[2] or None,
-                    api_key=prev_llm[3] if prev_llm[3] else None,
-                )
-            self._plan_mode = False
-            # Soft end-of-turn checkpoint if substantial tool work happened
-            if not plan_mode and not is_turn_aborted():
-                with suppress(Exception):
-                    steps = list(getattr(self, "_turn_tool_steps", None) or [])
-                    if len(steps) >= 4:
-                        self._maybe_auto_checkpoint(
-                            reason="turn_end",
-                            title=(message or "Task")[:80],
-                            force=True,
-                        )
-                # Post-turn: distill multi-step successes into probation skills
-                with suppress(Exception):
-                    self._maybe_auto_learn_from_turn(message, session_id)
+                self._streaming_sessions.clear()
+
+    def is_session_streaming(self, session_id: str | None) -> bool:
+        """True when this session id has an active stream turn."""
+        from remedy.core.turn_context import is_session_streaming as _is_sid
+
+        sid = str(session_id or "").strip()
+        if not sid:
+            return False
+        if sid in getattr(self, "_streaming_sessions", set()):
+            return True
+        return _is_sid(sid)
 
     def _maybe_auto_learn_from_turn(
         self,

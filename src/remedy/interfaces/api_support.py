@@ -825,6 +825,7 @@ def _sync_runtime_llm_from_config(
     *,
     model_override: str | None = None,
     provider_override: str | None = None,
+    llm_only: bool = False,
 ) -> str:
     """Reload provider/model/url/key from disk into the live runtime.
 
@@ -835,6 +836,9 @@ def _sync_runtime_llm_from_config(
     *provider_override* / *model_override*: per-session picks (status-bar switch).
     Without these, a session on Grok while global config is still DeepSeek would
     send ``model=grok-4.5`` to the DeepSeek base URL every turn.
+
+    *llm_only*: when True (chat turns), only bind provider/model/url/key — do not
+    thrash project_path / harness / approval_mode mid concurrent streams.
     """
     if runtime is None:
         return ""
@@ -897,9 +901,18 @@ def _sync_runtime_llm_from_config(
     ):
         api_key = "local"
 
-    # Partner trust: keep APPROVALS + runtime aligned with config on every turn.
-    # Without this, thumbs-up (auto) in Settings/UI can show while tools still
-    # emit APPROVAL_REQUIRED because the process started on default ask.
+    if llm_only:
+        # Chat/messenger turn: only LLM binding (safe under _llm_turn_lock).
+        _apply_llm_to_runtime(
+            runtime,
+            provider=provider,
+            model=model,
+            base_url=base_url,
+            api_key=api_key if api_key else None,
+        )
+        return str(getattr(runtime, "_llm_api_key", "") or api_key or "")
+
+    # Full sync (settings save / cold start): partner trust + project + harness.
     am = str(cfg.get("approval_mode") or "ask").strip().lower()
     if am not in ("ask", "auto"):
         am = "ask"

@@ -237,8 +237,10 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         if runtime is not None:
             # Clear global streaming flag when this session was the active one.
             with contextlib.suppress(Exception):
-                if str(getattr(runtime, "_session_id", "") or "") == str(session_id):
-                    runtime._streaming = False  # type: ignore[attr-defined]
+                # Per-session stream set; clear this id only (not all tabs).
+                ss = getattr(runtime, "_streaming_sessions", None)
+                if isinstance(ss, set):
+                    ss.discard(str(session_id))
         return {"status": "aborted", "session_id": session_id, "notified": n}
 
     @app.put("/api/sessions/{session_id}/llm")
@@ -256,11 +258,20 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         )
         from remedy.interfaces.config import normalize_llm_settings
 
-        if runtime is not None and getattr(runtime, "_streaming", False):
-            raise HTTPException(
-                409,
-                "Stop generation before switching provider/model",
-            )
+        # Only block if *this* session is streaming — other tabs may run freely.
+        if runtime is not None:
+            is_busy = False
+            if hasattr(runtime, "is_session_streaming"):
+                is_busy = bool(runtime.is_session_streaming(session_id))
+            else:
+                from remedy.core.turn_context import is_session_streaming
+
+                is_busy = is_session_streaming(session_id)
+            if is_busy:
+                raise HTTPException(
+                    409,
+                    "Stop generation in this session before switching provider/model",
+                )
 
         cfg = load_config()
         provider, model, base_url = normalize_llm_settings(
@@ -432,6 +443,7 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             runtime,
             model_override=sess_model,
             provider_override=sess_provider,
+            llm_only=True,
         )
 
         from remedy.core.metrics import default_registry
@@ -443,6 +455,7 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             session_id=session_id,
             model=sess_model,
             plan_mode=bool(getattr(req, "plan_mode", False)),
+            provider=sess_provider,
         ):
             # Keep user-visible text only (tool lifecycle events are @@-prefixed).
             if isinstance(token, str) and token.startswith("@@"):
@@ -628,6 +641,7 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             runtime,
             model_override=sess_model,
             provider_override=sess_provider,
+            llm_only=True,
         )
 
         async def event_stream():
@@ -660,6 +674,7 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                     model=sess_model,
                     attachments=att_dicts,
                     plan_mode=bool(getattr(req, "plan_mode", False)),
+                    provider=sess_provider,
                 ):
                     if isinstance(token, str) and token.startswith("@@aborted"):
                         status = "aborted"
@@ -897,11 +912,13 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                     runtime,
                     model_override=sess_model,
                     provider_override=sess_provider,
+                    llm_only=True,
                 )
                 async for token in runtime.stream_response(
                     req.message,
                     session_id=session_id,
                     model=sess_model,
+                    provider=sess_provider,
                 ):
                     yield await _sse_stream_text(token, event="token")
             except Exception as e:
