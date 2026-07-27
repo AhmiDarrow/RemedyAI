@@ -64,11 +64,20 @@ puts the file on the composer rail so you can point things out to Remedy.
 [ left slide ] | chat | [ right slide ]
 ```
 
-Rails: Sessions · Settings · Files · Terminal · Browser · Scratch.  
-Each side: **thin strip** (click → icons) → **icon rail** (click icon → open panel) → **×** minimizes to thin.  
-**⇄ Swap sides** · Terminal/Browser/Scratch can pop out (↗) / fullscreen (⛶).  
-In fullscreen: use **Exit fullscreen** / **Close** on the top bar, or press **Esc**.  
-Browser content loads **inside** the panel; sites that block embedding offer **Open externally**.
+Remedy is a **workbench**: chat in the center, real tools on the rails.
+
+| Rail tool | What it is |
+|-----------|------------|
+| **Sessions** | Chats, projects, messenger threads |
+| **Settings** | Provider, vision/Qwen, messengers, appearance |
+| **Files** | In-app file browser for the session/project |
+| **Terminal** | In-app PowerShell (ConPTY) on this PC |
+| **Browser** | Embedded WebView2 research pane (**↗** = system browser) |
+| **Scratch** | Session-linked notepad |
+
+Each side: **thin strip** → **icon rail** → **open panel** (× collapses).  
+**⇄ Swap sides** · Terminal / Browser / Scratch: popout (↗) or fullscreen (⛶).  
+Fullscreen: **Exit fullscreen** / **Close** on the top bar, or **Esc**.
 
 ## Plan vs Build
 
