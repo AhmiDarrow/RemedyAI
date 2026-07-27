@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { isTauri, tauriInvoke } from '../api/tauri'
+import { RemedyLogo } from './RemedyLogo'
 
 export type AppMenuAction =
   | 'settings'
@@ -177,19 +178,8 @@ export function TitleBar({
             setMenuOpen((o) => !o)
           }}
         >
-          <img
-            src="/logo.png"
-            alt="Remedy"
-            draggable={false}
-            style={{
-              height: 28,
-              width: 'auto',
-              maxWidth: 168,
-              objectFit: 'contain',
-              objectPosition: 'left center',
-              display: 'block',
-            }}
-          />
+          {/* Monogram only — not the wordmark (logo.png has "Remedy" text baked in). */}
+          <RemedyLogo size={26} variant="auto" title="Remedy" />
           <span
             className="ml-0.5 text-[9px]"
             style={{ color: 'var(--text-muted)' }}
