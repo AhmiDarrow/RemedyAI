@@ -1,13 +1,20 @@
 # What's new (recent)
 
-High-level product notes for owners. Full detail lives in repo `CHANGELOG.md`.
+High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Ship **one** installer/tag for the current series (**v0.15.9**).
+Current series: **v0.15.9**.
 
-## 0.15.9 - Skills Library tab + first-session fix
+## Contents
 
-- **My skills | Library** segmented control at top of Skills panel (Library is easy to miss as a muted text button).
-- First message after boot waits for sessions/model and recovers stale auth after update.
+- [0.15.9](#0159---skills-library-visibility--first-session-fix) · [0.15.8](#0158---skills-library) · [0.15.7](#0157---memory-harness-v2) · [0.15.6](#0156---images-in-chat-for-every-model) · older below
+
+## 0.15.9 - Skills Library visibility + first-session fix
+
+- **Installed | Library** tabs fixed under the Skills title (not clipped by chrome).
+- **Memory → Progress**: calmer checkpoint wording (not raw scare-logs).
+- Empty chat monogram (no plate bubble); WebUI uses same SPA as desktop.
+- First message after boot waits for sessions/model; re-bootstrap token on 401 after update.
+- Messengers + session history SQL fix for long / messenger chats.
 
 ## 0.15.8 - Skills Library
 

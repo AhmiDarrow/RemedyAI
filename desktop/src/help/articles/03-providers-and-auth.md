@@ -1,8 +1,10 @@
 # Providers & authentication
 
-Remedy talks to one **active LLM provider** at a time. Configure it in the **Setup wizard** or **Settings**.
+Remedy talks to one **active LLM provider** at a time for **chat**. Configure it in the **Setup wizard** or **Settings**.
 
-## Supported providers
+Separately, Remedy can install an **on-device Qwen** model for vision decode and harness assist — that is not a chat provider. See [Local vision & on-device Qwen](14-visual-decoder).
+
+## Supported chat providers
 
 | Provider | Auth | Notes |
 |----------|------|--------|

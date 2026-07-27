@@ -13,6 +13,7 @@ You (goals, taste, judgment)
    · Memory (facts that last)
    · Skills (procedures that improve)
    · Context budget & quality
+   · Local Qwen (optional) — vision briefs, brief refresh
         │
         ▼
    Provider model (Grok / Claude / GPT / Ollama / …)
@@ -23,14 +24,16 @@ You (goals, taste, judgment)
         └──────── learn / compress / remember ─────┘
 ```
 
-You should feel **Remedy**, not a network of agents. Internal workers (sometimes called the continuity layer or nanoswarm in code) run in the background. They measure, prune, rank, and distill — they do not compete for the microphone.
+You should feel **Remedy**, not a network of agents. Internal workers (continuity layer / nanoswarm in code) measure, prune, rank, and distill — they do not compete for the microphone.
+
+**Local Qwen** (when installed) is part of that efficiency story: image→text for any chat model, and background harness work that would otherwise cost another paid call. See [Local vision & on-device Qwen](14-visual-decoder).
 
 ## What you get
 
 | Feeling | What is actually happening |
 |---------|----------------------------|
 | **Fast** | Hot path stays cheap: no mini-model debate on every keystroke |
-| **Cheaper** | Less re-sending of tool sludge; compress when context is full |
+| **Cheaper** | Less tool sludge re-sent; local Qwen for vision/briefs when it helps |
 | **Accurate over long work** | Session Brief keeps intent, files, decisions, next steps |
 | **Same partner on any model** | Continuity lives on your PC, not in the vendor’s chat product |
 
