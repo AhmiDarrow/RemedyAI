@@ -2,6 +2,8 @@
 
 This folder is the **canonical technical owner’s manual** for Remedy Desktop.
 
+**Browse on GitHub:** [Overview](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/00-overview.md) · [this index](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/README.md) · [folder](https://github.com/AhmiDarrow/RemedyAI/tree/master/docs/manual)
+
 ## In the app
 
 Open **Help** ( **F1** or **Ctrl+/** ) for a searchable wiki UI that loads these chapters offline.

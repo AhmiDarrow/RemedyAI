@@ -5,7 +5,7 @@
 Knowledge, design, code, and get-it-done work. One continuous partner — not a thin chat wrapper, not a farm of bots.  
 **Not** a medical product; the name means unsticking problems and finishing requests.
 
-**[Download for Windows](https://github.com/AhmiDarrow/RemedyAI/releases/latest)** · **F1** offline owner’s manual · **0.15.x**
+**[Download for Windows](https://github.com/AhmiDarrow/RemedyAI/releases/latest)** · **[Owner’s manual (GitHub)](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/00-overview.md)** · **F1** in-app · **0.15.x**
 
 ---
 
@@ -27,7 +27,21 @@ Knowledge, design, code, and get-it-done work. One continuous partner — not a 
 14. [Development](#development)  
 15. [Support](#support) · [License](#license)  
 
-Manuals: [`docs/manual/`](docs/manual/) · Changelog: [`CHANGELOG.md`](CHANGELOG.md) · Agent notes: [`AGENTS.md`](AGENTS.md)
+### Owner’s manual (hosted on GitHub)
+
+GitHub renders the full Help wiki as markdown (same chapters as in-app **F1**):
+
+| | |
+|--|--|
+| **Start here** | [Overview](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/00-overview.md) |
+| **All chapters** | [docs/manual/](https://github.com/AhmiDarrow/RemedyAI/tree/master/docs/manual) · [chapter index](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/README.md) |
+| **Continuity** | [How Remedy works](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/16-continuity-philosophy.md) |
+| **Local Qwen** | [Vision & on-device Qwen](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/14-visual-decoder.md) |
+| **Chat & rails** | [Chat & sessions](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/05-chat-and-sessions.md) |
+| **Skills** | [Skills](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/07-skills.md) |
+| **What’s new** | [What’s new](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/13-whats-new.md) |
+
+Also: [CHANGELOG.md](CHANGELOG.md) · [AGENTS.md](AGENTS.md)
 
 ---
 
