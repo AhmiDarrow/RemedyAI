@@ -4,45 +4,23 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
-### UI: Process trail readability (Min / Med / Full)
+## [0.17.0] - 2026-07-27
 
-- **No double trail:** live TaskProgress shows the bar only when Process is present (no second chip cloud).
-- **Min:** header counts + compact grouped chips; “+N earlier”; short viewport.
-- **Med:** consecutive same tools grouped (`Reading file ×3`); human labels only; path one-liner; **Show result** expands body (no args/path repeated).
-- **Full:** **every** step listed with complete args/results (not grouped away); live viewport taller; raw tool id kept for debug.
-- Progress area max-height scales by Min / Med / Full.
+### Feature: Language-agnostic coding agency
 
-### Coding agency: language-agnostic search + optional focus
+- **`repo_search`:** no exclusive file-extension allowlist — content sniff + bundled/system **ripgrep** (MIT/Unlicense, pin 15.2.0 under `third_party/ripgrep/`). Finds GDScript, Zig, Makefiles, etc. Engine reported as `bundled-rg` | `rg` | `python`.
+- **Focus folder optional:** absolute multi-tree paths work anywhere in access scope; relative paths still resolve from default cwd.
+- **Orientation + stack fingerprint:** `AGENTS.md` / handoff pointers and verify hints (Godot smoke scripts, pytest, cargo, …) for focus and session work roots.
+- **Tools:** `bash_exec` `timeout_seconds` / `workdir` + local PATH; multi-hunk `file_edit` + `file_edit_batch`; `job_run` explore/verify/diff; `symbol=` and context lines on search.
+- **Resilience:** empty-search / NOT_FOUND recovery nudges; same-path write locks; mission verify gate + git after verify; Windows reserved-name guards; non-blocking `schedule_ensure_rg`.
+- **Docs:** agency manual + THIRD_PARTY for ripgrep.
 
-- **`repo_search`:** no exclusive file-extension allowlist. Pure-Python path uses content sniffing (text vs binary) so GDScript, Zig, Makefiles, etc. are found without system tools.
-- **ripgrep:** locator prefers Remedy-owned `rg` (`~/.remedy/bin` / package `bin`) then PATH; `ensure_rg()` can download a pinned official release (MIT/Unlicense) with SHA-256 verify. Engine reported as `bundled-rg` | `rg` | `python`.
-- **Multi-tree paths:** absolute `path` to `repo_search` / explore works without confining the agent to a project root. Focus folder remains optional default cwd only.
-- **Recovery:** empty search results include a re-scope hint; system tool policy covers absolute paths, empty-search recovery, and optional focus.
-- **third_party/ripgrep:** license texts, VERSION pin (15.2.0), SHA256SUMS.
-- **Docs:** agency manual — optional focus, language-agnostic search.
+### UI: Process trail (Min / Med / Full)
 
-### Coding agency phases 3–5: orient, shell, missions, polish
-
-- **Orientation + fingerprint:** when a focus path has `AGENTS.md` / handoff / stack markers (`project.godot`, `package.json`, …), inject short pointers and verify hints (never required to pick a project).
-- **`job_run`:** richer explore (listing + subdir sample + fingerprint + orientation + search); verify uses optional `path=` workdir, longer default timeout, local PATH; `kind=diff` for git status/stat.
-- **`bash_exec`:** `timeout_seconds` (5–600) and `workdir=`; prepends `.venv` / `node_modules/.bin` / repo root to PATH.
-- **`file_edit`:** multi-hunk via `edits=` JSON array of `{old_string,new_string}`.
-- **Missions:** auto-fill `verify_command` from stack fingerprint when omitted; done-gate nudge when steps done but verify not passed.
-- **Metrics:** `remedy_repo_search_total` / `remedy_repo_search_empty_total` by engine.
-- **Windows:** reserved device names (`nul`, `con`, …) rejected on file/list tools with clear errors.
-
-### Coding agency hardening (review follow-through)
-
-- **Recovery:** empty `repo_search` and NOT_FOUND count as tool errors → ReAct recovery nudge (including empty-search-specific text).
-- **Work-root memory:** trees touched via tools get orientation/fingerprint (not only focus folder).
-- **Write serialization:** parallel `file_edit`/`file_write` to the same path use per-path locks (no silent clobber).
-- **rg install:** non-blocking background `schedule_ensure_rg` (no multi-MB download on the search hot path).
-- **Search:** optional `context_before`/`context_after`, `symbol=` definition search, simple `.gitignore` basename skip in Python fallback, huge-root (home) warning.
-- **Verify:** Godot prefers `tools/smoke_*.gd` / `diag_*.gd` headless `-s` when present.
-- **Mission gate:** inject verify-required message when steps done but verify not passed; git status/diff after successful verify.
-- **`file_edit_batch`:** multi-file search/replace in one tool call.
-- **Read-before-edit soft note** + bash stderr **path:line** extraction for fix loops.
-- **Intent packs** updated for timeouts, multi-hunk, absolute paths, mission verify discipline.
+- **No double trail:** live progress bar without a second chip cloud when Process is shown.
+- **Min:** header counts + compact grouped chips + “+N earlier”.
+- **Med:** grouped runs, path one-liner, expand for short result.
+- **Full:** every step with complete args/results; taller live viewport.
 
 ## [0.16.0] - 2026-07-27
 

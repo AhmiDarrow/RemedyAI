@@ -2,11 +2,18 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current series: **v0.16.0**.
+Current series: **v0.17.0**.
 
 ## Contents
 
-- [0.16.0](#0160---messengers--polish) · [0.15.9](#0159---skills-library-visibility--first-session-fix) · [0.15.8](#0158---skills-library) · [0.15.7](#0157---memory-harness-v2) · older below
+- [0.17.0](#0170---coding-agency--process-trail) · [0.16.0](#0160---messengers--polish) · [0.15.9](#0159---skills-library-visibility--first-session-fix) · older below
+
+## 0.17.0 - Coding agency + Process trail
+
+- **Code search** works for any text language (not just Python/JS) — optional bundled ripgrep; no need to install tools for basic discovery.
+- Work on **any folder path** without forcing a project jail; focus folder is optional convenience.
+- Stronger **Build** tools: longer shell timeouts, multi-file edits, explore/verify jobs, mission verify before “done”.
+- **Process** Min / Med / Full is readable on long tool runs (no double chip clouds; grouped steps on Min/Med; full dumps on Full).
 
 ## 0.16.0 - Messengers + polish
 
