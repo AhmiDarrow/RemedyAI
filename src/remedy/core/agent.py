@@ -22,6 +22,15 @@ from remedy.core.react_policy import (
     MAX_REACT_STEPS as _MAX_REACT_STEPS,
 )
 from remedy.core.react_policy import (
+    REACT_AUTO_CONTINUE as _REACT_AUTO_CONTINUE,
+)
+from remedy.core.react_policy import (
+    REACT_EPOCH_STEPS as _REACT_EPOCH_STEPS,
+)
+from remedy.core.react_policy import (
+    REACT_MAX_STALE_EPOCHS as _REACT_MAX_STALE_EPOCHS,
+)
+from remedy.core.react_policy import (
     _build_system_prompt,
     _looks_like_pseudo_tools,
     _message_wants_tools,
@@ -56,6 +65,7 @@ __all__ = [
     "BasicRuntime",
     "_MAX_PARALLEL_TOOLS",
     "_MAX_REACT_STEPS",
+    "_REACT_EPOCH_STEPS",
     "_looks_like_pseudo_tools",
     "_message_wants_tools",
     "_parse_pseudo_tool_calls",
@@ -84,7 +94,11 @@ class BasicRuntime(AgentRuntime):
         self._llm_base_url: str = config.llm_base_url or "https://api.openai.com/v1"
         self._llm_provider: str = getattr(config, "llm_provider", "openai") or "openai"
         self._provider: ProviderAdapter = get_provider(self._llm_provider)
+        # Absolute safety total (multi-epoch). Soft epoch size is separate.
         self._max_react_steps = _MAX_REACT_STEPS
+        self._epoch_react_steps = _REACT_EPOCH_STEPS
+        self._react_auto_continue = _REACT_AUTO_CONTINUE
+        self._react_max_stale_epochs = _REACT_MAX_STALE_EPOCHS
         # Default workspace from config; per-session override applied in stream_response.
         # Empty / "." project → home as root + full access (see workspace.effective_access_scope).
         raw_proj = getattr(config, "project_path", None)

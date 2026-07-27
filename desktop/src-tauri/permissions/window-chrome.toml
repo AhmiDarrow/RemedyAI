@@ -4,6 +4,7 @@ description = "Custom title bar: minimize, maximize, close/hide-to-tray, show."
 commands.allow = [
   "show_main_window",
   "minimize_main_window",
+  "start_dragging_main_window",
   "toggle_maximize_main_window",
   "request_close_main_window",
   "switch_to_web_ui",

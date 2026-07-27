@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-
 # Deterministic worker kinds (prefer these — cheap and parallelizable).
 SPREAD_KINDS = frozenset(
     {"explore", "search", "verify", "diff", "read_map", "review"}

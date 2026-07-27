@@ -1206,6 +1206,16 @@ fn minimize_main_window(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Explicit title-bar drag (preferred over CSS `data-tauri-drag-region` on Windows).
+/// CSS drag regions leave sticky hit-tests after move/maximize so min/max/close die.
+#[tauri::command]
+fn start_dragging_main_window(app: AppHandle) -> Result<(), String> {
+    let w = primary_window(&app).ok_or_else(|| "no main window".to_string())?;
+    w.start_dragging()
+        .map_err(|e| format!("start_dragging failed: {e}"))?;
+    Ok(())
+}
+
 /// Hide desktop window to tray and open the browser WebUI (same chat app via local API).
 #[tauri::command]
 fn switch_to_web_ui(app: AppHandle) -> Result<String, String> {
@@ -2715,6 +2725,7 @@ pub fn run() {
             show_main_window,
             is_main_window_maximized,
             minimize_main_window,
+            start_dragging_main_window,
             toggle_maximize_main_window,
             request_close_main_window,
             switch_to_web_ui,

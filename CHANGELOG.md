@@ -4,6 +4,21 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.18.1] - 2026-07-27
+
+### Fix: run-until-finished agency (no tool-limit stop) + title bar after move
+
+- **ReAct multi-epoch:** soft epochs only checkpoint + compact context; tools stay on
+  for coding / mission / open work. Absolute step ceiling is a pathological-loop
+  safety net (~10k), not a “finish soon” budget — same class as a long Build session.
+- **No bare tool-limit dead-end:** fingerprint loops nudge different actions instead of
+  permanently stripping tools; idle pause only after many epochs with zero tool activity.
+- **Prompts / work-alone:** explicit “run until finished”; epochs are not a stop signal.
+- **Desktop title bar:** min / max / close no longer die after move/maximize — drag uses
+  explicit `startDragging` (no sticky CSS `data-tauri-drag-region`); controls isolated
+  with `no-drag` + z-index; geometry events resync chrome hit-testing.
+- **Docs:** agency manual “Run until finished”; desktop title-bar developer note; help wiki sync.
+
 ## [0.18.0] - 2026-07-27
 
 ### Agency: silent spread (fan-out) + hardening

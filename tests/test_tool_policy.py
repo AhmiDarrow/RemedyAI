@@ -5,17 +5,74 @@ from __future__ import annotations
 from remedy.core.agent import (
     _MAX_PARALLEL_TOOLS,
     _MAX_REACT_STEPS,
+    _REACT_EPOCH_STEPS,
     _looks_like_pseudo_tools,
     _message_wants_tools,
     _parse_pseudo_tool_calls,
     _tool_call_fingerprint,
 )
+from remedy.core.react_policy import (
+    REACT_AUTO_CONTINUE,
+    epoch_continue_message,
+    is_productive_tool_batch,
+    turn_has_unfinished_work,
+)
 
 
 def test_max_tool_steps_has_headroom():
-    # Real coding turns need headroom; simple turns never spend it.
-    assert _MAX_REACT_STEPS >= 128
+    # Absolute safety total must be far above a soft epoch (long autonomous runs).
+    assert _MAX_REACT_STEPS >= 1000
+    assert _REACT_EPOCH_STEPS >= 64
+    assert _MAX_REACT_STEPS > _REACT_EPOCH_STEPS
     assert _MAX_PARALLEL_TOOLS >= 8
+    assert REACT_AUTO_CONTINUE is True
+
+
+def test_epoch_continue_message_keeps_going():
+    msg = epoch_continue_message(epoch=2, total_step=512)
+    assert msg["role"] == "user"
+    low = msg["content"].lower()
+    assert "epoch" in low and "step" in low
+    assert "run until" in low or "finished" in low
+    assert "not a stop" in low or "continue" in low
+
+
+def test_productive_tool_batch_detects_ok_results():
+    assert is_productive_tool_batch(
+        [{"role": "tool", "content": "file contents here"}]
+    )
+    assert not is_productive_tool_batch(
+        [{"role": "tool", "content": "Error [CODE:tool] missing"}]
+    )
+    assert not is_productive_tool_batch([])
+
+
+def test_unfinished_work_false_without_tools():
+    class _R:
+        config = None
+        _session_id = ""
+
+    assert (
+        turn_has_unfinished_work(
+            _R(), tools_enabled=False, tool_steps_this_turn=5
+        )
+        is False
+    )
+    assert (
+        turn_has_unfinished_work(
+            _R(),
+            tools_enabled=True,
+            tool_steps_this_turn=3,
+            open_tasks=["finish tests"],
+        )
+        is True
+    )
+    assert (
+        turn_has_unfinished_work(
+            _R(), tools_enabled=True, tool_steps_this_turn=2
+        )
+        is True
+    )
 
 
 def test_simple_questions_skip_tools():

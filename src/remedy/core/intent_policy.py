@@ -82,9 +82,11 @@ _PACKS: dict[str, dict[str, Any]] = {
             "(do not claim complete if verify failed).\n"
             "5) On failure: read errors (path:line), file_edit fixes, re-verify "
             "(raise timeout_seconds for long builds).\n"
+            "6) Run until finished — same class of agency as a long Build session. "
+            "Soft epochs only compact context; never stop for a step/tool budget.\n"
             "Do not stop at a question when you can pick a reasonable default. "
             "Escalate only for secrets, paid APIs, or irreversible destroy. "
-            "Summarize when finished."
+            "Summarize only when the work is actually done."
         ),
         "prefer_tools": True,
         "suggest_tools": [

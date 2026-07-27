@@ -16,7 +16,6 @@ from remedy.core.turn_context import (
     end_turn,
     is_session_streaming,
     is_turn_aborted,
-    kill_session_processes,
     register_turn_process,
     turn_session_id,
     unregister_turn_process,

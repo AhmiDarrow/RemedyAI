@@ -53,6 +53,10 @@ force-promote.
 - **Tool process**: Min / Med / Full (status bar + Settings; answer always full)
 - Prompt history: ↑ / ↓ in the composer
 - Title-bar wordmark menu: Settings, About, Updates; session avatars use circuit-R
+- **Custom title bar (undecorated):** min / max / close live in React (`TitleBar.tsx`).
+  Window drag uses explicit `startDragging()` on the middle strip only — **do not**
+  reintroduce whole-bar `data-tauri-drag-region` (Windows WebView2 sticky hit-tests
+  break chrome buttons after move/maximize). Logo + controls are always `no-drag`.
 - Settings: your name, agent name, persona, project browse, scope, harness, themes, density, accent
 - Sessions: auto-title from first prompt; rename; search / pin / tags
 - Approvals banner for high-impact shell commands

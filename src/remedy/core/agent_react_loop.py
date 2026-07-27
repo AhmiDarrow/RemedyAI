@@ -28,10 +28,13 @@ from remedy.core.react_policy import (
     batch_has_approval_required,
     batch_has_empty_search,
     batch_has_tool_errors,
+    epoch_continue_message,
+    is_productive_tool_batch,
     looks_like_false_progress,
     mission_verify_gate_message,
     recovery_nudge_message,
     strip_tool_markup,
+    turn_has_unfinished_work,
 )
 from remedy.core.react_stream import (
     StreamRoundState,
@@ -56,11 +59,12 @@ async def call_llm_stream(runtime, message: str,
         *,
         plan_mode: bool = False,
     ) -> AsyncIterator[str]:
-    """Call the LLM with a smooth ReAct loop.
+    """Call the LLM with a smooth multi-epoch ReAct loop.
 
     Yields status tokens prefixed with '@@' for tool-call lifecycle events.
-    Never leaves the user with a bare "tool limit" dead-end — final step
-    always forces a plain-text answer (or a short synthesis).
+    Soft epoch walls compact context and checkpoint — they do **not** strip
+    tools while work is unfinished. Only the absolute safety ceiling (or a
+    no-progress stale-epoch stop) forces a final answer.
 
     When *plan_mode* is True, only planning tools run (no shell/file writes).
     """
@@ -257,10 +261,33 @@ async def call_llm_stream(runtime, message: str,
         max_empty_answer_retries = 8
         # One OAuth/API re-auth attempt per turn (xAI 401 → refresh token).
         auth_refresh_done = False
+        # Multi-epoch: soft walls compact; absolute total is safety only.
+        max_total = max(1, int(getattr(runtime, "_max_react_steps", 10_000) or 10_000))
+        epoch_size = max(
+            16, int(getattr(runtime, "_epoch_react_steps", 256) or 256)
+        )
+        auto_continue = bool(getattr(runtime, "_react_auto_continue", True))
+        max_stale_epochs = max(
+            1, int(getattr(runtime, "_react_max_stale_epochs", 2) or 2)
+        )
+        epoch_index = 1
+        productive_in_epoch = 0
+        tool_batches_in_epoch = 0
+        stale_epochs = 0
+        tool_batches_this_turn = 0
+        runtime._fingerprint_loop_hits = 0
+        open_tasks_for_wall: list[str] = []
+        with suppress(Exception):
+            brief = getattr(runtime, "_session_brief", None)
+            if brief is not None:
+                open_tasks_for_wall = list(getattr(brief, "open_tasks", None) or [])
+        # Coding / tool-enabled turns: Grok Build style — run until finished.
+        run_until_done = bool(tools) or bool(all_tools)
+
         async with aiohttp.ClientSession(
             timeout=timeout, connector=connector
         ) as http:
-            for step in range(runtime._max_react_steps):
+            for step in range(max_total):
                 # Cooperative abort between ReAct steps (Stop generation).
                 with suppress(Exception):
                     from remedy.core.turn_context import is_turn_aborted
@@ -268,9 +295,129 @@ async def call_llm_stream(runtime, message: str,
                     if is_turn_aborted():
                         yield "@@aborted\n"
                         return
-                is_final_step = step >= runtime._max_react_steps - 1
-                # Only force a final answer at the true step wall (or sticky).
-                # Early force-answer (old: step>=8) made long tool chains "stuck".
+
+                # Soft epoch roll every epoch_size model rounds: compact + checkpoint.
+                # Tools stay on — run until finished (not a tool-budget stop).
+                if (
+                    step > 0
+                    and step % epoch_size == 0
+                    and auto_continue
+                    and not force_answer_sticky
+                ):
+                    unfinished = turn_has_unfinished_work(
+                        runtime,
+                        session_id=session_id,
+                        tools_enabled=bool(tools or all_tools),
+                        tool_steps_this_turn=tool_batches_this_turn,
+                        open_tasks=open_tasks_for_wall or None,
+                    )
+                    coding_in_flight = run_until_done and (
+                        unfinished
+                        or tool_batches_this_turn > 0
+                        or bool(tools or all_tools)
+                    )
+                    if coding_in_flight:
+                        # Stale only when an epoch had *zero* tool calls (dead air).
+                        # Failed tools still count as activity — keep recovering.
+                        if tool_batches_in_epoch <= 0 and productive_in_epoch <= 0:
+                            stale_epochs += 1
+                        else:
+                            stale_epochs = 0
+                        if stale_epochs >= max_stale_epochs:
+                            logger.warning(
+                                "Stale epochs=%d at step=%d — safety pause "
+                                "(no tool activity for many epochs)",
+                                stale_epochs,
+                                step,
+                            )
+                            yield (
+                                "@@status:Paused after long idle (no tool activity) "
+                                "— say continue to resume from the checkpoint\n"
+                            )
+                            with suppress(Exception):
+                                md = runtime._maybe_auto_checkpoint(
+                                    reason="step_wall",
+                                    title="Idle safety pause",
+                                    force=True,
+                                )
+                                if md:
+                                    yield "@@checkpoint"
+                            force_answer_sticky = True
+                            tools = []
+                        else:
+                            epoch_index += 1
+                            logger.info(
+                                "ReAct soft epoch roll → epoch %d at step %d "
+                                "(productive=%d tools=%d stale=%d)",
+                                epoch_index,
+                                step,
+                                productive_in_epoch,
+                                tool_batches_in_epoch,
+                                stale_epochs,
+                            )
+                            yield (
+                                f"@@status:Continuing until task finished "
+                                f"(epoch {epoch_index}, step {step})…\n"
+                            )
+                            with suppress(Exception):
+                                md = runtime._maybe_auto_checkpoint(
+                                    reason="step_wall",
+                                    title=f"Epoch {epoch_index - 1} complete",
+                                    force=True,
+                                )
+                                if md:
+                                    yield "@@checkpoint"
+                            with suppress(Exception):
+                                from remedy.memory.harness.send_policy import (
+                                    slim_messages_mid_turn,
+                                )
+
+                                messages[:] = slim_messages_mid_turn(
+                                    runtime,
+                                    messages,
+                                    session_id=str(
+                                        getattr(runtime, "_session_id", "")
+                                        or session_id
+                                        or ""
+                                    ),
+                                    tool_result_char_cap=int(
+                                        _TOOL_RESULT_CHAR_CAP or 0
+                                    ),
+                                )
+                            messages.append(
+                                epoch_continue_message(
+                                    epoch=epoch_index - 1,
+                                    total_step=step,
+                                )
+                            )
+                            productive_in_epoch = 0
+                            tool_batches_in_epoch = 0
+                            # Keep tools; re-enable if a prior loop cleared them.
+                            if all_tools:
+                                tools = all_tools
+                    elif step >= epoch_size and not run_until_done:
+                        # Pure chat (tools never enabled) — wrap up.
+                        force_answer_sticky = True
+                    elif step >= epoch_size and run_until_done and all_tools:
+                        # Tools enabled but model has not used them yet — nudge, keep going.
+                        epoch_index += 1
+                        tools = all_tools
+                        messages.append(
+                            {
+                                "role": "user",
+                                "content": (
+                                    "Keep going until the user request is finished. "
+                                    "Use tools now (do not stop for a step count). "
+                                    "Call list_dir / file_read / file_edit / bash_exec / "
+                                    "mission_* / spread_run as needed and complete the work."
+                                ),
+                            }
+                        )
+                        productive_in_epoch = 0
+                        tool_batches_in_epoch = 0
+
+                is_final_step = step >= max_total - 1
+                # Absolute safety wall only — soft epochs never force-answer alone.
                 force_answer = (
                     is_final_step or not tools or force_answer_sticky
                 )
@@ -895,7 +1042,9 @@ async def call_llm_stream(runtime, message: str,
                     filter_fresh_tool_calls(tool_calls_list, seen_fps)
                 )
                 if not fresh_calls:
-                    # Model is looping the same tools — force a final answer next.
+                    # Model is looping the same tools — feed cached results, nudge
+                    # different actions. Only force-answer after repeated loops with
+                    # no unfinished mission/open work.
                     looped = normalize_tool_calls(tool_calls_list)
                     messages.append(
                         build_assistant_api_message(
@@ -914,8 +1063,31 @@ async def call_llm_stream(runtime, message: str,
                                 "content": cached,
                             }
                         )
+                    loop_hits = int(getattr(runtime, "_fingerprint_loop_hits", 0) or 0) + 1
+                    runtime._fingerprint_loop_hits = loop_hits
+                    unfinished_loop = turn_has_unfinished_work(
+                        runtime,
+                        session_id=session_id,
+                        tools_enabled=bool(all_tools),
+                        tool_steps_this_turn=tool_batches_this_turn,
+                        open_tasks=open_tasks_for_wall or None,
+                    )
+                    if unfinished_loop and loop_hits < 3 and all_tools:
+                        messages.append(
+                            {
+                                "role": "user",
+                                "content": (
+                                    "Those exact tool calls already ran (results above). "
+                                    "Do not repeat them. Use different paths/args, "
+                                    "mission_update / mission_verify, file_edit, or "
+                                    "spread_run/job_run — and finish the remaining work."
+                                ),
+                            }
+                        )
+                        tools = all_tools
+                        continue
                     # Jump toward final answer on next iteration.
-                    tools = []  # disable further tool schemas
+                    tools = []
                     continue
 
                 messages.append(
@@ -944,6 +1116,10 @@ async def call_llm_stream(runtime, message: str,
                     step + 1,
                     len(fresh_calls),
                 )
+                tool_batches_this_turn += 1
+                tool_batches_in_epoch += 1
+                if is_productive_tool_batch(batch_tool_msgs):
+                    productive_in_epoch += 1
 
                 # Soft recovery: if tools failed or search empty, nudge once.
                 if (
@@ -998,13 +1174,13 @@ async def call_llm_stream(runtime, message: str,
                     with suppress(Exception):
                         md = runtime._maybe_auto_checkpoint(
                             reason="step_wall",
-                            title="Approaching step limit",
+                            title="Absolute safety step ceiling",
                             force=True,
                         )
                         if md:
                             yield "@@checkpoint"
 
-        # Exhausted steps without a streamed answer — full synthesis, not a stub.
+        # Exhausted absolute safety steps without a streamed answer.
         if not produced_user_text:
             messages.append(
                 {

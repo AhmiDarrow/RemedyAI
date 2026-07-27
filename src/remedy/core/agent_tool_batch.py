@@ -11,7 +11,6 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from contextlib import suppress
-from pathlib import Path
 from typing import Any
 from uuid import uuid4
 

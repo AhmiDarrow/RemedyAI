@@ -9,10 +9,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from remedy.core.spread.planner import plan_spread
-from remedy.core.spread.runner import run_spread, spread_depth
-from remedy.core.spread.types import SpreadTask
 from remedy.core.react_policy import tool_content_is_error
+from remedy.core.spread.planner import plan_spread
+from remedy.core.spread.runner import run_spread
+from remedy.core.spread.types import SpreadTask
 
 
 def test_plan_spread_chat_no():
@@ -129,7 +129,6 @@ async def test_run_spread_blocks_nesting():
     runtime = MagicMock()
     tasks = [SpreadTask(id="t1", kind="explore", path="."), SpreadTask(id="t2", kind="diff")]
 
-    import contextvars
     from remedy.core.spread import runner as runner_mod
 
     token = runner_mod._spread_depth.set(1)
@@ -142,8 +141,8 @@ async def test_run_spread_blocks_nesting():
 
 
 def test_jobs_resolve_fail_closed():
-    from remedy.core.jobs import _resolve_job_path
     from remedy.core.errors import SecurityError
+    from remedy.core.jobs import _resolve_job_path
 
     runtime = MagicMock()
 

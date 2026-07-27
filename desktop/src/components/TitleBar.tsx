@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from 'react'
 import { isTauri, tauriInvoke } from '../api/tauri'
 
 export type AppMenuAction =
@@ -22,7 +28,11 @@ interface TitleBarProps {
 /**
  * Single in-app chrome bar: brand wordmark menu + drag region + window controls.
  * Requires `decorations: false` so OS chrome is not stacked above this bar.
- * Wordmark only — no extra title text beside the logo.
+ *
+ * Windows + WebView2: do NOT use `data-tauri-drag-region` for the whole bar.
+ * CSS drag regions poison hit-testing after move/maximize/restore. Drag is
+ * started only via explicit `startDragging()` on the middle strip mousedown.
+ * Logo + window controls are always `app-region: no-drag` with higher z-index.
  */
 export function TitleBar({
   version,
@@ -33,6 +43,7 @@ export function TitleBar({
   const [maximized, setMaximized] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!menuOpen) return
@@ -52,37 +63,123 @@ export function TitleBar({
     }
   }, [menuOpen])
 
-  // Keep maximize icon in sync after system maximize/restore
+  const refreshMaximized = useCallback(() => {
+    if (!isTauri()) return
+    tauriInvoke<boolean>('is_main_window_maximized')
+      .then((v) => setMaximized(Boolean(v)))
+      .catch(() => {})
+  }, [])
+
+  /** Force WebView hit-test refresh after geometry changes (Windows drag-region bug). */
+  const reflowChrome = useCallback(() => {
+    const el = rootRef.current
+    if (!el) return
+    // Toggle a harmless property so layout/hit-test rebuilds without flicker.
+    const prev = el.style.transform
+    el.style.transform = 'translateZ(0)'
+    void el.offsetHeight
+    el.style.transform = prev
+  }, [])
+
+  const syncChrome = useCallback(() => {
+    refreshMaximized()
+    // Double rAF: wait until native resize/move settles.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        reflowChrome()
+        refreshMaximized()
+      })
+    })
+  }, [refreshMaximized, reflowChrome])
+
+  // Event-driven maximize state + hit-test resync (not a sticky CSS drag region).
   useEffect(() => {
     if (!isTauri()) return
     let cancelled = false
-    const poll = () => {
-      tauriInvoke<boolean>('is_main_window_maximized')
-        .then((v) => {
-          if (!cancelled) setMaximized(Boolean(v))
-        })
-        .catch(() => {})
-    }
-    poll()
-    const id = window.setInterval(poll, 800)
+    const unsubs: Array<() => void> = []
+
+    syncChrome()
+
+    ;(async () => {
+      try {
+        const { getCurrentWindow } = await import('@tauri-apps/api/window')
+        if (cancelled) return
+        const win = getCurrentWindow()
+        const onGeo = () => {
+          if (!cancelled) syncChrome()
+        }
+        unsubs.push(await win.onResized(onGeo))
+        unsubs.push(await win.onMoved(onGeo))
+        unsubs.push(await win.onScaleChanged(onGeo))
+        unsubs.push(
+          await win.onFocusChanged(() => {
+            if (!cancelled) syncChrome()
+          }),
+        )
+      } catch {
+        // Fall back to light polling if window events unavailable.
+        const id = window.setInterval(() => {
+          if (!cancelled) refreshMaximized()
+        }, 2000)
+        unsubs.push(() => window.clearInterval(id))
+      }
+    })()
+
+    // Rare fallback poll (icon can desync if events missed).
+    const pollId = window.setInterval(() => {
+      if (!cancelled) refreshMaximized()
+    }, 4000)
+
     return () => {
       cancelled = true
-      window.clearInterval(id)
+      window.clearInterval(pollId)
+      for (const u of unsubs) {
+        try {
+          u()
+        } catch {
+          /* ignore */
+        }
+      }
     }
-  }, [])
+  }, [syncChrome, refreshMaximized])
 
   const run = (action: AppMenuAction) => {
     setMenuOpen(false)
     onMenuAction?.(action)
   }
 
+  /** Explicit window drag — avoids CSS app-region sticky hit-test after move. */
+  const onDragMouseDown = (e: ReactMouseEvent) => {
+    if (!isTauri()) return
+    if (e.button !== 0) return
+    if ((e.target as HTMLElement).closest('button')) return
+    e.preventDefault()
+    void (async () => {
+      try {
+        const { getCurrentWindow } = await import('@tauri-apps/api/window')
+        await getCurrentWindow().startDragging()
+      } catch {
+        // Fallback: custom command path if API import fails mid-session.
+        try {
+          await tauriInvoke('start_dragging_main_window')
+        } catch {
+          /* ignore */
+        }
+      }
+      // After drag ends, OS may fire move; sync anyway.
+      syncChrome()
+    })()
+  }
+
   const onDragDoubleClick = (e: ReactMouseEvent) => {
-    // Only toggle when the empty drag area (not buttons) is double-clicked
     if ((e.target as HTMLElement).closest('button')) return
     if (!isTauri()) return
     e.preventDefault()
     void tauriInvoke<boolean>('toggle_maximize_main_window')
-      .then((v) => setMaximized(Boolean(v)))
+      .then((v) => {
+        setMaximized(Boolean(v))
+        syncChrome()
+      })
       .catch(() => {})
   }
 
@@ -102,8 +199,13 @@ export function TitleBar({
         fontSize: 12,
         lineHeight: 1,
       }}
+      onMouseDown={(e) => {
+        // Never let the drag strip steal the click.
+        e.stopPropagation()
+      }}
       onClick={(e) => {
         e.stopPropagation()
+        e.preventDefault()
         onClick()
       }}
       onMouseEnter={(e) => {
@@ -145,6 +247,7 @@ export function TitleBar({
 
   return (
     <div
+      ref={rootRef}
       className="titlebar flex items-center flex-shrink-0 select-none"
       style={{
         height: 36,
@@ -155,8 +258,8 @@ export function TitleBar({
         paddingRight: 0,
       }}
     >
-      {/* Logo / app menu — not a drag region so clicks work */}
-      <div className="relative flex-shrink-0 flex items-stretch h-full" data-tauri-drag-region={undefined}>
+      {/* Logo / app menu — never a drag region */}
+      <div className="titlebar-logo relative flex-shrink-0 flex items-stretch h-full">
         <button
           ref={btnRef}
           type="button"
@@ -172,6 +275,7 @@ export function TitleBar({
           aria-haspopup="menu"
           aria-expanded={menuOpen}
           aria-label="Open Remedy menu"
+          onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation()
             setMenuOpen((o) => !o)
@@ -235,21 +339,26 @@ export function TitleBar({
         )}
       </div>
 
-      {/* Empty drag + double-click maximize (Windows title-bar convention). Branding lives in the wordmark only. */}
+      {/* Empty drag strip: explicit startDragging only (no data-tauri-drag-region). */}
       <div
-        className="flex-1 min-w-0 h-full"
-        data-tauri-drag-region
+        className="titlebar-drag flex-1 min-w-0 h-full"
+        onMouseDown={onDragMouseDown}
         onDoubleClick={onDragDoubleClick}
       />
 
       {isTauri() && (
-        <div className="flex items-stretch flex-shrink-0 h-full">
+        <div className="titlebar-controls flex items-stretch flex-shrink-0 h-full">
           {winBtn('Minimize', () => {
-            void tauriInvoke('minimize_main_window').catch(() => {})
+            void tauriInvoke('minimize_main_window')
+              .then(() => syncChrome())
+              .catch(() => {})
           })}
           {winBtn('Maximize', () => {
             void tauriInvoke<boolean>('toggle_maximize_main_window')
-              .then((v) => setMaximized(Boolean(v)))
+              .then((v) => {
+                setMaximized(Boolean(v))
+                syncChrome()
+              })
               .catch(() => {})
           })}
           {winBtn(

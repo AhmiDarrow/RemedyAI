@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import re
+from contextlib import suppress
 from typing import Any
 from uuid import uuid4
 
@@ -68,8 +69,12 @@ _DEFAULT_SYSTEM_PROMPT = (
     "Never spread for pure chat. Workers cannot nest.\n"
     "- After tool results, synthesize a clear final answer when the task is done. "
     "Never stall, loop, or stop mid-task because of artificial step pressure.\n"
+    "- **Run until finished** (coding / project / mission work): keep calling tools "
+    "across soft epochs until the user request is done — same as a long Build agent "
+    "session. Soft epochs only compact context; they are not a stop signal.\n"
+    "- Never claim blocked by a tool or step limit. Safety stops only pathological loops.\n"
     "- If information is already in context (provider block, skills list, history), use it.\n"
-    "- Prefer complete work over short partial answers. Keep going until the user request is finished.\n\n"
+    "- Prefer complete work over short partial answers. Do not stop mid-task to summarize.\n\n"
     "Coding path model:\n"
     "- A focus/project folder is optional convenience (default cwd for relative paths). "
     "You are not confined to it — absolute paths work anywhere in access scope.\n"
@@ -113,10 +118,47 @@ EMPTY_SEARCH_NUDGE = (
     "with a clearer path or simpler pattern."
 )
 
-# Near-unlimited agent headroom. Simple turns never spend this budget;
-# long builds / research / multi-file work need room to keep going.
-# Hard ceiling only for pathological loops — not a "finish soon" budget.
-MAX_REACT_STEPS = 256
+# Multi-epoch ReAct: soft epoch size triggers compact/checkpoint only.
+# Absolute total is a pathological-loop safety net — not a task budget.
+# Long autonomous / mission work must never stop solely because an epoch ended.
+def _env_int(name: str, default: int, *, lo: int, hi: int) -> int:
+    raw = str(os.environ.get(name, "") or "").strip()
+    if not raw:
+        return default
+    try:
+        return max(lo, min(hi, int(raw)))
+    except ValueError:
+        return default
+
+
+def _env_bool(name: str, default: bool = True) -> bool:
+    raw = str(os.environ.get(name, "")).strip().lower()
+    if not raw:
+        return default
+    if raw in ("0", "false", "no", "off"):
+        return False
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    return default
+
+
+# Soft epoch: checkpoint + mid-turn slim, then keep tools (do not force-answer).
+# Same operating model as Grok Build: run until the task is finished.
+REACT_EPOCH_STEPS = _env_int("REMEDY_REACT_EPOCH_STEPS", 256, lo=16, hi=2_000)
+# Absolute safety ceiling across all epochs in one turn (pathological loops only).
+REACT_MAX_TOTAL_STEPS = _env_int(
+    "REMEDY_REACT_MAX_TOTAL_STEPS", 10_000, lo=64, hi=100_000
+)
+# When True (default), epoch walls never strip tools while work is unfinished.
+REACT_AUTO_CONTINUE = _env_bool("REMEDY_REACT_AUTO_CONTINUE", True)
+# Only stop after many consecutive epochs with *zero* tool activity (not
+# failed tools — recovery still counts as activity). High so long coding
+# runs are not paused mid-task.
+REACT_MAX_STALE_EPOCHS = _env_int("REMEDY_REACT_MAX_STALE_EPOCHS", 8, lo=1, hi=50)
+
+# Back-compat alias: historical name meant "max steps this turn".
+# Now points at absolute safety total so long runs are not capped at 256.
+MAX_REACT_STEPS = REACT_MAX_TOTAL_STEPS
 MAX_PARALLEL_TOOLS = 16
 # Prefer recent turns, but allow very long multi-turn sessions.
 HISTORY_MSG_LIMIT = 400
@@ -853,3 +895,75 @@ def mission_verify_gate_message(verify_command: str) -> dict[str, str]:
             "and only then write the final summary. Do not claim complete without a pass."
         ),
     }
+
+
+def epoch_continue_message(*, epoch: int, total_step: int) -> dict[str, str]:
+    """Injected between soft epochs — keep tools; do not restate entire history."""
+    return {
+        "role": "user",
+        "content": (
+            f"[Epoch {epoch} complete at step {total_step}] Context was compacted — "
+            "this is not a stop. Run until the task is finished: continue from the "
+            "checkpoint / tool results above. Do not restart, renumber, or summarize-only. "
+            "Keep using tools until the work is done (or mission_verify passes)."
+        ),
+    }
+
+
+def turn_has_unfinished_work(
+    runtime: Any,
+    *,
+    session_id: str | None = None,
+    tools_enabled: bool,
+    tool_steps_this_turn: int = 0,
+    open_tasks: list[str] | None = None,
+) -> bool:
+    """True when a soft epoch wall must NOT force a final answer.
+
+    Unfinished = active mission, open brief tasks, or mid-turn tool work still
+    in progress. Simple chat (no tools) returns False so epochs never thrash.
+    """
+    if not tools_enabled:
+        return False
+    if open_tasks:
+        for t in open_tasks:
+            if (t or "").strip():
+                return True
+    # Active mission with pending work / unverified done
+    with suppress(Exception):
+        from remedy.core.mission import MissionStore
+
+        home = getattr(getattr(runtime, "config", None), "home_dir", None)
+        mid = str(
+            session_id
+            or getattr(runtime, "_session_id", None)
+            or ""
+        ) or None
+        m = MissionStore(home).latest(mid)
+        if m is not None and m.status == "active":
+            if not m.steps:
+                return True
+            if any(s.status in ("pending", "active", "failed") for s in m.steps):
+                return True
+            if m.verify_command and m.verify_status != "passed":
+                return True
+    # Mid-turn tool work without a deliberate completion
+    return tool_steps_this_turn > 0
+
+
+def is_productive_tool_batch(tool_messages: list[dict[str, Any]]) -> bool:
+    """True when a tool batch looks like real progress (not pure error/dup)."""
+    if not tool_messages:
+        return False
+    any_ok = False
+    for msg in tool_messages:
+        if not isinstance(msg, dict) or msg.get("role") != "tool":
+            continue
+        content = msg.get("content")
+        if not isinstance(content, str) or not content.strip():
+            continue
+        if tool_content_is_error(content):
+            continue
+        any_ok = True
+        break
+    return any_ok

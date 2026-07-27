@@ -73,6 +73,30 @@ use_local_plan = true
 **When spread is faster:** independent branches and noisy surveys.  
 **When it is not:** serial edit→test chains; always-on fan-out on every message (disabled by design).
 
+## Run until finished (long coding)
+
+Long coding / project turns use the **same operating model as a Build agent**: keep
+using tools until the request is actually done — not until an arbitrary step count.
+
+| Mechanism | Behavior |
+|-----------|----------|
+| **Soft epochs** | Every N model rounds: checkpoint + context compact, then **continue with tools** |
+| **Absolute ceiling** | Very high safety net for pathological loops only (not a task budget) |
+| **User abort** | Stop generation still ends the turn immediately |
+
+Remedy does **not** force a final “tool limit” answer mid-mission. If the model
+loops the same tools, it is nudged to change approach; idle pauses only after
+many epochs with **zero** tool activity.
+
+Optional env overrides (advanced):
+
+```text
+REMEDY_REACT_EPOCH_STEPS=256
+REMEDY_REACT_MAX_TOTAL_STEPS=10000
+REMEDY_REACT_AUTO_CONTINUE=1
+REMEDY_REACT_MAX_STALE_EPOCHS=8
+```
+
 ## Missions (work alone)
 
 When you say **work alone** / **handle this on your own**, continuity steers Remedy to:
@@ -82,6 +106,7 @@ When you say **work alone** / **handle this on your own**, continuity steers Rem
 3. `mission_update` as steps complete  
 4. `mission_verify` before claiming done (nudged when steps are done but verify has not passed)  
 5. Fix and re-verify on failure  
+6. Soft epochs compact context — the agent keeps going until verify passes / work is done  
 
 Orientation: if the focus folder has `AGENTS.md`, `memory/LATEST_HANDOFF.md`, etc., Remedy surfaces short pointers automatically.
 
