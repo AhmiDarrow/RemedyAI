@@ -348,17 +348,20 @@ def _process_install_paths() -> list[Path]:
                 "Where-Object { $_.CommandLine -match 'ComfyUI|main\\.py' } | "
                 "Select-Object -ExpandProperty CommandLine"
             )
-            proc = subprocess.run(
+            from remedy.execution.process import run_hidden
+
+            proc = run_hidden(
                 [
                     "powershell",
                     "-NoProfile",
+                    "-WindowStyle",
+                    "Hidden",
                     "-Command",
                     ps,
                 ],
                 capture_output=True,
                 text=True,
                 timeout=5,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
             lines = (proc.stdout or "").splitlines()
         else:

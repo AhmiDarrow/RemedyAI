@@ -23,12 +23,33 @@ def hidden_creationflags() -> int:
     return 0
 
 
+def hidden_startupinfo() -> Any | None:
+    """STARTUPINFO with SW_HIDE — belt-and-suspenders with CREATE_NO_WINDOW."""
+    if sys.platform != "win32":
+        return None
+    try:
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = subprocess.SW_HIDE
+        return si
+    except Exception:
+        return None
+
+
 def hidden_subprocess_kwargs() -> dict[str, Any]:
-    """Kwargs mergeable into subprocess.run / Popen / create_subprocess_exec."""
-    flags = hidden_creationflags()
-    if flags:
-        return {"creationflags": flags}
-    return {}
+    """Kwargs mergeable into subprocess.run / Popen / create_subprocess_exec.
+
+    On Windows: CREATE_NO_WINDOW + SW_HIDE so tool/spread children do not flash
+    a cmd/console window. Does not prevent a *third-party* tool that itself
+    forces a new console (rare); Remedy-spawned shells and rg should stay quiet.
+    """
+    if sys.platform != "win32":
+        return {}
+    out: dict[str, Any] = {"creationflags": CREATE_NO_WINDOW}
+    si = hidden_startupinfo()
+    if si is not None:
+        out["startupinfo"] = si
+    return out
 
 
 def run_hidden(

@@ -247,6 +247,9 @@ def _search_rg(
         cmd.extend(["--glob", f"!{d}/**"])
     cmd.extend(["--", pattern, str(start)])
     try:
+        # Never flash a console on Windows (spread_run / search workers hit this often).
+        from remedy.execution.process import hidden_subprocess_kwargs
+
         proc = subprocess.run(
             cmd,
             capture_output=True,
@@ -256,6 +259,7 @@ def _search_rg(
             timeout=30,
             cwd=str(root if root.is_dir() else root.parent),
             env={**os.environ, "RIPGREP_CONFIG_PATH": ""},
+            **hidden_subprocess_kwargs(),
         )
     except (OSError, subprocess.TimeoutExpired):
         return [], False

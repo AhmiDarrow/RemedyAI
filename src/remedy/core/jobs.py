@@ -272,8 +272,11 @@ async def run_verify_job(
 
 
 async def run_diff_job(runtime: Any, *, path: str = ".") -> JobResult:
-    """Git status + diff --stat under path (best-effort)."""
-    from remedy.execution.process import win_shell_prefix
+    """Git status + diff --stat under path (best-effort).
+
+    Spawns ``git`` directly (hidden console) — not via ``cmd``/PowerShell — so
+    spread/diff workers do not flash a window on Windows.
+    """
     from remedy.execution.sandbox import SubprocessSandbox
 
     try:
@@ -291,15 +294,29 @@ async def run_diff_job(runtime: Any, *, path: str = ".") -> JobResult:
     sandbox = SubprocessSandbox(
         allowed_paths=roots or [runtime.effective_project_path(), workdir]
     )
-    argv = [*win_shell_prefix(), "git status -sb && git diff --stat && git diff --cached --stat"]
-    result = await sandbox.execute(argv, workdir=workdir, timeout_seconds=60.0)
-    ok = result.exit_code == 0
-    body = ((result.stdout or "") + (result.stderr or ""))[:6000]
+    chunks: list[str] = []
+    last_code = 0
+    for argv in (
+        ["git", "status", "-sb"],
+        ["git", "diff", "--stat"],
+        ["git", "diff", "--cached", "--stat"],
+    ):
+        result = await sandbox.execute(argv, workdir=workdir, timeout_seconds=60.0)
+        last_code = result.exit_code
+        part = ((result.stdout or "") + (result.stderr or "")).strip()
+        if part:
+            chunks.append(part)
+        if result.exit_code != 0 and "not a git repository" in (
+            (result.stderr or "") + (result.stdout or "")
+        ).lower():
+            break
+    ok = last_code == 0 or any(chunks)
+    body = "\n".join(chunks)[:6000]
     return JobResult(
         kind="diff",
         ok=ok,
-        summary=f"git summary cwd={workdir}\nexit={result.exit_code}\n{body}",
-        details={"exit_code": result.exit_code},
+        summary=f"git summary cwd={workdir}\nexit={last_code}\n{body}",
+        details={"exit_code": last_code},
     )
 
 

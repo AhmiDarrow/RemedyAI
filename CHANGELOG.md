@@ -4,6 +4,13 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Fix: no console flash on tool / spread workers (Windows)
+
+- **`repo_search` / ripgrep** (used heavily by `spread_run` explore/search) now spawn with
+  `CREATE_NO_WINDOW` + hidden STARTUPINFO — was the common cmd-window flash.
+- Diff jobs call **`git` directly** (hidden) instead of through a shell one-liner.
+- Hidden-process helper also sets **SW_HIDE** with CREATE_NO_WINDOW for shell/rg children.
+
 ### Fix: update check on launch
 
 - Desktop runs **one automatic update check** shortly after the local server is ready

@@ -20,13 +20,16 @@ from remedy.execution.process import (
 
 def test_hidden_creationflags_windows_only() -> None:
     flags = hidden_creationflags()
+    kw = hidden_subprocess_kwargs()
     if sys.platform == "win32":
         assert flags == CREATE_NO_WINDOW
         assert flags == 0x08000000
-        assert hidden_subprocess_kwargs() == {"creationflags": CREATE_NO_WINDOW}
+        assert kw.get("creationflags") == CREATE_NO_WINDOW
+        # STARTUPINFO SW_HIDE is set when available (extra anti-flash)
+        assert "startupinfo" in kw or kw == {"creationflags": CREATE_NO_WINDOW}
     else:
         assert flags == 0
-        assert hidden_subprocess_kwargs() == {}
+        assert kw == {}
 
 
 def test_win_shell_prefix_has_hidden_style_on_windows() -> None:
