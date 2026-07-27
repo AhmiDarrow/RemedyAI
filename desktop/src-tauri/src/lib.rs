@@ -290,10 +290,18 @@ fn spawn_remedy(cmd: &str) -> Option<Child> {
 
     #[cfg(target_os = "windows")]
     {
+        // CREATE_NO_WINDOW alone can still flash a console for console-subsystem
+        // PyInstaller/uv children; DETACHED + NO_WINDOW keeps sidecar headless.
+        const DETACHED_PROCESS: u32 = 0x00000008;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
+        let flags = CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP;
         let mut c = Command::new(cmd);
         c.args(args)
             .env("REMEDY_DESKTOP_SIDECAR", "1")
-            .creation_flags(CREATE_NO_WINDOW)
+            // Avoid Python allocating a console when bundled as console app.
+            .env("PYTHONUNBUFFERED", "1")
+            .creation_flags(flags)
+            .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         if let Some(ref dir) = webui {
@@ -321,21 +329,63 @@ fn spawn_remedy(cmd: &str) -> Option<Child> {
     }
 }
 
+/// True if this sidecar line is routine traffic noise (not useful in the desktop log).
+fn is_routine_sidecar_log(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    // uvicorn access-style
+    if lower.contains("\"get /api/status")
+        || lower.contains("http/1.1\" 200")
+        || (lower.contains(" - \"get /api/") && lower.contains(" 200 "))
+    {
+        return true;
+    }
+    // Remedy structured access: "GET /api/foo -> 200" / OPTIONS / SLOW GET … 200
+    if (lower.contains(" get /api/") || lower.contains(" options /api/") || lower.contains("slow get /api/"))
+        && (lower.contains("-> 200") || lower.contains(" 200 ("))
+    {
+        return true;
+    }
+    // Common high-frequency desktop polls
+    if lower.contains("/api/partner/status")
+        || lower.contains("/api/checkpoints/latest")
+        || lower.contains("/api/plans/latest")
+        || lower.contains("/api/ping")
+        || lower.contains("/api/events/sessions")
+    {
+        // Keep non-2xx for diagnosis
+        if lower.contains("-> 200")
+            || lower.contains(" 200 (")
+            || lower.contains("http/1.1\" 200")
+        {
+            return true;
+        }
+    }
+    false
+}
+
 fn forward_output(label: &str, reader: impl BufRead + Send + 'static) {
     let label = label.to_string();
     thread::spawn(move || {
         for line in reader.lines() {
             match line {
                 Ok(text) if !text.is_empty() => {
-                    // Drop noisy uvicorn access lines (status polls / routine 200s).
-                    let lower = text.to_ascii_lowercase();
-                    if lower.contains("\"get /api/status")
-                        || lower.contains("http/1.1\" 200")
-                        || (lower.contains(" - \"get /api/") && lower.contains(" 200 "))
-                    {
+                    if is_routine_sidecar_log(&text) {
                         continue;
                     }
-                    log::info!("[remedy {}] {}", label, text);
+                    // Warnings/errors from sidecar → warn; rest quiet info
+                    let lower = text.to_ascii_lowercase();
+                    if lower.contains(" error")
+                        || lower.contains("traceback")
+                        || lower.contains("exception")
+                        || lower.contains(" -> 5")
+                        || lower.contains(" -> 4")
+                    {
+                        log::warn!("[remedy {}] {}", label, text);
+                    } else if lower.contains("warning") || lower.contains("slow ") {
+                        log::warn!("[remedy {}] {}", label, text);
+                    } else {
+                        log::debug!("[remedy {}] {}", label, text);
+                    }
                 }
                 _ => {}
             }
@@ -2889,9 +2939,18 @@ pub fn run() {
             }
 
             if cfg!(debug_assertions) {
+                // Log to file only — default stdout target opens a separate console
+                // window on Windows and floods with [remedy err] API lines.
+                use tauri_plugin_log::{Target, TargetKind};
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
                         .level(log::LevelFilter::Info)
+                        .targets([
+                            Target::new(TargetKind::LogDir {
+                                file_name: Some("remedy-desktop".into()),
+                            }),
+                            Target::new(TargetKind::Webview),
+                        ])
                         .build(),
                 )?;
             }

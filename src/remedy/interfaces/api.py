@@ -288,13 +288,26 @@ def create_app(
         start = time.time()
         response = await call_next(request)
         duration = (time.time() - start) * 1000
-        # Health polls are high-frequency — don't spam the desktop console.
         path = request.url.path
-        quiet = path in ("/api/status", "/api/ping") or path.endswith(
-            ("/api/status", "/api/ping")
+        method = request.method.upper()
+        desktop = str(os.environ.get("REMEDY_DESKTOP_SIDECAR", "")).strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
         )
+        # Desktop: read-heavy polls at DEBUG so no console flood. Mutations/errors stay INFO.
+        quiet = method == "OPTIONS" or path in (
+            "/api/status",
+            "/api/ping",
+            "/api/partner/status",
+            "/api/checkpoints/latest",
+            "/api/plans/latest",
+            "/api/events/sessions",
+        )
+        if desktop and method in ("GET", "HEAD") and response.status_code < 400:
+            quiet = True
         if duration >= 500:
-            # Always surface slow requests — these cause UI "disconnected" flaps.
             logger.warning(
                 "SLOW %s %s -> %d (%.0fms)",
                 request.method,
