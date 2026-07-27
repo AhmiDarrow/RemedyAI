@@ -3,9 +3,9 @@
 /**
  * Tool-process visibility — progressive detail in the **same** Process UI.
  *
- * - **Min (off)**: step names + status only.
- * - **Med**: path/command one-liners + short result body.
- * - **Full**: complete args/results, open by default.
+ * - **Min (off)**: header counts + compact chips (grouped); progress bar without chip duplicate.
+ * - **Med**: consecutive same tools grouped; human label + path one-liner; result on expand.
+ * - **Full**: every step listed with complete args/results (never collapsed away).
  *
  * Chat answer is never truncated. (Legacy `full+` maps to Full.)
  */
@@ -15,17 +15,17 @@ export const TOOL_PROCESS_MODES: { id: ToolProcessMode; label: string; hint: str
   {
     id: 'off',
     label: 'Min',
-    hint: 'Process steps as names only — answer always full',
+    hint: 'Compact chips + counts — no duplicate progress chips',
   },
   {
     id: 'medium',
     label: 'Med',
-    hint: 'Same list with path/command + short result under each step',
+    hint: 'Grouped runs, path/command line, expand for short result',
   },
   {
     id: 'full',
     label: 'Full',
-    hint: 'Same list with complete args/results (auto-scrolls while live)',
+    hint: 'Every step with full args and results (live auto-scroll)',
   },
 ]
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,26 @@ def register_workspace_tools(runtime: Any) -> None:
         parent = Path(p).parent.as_posix()
         return parent if parent not in ("", ".") else "."
 
+    def _reserved_guard(path: str) -> str | None:
+        from remedy.core.win_paths import check_tool_path_safe
+
+        return check_tool_path_safe(path)
+
+    def _note_path(target: Path) -> None:
+        with suppress(Exception):
+            from remedy.core.work_roots import note_work_path
+
+            note_work_path(runtime, target)
+
+    def _track_read(target: Path) -> None:
+        with suppress(Exception):
+            key = str(target.resolve()).lower()
+            reads = getattr(runtime, "_files_read_this_turn", None)
+            if not isinstance(reads, set):
+                reads = set()
+                runtime._files_read_this_turn = reads
+            reads.add(key)
+
     async def file_read(
         path: str = ".",
         offset: int = 0,
@@ -32,7 +53,16 @@ def register_workspace_tools(runtime: Any) -> None:
         **_kwargs: object,
     ) -> str:
         runtime.effective_project_path()
+        bad = _reserved_guard(path)
+        if bad:
+            return format_tool_error(
+                bad,
+                code="RESERVED_NAME",
+                tool_name="file_read",
+                suggestion="Skip reserved device paths (e.g. nul); use list_dir on the parent.",
+            )
         target = runtime.resolve_tool_path(path)
+        _note_path(target)
         if not target.exists():
             parent = _parent_hint(path)
             return format_tool_error(
@@ -53,6 +83,18 @@ def register_workspace_tools(runtime: Any) -> None:
                     f'Use list_dir("{path}") then file_read on a specific file inside it.'
                 ),
             )
+        try:
+            from remedy.core.text_files import is_probably_text
+
+            if not is_probably_text(target):
+                return format_tool_error(
+                    f"binary or non-text file: {path}",
+                    code="BINARY",
+                    tool_name="file_read",
+                    suggestion="Use another tool for binaries; file_read is for text sources.",
+                )
+        except Exception:
+            pass
         try:
             data = target.read_text(encoding="utf-8", errors="replace")
         except OSError as e:
@@ -95,6 +137,7 @@ def register_workspace_tools(runtime: Any) -> None:
                 f"read a smaller path or a specific section if needed]"
             )
         runtime._track_artifact(str(target))
+        _track_read(target)
         return data
 
     async def file_write(path: str, content: str = "") -> str:
@@ -118,7 +161,16 @@ def register_workspace_tools(runtime: Any) -> None:
                 "Do not invent success. Tell the user this needs approval in the UI "
                 f"(or /approve {item.id}). After they approve, retry file_write."
             )
+        bad = _reserved_guard(path)
+        if bad:
+            return format_tool_error(
+                bad,
+                code="RESERVED_NAME",
+                tool_name="file_write",
+                suggestion="Choose a normal filename; never write Windows device names (nul, con, …).",
+            )
         target = runtime.resolve_tool_path(path)
+        _note_path(target)
         # Capture prior content for time-travel undo (best-effort).
         existed = False
         previous: str | None = None
@@ -165,17 +217,35 @@ def register_workspace_tools(runtime: Any) -> None:
         old_string: str = "",
         new_string: str = "",
         replace_all: bool = False,
+        edits: str = "",
     ) -> str:
-        """Precise search/replace edit (prefer over rewriting whole files)."""
+        """Precise search/replace edit (prefer over rewriting whole files).
+
+        Pass either old_string/new_string, or edits= as a JSON list of
+        {old_string, new_string, replace_all?} for multi-hunk edits in one call.
+        """
+        import json as _json
+
         from remedy.core.approvals import APPROVALS
-        from remedy.core.file_edit import apply_search_replace
+        from remedy.core.file_edit import apply_multi_hunk, apply_search_replace
 
         if not (path or "").strip():
             return format_tool_error(
                 "path is required",
                 code="MISSING_PATH",
                 tool_name="file_edit",
-                suggestion='file_edit(path="src/foo.py", old_string="...", new_string="...")',
+                suggestion=(
+                    'file_edit(path="src/foo.py", old_string="...", new_string="...") '
+                    'or edits=\'[{"old_string":"a","new_string":"b"}]\''
+                ),
+            )
+        bad = _reserved_guard(path)
+        if bad:
+            return format_tool_error(
+                bad,
+                code="RESERVED_NAME",
+                tool_name="file_edit",
+                suggestion="Skip reserved device paths.",
             )
         ask_reason = APPROVALS.needs_ask(f"edit {path}", tool_name="file_edit")
         sid = getattr(runtime, "_session_id", None)
@@ -196,6 +266,7 @@ def register_workspace_tools(runtime: Any) -> None:
                 f"(or /approve {item.id}), then retry file_edit."
             )
         target = runtime.resolve_tool_path(path)
+        _note_path(target)
         if not target.is_file():
             return format_tool_error(
                 f"file not found: {path}",
@@ -203,6 +274,28 @@ def register_workspace_tools(runtime: Any) -> None:
                 tool_name="file_edit",
                 suggestion="Use list_dir/repo_search to find the path, then file_read before edit.",
             )
+        edits_raw = (edits or "").strip()
+        has_single = bool((old_string or "").strip())
+        if not edits_raw and not has_single:
+            return format_tool_error(
+                "provide old_string/new_string or edits= JSON array",
+                code="MISSING_EDIT",
+                tool_name="file_edit",
+                suggestion=(
+                    'file_edit(path=..., old_string="…", new_string="…") or '
+                    'edits=\'[{"old_string":"…","new_string":"…"}]\''
+                ),
+            )
+        # Soft read-before-edit guidance
+        read_warn = ""
+        with suppress(Exception):
+            key = str(target.resolve()).lower()
+            reads = getattr(runtime, "_files_read_this_turn", None) or set()
+            if key not in reads:
+                read_warn = (
+                    "\nNote: this file was not file_read this turn — "
+                    "prefer reading before large edits to avoid stale matches."
+                )
         try:
             previous = target.read_text(encoding="utf-8", errors="replace")
         except OSError as e:
@@ -211,12 +304,31 @@ def register_workspace_tools(runtime: Any) -> None:
                 code="IO_ERROR",
                 tool_name="file_edit",
             )
-        result = apply_search_replace(
-            previous,
-            old_string or "",
-            new_string if new_string is not None else "",
-            replace_all=bool(replace_all),
-        )
+
+        if edits_raw:
+            try:
+                parsed = _json.loads(edits_raw)
+            except _json.JSONDecodeError as e:
+                return format_tool_error(
+                    f"edits must be JSON array: {e}",
+                    code="INVALID_EDITS",
+                    tool_name="file_edit",
+                    suggestion='edits=\'[{"old_string":"…","new_string":"…"}]\'',
+                )
+            if not isinstance(parsed, list):
+                return format_tool_error(
+                    "edits must be a JSON array of hunks",
+                    code="INVALID_EDITS",
+                    tool_name="file_edit",
+                )
+            result = apply_multi_hunk(previous, parsed)
+        else:
+            result = apply_search_replace(
+                previous,
+                old_string or "",
+                new_string if new_string is not None else "",
+                replace_all=bool(replace_all),
+            )
         if not result.ok or result.new_content is None:
             return format_tool_error(
                 result.message,
@@ -250,7 +362,96 @@ def register_workspace_tools(runtime: Any) -> None:
             )
         except Exception:
             pass
-        return f"{result.message} path={path}"
+        _track_read(target)
+        return f"{result.message} path={path}{read_warn}"
+
+    async def file_edit_batch(edits: str = "") -> str:
+        """Apply search/replace hunks across one or more files (JSON array).
+
+        Each item: {path, old_string, new_string, replace_all?}
+        Files are processed in order; same path serialized by tool batch locks.
+        """
+        import json as _json
+
+        from remedy.core.approvals import APPROVALS
+        from remedy.core.file_edit import apply_search_replace
+
+        raw = (edits or "").strip()
+        if not raw:
+            return format_tool_error(
+                "edits JSON array is required",
+                code="MISSING_EDITS",
+                tool_name="file_edit_batch",
+                suggestion=(
+                    'file_edit_batch(edits=\'[{"path":"a.py","old_string":"x",'
+                    '"new_string":"y"}]\')'
+                ),
+            )
+        try:
+            items = _json.loads(raw)
+        except _json.JSONDecodeError as e:
+            return format_tool_error(
+                f"invalid JSON: {e}",
+                code="INVALID_EDITS",
+                tool_name="file_edit_batch",
+            )
+        if not isinstance(items, list) or not items:
+            return format_tool_error(
+                "edits must be a non-empty JSON array",
+                code="INVALID_EDITS",
+                tool_name="file_edit_batch",
+            )
+        reports: list[str] = []
+        sid = getattr(runtime, "_session_id", None)
+        for i, item in enumerate(items[:40]):
+            if not isinstance(item, dict):
+                reports.append(f"[{i}] skip: not an object")
+                continue
+            p = str(item.get("path") or "").strip()
+            if not p:
+                reports.append(f"[{i}] skip: missing path")
+                continue
+            bad = _reserved_guard(p)
+            if bad:
+                reports.append(f"[{i}] {p}: reserved name")
+                continue
+            ask_reason = APPROVALS.needs_ask(f"edit {p}", tool_name="file_edit")
+            if ask_reason and not APPROVALS.is_approved(
+                "file_edit", f"edit {p}", session_id=sid
+            ):
+                reports.append(f"[{i}] {p}: APPROVAL_REQUIRED")
+                continue
+            try:
+                target = runtime.resolve_tool_path(p)
+            except Exception as e:
+                reports.append(f"[{i}] {p}: resolve error {e}")
+                continue
+            _note_path(target)
+            if not target.is_file():
+                reports.append(f"[{i}] {p}: not found")
+                continue
+            try:
+                previous = target.read_text(encoding="utf-8", errors="replace")
+            except OSError as e:
+                reports.append(f"[{i}] {p}: read error {e}")
+                continue
+            r = apply_search_replace(
+                previous,
+                str(item.get("old_string") or ""),
+                str(item.get("new_string") if "new_string" in item else ""),
+                replace_all=bool(item.get("replace_all")),
+            )
+            if not r.ok or r.new_content is None:
+                reports.append(f"[{i}] {p}: FAIL {r.message}")
+                continue
+            try:
+                target.write_text(r.new_content, encoding="utf-8")
+            except OSError as e:
+                reports.append(f"[{i}] {p}: write error {e}")
+                continue
+            runtime._track_artifact(str(target))
+            reports.append(f"[{i}] {p}: OK {r.message}")
+        return "file_edit_batch:\n" + "\n".join(reports)
 
     async def repo_search(
         pattern: str = "",
@@ -258,25 +459,83 @@ def register_workspace_tools(runtime: Any) -> None:
         glob: str = "",
         max_matches: int = 50,
         case_insensitive: bool = False,
+        context_before: int = 0,
+        context_after: int = 0,
+        symbol: str = "",
     ) -> str:
-        """Search repository text (ripgrep if available, else pure Python)."""
-        from remedy.core.repo_search import format_hits, search_repo
+        """Search text under path (any language). Prefer absolute path when multi-tree."""
+        from remedy.core.repo_search import (
+            SearchHit,
+            format_hits,
+            search_repo,
+            symbol_search_patterns,
+        )
+
+        root = runtime.effective_project_path()
+        raw_path = (path or ".").strip() or "."
+        search_path = raw_path
+        try:
+            if raw_path not in (".", "./", ""):
+                resolved = runtime.resolve_tool_path(raw_path)
+                if resolved.exists():
+                    search_path = str(resolved)
+                    _note_path(resolved)
+        except Exception:
+            search_path = raw_path
+
+        home = getattr(getattr(runtime, "config", None), "home_dir", None)
+        sym = (symbol or "").strip()
+        if sym and not (pattern or "").strip():
+            # Definition-oriented multi-pattern search
+            all_hits: list[SearchHit] = []
+            engine_used = "python"
+            for pat in symbol_search_patterns(sym):
+                hits, engine = search_repo(
+                    root,
+                    pat,
+                    path=search_path,
+                    glob=(glob or None) or None,
+                    max_matches=max(5, int(max_matches or 50) // 2),
+                    case_insensitive=True,
+                    context_before=int(context_before or 0),
+                    context_after=int(context_after or 0),
+                    home_dir=home,
+                )
+                engine_used = engine
+                for h in hits:
+                    if not any(
+                        x.path == h.path and x.line == h.line for x in all_hits
+                    ):
+                        all_hits.append(h)
+                if len(all_hits) >= int(max_matches or 50):
+                    break
+            return format_hits(
+                all_hits[: int(max_matches or 50)],
+                engine=engine_used,
+                pattern=f"symbol:{sym}",
+            )
 
         if not (pattern or "").strip():
             return format_tool_error(
-                "pattern is required",
+                "pattern or symbol is required",
                 code="MISSING_PATTERN",
                 tool_name="repo_search",
-                suggestion='repo_search(pattern="def foo", path="src", glob="*.py")',
+                suggestion=(
+                    'repo_search(pattern="class_name Foo", path="src") '
+                    'or repo_search(symbol="WorldGenerator", path=...)'
+                ),
             )
-        root = runtime.effective_project_path()
+
         hits, engine = search_repo(
             root,
             pattern.strip(),
-            path=path or ".",
+            path=search_path,
             glob=(glob or None) or None,
             max_matches=int(max_matches or 50),
             case_insensitive=bool(case_insensitive),
+            context_before=int(context_before or 0),
+            context_after=int(context_after or 0),
+            home_dir=home,
         )
         return format_hits(hits, engine=engine, pattern=pattern.strip())
 
@@ -285,8 +544,17 @@ def register_workspace_tools(runtime: Any) -> None:
         limit: int = 200,
         offset: int = 0,
     ) -> str:
+        bad = _reserved_guard(path)
+        if bad:
+            return format_tool_error(
+                bad,
+                code="RESERVED_NAME",
+                tool_name="list_dir",
+                suggestion="Skip reserved device paths; list the parent directory.",
+            )
         root = runtime.effective_project_path()
         target = runtime.resolve_tool_path(path)
+        _note_path(target)
         if not target.exists():
             parent = _parent_hint(path)
             return format_tool_error(
@@ -294,7 +562,7 @@ def register_workspace_tools(runtime: Any) -> None:
                 code="NOT_FOUND",
                 tool_name="list_dir",
                 suggestion=(
-                    f"Call list_dir on '{parent}' or project root ('.') "
+                    f"Call list_dir on '{parent}' or default cwd ('.') "
                     "to find the correct directory name."
                 ),
             )
@@ -349,9 +617,19 @@ def register_workspace_tools(runtime: Any) -> None:
             footer = f"\n… showing {off + 1}-{shown} of {total}"
         return "\n".join(lines) + footer
 
-    async def bash_exec(command: str = "") -> str:
-        """Run a shell command through SubprocessSandbox (hidden console on Windows)."""
+    async def bash_exec(
+        command: str = "",
+        timeout_seconds: float = 60.0,
+        workdir: str = "",
+    ) -> str:
+        """Run a shell command through SubprocessSandbox (hidden console on Windows).
+
+        *timeout_seconds* default 60, clamped to 5–600. *workdir* optional
+        absolute or relative path (defaults to focus/default cwd). Local
+        venv/node_modules/.bin and repo-root tools are prepended to PATH.
+        """
         from remedy.core.approvals import APPROVALS
+        from remedy.core.project_fingerprint import path_env_with_local_bins
         from remedy.execution.process import win_shell_prefix
         from remedy.execution.sandbox import SubprocessSandbox
 
@@ -394,11 +672,42 @@ def register_workspace_tools(runtime: Any) -> None:
                 "the same command."
             )
         root = runtime.effective_project_path()
+        cwd = root
+        wd_raw = (workdir or "").strip()
+        if wd_raw:
+            bad_wd = _reserved_guard(wd_raw)
+            if bad_wd:
+                return format_tool_error(
+                    bad_wd,
+                    code="RESERVED_NAME",
+                    tool_name="bash_exec",
+                    suggestion="Use a normal directory for workdir.",
+                )
+            try:
+                cwd = runtime.resolve_tool_path(wd_raw)
+                if cwd.is_file():
+                    cwd = cwd.parent
+            except Exception as e:
+                return format_tool_error(
+                    f"invalid workdir: {e}",
+                    code="BAD_WORKDIR",
+                    tool_name="bash_exec",
+                    suggestion="Pass an absolute path or a path under allowed roots.",
+                )
+        try:
+            timeout = float(timeout_seconds if timeout_seconds is not None else 60.0)
+        except (TypeError, ValueError):
+            timeout = 60.0
+        timeout = max(5.0, min(600.0, timeout))
+
         roots = runtime.allowed_roots()
         argv = [*win_shell_prefix(), command]
-        sandbox = SubprocessSandbox(allowed_paths=roots or [root])
-        result = await sandbox.execute(argv, workdir=root, timeout_seconds=60.0)
-        parts = [f"exit_code={result.exit_code}", f"cwd={root}"]
+        sandbox = SubprocessSandbox(allowed_paths=roots or [root, cwd])
+        env = path_env_with_local_bins(cwd)
+        result = await sandbox.execute(
+            argv, workdir=cwd, timeout_seconds=timeout, env=env
+        )
+        parts = [f"exit_code={result.exit_code}", f"cwd={cwd}", f"timeout_s={timeout}"]
         # Full stdout/stderr — no quality truncation for the model.
         if result.stdout:
             out = result.stdout
@@ -412,9 +721,30 @@ def register_workspace_tools(runtime: Any) -> None:
             parts.append(f"stderr:\n{err}")
         if result.exit_code != 0:
             parts.append(
-                "Suggestion: Read stderr, fix flags/paths/cwd, or try a different "
-                "command; use list_dir/file_read if you only need file contents."
+                "Suggestion: Read stderr, fix flags/paths/cwd, raise timeout_seconds "
+                "for long builds, or try a different command; use list_dir/file_read "
+                "if you only need file contents."
             )
+            # Best-effort path:line extraction for faster fix loops
+            with suppress(Exception):
+                import re as _re
+
+                blob = (result.stderr or "") + "\n" + (result.stdout or "")
+                locs: list[str] = []
+                for m in _re.finditer(
+                    r"([A-Za-z]:\\[^\s:\"']+\.\w{1,8}|[^\s:\"']+\.\w{1,8}):(\d+)",
+                    blob,
+                ):
+                    loc = f"{m.group(1)}:{m.group(2)}"
+                    if loc not in locs:
+                        locs.append(loc)
+                    if len(locs) >= 5:
+                        break
+                if locs:
+                    parts.append(
+                        "Likely locations (file_read these):\n"
+                        + "\n".join(f"- {x}" for x in locs)
+                    )
         return "\n".join(parts)
 
     runtime.tool_registry.register_builtin_handler(
@@ -466,7 +796,8 @@ def register_workspace_tools(runtime: Any) -> None:
         "file_edit",
         "Precise search/replace edit of an existing text file. Prefer this over "
         "file_write when changing part of a large file. old_string must match "
-        "exactly once unless replace_all=true.",
+        "exactly once unless replace_all=true. For multiple changes in one file, "
+        "pass edits= as a JSON array of {old_string,new_string} hunks.",
         file_edit,
         {
             "type": "object",
@@ -485,14 +816,41 @@ def register_workspace_tools(runtime: Any) -> None:
                     "description": "Replace every match (default false = unique match required)",
                     "default": False,
                 },
+                "edits": {
+                    "type": "string",
+                    "description": (
+                        "Optional JSON array of hunks "
+                        '[{"old_string":"...","new_string":"...","replace_all":false}] '
+                        "applied in order (multi-hunk edit)"
+                    ),
+                },
             },
-            "required": ["path", "old_string", "new_string"],
+            "required": ["path"],
+        },
+    )
+    runtime.tool_registry.register_builtin_handler(
+        "file_edit_batch",
+        "Apply multiple search/replace edits across one or more files in one call. "
+        "edits= JSON array of {path, old_string, new_string, replace_all?}.",
+        file_edit_batch,
+        {
+            "type": "object",
+            "properties": {
+                "edits": {
+                    "type": "string",
+                    "description": (
+                        'JSON array e.g. [{"path":"a.py","old_string":"x","new_string":"y"}]'
+                    ),
+                },
+            },
+            "required": ["edits"],
         },
     )
     runtime.tool_registry.register_builtin_handler(
         "repo_search",
-        "Search project text by regex/literal (ripgrep if installed, else built-in). "
-        "Prefer this over bash grep/Select-String for code discovery.",
+        "Search text by regex/literal (bundled/system ripgrep, else content-sniff). "
+        "Any language — no extension allowlist. Prefer absolute path when multi-tree. "
+        "Use symbol= for definition-oriented search. context_before/after for snippets.",
         repo_search,
         {
             "type": "object",
@@ -501,9 +859,13 @@ def register_workspace_tools(runtime: Any) -> None:
                     "type": "string",
                     "description": "Search pattern (regex supported)",
                 },
+                "symbol": {
+                    "type": "string",
+                    "description": "Find definitions of this symbol (class/func/etc.)",
+                },
                 "path": {
                     "type": "string",
-                    "description": "Subdirectory or file (default project root)",
+                    "description": "Subdirectory, file, or absolute tree (default: focus/cwd)",
                     "default": ".",
                 },
                 "glob": {
@@ -520,21 +882,30 @@ def register_workspace_tools(runtime: Any) -> None:
                     "description": "Case-insensitive search",
                     "default": False,
                 },
+                "context_before": {
+                    "type": "integer",
+                    "description": "Context lines before each hit (0-5)",
+                    "default": 0,
+                },
+                "context_after": {
+                    "type": "integer",
+                    "description": "Context lines after each hit (0-5)",
+                    "default": 0,
+                },
             },
-            "required": ["pattern"],
         },
     )
     runtime.tool_registry.register_builtin_handler(
         "list_dir",
         "List files and directories under allowed roots (see access scope). "
-        "Default limit=200; use offset for the next page.",
+        "Default limit=200; use offset for the next page. Absolute paths OK.",
         list_dir,
         {
             "type": "object",
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Relative directory (default: project root)",
+                    "description": "Relative or absolute directory (default: focus/cwd)",
                 },
                 "limit": {
                     "type": "integer",
@@ -549,13 +920,24 @@ def register_workspace_tools(runtime: Any) -> None:
     )
     runtime.tool_registry.register_builtin_handler(
         "bash_exec",
-        "Run a shell command (cwd = project). Do NOT use for simple text file "
-        "create/edit — use file_write instead (avoids PowerShell quoting failures).",
+        "Run a shell command. Default cwd = focus folder (or home). "
+        "Optional workdir= absolute/relative path; timeout_seconds= 5–600 (default 60). "
+        "Local .venv/node_modules/.bin and repo-root tools are on PATH. "
+        "Do NOT use for simple text file create/edit — use file_write instead.",
         bash_exec,
         {
             "type": "object",
             "properties": {
                 "command": {"type": "string", "description": "Shell command to run"},
+                "timeout_seconds": {
+                    "type": "number",
+                    "description": "Timeout seconds (default 60, max 600)",
+                    "default": 60,
+                },
+                "workdir": {
+                    "type": "string",
+                    "description": "Optional working directory (absolute or relative)",
+                },
             },
             "required": ["command"],
         },

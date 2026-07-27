@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass
@@ -12,6 +13,7 @@ class EditResult:
     occurrences: int = 0
     previous: str | None = None
     new_content: str | None = None
+    hunks_applied: int = 0
 
 
 def apply_search_replace(
@@ -64,4 +66,69 @@ def apply_search_replace(
         occurrences=n,
         previous=content,
         new_content=new_content,
+        hunks_applied=1,
+    )
+
+
+def apply_multi_hunk(
+    content: str,
+    hunks: list[dict[str, Any]] | list[tuple[str, str]],
+) -> EditResult:
+    """Apply multiple search/replace hunks sequentially on *content*.
+
+    Each hunk is either:
+      - dict with keys old_string/new_string (optional replace_all)
+      - tuple (old_string, new_string)
+
+    Stops on first failure and leaves content unchanged for that failure
+    (returns previous successful partial only via message — actually we
+    return failure without writing; caller should not write on !ok).
+    On failure, *new_content* is None; *previous* is original content.
+    """
+    if not hunks:
+        return EditResult(
+            ok=False,
+            message="edits list is empty",
+            previous=content,
+        )
+
+    current = content
+    total_occ = 0
+    applied = 0
+    for i, hunk in enumerate(hunks):
+        if isinstance(hunk, (tuple, list)) and len(hunk) >= 2:
+            old_s = str(hunk[0])
+            new_s = str(hunk[1])
+            rep_all = bool(hunk[2]) if len(hunk) > 2 else False
+        elif isinstance(hunk, dict):
+            old_s = str(hunk.get("old_string") or hunk.get("old") or "")
+            new_s = str(hunk.get("new_string") if "new_string" in hunk else hunk.get("new") or "")
+            rep_all = bool(hunk.get("replace_all") or False)
+        else:
+            return EditResult(
+                ok=False,
+                message=f"hunk {i}: invalid shape (need old_string/new_string)",
+                previous=content,
+                hunks_applied=applied,
+            )
+        r = apply_search_replace(current, old_s, new_s, replace_all=rep_all)
+        if not r.ok or r.new_content is None:
+            return EditResult(
+                ok=False,
+                message=f"hunk {i} failed: {r.message}",
+                previous=content,
+                occurrences=total_occ,
+                hunks_applied=applied,
+            )
+        current = r.new_content
+        total_occ += r.occurrences
+        applied += 1
+
+    return EditResult(
+        ok=True,
+        message=f"Applied {applied} hunk(s), {total_occ} total replacement(s).",
+        occurrences=total_occ,
+        previous=content,
+        new_content=current,
+        hunks_applied=applied,
     )

@@ -85,8 +85,14 @@ def test_workspace_context_block_shape(tmp_path):
 
 def test_workspace_context_unset_project_warns_full(tmp_path):
     block = workspace_context_block(tmp_path, project_unset=True)
-    assert "No project folder" in block or "full" in block.lower()
+    # Focus is optional; copy must allow full access without requiring a project cage.
+    assert (
+        "No focus folder" in block
+        or "No project folder" in block
+        or "full" in block.lower()
+    )
     assert "Access scope: full" in block
+    assert "optional" in block.lower() or "absolute" in block.lower()
 
 
 def test_list_workspace_entries_filters(tmp_path):

@@ -1,6 +1,6 @@
-"""file_edit apply_search_replace."""
+"""file_edit apply_search_replace + multi-hunk."""
 
-from remedy.core.file_edit import apply_search_replace
+from remedy.core.file_edit import apply_multi_hunk, apply_search_replace
 
 
 def test_unique_replace():
@@ -23,3 +23,30 @@ def test_multiple_requires_replace_all():
     r2 = apply_search_replace("aa aa", "aa", "b", replace_all=True)
     assert r2.ok
     assert r2.new_content == "b b"
+
+
+def test_multi_hunk_ok():
+    src = "alpha\nbeta\ngamma\n"
+    r = apply_multi_hunk(
+        src,
+        [
+            {"old_string": "alpha", "new_string": "ALPHA"},
+            {"old_string": "gamma", "new_string": "GAMMA"},
+        ],
+    )
+    assert r.ok
+    assert r.hunks_applied == 2
+    assert r.new_content == "ALPHA\nbeta\nGAMMA\n"
+
+
+def test_multi_hunk_stops_on_failure():
+    r = apply_multi_hunk(
+        "only once\n",
+        [
+            {"old_string": "only once", "new_string": "twice"},
+            {"old_string": "missing", "new_string": "x"},
+        ],
+    )
+    assert not r.ok
+    assert r.hunks_applied == 1
+    assert "hunk 1 failed" in r.message

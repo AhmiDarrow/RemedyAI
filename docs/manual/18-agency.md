@@ -4,29 +4,62 @@ Remedy is a **local continuity system**. When paired with a frontier model (Grok
 
 You still talk to **one Remedy**.
 
+## Focus folder is optional
+
+A **focus folder** (Settings project path / session workspace) only sets the **default cwd** for relative paths. It is **not** required to code.
+
+| Mode | Behavior |
+|------|----------|
+| **No focus** | Default cwd is usually your home profile; use **absolute paths** for any tree |
+| **Focus set** | Relative paths resolve there; **absolute paths still work** for other trees in access scope |
+
+Access scope (`project` / `home` / `full`) is a **security** control, separate from “must open a project.”
+
 ## Tools for coding
 
 | Tool | Use |
 |------|-----|
-| **`file_edit`** | Precise search/replace on existing files (prefer over rewriting whole files) |
+| **`file_edit`** | Precise search/replace; multi-hunk via `edits=` JSON; prefer over full rewrites |
+| **`file_edit_batch`** | Multi-file search/replace in one call |
 | **`file_write`** | Create or fully overwrite a file |
 | **`file_read`** | Read text (optional line offset/limit) |
-| **`repo_search`** | Find code by pattern (ripgrep if installed, else built-in) |
-| **`list_dir`** | Browse the project |
-| **`bash_exec`** | Builds, tests, git (approval mode still applies) |
+| **`repo_search`** | Any text language; `symbol=` for definitions; `context_before`/`after`; absolute `path` for multi-tree |
+| **`list_dir`** | Browse a directory (relative or absolute) |
+| **`bash_exec`** | Builds, tests, git (approval mode still applies; cwd defaults to focus/home) |
 | **`job_run`** | Silent **explore** or **verify** job — returns a summary, not a second chat persona |
 | **`mission_*`** | Durable checklist + verify for work-alone builds |
 | **`web_fetch`** | Optional HTTP fetch — enable `web_tools_enabled: true` in config |
+
+### Search (language-agnostic)
+
+- **No extension allowlist.** GDScript, Zig, Rust, Makefiles, etc. are searchable without special config.
+- Prefer **bundled or system `rg`** (ripgrep, MIT/Unlicense). Remedy can install a pinned build under `~/.remedy/bin`.
+- Pure-Python fallback sniffs **text vs binary** (skips PNGs and other binaries).
+- Zero matches include a **recovery hint** — re-scope path / simplify pattern; do not invent symbols.
+
+### Shell and edits
+
+- **`bash_exec`:** optional `timeout_seconds` (up to 600) and `workdir` for long Godot/cargo builds; local `.venv` / `node_modules/.bin` / repo-root tools are on `PATH`.
+- **`file_edit`:** multi-hunk with `edits='[{"old_string":"…","new_string":"…"}]'` to cut round-trips.
+- **Windows:** paths named `nul` / other reserved device names are rejected with a clear error (do not open them).
+
+### Explore / verify jobs
+
+- **`job_run kind=explore`:** tree sample + stack fingerprint + orientation pointers + optional search under `path=` (absolute OK).
+- **`job_run kind=verify`:** runs a command (or fingerprint default) with local PATH and longer timeout.
+- **`job_run kind=diff`:** `git status` / `diff --stat` summary.
 
 ## Missions (work alone)
 
 When you say **work alone** / **handle this on your own**, continuity steers Remedy to:
 
-1. `mission_start` with a goal, steps, and `verify_command` (e.g. `pytest -q`)  
+1. `mission_start` with a goal, steps, and `verify_command` (e.g. `pytest -q`) — if verify is omitted, stack fingerprint may suggest one  
 2. Implement with `file_edit` / `repo_search`  
 3. `mission_update` as steps complete  
-4. `mission_verify` before claiming done  
+4. `mission_verify` before claiming done (nudged when steps are done but verify has not passed)  
 5. Fix and re-verify on failure  
+
+Orientation: if the focus folder has `AGENTS.md`, `memory/LATEST_HANDOFF.md`, etc., Remedy surfaces short pointers automatically.
 
 ## Optional web tools
 
@@ -43,7 +76,7 @@ Then `web_fetch` can load documentation URLs. Offline coding does not require th
 - **Partner Memory** and Session Brief across sessions  
 - **Skills lifecycle** (probation → active, hard-won protection)  
 - Local vision / ComfyUI  
-- Desktop sessions, projects, and signed updates  
+- Desktop sessions, optional focus folders, and signed updates  
 
 ## Related
 

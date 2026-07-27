@@ -31,6 +31,25 @@ async def build_turn_context(runtime: Any) -> str:
             )
         )
 
+    # Orientation + fingerprint for focus and active work roots (session-touched trees).
+    with suppress(Exception):
+        from remedy.core.work_roots import work_roots_context_block
+
+        wr = work_roots_context_block(runtime)
+        if wr:
+            parts.append(wr)
+        else:
+            from remedy.core.project_fingerprint import fingerprint_path, orientation_block
+
+            focus = runtime.effective_project_path()
+            orient = orientation_block(focus)
+            if orient:
+                parts.append(orient)
+            fp = fingerprint_path(focus)
+            fp_lines = fp.context_lines()
+            if fp_lines:
+                parts.append("\n".join(fp_lines))
+
     # Partner Memory (durable identity + preferences — default on, budget-capped)
     with suppress(Exception):
         if runtime.memory is not None:
@@ -67,13 +86,13 @@ async def build_turn_context(runtime: Any) -> str:
             )
             if block:
                 parts.append(block)
-            # Full-scope reminder (no project jail) — once per context build
+            # Full-scope / no-focus reminder — optional focus, not a cage
             if runtime.project_path_is_unset() or runtime.access_scope() == "full":
                 parts.append(
-                    "Access scope: full (no project folder). "
-                    "Tools are not limited to a project jail — prefer "
-                    "asking the user to pick a folder for focused coding, "
-                    "and avoid broad writes outside the active task."
+                    "Access scope: full (or no focus folder). "
+                    "Tools may use absolute paths anywhere allowed for this account. "
+                    "A focus folder is optional convenience for relative paths — "
+                    "not required. Prefer reversible writes; confirm destructive ops."
                 )
 
     # Session Brief (Memory Harness L2) when present on agent

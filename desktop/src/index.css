@@ -846,6 +846,14 @@ pre code {
 .scroll-latest-fab:hover {
   background: color-mix(in srgb, var(--accent) 18%, var(--bg-secondary));
 }
+/* Process trail — Min chips stay dense but readable */
+.process-trace[data-process-mode='off'] .process-min-chips {
+  max-width: 100%;
+}
+.process-trace[data-process-mode='off'] .process-min-chip {
+  max-width: 100%;
+}
+
 .scroll-latest-fab.process-jump {
   bottom: 8px;
   width: 28px;

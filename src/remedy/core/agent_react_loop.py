@@ -25,8 +25,10 @@ from remedy.core.react_policy import (
     _looks_like_pseudo_tools,
     _parse_pseudo_tool_calls,
     _tool_call_fingerprint,
+    batch_has_empty_search,
     batch_has_tool_errors,
     looks_like_false_progress,
+    mission_verify_gate_message,
     recovery_nudge_message,
     strip_tool_markup,
 )
@@ -667,7 +669,10 @@ async def call_llm_stream(runtime, message: str,
                             and batch_has_tool_errors(batch_tool_msgs)
                         ):
                             recovery_nudge_done = True
-                            messages.append(recovery_nudge_message())
+                            empty = batch_has_empty_search(batch_tool_msgs)
+                            messages.append(
+                                recovery_nudge_message(empty_search=empty)
+                            )
                             with suppress(Exception):
                                 md = runtime._maybe_auto_checkpoint(
                                     reason="recovery",
@@ -924,18 +929,19 @@ async def call_llm_stream(runtime, message: str,
                     len(fresh_calls),
                 )
 
-                # Soft recovery: if tools failed, nudge the model once to
-                # try alternate paths/commands before answering.
+                # Soft recovery: if tools failed or search empty, nudge once.
                 if (
                     not recovery_nudge_done
                     and not force_answer
                     and batch_has_tool_errors(batch_tool_msgs)
                 ):
                     recovery_nudge_done = True
-                    messages.append(recovery_nudge_message())
+                    empty = batch_has_empty_search(batch_tool_msgs)
+                    messages.append(recovery_nudge_message(empty_search=empty))
                     logger.info(
-                        "Injected tool recovery nudge after step %d (RECOVERY_NUDGE)",
+                        "Injected tool recovery nudge after step %d (empty_search=%s)",
                         step + 1,
+                        empty,
                     )
                     with suppress(Exception):
                         runtime._maybe_auto_checkpoint(
@@ -943,6 +949,28 @@ async def call_llm_stream(runtime, message: str,
                             title="After tool failure",
                             force=True,
                         )
+                # Mission done-gate: steps done but verify not passed → force verify
+                with suppress(Exception):
+                    from remedy.core.mission import MissionStore
+
+                    home = getattr(getattr(runtime, "config", None), "home_dir", None)
+                    mid = str(getattr(runtime, "_session_id", "") or "") or None
+                    m = MissionStore(home).latest(mid)
+                    if (
+                        m is not None
+                        and m.status == "active"
+                        and m.verify_command
+                        and m.verify_status != "passed"
+                        and m.steps
+                        and all(s.status in ("done", "skipped") for s in m.steps)
+                        and not force_answer
+                        and not getattr(runtime, "_mission_gate_nudge_done", False)
+                    ):
+                        runtime._mission_gate_nudge_done = True
+                        messages.append(
+                            mission_verify_gate_message(m.verify_command)
+                        )
+                        logger.info("Injected mission verify gate nudge")
                 with suppress(Exception):
                     runtime._maybe_auto_checkpoint(reason="auto")
                 if is_final_step:

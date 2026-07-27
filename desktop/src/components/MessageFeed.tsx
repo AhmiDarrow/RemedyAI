@@ -725,12 +725,27 @@ export function MessageFeed({
       })}
 
       {streaming && (
-        <div className="px-3 max-h-[28vh] overflow-y-auto">
+        <div
+          className="px-3 overflow-y-auto"
+          style={{
+            // Room for Process depth without eating the whole feed
+            maxHeight:
+              toolProcessMode === 'full'
+                ? 'min(42vh, 26rem)'
+                : toolProcessMode === 'medium'
+                  ? 'min(34vh, 20rem)'
+                  : 'min(26vh, 14rem)',
+          }}
+        >
+          {/*
+            Progress bar always. Tool chips only if ProcessTrace is absent —
+            otherwise every mode double-lists the same steps.
+          */}
           <TaskProgress
             streaming={streaming}
             activeTools={activeTools}
             progress={taskProgress}
-            showToolDetails
+            showToolDetails={processSteps.length === 0}
           />
           {processSteps.length > 0 && (
             <ProcessTrace mode={toolProcessMode} steps={processSteps} live />

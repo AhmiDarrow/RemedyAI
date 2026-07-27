@@ -7,6 +7,7 @@ loop. They never open a second chat personality.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 
@@ -18,6 +19,18 @@ class JobResult:
     details: dict[str, Any] = field(default_factory=dict)
 
 
+def _resolve_job_path(runtime: Any, path: str = ".") -> Path:
+    raw = (path or ".").strip() or "."
+    try:
+        return runtime.resolve_tool_path(raw)
+    except Exception:
+        p = Path(raw).expanduser()
+        try:
+            return p.resolve()
+        except OSError:
+            return p.absolute()
+
+
 async def run_explore_job(
     runtime: Any,
     *,
@@ -25,14 +38,30 @@ async def run_explore_job(
     path: str = ".",
     max_files: int = 40,
 ) -> JobResult:
-    """Read-only survey: list_dir + optional repo_search."""
+    """Read-only survey: tree + fingerprint + orientation + optional search."""
+    from remedy.core.project_fingerprint import fingerprint_path, orientation_block
     from remedy.core.repo_search import format_hits, search_repo
 
     root = runtime.effective_project_path()
-    parts: list[str] = [f"Explore job under {root}"]
+    target = _resolve_job_path(runtime, path)
+    parts: list[str] = [f"Explore job under {target}"]
+
+    # Fingerprint + orientation for this path (not mandatory project root)
     try:
-        target = runtime.resolve_tool_path(path or ".")
+        orient_root = target if target.is_dir() else target.parent
+        fp = fingerprint_path(orient_root)
+        fp_lines = fp.context_lines()
+        if fp_lines:
+            parts.append("\n".join(fp_lines))
+        orient = orientation_block(orient_root)
+        if orient:
+            parts.append(orient)
+    except Exception as e:
+        parts.append(f"fingerprint/orientation error: {e}")
+
+    try:
         if target.is_dir():
+            # Level-0 listing
             entries = sorted(
                 target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())
             )
@@ -42,44 +71,112 @@ async def run_explore_job(
                 try:
                     rel = p.relative_to(root).as_posix()
                 except ValueError:
-                    rel = p.name
+                    try:
+                        rel = p.relative_to(target).as_posix()
+                    except ValueError:
+                        rel = p.name
                 lines.append(f"{'dir ' if p.is_dir() else 'file'} {rel}")
             parts.append("Listing:\n" + ("\n".join(lines) if lines else "(empty)"))
+
+            # One level of subdirectory names (budgeted) for tree feel
+            sub_lines: list[str] = []
+            for p in visible:
+                if not p.is_dir():
+                    continue
+                try:
+                    kids = sorted(
+                        x for x in p.iterdir() if not x.name.startswith(".")
+                    )[:8]
+                except OSError:
+                    continue
+                if not kids:
+                    continue
+                try:
+                    pref = p.relative_to(target).as_posix()
+                except ValueError:
+                    pref = p.name
+                names = ", ".join(
+                    (k.name + "/") if k.is_dir() else k.name for k in kids
+                )
+                sub_lines.append(f"  {pref}/ → {names}")
+                if len(sub_lines) >= 12:
+                    break
+            if sub_lines:
+                parts.append("Subdirs (sample):\n" + "\n".join(sub_lines))
         elif target.is_file():
             try:
                 rel = target.relative_to(root).as_posix()
             except ValueError:
                 rel = str(target)
             parts.append(f"File: {rel}")
+        else:
+            parts.append(f"path not found: {target}")
     except Exception as e:
         parts.append(f"list error: {e}")
 
     if (query or "").strip():
+        search_path = str(target) if target.exists() else (path or ".")
+        home = getattr(getattr(runtime, "config", None), "home_dir", None)
         hits, engine = search_repo(
-            root, query.strip(), path=path or ".", max_matches=30
+            root,
+            query.strip(),
+            path=search_path,
+            max_matches=30,
+            home_dir=home,
         )
         parts.append(format_hits(hits, engine=engine, pattern=query.strip()))
     elif not any(p.startswith("Listing:") or p.startswith("File:") for p in parts):
         parts.append("(no query — pass query= to search)")
 
     summary = "\n\n".join(parts)
-    return JobResult(kind="explore", ok=True, summary=summary[:12_000])
+    return JobResult(
+        kind="explore",
+        ok=True,
+        summary=summary[:14_000],
+        details={"path": str(target)},
+    )
 
 
 async def run_verify_job(
     runtime: Any,
     *,
     command: str = "",
-    timeout: float = 120.0,
+    path: str = "",
+    timeout: float = 180.0,
 ) -> JobResult:
-    """Run a verify/test command via sandbox."""
+    """Run a verify/test command via sandbox (optional workdir path)."""
+    from remedy.core.project_fingerprint import fingerprint_path, path_env_with_local_bins
     from remedy.core.security import check_dangerous_command
     from remedy.execution.process import win_shell_prefix
     from remedy.execution.sandbox import SubprocessSandbox
 
+    root = runtime.effective_project_path()
+    workdir = root
+    if (path or "").strip():
+        try:
+            workdir = _resolve_job_path(runtime, path)
+            if workdir.is_file():
+                workdir = workdir.parent
+        except Exception:
+            workdir = root
+
     cmd = (command or "").strip()
     if not cmd:
-        return JobResult(kind="verify", ok=False, summary="No verify command provided.")
+        # Fingerprint-suggested verify when command omitted
+        try:
+            fp = fingerprint_path(workdir)
+            cmd = (fp.suggest_verify or "").strip()
+        except Exception:
+            cmd = ""
+    if not cmd:
+        return JobResult(
+            kind="verify",
+            ok=False,
+            summary=(
+                "No verify command provided and no stack fingerprint default. "
+                "Pass command= (e.g. pytest -q) or path= to a known project tree."
+            ),
+        )
     danger = check_dangerous_command(["bash", "-c", cmd])
     if danger:
         return JobResult(
@@ -87,16 +184,24 @@ async def run_verify_job(
             ok=False,
             summary=f"Blocked by security policy: {danger}",
         )
-    root = runtime.effective_project_path()
     roots = runtime.allowed_roots()
-    sandbox = SubprocessSandbox(allowed_paths=roots or [root])
+    sandbox = SubprocessSandbox(allowed_paths=roots or [root, workdir])
     argv = [*win_shell_prefix(), cmd]
-    result = await sandbox.execute(argv, workdir=root, timeout_seconds=float(timeout or 120))
+    env = path_env_with_local_bins(workdir)
+    timeout_s = max(5.0, min(600.0, float(timeout or 180)))
+    result = await sandbox.execute(
+        argv,
+        workdir=workdir,
+        timeout_seconds=timeout_s,
+        env=env,
+    )
     out = (result.stdout or "")[:4000]
     err = (result.stderr or "")[:2000]
     ok = result.exit_code == 0
     summary = (
         f"verify exit_code={result.exit_code}\n"
+        f"cwd={workdir}\n"
+        f"timeout_s={timeout_s}\n"
         f"command={cmd}\n"
         f"{out}"
         + (f"\nstderr:\n{err}" if err else "")
@@ -105,6 +210,30 @@ async def run_verify_job(
         kind="verify",
         ok=ok,
         summary=summary,
+        details={"exit_code": result.exit_code, "cwd": str(workdir)},
+    )
+
+
+async def run_diff_job(runtime: Any, *, path: str = ".") -> JobResult:
+    """Git status + diff --stat under path (best-effort)."""
+    from remedy.execution.process import win_shell_prefix
+    from remedy.execution.sandbox import SubprocessSandbox
+
+    workdir = _resolve_job_path(runtime, path)
+    if workdir.is_file():
+        workdir = workdir.parent
+    roots = runtime.allowed_roots()
+    sandbox = SubprocessSandbox(
+        allowed_paths=roots or [runtime.effective_project_path(), workdir]
+    )
+    argv = [*win_shell_prefix(), "git status -sb && git diff --stat && git diff --cached --stat"]
+    result = await sandbox.execute(argv, workdir=workdir, timeout_seconds=60.0)
+    ok = result.exit_code == 0
+    body = ((result.stdout or "") + (result.stderr or ""))[:6000]
+    return JobResult(
+        kind="diff",
+        ok=ok,
+        summary=f"git summary cwd={workdir}\nexit={result.exit_code}\n{body}",
         details={"exit_code": result.exit_code},
     )
 
@@ -116,21 +245,25 @@ async def run_job(
     query: str = "",
     path: str = ".",
     command: str = "",
+    timeout: float = 180.0,
 ) -> JobResult:
     k = (kind or "explore").strip().lower()
     if k in ("explore", "survey", "map"):
         return await run_explore_job(runtime, query=query, path=path)
     if k in ("verify", "test", "check"):
-        return await run_verify_job(runtime, command=command)
+        return await run_verify_job(
+            runtime, command=command, path=path, timeout=timeout
+        )
+    if k in ("diff", "git", "status"):
+        return await run_diff_job(runtime, path=path or ".")
     if k in ("implement",):
-        # Implement jobs stay on the parent ReAct loop — return guidance.
         return JobResult(
             kind="implement",
             ok=True,
             summary=(
                 "Implement jobs use the main agent tools (file_edit, file_write, "
                 "bash_exec). Continue implementing in this turn; use job_run "
-                "kind=explore|verify for support."
+                "kind=explore|verify|diff for support."
             ),
         )
     return JobResult(kind=k, ok=False, summary=f"Unknown job kind: {kind}")

@@ -64,11 +64,20 @@ _DEFAULT_SYSTEM_PROMPT = (
     "Never stall, loop, or stop mid-task because of artificial step pressure.\n"
     "- If information is already in context (provider block, skills list, history), use it.\n"
     "- Prefer complete work over short partial answers. Keep going until the user request is finished.\n\n"
+    "Coding path model:\n"
+    "- A focus/project folder is optional convenience (default cwd for relative paths). "
+    "You are not confined to it — absolute paths work anywhere in access scope.\n"
+    "- Multi-tree work: pass absolute paths to list_dir / repo_search / file_*.\n"
+    "- Prefer file_edit for surgical edits; repo_search finds any text language "
+    "(no extension allowlist). Prefer parallel independent reads.\n"
+    "- When a mission has verify_command, run mission_verify before claiming done.\n\n"
     "Recovery (do not give up on the first failure):\n"
     "- Tool errors include Error [CODE:tool] and often a Suggestion line — follow it.\n"
-    "- Path not found → list_dir on the parent or project root; try alternate spellings.\n"
+    "- Path not found → list_dir on the parent or default cwd; try absolute form.\n"
     "- Path is a directory → use list_dir, then file_read on specific files.\n"
     "- Not a directory / wrong type → switch tool (file_read vs list_dir).\n"
+    "- repo_search 0 hits → re-scope path (absolute tree), list_dir, simplify pattern; "
+    "never invent symbols or paths.\n"
     "- Command failed (non-zero exit / stderr) → fix flags/cwd or try a safer equivalent.\n"
     "- Prefer discovery (list_dir) over guessing paths; never invent file contents.\n"
     "- Only report that you cannot finish after at least one recovery attempt "
@@ -79,8 +88,15 @@ _DEFAULT_SYSTEM_PROMPT = (
 RECOVERY_NUDGE = (
     "One or more tools failed. Do not give a final answer yet. "
     "Recover now: read the Error/Suggestion lines, then list_dir on the parent or "
-    "project root, try an alternate path, or adjust the shell command. "
+    "use an absolute path, try an alternate path, or adjust the shell command. "
     "Finish the user's task with corrected tool calls."
+)
+
+# When repo_search returns no hits (appended by format_hits); also available for loop.
+EMPTY_SEARCH_NUDGE = (
+    "Search returned no matches. Do not invent paths. "
+    "list_dir the intended tree (absolute path if needed), then repo_search again "
+    "with a clearer path or simpler pattern."
 )
 
 # Near-unlimited agent headroom. Simple turns never spend this budget;
@@ -718,7 +734,8 @@ def tool_content_is_error(content: str | None) -> bool:
     """True when a tool result string represents a failure the model should recover from.
 
     Matches workspace-tool strings (``Error …``), security blocks, structured
-    ``{"ok": false, …}`` payloads, and non-zero ``bash_exec`` exit codes.
+    ``{"ok": false, …}`` payloads, non-zero ``bash_exec`` exit codes, empty
+    ``repo_search`` results, and common NOT_FOUND phrasing.
     """
     if not content:
         return False
@@ -728,6 +745,14 @@ def tool_content_is_error(content: str | None) -> bool:
     if s.startswith("Error"):
         return True
     if s.startswith("Blocked by security"):
+        return True
+    # Empty / failed discovery — recover, do not invent paths
+    low = s[:500].lower()
+    if s.startswith("No matches for ") or "no matches for" in low[:80]:
+        return True
+    if "file not found" in low or "path not found" in low:
+        return True
+    if "error: path not found" in low or "error: path outside" in low:
         return True
     if s.startswith("{"):
         try:
@@ -763,6 +788,31 @@ def batch_has_tool_errors(tool_messages: list[dict[str, Any]]) -> bool:
     return False
 
 
-def recovery_nudge_message() -> dict[str, str]:
+def batch_has_empty_search(tool_messages: list[dict[str, Any]]) -> bool:
+    """True if any tool result is an empty repo_search."""
+    for msg in tool_messages:
+        if not isinstance(msg, dict) or msg.get("role") != "tool":
+            continue
+        content = msg.get("content")
+        if isinstance(content, str) and content.strip().startswith("No matches for "):
+            return True
+    return False
+
+
+def recovery_nudge_message(*, empty_search: bool = False) -> dict[str, str]:
     """User-role message that triggers one automatic recovery attempt."""
+    if empty_search:
+        return {"role": "user", "content": EMPTY_SEARCH_NUDGE + "\n" + RECOVERY_NUDGE}
     return {"role": "user", "content": RECOVERY_NUDGE}
+
+
+def mission_verify_gate_message(verify_command: str) -> dict[str, str]:
+    """Block claiming done until mission_verify passes."""
+    return {
+        "role": "user",
+        "content": (
+            "[Mission gate] Checklist steps may be done but verify has not passed. "
+            f"Run mission_verify (command={verify_command!r}) now, fix failures, "
+            "and only then write the final summary. Do not claim complete without a pass."
+        ),
+    }

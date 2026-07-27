@@ -47,13 +47,13 @@ _PACKS: dict[str, dict[str, Any]] = {
         "id": "tool",
         "system": (
             "[Continuity] User wants work done on the machine or project. "
-            "Prefer tools over monologue: file_edit for precise edits, "
-            "repo_search for finding code, file_write for new files, "
-            "bash_exec for builds/tests. Use job_run explore/verify for surveys. "
-            "Keep going until the request is finished."
+            "Prefer tools over monologue: file_edit (multi-hunk via edits=) for "
+            "precise edits, repo_search for discovery (absolute path= when multi-tree), "
+            "file_write for new files, bash_exec with timeout_seconds/workdir for builds. "
+            "Use job_run explore/verify/diff for surveys. Keep going until finished."
         ),
         "prefer_tools": True,
-        "suggest_tools": ["file_edit", "repo_search", "file_read", "bash_exec"],
+        "suggest_tools": ["file_edit", "repo_search", "file_read", "bash_exec", "job_run"],
     },
     "autonomous": {
         "id": "autonomous",
@@ -61,12 +61,14 @@ _PACKS: dict[str, dict[str, Any]] = {
             "[Continuity · Work alone] The user stepped away or asked you to handle "
             "this end-to-end without check-ins. Act with high agency:\n"
             "1) mission_start with goal, checklist steps, and verify_command "
-            "(e.g. pytest -q) for multi-step work.\n"
-            "2) Prefer file_edit for surgical edits; repo_search for discovery; "
-            "file_write only for new files.\n"
-            "3) job_run kind=explore to survey; kind=verify to run tests.\n"
-            "4) mission_update after each step; mission_verify before claiming done.\n"
-            "5) On failure: read errors, file_edit fixes, re-verify (respect retry caps).\n"
+            "(stack fingerprint may auto-fill; e.g. pytest -q or Godot headless smoke).\n"
+            "2) Prefer file_edit / multi-hunk edits=; repo_search for discovery; "
+            "file_write only for new files. Use absolute paths when juggling trees.\n"
+            "3) job_run kind=explore to survey; kind=verify for tests; kind=diff for git.\n"
+            "4) mission_update after each step; mission_verify before claiming done "
+            "(do not claim complete if verify failed).\n"
+            "5) On failure: read errors (path:line), file_edit fixes, re-verify "
+            "(raise timeout_seconds for long builds).\n"
             "Do not stop at a question when you can pick a reasonable default. "
             "Escalate only for secrets, paid APIs, or irreversible destroy. "
             "Summarize when finished."
@@ -79,6 +81,7 @@ _PACKS: dict[str, dict[str, Any]] = {
             "file_edit",
             "repo_search",
             "job_run",
+            "bash_exec",
         ],
     },
 }

@@ -284,40 +284,47 @@ def workspace_context_block(
         # Empty project path → full access (owner PC); recommend setting a folder.
         scope = "full"
     lines = [
-        f"Working directory (project root): {root}",
+        f"Default working directory (focus): {root}",
         f"Access scope: {scope}",
     ]
     if project_unset:
         lines.append(
-            "No project folder is set — filesystem access is **full** (this user account). "
-            "Prefer absolute paths or paths under the user profile. "
-            "Recommend the user pick a project folder in Settings for focused code work."
+            "No focus folder is set — default cwd is the user home profile; "
+            "access is **full** for this account. "
+            "Use absolute paths for any tree you work on; relative paths resolve "
+            "from the default cwd. A focus folder is optional convenience, not required."
         )
     elif scope == "project":
         lines.append(
-            "File and shell tools are jailed to the project directory unless the user "
-            "raises access scope in Settings."
+            "Relative paths resolve under the focus folder. Absolute paths still work "
+            "when within access scope. Raise access scope in Settings if you need more roots."
         )
     elif scope == "home":
         lines.append(
-            "File tools may use the project directory and the user home profile. "
-            "Prefer the project root for code work."
+            "Focus folder plus user home profile are allowed. "
+            "Absolute paths are fine; relative paths resolve from the focus folder."
         )
     elif scope == "untrusted":
         lines.append(
-            "Untrusted scope: project root only; high-impact tools stay on Ask."
+            "Untrusted scope: focus folder only; high-impact tools stay on Ask."
         )
     else:
         lines.append(
             "Access scope is full user machine (no silent admin elevation). "
-            "Prefer reversible actions; confirm destructive ops."
+            "Absolute paths preferred for multi-tree work; prefer reversible actions."
         )
     if extra_roots:
         lines.append("Allowed roots: " + ", ".join(str(r) for r in extra_roots[:6]))
     if project_unset:
-        lines.append("Prefer absolute paths when the target is outside the default home root.")
+        lines.append(
+            "Coding without a focus folder is first-class — list_dir / repo_search / "
+            "file_* with absolute paths anywhere in scope."
+        )
     else:
-        lines.append("Prefer relative paths from the project root when possible.")
+        lines.append(
+            "Relative paths are convenient under the focus folder; absolute paths "
+            "remain valid for other trees in scope."
+        )
     entries = list_workspace_entries(root)
     if entries:
         listing = ", ".join(

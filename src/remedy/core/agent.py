@@ -203,6 +203,12 @@ class BasicRuntime(AgentRuntime):
         from remedy.core.agent_workspace_tools import register_workspace_tools
 
         register_workspace_tools(self)
+        # Non-blocking: ensure pinned ripgrep under ~/.remedy/bin when missing
+        with suppress(Exception):
+            from remedy.core.rg_binary import schedule_ensure_rg
+
+            home = getattr(self.config, "home_dir", None)
+            schedule_ensure_rg(home)
 
     def _get_learning_loop(self):
         """Lazy LearningLoop bound to home skills dir + this registry."""

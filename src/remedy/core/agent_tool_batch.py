@@ -11,6 +11,7 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from contextlib import suppress
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -61,6 +62,25 @@ def progress_marker(
     return f"@@progress:{json.dumps(payload, separators=(',', ':'))}"
 
 
+_WRITE_TOOLS = frozenset({"file_write", "file_edit", "file_edit_batch"})
+
+
+def _write_path_key(name: str, args: dict[str, Any]) -> str | None:
+    """Normalized path key for serializing concurrent writes to the same file."""
+    if name not in _WRITE_TOOLS:
+        return None
+    raw = str(args.get("path") or "").strip()
+    if not raw and name == "file_edit_batch":
+        # Batch may touch many paths; serialize whole batch under a global write lock.
+        return "__batch_write__"
+    if not raw:
+        return None
+    try:
+        return str(Path(raw).expanduser().resolve()).lower()
+    except Exception:
+        return raw.replace("\\", "/").lower()
+
+
 async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
         *,
         seen_fps: set[str],
@@ -71,6 +91,9 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
     Critical API contract: every ``tool_calls[].id`` on the preceding assistant
     message must receive a matching ``role=tool`` message. Cap and fingerprint
     dedupe may reduce *executions*, but never reduce *results*.
+
+    Writes to the same path are serialized via per-path locks so parallel
+    file_edit/file_write cannot clobber each other.
     """
     pending = normalize_tool_calls(tool_calls_list)
     if not pending:
@@ -84,6 +107,8 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
         if fp not in fp_to_tc:
             fp_to_tc[fp] = tc
             fp_order.append(fp)
+
+    path_locks: dict[str, asyncio.Lock] = {}
 
     async def _run_one(tc: dict[str, Any]) -> str:
         fn = tc.get("function") or {}
@@ -105,21 +130,32 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
         if not isinstance(args, dict):
             args = {}
 
-        result = await runtime.call_tool(ToolCall(tool_name=name, arguments=args))
-        if result.success:
-            payload = result.data
-            content_str = (
-                payload
-                if isinstance(payload, str)
-                else json.dumps(payload, default=str)
-            )
+        async def _call() -> tuple[Any, str]:
+            result = await runtime.call_tool(ToolCall(tool_name=name, arguments=args))
+            if result.success:
+                payload = result.data
+                content_str = (
+                    payload
+                    if isinstance(payload, str)
+                    else json.dumps(payload, default=str)
+                )
+            else:
+                content_str = result.error or format_tool_error(
+                    "tool failed",
+                    code="TOOL_FAILED",
+                    tool_name=name or "unknown",
+                    suggestion="Retry with corrected arguments or a different tool.",
+                )
+            return result, content_str
+
+        lock_key = _write_path_key(name, args)
+        if lock_key:
+            lock = path_locks.setdefault(lock_key, asyncio.Lock())
+            async with lock:
+                result, content_str = await _call()
         else:
-            content_str = result.error or format_tool_error(
-                "tool failed",
-                code="TOOL_FAILED",
-                tool_name=name or "unknown",
-                suggestion="Retry with corrected arguments or a different tool.",
-            )
+            result, content_str = await _call()
+
         # Full tool results for the model (cap only if TOOL_RESULT_CHAR_CAP > 0).
         cap = _TOOL_RESULT_CHAR_CAP if _TOOL_RESULT_CHAR_CAP > 0 else _HARD_SAFETY_CHARS
         if len(content_str) > cap:
