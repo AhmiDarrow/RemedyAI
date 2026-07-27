@@ -570,6 +570,16 @@ See [docs/DESKTOP.md](docs/DESKTOP.md) for API contract and full desktop notes.
 
 ---
 
+## Support
+
+If Remedy helps you, you can support development on Patreon:
+
+**[patreon.com/cw/AhmiDarrow](https://www.patreon.com/cw/AhmiDarrow)**
+
+Any support is genuinely appreciated — it helps a family man keep building Remedy, games, and music.
+
+---
+
 ## License
 
 **Source-available** — see [LICENSE](./LICENSE) (binding) and [COMMERCIAL.md](./COMMERCIAL.md) (summary).
