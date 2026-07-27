@@ -146,9 +146,18 @@ CI keeps the docs honest:
 
 ## License
 
-Skill packs and catalog scripts in this repository follow the project’s
-source-available terms unless a pack says otherwise. Remedy the product is
-documented in the [main repo](https://github.com/AhmiDarrow/RemedyAI).
+**Same as [RemedyAI](https://github.com/AhmiDarrow/RemedyAI):** the
+[RemedyAI Source-Available License](./LICENSE) (copyright Ahmi Darrow).
+
+| Who | Terms |
+|-----|--------|
+| **Solo / small indies** (&lt; $1M revenue **and** &lt; 20 FTE) | Free under LICENSE |
+| **Personal / education / research** | Free |
+| **Larger orgs, SaaS hosting, commercial resale** | Written commercial license — see [COMMERCIAL.md](./COMMERCIAL.md) |
+
+Skill packs and catalog scripts in this repo are covered by that LICENSE unless
+a pack’s frontmatter names a different license. Remedy the product is documented
+in the [main repo](https://github.com/AhmiDarrow/RemedyAI).
 
 ---
 

@@ -6,3 +6,7 @@
 4. Maintainers review security; release updates the signed catalog.
 
 Required frontmatter: `name`, `description`, `version` (prefer SemVer).
+
+## License
+
+Contributions are accepted under the same **[RemedyAI Source-Available License](./LICENSE)** as this repository and the main [RemedyAI](https://github.com/AhmiDarrow/RemedyAI) product (unless you and maintainers agree otherwise in writing). Prefer `license: LicenseRef-Proprietary` in skill frontmatter to match that license.
