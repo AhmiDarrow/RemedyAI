@@ -1100,8 +1100,10 @@ def _cmd_serve(args) -> None:
         gateway = Gateway(runtime=runtime, memory_store=memory)
         from remedy.gateway.serve_bootstrap import attach_messengers_to_gateway
 
+        # Register channels only — do NOT gateway.start() here.
+        # asyncio.run() closes this loop when _start returns; Telegram poll
+        # tasks would die. Real start happens in FastAPI lifespan (uvicorn loop).
         attach_messengers_to_gateway(runtime, gateway)
-        await gateway.start()
 
         return runtime, gateway, memory, n_skills
 

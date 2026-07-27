@@ -91,6 +91,19 @@ def create_app(
         if not _vision_atexit_registered:
             atexit.register(_shutdown_vision_decoder)
             _vision_atexit_registered = True
+
+        # Start gateway messengers on uvicorn's event loop (not the pre-uvicorn
+        # asyncio.run used during serve bootstrap — that loop is already closed).
+        if gateway is not None and not getattr(gateway, "running", False):
+            try:
+                await gateway.start()
+                logger.info(
+                    "Gateway messengers started on API lifespan (channels=%s)",
+                    [c.value for c in getattr(gateway, "channels", [])],
+                )
+            except Exception:
+                logger.exception("Gateway start on lifespan failed")
+
         # Local model starts with Remedy when installed + enabled (vision + nano).
         try:
             import asyncio
@@ -123,6 +136,11 @@ def create_app(
         try:
             yield
         finally:
+            if gateway is not None and getattr(gateway, "running", False):
+                try:
+                    await gateway.stop()
+                except Exception:
+                    logger.debug("Gateway stop on shutdown failed", exc_info=True)
             logger.info("API shutdown: stopping vision decoder if running")
             _shutdown_vision_decoder()
 

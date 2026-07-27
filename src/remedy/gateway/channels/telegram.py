@@ -35,8 +35,14 @@ class TelegramChannel(ChannelAdapter):
     async def start(self) -> None:
         await super().start()
         if self.bot_token:
-            logger.info("Telegram channel active (chats=%d)", len(self.chat_ids))
+            logger.info(
+                "Telegram channel active (allowlist=%d, allow_all=%s)",
+                len(self.chat_ids),
+                self.allow_all,
+            )
+            # Ensure we are on a live loop (uvicorn lifespan); cancelled loops drop polls.
             self._poll_task = asyncio.create_task(self._poll_loop())
+            logger.info("Telegram long-poll task scheduled")
         else:
             logger.info("Telegram channel: stub mode (no token)")
 
@@ -122,6 +128,10 @@ class TelegramChannel(ChannelAdapter):
 
         chat = msg.get("chat") or {}
         chat_id = str(chat.get("id", ""))
+        from_user = msg.get("from") or {}
+        user_id = str(from_user.get("id") or "")
+        source_id = user_id or chat_id
+
         env_allow = str(os.environ.get("REMEDY_TELEGRAM_ALLOW_ALL", "")).strip().lower() in (
             "1",
             "true",
@@ -130,12 +140,24 @@ class TelegramChannel(ChannelAdapter):
         )
         allow_all = bool(self.allow_all) or env_allow
         if not self.chat_ids and not allow_all:
+            logger.info(
+                "Telegram ignore chat_id=%s user_id=%s (allowlist empty; set allow_chat_ids or allow_all)",
+                chat_id,
+                user_id,
+            )
             return
-        if self.chat_ids and chat_id not in self.chat_ids:
-            return
+        # Accept either chat id (DM chat id == user id) or explicit user id.
+        if self.chat_ids:
+            allowed = {str(x).strip() for x in self.chat_ids if str(x).strip()}
+            if chat_id not in allowed and user_id not in allowed:
+                logger.info(
+                    "Telegram ignore chat_id=%s user_id=%s (not in allowlist %s)",
+                    chat_id,
+                    user_id,
+                    sorted(allowed),
+                )
+                return
 
-        from_user = msg.get("from") or {}
-        source_id = str(from_user.get("id") or chat_id)
         event = GatewayEvent(
             kind=EventKind.MESSAGE,
             channel=ChannelKind.TELEGRAM,
@@ -144,8 +166,15 @@ class TelegramChannel(ChannelAdapter):
             payload={
                 "message": text,
                 "chat_id": chat_id,
+                "user_id": user_id,
                 "username": from_user.get("username"),
             },
             raw=str(update)[:2000],
+        )
+        logger.info(
+            "Telegram inbound chat_id=%s user=%s len=%d",
+            chat_id,
+            from_user.get("username") or user_id,
+            len(text),
         )
         await self.gateway.emit(event)
