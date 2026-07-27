@@ -238,10 +238,10 @@ def _extract_rg_from_archive(archive: Path, dest_dir: Path) -> Path:
 
     if found is None:
         raise FileNotFoundError(f"rg binary not found inside {archive.name}")
-    try:
+    from contextlib import suppress
+
+    with suppress(OSError):
         found.chmod(found.stat().st_mode | 0o111)
-    except OSError:
-        pass
     return found
 
 

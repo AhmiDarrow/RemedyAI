@@ -56,9 +56,7 @@ def is_probably_text(
                 ctrl += 1
         elif b == 127:
             ctrl += 1
-    if len(data) > 0 and (ctrl / len(data)) > _BINARY_CTRL_RATIO:
-        return False
-    return True
+    return not (len(data) > 0 and (ctrl / len(data)) > _BINARY_CTRL_RATIO)
 
 
 def should_search_file(

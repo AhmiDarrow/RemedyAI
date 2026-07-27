@@ -263,9 +263,12 @@ def _should_skip_dir(name: str) -> bool:
         return True
     # Skip most hidden dirs; keep common config roots searchable by name walk
     # only when not in skip list. Dot-dirs that are pure caches are listed above.
-    if name.startswith(".") and name not in (".github", ".gitlab", ".circleci", ".config"):
-        return True
-    return False
+    return name.startswith(".") and name not in (
+        ".github",
+        ".gitlab",
+        ".circleci",
+        ".config",
+    )
 
 
 def _load_gitignore_names(root: Path) -> set[str]:

@@ -340,7 +340,6 @@ def path_env_with_local_bins(workdir: Path | str | None, base_env: dict[str, str
         return env
     sep = ";" if os.name == "nt" else ":"
     prefix = sep.join(str(d) for d in dirs)
-    key = "Path" if os.name == "nt" and "Path" in env and "PATH" not in env else "PATH"
     # Normalize to PATH for children; keep Path on Windows too
     current = env.get("PATH") or env.get("Path") or ""
     env["PATH"] = prefix + (sep + current if current else "")
