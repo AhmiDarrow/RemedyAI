@@ -108,8 +108,17 @@ class TelegramChannel(ChannelAdapter):
         ):
             if resp.status != 200:
                 text = await resp.text()
-                logger.warning("Telegram getUpdates %s: %s", resp.status, text[:200])
-                await asyncio.sleep(1.0)
+                if resp.status == 404:
+                    logger.error(
+                        "Telegram getUpdates 404 — bot token is invalid or revoked. "
+                        "Re-paste the token from @BotFather in Settings → Messengers "
+                        "(current token is rejected by api.telegram.org). Body: %s",
+                        text[:160],
+                    )
+                    await asyncio.sleep(30.0)
+                else:
+                    logger.warning("Telegram getUpdates %s: %s", resp.status, text[:200])
+                    await asyncio.sleep(2.0)
                 return []
             data = await resp.json()
             if not data.get("ok"):

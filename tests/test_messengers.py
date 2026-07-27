@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+# Path is used for isolation checks against the real home directory
+
 from remedy.gateway.messengers import (
     external_session_id,
     heuristic_session_title,
@@ -103,10 +105,20 @@ def test_settings_put_messenger_token_not_echoed(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
     (home / "config.toml").write_text(
-        'name = "Remedy"\nenabled_channels = ["cli"]\nsetup_completed = true\n',
+        'name = "Remedy"\nenabled_channels = ["cli"]\nsetup_completed = true\nhome_dir = "%s"\n'
+        % home.as_posix(),
         encoding="utf-8",
     )
     monkeypatch.setenv("REMEDY_HOME", str(home))
+    # Ensure settings path + secrets never touch the real user home.
+    from remedy.interfaces import api_support
+
+    monkeypatch.setattr(
+        api_support,
+        "_default_config_path",
+        lambda: home / "config.toml",
+    )
+    monkeypatch.setattr(api_support, "_find_config_path", lambda: home / "config.toml")
     client = TestClient(create_app())
     r = client.put(
         "/api/settings",
@@ -129,6 +141,13 @@ def test_settings_put_messenger_token_not_echoed(tmp_path, monkeypatch):
     tg = next(m for m in body["messengers"] if m["id"] == "telegram")
     assert tg["enabled"] is True
     assert tg["token_set"] is True
+    # Isolation: real ~/.remedy must not have received the fake token
+    real_home = Path.home() / ".remedy"
+    if real_home.exists():
+        from remedy.interfaces.secret_store import load_provider_keys
+
+        real_keys = load_provider_keys(real_home)
+        assert real_keys.get("ch:telegram:bot_token") != "secret-token-xyz"
 
 
 def test_apply_messengers_update_fields(tmp_path):

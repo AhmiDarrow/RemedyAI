@@ -675,7 +675,14 @@ async def handle_slash_command(
 
 
 def _default_config_path() -> Path:
-    """Canonical user config path (matches desktop sidecar --home)."""
+    """Canonical user config path (matches desktop sidecar --home).
+
+    Honors ``REMEDY_HOME`` so tests and alternate homes never write into the
+    real ``~/.remedy`` by accident.
+    """
+    env_home = str(os.environ.get("REMEDY_HOME") or "").strip()
+    if env_home:
+        return Path(env_home).expanduser().resolve() / "config.toml"
     return Path.home() / ".remedy" / "config.toml"
 
 
@@ -684,6 +691,9 @@ def _find_config_path() -> Path | None:
     primary = _default_config_path()
     if primary.exists():
         return primary
+    # When REMEDY_HOME is set (tests), never fall through to the real user home.
+    if str(os.environ.get("REMEDY_HOME") or "").strip():
+        return None
     for p in CONFIG_PATHS:
         expanded = p.expanduser().resolve()
         if expanded.exists():
