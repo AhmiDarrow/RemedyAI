@@ -4,6 +4,13 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Fix: force-answer nudge once; messenger/legacy stream honor session LLM
+
+- Do not append “Stop calling tools…” every ReAct step (context bloat / stuck feel).
+- Restore full provider+model+key+url after each stream turn (safer concurrent sessions).
+- Messenger + legacy chat stream apply session `llm_provider` like desktop SSE.
+- Fatal: “supported API model names are …” (wrong host) hard-stops.
+
 ## [0.18.3] - 2026-07-27
 
 ### Fix: session provider switch, quit prefs, launch update check, console flash

@@ -883,7 +883,26 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             )
 
             try:
-                async for token in runtime.stream_response(req.message, session_id=session_id):
+                # Honor per-session LLM (same as /messages/stream).
+                sess_provider = None
+                sess_model = getattr(req, "model", None)
+                if memory is not None:
+                    with contextlib.suppress(Exception):
+                        ex = await memory.get_chat_session(session_id)
+                        if ex is not None:
+                            sess_provider = getattr(ex, "llm_provider", None)
+                            if not sess_model:
+                                sess_model = getattr(ex, "model", None)
+                _sync_runtime_llm_from_config(
+                    runtime,
+                    model_override=sess_model,
+                    provider_override=sess_provider,
+                )
+                async for token in runtime.stream_response(
+                    req.message,
+                    session_id=session_id,
+                    model=sess_model,
+                ):
                     yield await _sse_stream_text(token, event="token")
             except Exception as e:
                 status = "error"

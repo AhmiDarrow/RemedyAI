@@ -61,6 +61,9 @@ def _is_fatal_llm_api_error(status: int, body: str) -> bool:
     if status in (404, 410, 422):
         return True
     low = (body or "").lower()
+    # Wrong model name for this host (e.g. grok id on DeepSeek API)
+    if "supported api model" in low or "supported models are" in low:
+        return True
     fatal_phrases = (
         "does not exist",
         "model_not_found",
@@ -289,6 +292,8 @@ async def call_llm_stream(runtime, message: str,
         force_answer_sticky = False
         # After one force-answer API attempt fails, stop (no 404 spam loop).
         force_answer_api_fail_once = False
+        # Inject "Stop calling tools / final answer" user nudge at most once.
+        force_answer_nudge_done = False
         # Empty-answer recovery (model thought but sent no content).
         empty_answer_retries = 0
         max_empty_answer_retries = 8
@@ -456,8 +461,14 @@ async def call_llm_stream(runtime, message: str,
                 )
                 step_tools = None if force_answer else tools
 
-                if force_answer and step > 0 and length_continuations == 0:
-                    # Never ask for a "short" answer — complete full response.
+                if (
+                    force_answer
+                    and step > 0
+                    and length_continuations == 0
+                    and not force_answer_nudge_done
+                ):
+                    # Once only — repeating this every step bloated context and looked stuck.
+                    force_answer_nudge_done = True
                     messages.append(
                         {
                             "role": "user",

@@ -629,7 +629,14 @@ class BasicRuntime(AgentRuntime):
 
         from remedy.core.turn_context import begin_turn, end_turn, is_turn_aborted
 
-        prev_model = self._llm_model
+        # Snapshot full LLM binding so concurrent sessions / messenger turns
+        # cannot leave the wrong provider+key sticky after this turn.
+        prev_llm = (
+            str(getattr(self, "_llm_provider", "") or ""),
+            str(getattr(self, "_llm_model", "") or ""),
+            str(getattr(self, "_llm_base_url", "") or ""),
+            str(getattr(self, "_llm_api_key", "") or ""),
+        )
         if model and str(model).strip():
             self._llm_model = str(model).strip()
 
@@ -669,7 +676,14 @@ class BasicRuntime(AgentRuntime):
         finally:
             self._streaming = False
             end_turn(session_id, tok_s, tok_a, tok_w)
-            self._llm_model = prev_model
+            # Restore pre-turn provider/model/url/key (not model-only).
+            with suppress(Exception):
+                self.reconfigure_llm(
+                    provider=prev_llm[0] or None,
+                    model=prev_llm[1] or None,
+                    base_url=prev_llm[2] or None,
+                    api_key=prev_llm[3] if prev_llm[3] else None,
+                )
             self._plan_mode = False
             # Soft end-of-turn checkpoint if substantial tool work happened
             if not plan_mode and not is_turn_aborted():

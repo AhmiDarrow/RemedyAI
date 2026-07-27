@@ -29,3 +29,11 @@ def test_model_not_found_phrase_on_400() -> None:
         )
         is True
     )
+
+
+def test_wrong_model_for_host_is_fatal() -> None:
+    body = (
+        '{"error":{"message":"The supported API model names are deepseek-v4-pro '
+        'or deepseek-v4-flash, but you passed grok-4.5."}}'
+    )
+    assert _is_fatal_llm_api_error(400, body) is True

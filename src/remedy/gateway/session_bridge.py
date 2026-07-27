@@ -255,8 +255,22 @@ async def handle_messenger_event(
     reply_parts: list[str] = []
     if session is not None and hasattr(runtime, "stream_response"):
         try:
+            # Bind session provider/model (status-bar style) before the turn —
+            # otherwise messenger always used whatever global config last set.
+            with suppress(Exception):
+                from remedy.interfaces.api_support import (
+                    _sync_runtime_llm_from_config,
+                )
+
+                _sync_runtime_llm_from_config(
+                    runtime,
+                    model_override=getattr(session, "model", None),
+                    provider_override=getattr(session, "llm_provider", None),
+                )
             async for chunk in runtime.stream_response(
-                message, session_id=session.id
+                message,
+                session_id=session.id,
+                model=getattr(session, "model", None),
             ):
                 if chunk is not None:
                     text = str(chunk)
