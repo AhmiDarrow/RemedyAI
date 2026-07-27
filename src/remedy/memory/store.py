@@ -131,8 +131,8 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_chat_sessions_updated ON chat_sessions(updated_at);
-CREATE INDEX IF NOT EXISTS idx_chat_sessions_origin
-    ON chat_sessions(origin_channel, external_chat_id);
+-- idx_chat_sessions_origin is created in _migrate_schema after columns exist
+-- (CREATE INDEX here breaks older DBs that lack origin_channel until ALTER).
 
 CREATE TABLE IF NOT EXISTS chat_messages (
     id TEXT PRIMARY KEY,
