@@ -824,41 +824,58 @@ def _sync_runtime_llm_from_config(
     runtime: Any,
     *,
     model_override: str | None = None,
+    provider_override: str | None = None,
 ) -> str:
     """Reload provider/model/url/key from disk into the live runtime.
 
     Returns the effective API key (may be empty). Re-reads config when the file
     changes (or first call) so settings saved after server start apply without
     a restart, without paying for a full disk parse on every message.
+
+    *provider_override* / *model_override*: per-session picks (status-bar switch).
+    Without these, a session on Grok while global config is still DeepSeek would
+    send ``model=grok-4.5`` to the DeepSeek base URL every turn.
     """
     if runtime is None:
         return ""
     cfg = _load_config_cached()
-    provider = str(
+    cfg_provider = str(
         cfg.get("llm_provider")
         or getattr(runtime, "_llm_provider", None)
         or os.environ.get("REMEDY_LLM_PROVIDER")
         or "openai"
-    )
+    ).strip().lower()
+    provider = str(
+        (provider_override or "").strip()
+        or cfg_provider
+        or "openai"
+    ).strip().lower()
     model = str(
-        model_override
+        (model_override or "").strip()
         or cfg.get("llm_model")
         or getattr(runtime, "_llm_model", None)
         or os.environ.get("REMEDY_LLM_MODEL")
         or ""
     )
-    base_url = str(
-        cfg.get("llm_base_url")
-        or getattr(runtime, "_llm_base_url", None)
-        or os.environ.get("REMEDY_LLM_BASE_URL")
-        or ""
-    )
+    # Only reuse global base_url when still on the same provider; otherwise
+    # normalize_llm_settings must pick the provider's default API host.
+    if provider == cfg_provider:
+        base_url = str(
+            cfg.get("llm_base_url")
+            or getattr(runtime, "_llm_base_url", None)
+            or os.environ.get("REMEDY_LLM_BASE_URL")
+            or ""
+        )
+    else:
+        base_url = ""
     # Migrate retired model ids (deepseek-chat → v4, old grok-3 → current, …)
     # and align base_url with provider so chat works without a settings re-save.
     try:
         from remedy.interfaces.config import normalize_llm_settings
 
-        provider, model, base_url = normalize_llm_settings(provider, model, base_url)
+        provider, model, base_url = normalize_llm_settings(
+            provider, model, base_url or None
+        )
     except Exception as exc:
         logger.debug("normalize_llm_settings in runtime sync failed: %s", exc)
     # Per-provider only — never reuse DeepSeek sk-… for xAI, etc.

@@ -4,6 +4,14 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Fix: status-bar provider switch stuck on previous API host
+
+- Per-session provider (e.g. DeepSeek → Grok) is applied on **each message**, not
+  only model name. Previously global config provider stayed DeepSeek while the
+  UI sent `grok-4.5` → HTTP 400 “supported models are deepseek-…”.
+- Session `llm_provider` from PUT `/sessions/{id}/llm` wins over config until you
+  change the global default.
+
 ### Fix: stop spinning on dead/missing model (not “tool budget”)
 
 - HTTP **404** / model-not-found / no-access errors **hard-stop** with a clear

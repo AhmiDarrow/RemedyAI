@@ -416,8 +416,23 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                 content=req.message,
             ))
 
+        # Prefer per-session provider (status-bar switch) over global config.
+        sess_provider = None
+        sess_model = req.model
+        if memory:
+            with contextlib.suppress(Exception):
+                ex = await memory.get_chat_session(session_id)
+                if ex is not None:
+                    sess_provider = getattr(ex, "llm_provider", None)
+                    if not sess_model:
+                        sess_model = getattr(ex, "model", None)
+
         # Always re-sync credentials from disk (wizard/settings may have just saved).
-        _sync_runtime_llm_from_config(runtime, model_override=req.model)
+        _sync_runtime_llm_from_config(
+            runtime,
+            model_override=sess_model,
+            provider_override=sess_provider,
+        )
 
         from remedy.core.metrics import default_registry
 
@@ -426,7 +441,7 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         async for token in runtime.stream_response(
             req.message,
             session_id=session_id,
-            model=req.model,
+            model=sess_model,
             plan_mode=bool(getattr(req, "plan_mode", False)),
         ):
             # Keep user-visible text only (tool lifecycle events are @@-prefixed).
@@ -596,8 +611,24 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                 agent=req.agent,
             ))
 
+        # Prefer per-session provider (status-bar switch) over global config.
+        # Bug: only model_override was applied → DeepSeek API + grok-4.5 model name.
+        sess_provider = None
+        sess_model = req.model
+        if memory:
+            with contextlib.suppress(Exception):
+                ex = await memory.get_chat_session(session_id)
+                if ex is not None:
+                    sess_provider = getattr(ex, "llm_provider", None)
+                    if not sess_model:
+                        sess_model = getattr(ex, "model", None)
+
         # Always re-sync credentials from disk (first-run wizard / settings).
-        api_key = _sync_runtime_llm_from_config(runtime, model_override=req.model)
+        api_key = _sync_runtime_llm_from_config(
+            runtime,
+            model_override=sess_model,
+            provider_override=sess_provider,
+        )
 
         async def event_stream():
             from remedy.core.metrics import default_registry
@@ -626,7 +657,7 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                 async for token in runtime.stream_response(
                     user_text or "(see attached files)",
                     session_id=session_id,
-                    model=req.model,
+                    model=sess_model,
                     attachments=att_dicts,
                     plan_mode=bool(getattr(req, "plan_mode", False)),
                 ):
