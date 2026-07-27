@@ -1762,7 +1762,10 @@ export default function App() {
               onDismiss={clearLibrarySuggest}
               onOpenLibrary={() => {
                 setPanel('skills')
-                clearLibrarySuggest()
+              }}
+              onInstalled={() => {
+                // Open Skills so the pack is visible; chip auto-clears after success
+                setPanel('skills')
               }}
             />
             <Composer
