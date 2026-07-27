@@ -548,12 +548,18 @@ export default function App() {
   useEffect(() => {
     if (!isTauri()) return
     let off: (() => void) | undefined
+    let cancelled = false
     void tauriListen('app-quit-requested', () => {
       setQuitWarnOpen(true)
     }).then((fn) => {
+      if (cancelled) {
+        fn()
+        return
+      }
       off = fn
     })
     return () => {
+      cancelled = true
       off?.()
     }
   }, [])
@@ -561,20 +567,24 @@ export default function App() {
   useEffect(() => {
     if (!isTauri()) return
     let off: Array<() => void> = []
+    let cancelled = false
     void (async () => {
-      off.push(
-        await tauriListen('server-ready', () => {
-          setServerState('ready')
-        }),
-      )
-      off.push(
-        await tauriListen('server-error', (payload) => {
-          setServerState('error')
-          setServerError(typeof payload === 'string' ? payload : 'Server failed to start')
-        }),
-      )
+      const a = await tauriListen('server-ready', () => {
+        setServerState('ready')
+      })
+      const b = await tauriListen('server-error', (payload) => {
+        setServerState('error')
+        setServerError(typeof payload === 'string' ? payload : 'Server failed to start')
+      })
+      if (cancelled) {
+        a()
+        b()
+        return
+      }
+      off.push(a, b)
     })()
     return () => {
+      cancelled = true
       for (const u of off) u()
     }
   }, [])
@@ -583,16 +593,23 @@ export default function App() {
   useEffect(() => {
     if (!isTauri()) return
     let off: Array<() => void> = []
+    let cancelled = false
     void (async () => {
-      off.push(await tauriListen('tray-open-settings', () => openSettingsInRail()))
-      off.push(
-        await tauriListen('tray-check-updates', () => {
+      const listeners = await Promise.all([
+        tauriListen('tray-open-settings', () => openSettingsInRail()),
+        tauriListen('tray-check-updates', () => {
           void runUpdateCheckVisible()
         }),
-      )
-      off.push(await tauriListen('tray-about', () => setAboutOpen(true)))
+        tauriListen('tray-about', () => setAboutOpen(true)),
+      ])
+      if (cancelled) {
+        for (const u of listeners) u()
+        return
+      }
+      off = listeners
     })()
     return () => {
+      cancelled = true
       for (const u of off) u()
     }
   }, [runUpdateCheckVisible, openSettingsInRail])
@@ -748,6 +765,7 @@ export default function App() {
   useEffect(() => {
     if (serverState !== 'ready') return
     let unsub: (() => void) | undefined
+    let cancelled = false
     let debounce: ReturnType<typeof setTimeout> | null = null
     const scheduleRefresh = (sessionId?: string) => {
       if (debounce) clearTimeout(debounce)
@@ -760,6 +778,7 @@ export default function App() {
       }, 400)
     }
     void import('./api/sessionEvents').then(({ subscribeSessionEvents }) => {
+      if (cancelled) return
       unsub = subscribeSessionEvents({
         onEvent: (ev) => {
           if (
@@ -774,6 +793,7 @@ export default function App() {
       })
     })
     return () => {
+      cancelled = true
       if (debounce) clearTimeout(debounce)
       unsub?.()
     }
@@ -1167,11 +1187,18 @@ export default function App() {
     [activeId, streaming, messages, beginEdit, send, model],
   )
 
+  // Notify only on streaming true→false edge for a turn we started (not history loads).
+  const wasStreamingRef = useRef(false)
   useEffect(() => {
-    if (!streaming && messages.length > 0) {
+    const was = wasStreamingRef.current
+    wasStreamingRef.current = streaming
+    if (was && !streaming && messages.length > 0) {
       const last = messages[messages.length - 1]
       if (last && last.role === 'assistant' && last.content) {
-        notify('Remedy', { body: `Response ready — ${last.content.slice(0, 80)}...`, silent: false })
+        notify('Remedy', {
+          body: `Response ready — ${last.content.slice(0, 80)}...`,
+          silent: false,
+        })
       }
     }
   }, [streaming, messages, notify])
@@ -1206,7 +1233,7 @@ export default function App() {
       { id: 'plan', label: 'Toggle Plan Mode', description: 'Switch between plan and build', category: 'general', action: () => setPlanMode((p) => !p) },
       { id: 'memory', label: 'Memory Panel', description: 'Toggle memory panel', category: 'panel', action: () => setPanel((p) => (p === 'memory' ? null : 'memory')) },
       { id: 'skills', label: 'Skills Panel', description: 'Toggle skills panel', category: 'panel', action: () => setPanel((p) => (p === 'skills' ? null : 'skills')) },
-      { id: 'settings', label: 'Settings Panel', description: 'Toggle settings panel', category: 'panel', action: () => setPanel((p) => (p === 'settings' ? null : 'settings')) },
+      { id: 'settings', label: 'Settings Panel', description: 'Open settings in the right rail', category: 'panel', action: () => openSettingsInRail() },
       {
         id: 'help',
         label: "Help / Owner's Manual",
@@ -1262,6 +1289,7 @@ export default function App() {
     handleImport,
     activeId,
     openHelp,
+    openSettingsInRail,
   ])
 
   // Wire global shortcuts from hotkeys.ts (single source of truth for labels + keys).
@@ -1273,7 +1301,7 @@ export default function App() {
       },
       'Open command palette': () => setPaletteOpen((o) => !o),
       'Toggle plan mode': togglePlan,
-      'Open settings': () => setPanel((p) => (p === 'settings' ? null : 'settings')),
+      'Open settings': () => openSettingsInRail(),
       "Open Help wiki (owner's manual)": () => openHelp(),
       'Close panels and command palette': () => {
         // HelpPanel also handles Esc while open; this covers palette / side panels.
@@ -1307,7 +1335,7 @@ export default function App() {
       })
     }
     return out
-  }, [handleNewSession, openHelp, helpOpen])
+  }, [handleNewSession, openHelp, helpOpen, openSettingsInRail])
 
   useKeyboardShortcuts(globalShortcuts)
 

@@ -118,7 +118,9 @@ class Gateway:
     # -- handlers ------------------------------------------------------------
 
     def register_handler(self, handler: EventHandler) -> None:
-        self._handlers.append(handler)
+        # Idempotent: double bootstrap must not run the agent twice per event.
+        if handler not in self._handlers:
+            self._handlers.append(handler)
 
     def remove_handler(self, handler: EventHandler) -> None:
         if handler in self._handlers:

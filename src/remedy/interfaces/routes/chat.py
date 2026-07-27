@@ -71,11 +71,18 @@ def register_chat_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
             elapsed_s
         )
 
-        response_text = ""
+        # Join all string chunks; skip the gateway "Processing …" status line.
+        parts: list[str] = []
         for r in responses:
-            if isinstance(r, str):
-                response_text = r
-                break
+            if not isinstance(r, str):
+                continue
+            text = r.strip()
+            if not text:
+                continue
+            if text.startswith("[") and "Processing " in text[:80]:
+                continue
+            parts.append(r)
+        response_text = "".join(parts).strip()
 
         if memory and response_text:
             await memory.add_chat_message(ChatMessage(

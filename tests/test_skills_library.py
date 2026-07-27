@@ -53,6 +53,14 @@ def test_allowlist_urls():
     assert not is_allowed_download_url(
         "https://github.com/AhmiDarrow/remedy-skills/tree/main/skills"
     )
+    # CDN hosts must not appear as catalog initial URLs (redirect hop only).
+    assert not is_allowed_download_url(
+        "https://objects.githubusercontent.com/github-production-release-asset/1/x"
+    )
+    assert is_allowed_download_url(
+        "https://objects.githubusercontent.com/github-production-release-asset/1/x",
+        allow_cdn_redirect=True,
+    )
 
 
 def test_safe_skill_name():

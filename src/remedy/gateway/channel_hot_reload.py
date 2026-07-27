@@ -15,7 +15,6 @@ async def reload_messenger_channels(gateway: Any, cfg: dict | None = None) -> li
     from remedy.gateway.channel_registry import register_messenger_channels
     from remedy.gateway.messengers import INTERNAL_CHANNELS, is_messenger_channel
     from remedy.interfaces.api_support import load_config
-    from remedy.models import ChannelKind
 
     cfg = cfg if isinstance(cfg, dict) else (load_config() or {})
 

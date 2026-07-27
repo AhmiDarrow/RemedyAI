@@ -108,6 +108,16 @@ class LocalJobQueue:
                     dropped.job_id,
                     dropped.kind,
                 )
+                # Unblock waiters on the dropped job (otherwise they hang until timeout).
+                try:
+                    dbox = dropped.payload.get("_result_box")
+                    devent = dropped.payload.get("_done_event")
+                    if isinstance(dbox, dict):
+                        dbox["error"] = "Local job queue full; job dropped"
+                    if devent is not None and hasattr(devent, "set"):
+                        devent.set()
+                except Exception:
+                    pass
             self._pending.append(job)
             self._pending.sort(key=lambda j: (-j.priority, j.created_at))
             self._cond.notify()

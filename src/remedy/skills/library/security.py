@@ -52,8 +52,13 @@ def verify_catalog_signature(
         raise ValueError("Catalog signature verification failed") from e
 
 
-def is_allowed_download_url(url: str) -> bool:
-    """True if URL is local dogfood or an allowed GitHub release asset for remedy-skills."""
+def is_allowed_download_url(url: str, *, allow_cdn_redirect: bool = False) -> bool:
+    """True if URL is local dogfood or an allowed GitHub release asset for remedy-skills.
+
+    Catalog / initial download URLs must be github.com release paths for this repo.
+    GitHub CDN hosts are allowed only as the *final* hop after a redirect from that
+    release URL (``allow_cdn_redirect=True``), never as a catalog download_url.
+    """
     u = (url or "").strip()
     if not u:
         return False
@@ -88,13 +93,16 @@ def is_allowed_download_url(url: str) -> bool:
             return False
         return bool(re.fullmatch(r"[A-Za-z0-9._+-]{1,200}", filename))
 
-    # GitHub release asset CDN — only as final hop after github.com release URL.
-    # Path is opaque (numeric IDs); require release-asset path shape, no path traversal.
+    # GitHub release asset CDN — final hop only (never catalog initial URL).
     if host in ("objects.githubusercontent.com", "release-assets.githubusercontent.com"):
+        if not allow_cdn_redirect:
+            return False
         if ".." in path:
             return False
-        # Typical: /github-production-release-asset/... or similar under objects
         cleaned = path.strip("/")
+        # Require production-release path shape when present; still size-bound.
+        if "github-production-release-asset" not in cleaned and "release" not in cleaned:
+            return False
         return bool(cleaned) and len(cleaned) <= 500
 
     return False

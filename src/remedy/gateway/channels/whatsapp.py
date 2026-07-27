@@ -87,8 +87,11 @@ class WhatsAppChannel(HttpSessionMixin, ChannelAdapter):
         return None
 
     def verify_signature(self, body: bytes, signature_header: str) -> bool:
+        # Fail closed: inbound POST requires app_secret + valid HMAC.
+        # (GET verify still uses verify_token alone.)
         if not self.app_secret:
-            return True  # optional
+            logger.warning("WhatsApp webhook POST rejected: app_secret not configured")
+            return False
         if not signature_header.startswith("sha256="):
             return False
         expected = signature_header.split("=", 1)[1]

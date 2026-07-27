@@ -587,6 +587,8 @@ class BasicRuntime(AgentRuntime):
         """
         await self._apply_session_workspace(session_id)
 
+        from remedy.core.turn_context import begin_turn, end_turn, is_turn_aborted
+
         prev_model = self._llm_model
         if model and str(model).strip():
             self._llm_model = str(model).strip()
@@ -598,6 +600,8 @@ class BasicRuntime(AgentRuntime):
         if session_id:
             self._session_id = session_id
 
+        tok_s, tok_a = begin_turn(session_id)
+        self._streaming = True
         try:
             if not self._llm_api_key:
                 yield (
@@ -612,12 +616,17 @@ class BasicRuntime(AgentRuntime):
                 attachments=attachments,
                 plan_mode=bool(plan_mode),
             ):
+                if is_turn_aborted():
+                    yield "@@aborted\n"
+                    break
                 yield chunk
         finally:
+            self._streaming = False
+            end_turn(session_id, tok_s, tok_a)
             self._llm_model = prev_model
             self._plan_mode = False
             # Soft end-of-turn checkpoint if substantial tool work happened
-            if not plan_mode:
+            if not plan_mode and not is_turn_aborted():
                 with suppress(Exception):
                     steps = list(getattr(self, "_turn_tool_steps", None) or [])
                     if len(steps) >= 4:

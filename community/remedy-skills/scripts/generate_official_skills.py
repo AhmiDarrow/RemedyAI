@@ -1930,6 +1930,28 @@ The user's goal is met **or** you report exactly what remains blocked and why.
 
 
 def main() -> None:
+    import argparse
+    import sys
+
+    p = argparse.ArgumentParser(
+        description=(
+            "Bulk-write official skills. DANGEROUS: overwrites skills/*/SKILL.md. "
+            "Requires --force. Prefer hand-edits + build_catalog for normal releases."
+        )
+    )
+    p.add_argument(
+        "--force",
+        action="store_true",
+        help="Required to actually write files (safety latch).",
+    )
+    args = p.parse_args()
+    if not args.force:
+        print(
+            "Refusing to run: this generator overwrites skill packs.\n"
+            "Re-run with --force only if you intend a full regeneration.",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
     ROOT.mkdir(parents=True, exist_ok=True)
     names: list[str] = []
     for name, desc, tags, tools, body in SKILLS:

@@ -58,9 +58,21 @@ export async function logoutXai(): Promise<{ status: string; connected: boolean 
 /**
  * Open verification URL in the system browser.
  * Prefer Tauri shell plugin when available; fall back to window.open.
+ * Only http(s) schemes — reject javascript:/data:/file: etc.
  */
 export async function openExternalUrl(url: string): Promise<void> {
   if (!url) return
+  const trimmed = url.trim()
+  let parsed: URL
+  try {
+    parsed = new URL(trimmed)
+  } catch {
+    return
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return
+  }
+  url = parsed.href
   if (isTauri()) {
     try {
       // tauri-plugin-shell open (plugin command name varies by version)

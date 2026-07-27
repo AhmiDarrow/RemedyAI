@@ -855,20 +855,28 @@ class MemoryStore:
         db = self._ensure_db()
         session.created_at = datetime.now(UTC)
         session.updated_at = datetime.now(UTC)
-        db.execute(
-            """INSERT INTO chat_sessions (id, title, model, agent, project_path,
-               llm_provider, message_count, origin_channel, external_chat_id,
-               external_user, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                session.id, session.title, session.model, session.agent,
-                session.project_path, session.llm_provider, session.message_count,
-                session.origin_channel, session.external_chat_id, session.external_user,
-                session.created_at.isoformat(), session.updated_at.isoformat(),
-            ),
-        )
-        db.commit()
-        return session
+        try:
+            db.execute(
+                """INSERT INTO chat_sessions (id, title, model, agent, project_path,
+                   llm_provider, message_count, origin_channel, external_chat_id,
+                   external_user, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    session.id, session.title, session.model, session.agent,
+                    session.project_path, session.llm_provider, session.message_count,
+                    session.origin_channel, session.external_chat_id, session.external_user,
+                    session.created_at.isoformat(), session.updated_at.isoformat(),
+                ),
+            )
+            db.commit()
+            return session
+        except sqlite3.IntegrityError:
+            # Concurrent create (messenger dual-delivery / race) — return existing.
+            db.rollback()
+            existing = await self.get_chat_session(session.id)
+            if existing is not None:
+                return existing
+            raise
 
     async def get_chat_session(self, session_id: str) -> ChatSession | None:
         db = self._ensure_db()
@@ -984,19 +992,28 @@ class MemoryStore:
         *,
         include_reverted: bool = False,
     ) -> list[ChatMessage]:
+        """Return up to ``limit`` messages for a session in chronological order.
+
+        Uses a newest-first window (then reorders ASC) so ``limit`` keeps the
+        **latest** turns for long sessions — not the oldest page.
+        ``offset`` skips that many newest messages (for older-page loads).
+        """
         db = self._ensure_db()
-        if include_reverted:
-            rows = db.execute(
-                "SELECT * FROM chat_messages WHERE session_id = ? "
-                "ORDER BY created_at ASC LIMIT ? OFFSET ?",
-                (session_id, limit, offset),
-            ).fetchall()
-        else:
-            rows = db.execute(
-                "SELECT * FROM chat_messages WHERE session_id = ? AND reverted = 0 "
-                "ORDER BY created_at ASC LIMIT ? OFFSET ?",
-                (session_id, limit, offset),
-            ).fetchall()
+        where = "session_id = ?"
+        params: list[Any] = [session_id]
+        if not include_reverted:
+            where += " AND reverted = 0"
+        # Nested select: take newest first, then chronological for callers.
+        sql = (
+            f"SELECT * FROM ("
+            f"  SELECT * FROM chat_messages WHERE {where} "
+            f"  ORDER BY created_at DESC, rowid DESC "
+            f"  LIMIT ? OFFSET ?"
+            f") AS recent "
+            f"ORDER BY created_at ASC, rowid ASC"
+        )
+        params.extend([limit, offset])
+        rows = db.execute(sql, params).fetchall()
         return [self._row_to_message(r) for r in rows]
 
     async def get_chat_message(self, msg_id: str) -> ChatMessage | None:

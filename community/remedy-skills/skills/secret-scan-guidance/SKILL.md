@@ -23,11 +23,11 @@ metadata:
 # Secret Scan Guidance
 
 ## Steps
-1. Prefer `secret scanners`, `secret scanners`, or `secret scanners` if installed.
+1. Prefer a secret scanner if installed: `gitleaks detect`, `trufflehog filesystem .`, or `detect-secrets scan`.
 2. Otherwise search for common patterns (AWS keys, `ghp_`, `sk-`, private key headers) and **redact** middles in output.
 3. Check history only as needed; warn about force-push rewrites.
 4. Remediation order: **rotate** → remove from tree → history purge only if requested.
-5. Suggest pre-commit secret hooks if missing.
+5. Suggest pre-commit secret hooks (e.g. gitleaks / detect-secrets) if missing.
 
 ## Never
 Echo full live credentials into chat or commits.

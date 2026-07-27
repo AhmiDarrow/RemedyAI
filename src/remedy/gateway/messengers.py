@@ -7,7 +7,7 @@ status, and helpers for stable session identity + public (secret-scrubbed) views
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Literal
 
 MessengerStatus = Literal["ready", "partial", "planned"]
@@ -53,6 +53,7 @@ SECRET_FIELD_KEYS = frozenset(
     {
         "bot_token",
         "access_token",
+        "app_token",
         "app_password",
         "app_secret",
         "verify_token",

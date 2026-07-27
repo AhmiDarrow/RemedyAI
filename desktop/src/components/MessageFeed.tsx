@@ -399,6 +399,18 @@ const MessageBubble = memo(function MessageBubble({
                       pre({ children }) {
                         return <>{children}</>
                       },
+                      a({ href, children }) {
+                        const h = (href || '').trim()
+                        // Only allow safe navigable schemes in chat markdown.
+                        if (!h || !/^(https?:|mailto:)/i.test(h)) {
+                          return <span>{children}</span>
+                        }
+                        return (
+                          <a href={h} target="_blank" rel="noopener noreferrer">
+                            {children}
+                          </a>
+                        )
+                      },
                       img({ src, alt }) {
                         if (!src) return null
                         return (

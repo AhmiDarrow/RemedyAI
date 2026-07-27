@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { isTauri, tauriInvoke } from '../api/tauri'
-import { RemedyLogo } from './RemedyLogo'
 
 export type AppMenuAction =
   | 'settings'
@@ -15,18 +14,17 @@ export type AppMenuAction =
   | 'quit'
 
 interface TitleBarProps {
-  title?: string
   version?: string
   updateAvailable?: boolean
   onMenuAction?: (action: AppMenuAction) => void
 }
 
 /**
- * Single in-app chrome bar: logo/menu + drag region + window controls.
+ * Single in-app chrome bar: brand wordmark menu + drag region + window controls.
  * Requires `decorations: false` so OS chrome is not stacked above this bar.
+ * Wordmark only — no extra title text beside the logo.
  */
 export function TitleBar({
-  title = 'Remedy',
   version,
   updateAvailable,
   onMenuAction,
@@ -153,21 +151,22 @@ export function TitleBar({
         background: 'var(--bg-secondary)',
         borderBottom: '1px solid var(--border)',
         color: 'var(--text-primary)',
-        paddingLeft: 6,
+        paddingLeft: 0,
         paddingRight: 0,
       }}
     >
       {/* Logo / app menu — not a drag region so clicks work */}
-      <div className="relative flex-shrink-0 flex items-center" data-tauri-drag-region={undefined}>
+      <div className="relative flex-shrink-0 flex items-stretch h-full" data-tauri-drag-region={undefined}>
         <button
           ref={btnRef}
           type="button"
-          className="flex items-center px-1.5 rounded"
+          className="flex items-center h-full pl-1 pr-1"
           style={{
-            height: 30,
             background: menuOpen ? 'var(--bg-tertiary)' : 'transparent',
             border: 'none',
             cursor: 'pointer',
+            paddingTop: 0,
+            paddingBottom: 0,
           }}
           title="Remedy menu"
           aria-haspopup="menu"
@@ -178,8 +177,19 @@ export function TitleBar({
             setMenuOpen((o) => !o)
           }}
         >
-          {/* Monogram only — not the wordmark (logo.png has "Remedy" text baked in). */}
-          <RemedyLogo size={26} variant="auto" title="Remedy" />
+          <img
+            src="/logo.png"
+            alt="Remedy"
+            draggable={false}
+            style={{
+              height: '100%',
+              width: 'auto',
+              maxHeight: 36,
+              objectFit: 'contain',
+              objectPosition: 'left center',
+              display: 'block',
+            }}
+          />
           <span
             className="ml-0.5 text-[9px]"
             style={{ color: 'var(--text-muted)' }}
@@ -225,21 +235,12 @@ export function TitleBar({
         )}
       </div>
 
-      {/* Drag + double-click maximize (Windows title-bar convention) */}
+      {/* Empty drag + double-click maximize (Windows title-bar convention). Branding lives in the wordmark only. */}
       <div
-        className="flex-1 min-w-0 h-full flex items-center px-3"
+        className="flex-1 min-w-0 h-full"
         data-tauri-drag-region
         onDoubleClick={onDragDoubleClick}
-        title={title}
-      >
-        <span
-          className="truncate text-[11px] pointer-events-none"
-          style={{ color: 'var(--text-muted)' }}
-          data-tauri-drag-region
-        >
-          {title}
-        </span>
-      </div>
+      />
 
       {isTauri() && (
         <div className="flex items-stretch flex-shrink-0 h-full">

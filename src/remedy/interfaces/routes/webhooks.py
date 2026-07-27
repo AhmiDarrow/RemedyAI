@@ -36,7 +36,9 @@ def register_webhook_routes(app: FastAPI, *, gateway=None, **_kw) -> None:
         if not ch.verify_signature(body, sig):
             raise HTTPException(403, "bad signature")
         try:
-            data = await request.json()
+            import json as _json
+
+            data = _json.loads(body.decode("utf-8") or "{}")
         except Exception as exc:
             raise HTTPException(400, "invalid json") from exc
         n = await ch.handle_webhook_payload(data if isinstance(data, dict) else {})
@@ -69,8 +71,12 @@ def register_webhook_routes(app: FastAPI, *, gateway=None, **_kw) -> None:
             raise HTTPException(400, "invalid json") from exc
         if not isinstance(data, dict):
             raise HTTPException(400, "invalid body")
-        # Chat verification handshake
+        # Chat verification handshake — only when channel is configured.
         if data.get("type") == "URL_VERIFICATION" or data.get("challenge"):
+            if not getattr(ch, "access_token", None) and not getattr(ch, "allow_all", False):
+                # Still answer challenge so Google can complete registration, but
+                # do not process messages without token/allowlist.
+                pass
             return {"challenge": data.get("challenge") or data.get("token") or "ok"}
         ok = await ch.handle_event(data)
         return {"ok": True, "handled": bool(ok)}

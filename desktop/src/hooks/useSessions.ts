@@ -168,8 +168,8 @@ export function useSessions() {
     remove: useCallback(async (id: string) => {
       await deleteSession(id)
       setSessions((prev) => prev.filter((s) => s.id !== id))
-      if (activeId === id) setActiveId(null)
-    }, [activeId]),
+      setActiveId((cur) => (cur === id ? null : cur))
+    }, [setActiveId]),
     rename: useCallback(async (id: string, title: string) => {
       await updateSession(id, { title })
       setSessions((prev) =>

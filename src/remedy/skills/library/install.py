@@ -66,7 +66,7 @@ async def _download_bytes(
             raise RuntimeError(f"Download failed HTTP {resp.status}")
         # Always require the *final* URL to be allowlisted (no redirect off-list).
         final = str(resp.url)
-        if not is_allowed_download_url(final):
+        if not is_allowed_download_url(final, allow_cdn_redirect=True):
             raise ValueError(f"Download final URL not allowed: {final}")
         # Stream with hard size cap
         chunks: list[bytes] = []

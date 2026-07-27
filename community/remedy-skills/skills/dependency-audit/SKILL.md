@@ -23,8 +23,12 @@ metadata:
 # Dependency Audit
 
 ## Steps
-1. Detect lockfiles (package-lock, pnpm-lock, Cargo.lock, uv.lock, go.mod, poetry.lock).
-2. Run ecosystem audit tools when present: `Node audit tools`, `Node audit tools`, `Python audit tools`/`uv`, `Rust audit tools`, `Go vulnerability scanners`.
+1. Detect lockfiles (`package-lock.json`, `pnpm-lock.yaml`, `Cargo.lock`, `uv.lock`, `go.mod`/`go.sum`, `poetry.lock`).
+2. Run the matching audit command when the ecosystem tool is available:
+   - Node: `npm audit` or `pnpm audit` (or `yarn npm audit`)
+   - Python: `pip-audit` or `uv pip audit` / `poetry show` + advisory lookup
+   - Rust: `cargo audit`
+   - Go: `govulncheck ./...`
 3. Summarize **high/critical** first: package, issue, fixed version.
 4. Recommend minimal upgrade path; avoid mass major bumps without tests.
 5. Flag clearly abandoned deps when easy to see.

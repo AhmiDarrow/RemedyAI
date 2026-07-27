@@ -14,6 +14,27 @@ from remedy.models import ChannelKind
 
 logger = logging.getLogger(__name__)
 
+# Bot Framework connector hosts only — never store arbitrary attacker serviceUrl.
+_BF_SERVICE_HOST_SUFFIXES = (
+    ".botframework.com",
+    ".botframework.us",
+    ".botframework.azure.cn",
+)
+
+
+def _is_allowed_botframework_service_url(url: str) -> bool:
+    from urllib.parse import urlparse
+
+    u = (url or "").strip()
+    if not u.lower().startswith("https://"):
+        return False
+    host = (urlparse(u).hostname or "").lower()
+    if not host:
+        return False
+    if host in ("smba.trafficmanager.net", "directline.botframework.com"):
+        return True
+    return any(host == s[1:] or host.endswith(s) for s in _BF_SERVICE_HOST_SUFFIXES)
+
 
 class TeamsChannel(HttpSessionMixin, ChannelAdapter):
     """Outbound uses Bot Framework connector; inbound via /api/webhooks/teams."""
@@ -119,7 +140,11 @@ class TeamsChannel(HttpSessionMixin, ChannelAdapter):
             pass
 
     async def handle_activity(self, activity: dict[str, Any]) -> bool:
-        """Handle Bot Framework activity JSON from webhook."""
+        """Handle Bot Framework activity JSON from webhook.
+
+        Auth: allowlist/allow_all + trusted serviceUrl hosts. Full Azure AD JWT
+        validation can be layered later; empty allowlist without allow_all drops.
+        """
         if (activity.get("type") or "") != "message":
             return False
         text = (activity.get("text") or "").strip()
@@ -129,10 +154,22 @@ class TeamsChannel(HttpSessionMixin, ChannelAdapter):
         conv_id = str(conv.get("id") or "")
         from_id = str((activity.get("from") or {}).get("id") or "")
         service_url = str(activity.get("serviceUrl") or "").rstrip("/")
-        if service_url:
+        if service_url and _is_allowed_botframework_service_url(service_url):
             self._last_service_url = service_url
+        elif service_url:
+            logger.warning("Teams ignored untrusted serviceUrl host: %s", service_url[:120])
+            # Reject activities that only offer an untrusted reply endpoint
+            # when we have no prior trusted service URL to fall back to.
+            if not self._last_service_url:
+                return False
         if conv_id:
             self._last_conversation_id = conv_id
+        if not self._allowed and not self.allow_all:
+            logger.info(
+                "Teams ignore (empty allowlist, allow_all=false) conv=%s",
+                conv_id or from_id,
+            )
+            return False
         if not is_allowed(
             allowlist=self._allowed,
             allow_all=self.allow_all,

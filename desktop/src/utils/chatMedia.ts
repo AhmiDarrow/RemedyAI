@@ -5,7 +5,38 @@
  */
 import { ensureApiToken, getApiBase, authHeaders } from '../api/client'
 
+/** LRU-ish blob URL cache (path → object URL). Cap avoids unbounded memory. */
+const BLOB_CACHE_MAX = 64
 const blobCache = new Map<string, string>()
+
+function cacheSet(path: string, objectUrl: string): void {
+  // Refresh insertion order for simple LRU: delete then re-set.
+  if (blobCache.has(path)) {
+    const old = blobCache.get(path)
+    blobCache.delete(path)
+    if (old && old !== objectUrl) {
+      try {
+        URL.revokeObjectURL(old)
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  blobCache.set(path, objectUrl)
+  while (blobCache.size > BLOB_CACHE_MAX) {
+    const oldest = blobCache.keys().next().value as string | undefined
+    if (!oldest) break
+    const u = blobCache.get(oldest)
+    blobCache.delete(oldest)
+    if (u) {
+      try {
+        URL.revokeObjectURL(u)
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+}
 
 export function isRemoteOrDataUrl(src: string): boolean {
   const s = (src || '').trim()
@@ -62,12 +93,22 @@ export function normalizeLocalMediaPath(src: string): string {
 export async function resolveChatMediaUrl(src: string): Promise<string> {
   const raw = (src || '').trim()
   if (!raw) return ''
-  if (isRemoteOrDataUrl(raw)) return raw
-  if (!isLocalMediaPath(raw)) return raw
+  // Reject protocol-relative and non-http(s)/data/blob remotes.
+  if (/^\/\//.test(raw)) return ''
+  if (isRemoteOrDataUrl(raw)) {
+    if (/^(javascript|vbscript|file):/i.test(raw)) return ''
+    return raw
+  }
+  if (!isLocalMediaPath(raw)) return ''
 
   const path = normalizeLocalMediaPath(raw)
   const cached = blobCache.get(path)
-  if (cached) return cached
+  if (cached) {
+    // Touch for LRU order
+    blobCache.delete(path)
+    blobCache.set(path, cached)
+    return cached
+  }
 
   await ensureApiToken()
   const url = `${getApiBase()}/media?path=${encodeURIComponent(path)}`
@@ -83,7 +124,7 @@ export async function resolveChatMediaUrl(src: string): Promise<string> {
   }
   const blob = await res.blob()
   const objectUrl = URL.createObjectURL(blob)
-  blobCache.set(path, objectUrl)
+  cacheSet(path, objectUrl)
   return objectUrl
 }
 

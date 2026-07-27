@@ -2398,6 +2398,28 @@ for batch in (GAMING, DESIGN, CONTENT, PERSONAL, EXTRA):
 
 
 def main() -> None:
+    import argparse
+    import sys
+
+    p = argparse.ArgumentParser(
+        description=(
+            "Bulk-write domain skills. DANGEROUS: overwrites skills/*/SKILL.md. "
+            "Requires --force. Prefer hand-edits + build_catalog for normal releases."
+        )
+    )
+    p.add_argument(
+        "--force",
+        action="store_true",
+        help="Required to actually write files (safety latch).",
+    )
+    args = p.parse_args()
+    if not args.force:
+        print(
+            "Refusing to run: this generator overwrites skill packs.\n"
+            "Re-run with --force only if you intend a full regeneration.",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
     # load existing names so we don't overwrite older official engineering skills accidentally
     # We still write domain skills; overwrite if same name in this generator only
     written = 0

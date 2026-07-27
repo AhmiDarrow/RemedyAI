@@ -3,7 +3,8 @@ import type { ChatMessage, ModelDefinition, AgentDefinition, CommandDefinition }
 
 export async function listMessages(
   sessionId: string,
-  limit = 100,
+  /** Newest-window size (server returns latest N in chrono order). */
+  limit = 250,
   offset = 0,
 ): Promise<ChatMessage[]> {
   const data = await apiFetch<{ messages: ChatMessage[] }>(

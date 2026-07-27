@@ -230,7 +230,16 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
 
     @app.post("/api/sessions/{session_id}/abort")
     async def abort_session(session_id: str):
-        return {"status": "aborted", "session_id": session_id}
+        """Cooperatively stop in-flight generation for this session."""
+        from remedy.core.turn_context import abort_session as _abort_turn
+
+        n = _abort_turn(session_id)
+        if runtime is not None:
+            # Clear global streaming flag when this session was the active one.
+            with contextlib.suppress(Exception):
+                if str(getattr(runtime, "_session_id", "") or "") == str(session_id):
+                    runtime._streaming = False  # type: ignore[attr-defined]
+        return {"status": "aborted", "session_id": session_id, "notified": n}
 
     @app.put("/api/sessions/{session_id}/llm")
     async def set_session_llm(session_id: str, req: SessionLlmRequest):
@@ -621,6 +630,14 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                     attachments=att_dicts,
                     plan_mode=bool(getattr(req, "plan_mode", False)),
                 ):
+                    if isinstance(token, str) and token.startswith("@@aborted"):
+                        status = "aborted"
+                        yield (
+                            "event: error\ndata: "
+                            + json.dumps({"type": "error", "message": "Generation stopped"})
+                            + "\n\n"
+                        )
+                        break
                     if token.startswith("@@tool_call:"):
                         raw = token[len("@@tool_call:") :]
                         tool_name = raw

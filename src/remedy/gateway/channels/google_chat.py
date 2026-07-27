@@ -76,7 +76,12 @@ class GoogleChatChannel(HttpSessionMixin, ChannelAdapter):
         return
 
     async def handle_event(self, data: dict[str, Any]) -> bool:
-        """Handle Chat app event (MESSAGE)."""
+        """Handle Chat app event (MESSAGE).
+
+        Fail closed when allowlist is empty and allow_all is off (same policy as
+        Telegram). Full Google Chat JWT verification is environment-specific;
+        operators should set allow_ids or enable allow_all only behind a private URL.
+        """
         etype = data.get("type") or data.get("eventType") or ""
         msg = data.get("message") or {}
         if etype and etype not in ("MESSAGE", "message"):
@@ -93,6 +98,13 @@ class GoogleChatChannel(HttpSessionMixin, ChannelAdapter):
         sender = (msg.get("sender") or data.get("user") or {}) or {}
         user_name = str(sender.get("name") or sender.get("displayName") or "")
         if sender.get("type") == "BOT":
+            return False
+        # Empty allowlist + not allow_all → ignore (do not open the agent to the world)
+        if not self._allowed and not self.allow_all:
+            logger.info(
+                "Google Chat ignore (empty allowlist, allow_all=false) space=%s",
+                space_id or space_name,
+            )
             return False
         if not is_allowed(
             allowlist=self._allowed,

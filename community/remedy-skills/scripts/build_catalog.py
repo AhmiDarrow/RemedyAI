@@ -30,10 +30,16 @@ def _parse_skill_md(path: Path) -> dict:
 def _zip_skill(skill_dir: Path) -> bytes:
     buf = io.BytesIO()
     root_parent = skill_dir.parent
+    skip_parts = {"__pycache__", ".git", ".DS_Store", "node_modules"}
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for f in skill_dir.rglob("*"):
-            if f.is_file():
-                zf.write(f, f.relative_to(root_parent).as_posix())
+            if not f.is_file():
+                continue
+            if any(p in skip_parts for p in f.parts):
+                continue
+            if f.suffix in {".pyc", ".pyo"}:
+                continue
+            zf.write(f, f.relative_to(root_parent).as_posix())
     return buf.getvalue()
 
 
@@ -54,9 +60,18 @@ def build_catalog(
 
     for skill_md in sorted(skills_dir.glob("*/SKILL.md")):
         fm = _parse_skill_md(skill_md)
-        name = str(fm.get("name") or skill_md.parent.name).strip()
+        folder = skill_md.parent.name
+        name = str(fm.get("name") or folder).strip()
+        if name != folder:
+            raise ValueError(
+                f"Skill frontmatter name {name!r} must match folder {folder!r} ({skill_md})"
+            )
+        if not name or "/" in name or "\\" in name or ".." in name:
+            raise ValueError(f"Unsafe skill name {name!r} in {skill_md}")
         version = str(fm.get("version") or "1.0.0").strip()
         desc = str(fm.get("description") or "").strip()
+        if not desc:
+            raise ValueError(f"Missing description in {skill_md}")
         author = str(fm.get("author") or "community").strip()
         tags = list(fm.get("tags") or [])
         tools = list(fm.get("tools") or [])

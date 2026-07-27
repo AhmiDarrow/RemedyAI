@@ -246,6 +246,13 @@ async def call_llm_stream(runtime, message: str,
             timeout=timeout, connector=connector
         ) as http:
             for step in range(runtime._max_react_steps):
+                # Cooperative abort between ReAct steps (Stop generation).
+                with suppress(Exception):
+                    from remedy.core.turn_context import is_turn_aborted
+
+                    if is_turn_aborted():
+                        yield "@@aborted\n"
+                        return
                 is_final_step = step >= runtime._max_react_steps - 1
                 # Only force a final answer at the true step wall (or sticky).
                 # Early force-answer (old: step>=8) made long tool chains "stuck".

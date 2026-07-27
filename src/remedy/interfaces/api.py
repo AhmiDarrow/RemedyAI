@@ -230,6 +230,11 @@ def create_app(
         "/api/openapi.json",
         "/api/openapi.yaml",
     }
+    # Messenger platform webhooks cannot send our Bearer token; they authenticate
+    # via their own verify tokens / HMAC / JWT inside the route handlers.
+    _AUTH_PUBLIC_PREFIXES = (
+        "/api/webhooks/",
+    )
     if api_key:
         app.state.api_key = api_key  # type: ignore[attr-defined]
 
@@ -243,6 +248,8 @@ def create_app(
                 return await call_next(request)
             # Public docs / health / bootstrap
             if path in _AUTH_PUBLIC or path.startswith("/docs") or path.startswith("/redoc"):
+                return await call_next(request)
+            if any(path.startswith(p) for p in _AUTH_PUBLIC_PREFIXES):
                 return await call_next(request)
             # SPA / static Web UI (GET only) — browser loads shell then bootstraps token
             if request.method in ("GET", "HEAD") and not path.startswith("/api"):

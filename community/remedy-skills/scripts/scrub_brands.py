@@ -119,6 +119,28 @@ def scrub_file(path: Path) -> bool:
 
 
 def main() -> None:
+    import argparse
+    import sys
+
+    p = argparse.ArgumentParser(
+        description=(
+            "ONE-SHOT brand scrub. Destructive (renames + rewrites). "
+            "Most REPLS are no-ops now; do not re-run casually. Requires --force."
+        )
+    )
+    p.add_argument(
+        "--force",
+        action="store_true",
+        help="Required to actually mutate the tree.",
+    )
+    args = p.parse_args()
+    if not args.force:
+        print(
+            "Refusing to run: scrub_brands is a frozen one-shot.\n"
+            "Re-run with --force only if you know you need it.",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
     rename_skills()
     n = 0
     for p in ROOT.rglob("*"):

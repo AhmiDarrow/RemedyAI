@@ -7,6 +7,7 @@ import {
   type StreamProgress,
   type UsagePayload,
 } from '../api/messages'
+import { abortSession } from '../api/sessions'
 import type { ChatMessage } from '../types'
 import { toolLabel, type ProcessStep } from '../utils/toolLabels'
 import { emptyUsage, type UsageSnapshot } from '../utils/tokenCost'
@@ -184,24 +185,31 @@ export function useMessages(sessionId: string | null) {
     // Always load when switching sessions (force). Only skip mid-stream refreshes
     // for the same session — previously a stuck stream blocked all session switches.
     if (streamingRef.current && !opts?.force) return
+    const loadId = sessionId
     setLoading(true)
     setLoadError(null)
     try {
-      const msgs = await listMessages(sessionId)
+      const msgs = await listMessages(loadId)
+      // Ignore stale responses after a session switch.
+      if (sessionIdRef.current !== loadId) return
       setMessages(Array.isArray(msgs) ? msgs : [])
     } catch (e: unknown) {
+      if (sessionIdRef.current !== loadId) return
       const msg = e instanceof Error ? e.message : String(e)
-      console.warn('[remedy] listMessages failed', sessionId, msg)
+      console.warn('[remedy] listMessages failed', loadId, msg)
       setLoadError(msg || 'Failed to load messages')
       // Clear so we never show another session's transcript under a load failure.
       setMessages([])
     } finally {
-      setLoading(false)
+      if (sessionIdRef.current === loadId) {
+        setLoading(false)
+      }
     }
   }, [sessionId])
 
   // Session change: always force-load history so list clicks work.
   // Abort any in-flight stream and clear stuck flags so a dead stream cannot blank the feed.
+  // Drop the send queue — queued items are for the previous session context.
   useEffect(() => {
     try {
       streamCtrlRef.current?.abort()
@@ -219,6 +227,8 @@ export function useMessages(sessionId: string | null) {
     setTaskProgress(null)
     setStreamCtrl(null)
     streamCtrlRef.current = null
+    setQueue([])
+    queueRef.current = []
     void load({ force: true })
   }, [load])
 
@@ -409,22 +419,25 @@ export function useMessages(sessionId: string | null) {
         setTaskProgress(null)
         streamingRef.current = false
         sendLockRef.current = false
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: crypto.randomUUID(),
-            role: 'system',
-            content: `Error: ${errMsg}`,
-            thinking: null,
-            tool_calls: [],
-            tool_results: [],
-            model: null,
-            agent: null,
-            tokens: null,
-            created_at: new Date().toISOString(),
-            reverted: false,
-          },
-        ])
+        // Only paint errors on the session that started this turn.
+        if (sessionIdRef.current === targetId) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: crypto.randomUUID(),
+              role: 'system',
+              content: `Error: ${errMsg}`,
+              thinking: null,
+              tool_calls: [],
+              tool_results: [],
+              model: null,
+              agent: null,
+              tokens: null,
+              created_at: new Date().toISOString(),
+              reverted: false,
+            },
+          ])
+        }
         window.setTimeout(() => {
           void drainQueue()
         }, 40)
@@ -622,6 +635,7 @@ export function useMessages(sessionId: string | null) {
           return
         }
         setQueue((q) => [...q, item])
+        queueRef.current = [...queueRef.current, item]
         return
       }
 
@@ -631,8 +645,13 @@ export function useMessages(sessionId: string | null) {
   )
 
   const stop = useCallback(() => {
+    const sid = sessionIdRef.current
     streamCtrlRef.current?.abort()
     streamCtrl?.abort()
+    // Server-side cooperative cancel (tools/LLM keep running until this lands).
+    if (sid) {
+      void abortSession(sid).catch(() => {})
+    }
     resetStreamBuffers()
     setStreaming(false)
     setStreamCtrl(null)
@@ -671,10 +690,15 @@ export function useMessages(sessionId: string | null) {
     })
     setProcessSteps([])
     processStepsRef.current = []
-  }, [streamCtrl, resetStreamBuffers])
+    // Drain any prompts queued "after" the stopped turn.
+    window.setTimeout(() => {
+      void drainQueue()
+    }, 40)
+  }, [streamCtrl, resetStreamBuffers, drainQueue])
 
   const cancelQueued = useCallback((id: string) => {
     setQueue((q) => q.filter((x) => x.id !== id))
+    queueRef.current = queueRef.current.filter((x) => x.id !== id)
   }, [])
 
   const clearQueue = useCallback(() => {
@@ -684,6 +708,7 @@ export function useMessages(sessionId: string | null) {
 
   const updateQueued = useCallback((id: string, patch: Partial<QueuedSend>) => {
     setQueue((q) => q.map((x) => (x.id === id ? { ...x, ...patch } : x)))
+    queueRef.current = queueRef.current.map((x) => (x.id === id ? { ...x, ...patch } : x))
   }, [])
 
   const promoteQueued = useCallback(
