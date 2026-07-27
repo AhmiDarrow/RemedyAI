@@ -43,6 +43,7 @@ export type SessionEventsHandlers = {
 export function subscribeSessionEvents(handlers: SessionEventsHandlers): () => void {
   const ac = new AbortController()
   let stopped = false
+  let backoffMs = 1500
 
   const run = async () => {
     while (!stopped && !ac.signal.aborted) {
@@ -59,13 +60,15 @@ export function subscribeSessionEvents(handlers: SessionEventsHandlers): () => v
         })
         if (!res.ok || !res.body) {
           handlers.onError?.(new Error(`session events HTTP ${res.status}`))
-          await sleep(2000)
+          await sleep(backoffMs)
+          backoffMs = Math.min(30_000, Math.floor(backoffMs * 1.6))
           continue
         }
+        backoffMs = 1500
         const reader = res.body.getReader()
         const decoder = new TextDecoder()
         let buf = ''
-        while (!stopped) {
+        while (!stopped && !ac.signal.aborted) {
           const { done, value } = await reader.read()
           if (done) break
           buf += decoder.decode(value, { stream: true })
@@ -78,7 +81,8 @@ export function subscribeSessionEvents(handlers: SessionEventsHandlers): () => v
       } catch (e) {
         if (ac.signal.aborted || stopped) break
         handlers.onError?.(e)
-        await sleep(2000)
+        await sleep(backoffMs)
+        backoffMs = Math.min(30_000, Math.floor(backoffMs * 1.6))
       }
     }
   }

@@ -736,7 +736,15 @@ export default function App() {
     }
   }, [serverState, refreshModels, refreshSessions])
 
-  // Realtime session sync (messenger + multi-surface): refresh list / active thread
+  // Realtime session sync (messenger + multi-surface). Stable subscription —
+  // do not re-open SSE when activeId changes (that froze / fought the UI).
+  const activeIdRef = useRef(activeId)
+  activeIdRef.current = activeId
+  const refreshSessionsRef = useRef(refreshSessions)
+  refreshSessionsRef.current = refreshSessions
+  const reloadMessagesRef = useRef(reloadMessages)
+  reloadMessagesRef.current = reloadMessages
+
   useEffect(() => {
     if (serverState !== 'ready') return
     let unsub: (() => void) | undefined
@@ -744,11 +752,12 @@ export default function App() {
     const scheduleRefresh = (sessionId?: string) => {
       if (debounce) clearTimeout(debounce)
       debounce = setTimeout(() => {
-        void refreshSessions()
-        if (sessionId && sessionId === activeId) {
-          void reloadMessages(sessionId)
+        void refreshSessionsRef.current()
+        // load() takes { force }, not session id — force-refresh active thread only
+        if (sessionId && sessionId === activeIdRef.current) {
+          void reloadMessagesRef.current({ force: true })
         }
-      }, 200)
+      }, 400)
     }
     void import('./api/sessionEvents').then(({ subscribeSessionEvents }) => {
       unsub = subscribeSessionEvents({
@@ -768,7 +777,7 @@ export default function App() {
       if (debounce) clearTimeout(debounce)
       unsub?.()
     }
-  }, [serverState, refreshSessions, activeId, reloadMessages])
+  }, [serverState])
 
   const handleNewSession = useCallback(async () => {
     const s = await create()
