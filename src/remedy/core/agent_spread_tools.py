@@ -42,7 +42,8 @@ def register_spread_tools(runtime: Any) -> None:
             from remedy.interfaces.config import load_config
 
             cfg = load_config() or {}
-            sp = cfg.get("spread") if isinstance(cfg.get("spread"), dict) else {}
+            raw_sp = cfg.get("spread") if isinstance(cfg, dict) else None
+            sp: dict = raw_sp if isinstance(raw_sp, dict) else {}
             if sp.get("enabled") is False:
                 enabled = False
             if sp.get("max_workers") is not None:

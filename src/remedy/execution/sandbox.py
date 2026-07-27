@@ -161,7 +161,6 @@ class SubprocessSandbox(Sandbox):
             )
             from remedy.execution.process import (
                 create_hidden_subprocess_exec,
-                kill_process_tree,
             )
 
             if is_turn_aborted():
@@ -236,9 +235,13 @@ async def _communicate_or_abort(
 
     comm = asyncio.create_task(proc.communicate())
     waiters: set[asyncio.Task[Any]] = {comm}
-    abort_task: asyncio.Task[None] | None = None
+    abort_task: asyncio.Task[Any] | None = None
     if abort_event is not None:
-        abort_task = asyncio.create_task(abort_event.wait())
+
+        async def _wait_abort() -> None:
+            await abort_event.wait()
+
+        abort_task = asyncio.create_task(_wait_abort())
         waiters.add(abort_task)
 
     done, pending = await asyncio.wait(

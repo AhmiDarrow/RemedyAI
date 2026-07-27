@@ -349,11 +349,11 @@ def _try_local_refine(
     try:
         from remedy.runtime.jobs import LocalJob, LocalRole, default_queue
         from remedy.runtime.local_infer import ensure_handlers_registered
-        from remedy.vision.config import load_vision_config
+        from remedy.vision.config import load_vision_json
 
         ensure_handlers_registered()
-        cfg = load_vision_config()
-        base_url = str(getattr(cfg, "base_url", None) or "") or "http://127.0.0.1:8742"
+        cfg = load_vision_json()
+        base_url = str(cfg.get("base_url") or "") or "http://127.0.0.1:8742"
         prompt = (
             "Decide if the user request needs parallel silent workers.\n"
             "Reply ONLY JSON: "
@@ -396,7 +396,7 @@ def _try_local_refine(
         tasks_raw = parsed.get("tasks") if isinstance(parsed.get("tasks"), list) else []
         tasks = [
             SpreadTask.from_dict(t, index=i)
-            for i, t in enumerate(tasks_raw)
+            for i, t in enumerate(list(tasks_raw or []))
             if isinstance(t, dict)
         ][:max_tasks]
         if spread and len(tasks) < 2:
