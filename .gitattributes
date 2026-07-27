@@ -1,0 +1,3 @@
+# Catalog signature is over exact bytes — force LF for portable verify
+community/remedy-skills/catalog.json text eol=lf
+community/remedy-skills/catalog.json.sig text eol=lf
