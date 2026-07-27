@@ -42,7 +42,7 @@ def test_note_work_path_on_runtime(tmp_path: Path):
 
     r = R()
     note_work_path(r, tmp_path / "package.json")
-    assert getattr(r, "_work_roots")
+    assert r._work_roots
     assert str(tmp_path.resolve()) in r._work_roots[0] or tmp_path.as_posix() in r._work_roots[
         0
     ].replace("\\", "/")
