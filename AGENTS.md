@@ -19,8 +19,8 @@ on demand.
 |---|------|---------------|---------|
 | 1 | **Fix / implement** | Requested behavior works; no known regressions you introduced | Keep fixing |
 | 2 | **Test** | Full suite (or documented subset) green; targeted tests for the change | Fix + re-run; **do not commit “red”** |
-| 3 | **Update project** | Version bump if shipping; code + assets consistent | Align versions / assets |
-| 4 | **Update documentation** | CHANGELOG + user/manual notes for user-visible change; run docs sync/check if the repo has it | Sync docs; re-check |
+| 3 | **Update project** | Version bump **only** when shipping runtime/API/installer behavior (not docs-only) | Align versions / assets |
+| 4 | **Update documentation** | CHANGELOG + user/manual notes for user-visible change; run docs sync/check if the repo has it. **Do not bump version for docs-only fixes** (e.g. What's new catch-up) | Sync docs; re-check |
 | 5 | **Build** | Package / desktop / artifacts the project expects still build | Fix build; re-test if needed |
 | 6 | **Commit** | Clear conventional message; only intentional files | Split noise out of the commit |
 | 7 | **Push → CI** | Remote CI green for that commit | Fix on a follow-up commit; **do not publish** |

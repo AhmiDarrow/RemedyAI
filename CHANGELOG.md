@@ -4,12 +4,10 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
-## [0.18.3] - 2026-07-27
+### Docs
 
-### Docs: What's new for 0.18.1 / 0.18.2
-
-- **Owner's manual / in-app F1:** `13-whats-new` now covers **0.18.1** (run-until-finished + title bar)
-  and **0.18.2** (spread_run task-array fix); current series stamped **v0.18.3**.
+- **What's new** (`docs/manual/13-whats-new.md` / F1): owner notes for **0.18.1** and **0.18.2**
+  (no version bump — docs-only).
 
 ## [0.18.2] - 2026-07-27
 

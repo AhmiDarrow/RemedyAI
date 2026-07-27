@@ -2,15 +2,11 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current series: **v0.18.3**.
+Current series: **v0.18.2**.
 
 ## Contents
 
-- [0.18.3](#0183---docs) · [0.18.2](#0182---spread-run-fix) · [0.18.1](#0181---run-until-finished--title-bar) · [0.18.0](#0180---spread--library-suggest) · [0.17.0](#0170---coding-agency--process-trail) · [0.16.0](#0160---messengers--polish) · older below
-
-## 0.18.3 - Docs
-
-- **What's new** (this page / F1) caught up for **0.18.1** and **0.18.2** notes that shipped without an owner-facing summary.
+- [0.18.2](#0182---spread-run-fix) · [0.18.1](#0181---run-until-finished--title-bar) · [0.18.0](#0180---spread--library-suggest) · [0.17.0](#0170---coding-agency--process-trail) · [0.16.0](#0160---messengers--polish) · older below
 
 ## 0.18.2 - Spread run fix
 
