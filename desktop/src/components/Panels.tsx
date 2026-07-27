@@ -715,11 +715,23 @@ export function SkillsPanel({
         )}
       </div>
 
-      {panelTab === 'library' ? (
-        <div className="flex-1 min-h-0" style={{ minHeight: 280 }}>
-          <SkillsLibrary onInstalled={() => load()} installed={skills} />
-        </div>
-      ) : null}
+      {/* Keep Library mounted while Skills panel is open so list state survives
+          tab flips and soft-refresh can run without remount stutter. */}
+      <div
+        className="flex-1 min-h-0"
+        style={{
+          minHeight: panelTab === 'library' ? 280 : 0,
+          display: panelTab === 'library' ? 'flex' : 'none',
+          flexDirection: 'column',
+        }}
+        hidden={panelTab !== 'library'}
+      >
+        <SkillsLibrary
+          active={panelTab === 'library'}
+          onInstalled={() => load()}
+          installed={skills}
+        />
+      </div>
 
       {panelTab === 'installed' ? (
         <>
