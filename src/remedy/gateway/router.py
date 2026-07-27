@@ -180,14 +180,19 @@ class Gateway:
             except Exception:
                 logger.exception("Handler error for event %s", event.id)
 
-        if self.memory:
+        # Skip heavy memory upsert for messenger MESSAGE events — chat_sessions /
+        # chat_messages already persist the turn (avoids double SQLite write + lag).
+        ch = event.channel.value if hasattr(event.channel, "value") else str(event.channel)
+        kind = event.kind.value if hasattr(event.kind, "value") else str(event.kind)
+        messenger_msg = kind == "message" and ch not in ("cli", "web", "api")
+        if self.memory and not messenger_msg:
             try:
                 mem_entry = MemoryEntry(
                     entry_type=MemoryEntryType.SYSTEM,
                     title=f"Gateway event: {event.kind.value}",
                     content=json.dumps(event.payload, default=str)[:500],
                     importance=0.2,
-                    tags=["gateway", event.channel.value],
+                    tags=["gateway", ch],
                     session_id=event.session_id,
                 )
                 await self.memory.upsert(mem_entry)

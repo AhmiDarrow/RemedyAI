@@ -100,7 +100,7 @@ def register_catalog_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
             cache = app.state._model_discovery_cache
         now = time.time()
         cached = cache.get(cache_key)
-        from_cache = bool(cached and (now - cached[0]) < 90)
+        from_cache = bool(cached and (now - cached[0]) < 180)
         discovered = list(cached[1]) if from_cache else []
 
         verify_ssl = not _is_local_url(base_url)
@@ -140,9 +140,10 @@ def register_catalog_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
             and base_url
         ):
             try:
-                # 3.5s: enough for cloud; cache (90s) keeps Settings/status bar snappy.
+                # 1.8s: enough for cloud; 90s cache keeps Settings/status bar snappy.
+                # Was 3.5s and stacked with parallel UI fetches (felt like multi-second lag).
                 async with aiohttp.ClientSession(
-                    timeout=aiohttp.ClientTimeout(total=3.5)
+                    timeout=aiohttp.ClientTimeout(total=1.8)
                 ) as session:
                     models_url = base_url.rstrip("/") + "/models"
                     headers: dict[str, str] = {}

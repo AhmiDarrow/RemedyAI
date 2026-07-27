@@ -179,6 +179,7 @@ async def persist_user_message(
         agent=agent,
     )
     saved = await memory.add_chat_message(msg)
+    # One event is enough for desktop SSE (list + active thread refresh).
     await publish_session_event(
         "message_added",
         session.id,
@@ -186,12 +187,7 @@ async def persist_user_message(
         message_id=str(saved.id),
         title=session.title,
         role="user",
-    )
-    await publish_session_event(
-        "session_updated",
-        session.id,
-        origin_channel=session.origin_channel,
-        title=session.title,
+        message_count=getattr(session, "message_count", None),
     )
     return saved
 
@@ -219,12 +215,6 @@ async def persist_assistant_message(
         message_id=str(saved.id),
         title=session.title,
         role="assistant",
-    )
-    await publish_session_event(
-        "session_updated",
-        session.id,
-        origin_channel=session.origin_channel,
-        title=session.title,
     )
     return saved
 

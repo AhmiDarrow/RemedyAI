@@ -1,4 +1,11 @@
-"""Telegram bot channel — long-poll inbound + sendMessage outbound."""
+"""Telegram bot channel — long-poll inbound + sendMessage outbound.
+
+Optimizations:
+- One shared aiohttp session (no per-request TLS handshake)
+- 409 (multi-poller) backoff without tight error loops
+- deleteWebhook on start so getUpdates is the sole delivery path
+- typing indicator for snappier feel while the agent thinks
+"""
 
 from __future__ import annotations
 
@@ -7,6 +14,7 @@ import contextlib
 import json
 import logging
 import os
+import time
 
 from remedy.gateway.router import ChannelAdapter
 from remedy.models import ChannelKind, EventKind, GatewayEvent
@@ -26,25 +34,57 @@ class TelegramChannel(ChannelAdapter):
         allow_all: bool = False,
     ) -> None:
         super().__init__(ChannelKind.TELEGRAM, gateway)
-        self.bot_token = bot_token
-        self.chat_ids: list[str] = [str(c) for c in (chat_ids or [])]
+        self.bot_token = (bot_token or "").strip()
+        self.chat_ids: list[str] = [str(c).strip() for c in (chat_ids or []) if str(c).strip()]
+        self._allowed = frozenset(self.chat_ids)
         self.allow_all = bool(allow_all)
         self._poll_task: asyncio.Task | None = None
         self._last_update_id: int = 0
+        self._session = None  # aiohttp.ClientSession
+        self._api_base = (
+            f"https://api.telegram.org/bot{self.bot_token}" if self.bot_token else ""
+        )
+        self._conflict_until = 0.0
+        self._last_err_log = 0.0
+
+    async def _ensure_session(self):
+        import aiohttp
+
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=60, sock_connect=10),
+                headers={"Connection": "keep-alive"},
+            )
+        return self._session
+
+    async def _close_session(self) -> None:
+        if self._session is not None and not self._session.closed:
+            await self._session.close()
+        self._session = None
 
     async def start(self) -> None:
         await super().start()
-        if self.bot_token:
-            logger.info(
-                "Telegram channel active (allowlist=%d, allow_all=%s)",
-                len(self.chat_ids),
-                self.allow_all,
-            )
-            # Ensure we are on a live loop (uvicorn lifespan); cancelled loops drop polls.
-            self._poll_task = asyncio.create_task(self._poll_loop())
-            logger.info("Telegram long-poll task scheduled")
-        else:
+        if not self.bot_token:
             logger.info("Telegram channel: stub mode (no token)")
+            return
+        logger.info(
+            "Telegram channel active (allowlist=%d, allow_all=%s)",
+            len(self.chat_ids),
+            self.allow_all,
+        )
+        # Prefer getUpdates; drop any leftover webhook so we don't fight webhooks.
+        try:
+            session = await self._ensure_session()
+            async with session.post(
+                f"{self._api_base}/deleteWebhook",
+                json={"drop_pending_updates": False},
+            ) as resp:
+                if resp.status == 200:
+                    logger.debug("Telegram deleteWebhook ok")
+        except Exception:
+            logger.debug("Telegram deleteWebhook failed", exc_info=True)
+        self._poll_task = asyncio.create_task(self._poll_loop())
+        logger.info("Telegram long-poll task scheduled")
 
     async def stop(self) -> None:
         if self._poll_task is not None:
@@ -52,34 +92,51 @@ class TelegramChannel(ChannelAdapter):
             with contextlib.suppress(asyncio.CancelledError):
                 await self._poll_task
             self._poll_task = None
+        await self._close_session()
         await super().stop()
 
     async def send(self, message: str, target: str | None = None) -> bool:
         if not self.bot_token:
             logger.debug("Telegram stub: %s", message[:50])
             return True
-
-        import aiohttp
-
         chat_id = target or (self.chat_ids[0] if self.chat_ids else None)
         if chat_id is None:
             return False
+        try:
+            session = await self._ensure_session()
+            async with session.post(
+                f"{self._api_base}/sendMessage",
+                json={"chat_id": chat_id, "text": (message or "")[:4096]},
+            ) as resp:
+                if resp.status != 200:
+                    body = await resp.text()
+                    logger.warning("Telegram send %s: %s", resp.status, body[:160])
+                return resp.status == 200
+        except Exception as e:
+            logger.error("Telegram send failed: %s", e)
+            return False
 
-        url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
-        async with aiohttp.ClientSession() as session:
-            try:
-                async with session.post(
-                    url,
-                    json={"chat_id": chat_id, "text": message[:4096]},
-                ) as resp:
-                    return resp.status == 200
-            except Exception as e:
-                logger.error("Telegram send failed: %s", e)
-                return False
+    async def send_typing(self, chat_id: str) -> None:
+        """Best-effort typing indicator (non-blocking UX polish)."""
+        if not self.bot_token or not chat_id:
+            return
+        try:
+            session = await self._ensure_session()
+            async with session.post(
+                f"{self._api_base}/sendChatAction",
+                json={"chat_id": chat_id, "action": "typing"},
+            ) as resp:
+                _ = resp.status
+        except Exception:
+            pass
 
     async def _poll_loop(self) -> None:
         while self._running:
             try:
+                now = time.monotonic()
+                if now < self._conflict_until:
+                    await asyncio.sleep(min(5.0, self._conflict_until - now))
+                    continue
                 updates = await self._get_updates(timeout=25)
                 for update in updates:
                     await self._handle_update(update)
@@ -90,40 +147,64 @@ class TelegramChannel(ChannelAdapter):
                 await asyncio.sleep(2.0)
 
     async def _get_updates(self, timeout: int = 25) -> list[dict]:
-        import aiohttp
-
-        url = f"https://api.telegram.org/bot{self.bot_token}/getUpdates"
+        session = await self._ensure_session()
         params = {
             "timeout": timeout,
             "offset": self._last_update_id + 1 if self._last_update_id else 0,
             "allowed_updates": json.dumps(["message", "edited_message"]),
         }
-        async with (
-            aiohttp.ClientSession() as session,
-            session.get(
-                url,
+        try:
+            async with session.get(
+                f"{self._api_base}/getUpdates",
                 params=params,
-                timeout=aiohttp.ClientTimeout(total=timeout + 10),
-            ) as resp,
-        ):
-            if resp.status != 200:
-                text = await resp.text()
-                if resp.status == 404:
-                    logger.error(
-                        "Telegram getUpdates 404 — bot token is invalid or revoked. "
-                        "Re-paste the token from @BotFather in Settings → Messengers "
-                        "(current token is rejected by api.telegram.org). Body: %s",
-                        text[:160],
-                    )
-                    await asyncio.sleep(30.0)
-                else:
-                    logger.warning("Telegram getUpdates %s: %s", resp.status, text[:200])
-                    await asyncio.sleep(2.0)
-                return []
-            data = await resp.json()
-            if not data.get("ok"):
-                return []
-            return list(data.get("result") or [])
+                timeout=aiohttp_timeout(timeout + 10),
+            ) as resp:
+                if resp.status != 200:
+                    text = await resp.text()
+                    await self._handle_poll_error(resp.status, text)
+                    return []
+                data = await resp.json()
+                if not data.get("ok"):
+                    return []
+                return list(data.get("result") or [])
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            # Network blips — don't spam
+            now = time.monotonic()
+            if now - self._last_err_log > 30:
+                logger.warning("Telegram getUpdates network: %s", e)
+                self._last_err_log = now
+            await asyncio.sleep(2.0)
+            return []
+
+    async def _handle_poll_error(self, status: int, text: str) -> None:
+        now = time.monotonic()
+        if status == 404:
+            if now - self._last_err_log > 60:
+                logger.error(
+                    "Telegram getUpdates 404 — bot token invalid/revoked. "
+                    "Re-paste from @BotFather in Settings → Messengers. %s",
+                    text[:120],
+                )
+                self._last_err_log = now
+            await asyncio.sleep(30.0)
+            return
+        if status == 409:
+            # Another process is polling this bot — back off hard.
+            self._conflict_until = now + 25.0
+            if now - self._last_err_log > 20:
+                logger.warning(
+                    "Telegram getUpdates 409 (another poller). "
+                    "Only one Remedy instance should own the bot. Backing off 25s."
+                )
+                self._last_err_log = now
+            await asyncio.sleep(5.0)
+            return
+        if now - self._last_err_log > 15:
+            logger.warning("Telegram getUpdates %s: %s", status, text[:160])
+            self._last_err_log = now
+        await asyncio.sleep(2.0)
 
     async def _handle_update(self, update: dict) -> None:
         uid = update.get("update_id")
@@ -148,24 +229,22 @@ class TelegramChannel(ChannelAdapter):
             "on",
         )
         allow_all = bool(self.allow_all) or env_allow
-        if not self.chat_ids and not allow_all:
+        if not self._allowed and not allow_all:
             logger.info(
-                "Telegram ignore chat_id=%s user_id=%s (allowlist empty; set allow_chat_ids or allow_all)",
+                "Telegram ignore chat_id=%s (empty allowlist)",
+                chat_id,
+            )
+            return
+        if self._allowed and chat_id not in self._allowed and user_id not in self._allowed:
+            logger.info(
+                "Telegram ignore chat_id=%s user_id=%s (not allowlisted)",
                 chat_id,
                 user_id,
             )
             return
-        # Accept either chat id (DM chat id == user id) or explicit user id.
-        if self.chat_ids:
-            allowed = {str(x).strip() for x in self.chat_ids if str(x).strip()}
-            if chat_id not in allowed and user_id not in allowed:
-                logger.info(
-                    "Telegram ignore chat_id=%s user_id=%s (not in allowlist %s)",
-                    chat_id,
-                    user_id,
-                    sorted(allowed),
-                )
-                return
+
+        # UX: show typing while agent works
+        asyncio.create_task(self.send_typing(chat_id))
 
         event = GatewayEvent(
             kind=EventKind.MESSAGE,
@@ -178,7 +257,7 @@ class TelegramChannel(ChannelAdapter):
                 "user_id": user_id,
                 "username": from_user.get("username"),
             },
-            raw=str(update)[:2000],
+            raw=str(update)[:1200],
         )
         logger.info(
             "Telegram inbound chat_id=%s user=%s len=%d",
@@ -187,3 +266,9 @@ class TelegramChannel(ChannelAdapter):
             len(text),
         )
         await self.gateway.emit(event)
+
+
+def aiohttp_timeout(total: float):
+    import aiohttp
+
+    return aiohttp.ClientTimeout(total=total)

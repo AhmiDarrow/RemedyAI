@@ -30,11 +30,27 @@ def attach_messengers_to_gateway(runtime: Any, gateway: Any) -> list[str]:
             or None
         )
         if is_messenger_channel(ch):
+            # Refresh typing occasionally while the model streams (Telegram only).
+            typing_fn = None
+            adapter = gateway.get_channel(event.channel) if hasattr(gateway, "get_channel") else None
+            if adapter is not None and hasattr(adapter, "send_typing") and target:
+                typing_fn = adapter.send_typing
+
             buf: list[str] = []
+            last_typing = 0.0
+            import time as _time
+
             async for chunk in handle_messenger_event(runtime, event):
                 if chunk is not None:
                     buf.append(str(chunk))
                     yield chunk
+                    now = _time.monotonic()
+                    if typing_fn is not None and now - last_typing > 4.0:
+                        last_typing = now
+                        try:
+                            await typing_fn(str(target))
+                        except Exception:
+                            pass
             full = "".join(buf).strip()
             if full:
                 for part in outbound_chunks(full, ch):
