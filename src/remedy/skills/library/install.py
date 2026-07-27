@@ -6,6 +6,7 @@ import hashlib
 import io
 import logging
 import tempfile
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -166,10 +167,8 @@ async def install_skill_from_catalog(
     if force and runtime is not None and hasattr(runtime, "skills") and hasattr(
         runtime.skills, "remove"
     ):
-        try:
+        with suppress(Exception):
             runtime.skills.remove(entry.name)
-        except Exception:
-            pass
 
     tmp = Path(tempfile.mkdtemp(prefix="remedy-lib-install-"))
     try:

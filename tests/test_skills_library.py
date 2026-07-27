@@ -94,8 +94,9 @@ async def test_install_local_hello_quarantine(tmp_path: Path):
     cat.source = "local"
 
     # Patch entries with correct local zip checksums via resolve path
-    from remedy.skills.library.install import _zip_from_local_skill
     import hashlib
+
+    from remedy.skills.library.install import _zip_from_local_skill
 
     for entry in cat.skills:
         if entry.id == "hello-library":

@@ -110,7 +110,8 @@ The desktop app bundles the full Remedy server as a sidecar, so everything runs 
 | **Visual decoder** | Opt-in local image→text (llama.cpp + Qwen2.5-VL 3B) so text-only chat models can use screenshots/OCR; prefer-local to save provider vision tokens |
 | **Themes** | System, Dark, **Neutral Dark**, Light, Emerald, Amethyst, Amber, Ocean |
 | **Side panels** | Memory · Skills · Settings (status bar) |
-| **Skills HITL** | Force-promote / quarantine toggles; CodeMirror `SKILL.md` editor; **Export/Import Pack** (ZIP) |
+| **Skills HITL** | **Installed / Library** tabs; Trust · Promote · Quarantine · Archive · Delete; CodeMirror `SKILL.md`; **Export/Import** ZIP |
+| **Skills Library** | Signed community catalog (`AhmiDarrow/remedy-skills`); install → quarantine → Trust; Ed25519 + SHA-256 |
 | **Time Travel** | Status-bar timeline: restore chat + best-effort files to an earlier step |
 | **Token & cost ticker** | Hideable live run/session tokens + estimated API cost |
 | **Tray** | Circuit-R icon; right-click Settings and more |
@@ -368,8 +369,15 @@ remedy learn stats --skill my-skill
 remedy learn changelog my-skill
 ```
 
-See [docs/SKILL_LIFECYCLE.md](docs/SKILL_LIFECYCLE.md) for gates, ranking, API,
-quarantine import, and the desktop Skills panel.
+### Skills Library (community packs)
+
+Optional extra playbooks live in the public **[remedy-skills](https://github.com/AhmiDarrow/remedy-skills)**
+repo (signed `catalog.json` on GitHub Releases). In Desktop: **Skills → Library**
+→ Install (quarantine) → review → **Trust**. CLI/API users can call
+`GET /api/skills/library/catalog` and `POST /api/skills/library/install`.
+
+See [docs/SKILL_LIFECYCLE.md](docs/SKILL_LIFECYCLE.md) and [docs/manual/07-skills.md](docs/manual/07-skills.md)
+for gates, ranking, quarantine import, Library security, and the Skills panel.
 
 ### Local API auth & security (0.10.33+)
 
@@ -474,7 +482,7 @@ def teardown_plugin():
 git clone https://github.com/AhmiDarrow/RemedyAI.git
 cd RemedyAI
 uv sync --group dev
-uv run pytest -q          # full suite (560+ tests; currently ~833)
+uv run pytest -q          # full suite (560+ tests; currently ~842)
 cd desktop && npm test    # frontend unit tests (vitest)
 python scripts/check_docs.py  # docs stay synced with code (help, cmds, versions)
 uv run remedy --help
@@ -532,7 +540,7 @@ git tag vX.Y.Z && git push origin vX.Y.Z
 # Optional: publish Python package — uv build && uv publish
 ```
 
-See [CHANGELOG.md](CHANGELOG.md) for release notes. Current desktop series: **0.14.x**.
+See [CHANGELOG.md](CHANGELOG.md) for release notes. Current series: **0.15.x** (latest tag follows `pyproject.toml`).
 
 **Signing (required for in-app auto-update):**
 

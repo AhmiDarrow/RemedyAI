@@ -2,6 +2,17 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.15.8] - 2026-07-27
+
+### Feature: Skills Library (signed catalog) + Skills panel polish
+
+- **Skills Library:** browse the public signed catalog (`AhmiDarrow/remedy-skills`), install into quarantine, Trust to activate. Client verifies Ed25519 catalog signatures and SHA-256 skill zips; downloads limited to this project’s GitHub release assets.
+- **Desktop:** Skills panel **Installed / Library** tabs; compact Trust / Promote / Quarantine / Archive / Edit / Delete; Library shows install/update state.
+- **API:** `GET/POST /api/skills/library/*` (catalog, search, install, updates, submit validation); `DELETE /api/skills/{name}` for user/library packs under `~/.remedy/skills/`.
+- **Hardening:** final-URL allowlist, download size caps, safe skill names, force-update replaces (no `name-imported`), `/api/skills/packs` no longer shadowed by `{name}`, activate/run respect disabled/archived, library packs protected from learning merge, catalog signing key rotated (seed not in tree).
+- **Library content:** 280+ brand-free workflow packs + deep **Godot 4.7.1** and **PixelLab** skills; auto-updating SKILLS.md / README list generators; CI attaches catalog + zips on release.
+- **Docs:** skills manual + Help wiki updated; suite **842** tests.
+
 ## [0.15.7] - 2026-07-26
 
 ### Feature: Memory Harness v2 + continuity harden

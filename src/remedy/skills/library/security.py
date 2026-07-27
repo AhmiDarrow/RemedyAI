@@ -86,9 +86,7 @@ def is_allowed_download_url(url: str) -> bool:
             return False
         if not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", tag):
             return False
-        if not re.fullmatch(r"[A-Za-z0-9._+-]{1,200}", filename):
-            return False
-        return True
+        return bool(re.fullmatch(r"[A-Za-z0-9._+-]{1,200}", filename))
 
     # GitHub release asset CDN — only as final hop after github.com release URL.
     # Path is opaque (numeric IDs); require release-asset path shape, no path traversal.
@@ -97,8 +95,6 @@ def is_allowed_download_url(url: str) -> bool:
             return False
         # Typical: /github-production-release-asset/... or similar under objects
         cleaned = path.strip("/")
-        if not cleaned or len(cleaned) > 500:
-            return False
-        return True
+        return bool(cleaned) and len(cleaned) <= 500
 
     return False

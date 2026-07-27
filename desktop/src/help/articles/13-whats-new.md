@@ -2,7 +2,13 @@
 
 High-level product notes for owners. Full detail lives in repo `CHANGELOG.md`.
 
-Ship **one** installer/tag for the current series (**v0.15.7**).
+Ship **one** installer/tag for the current series (**v0.15.8**).
+
+## 0.15.8 - Skills Library
+
+- **Skills → Library:** browse the signed community catalog, install into quarantine, then **Trust**.
+- **Installed** panel cleaned up: Trust / Promote / Quarantine / Archive / Edit / Delete without the old control clutter.
+- Library installs are checksummed and path-safe; delete removes user packs under `~/.remedy/skills/`.
 
 ## 0.15.7 - Memory Harness v2
 
