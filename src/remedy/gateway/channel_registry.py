@@ -8,20 +8,17 @@ from typing import Any
 
 from remedy.gateway.channels import (
     DiscordChannel,
+    GoogleChatChannel,
     MatrixChannel,
     MattermostChannel,
-    PlannedMessengerChannel,
+    SignalChannel,
     SlackChannel,
+    TeamsChannel,
     TelegramChannel,
     WhatsAppChannel,
 )
-from remedy.gateway.messengers import (
-    get_messenger,
-    parse_list_field,
-    resolve_channel_secret,
-)
+from remedy.gateway.messengers import parse_list_field, resolve_channel_secret
 from remedy.gateway.router import Gateway
-from remedy.models import ChannelKind
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +61,6 @@ def register_messenger_channels(
 
     registered: list[str] = []
 
-    # --- Telegram ---
     if "telegram" in enabled:
         s = _sec(cfg, "telegram")
         tok = _secret(cfg, "telegram", "bot_token", home, token_telegram)
@@ -81,7 +77,6 @@ def register_messenger_channels(
         else:
             logger.warning("telegram enabled but no bot_token")
 
-    # --- Discord ---
     if "discord" in enabled:
         s = _sec(cfg, "discord")
         tok = _secret(cfg, "discord", "bot_token", home, token_discord)
@@ -100,7 +95,6 @@ def register_messenger_channels(
         else:
             logger.warning("discord enabled but no bot_token")
 
-    # --- Slack ---
     if "slack" in enabled:
         s = _sec(cfg, "slack")
         tok = _secret(cfg, "slack", "bot_token", home, token_slack)
@@ -120,7 +114,6 @@ def register_messenger_channels(
         else:
             logger.warning("slack enabled but no bot_token")
 
-    # --- Mattermost ---
     if "mattermost" in enabled:
         s = _sec(cfg, "mattermost")
         tok = _secret(cfg, "mattermost", "bot_token", home)
@@ -141,7 +134,6 @@ def register_messenger_channels(
         else:
             logger.warning("mattermost enabled but missing bot_token or base_url")
 
-    # --- Matrix ---
     if "matrix" in enabled:
         s = _sec(cfg, "matrix")
         tok = _secret(cfg, "matrix", "access_token", home)
@@ -162,7 +154,6 @@ def register_messenger_channels(
         else:
             logger.warning("matrix enabled but missing access_token or homeserver")
 
-    # --- WhatsApp ---
     if "whatsapp" in enabled:
         s = _sec(cfg, "whatsapp")
         tok = _secret(cfg, "whatsapp", "access_token", home)
@@ -184,18 +175,53 @@ def register_messenger_channels(
         else:
             logger.warning("whatsapp enabled but missing access_token or phone_number_id")
 
-    # --- Planned stubs ---
-    for mid in ("teams", "google_chat", "signal"):
-        if mid not in enabled:
-            continue
-        try:
-            kind = ChannelKind(mid)
-        except ValueError:
-            continue
-        mdef = get_messenger(mid)
+    if "teams" in enabled:
+        s = _sec(cfg, "teams")
+        app_id = str(s.get("app_id") or "").strip()
+        pwd = _secret(cfg, "teams", "app_password", home)
+        if app_id and pwd:
+            gw.register_channel(
+                TeamsChannel(
+                    gw,
+                    app_id=app_id,
+                    app_password=pwd,
+                    tenant_id=str(s.get("tenant_id") or ""),
+                    allow_ids=parse_list_field(s.get("allow_ids")),
+                    allow_all=bool(s.get("allow_all")),
+                )
+            )
+            registered.append("teams")
+        else:
+            logger.warning("teams enabled but missing app_id or app_password")
+
+    if "google_chat" in enabled:
+        s = _sec(cfg, "google_chat")
+        tok = _secret(cfg, "google_chat", "access_token", home)
+        if tok:
+            gw.register_channel(
+                GoogleChatChannel(
+                    gw,
+                    access_token=tok,
+                    space_id=str(s.get("space_id") or ""),
+                    allow_ids=parse_list_field(s.get("allow_ids")),
+                    allow_all=bool(s.get("allow_all")),
+                )
+            )
+            registered.append("google_chat")
+        else:
+            logger.warning("google_chat enabled but no access_token")
+
+    if "signal" in enabled:
+        s = _sec(cfg, "signal")
         gw.register_channel(
-            PlannedMessengerChannel(kind, gw, label=mdef.name if mdef else mid)
+            SignalChannel(
+                gw,
+                cli_path=str(s.get("cli_path") or "signal-cli"),
+                account=str(s.get("account") or ""),
+                allow_from=parse_list_field(s.get("allow_from") or s.get("allow_ids")),
+                allow_all=bool(s.get("allow_all")),
+            )
         )
-        registered.append(mid)
+        registered.append("signal")
 
     return registered

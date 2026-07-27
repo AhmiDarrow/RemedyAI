@@ -12,6 +12,9 @@ from remedy.gateway.channels.discord import DiscordChannel
 from remedy.gateway.channels.matrix import MatrixChannel
 from remedy.gateway.channels.mattermost import MattermostChannel
 from remedy.gateway.channels.slack import SlackChannel
+from remedy.gateway.channels.google_chat import GoogleChatChannel
+from remedy.gateway.channels.signal_cli import SignalChannel
+from remedy.gateway.channels.teams import TeamsChannel
 from remedy.gateway.channels.whatsapp import WhatsAppChannel
 from remedy.gateway.messengers import get_messenger, list_messenger_definitions
 from remedy.models import ChannelKind
@@ -107,5 +110,62 @@ async def test_mattermost_matrix_stub_start():
 
 
 def test_channel_kinds_exist():
-    for v in ("discord", "slack", "mattermost", "matrix", "whatsapp"):
+    for v in (
+        "discord",
+        "slack",
+        "mattermost",
+        "matrix",
+        "whatsapp",
+        "teams",
+        "google_chat",
+        "signal",
+    ):
         assert ChannelKind(v).value == v
+
+
+@pytest.mark.asyncio
+async def test_teams_activity_and_google_chat_event():
+    gw = _GW()
+    teams = TeamsChannel(gw, app_id="id", app_password="pw", allow_all=True)
+    ok = await teams.handle_activity(
+        {
+            "type": "message",
+            "text": "hi teams",
+            "serviceUrl": "https://smba.trafficmanager.net/amer/",
+            "conversation": {"id": "conv1"},
+            "from": {"id": "u1", "name": "User"},
+        }
+    )
+    assert ok is True
+    assert gw.events[-1].payload["message"] == "hi teams"
+    assert teams._last_conversation_id == "conv1"
+
+    gchat = GoogleChatChannel(gw, access_token="t", allow_all=True)
+    ok2 = await gchat.handle_event(
+        {
+            "type": "MESSAGE",
+            "message": {
+                "text": "hi gchat",
+                "sender": {"name": "users/1", "displayName": "A", "type": "HUMAN"},
+                "space": {"name": "spaces/abc"},
+            },
+            "space": {"name": "spaces/abc"},
+        }
+    )
+    assert ok2 is True
+    assert gw.events[-1].payload["message"] == "hi gchat"
+
+
+@pytest.mark.asyncio
+async def test_signal_stub_without_cli():
+    gw = _GW()
+    sig = SignalChannel(gw, cli_path="signal-cli-not-installed", account="")
+    await sig.start()
+    assert await sig.send("x", target="+100") is False
+    await sig.stop()
+
+
+def test_catalog_all_have_fields():
+    for m in list_messenger_definitions():
+        assert m.id and m.name
+        assert m.status in ("ready", "partial", "planned")
