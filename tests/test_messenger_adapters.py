@@ -2,18 +2,15 @@
 
 from __future__ import annotations
 
-import asyncio
-from types import SimpleNamespace
-
 import pytest
 
 from remedy.gateway.channels.allowlist import is_allowed, parse_ids
 from remedy.gateway.channels.discord import DiscordChannel
+from remedy.gateway.channels.google_chat import GoogleChatChannel
 from remedy.gateway.channels.matrix import MatrixChannel
 from remedy.gateway.channels.mattermost import MattermostChannel
-from remedy.gateway.channels.slack import SlackChannel
-from remedy.gateway.channels.google_chat import GoogleChatChannel
 from remedy.gateway.channels.signal_cli import SignalChannel
+from remedy.gateway.channels.slack import SlackChannel
 from remedy.gateway.channels.teams import TeamsChannel
 from remedy.gateway.channels.whatsapp import WhatsAppChannel
 from remedy.gateway.messengers import get_messenger, list_messenger_definitions

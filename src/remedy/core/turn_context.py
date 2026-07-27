@@ -10,6 +10,7 @@ ReAct loop can stop without relying only on client SSE disconnect.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import threading
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
@@ -93,19 +94,13 @@ def end_turn(
                 lst.remove(ev)
             if not lst and sid in _registry:
                 del _registry[sid]
-    try:
+    with contextlib.suppress(Exception):
         _turn_session_id.reset(tok_s)
-    except Exception:
-        pass
-    try:
+    with contextlib.suppress(Exception):
         _turn_abort.reset(tok_a)
-    except Exception:
-        pass
     if tok_w is not None:
-        try:
+        with contextlib.suppress(Exception):
             _turn_workspace.reset(tok_w)
-        except Exception:
-            pass
 
 
 def abort_session(session_id: str) -> int:
@@ -116,10 +111,8 @@ def abort_session(session_id: str) -> int:
     with _lock:
         events = list(_registry.get(sid) or [])
     for ev in events:
-        try:
+        with contextlib.suppress(Exception):
             ev.set()
-        except Exception:
-            pass
     return len(events)
 
 

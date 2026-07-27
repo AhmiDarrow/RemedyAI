@@ -8,7 +8,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 # Path is used for isolation checks against the real home directory
-
 from remedy.gateway.messengers import (
     external_session_id,
     heuristic_session_title,
@@ -20,7 +19,6 @@ from remedy.gateway.messengers import (
 from remedy.interfaces.api import create_app
 from remedy.interfaces.messenger_settings import (
     apply_messengers_update,
-    messengers_for_settings_response,
     normalize_enabled_channels,
 )
 from remedy.models import ChannelKind
@@ -105,8 +103,7 @@ def test_settings_put_messenger_token_not_echoed(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
     (home / "config.toml").write_text(
-        'name = "Remedy"\nenabled_channels = ["cli"]\nsetup_completed = true\nhome_dir = "%s"\n'
-        % home.as_posix(),
+        f'name = "Remedy"\nenabled_channels = ["cli"]\nsetup_completed = true\nhome_dir = "{home.as_posix()}"\n',
         encoding="utf-8",
     )
     monkeypatch.setenv("REMEDY_HOME", str(home))

@@ -2,12 +2,39 @@
 
 All notable changes to Remedy (`remedy-ai`) are documented here.
 
+## [0.16.0] - 2026-07-27
+
+### Feature: Messengers as first-class connectors
+
+- **Settings → Messengers:** modular adapters for Telegram (live long-poll), Discord, Slack, Mattermost, Matrix, WhatsApp, Teams, Google Chat, and Signal — expandable rows, secret-store tokens (`ch:{channel}:{field}`), status ready/partial/planned.
+- **Session continuity:** messenger chats map into desktop sessions (`msg:{channel}:{id}`); SSE session events keep the UI in sync; history load uses stable rowid SQL (no 500 on long threads).
+- **Gateway:** Telegram poll starts on uvicorn lifespan (not a dead `asyncio.run`); hot-reload after settings save; turn abort + per-turn workspace ContextVars for concurrent streams.
+- **Hardening:** webhook auth, path jail for `/api/files` (no CWD fallback on `..`), review fixes across abort/history/skills/desktop.
+
+### UI / desktop polish
+
+- Title bar monogram / full-height wordmark iterations; empty-state monogram only (larger, unframed).
+- Skills Library smart refresh; Installed | Library tabs sit below the title bar (not clipped).
+- Calm Memory Progress language; status bar shows **Memory** without checkpoint noise.
+- Sidecar console noise hidden (`CREATE_NO_WINDOW` without `DETACHED_PROCESS`).
+
+### WebUI & docs
+
+- WebUI prefers `desktop/dist` over stale staged `webui/`; agent notes document the desync pitfall.
+- README / manuals: TOC, product showcase (Files · Terminal · Browser · Scratch · messengers · local Qwen · nanoswarm), GitHub-hosted owner manual links, download points to **latest** (no version pin).
+- Community skills catalog rebuilt and re-signed.
+
+### Tests
+
+- Suite **870** tests green; ruff/mypy clean.
+
 ## [0.15.9] - 2026-07-27
 
 ### Fix: Skills Library tab visibility + first-session chat hang
 
 - **Skills tabs:** full-width segmented control (**My skills** | **Library**) so Library is obvious after auto-update.
 - **First chat:** wait for session list after server ready; ensure model from settings before stream; surface createSession failures; re-bootstrap API token on 401 stream (post-update).
+
 ## [0.15.8] - 2026-07-27
 
 ### Feature: Skills Library (signed catalog) + Skills panel polish

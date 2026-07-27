@@ -5,6 +5,7 @@ Keeps interfaces/cli.py thin: serve only calls ``attach_messengers_to_gateway``.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from typing import Any
 
@@ -47,10 +48,8 @@ def attach_messengers_to_gateway(runtime: Any, gateway: Any) -> list[str]:
                     now = _time.monotonic()
                     if typing_fn is not None and now - last_typing > 4.0:
                         last_typing = now
-                        try:
+                        with contextlib.suppress(Exception):
                             await typing_fn(str(target))
-                        except Exception:
-                            pass
             full = "".join(buf).strip()
             if full:
                 for part in outbound_chunks(full, ch):

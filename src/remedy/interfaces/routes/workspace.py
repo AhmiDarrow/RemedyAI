@@ -57,17 +57,18 @@ def register_workspace_routes(app: FastAPI, *, runtime=None, gateway=None, memor
             return default_project_from_config(cfg)
 
     def _resolve_jailed(path: str, base: Path) -> Path:
-        """Resolve path under base; reject traversal."""
+        """Resolve path under base; reject traversal.
+
+        Do not re-resolve relative paths against process CWD after jail_path
+        fails — ``Path("..").resolve()`` can land *on* the base when the app
+        cwd is a child of the project root, which silently accepts escapes.
+        Absolute paths under base are already handled by ``jail_path``.
+        """
         from remedy.core.workspace import jail_path
 
         if path in (".", "", None):
             return base
-        try:
-            return jail_path(path, base)
-        except SecurityError:
-            candidate = Path(path).expanduser().resolve()
-            candidate.relative_to(base)
-            return candidate
+        return jail_path(path, base)
 
     @app.get("/api/media")
     async def serve_local_media(

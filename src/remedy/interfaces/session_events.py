@@ -8,6 +8,7 @@ call ``publish_session_event``. Desktop clients subscribe via
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
 from dataclasses import dataclass, field
@@ -62,10 +63,8 @@ class SessionEventHub:
             if q in self._subs:
                 self._subs.remove(q)
         # Unblock waiter
-        try:
+        with contextlib.suppress(asyncio.QueueFull):
             q.put_nowait(None)
-        except asyncio.QueueFull:
-            pass
 
     async def publish(self, event: SessionEvent) -> None:
         self._seq += 1

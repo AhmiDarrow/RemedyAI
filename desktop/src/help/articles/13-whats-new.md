@@ -2,11 +2,19 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current series: **v0.15.9**.
+Current series: **v0.16.0**.
 
 ## Contents
 
-- [0.15.9](#0159---skills-library-visibility--first-session-fix) · [0.15.8](#0158---skills-library) · [0.15.7](#0157---memory-harness-v2) · [0.15.6](#0156---images-in-chat-for-every-model) · older below
+- [0.16.0](#0160---messengers--polish) · [0.15.9](#0159---skills-library-visibility--first-session-fix) · [0.15.8](#0158---skills-library) · [0.15.7](#0157---memory-harness-v2) · older below
+
+## 0.16.0 - Messengers + polish
+
+- **Settings → Messengers:** connect Telegram (live) and modular Discord / Slack / Mattermost / Matrix / WhatsApp / Teams / Google Chat / Signal adapters — tokens stay in the secret store.
+- Messenger threads show up as normal sessions in the desktop; history and live updates stay in sync.
+- Skills Library refresh is smoother; empty chat shows a clean monogram; Memory Progress is calmer.
+- Owner docs showcase workspace tools, local Qwen, and messengers; download link always means **latest**.
+- WebUI and desktop share one SPA; rebuild + restart picks up UI changes correctly.
 
 ## 0.15.9 - Skills Library visibility + first-session fix
 

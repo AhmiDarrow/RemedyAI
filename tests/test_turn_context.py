@@ -46,7 +46,6 @@ async def test_turn_workspace_isolated():
 
 def test_create_session_integrity_race(tmp_path):
     """Concurrent create with same id returns existing (no crash)."""
-    import asyncio
 
     from remedy.memory.store import MemoryStore
     from remedy.models import ChatSession

@@ -26,7 +26,7 @@ def messengers_for_settings_response(
     from remedy.interfaces.secret_store import load_provider_keys
 
     keys = load_provider_keys(home_path)
-    secrets_set = {k: True for k in keys}
+    secrets_set = dict.fromkeys(keys, True)
     for mdef in list_messenger_definitions():
         sec = cfg.get(mdef.id)
         if not isinstance(sec, dict):

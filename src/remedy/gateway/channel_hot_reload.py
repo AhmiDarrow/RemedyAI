@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from typing import Any
 
@@ -29,10 +30,8 @@ async def reload_messenger_channels(gateway: Any, cfg: dict | None = None) -> li
                 await ch.stop()
             except Exception:
                 logger.debug("stop %s failed", val, exc_info=True)
-        try:
+        with contextlib.suppress(Exception):
             gateway._channels.pop(kind, None)  # type: ignore[attr-defined]
-        except Exception:
-            pass
 
     registered = register_messenger_channels(gateway, cfg)
     if getattr(gateway, "running", False):
