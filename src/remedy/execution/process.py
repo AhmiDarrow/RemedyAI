@@ -143,10 +143,10 @@ def kill_process_tree(proc: Any) -> None:
     except ProcessLookupError:
         return
     except Exception:
-        try:
+        from contextlib import suppress
+
+        with suppress(Exception):
             proc.terminate()
-        except Exception:
-            pass
 
 
 def win_shell_prefix() -> list[str]:

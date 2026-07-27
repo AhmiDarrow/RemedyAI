@@ -12,6 +12,7 @@ import os
 import re
 import threading
 import time
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -439,22 +440,16 @@ def load_suggest_config(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     if "enabled" in sp:
         out["enabled"] = bool(sp.get("enabled"))
     if sp.get("min_score") is not None:
-        try:
+        with suppress(TypeError, ValueError):
             out["min_score"] = float(sp["min_score"])
-        except (TypeError, ValueError):
-            pass
     if sp.get("min_query_chars") is not None:
-        try:
+        with suppress(TypeError, ValueError):
             out["min_query_chars"] = int(sp["min_query_chars"])
-        except (TypeError, ValueError):
-            pass
     if "local_rerank" in sp:
         out["local_rerank"] = bool(sp.get("local_rerank"))
     if sp.get("installed_cover_threshold") is not None:
-        try:
+        with suppress(TypeError, ValueError):
             out["installed_cover_threshold"] = float(sp["installed_cover_threshold"])
-        except (TypeError, ValueError):
-            pass
     return out
 
 

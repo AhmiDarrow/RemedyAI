@@ -384,10 +384,11 @@ def _try_local_refine(
         if not out.get("ok"):
             return None
         raw = out.get("result") or {}
-        if isinstance(raw, dict) and "text" in raw:
-            text = str(raw.get("text") or "")
-        else:
-            text = str(raw)
+        text = (
+            str(raw.get("text") or "")
+            if isinstance(raw, dict) and "text" in raw
+            else str(raw)
+        )
         parsed = _parse_local_json(text)
         if not parsed:
             return None

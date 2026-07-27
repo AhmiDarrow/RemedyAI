@@ -108,7 +108,7 @@ class SkillNanobot:
         if registry is not None and hasattr(registry, "match_skills"):
             try:
                 ranked = registry.match_skills(user_text or "", limit=5) or []
-                for sk, sc in ranked:
+                for sk, _sc in ranked:
                     name = getattr(getattr(sk, "manifest", None), "name", None) or getattr(
                         sk, "name", None
                     )

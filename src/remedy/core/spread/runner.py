@@ -280,10 +280,11 @@ def _local_summarize(text: str, *, goal: str) -> str | None:
         if not out.get("ok"):
             return None
         raw = out.get("result") or {}
-        if isinstance(raw, dict):
-            s = str(raw.get("text") or "").strip()
-        else:
-            s = str(raw).strip()
+        s = (
+            str(raw.get("text") or "").strip()
+            if isinstance(raw, dict)
+            else str(raw).strip()
+        )
         return s or None
     except Exception:
         return None
