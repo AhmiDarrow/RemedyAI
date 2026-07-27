@@ -477,6 +477,13 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                 )
             except Exception:
                 logger.exception("messenger settings update failed")
+            # Hot-reload adapters so new tokens work without full app quit.
+            try:
+                from remedy.gateway.channel_hot_reload import reload_messenger_channels
+
+                await reload_messenger_channels(gateway, cfg)
+            except Exception:
+                logger.debug("messenger hot-reload skipped", exc_info=True)
 
         # Keep profile.display_name in sync so the agent addresses the user correctly.
         if "user_name" in updates and updates["user_name"] is not None:

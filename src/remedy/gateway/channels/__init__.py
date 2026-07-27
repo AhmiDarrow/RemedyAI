@@ -1,21 +1,3 @@
-"""Gateway channel adapters (one module per platform)."""
+"""Gateway channel adapters (one slim module per platform)."""
 
-from remedy.gateway.channels.adapters import (
-    CLIChannel,
-    DiscordChannel,
-    MattermostChannel,
-    PlannedMessengerChannel,
-    SlackChannel,
-    TelegramChannel,
-    WebChannel,
-)
-
-__all__ = [
-    "CLIChannel",
-    "DiscordChannel",
-    "MattermostChannel",
-    "PlannedMessengerChannel",
-    "SlackChannel",
-    "TelegramChannel",
-    "WebChannel",
-]
+from remedy.gateway.channels.adapters import *  # noqa: F403
