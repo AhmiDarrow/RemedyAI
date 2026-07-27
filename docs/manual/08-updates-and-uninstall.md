@@ -4,10 +4,12 @@
 
 | Where | Action |
 |-------|--------|
+| **On launch** | One automatic check after the local server is ready (silent unless an update exists) |
 | Logo menu | **Check for updates…** |
 | Settings → About | **Check for Updates** |
 | Tray | Updates entry |
 | Status bar | **Update** badge when available |
+| Background | Re-checks about every **30 minutes** while the app is open |
 
 The app queries **GitHub Releases** for this project only. Installs use the signed
 `latest.json` asset URL (must match) and a non-empty release signature field.

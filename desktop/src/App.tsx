@@ -286,7 +286,7 @@ export default function App() {
     check: checkUpdates,
     lastStatus: updateLastStatus,
     updateAvailable,
-  } = useUpdateChecker()
+  } = useUpdateChecker({ ready: serverState === 'ready' })
   const [showSetupWizard, setShowSetupWizard] = useState(false)
   const [showUpdateScreen, setShowUpdateScreen] = useState(false)
   const [userName, setUserName] = useState('')

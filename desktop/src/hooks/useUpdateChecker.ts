@@ -89,14 +89,21 @@ function mergeUpdateSources(
   }
 }
 
-export function useUpdateChecker() {
+/**
+ * @param ready When false, defers the launch check (e.g. Tauri until sidecar is up).
+ *   Periodic 30m checks still only run while ready. Manual `check()` always works.
+ */
+export function useUpdateChecker(options?: { ready?: boolean }) {
+  const ready = options?.ready !== false
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
   const [desktopInfo, setDesktopInfo] = useState<DesktopUpdateInfo | null>(null)
   const [checking, setChecking] = useState(false)
   const [lastCheckedAt, setLastCheckedAt] = useState<number | null>(null)
   const [lastStatus, setLastStatus] = useState<string | null>(null)
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const intervalRef = useRef<number | null>(null)
   const inFlightRef = useRef(false)
+  /** One automatic check per app session after launch/ready (not per remount). */
+  const didLaunchCheckRef = useRef(false)
 
   const check = useCallback(async (): Promise<UpdateCheckResult> => {
     if (inFlightRef.current) {
@@ -203,19 +210,31 @@ export function useUpdateChecker() {
   }, [])
 
   useEffect(() => {
-    // Defer first network check so it never races splash / settings / sessions.
-    // Manual "Check for updates" still calls check() immediately.
-    const startupDelay = window.setTimeout(() => {
-      void check()
-    }, 25_000)
-    intervalRef.current = setInterval(() => {
+    // Wait until the shell is ready (sidecar up) so launch check is real, not a
+    // silent miss during "connecting". Was 25s from mount — felt like "never".
+    if (!ready) return
+
+    // One check soon after launch/ready. Manual "Check for updates" still works anytime.
+    let launchTimer: number | null = null
+    if (!didLaunchCheckRef.current) {
+      didLaunchCheckRef.current = true
+      // Short settle so settings/sessions bind first; still clearly "on launch".
+      launchTimer = window.setTimeout(() => {
+        void check()
+      }, 2_000)
+    }
+
+    intervalRef.current = window.setInterval(() => {
       void check()
     }, CHECK_INTERVAL)
     return () => {
-      window.clearTimeout(startupDelay)
-      if (intervalRef.current) clearInterval(intervalRef.current)
+      if (launchTimer != null) window.clearTimeout(launchTimer)
+      if (intervalRef.current != null) {
+        window.clearInterval(intervalRef.current)
+        intervalRef.current = null
+      }
     }
-  }, [check])
+  }, [check, ready])
 
   return {
     updateInfo,

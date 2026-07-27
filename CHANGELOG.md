@@ -4,6 +4,12 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Fix: update check on launch
+
+- Desktop runs **one automatic update check** shortly after the local server is ready
+  (previously deferred 25s from mount and easy to miss while still “connecting”).
+- 30‑minute background re-checks and manual **Check for updates** unchanged.
+
 ### Docs
 
 - **What's new** (`docs/manual/13-whats-new.md` / F1): owner notes for **0.18.1** and **0.18.2**
