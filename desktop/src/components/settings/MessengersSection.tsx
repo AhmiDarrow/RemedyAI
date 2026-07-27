@@ -67,16 +67,9 @@ export function MessengersSection({
           : sectionProps.summary || 'Telegram, Discord, WhatsApp…'
       }
     >
-      <div className="text-[10px] leading-snug mb-2 space-y-1" style={{ color: 'var(--text-muted)' }}>
-        <p style={{ margin: 0 }}>
-          Expand a messenger to set tokens and options. Chats show up in the session list
-          (realtime). Empty secret fields leave the current token unchanged.
-        </p>
-        <p style={{ margin: 0 }}>
-          <strong style={{ color: 'var(--text-secondary)' }}>Telegram:</strong> put your numeric
-          user id (or private chat id — same number) in Allowed chat IDs, then open the bot and
-          send <code>/start</code> once. Restart Remedy after saving so the poller reloads.
-        </p>
+      <div className="text-[10px] leading-snug mb-2" style={{ color: 'var(--text-muted)' }}>
+        Expand a messenger to set tokens and options. Chats show up in the session list
+        (realtime). Empty secret fields leave the current token unchanged.
       </div>
 
       {messengers.length === 0 && (
