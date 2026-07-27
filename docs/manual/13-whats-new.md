@@ -2,11 +2,26 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current series: **v0.18.0**.
+Current series: **v0.18.3**.
 
 ## Contents
 
-- [0.18.0](#0180---spread--library-suggest) · [0.17.0](#0170---coding-agency--process-trail) · [0.16.0](#0160---messengers--polish) · older below
+- [0.18.3](#0183---docs) · [0.18.2](#0182---spread-run-fix) · [0.18.1](#0181---run-until-finished--title-bar) · [0.18.0](#0180---spread--library-suggest) · [0.17.0](#0170---coding-agency--process-trail) · [0.16.0](#0160---messengers--polish) · older below
+
+## 0.18.3 - Docs
+
+- **What's new** (this page / F1) caught up for **0.18.1** and **0.18.2** notes that shipped without an owner-facing summary.
+
+## 0.18.2 - Spread run fix
+
+- **`spread_run` no longer fails** when the model passes `tasks` as a native list (common with tool calling). Process trail showed a red **Spread Run** error; that path is fixed.
+- `tasks` accepts a JSON array, a single task object, or a JSON string; `goal=` still auto-plans workers.
+
+## 0.18.1 - Run until finished + title bar
+
+- **Long coding / missions keep going** until the work is done — soft “epochs” only compact context and checkpoint; they do **not** stop tools with a fake tool-limit answer (Build-class agency).
+- Pathological loops still have a high safety ceiling; idle pauses only after long stretches with **no** tool activity.
+- **Title bar:** min / max / close stay clickable after you move, minimize, or maximize the window (explicit drag on the middle strip; controls never steal-hit as drag).
 
 ## 0.18.0 - Spread + Library suggest
 
