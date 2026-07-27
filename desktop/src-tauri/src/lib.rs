@@ -290,17 +290,14 @@ fn spawn_remedy(cmd: &str) -> Option<Child> {
 
     #[cfg(target_os = "windows")]
     {
-        // CREATE_NO_WINDOW alone can still flash a console for console-subsystem
-        // PyInstaller/uv children; DETACHED + NO_WINDOW keeps sidecar headless.
-        const DETACHED_PROCESS: u32 = 0x00000008;
-        const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
-        let flags = CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP;
+        // IMPORTANT: do NOT combine CREATE_NO_WINDOW with DETACHED_PROCESS —
+        // Windows ignores CREATE_NO_WINDOW when DETACHED is set, which opens a
+        // visible console for console-subsystem sidecar builds (what the user saw).
         let mut c = Command::new(cmd);
         c.args(args)
             .env("REMEDY_DESKTOP_SIDECAR", "1")
-            // Avoid Python allocating a console when bundled as console app.
             .env("PYTHONUNBUFFERED", "1")
-            .creation_flags(flags)
+            .creation_flags(CREATE_NO_WINDOW)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
