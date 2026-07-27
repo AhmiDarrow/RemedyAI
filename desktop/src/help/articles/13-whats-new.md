@@ -2,11 +2,17 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current series: **v0.17.0**.
+Current series: **v0.18.0**.
 
 ## Contents
 
-- [0.17.0](#0170---coding-agency--process-trail) · [0.16.0](#0160---messengers--polish) · [0.15.9](#0159---skills-library-visibility--first-session-fix) · older below
+- [0.18.0](#0180---spread--library-suggest) · [0.17.0](#0170---coding-agency--process-trail) · [0.16.0](#0160---messengers--polish) · older below
+
+## 0.18.0 - Spread + Library suggest
+
+- **`spread_run`:** silent parallel explore/search/verify workers so multi-area tasks cover ground faster — still one Remedy voice.
+- **Library skill check:** on real work, a soft tip when a signed Library pack would help; **Install** from the chip (or open Skills); never auto-installs without a click.
+- **Hardening:** tighter path jail and shell approvals on jobs; Stop kills in-flight shell trees; chat hot path stays free of blocking local-model waits.
 
 ## 0.17.0 - Coding agency + Process trail
 

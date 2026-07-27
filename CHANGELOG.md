@@ -4,6 +4,8 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-07-27
+
 ### Agency: silent spread (fan-out) + hardening
 
 - **`spread_run`:** parallel silent workers (explore/search/verify/diff/review) return one merged digest — cover more ground without multi-agent theater.
@@ -13,8 +15,8 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ### Skills: library skill check (soft suggest)
 
-- Cache-only rank of signed Skills Library index on tool-ish turns; at most one Install tip (never auto-install/Trust).
-- Continuity `[Library]` note + SSE `library_suggest` chip; dismiss suppress per session.
+- Cache-only rank of signed Skills Library index on tool-ish turns; at most one Install tip (never auto-install without a click).
+- Continuity `[Library]` note + SSE chip with **Install** (download + Trust for speed) and Library browse; dismiss suppress per session.
 - Speculative prep refreshes catalog in background; optional `library_rerank` local job (off by default).
 
 ## [0.17.0] - 2026-07-27
