@@ -390,32 +390,30 @@ export default function App() {
       window.close()
       return
     }
-    // Never block quit on prefs I/O — that made "Quit and stop server" look broken.
+    const { tauriInvoke } = await import('./api/tauri')
+    // Must finish writing desktop.json BEFORE quit_app kills the process —
+    // fire-and-forget prefs save was why "Don't show again" never stuck.
     if (dontWarnAgain) {
       try {
         localStorage.setItem('remedy.skipQuitServerWarning', '1')
       } catch {
         /* */
       }
-      void (async () => {
-        try {
-          const { tauriInvoke } = await import('./api/tauri')
-          const prefs = await tauriInvoke<{
-            close_to_tray?: boolean
-            start_in_tray?: boolean
-          }>('get_desktop_prefs')
-          await tauriInvoke('set_desktop_prefs', {
-            close_to_tray: Boolean(prefs?.close_to_tray ?? true),
-            start_in_tray: Boolean(prefs?.start_in_tray ?? false),
-            skip_quit_server_warning: true,
-          })
-        } catch (e) {
-          console.warn('save skip_quit_server_warning:', e)
-        }
-      })()
+      try {
+        const prefs = await tauriInvoke<{
+          close_to_tray?: boolean
+          start_in_tray?: boolean
+        }>('get_desktop_prefs')
+        await tauriInvoke('set_desktop_prefs', {
+          close_to_tray: Boolean(prefs?.close_to_tray ?? true),
+          start_in_tray: Boolean(prefs?.start_in_tray ?? false),
+          skip_quit_server_warning: true,
+        })
+      } catch (e) {
+        console.warn('save skip_quit_server_warning:', e)
+      }
     }
     try {
-      const { tauriInvoke } = await import('./api/tauri')
       // Race: if quit_app hangs, still try to leave
       await Promise.race([
         tauriInvoke('quit_app'),
@@ -432,17 +430,32 @@ export default function App() {
       return
     }
     try {
-      // localStorage fast-path
+      const { tauriInvoke } = await import('./api/tauri')
+      // Fast path: localStorage or disk prefs
       try {
         if (localStorage.getItem('remedy.skipQuitServerWarning') === '1') {
-          const { tauriInvoke } = await import('./api/tauri')
           await tauriInvoke('quit_app')
           return
         }
       } catch {
         /* */
       }
-      const { tauriInvoke } = await import('./api/tauri')
+      try {
+        const prefs = await tauriInvoke<{ skip_quit_server_warning?: boolean }>(
+          'get_desktop_prefs',
+        )
+        if (prefs?.skip_quit_server_warning) {
+          try {
+            localStorage.setItem('remedy.skipQuitServerWarning', '1')
+          } catch {
+            /* */
+          }
+          await tauriInvoke('quit_app')
+          return
+        }
+      } catch {
+        /* fall through to confirm path */
+      }
       const res = await tauriInvoke<{ needs_confirm?: boolean; quitting?: boolean }>(
         'request_quit_app',
       )
@@ -555,7 +568,29 @@ export default function App() {
     if (!isTauri()) return
     let off: (() => void) | undefined
     let cancelled = false
+    // Hydrate "don't show again" from disk → localStorage (survives WebView clears less often)
+    void (async () => {
+      try {
+        const prefs = await tauriInvoke<{ skip_quit_server_warning?: boolean }>(
+          'get_desktop_prefs',
+        )
+        if (prefs?.skip_quit_server_warning) {
+          localStorage.setItem('remedy.skipQuitServerWarning', '1')
+        }
+      } catch {
+        /* */
+      }
+    })()
     void tauriListen('app-quit-requested', () => {
+      // Rust only emits when skip is false on disk; still respect localStorage race.
+      try {
+        if (localStorage.getItem('remedy.skipQuitServerWarning') === '1') {
+          void tauriInvoke('quit_app').catch(() => setQuitWarnOpen(true))
+          return
+        }
+      } catch {
+        /* */
+      }
       setQuitWarnOpen(true)
     }).then((fn) => {
       if (cancelled) {

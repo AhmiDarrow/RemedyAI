@@ -4,6 +4,12 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Fix: “Don’t show quit warning again” persists
+
+- Saving the flag was fire-and-forget before `quit_app` killed the process, so
+  `desktop.json` often never wrote. Prefs are **awaited** before quit; disk flag
+  is re-checked on next quit / app start.
+
 ### Fix: status-bar provider switch stuck on previous API host
 
 - Per-session provider (e.g. DeepSeek → Grok) is applied on **each message**, not
