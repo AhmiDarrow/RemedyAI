@@ -15,6 +15,7 @@ from remedy.interfaces.routes.settings import register_settings_routes
 from remedy.interfaces.routes.status import register_status_routes
 from remedy.interfaces.routes.usage import register_usage_routes
 from remedy.interfaces.routes.vision import register_vision_routes
+from remedy.interfaces.routes.skills_library import register_skills_library_routes
 from remedy.interfaces.routes.workspace import register_workspace_routes
 
 
@@ -32,6 +33,8 @@ def register_all_routes(
     register_sessions_routes(app, **kw)
     register_catalog_routes(app, **kw)
     register_memory_routes(app, **kw)
+    # Library routes must register before any conflicting catch-alls; namespaced under /library
+    register_skills_library_routes(app, **kw)
     register_workspace_routes(app, **kw)
     register_settings_routes(app, **kw)
     register_auth_routes(app, **kw)

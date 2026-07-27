@@ -1,0 +1,43 @@
+name: Update skills list docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "skills/**"
+      - "scripts/generate_skills_list.py"
+      - "scripts/build_catalog.py"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: pip install pyyaml
+
+      - name: Regenerate SKILLS.md + README section
+        run: python scripts/generate_skills_list.py
+
+      - name: Commit if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add SKILLS.md README.md
+          if git diff --staged --quiet; then
+            echo "No skills list changes"
+          else
+            git commit -m "docs: auto-update skills list ($(find skills -name SKILL.md | wc -l) skills)"
+            git push
+          fi

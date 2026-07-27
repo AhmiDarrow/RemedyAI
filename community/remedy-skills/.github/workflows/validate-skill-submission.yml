@@ -1,0 +1,42 @@
+name: Validate skill submission
+
+on:
+  pull_request:
+    paths:
+      - "skills/**"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install deps
+        run: pip install pyyaml packaging
+      - name: Validate SKILL.md files
+        run: |
+          python -c "
+          from pathlib import Path
+          import sys, yaml
+          errs = []
+          for md in Path('skills').glob('*/SKILL.md'):
+              raw = md.read_text(encoding='utf-8')
+              if not raw.startswith('---'):
+                  errs.append(f'{md}: missing frontmatter'); continue
+              parts = raw.split('---', 2)
+              fm = yaml.safe_load(parts[1]) or {}
+              for k in ('name', 'description', 'version'):
+                  if not fm.get(k):
+                      errs.append(f'{md}: missing {k}')
+              body = parts[2] if len(parts) > 2 else ''
+              if len(body.strip()) < 20:
+                  errs.append(f'{md}: instructions too short')
+              for b in ('eval(', 'exec(', 'pickle.', 'shell=True'):
+                  if b in raw:
+                      errs.append(f'{md}: banned pattern {b}')
+          if errs:
+              print(chr(10).join(errs)); sys.exit(1)
+          print('ok')
+          "

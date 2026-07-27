@@ -1,10 +1,18 @@
-import { useState, useEffect, useRef, type ComponentType } from 'react'
+import {
+  useState,
+  useEffect,
+  useRef,
+  type ComponentType,
+  type CSSProperties,
+  type ReactNode,
+} from 'react'
+import { SkillsLibrary } from './SkillsLibrary'
 
 interface PanelProps {
   open: boolean
   onClose: () => void
   title: string
-  children: React.ReactNode
+  children: ReactNode
 }
 
 /** Side panel with basic focus trap + Escape to close (a11y). */
@@ -407,6 +415,7 @@ export function SkillsPanel({
   onClose: () => void
   onOpenHelp?: (articleId?: string) => void
 }) {
+  const [panelTab, setPanelTab] = useState<'installed' | 'library'>('installed')
   const [skills, setSkills] = useState<SkillRow[]>([])
   const [learning, setLearning] = useState<LearningSummary | null>(null)
   const [loading, setLoading] = useState(false)
@@ -514,6 +523,33 @@ export function SkillsPanel({
     }
   }
 
+  const deleteSkillRow = async (name: string) => {
+    const ok = window.confirm(
+      `Delete skill “${name}” permanently?\n\n` +
+        `This removes it from the agent and deletes its folder under ~/.remedy/skills/.\n` +
+        `Bundled skills cannot be deleted this way. You can reinstall library skills later.`,
+    )
+    if (!ok) return
+    setBusy(name)
+    setError(null)
+    try {
+      const { deleteSkill } = await import('../api/skills')
+      await deleteSkill(name)
+      setSelected((prev) => {
+        const next = new Set(prev)
+        next.delete(name)
+        return next
+      })
+      if (editName === name) setEditName(null)
+      setPackMsg(`Deleted ${name}`)
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Delete failed')
+    } finally {
+      setBusy(null)
+    }
+  }
+
   const visibleSkills = skills.filter((s) => {
     const st = (s.status || '').toLowerCase()
     if (statusFilter === 'all') return st !== 'archived' // hide archived from default list
@@ -613,398 +649,312 @@ export function SkillsPanel({
     }
   }
 
-  const feedback = async (name: string, success: boolean) => {
-    setBusy(name)
-    try {
-      const { skillFeedback } = await import('../api/skills')
-      await skillFeedback(name, success)
-      await load()
-    } catch {
-      /* ignore */
-    } finally {
-      setBusy(null)
-    }
+  const btnGhost: CSSProperties = {
+    border: '1px solid var(--border)',
+    color: 'var(--text-secondary)',
+    background: 'transparent',
+  }
+  const btnAccent: CSSProperties = {
+    background: 'var(--accent)',
+    color: '#fff',
+    border: 'none',
   }
 
   return (
-    <Panel open={open} onClose={onClose} title="Skills (agent packs)">
-      {onOpenHelp && (
-        <button
-          type="button"
-          onClick={() => onOpenHelp('07-skills')}
-          className="mb-2 w-full text-left text-[11px] px-2 py-1.5 rounded"
-          style={{
-            background: 'var(--bg-tertiary)',
-            border: '1px solid var(--border)',
-            color: 'var(--accent)',
-          }}
-        >
-          Skills guide in Help wiki →
-        </button>
-      )}
-      <div className="mb-2 flex gap-1 items-center">
-        <input
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && load()}
-          placeholder="Search skills…"
-          className="flex-1 text-xs px-2 py-1 rounded"
-          style={{
-            background: 'var(--bg-primary)',
-            border: '1px solid var(--border)',
-            color: 'var(--text-primary)',
-          }}
-        />
-        <button
-          type="button"
-          onClick={load}
-          className="text-xs px-2 py-1 rounded"
-          style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
-        >
-          Search
-        </button>
-      </div>
-      <div className="mb-2 flex flex-wrap gap-1">
-        <button
-          type="button"
-          onClick={() => void exportPack()}
-          className="text-[10px] px-2 py-1 rounded font-medium"
-          style={{
-            background: 'var(--accent)',
-            color: '#fff',
-          }}
-          title={
-            selected.size
-              ? `Export ${selected.size} selected`
-              : 'Export all skills as ZIP pack'
-          }
-        >
-          Export Pack{selected.size ? ` (${selected.size})` : ''}
-        </button>
-        <button
-          type="button"
-          onClick={() => void importPack()}
-          className="text-[10px] px-2 py-1 rounded"
-          style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
-        >
-          Import Pack
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            void (async () => {
-              setError(null)
-              setPackMsg(null)
-              try {
-                const { archiveUnusedSkills } = await import('../api/skills')
-                const dry = await archiveUnusedSkills({ days: 90, dry_run: true })
-                if (!dry.count) {
-                  setPackMsg('No learned skills unused for 90+ days.')
-                  return
-                }
-                const ok = window.confirm(
-                  `Archive ${dry.count} unused learned skill(s) (idle >90 days)?\n\n` +
-                    dry.candidates
-                      .slice(0, 12)
-                      .map((c) => c.name)
-                      .join(', ') +
-                    (dry.candidates.length > 12 ? '…' : ''),
-                )
-                if (!ok) return
-                const r = await archiveUnusedSkills({ days: 90, dry_run: false })
-                setPackMsg(`Archived ${r.count} skill(s).`)
-                await load()
-              } catch (e) {
-                setError(e instanceof Error ? e.message : 'Archive unused failed')
-              }
-            })()
-          }}
-          className="text-[10px] px-2 py-1 rounded"
-          style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
-          title="Archive learned skills with no activity for 90 days"
-        >
-          Archive unused (90d)
-        </button>
-        {selected.size > 0 && (
-          <button
-            type="button"
-            onClick={() => setSelected(new Set())}
-            className="text-[10px] px-2 py-1 rounded"
-            style={{ color: 'var(--text-muted)' }}
-          >
-            Clear selection
-          </button>
-        )}
-      </div>
-      {packMsg && (
-        <div className="mb-2 text-[10px]" style={{ color: 'var(--success, #3ecf8e)' }}>
-          {packMsg}
-        </div>
-      )}
-      {budgetBanner && (
-        <div
-          className="mb-2 text-[10px] px-2 py-1.5 rounded"
-          style={{
-            background: 'color-mix(in srgb, var(--warning, #e6a23c) 15%, var(--bg-tertiary))',
-            border: '1px solid var(--warning, #e6a23c)',
-            color: 'var(--text-primary)',
-          }}
-        >
-          {budgetBanner}
-        </div>
-      )}
-      <div className="mb-2 flex flex-wrap gap-1">
+    <Panel open={open} onClose={onClose} title="Skills">
+      <div className="mb-2 flex items-center gap-1">
         {(
           [
-            ['all', 'Active set'],
-            ['active', 'Promoted'],
-            ['learned', 'Learned'],
-            ['quarantine', 'Quarantine'],
-            ['archived', 'Archived'],
+            ['installed', 'Installed'],
+            ['library', 'Library'],
           ] as const
         ).map(([id, label]) => (
           <button
             key={id}
             type="button"
-            onClick={() => setStatusFilter(id)}
-            className="text-[10px] px-2 py-0.5 rounded"
+            className="text-[11px] px-2.5 py-1 rounded"
             style={{
-              background: statusFilter === id ? 'var(--accent)' : 'var(--bg-tertiary)',
-              color: statusFilter === id ? '#fff' : 'var(--text-secondary)',
-              border: '1px solid var(--border)',
+              background: panelTab === id ? 'var(--bg-tertiary)' : 'transparent',
+              border: panelTab === id ? '1px solid var(--border)' : '1px solid transparent',
+              color: panelTab === id ? 'var(--accent)' : 'var(--text-muted)',
+              fontWeight: panelTab === id ? 600 : 400,
             }}
+            onClick={() => setPanelTab(id)}
           >
             {label}
           </button>
         ))}
-      </div>
-      <p className="mb-2" style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>
-        Human overrides: force-promote, quarantine, or archive for large libraries (100+).
-        Archived skills stay on disk but leave the hot catalog.
-      </p>
-      {learning && (
-        <div
-          className="mb-3 p-2 rounded"
-          style={{
-            background: 'var(--bg-primary)',
-            border: '1px solid var(--border)',
-          }}
-        >
-          <div
-            className="font-medium mb-1"
-            style={{ color: 'var(--text-primary)', fontSize: '0.75rem' }}
-          >
-            What I learned
-          </div>
-          <div
-            className="mb-1.5 flex flex-wrap gap-2"
-            style={{ color: 'var(--text-muted)', fontSize: '0.65rem' }}
-          >
-            <span>{learning.learned_count} learned</span>
-            <span>{learning.probation_count} on probation</span>
-            <span>{learning.active_learned_count} promoted</span>
-            {reuse && (
-              <>
-                <span>{reuse.total_activations} activations</span>
-                <span>{reuse.multi_session_reactivations} multi-session re-use</span>
-              </>
-            )}
-          </div>
-          {learning.recent.length === 0 ? (
-            <div style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>
-              {learning.note || 'No auto-learned skills yet.'}
-            </div>
-          ) : (
-            <ul className="m-0 p-0 list-none space-y-1">
-              {learning.recent.slice(0, 5).map((s) => (
-                <li
-                  key={`learned-${s.name}`}
-                  style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}
-                >
-                  <span style={{ color: 'var(--accent)' }}>{s.name}</span>
-                  <span style={{ color: statusColor(s.status) }}> · {s.status || '?'}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-      {error && (
-        <div className="mb-2 text-xs" style={{ color: 'var(--danger, #f66)' }}>
-          {error}
-        </div>
-      )}
-      {editName && (
-        <div
-          className="mb-3 p-2 rounded"
-          style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)' }}
-        >
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-xs font-medium" style={{ color: 'var(--accent)' }}>
-              Edit {editName}
-            </span>
-            <button
-              type="button"
-              onClick={() => setEditName(null)}
-              className="text-xs"
-              style={{ color: 'var(--text-muted)' }}
-            >
-              Close
-            </button>
-          </div>
-          <SkillMarkdownEditorLazy value={editBody} onChange={setEditBody} />
+        <div className="flex-1" />
+        {onOpenHelp && (
           <button
             type="button"
-            disabled={editSaving}
-            onClick={() => void saveEditor()}
-            className="mt-2 w-full text-xs py-1.5 rounded font-medium"
-            style={{ background: 'var(--accent)', color: '#fff' }}
+            onClick={() => onOpenHelp('07-skills')}
+            className="text-[10px] px-1.5 py-0.5 rounded"
+            style={{ color: 'var(--text-muted)' }}
+            title="Skills help"
           >
-            {editSaving ? 'Saving…' : 'Save SKILL.md'}
+            ?
           </button>
+        )}
+      </div>
+
+      {panelTab === 'library' ? (
+        <div className="flex-1 min-h-0" style={{ minHeight: 280 }}>
+          <SkillsLibrary onInstalled={() => load()} installed={skills} />
         </div>
-      )}
-      {loading ? (
-        <div style={{ color: 'var(--text-muted)' }}>Loading...</div>
-      ) : visibleSkills.length === 0 ? (
-        <div style={{ color: 'var(--text-muted)' }}>
-          {skills.length === 0 ? 'No skills loaded' : 'No skills in this filter'}
-        </div>
-      ) : (
-        visibleSkills.map((s) => (
-          <div
-            key={s.name}
-            className="mb-2 p-2 rounded"
-            style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}
-          >
-            <div className="flex items-center gap-2 flex-wrap">
-              <input
-                type="checkbox"
-                checked={selected.has(s.name)}
-                onChange={() => toggleSelect(s.name)}
-                title="Select for export pack"
-                aria-label={`Select ${s.name}`}
-              />
-              <span className="font-medium" style={{ color: 'var(--accent)' }}>
-                {s.name}
-              </span>
-              <span
-                className="text-xs px-1.5 rounded"
+      ) : null}
+
+      {panelTab === 'installed' ? (
+        <>
+          <div className="mb-2 flex gap-1 items-center">
+            <input
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && load()}
+              placeholder="Filter…"
+              className="flex-1 text-xs px-2 py-1.5 rounded"
+              style={{
+                background: 'var(--bg-primary)',
+                border: '1px solid var(--border)',
+                color: 'var(--text-primary)',
+              }}
+            />
+            <button type="button" onClick={load} className="text-[10px] px-2 py-1.5 rounded" style={btnGhost}>
+              ↻
+            </button>
+          </div>
+
+          <div className="mb-2 flex flex-wrap gap-1 items-center">
+            {(
+              [
+                ['all', 'All'],
+                ['active', 'Active'],
+                ['quarantine', 'Quarantine'],
+                ['learned', 'Learned'],
+                ['archived', 'Archived'],
+              ] as const
+            ).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setStatusFilter(id)}
+                className="text-[10px] px-2 py-0.5 rounded"
                 style={{
-                  color: statusColor(s.status),
-                  border: `1px solid ${statusColor(s.status)}`,
-                  fontSize: '0.65rem',
+                  background: statusFilter === id ? 'var(--accent)' : 'var(--bg-tertiary)',
+                  color: statusFilter === id ? '#fff' : 'var(--text-secondary)',
+                  border: '1px solid var(--border)',
                 }}
               >
-                {s.status || 'unknown'}
-              </span>
-              {s.quarantine && (
-                <span style={{ color: 'var(--danger, #f66)', fontSize: '0.65rem' }}>
-                  quarantine
-                </span>
-              )}
-              {s.auto_generated && (
-                <span style={{ color: 'var(--text-muted)', fontSize: '0.65rem' }}>learned</span>
-              )}
-            </div>
-            <div className="mt-0.5" style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
-              {s.description}
-            </div>
-            <div
-              className="mt-1.5 flex flex-wrap gap-1 items-center"
-              style={{ fontSize: '0.7rem' }}
-            >
-              <button
-                type="button"
-                disabled={busy === s.name}
-                onClick={() =>
-                  void archiveSkill(
-                    s.name,
-                    (s.status || '').toLowerCase() !== 'archived',
-                  )
-                }
-                className="text-[10px] px-1.5 py-0.5 rounded"
-                style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
-                title={
-                  (s.status || '').toLowerCase() === 'archived'
-                    ? 'Restore to active set'
-                    : 'Archive (leave hot catalog, keep on disk)'
-                }
-              >
-                {(s.status || '').toLowerCase() === 'archived' ? 'Unarchive' : 'Archive'}
+                {label}
               </button>
-              <label
-                className="flex items-center gap-1 cursor-pointer"
-                style={{ color: 'var(--text-secondary)' }}
-                title="Force-promote to ACTIVE (skip probation)"
-              >
-                <input
-                  type="checkbox"
-                  checked={(s.status || '').toLowerCase() === 'active' && !s.quarantine}
-                  disabled={busy === s.name}
-                  onChange={(e) => {
-                    if (e.target.checked) void forcePromote(s.name)
-                    else void toggleQuarantine(s.name, false)
-                  }}
-                />
-                Force promote
-              </label>
-              <label
-                className="flex items-center gap-1 cursor-pointer"
-                style={{ color: 'var(--text-secondary)' }}
-                title="Manually quarantine (blocks script activation)"
-              >
-                <input
-                  type="checkbox"
-                  checked={Boolean(s.quarantine)}
-                  disabled={busy === s.name}
-                  onChange={(e) => void toggleQuarantine(s.name, e.target.checked)}
-                />
-                Quarantine
-              </label>
-            </div>
-            <div className="mt-1.5 flex flex-wrap gap-1">
-              <button
-                type="button"
-                disabled={busy === s.name}
-                onClick={() => void openEditor(s.name)}
-                className="text-xs px-1.5 py-0.5 rounded"
-                style={{ border: '1px solid var(--border)', color: 'var(--accent)' }}
-              >
-                Edit MD
-              </button>
-              <button
-                type="button"
-                disabled={busy === s.name}
-                onClick={() => void forcePromote(s.name)}
-                className="text-xs px-1.5 py-0.5 rounded"
-                style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
-                title="Force ACTIVE now"
-              >
-                Promote
-              </button>
-              <button
-                type="button"
-                disabled={busy === s.name}
-                onClick={() => feedback(s.name, true)}
-                className="text-xs px-1.5 py-0.5 rounded"
-                style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
-              >
-                ✓
-              </button>
-              <button
-                type="button"
-                disabled={busy === s.name}
-                onClick={() => feedback(s.name, false)}
-                className="text-xs px-1.5 py-0.5 rounded"
-                style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
-              >
-                ✗
-              </button>
-            </div>
+            ))}
           </div>
-        ))
-      )}
+
+          <div className="mb-2 flex flex-wrap gap-1">
+            <button
+              type="button"
+              onClick={() => void exportPack()}
+              className="text-[10px] px-2 py-0.5 rounded"
+              style={btnGhost}
+              title={selected.size ? `Export ${selected.size} selected` : 'Export all as ZIP'}
+            >
+              Export{selected.size ? ` (${selected.size})` : ''}
+            </button>
+            <button type="button" onClick={() => void importPack()} className="text-[10px] px-2 py-0.5 rounded" style={btnGhost}>
+              Import
+            </button>
+            {selected.size > 0 && (
+              <button
+                type="button"
+                onClick={() => setSelected(new Set())}
+                className="text-[10px] px-1.5 py-0.5 rounded"
+                style={{ color: 'var(--text-muted)' }}
+              >
+                Clear
+              </button>
+            )}
+          </div>
+
+          {(packMsg || budgetBanner || (learning && learning.learned_count > 0)) && (
+            <div className="mb-2 text-[10px] space-y-0.5" style={{ color: 'var(--text-muted)' }}>
+              {packMsg && <div style={{ color: 'var(--success, #3ecf8e)' }}>{packMsg}</div>}
+              {budgetBanner && <div style={{ color: 'var(--warning, #e6a23c)' }}>{budgetBanner}</div>}
+              {learning && learning.learned_count > 0 && (
+                <div>
+                  Learned {learning.learned_count}
+                  {learning.probation_count ? ` · ${learning.probation_count} probation` : ''}
+                  {reuse ? ` · ${reuse.total_activations} uses` : ''}
+                </div>
+              )}
+            </div>
+          )}
+
+          {error && (
+            <div className="mb-2 text-[11px]" style={{ color: 'var(--danger, #f66)' }}>
+              {error}
+            </div>
+          )}
+
+          {editName && (
+            <div
+              className="mb-2 p-2 rounded"
+              style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)' }}
+            >
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-medium" style={{ color: 'var(--accent)' }}>
+                  Edit {editName}
+                </span>
+                <button type="button" onClick={() => setEditName(null)} className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                  Close
+                </button>
+              </div>
+              <SkillMarkdownEditorLazy value={editBody} onChange={setEditBody} />
+              <button
+                type="button"
+                disabled={editSaving}
+                onClick={() => void saveEditor()}
+                className="mt-2 w-full text-xs py-1.5 rounded font-medium"
+                style={btnAccent}
+              >
+                {editSaving ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          )}
+
+          {loading ? (
+            <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+              Loading…
+            </div>
+          ) : visibleSkills.length === 0 ? (
+            <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+              {skills.length === 0 ? 'No skills loaded' : 'Nothing in this filter'}
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              {visibleSkills.map((s) => {
+                const isArchived = (s.status || '').toLowerCase() === 'archived'
+                const isActive = (s.status || '').toLowerCase() === 'active' && !s.quarantine
+                const desc =
+                  (s.description || '').length > 100
+                    ? `${(s.description || '').slice(0, 97)}…`
+                    : s.description
+                return (
+                  <div
+                    key={s.name}
+                    className="px-2 py-1.5 rounded"
+                    style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}
+                  >
+                    <div className="flex items-start gap-2">
+                      <input
+                        type="checkbox"
+                        className="mt-0.5"
+                        checked={selected.has(s.name)}
+                        onChange={() => toggleSelect(s.name)}
+                        title="Select for export"
+                        aria-label={`Select ${s.name}`}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-xs font-medium" style={{ color: 'var(--accent)' }}>
+                            {s.name}
+                          </span>
+                          <span
+                            className="text-[9px] px-1 rounded"
+                            style={{
+                              color: statusColor(s.status),
+                              border: `1px solid ${statusColor(s.status)}`,
+                            }}
+                          >
+                            {s.quarantine ? 'quarantine' : s.status || '?'}
+                          </span>
+                          {s.auto_generated && (
+                            <span className="text-[9px]" style={{ color: 'var(--text-muted)' }}>
+                              learned
+                            </span>
+                          )}
+                        </div>
+                        {desc && (
+                          <div className="text-[10px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>
+                            {desc}
+                          </div>
+                        )}
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {s.quarantine ? (
+                            <button
+                              type="button"
+                              disabled={busy === s.name}
+                              onClick={() => void forcePromote(s.name)}
+                              className="text-[10px] px-1.5 py-0.5 rounded"
+                              style={btnAccent}
+                              title="Trust & activate"
+                            >
+                              Trust
+                            </button>
+                          ) : !isActive && !isArchived ? (
+                            <button
+                              type="button"
+                              disabled={busy === s.name}
+                              onClick={() => void forcePromote(s.name)}
+                              className="text-[10px] px-1.5 py-0.5 rounded"
+                              style={btnGhost}
+                            >
+                              Promote
+                            </button>
+                          ) : null}
+                          {!s.quarantine && isActive && (
+                            <button
+                              type="button"
+                              disabled={busy === s.name}
+                              onClick={() => void toggleQuarantine(s.name, true)}
+                              className="text-[10px] px-1.5 py-0.5 rounded"
+                              style={btnGhost}
+                              title="Block scripts until Trust again"
+                            >
+                              Quarantine
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            disabled={busy === s.name}
+                            onClick={() => void archiveSkill(s.name, !isArchived)}
+                            className="text-[10px] px-1.5 py-0.5 rounded"
+                            style={btnGhost}
+                          >
+                            {isArchived ? 'Restore' : 'Archive'}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={busy === s.name}
+                            onClick={() => void openEditor(s.name)}
+                            className="text-[10px] px-1.5 py-0.5 rounded"
+                            style={{ ...btnGhost, color: 'var(--accent)' }}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            disabled={busy === s.name}
+                            onClick={() => void deleteSkillRow(s.name)}
+                            className="text-[10px] px-1.5 py-0.5 rounded"
+                            style={{
+                              border: '1px solid var(--danger, #f66)',
+                              color: 'var(--danger, #f66)',
+                              background: 'transparent',
+                            }}
+                            title="Delete from disk"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </>
+      ) : null}
     </Panel>
   )
 }

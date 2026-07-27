@@ -4,29 +4,36 @@ Skills are portable packages (`SKILL.md` + optional scripts) that teach Remedy s
 
 ## Skills panel
 
-Open **Skills** on the status bar:
+Open **Skills** on the status bar. Two tabs:
+
+- **Installed** — your local skills (bundled, learned, imported).
+- **Library** — browse the signed community catalog (`AhmiDarrow/remedy-skills`), install into quarantine, then **Trust**.
 
 | UI | Meaning |
 |----|---------|
-| **What I learned** | Counts + recent auto-learned skills (probation reasons) |
-| Status chips | active / validated / discovered / disabled / quarantined |
-| **Hard-won** badge | Skill earned high effort / recovery value |
-| Search | Filter by name / description |
-| **Force promote** | Manual override: promote a probation skill to **ACTIVE** now |
-| **Quarantine** | Manual override: lock a failing/untrusted skill (blocks script runs) |
-| **Edit MD** | Open an embedded CodeMirror editor for the skill’s `SKILL.md` body |
-| **Export Pack** | Bundle selected (or all) skills into a portable `.zip` |
-| **Import Pack** | Load a pack ZIP; imports stay quarantined until you promote |
-| Feedback | Success / fail signals for ranking |
+| Filters | All / Active / Quarantine / Learned / Archived |
+| Status chips | active · discovered · quarantine · archived · … |
+| **Trust** | Clear quarantine and activate (library/import packs) |
+| **Promote** | Force ACTIVE for probation skills |
+| **Quarantine** | Block activate/run until Trust again |
+| **Archive** / **Restore** | Soft-hide from the hot set (files stay on disk) |
+| **Delete** | Permanently remove user/library skill under `~/.remedy/skills/` |
+| **Edit** | Edit `SKILL.md` body |
+| **Export** / **Import** | ZIP packs (imports stay quarantined) |
+| **Library → Install** | Signed catalog download → quarantine |
+| **Library → Update** | Replace install and re-quarantine |
+
+### Skills Library (community)
+
+The library catalog is **Ed25519-signed**. Remedy verifies the signature before listing skills. Installs only use GitHub release assets for `AhmiDarrow/remedy-skills` (or a local monorepo seed for development). Scripts stay blocked until you **Trust**.
 
 API highlights:
 
-- `GET /api/skills/learning/summary` — “what I learned” snapshot  
-- `POST /api/skills/{name}/status` — lifecycle + `force_promote`  
-- `POST /api/skills/{name}/quarantine` — human quarantine toggle  
-- `PUT /api/skills/{name}/body` — save edited instructions  
-- `POST /api/skills/export` / `POST /api/skills/import` — pack portability
-
+- `GET /api/skills/library/catalog` · `…/search` · `POST …/install` · `GET …/updates`  
+- `DELETE /api/skills/{name}` — remove user skill  
+- `GET /api/skills/learning/summary` — learned snapshot  
+- `POST /api/skills/{name}/status` · `…/quarantine` · `PUT …/body`  
+- `POST /api/skills/export` · `…/import`
 ## Lifecycle (simplified)
 
 ```

@@ -1,0 +1,10 @@
+dist/
+*.pyc
+__pycache__/
+.DS_Store
+.keys/
+*.key
+.env
+
+dist/
+

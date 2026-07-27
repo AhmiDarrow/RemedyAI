@@ -196,6 +196,71 @@ def register_memory_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
             ),
         }
 
+    # Static skill routes MUST be registered before /api/skills/{name}
+    # or Starlette treats "packs" as a skill name.
+    @app.get("/api/skills/packs")
+    async def get_skill_packs():
+        """List skill packs (power-user grouping)."""
+        from pathlib import Path
+
+        from remedy.skills.shared import load_skill_packs
+
+        home = Path(
+            getattr(getattr(runtime, "config", None), "home_dir", None) or "~/.remedy"
+        ).expanduser()
+        data = load_skill_packs(home)
+        budget = 80
+        try:
+            from remedy.interfaces.api_support import load_config
+
+            budget = int((load_config() or {}).get("skills_active_budget") or 80)
+        except Exception:
+            pass
+        active_count = 0
+        if runtime is not None and hasattr(runtime, "skills"):
+            for s in runtime.skills.skills:
+                st = s.manifest.status
+                stv = st.value if hasattr(st, "value") else str(st)
+                if stv not in ("archived", "disabled", "deprecated"):
+                    if not (s.manifest.metadata or {}).get("quarantine"):
+                        active_count += 1
+        return {
+            **data,
+            "active_count": active_count,
+            "active_budget": budget,
+            "budget_banner": (
+                f"{active_count} / {budget} in active set — archive or pack to stay sharp"
+                if active_count >= int(budget * 0.85)
+                else None
+            ),
+        }
+
+    @app.put("/api/skills/packs")
+    async def put_skill_packs(request: Request):
+        """Save skill packs definition + enabled pack list."""
+        from pathlib import Path
+
+        from remedy.skills.shared import save_skill_packs
+
+        try:
+            payload = await request.json()
+        except Exception:
+            raise HTTPException(400, "JSON body required") from None
+        home = Path(
+            getattr(getattr(runtime, "config", None), "home_dir", None) or "~/.remedy"
+        ).expanduser()
+        data = {
+            "packs": payload.get("packs") if isinstance(payload.get("packs"), dict) else {},
+            "enabled": list(payload.get("enabled") or []),
+        }
+        path = save_skill_packs(data, home)
+        return {"status": "ok", "path": str(path), **data}
+
+    def _skill_home() -> Path:
+        return Path(
+            getattr(getattr(runtime, "config", None), "home_dir", None) or "~/.remedy"
+        ).expanduser()
+
     @app.get("/api/skills/{name}")
     async def get_skill_detail(name: str):
         if runtime is None or not hasattr(runtime, "skills"):
@@ -215,10 +280,110 @@ def register_memory_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
             "references": list(skill.references or []),
         }
 
-    def _skill_home() -> Path:
-        return Path(
-            getattr(getattr(runtime, "config", None), "home_dir", None) or "~/.remedy"
-        ).expanduser()
+    @app.delete("/api/skills/{name}")
+    async def delete_skill(name: str, purge: bool = Query(default=True)):
+        """Remove a user-installed skill from the registry and (by default) disk.
+
+        The Skills panel ✗ control is *feedback*, not delete — this endpoint is
+        the real remove path for library installs, imports, and learned skills.
+
+        Safety: only deletes directories under ``~/.remedy/skills/``. Bundled package
+        skills (shipped under the Remedy install) cannot be deleted this way.
+        """
+        if runtime is None or not hasattr(runtime, "skills"):
+            raise HTTPException(503, "Skills not available")
+        reg = runtime.skills
+        skill = reg.get(name)
+        if skill is None:
+            raise HTTPException(404, f"Skill not found: {name}")
+
+        import shutil
+
+        from remedy.bundled_skills import bundled_skills_dir
+        from remedy.skills.library.security import is_safe_skill_name
+
+        if not is_safe_skill_name(name):
+            raise HTTPException(400, "Invalid skill name")
+
+        home = _skill_home()
+        user_skills = (home / "skills").resolve()
+        # Prefer canonical user-skills path by name (prevents metadata path tricks)
+        canonical = (user_skills / name).resolve()
+        try:
+            canonical.relative_to(user_skills)
+        except ValueError as e:
+            raise HTTPException(400, "Refusing delete: path escapes user skills dir") from e
+
+        meta = dict(skill.manifest.metadata or {})
+        raw_path = (
+            getattr(skill, "source_skill_dir", None)
+            or skill.manifest.path
+            or meta.get("skill_path")
+            or ""
+        )
+        skill_path = Path(str(raw_path)).expanduser() if raw_path else canonical
+        try:
+            skill_path = skill_path.resolve()
+        except OSError:
+            skill_path = canonical
+
+        # Never allow deleting outside the user skills tree
+        try:
+            skill_path.relative_to(user_skills)
+            under_user = True
+        except ValueError:
+            under_user = False
+
+        bundled_root = bundled_skills_dir().resolve()
+        try:
+            skill_path.relative_to(bundled_root)
+            is_bundled = True
+        except ValueError:
+            is_bundled = False
+
+        if is_bundled or not under_user:
+            raise HTTPException(
+                400,
+                "Cannot delete bundled or non-user skills. "
+                "Archive or quarantine them instead. "
+                "Only skills under ~/.remedy/skills/ can be removed.",
+            )
+
+        target = skill_path if skill_path.is_dir() else skill_path.parent
+        try:
+            target = target.resolve()
+            target.relative_to(user_skills)
+        except ValueError as e:
+            raise HTTPException(400, "Refusing delete: path escapes user skills dir") from e
+        # Basename must match skill name (no deleting a different skill dir)
+        if target.name != name or target == user_skills:
+            # Fall back to canonical path only when metadata path is wrong
+            if canonical.is_dir() and canonical.name == name:
+                target = canonical
+            else:
+                raise HTTPException(
+                    400,
+                    "Refusing delete: skill path does not match skill name.",
+                )
+
+        removed_files = False
+        if purge and target.is_dir() and target != user_skills:
+            shutil.rmtree(target, ignore_errors=True)
+            removed_files = not target.exists()
+
+        if hasattr(reg, "remove"):
+            reg.remove(name)
+        with suppress(Exception):
+            from remedy.skills.shared import invalidate_shared_registry
+
+            invalidate_shared_registry()
+
+        return {
+            "name": name,
+            "status": "deleted",
+            "removed_files": removed_files,
+            "path": str(target),
+        }
 
     def _persist_skill(skill) -> None:
         with suppress(Exception):
@@ -312,6 +477,10 @@ def register_memory_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
 
             skill.manifest.status = _SS.DISABLED
         _persist_skill(skill)
+        with suppress(Exception):
+            from remedy.skills.shared import invalidate_shared_registry
+
+            invalidate_shared_registry()
         return {
             "name": name,
             "quarantine": on,
@@ -574,64 +743,6 @@ def register_memory_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
             "archived": archived,
             "count": len(archived) if not dry_run else len(candidates),
         }
-
-    @app.get("/api/skills/packs")
-    async def get_skill_packs():
-        """List skill packs (power-user grouping)."""
-        from pathlib import Path
-
-        from remedy.skills.shared import load_skill_packs
-
-        home = Path(
-            getattr(getattr(runtime, "config", None), "home_dir", None) or "~/.remedy"
-        ).expanduser()
-        data = load_skill_packs(home)
-        budget = 80
-        try:
-            from remedy.interfaces.api_support import load_config
-
-            budget = int((load_config() or {}).get("skills_active_budget") or 80)
-        except Exception:
-            pass
-        active_count = 0
-        if runtime is not None and hasattr(runtime, "skills"):
-            for s in runtime.skills.skills:
-                st = s.manifest.status
-                stv = st.value if hasattr(st, "value") else str(st)
-                if stv not in ("archived", "disabled", "deprecated"):
-                    if not (s.manifest.metadata or {}).get("quarantine"):
-                        active_count += 1
-        return {
-            **data,
-            "active_count": active_count,
-            "active_budget": budget,
-            "budget_banner": (
-                f"{active_count} / {budget} in active set — archive or pack to stay sharp"
-                if active_count >= int(budget * 0.85)
-                else None
-            ),
-        }
-
-    @app.put("/api/skills/packs")
-    async def put_skill_packs(request: Request):
-        """Save skill packs definition + enabled pack list."""
-        from pathlib import Path
-
-        from remedy.skills.shared import save_skill_packs
-
-        try:
-            payload = await request.json()
-        except Exception:
-            raise HTTPException(400, "JSON body required") from None
-        home = Path(
-            getattr(getattr(runtime, "config", None), "home_dir", None) or "~/.remedy"
-        ).expanduser()
-        data = {
-            "packs": payload.get("packs") if isinstance(payload.get("packs"), dict) else {},
-            "enabled": list(payload.get("enabled") or []),
-        }
-        path = save_skill_packs(data, home)
-        return {"status": "ok", "path": str(path), **data}
 
     # -- webhook -------------------------------------------------------------
     @app.post("/api/webhook/{source}")

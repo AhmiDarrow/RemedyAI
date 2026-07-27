@@ -500,6 +500,12 @@ class LearningLoop:
         gs = reflection.generated_skill
         if gs is None:
             return None
+        # Never rewrite official library / imported packs as auto_generated
+        meta0 = existing.manifest.metadata or {}
+        if meta0.get("source") == "library" or meta0.get("library_id"):
+            return None
+        if meta0.get("trust") in ("imported", "library-install", "library-update"):
+            return None
         eff_score = float(getattr(effort, "score", 0.0) or 0.0)
         old_effort = float(
             (existing.manifest.metadata or {}).get("effort_weight") or 0.0

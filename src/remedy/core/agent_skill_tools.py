@@ -50,6 +50,14 @@ def register_skill_tools(runtime: Any) -> None:
                         "Instruction load is blocked until then (scripts already blocked)."
                     ),
                 )
+            st = getattr(sk_obj.manifest.status, "value", str(sk_obj.manifest.status))
+            if str(st).lower() in ("disabled", "archived", "deprecated"):
+                return format_tool_error(
+                    f"Skill '{nm}' is {st} (not active)",
+                    code="SKILL_INACTIVE",
+                    tool_name="skill_activate",
+                    suggestion="Force-promote or Unarchive the skill in the Skills panel first.",
+                )
         body = reg.skill_body(nm, include_references=bool(include_references))
         if body is None:
             # fuzzy match
@@ -120,6 +128,14 @@ def register_skill_tools(runtime: Any) -> None:
                     "Open Skills panel → Trust / Activate after review. "
                     "Script execution is blocked until quarantine is cleared."
                 ),
+            )
+        st = getattr(sk.manifest.status, "value", str(sk.manifest.status))
+        if str(st).lower() in ("disabled", "archived", "deprecated"):
+            return format_tool_error(
+                f"Skill '{nm}' is {st} (not active)",
+                code="SKILL_INACTIVE",
+                tool_name="skill_run",
+                suggestion="Force-promote or Unarchive the skill in the Skills panel first.",
             )
         from remedy.core.approvals import APPROVALS
 
