@@ -530,7 +530,7 @@ export function StatusBar({
                 : 'Memory, checkpoints & plans'
             }
           >
-            Memory{hasCheckpoint ? ' · CP' : ''}
+            Memory
           </SegButton>
           <SegButton
             active={panel === 'skills'}

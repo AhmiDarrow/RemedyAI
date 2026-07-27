@@ -13,10 +13,15 @@ interface PanelProps {
   onClose: () => void
   title: string
   children: ReactNode
+  /**
+   * Fixed chrome under the title (tabs, etc.) — not inside the scroll body,
+   * so it cannot scroll/clip above the visible viewport.
+   */
+  toolbar?: ReactNode
 }
 
 /** Side panel with basic focus trap + Escape to close (a11y). */
-export function Panel({ open, onClose, title, children }: PanelProps) {
+export function Panel({ open, onClose, title, children, toolbar }: PanelProps) {
   const rootRef = useRef<HTMLDivElement>(null)
   const closeRef = useRef<HTMLButtonElement>(null)
   const prevFocus = useRef<HTMLElement | null>(null)
@@ -59,35 +64,51 @@ export function Panel({ open, onClose, title, children }: PanelProps) {
   // in a column flex parent and was collapsing the chat feed to 0px.
   if (!open) return null
 
+  // Sit below the in-app title bar (36px). top:0 hid the Skills title + Library
+  // tabs under the window chrome so users only saw the filter list.
+  const TITLEBAR_H = 36
+  // Leave room for the bottom status bar so close/tabs aren't covered either.
+  const STATUSBAR_H = 28
+
   return (
     <div
       ref={rootRef}
       role="complementary"
       aria-label={title}
-      className="flex flex-col border-l overflow-hidden fixed top-0 right-0 bottom-0 z-[80]"
+      className="flex flex-col border-l overflow-hidden fixed right-0 z-[80]"
       style={{
-        width: 280,
+        top: TITLEBAR_H,
+        bottom: STATUSBAR_H,
+        width: 300,
         background: 'var(--bg-secondary)',
         borderColor: 'var(--border)',
         boxShadow: '-8px 0 24px rgba(0,0,0,0.25)',
       }}
     >
       <div
-        className="flex items-center justify-between px-3 py-2 border-b text-xs font-medium"
+        className="flex items-center justify-between px-3 py-2 border-b text-xs font-medium flex-shrink-0"
         style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}
       >
         <span>{title}</span>
         <button
           ref={closeRef}
           onClick={onClose}
-          className="px-1 rounded"
+          className="px-1 rounded text-base leading-none"
           style={{ color: 'var(--text-muted)' }}
           aria-label={`Close ${title}`}
         >
           {'\u00D7'}
         </button>
       </div>
-      <div className="flex-1 overflow-y-auto p-2 text-xs">
+      {toolbar != null && (
+        <div
+          className="flex-shrink-0 px-2 py-2 border-b"
+          style={{ borderColor: 'var(--border)', background: 'var(--bg-tertiary)' }}
+        >
+          {toolbar}
+        </div>
+      )}
+      <div className="flex-1 min-h-0 overflow-y-auto p-2 text-xs">
         {children}
       </div>
     </div>
@@ -191,30 +212,52 @@ export function MemoryPanel({
     <button
       type="button"
       onClick={() => setTab(id)}
-      className="flex-1 text-[10px] py-1 rounded"
+      className="flex-1 text-[11px] py-1.5 rounded"
       style={{
-        background: tab === id ? 'var(--bg-tertiary)' : 'transparent',
-        color: tab === id ? 'var(--accent)' : 'var(--text-muted)',
-        border: tab === id ? '1px solid var(--border)' : '1px solid transparent',
+        background: tab === id ? 'var(--accent)' : 'transparent',
+        color: tab === id ? '#fff' : 'var(--text-primary)',
+        fontWeight: tab === id ? 700 : 600,
+        border: 'none',
+        cursor: 'pointer',
       }}
     >
       {label}
     </button>
   )
 
-  return (
-    <Panel open={open} onClose={onClose} title="Memory & progress">
-      <div className="mb-2 flex gap-1">
-        {tabBtn('memory', 'Memory')}
-        {tabBtn('checkpoint', 'Checkpoint')}
-        {tabBtn('plan', 'Plan')}
-      </div>
+  const memoryToolbar = (
+    <div
+      className="flex rounded-md p-0.5 gap-0.5"
+      style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)' }}
+      role="tablist"
+      aria-label="Memory views"
+    >
+      {tabBtn('memory', 'Memory')}
+      {tabBtn('checkpoint', 'Progress')}
+      {tabBtn('plan', 'Plan')}
+    </div>
+  )
 
+  // Split checkpoint lines: tool failures should not sit under a cheerful "Done".
+  const doneLines = checkpoint?.done || []
+  const failedFromDone = doneLines.filter(looksLikeToolFailure)
+  const completedLines = doneLines.filter((d) => !looksLikeToolFailure(d))
+  const failedLines = [
+    ...failedFromDone,
+    ...(checkpoint?.failures || []).filter((f) => !failedFromDone.includes(f)),
+  ]
+  const nextLines = checkpoint?.next_steps || []
+
+  return (
+    <Panel open={open} onClose={onClose} title="Memory" toolbar={memoryToolbar}>
       {loading ? (
-        <div style={{ color: 'var(--text-muted)' }}>Loading...</div>
+        <div style={{ color: 'var(--text-muted)' }}>Loading…</div>
       ) : tab === 'memory' ? (
         entries.length === 0 ? (
-          <div style={{ color: 'var(--text-muted)' }}>No entries</div>
+          <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', lineHeight: 1.45 }}>
+            No saved memories yet. Things Remedy learns about you and this project will show up
+            here.
+          </div>
         ) : (
           entries.map((e) => (
             <div
@@ -228,77 +271,125 @@ export function MemoryPanel({
               <div className="mt-0.5" style={{ color: 'var(--text-secondary)' }}>
                 {e.content.slice(0, 120)}
               </div>
-              <div className="mt-1" style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>
-                {e.type}
-              </div>
             </div>
           ))
         )
       ) : tab === 'checkpoint' ? (
         !checkpoint ? (
-          <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
-            No mid-task checkpoints yet. Long Build runs auto-save progress under
-            ~/.remedy/checkpoints/.
+          <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', lineHeight: 1.45 }}>
+            No progress snapshots yet. During longer Build runs, Remedy saves checkpoints so work
+            can resume if a step hits a snag.
           </div>
         ) : (
           <div className="space-y-2">
+            <div
+              className="px-2 py-1.5 rounded text-[10px]"
+              style={{
+                background: 'color-mix(in srgb, var(--accent) 12%, var(--bg-tertiary))',
+                border: '1px solid var(--border)',
+                color: 'var(--text-secondary)',
+                lineHeight: 1.4,
+              }}
+            >
+              This is a <strong style={{ color: 'var(--text-primary)' }}>progress snapshot</strong>
+              , not a crash. It records where a task left off so Remedy can continue.
+            </div>
             <div
               className="p-2 rounded"
               style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}
             >
               <div className="font-medium" style={{ color: 'var(--accent)' }}>
-                {checkpoint.title}
+                {friendlyCheckpointTitle(checkpoint.title)}
               </div>
-              <div style={{ color: 'var(--text-muted)', fontSize: '0.65rem' }}>
-                {checkpoint.reason || 'checkpoint'}
+              <div style={{ color: 'var(--text-muted)', fontSize: '0.7rem', marginTop: 2 }}>
+                {humanizeCheckpointReason(checkpoint.reason)}
                 {checkpoint.tool_step_count != null
-                  ? ` · ${checkpoint.tool_step_count} tools`
+                  ? ` · ${checkpoint.tool_step_count} step${
+                      checkpoint.tool_step_count === 1 ? '' : 's'
+                    }`
                   : ''}
               </div>
-              {(checkpoint.done?.length || 0) > 0 && (
-                <div className="mt-1.5">
-                  <div style={{ color: 'var(--text-secondary)', fontSize: '0.7rem' }}>Done</div>
-                  <ul className="m-0 pl-3" style={{ color: 'var(--text-primary)', fontSize: '0.7rem' }}>
-                    {checkpoint.done!.slice(0, 8).map((d, i) => (
-                      <li key={i}>{d}</li>
+
+              {completedLines.length > 0 && (
+                <div className="mt-2">
+                  <div
+                    className="font-semibold"
+                    style={{ color: 'var(--text-secondary)', fontSize: '0.7rem' }}
+                  >
+                    Completed
+                  </div>
+                  <ul
+                    className="m-0 mt-0.5 pl-3"
+                    style={{ color: 'var(--text-primary)', fontSize: '0.75rem', lineHeight: 1.4 }}
+                  >
+                    {completedLines.slice(0, 8).map((d, i) => (
+                      <li key={i}>{humanizeCheckpointLine(d)}</li>
                     ))}
                   </ul>
                 </div>
               )}
-              {(checkpoint.next_steps?.length || 0) > 0 && (
-                <div className="mt-1.5">
-                  <div style={{ color: 'var(--text-secondary)', fontSize: '0.7rem' }}>Next</div>
-                  <ul className="m-0 pl-3" style={{ color: 'var(--text-primary)', fontSize: '0.7rem' }}>
-                    {checkpoint.next_steps!.slice(0, 6).map((d, i) => (
-                      <li key={i}>{d}</li>
+
+              {failedLines.length > 0 && (
+                <div className="mt-2">
+                  <div
+                    className="font-semibold"
+                    style={{ color: 'var(--text-secondary)', fontSize: '0.7rem' }}
+                  >
+                    Hit a snag
+                  </div>
+                  <ul
+                    className="m-0 mt-0.5 pl-3"
+                    style={{ color: 'var(--text-primary)', fontSize: '0.75rem', lineHeight: 1.4 }}
+                  >
+                    {failedLines.slice(0, 6).map((d, i) => (
+                      <li key={i}>{humanizeCheckpointLine(d)}</li>
                     ))}
                   </ul>
                 </div>
               )}
-              {(checkpoint.failures?.length || 0) > 0 && (
-                <div className="mt-1.5">
-                  <div style={{ color: 'var(--danger, #f66)', fontSize: '0.7rem' }}>Failures</div>
-                  <ul className="m-0 pl-3" style={{ color: 'var(--text-secondary)', fontSize: '0.7rem' }}>
-                    {checkpoint.failures!.slice(0, 4).map((d, i) => (
-                      <li key={i}>{d}</li>
+
+              {nextLines.length > 0 && (
+                <div className="mt-2">
+                  <div
+                    className="font-semibold"
+                    style={{ color: 'var(--text-secondary)', fontSize: '0.7rem' }}
+                  >
+                    Suggested next
+                  </div>
+                  <ul
+                    className="m-0 mt-0.5 pl-3"
+                    style={{ color: 'var(--text-primary)', fontSize: '0.75rem', lineHeight: 1.4 }}
+                  >
+                    {nextLines.slice(0, 6).map((d, i) => (
+                      <li key={i}>{humanizeCheckpointLine(d)}</li>
                     ))}
                   </ul>
                 </div>
               )}
             </div>
+
             {checkpointMd && (
-              <pre
-                className="p-2 rounded overflow-x-auto whitespace-pre-wrap"
-                style={{
-                  fontSize: '0.65rem',
-                  color: 'var(--text-muted)',
-                  background: 'var(--bg-primary)',
-                  border: '1px solid var(--border)',
-                  maxHeight: 160,
-                }}
-              >
-                {checkpointMd.slice(0, 1200)}
-              </pre>
+              <details className="text-[10px]">
+                <summary
+                  className="cursor-pointer select-none"
+                  style={{ color: 'var(--text-muted)' }}
+                >
+                  Technical details
+                </summary>
+                <pre
+                  className="mt-1 p-2 rounded overflow-x-auto whitespace-pre-wrap"
+                  style={{
+                    fontSize: '0.65rem',
+                    color: 'var(--text-muted)',
+                    background: 'var(--bg-primary)',
+                    border: '1px solid var(--border)',
+                    maxHeight: 140,
+                    margin: 0,
+                  }}
+                >
+                  {checkpointMd.slice(0, 1200)}
+                </pre>
+              </details>
             )}
             <button
               type="button"
@@ -311,9 +402,9 @@ export function MemoryPanel({
           </div>
         )
       ) : !plan ? (
-        <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
-          No structured plan yet. Use Plan mode (Ctrl+B) and ask Remedy to save steps, or{' '}
-          <code>/plan new …</code>.
+        <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', lineHeight: 1.45 }}>
+          No plan yet. Switch to Plan mode (Ctrl+B) and ask Remedy to outline steps, or type{' '}
+          <code style={{ fontSize: '0.7rem' }}>/plan new …</code>.
         </div>
       ) : (
         <div className="space-y-2">
@@ -324,11 +415,16 @@ export function MemoryPanel({
             <div className="font-medium" style={{ color: 'var(--accent)' }}>
               {plan.title}
             </div>
-            <div style={{ color: 'var(--text-muted)', fontSize: '0.65rem' }}>
-              status: {plan.status || 'draft'} · {plan.steps?.length || 0} steps
+            <div style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>
+              {plan.status === 'approved' ? 'Approved' : plan.status === 'draft' ? 'Draft' : plan.status || 'Draft'}
+              {' · '}
+              {plan.steps?.length || 0} step{(plan.steps?.length || 0) === 1 ? '' : 's'}
             </div>
             {(plan.steps?.length || 0) > 0 && (
-              <ol className="mt-1.5 m-0 pl-4" style={{ fontSize: '0.7rem', color: 'var(--text-primary)' }}>
+              <ol
+                className="mt-1.5 m-0 pl-4"
+                style={{ fontSize: '0.75rem', color: 'var(--text-primary)', lineHeight: 1.4 }}
+              >
                 {plan.steps!.slice(0, 12).map((s, i) => (
                   <li key={i}>
                     {s.title}
@@ -364,6 +460,63 @@ export function MemoryPanel({
       )}
     </Panel>
   )
+}
+
+/** True if a checkpoint line is really a tool failure, not a success. */
+function looksLikeToolFailure(line: string): boolean {
+  const s = line || ''
+  return (
+    /error\s*\[/i.test(s)
+    || /\bNOT_FOUND\b/i.test(s)
+    || /\bfile not found\b/i.test(s)
+    || /\bfailed\b/i.test(s)
+    || /\bexception\b/i.test(s)
+    || /:\s*Error\b/i.test(s)
+  )
+}
+
+function humanizeCheckpointReason(reason?: string): string {
+  const r = (reason || '').trim().toLowerCase()
+  if (!r || r === 'checkpoint') return 'Saved progress'
+  if (r === 'recovery') return 'Saved after a step had trouble'
+  if (r === 'turn_end') return 'Saved at end of turn'
+  if (r === 'auto' || r.startsWith('auto')) return 'Auto-saved progress'
+  return r.replace(/_/g, ' ')
+}
+
+function friendlyCheckpointTitle(title?: string): string {
+  const t = (title || '').trim()
+  if (!t) return 'Progress snapshot'
+  if (/^after tool failure$/i.test(t)) return 'Paused after a step had trouble'
+  if (/tool failure/i.test(t)) return 'Paused after a step had trouble'
+  return t.replace(/^#\s*Checkpoint:\s*/i, '').trim() || 'Progress snapshot'
+}
+
+/** Plain-language line for checkpoint lists (hides scary error codes by default). */
+function humanizeCheckpointLine(line: string): string {
+  const raw = (line || '').trim()
+  if (!raw) return raw
+
+  const notFound = raw.match(/file not found:\s*(.+?)(?:\s+Suggestion:|$)/i)
+  if (notFound) {
+    const file = notFound[1]!.trim().replace(/[`'"]/g, '')
+    const sug = raw.match(/Suggestion:\s*(.+)/i)?.[1]?.trim()
+    if (sug && /list_dir/i.test(sug)) {
+      return `Couldn't find “${file}”. Next: check the folder listing.`
+    }
+    return `Couldn't find “${file}”.`
+  }
+
+  // Strip tool_name: Error [CODE]: prefix
+  let s = raw
+    .replace(/^[a-z0-9_.-]+:\s*/i, '')
+    .replace(/Error\s*\[[^\]]+\]:\s*/gi, '')
+    .replace(/\bSuggestion:\s*/gi, 'Tip: ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  if (s.length > 160) s = `${s.slice(0, 157)}…`
+  return s
 }
 
 type SkillRow = {
@@ -660,61 +813,69 @@ export function SkillsPanel({
     border: 'none',
   }
 
-  return (
-    <Panel open={open} onClose={onClose} title="Skills">
-      <div className="mb-2 flex items-center gap-1.5">
-        <div
-          className="flex flex-1 rounded-md p-0.5 gap-0.5"
-          style={{
-            background: 'var(--bg-primary)',
-            border: '1px solid var(--border)',
-          }}
-          role="tablist"
-          aria-label="Skills views"
-        >
-          {(
-            [
-              ['installed', 'My skills'],
-              ['library', 'Library'],
-            ] as const
-          ).map(([id, label]) => {
-            const on = panelTab === id
-            return (
-              <button
-                key={id}
-                type="button"
-                role="tab"
-                aria-selected={on}
-                className="flex-1 text-[11px] px-2 py-1.5 rounded"
-                style={{
-                  background: on ? 'var(--accent)' : 'transparent',
-                  color: on ? '#fff' : 'var(--text-secondary)',
-                  fontWeight: on ? 600 : 500,
-                  border: 'none',
-                }}
-                onClick={() => setPanelTab(id)}
-              >
-                {label}
-              </button>
-            )
-          })}
-        </div>
-        {onOpenHelp && (
-          <button
-            type="button"
-            onClick={() => onOpenHelp('07-skills')}
-            className="text-[11px] px-2 py-1.5 rounded shrink-0"
-            style={{
-              border: '1px solid var(--border)',
-              color: 'var(--text-muted)',
-            }}
-            title="Skills help"
-          >
-            Help
-          </button>
-        )}
+  const skillsToolbar = (
+    <div className="flex items-center gap-1.5">
+      <div
+        className="flex flex-1 rounded-md p-0.5 gap-0.5"
+        style={{
+          background: 'var(--bg-primary)',
+          border: '1px solid var(--border)',
+        }}
+        role="tablist"
+        aria-label="Skills views"
+      >
+        {(
+          [
+            ['installed', 'Installed'],
+            ['library', 'Library'],
+          ] as const
+        ).map(([id, label]) => {
+          const on = panelTab === id
+          return (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={on}
+              className="flex-1 text-[12px] px-2 py-2 rounded"
+              style={{
+                background: on ? 'var(--accent)' : 'transparent',
+                color: on ? '#fff' : 'var(--text-primary)',
+                fontWeight: on ? 700 : 600,
+                border: 'none',
+                cursor: 'pointer',
+              }}
+              onClick={() => setPanelTab(id)}
+              title={
+                id === 'library'
+                  ? 'Browse and install from the signed Skills Library catalog'
+                  : 'Skills already on this machine (bundled, learned, quarantined)'
+              }
+            >
+              {label}
+            </button>
+          )
+        })}
       </div>
+      {onOpenHelp && (
+        <button
+          type="button"
+          onClick={() => onOpenHelp('07-skills')}
+          className="text-[11px] px-2 py-1.5 rounded shrink-0"
+          style={{
+            border: '1px solid var(--border)',
+            color: 'var(--text-muted)',
+          }}
+          title="Skills help"
+        >
+          Help
+        </button>
+      )}
+    </div>
+  )
 
+  return (
+    <Panel open={open} onClose={onClose} title="Skills" toolbar={skillsToolbar}>
       {/* Keep Library mounted while Skills panel is open so list state survives
           tab flips and soft-refresh can run without remount stutter. */}
       <div
