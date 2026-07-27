@@ -70,6 +70,89 @@ Remedy-specific commands. For handoffs between agents, also use **`session-hando
 - `docs/WINDOWS_SIGNING.md` — minisign + Authenticode  
 - `docs/manual/08-updates-and-uninstall.md` — user-facing update flow  
 
+## Desktop SPA vs WebUI — same code, different load paths (critical)
+
+Desktop UI and browser **WebUI share one React SPA** under `desktop/src/`.
+There is no separate WebUI frontend. What differs is **how the built assets are
+loaded**:
+
+| Surface | How it gets UI code |
+|---------|---------------------|
+| **Tauri desktop (`tauri:dev`)** | Vite dev server (HMR) — always latest `desktop/src` |
+| **WebUI** `http://127.0.0.1:7400/` | Static files from a built SPA directory mounted by the local API |
+
+### Where WebUI assets come from
+
+`remedy.interfaces.api.find_webui_dir()` resolves the SPA root (see that function
+for the full ordered list). **Prefer live Vite output:**
+
+1. `REMEDY_WEBUI_DIR` if set  
+2. `REMEDY_DEV_ROOT/desktop/dist`  
+3. Repo `desktop/dist` (discovered from source tree)  
+4. `…/desktop/dist` next to a Tauri debug layout  
+5. **Staged / packaged copies last:**  
+   `desktop/src-tauri/target/debug/webui`, `desktop/bin/webui`, bundle `webui/`, etc.
+
+`desktop/dist` is **gitignored**. Building is required for WebUI to see SPA
+changes that are not on the Vite dev server.
+
+### Desync pitfall (2026-07 — fixed lookup, still easy to hit)
+
+**Symptom:** Desktop (tauri:dev) shows new UI; browser WebUI still looks old after
+refresh. Network tab may show an **old hashed** script name (e.g. `index-BNJOTVWc.js`)
+while `desktop/dist/index.html` references a **new** hash (`index-C7Fni8m6.js`).
+
+**Cause:** The API/sidecar process mounted a **stale staged** folder
+(`target/debug/webui` or `bin/webui`) at **startup**, not the freshly rebuilt
+`desktop/dist`. Refreshing the browser only reloads that old mount.
+
+**Also:** The SPA mount directory is chosen once at server start. Changing
+`find_webui_dir` priority or rebuilding dist does not remount until **serve
+restarts**.
+
+### Agent / dev procedure after UI changes
+
+When the user cares about **WebUI parity** with desktop:
+
+1. Edit `desktop/src/…` as usual.  
+2. `cd desktop && npm run build` → writes `desktop/dist`.  
+3. **Restart** the local API / desktop app so serve re-resolves `find_webui_dir`
+   (or at least restarts after the 0fa331a lookup fix so it prefers `desktop/dist`).  
+4. If a frozen/debug sidecar is still bound to staged `webui/`, either restart
+   after the code preference is live, **or** sync:
+   ```text
+   Copy-Item -Recurse -Force desktop\dist\* desktop\src-tauri\target\debug\webui\
+   # and if present:
+   Copy-Item -Recurse -Force desktop\dist\* desktop\bin\webui\
+   ```
+5. Hard-refresh the browser (**Ctrl+F5**). HTML is served with **no-cache**
+   headers so the entry document should pick new hashed assets; assets themselves
+   are content-hashed.
+
+### Quick verification
+
+```text
+# Disk (after build)
+Select-String -Path desktop\dist\index.html -Pattern 'index-.*\.js'
+
+# Live WebUI (must match after restart/sync)
+# Fetch http://127.0.0.1:7400/ and check the same index-*.js name
+```
+
+### Do not
+
+- Assume “refresh the WebUI tab” alone picks up `npm run build` if serve is still
+  pointing at an old `webui/` tree.  
+- Edit only `target/debug/webui` — that is a **staging mirror**, not the source of truth.  
+- Forget that packaged releases still ship a staged `webui`; release pipelines must
+  continue to stage `desktop/dist` into the install layout.
+
+### Related
+
+- `src/remedy/interfaces/api.py` — `find_webui_dir`, `_mount_web_ui`  
+- `docs/DESKTOP.md` — Switch to Web UI  
+- Commit `0fa331a` — prefer `desktop/dist` over stale sidecar `webui`
+
 ## Version surfaces
 
 Keep these aligned via `python scripts/sync_version.py {X.Y.Z}`:

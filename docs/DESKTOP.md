@@ -40,7 +40,8 @@ force-promote.
 ### Help wiki + Web UI (0.10.37)
 
 - Offline owner’s manual: **F1** / status bar **Help** (`docs/manual/` + in-app wiki).
-- **Switch to Web UI**: hide to tray + open `http://127.0.0.1:7400/` (API serves `desktop/dist`).
+- **Switch to Web UI**: hide to tray + open `http://127.0.0.1:7400/` (same SPA as desktop; API serves built assets).
+- **WebUI vs desktop dev:** `tauri:dev` uses Vite HMR; WebUI needs `cd desktop && npm run build` then **restart serve** (or sync into staged `webui/`). Prefer `desktop/dist` over stale `target/debug/webui` — see **AGENTS.md** (“Desktop SPA vs WebUI”).
 - Full quit warns that the local server stops (Web UI dies); hide-to-tray does not.
 - Sync wiki copies: `python scripts/sync_help_manual.py`
 - Docs stay aligned with code (CI gate): `python scripts/check_docs.py` — help bodies, versions, slash commands, hotkeys, catalog ids, README test-count claim
