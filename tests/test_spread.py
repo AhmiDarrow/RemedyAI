@@ -140,6 +140,68 @@ async def test_run_spread_blocks_nesting():
         runner_mod._spread_depth.reset(token)
 
 
+def test_parse_tasks_arg_accepts_native_list():
+    """Models pass tasks as a JSON array via tool_calls — must not .strip() a list."""
+    from remedy.core.agent_spread_tools import _parse_tasks_arg
+
+    items, err = _parse_tasks_arg(
+        [
+            {"id": "t1", "kind": "explore", "path": "src/a"},
+            {"id": "t2", "kind": "explore", "path": "src/b"},
+        ]
+    )
+    assert err is None
+    assert items is not None and len(items) == 2
+
+    items2, err2 = _parse_tasks_arg(
+        '[{"id":"t1","kind":"diff","path":"."},{"id":"t2","kind":"explore","path":"tests"}]'
+    )
+    assert err2 is None
+    assert items2 is not None and len(items2) == 2
+
+    items3, err3 = _parse_tasks_arg({"kind": "explore", "path": "src"})
+    assert err3 is None
+    assert items3 is not None and len(items3) == 1
+
+    empty, err_e = _parse_tasks_arg("")
+    assert empty is None and err_e is None
+
+
+@pytest.mark.asyncio
+async def test_spread_run_tool_accepts_list_tasks(tmp_path: Path):
+    """Regression: AttributeError 'list' object has no attribute 'strip'."""
+    from remedy.core.agent_spread_tools import register_spread_tools
+    from remedy.skills.tool_registry import ToolRegistry
+
+    runtime = MagicMock()
+    runtime.tool_registry = ToolRegistry()
+    runtime.effective_project_path.return_value = tmp_path
+    runtime.resolve_tool_path.side_effect = lambda p: tmp_path
+    runtime.allowed_roots.return_value = [tmp_path]
+    runtime.access_scope.return_value = "project"
+    runtime._session_id = "spread-list-test"
+
+    (tmp_path / "a.txt").write_text("hello\n", encoding="utf-8")
+
+    register_spread_tools(runtime)
+    assert runtime.tool_registry.get("spread_run") is not None
+
+    # Native list (how OpenAI-compat tool_calls often arrive after json.loads)
+    out = await runtime.tool_registry.execute(
+        "spread_run",
+        goal="",
+        tasks=[
+            {"id": "t1", "kind": "explore", "path": "."},
+            {"id": "t2", "kind": "diff", "path": "."},
+        ],
+        max_workers=2,
+        path=".",
+    )
+    assert isinstance(out, str)
+    assert not out.startswith("Error")
+    assert "spread" in out.lower() or "worker" in out.lower() or "Explore" in out
+
+
 def test_jobs_resolve_fail_closed():
     from remedy.core.errors import SecurityError
     from remedy.core.jobs import _resolve_job_path

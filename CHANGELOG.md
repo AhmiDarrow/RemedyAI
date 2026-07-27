@@ -4,6 +4,15 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.18.2] - 2026-07-27
+
+### Fix: spread_run accepts native task arrays
+
+- **`spread_run`:** models pass `tasks` as a JSON **array** via tool_calls; the handler
+  no longer assumes a string and crashes with `'list' object has no attribute 'strip'`.
+- Accepts list, single object, or JSON string; schema documents `anyOf` array|string.
+- Regression tests for list-arg path.
+
 ## [0.18.1] - 2026-07-27
 
 ### Fix: run-until-finished agency (no tool-limit stop) + title bar after move

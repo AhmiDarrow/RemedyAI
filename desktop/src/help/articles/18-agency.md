@@ -55,6 +55,7 @@ Access scope (`project` / `home` / `full`) is a **security** control, separate f
 When a request spans **independent** modules/paths (or you say “in parallel” / “cover more ground”), Remedy can **fan out**:
 
 - **`spread_run`** — runs several silent workers at once (explore / search / verify / diff / review), then returns **one merged digest** to the main agent.
+  Pass `tasks` as a **JSON array** (native tool-call list) or a JSON string, or use `goal=` for auto-plan.
 - You still talk to **one Remedy** — workers are not separate chat personas.
 - Workers are **depth-1** (they cannot spawn more workers).
 - Most workers are **non-LLM** jobs (fast). Optional local Qwen only refines the plan or compresses long digests when the server is already up.
