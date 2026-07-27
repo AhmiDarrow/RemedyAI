@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.17.0"
+version = "0.18.0"
 description = "Remedy Desktop — local AI partner for knowledge, design, and code"
 authors = ["Ahmi <ahmitdarrow@gmail.com>"]
 license = "LicenseRef-Proprietary"
@@ -35,3 +35,4 @@ winreg = "0.55"
 rfd = "0.15"
 portable-pty = "0.9.0"
 url = "2.5.8"
+
