@@ -53,6 +53,36 @@ from remedy.core.react_stream import (
 logger = logging.getLogger(__name__)
 
 
+def _is_fatal_llm_api_error(status: int, body: str) -> bool:
+    """True when retrying the same model/request cannot succeed.
+
+    e.g. HTTP 404 model-not-found — soft-continue spam looks like a stuck agent.
+    """
+    if status in (404, 410, 422):
+        return True
+    low = (body or "").lower()
+    fatal_phrases = (
+        "does not exist",
+        "model_not_found",
+        "invalid model",
+        "unknown model",
+        "not have access",
+        "model is not available",
+        "no such model",
+        "unsupported model",
+        "invalid_request_error",  # often permanent model/route issues
+    )
+    if any(p in low for p in fatal_phrases) and (
+        "model" in low or status in (400, 403, 404)
+    ):
+        return True
+    # 401/403 without a chance to refresh (non-xAI handled elsewhere)
+    if status in (401, 403) and "expired" not in low:
+        # Still allow one soft path for generic auth; treat "does not have access" as fatal above
+        pass
+    return False
+
+
 async def call_llm_stream(runtime, message: str,
         session_id: str | None = None,
         attachments: list[dict[str, Any]] | None = None,
@@ -252,10 +282,13 @@ async def call_llm_stream(runtime, message: str,
         # Retry once after repairing DeepSeek reasoning_content on tool turns.
         reasoning_repair_done = False
         # Soft API errors: keep going when we already have tool context.
+        # Low cap — fatal model errors hard-stop (see _is_fatal_llm_api_error).
         api_soft_failures = 0
-        max_api_soft_failures = 16
+        max_api_soft_failures = 3
         # Sticky force-answer after recoverable provider failures.
         force_answer_sticky = False
+        # After one force-answer API attempt fails, stop (no 404 spam loop).
+        force_answer_api_fail_once = False
         # Empty-answer recovery (model thought but sent no content).
         empty_answer_retries = 0
         max_empty_answer_retries = 8
@@ -557,15 +590,47 @@ async def call_llm_stream(runtime, message: str,
                                     "reasoning for tool turns; continuing…\n"
                                 )
                                 continue
+                        # Fatal: wrong/missing model — do not soft-retry 16× (looks stuck).
+                        if _is_fatal_llm_api_error(resp.status, text):
+                            model_name = str(
+                                getattr(runtime, "_llm_model", None) or "unknown"
+                            )
+                            prov = str(
+                                getattr(runtime, "_llm_provider", None) or "unknown"
+                            )
+                            yield (
+                                f"\n[LLM ERROR — HTTP {resp.status}]\n"
+                                f"{text[:500]}\n[END LLM ERROR]\n\n"
+                                f"**Cannot continue:** model `{model_name}` "
+                                f"(provider `{prov}`) is not available or this "
+                                f"account cannot use it.\n\n"
+                                "Pick a working model in the model picker / Settings "
+                                "(e.g. your previous Grok or DeepSeek id), then resend. "
+                                "This is not a tool-budget limit.\n"
+                            )
+                            return
+                        # Already forced a no-tool answer and API still failed → stop.
+                        if force_answer_sticky or force_answer_api_fail_once:
+                            yield (
+                                f"\n[LLM ERROR — HTTP {resp.status}]\n"
+                                f"{text[:500]}\n[END LLM ERROR]\n\n"
+                                "Stopped after repeated provider errors. "
+                                "Check model/API key in Settings and try again "
+                                "(or say **continue** after switching models).\n"
+                            )
+                            return
                         api_soft_failures += 1
-                        # Do not hard-stop the whole turn if we can still answer.
+                        # Transient path: one force-answer attempt from any tool context.
                         if api_soft_failures <= max_api_soft_failures:
                             yield (
                                 f"\n[LLM notice — HTTP {resp.status}; "
-                                f"continuing]\n{text[:240]}\n"
+                                f"trying to finish from context "
+                                f"({api_soft_failures}/{max_api_soft_failures})]\n"
+                                f"{text[:200]}\n"
                             )
                             tools = []
                             force_answer_sticky = True
+                            force_answer_api_fail_once = True
                             messages.append(
                                 {
                                     "role": "user",
@@ -581,12 +646,10 @@ async def call_llm_stream(runtime, message: str,
                         yield (
                             f"\n[LLM ERROR — HTTP {resp.status}]\n"
                             f"{text[:500]}\n[END LLM ERROR]\n"
-                            "I hit repeated API errors but will try one last "
-                            "answer from context.\n"
+                            "Stopped after repeated API errors. "
+                            "Switch model or check the provider, then resend.\n"
                         )
-                        tools = []
-                        force_answer_sticky = True
-                        continue
+                        return
 
                     with suppress(Exception):
                         from remedy.nanoswarm import get_swarm

@@ -4,6 +4,13 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Fix: stop spinning on dead/missing model (not “tool budget”)
+
+- HTTP **404** / model-not-found / no-access errors **hard-stop** with a clear
+  “switch model” message instead of soft-retrying until the turn looks stuck.
+- Soft API retries capped; after one forced final-answer attempt fails, stop
+  (no walls of `[LLM notice — HTTP 404; continuing]`).
+
 ### Fix: no console flash on tool / spread workers (Windows)
 
 - **`repo_search` / ripgrep** (used heavily by `spread_run` explore/search) now spawn with
