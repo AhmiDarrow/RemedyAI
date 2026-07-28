@@ -30,12 +30,12 @@ function readBounds(el: HTMLElement | null): Bounds | null {
   if (r.width < 80 || r.height < 80) return null
   if (r.bottom < 0 || r.right < 0) return null
   if (r.top > window.innerHeight || r.left > window.innerWidth) return null
-  // Inset 1px so chrome borders don't clip WebView2
+  // Flush to host box — no inset (inset showed a white/dark border halo)
   return {
-    x: Math.round(r.left) + 1,
-    y: Math.round(r.top) + 1,
-    width: Math.max(80, Math.round(r.width) - 2),
-    height: Math.max(80, Math.round(r.height) - 2),
+    x: Math.round(r.left),
+    y: Math.round(r.top),
+    width: Math.max(80, Math.round(r.width)),
+    height: Math.max(80, Math.round(r.height)),
   }
 }
 
@@ -235,14 +235,79 @@ export function BrowserSlide() {
   )
   goRef.current = go
 
-  // Auto-load homepage once the host has a real size (desktop only).
+  // Sync address bar when agent/Rust navigates (does not reload the page).
+  useEffect(() => {
+    const onSetUrl = (ev: Event) => {
+      const u = (ev as CustomEvent<{ url?: string }>).detail?.url
+      if (!u) return
+      setUrl(u)
+      setActiveUrl(u)
+      setLoaded(true)
+      setStatus(`Loaded ${u}`)
+      autoStarted.current = true
+      void pushBounds()
+    }
+    window.addEventListener('remedy:browser-set-url', onSetUrl)
+    return () => window.removeEventListener('remedy:browser-set-url', onSetUrl)
+  }, [pushBounds])
+
+  // Poll live URL from WebView (user navigated inside the page).
+  useEffect(() => {
+    if (!isTauri() || !loaded) return
+    let cancelled = false
+    const tick = async () => {
+      if (cancelled) return
+      try {
+        const cur = await tauriInvoke<string>('browser_current_url')
+        if (cur && cur !== activeUrl && !cur.startsWith('about:')) {
+          setActiveUrl(cur)
+          setUrl(cur)
+        }
+      } catch {
+        /* embed closed */
+      }
+    }
+    void tick()
+    const iv = window.setInterval(() => void tick(), 1200)
+    return () => {
+      cancelled = true
+      window.clearInterval(iv)
+    }
+  }, [loaded, activeUrl])
+
+  // Auto-load homepage only if embed is not already open (side-switch remount).
   useEffect(() => {
     if (!isTauri() || autoStarted.current) return
     let cancelled = false
     let attempts = 0
-    const tick = () => {
+    const tick = async () => {
       if (cancelled || autoStarted.current) return
       attempts += 1
+      try {
+        const open = await tauriInvoke<boolean>('browser_is_open')
+        if (open) {
+          // Side switch remount: keep existing page, sync URL bar — do NOT load home
+          autoStarted.current = true
+          setLoaded(true)
+          try {
+            const cur = await tauriInvoke<string>('browser_current_url')
+            if (cur && !cur.startsWith('about:')) {
+              setUrl(cur)
+              setActiveUrl(cur)
+              setStatus(`Restored ${cur}`)
+            } else {
+              setStatus('Browser ready')
+            }
+          } catch {
+            setStatus('Browser ready')
+          }
+          await pushBounds()
+          await tauriInvoke('browser_show').catch(() => {})
+          return
+        }
+      } catch {
+        /* */
+      }
       const b = readBounds(hostRef.current)
       if (b) {
         autoStarted.current = true
@@ -250,18 +315,17 @@ export function BrowserSlide() {
         return
       }
       if (attempts < 40) {
-        window.setTimeout(tick, 50)
+        window.setTimeout(() => void tick(), 50)
       } else {
         setStatus('Expand Browser rail, then press Go (or ↗ for system browser)')
       }
     }
-    // Defer one frame so flex layout can measure
-    const id = window.requestAnimationFrame(() => tick())
+    const id = window.requestAnimationFrame(() => void tick())
     return () => {
       cancelled = true
       window.cancelAnimationFrame(id)
     }
-  }, [home])
+  }, [home, pushBounds])
 
   const closeEmbed = useCallback(async () => {
     if (!isTauri()) {
@@ -389,7 +453,8 @@ export function BrowserSlide() {
         ref={hostRef}
         className="flex-1 min-h-0 relative w-full overflow-hidden"
         style={{
-          background: loaded ? '#ffffff' : 'var(--bg-primary)',
+          // Match app chrome — white flash/border around WebView was distracting
+          background: 'var(--bg-primary)',
           minHeight: 120,
           zIndex: 1,
           isolation: 'isolate',

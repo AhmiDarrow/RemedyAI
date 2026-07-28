@@ -83,8 +83,11 @@ def test_enqueue_sets_ui_command_for_rail(tmp_path: Path):
     assert cmd.get("action") == "open_browser"
     assert cmd.get("url") == "https://example.com/wiki"
     assert cmd.get("job_id") == job.id
-    b.clear_ui_command(job_id=job.id)
+    taken = b.take_ui_command()
+    assert taken is not None
+    assert taken.get("job_id") == job.id
     assert b.peek_ui_command() is None
+    assert b.take_ui_command() is None
 
 
 def test_computer_host_routes_loopback_no_auth(tmp_path: Path):

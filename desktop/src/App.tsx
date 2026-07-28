@@ -243,9 +243,31 @@ export default function App() {
     void import('./api/tauri').then(async ({ isTauri, tauriListen }) => {
       if (!isTauri()) return
       try {
-        unlisten = await tauriListen('computer-open-browser', () => {
+        unlisten = await tauriListen('computer-open-browser', (ev) => {
           openBrowserInRail()
+          // Sync address bar via DOM event for BrowserSlide
+          const payload = (ev as { payload?: { url?: string } })?.payload
+          const u = payload?.url
+          if (u) {
+            window.dispatchEvent(
+              new CustomEvent('remedy:browser-set-url', { detail: { url: u } }),
+            )
+          }
         })
+        const unlistenUrl = await tauriListen('computer-browser-url', (ev) => {
+          const payload = (ev as { payload?: { url?: string } })?.payload
+          const u = payload?.url
+          if (u) {
+            window.dispatchEvent(
+              new CustomEvent('remedy:browser-set-url', { detail: { url: u } }),
+            )
+          }
+        })
+        const prev = unlisten
+        unlisten = () => {
+          prev?.()
+          unlistenUrl?.()
+        }
       } catch {
         /* older shell */
       }

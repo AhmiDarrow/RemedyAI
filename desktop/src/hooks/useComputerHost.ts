@@ -219,44 +219,19 @@ export function useComputerHost(
       }).catch(() => null)
     }
 
-    /** Settings-like path: server sets ui_command → we open rail + navigate. */
+    /**
+     * SPA only opens the rail — Rust computer-host owns navigate (avoids double
+     * navigate + 30s races). Listen to computer-open-browser for URL bar sync.
+     */
     const tickUiCommand = async () => {
       if (cancelled || uiBusy.current) return
       uiBusy.current = true
       try {
+        // Peek only (do not take) — Rust uses take=1. Just ensure rail is open
+        // if anything is pending for UX when SPA is focused.
         const cmd = await fetchComputerUiCommand().catch(() => null)
-        if (!cmd?.action) return
-        if (cmd.action === 'open_browser' || cmd.job_action === 'navigate') {
+        if (cmd?.action === 'open_browser' || cmd?.job_action === 'navigate') {
           openRail()
-          const url = (cmd.url || '').trim()
-          const jobId = cmd.job_id
-          if (url && isTauri()) {
-            try {
-              await navigateInRail(url)
-              if (jobId) {
-                await completeComputerJob(jobId, {
-                  ok: true,
-                  result: {
-                    ok: true,
-                    target: 'browser',
-                    action: 'navigate',
-                    message: `Navigated in-rail: ${url}`,
-                    url,
-                    via: 'ui_command',
-                  },
-                }).catch(() => null)
-              }
-            } catch (e) {
-              console.warn('[computer-host] ui navigate failed', e)
-              if (jobId) {
-                await completeComputerJob(jobId, {
-                  ok: false,
-                  error: e instanceof Error ? e.message : String(e),
-                }).catch(() => null)
-              }
-            }
-          }
-          await ackComputerUiCommand(jobId).catch(() => null)
         }
       } finally {
         uiBusy.current = false

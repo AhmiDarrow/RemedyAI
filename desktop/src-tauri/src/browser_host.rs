@@ -246,9 +246,10 @@ pub fn navigate_embed(
     let window = main_window(app)?;
     // about:blank first → then navigate: avoids multiwebview white-screen on some GPUs.
     let blank: Url = "about:blank".parse().map_err(|e: url::ParseError| e.to_string())?;
+    // Dark chrome — pure white reads as a distracting border around the page
     let builder = WebviewBuilder::new(LABEL, WebviewUrl::External(blank))
         .focused(true)
-        .background_color(Color(255, 255, 255, 255));
+        .background_color(Color(18, 18, 22, 255));
 
     // add_child already runs builder on main thread internally
     let wv = window
@@ -326,32 +327,82 @@ fn computer_host_loop(app: AppHandle) {
         std::thread::sleep(Duration::from_millis(500));
     }
     log::info!("computer-host: API reachable, polling ui/command + jobs");
+    let mut last_job_id = String::new();
+    let mut hello_tick: u32 = 0;
     loop {
-        std::thread::sleep(Duration::from_millis(280));
-        let _ = agent
-            .post("http://127.0.0.1:7400/api/computer/host/hello")
-            .set("Content-Type", "application/json")
-            .send_string(r#"{"client":"desktop-rust"}"#);
+        std::thread::sleep(Duration::from_millis(200));
+        hello_tick = hello_tick.wrapping_add(1);
+        // Hello less often — was adding latency under load
+        if hello_tick % 10 == 0 {
+            let _ = agent
+                .post("http://127.0.0.1:7400/api/computer/host/hello")
+                .set("Content-Type", "application/json")
+                .send_string(r#"{"client":"desktop-rust"}"#);
+        }
 
-        // UI command path (open rail + navigate)
+        // take=1 clears command atomically — prevents reloading the same wiki forever
         if let Ok(resp) = agent
-            .get("http://127.0.0.1:7400/api/computer/ui/command")
+            .get("http://127.0.0.1:7400/api/computer/ui/command?take=1")
             .call()
         {
             if let Ok(v) = resp.into_json::<serde_json::Value>() {
                 if let Some(cmd) = v.get("command").filter(|c| !c.is_null() && c.is_object()) {
-                    handle_ui_command(&app, &agent, cmd);
+                    let jid = cmd
+                        .get("job_id")
+                        .and_then(|j| j.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    if !jid.is_empty() && jid == last_job_id {
+                        log::debug!("computer-host: skip duplicate job {jid}");
+                    } else {
+                        if !jid.is_empty() {
+                            last_job_id = jid.clone();
+                        }
+                        handle_ui_command(&app, &agent, cmd);
+                    }
                 }
             }
         }
 
-        // Job queue path
+        // Job queue — only claim non-navigate leftovers (navigate handled via ui take)
         if let Ok(resp) = agent
             .get("http://127.0.0.1:7400/api/computer/jobs/next")
             .call()
         {
             if let Ok(v) = resp.into_json::<serde_json::Value>() {
                 if let Some(job) = v.get("job").filter(|j| !j.is_null() && j.is_object()) {
+                    let action = job
+                        .get("action")
+                        .and_then(|a| a.as_str())
+                        .unwrap_or("");
+                    let jid = job
+                        .get("id")
+                        .and_then(|i| i.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    // Skip navigate jobs already finished via ui_command path
+                    if action == "navigate" {
+                        if !jid.is_empty() && jid == last_job_id {
+                            // Already handled — complete as no-op if still pending was claimed
+                            complete_job(
+                                &agent,
+                                &jid,
+                                true,
+                                json!({
+                                    "ok": true,
+                                    "target": "browser",
+                                    "action": "navigate",
+                                    "message": "Already navigated via ui_command",
+                                    "via": "rust-host-dedupe",
+                                }),
+                                None,
+                            );
+                            continue;
+                        }
+                    }
+                    if !jid.is_empty() {
+                        last_job_id = jid;
+                    }
                     handle_job(&app, &agent, job);
                 }
             }
@@ -385,19 +436,26 @@ fn handle_ui_command(app: &AppHandle, agent: &ureq::Agent, cmd: &serde_json::Val
         return;
     }
 
-    // Tell SPA to expand Browser rail (like Settings) + push real host bounds
+    // Tell SPA to expand Browser rail + sync address bar URL
     let _ = app.emit(
         "computer-open-browser",
         json!({ "url": url, "job_id": job_id }),
     );
-    // React: open rail → mount BrowserSlide → ResizeObserver → browser_set_bounds
-    std::thread::sleep(Duration::from_millis(700));
+    // Short settle — rail open is CSS; long sleeps made every navigate feel like 30s+
+    std::thread::sleep(Duration::from_millis(220));
 
     if !url.is_empty() {
         let nav_result = run_navigate_on_main(app, &url);
-        // Second pass: SPA may have pushed accurate bounds after mount
-        std::thread::sleep(Duration::from_millis(200));
+        // One quick resync after SPA pushes host bounds
+        std::thread::sleep(Duration::from_millis(80));
         let _ = run_resync_bounds_on_main(app);
+        // Keep SPA address bar in sync
+        if let Ok(ref final_url) = nav_result {
+            let _ = app.emit(
+                "computer-browser-url",
+                json!({ "url": final_url }),
+            );
+        }
         if !job_id.is_empty() {
             match nav_result {
                 Ok(final_url) => {

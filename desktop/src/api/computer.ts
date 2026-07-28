@@ -109,9 +109,12 @@ export type ComputerUiCommand = {
 }
 
 /** Server asks Desktop to open Browser rail (like Settings) + optional URL. */
-export async function fetchComputerUiCommand(): Promise<ComputerUiCommand | null> {
+export async function fetchComputerUiCommand(
+  take = false,
+): Promise<ComputerUiCommand | null> {
+  const q = take ? '?take=1' : ''
   const data = await hostFetch<{ command?: ComputerUiCommand | null }>(
-    '/computer/ui/command',
+    `/computer/ui/command${q}`,
   )
   return data.command || null
 }

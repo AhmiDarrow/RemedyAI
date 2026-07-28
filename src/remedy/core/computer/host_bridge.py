@@ -209,6 +209,28 @@ class ComputerHostBridge:
             except OSError:
                 pass
 
+    def take_ui_command(self) -> dict[str, Any] | None:
+        """Atomically read + clear UI command (prevents re-navigate loops)."""
+        with self._lock:
+            cmd = None
+            if self._ui_command:
+                cmd = dict(self._ui_command)
+            else:
+                try:
+                    if self._ui_path.is_file():
+                        raw = json.loads(self._ui_path.read_text(encoding="utf-8"))
+                        if isinstance(raw, dict) and raw.get("action"):
+                            cmd = raw
+                except (OSError, json.JSONDecodeError):
+                    cmd = None
+            self._ui_command = None
+            try:
+                if self._ui_path.is_file():
+                    self._ui_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            return cmd
+
     def enqueue(self, action: str, payload: dict[str, Any] | None = None) -> ComputerJob:
         job = ComputerJob(
             id=uuid.uuid4().hex[:16],
