@@ -67,6 +67,12 @@ def test_message_wants_tools_action_kicks() -> None:
         "troubleshoot why",
         "you don't seem to be able to complete this task",
         "process the assets",
+        # 2026-07-28 computer-use: browse kicks must enable tools
+        "goto gmail",
+        "bring up google",
+        "go to youtube",
+        "open gmail",
+        "gta 5 wiki show me it",
     ):
         assert message_wants_tools(msg) is True, msg
     # Still skip pure chit-chat
@@ -127,6 +133,16 @@ def test_history_suggests_open_work_keeps_agency() -> None:
     ) is True
     assert looks_like_false_progress("Here is the final result.") is False
     assert message_wants_tools("sorry pick up where you left off") is True
+    # 2026-07-28: narrated Gmail open without tool_calls
+    assert looks_like_false_progress(
+        "I'll try opening **Gmail** in the Browser rail now."
+    ) is True
+    assert looks_like_false_progress(
+        "I'll navigate to https://www.google.com in the Browser rail."
+    ) is True
+    assert looks_like_false_progress(
+        "Let me bring up Google there now."
+    ) is True
 
 
 def test_pseudo_tool_parse_and_log(caplog) -> None:

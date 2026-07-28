@@ -91,6 +91,15 @@ def normalize_url(url: str) -> str:
     # bare domain
     if re.match(r"^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(/.*)?$", u):
         return "https://" + u
+    # Nicknames: gmail → mail.google.com (lazy import avoids cycle with browse_intent)
+    try:
+        from remedy.core.computer.browse_intent import resolve_site_alias
+
+        alias = resolve_site_alias(u)
+        if alias:
+            return alias
+    except Exception:
+        pass
     return u
 
 

@@ -269,6 +269,17 @@ async def call_llm_stream(runtime, message: str,
                 else []
             )
 
+        # High-confidence browse kicks ("goto gmail", "bring up google"):
+        # force tools on + pre-run computer_navigate so the rail opens even if
+        # the model only narrates intent (session bug 2026-07-28).
+        browse_pre_url: str | None = None
+        with suppress(Exception):
+            from remedy.core.computer.browse_intent import parse_browse_navigate_url
+
+            browse_pre_url = parse_browse_navigate_url(message or "")
+        if browse_pre_url and all_tools and not plan_mode:
+            tools = all_tools
+
         seen_fps: set[str] = set()
         result_cache: dict[str, str] = {}
         produced_user_text = False
@@ -337,6 +348,69 @@ async def call_llm_stream(runtime, message: str,
                 open_tasks_for_wall = list(getattr(brief, "open_tasks", None) or [])
         # Coding / tool-enabled turns: Grok Build style — run until finished.
         run_until_done = bool(tools) or bool(all_tools)
+
+        # Pre-open Browser rail for clear "goto X" intents before the model speaks.
+        if browse_pre_url and not plan_mode:
+            has_nav = any(
+                ((t.get("function") or {}).get("name") or "") == "computer_navigate"
+                for t in (all_tools or [])
+            )
+            if has_nav:
+                from uuid import uuid4
+
+                nav_id = f"browse_pre_{uuid4().hex[:10]}"
+                pre_calls = normalize_tool_calls(
+                    [
+                        {
+                            "id": nav_id,
+                            "type": "function",
+                            "function": {
+                                "name": "computer_navigate",
+                                "arguments": json.dumps(
+                                    {
+                                        "url": browse_pre_url,
+                                        "target": "browser",
+                                    }
+                                ),
+                            },
+                        }
+                    ]
+                )
+                logger.info(
+                    "browse_intent pre-navigate url=%s",
+                    browse_pre_url,
+                )
+                yield "@@tool_calls"
+                messages.append(
+                    build_assistant_api_message(
+                        content=None,
+                        tool_calls=pre_calls,
+                    )
+                )
+                async for event, tool_msg in execute_tool_calls(
+                    runtime,
+                    pre_calls,
+                    seen_fps=seen_fps,
+                    result_cache=result_cache,
+                ):
+                    if event.startswith("@@"):
+                        yield event
+                    if tool_msg:
+                        messages.append(tool_msg)
+                tool_batches_this_turn += 1
+                productive_in_epoch += 1
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Browser rail navigate already ran for {browse_pre_url}. "
+                            "If ok/SUCCESS, reply in one short sentence that the page is "
+                            "open in the Browser rail. Do not web_fetch. Do not open the "
+                            "system browser. Do not claim the rail failed if the tool "
+                            "returned SUCCESS."
+                        ),
+                    }
+                )
 
         async with aiohttp.ClientSession(
             timeout=timeout, connector=connector
@@ -1037,11 +1111,14 @@ async def call_llm_stream(runtime, message: str,
                                 "role": "user",
                                 "content": (
                                     "Stop narrating intent. Use native function-calling "
-                                    "tools **now** (list_dir / file_read / file_write / "
-                                    "file_edit / bash_exec / comfyui / local_discover / "
-                                    "mission_start) and keep going until the user request "
-                                    "is finished. Do **not** reply with only a status line "
-                                    "or thinking — make real tool_calls."
+                                    "tools **now** (computer_navigate / list_dir / "
+                                    "file_read / file_write / file_edit / bash_exec / "
+                                    "comfyui / local_discover / mission_start) and keep "
+                                    "going until the user request is finished. "
+                                    "To open a website use **computer_navigate** with a "
+                                    "full https URL (gmail → https://mail.google.com). "
+                                    "Do **not** reply with only a status line or thinking "
+                                    "— make real tool_calls."
                                 ),
                             }
                         )

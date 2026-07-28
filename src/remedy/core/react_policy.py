@@ -226,7 +226,7 @@ else:
 # Skill body inject cap (progressive disclosure stage 2)
 SKILL_BODY_CHAR_CAP = 24_000
 
-# Messages that look like they need filesystem / shell tools.
+# Messages that look like they need filesystem / shell / computer tools.
 _TOOL_HINT_RE = re.compile(
     r"\b("
     r"read|write|edit|create|delete|list|ls|cat|open|save|"
@@ -243,7 +243,13 @@ _TOOL_HINT_RE = re.compile(
     r"generate(\s+an?)?\s+image|image\s+generation|render(\s+an?)?\s+image|"
     r"make\s+(me\s+)?(an?\s+)?(image|picture|photo)|"
     r"draw\s+(me\s+)?|illustrat|picture\s+of|photo\s+of|"
-    r"show\s+(it|me|the\s+image)|embed(\s+it)?|display(\s+it)?"
+    r"show\s+(it|me|the\s+image)|embed(\s+it)?|display(\s+it)?|"
+    # Computer-use / in-app browser rail (session 2026-07-28: "goto gmail"
+    # and "bring up google" gated tools=[] → pure narration, zero navigate)
+    r"goto|go\s+to|navigate|browser|rail|webview|"
+    r"bring\s+up|pull\s+up|fire\s+up|take\s+me\s+to|head\s+to|jump\s+to|"
+    r"gmail|youtube|wikipedia|wiki|fandom|"
+    r"https?://|www\."
     r")\b|"
     r"(?:[A-Za-z]:)?[\\/][\w.\\/ -]+",
     re.IGNORECASE,
@@ -311,7 +317,9 @@ _FALSE_PROGRESS_RE = re.compile(
     r"(?:"
     r"\b(?:i(?:'m| am)|i'?ll|let\s+me|now)\s+"
     r"(?:process|processing|check|checking|work|working|pick(?:ing)?\s+up|"
-    r"start|starting|do(?:ing)?|handle|handling|run|running)\b|"
+    r"start|starting|do(?:ing)?|handle|handling|run|running|"
+    r"try|trying|open|opening|navigate|navigating|bring|bringing|"
+    r"load|loading|pull|pulling|launch|launching)\b|"
     r"\bprocessing\b|"
     r"\bworking\s+on\s+it\b|"
     r"\bpicking\s+up\b|"
@@ -320,7 +328,12 @@ _FALSE_PROGRESS_RE = re.compile(
     r"\bgiving\s+you\s+(?:a\s+)?(?:real\s+)?eta\b|"
     r"\bchecking\s+assets\b|"
     r"\bdoing\s+the\s+(?:asset|logo|work)\b|"
-    r"\bso\s+we\s+can\s+(?:finish|complete|continue)\b"
+    r"\bso\s+we\s+can\s+(?:finish|complete|continue)\b|"
+    # Browser rail intent-only lines (session 2026-07-28 Gmail)
+    r"\bbrowser\s+rail\b|"
+    r"\bin[- ]?app\s+browser\b|"
+    r"\bnavigate\s+to\b|"
+    r"\bopening\s+(?:gmail|google|the\s+page|the\s+site)\b"
     r")",
     re.IGNORECASE,
 )
