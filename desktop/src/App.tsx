@@ -41,6 +41,10 @@ import { useTheme } from './hooks/useTheme'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import { useNotifications } from './hooks/useNotifications'
 import { useUpdateChecker } from './hooks/useUpdateChecker'
+import { useSessionStreamJobs } from './sessions/useSessionStreamJobs'
+import { shouldConfirmNewTurn } from './sessions/concurrentTurns'
+import { ConcurrentTurnDialog } from './components/ConcurrentTurnDialog'
+import { getStreamJob, subscribeStreamJobs } from './sessions/streamJobs'
 import { listAgents, listCommands, exportSession, importSession } from './api/messages'
 import { apiFetch } from './api/client'
 import { getSettings, updateSettings } from './api/settings'
@@ -134,6 +138,8 @@ export default function App() {
     loadingOlder: messagesLoadingOlder,
     loadOlder: loadOlderMessages,
     streaming,
+    streamStalled,
+    stallSeconds,
     partialText,
     partialThinking,
     activeTools,
@@ -145,6 +151,7 @@ export default function App() {
     clearLibrarySuggest,
     send,
     stop,
+    stopAndRetry,
     cancelQueued,
     clearQueue,
     updateQueued,
@@ -279,6 +286,40 @@ export default function App() {
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [agentDefs, setAgentDefs] = useState<{ name: string; description: string }[]>([])
   const { notify } = useNotifications()
+  const { busyIds, runningCount } = useSessionStreamJobs()
+  const [concurrentConfirm, setConcurrentConfirm] = useState<{
+    text: string
+    attachments?: {
+      path: string
+      name?: string
+      mime?: string
+      size?: number
+      is_image?: boolean
+      is_text?: boolean
+    }[]
+    opts?: { mode?: 'after' | 'interrupt' }
+  } | null>(null)
+  const skipConcurrentConfirmRef = useRef(false)
+
+  // Toast when a background (detached) turn finishes.
+  useEffect(() => {
+    return subscribeStreamJobs((ev) => {
+      if (ev.type !== 'update') return
+      const j = ev.job
+      if (j.status === 'running' || !j.detached) return
+      if (j.sessionId === activeId) return
+      const title =
+        sessions.find((s) => s.id === j.sessionId)?.title || 'Background session'
+      if (j.status === 'done') {
+        notify('Turn finished', { body: title, silent: true })
+        void refreshSessions()
+      } else if (j.status === 'error') {
+        notify('Background turn failed', {
+          body: j.error ? `${title}: ${j.error}` : title,
+        })
+      }
+    })
+  }, [activeId, sessions, notify, refreshSessions])
   const {
     updateInfo,
     desktopInfo,
@@ -1184,14 +1225,57 @@ export default function App() {
           usePlan = false
           setPlanMode(false)
         }
+        // Concurrent turn guard: 3+ live jobs → confirm (other models/sessions).
+        const otherRunning = Math.max(
+          0,
+          runningCount - (streaming ? 1 : 0),
+        )
+        if (
+          !opts?.mode
+          && !skipConcurrentConfirmRef.current
+          && shouldConfirmNewTurn(otherRunning)
+          && !streaming
+        ) {
+          setConcurrentConfirm({ text, attachments, opts })
+          return
+        }
+        skipConcurrentConfirmRef.current = false
+        // Sticky multi-tab bind: prefer this session's provider+model pair.
+        const mapOv = sessionLlmMap[sid!]
+        const useProvider =
+          mapOv?.provider
+          || sess?.llm_provider
+          || llmProvider
+          || undefined
+        if (mapOv?.model) useModel = mapOv.model
+        else if (sess?.model && sess.llm_provider) useModel = sess.model
         // While streaming, send() queues (after) or interrupts based on opts.mode.
-        void send(text, useModel, sid, attachments, usePlan, opts)
+        void send(text, useModel, sid, attachments, usePlan, {
+          ...opts,
+          provider: useProvider || undefined,
+        })
         window.setTimeout(() => {
           void refreshSessions()
         }, 1200)
       }
     },
-    [send, model, handleCommand, activeId, create, sessions, rename, refreshSessions, planMode, notify, setLlmProvider],
+    [
+      send,
+      model,
+      handleCommand,
+      activeId,
+      create,
+      sessions,
+      rename,
+      refreshSessions,
+      planMode,
+      notify,
+      setLlmProvider,
+      runningCount,
+      streaming,
+      sessionLlmMap,
+      llmProvider,
+    ],
   )
 
   const handleEditUserMessage = useCallback(
@@ -1558,6 +1642,7 @@ export default function App() {
       embedded
       sessions={sessions}
       activeId={activeId}
+      busySessionIds={busyIds}
       onSelect={handleSelect}
       onNew={handleNewSession}
       onNewInProject={(projectPath, opts) => {
@@ -1792,6 +1877,80 @@ export default function App() {
             className="chat-middle-composer flex flex-col"
             style={{ position: 'relative', zIndex: 5 }}
           >
+            {!streaming
+              && activeId
+              && getStreamJob(activeId)?.status === 'running' && (
+              <div
+                className="mx-3 mb-2 rounded-lg border px-3 py-2 text-xs flex flex-wrap items-center gap-2"
+                style={{
+                  borderColor: 'var(--accent)',
+                  background: 'color-mix(in srgb, var(--accent) 12%, transparent)',
+                  color: 'var(--text-primary)',
+                }}
+                role="status"
+              >
+                <span className="flex-1 min-w-[12rem]">
+                  Still working in the background — switch away anytime; Stop
+                  ends this session&apos;s turn only.
+                </span>
+                <button
+                  type="button"
+                  className="px-2 py-1 rounded font-semibold"
+                  style={{
+                    background: 'var(--error)',
+                    color: '#fff',
+                    border: 'none',
+                    cursor: 'pointer',
+                  }}
+                  onClick={() => stop()}
+                >
+                  Stop
+                </button>
+              </div>
+            )}
+            {streaming && streamStalled && (
+              <div
+                className="mx-3 mb-2 rounded-lg border px-3 py-2 text-xs flex flex-wrap items-center gap-2"
+                style={{
+                  borderColor: 'var(--warning, #d97706)',
+                  background: 'rgba(217, 119, 6, 0.1)',
+                  color: 'var(--text-primary)',
+                }}
+                role="status"
+              >
+                <span className="flex-1 min-w-[12rem]">
+                  Provider quiet for {stallSeconds}s (long think or stalled stream).
+                  Stream may be stuck.
+                </span>
+                <button
+                  type="button"
+                  className="px-2 py-1 rounded font-semibold"
+                  style={{
+                    background: 'var(--error)',
+                    color: '#fff',
+                    border: 'none',
+                    cursor: 'pointer',
+                  }}
+                  onClick={() => stop()}
+                >
+                  Stop
+                </button>
+                <button
+                  type="button"
+                  className="px-2 py-1 rounded font-semibold"
+                  style={{
+                    background: 'var(--accent)',
+                    color: '#fff',
+                    border: 'none',
+                    cursor: 'pointer',
+                  }}
+                  onClick={() => stopAndRetry()}
+                  title="Abort this turn and send the same prompt again"
+                >
+                  Stop &amp; retry
+                </button>
+              </div>
+            )}
             <TokenCostTicker
               placement="sidebar"
               run={displayRunUsage}
@@ -2160,6 +2319,19 @@ export default function App() {
       onCancel={() => setQuitWarnOpen(false)}
       onConfirmQuit={(dont) => {
         void confirmQuitApp(dont)
+      }}
+    />
+
+    <ConcurrentTurnDialog
+      open={Boolean(concurrentConfirm)}
+      runningCount={runningCount}
+      onCancel={() => setConcurrentConfirm(null)}
+      onContinue={() => {
+        const pending = concurrentConfirm
+        setConcurrentConfirm(null)
+        if (!pending) return
+        skipConcurrentConfirmRef.current = true
+        void handleSend(pending.text, pending.attachments, pending.opts)
       }}
     />
 

@@ -4,6 +4,115 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-07-28
+
+### Feat: full parallel multi-provider turns
+
+- Turns no longer hold a **whole-turn** LLM lock — only a short lock while
+  resolving credentials into a frozen per-turn binding.
+- **ContextVar `LlmBinding`** (`llm_binding.py`): each coroutine keeps its own
+  provider / model / base_url / api_key for every HTTP call (Grok + DeepSeek
+  can stream at the same time on one runtime).
+- **Per-turn plan_mode + tool step traces** via `turn_context` (no shared
+  mutable lists across concurrent tabs).
+- ReAct loop, `post_chat`, tool batch, checkpoints, and plan-mode tool gate
+  read binding / plan mode from context (not `runtime._provider` mid-flight).
+
+### Feat: background concurrent turns (Phase A)
+
+- Switching sessions **no longer aborts** a live turn — work continues in the
+  background while you chat elsewhere (e.g. Grok on A, DeepSeek on B).
+- Sidebar **busy pulse** on sessions with a live job; toast when a background
+  turn finishes/fails.
+- Soft concurrent guard: confirm before starting a **3rd** live turn.
+- Modules: `sessions/streamJobs`, `useSessionStreamJobs`, `concurrentTurns`.
+
+### Feat: sidebar reorder (↑ / ↓)
+
+- Project folders and sessions support **up/down** reorder (hover arrows).
+- Order persists in localStorage (`projectOrder` / `sessionOrder`); pure
+  `orderApply` + thin `OrderButtons` (modular, no SQLite migration).
+- “No project” stays first; pinned sessions still float to the top of a group.
+
+### Feat: Dark Forest theme
+
+- New theme **Dark Forest** (`forest`): classic Dark layout with muted moss green
+  accents — no neon mint (distinct from Emerald).
+
+### Fix: per-session provider+model bind (multi-tab)
+
+- Client sends **`provider` + `model`** on every chat stream (not model alone).
+- Server **sticky bind**: session `llm_provider`+`model` pair is not overwritten by
+  a lone model id from another tab’s global picker (fixes Grok tab getting
+  `deepseek-v4-flash` → HTTP 404 on wrong host).
+- Persist provider whenever model is saved; infer provider from model id when
+  missing (`session_llm.py`).
+
+### Fix: provider stops after short status snippet
+
+- Mid-task **`ok` / `sure` / `cool`** no longer force tools off when session history
+  has open work (was tools=[] → force_answer → one status line and stop).
+- Hard social only (`hi` / `thanks` / `bye`) still stays tool-free mid-session.
+- Action kicks include **pick up / left off / resume**.
+- **False-progress** status lines (“Checking…”, “Picking up…”) re-nudge up to 4×
+  and re-enable tools instead of accepting narration as the final answer.
+
+### Fix: stuck provider / DeepSeek DSML hangs
+
+- **Incomplete DSML recovery:** truncated tool markup (e.g. `name="bash_`) no
+  longer becomes an executable empty `bash_exec`; nudge for real function
+  calls instead of hanging the turn.
+- **SSE idle:** default provider stream idle cutover **180s** (was 900s);
+  override with `REMEDY_SSE_IDLE_SECONDS` (60–900). Surfaces a short note when
+  a model round ends for idle.
+- **Desktop stall banner:** after **90s** with no stream activity while a turn
+  is live → “Provider quiet” + **Stop** / **Stop & retry** (re-sends last prompt).
+
+### Fix: post-test polish (status leak, archive, sidebar, themes, memory)
+
+- **`@@status` / unknown `@@` control tokens** no longer stream into the chat bubble
+  (was showing `@@status:Visual decode…`); routed as progress label instead.
+- Stall banner: neutral copy — no DeepSeek branding.
+- **Archive** control on the session row (hover; always visible when archived).
+- Sidebar: remove false “drag onto folders” claims; ↑↓ reorder + 📁 move; `draggable` off.
+- Colored themes (Emerald / Amethyst / Amber / Ocean / Neutral): calmer body text;
+  Dark + Light unchanged.
+- **Memory panel**: empty search returns recent notes (not blank); excludes system
+  heartbeats. Empty-state copy clarifies notes vs partner facts.
+
+### Fix: attach images/files to session (desktop)
+
+- **Root cause vs earlier releases:** composer/API attach path was unchanged
+  since 0.10.1; drops stopped reaching the Rust handler after WebviewWindow
+  (`label: main`) + OS decorations — drops arrive on **WebviewEvent**, not only
+  `WindowEvent`. Also a short-lived async rfd picker deadlocked paperclip.
+- Handle OS drops on **both** window and webview drag-drop events (skip browser
+  embed). Queue + `file-drop-ready` + poll restored as in 0.10.1.
+- Paperclip: **sync** native multi-file picker (like session import) with HTML
+  `<input type="file">` fallback; attach allowed while streaming.
+- **Re-attach after remove:** drop dedupe was permanent — removing a chip no
+  longer blocks picking/dropping the same file again (2s race window only).
+- ACL: `pick_attach_files` (+ `open_text_file` for import).
+
+### Fix: tray / minimize restore after OS decorations
+
+- Cache main window handle; Win32 `ShowWindow(SW_RESTORE)` when Show/tray click.
+- Fixes “no main window” after hide-to-tray or minimize (logged in 0.18.6 testing).
+
+### Feat: change-safety baked into coding turns
+
+- Bundled skill **`change-safety`** (blast radius before multi-file work).
+- **Build / tool / autonomous** intent packs inject a standing change-safety
+  snippet and suggest `skill_activate`.
+- **`project-etiquette` v1.1** gate 0 = blast radius; pairs with change-safety.
+
+### Perf: coding tool-batch guidance (speed without losing agency)
+
+- System + Build intent: **batch many independent reads in one step** (4–12),
+  avoid re-reading paths already returned this turn, scope to named subsystems.
+- **One soft speed nudge** per turn after 3 consecutive single explore tools
+  (`file_read` / `list_dir` / `repo_search`) — does not force-answer or cap tools.
+
 ## [0.18.6] - 2026-07-27
 
 ### Fix: OS window chrome (end WebView title-bar hit-test loop)

@@ -3,6 +3,7 @@ export type ThemeId =
   | 'dark'
   | 'neutral'
   | 'light'
+  | 'forest'
   | 'green'
   | 'purple'
   | 'orange'
@@ -177,13 +178,13 @@ export const THEMES: Record<Exclude<ThemeId, 'system'>, Theme> = {
       '--border': '#2e3644',
       '--accent': '#94a3b8',
       '--accent-hover': '#cbd5e1',
-      '--text-primary': '#f1f5f9',
+      '--text-primary': '#e2e8f0',
       '--text-secondary': '#94a3b8',
       '--text-muted': '#64748b',
       '--success': '#34d399',
       '--error': '#f87171',
       '--warning': '#fbbf24',
-      ...chatFromPalette('dark', '#94a3b8', '#161a20', '#1e2430', '#2e3644', '#f1f5f9', '#f87171'),
+      ...chatFromPalette('dark', '#94a3b8', '#161a20', '#1e2430', '#2e3644', '#e2e8f0', '#f87171'),
     },
   },
 
@@ -209,6 +210,32 @@ export const THEMES: Record<Exclude<ThemeId, 'system'>, Theme> = {
     },
   },
 
+  /**
+   * Dark structure (like classic Dark) with muted forest green — no neon mint.
+   * Distinct from Emerald (brighter accent / more saturated greens).
+   */
+  forest: {
+    id: 'forest',
+    name: 'Dark Forest',
+    kind: 'dark',
+    colors: {
+      '--bg-primary': '#0a0e0b',
+      '--bg-secondary': '#121812',
+      '--bg-tertiary': '#1a221c',
+      '--border': '#2a352c',
+      // Moss / canopy — readable, not electric
+      '--accent': '#4d7a5a',
+      '--accent-hover': '#3d6349',
+      '--text-primary': '#e6ebe7',
+      '--text-secondary': '#9aa89e',
+      '--text-muted': '#6b7870',
+      '--success': '#5a8f6a',
+      '--error': '#b87a7a',
+      '--warning': '#a89058',
+      ...chatFromPalette('dark', '#4d7a5a', '#121812', '#1a221c', '#2a352c', '#e6ebe7', '#b87a7a'),
+    },
+  },
+
   green: {
     id: 'green',
     name: 'Emerald',
@@ -220,13 +247,14 @@ export const THEMES: Record<Exclude<ThemeId, 'system'>, Theme> = {
       '--border': '#1f4a38',
       '--accent': '#34d399',
       '--accent-hover': '#10b981',
-      '--text-primary': '#ecfdf5',
-      '--text-secondary': '#a7f3d0',
-      '--text-muted': '#6bb89a',
+      // Calmer body text (less pure pastel-on-dark glow)
+      '--text-primary': '#d8ebe2',
+      '--text-secondary': '#8fb8a4',
+      '--text-muted': '#5f8574',
       '--success': '#6ee7b7',
       '--error': '#fca5a5',
       '--warning': '#fcd34d',
-      ...chatFromPalette('dark', '#34d399', '#0f1f18', '#163026', '#1f4a38', '#ecfdf5', '#fca5a5'),
+      ...chatFromPalette('dark', '#34d399', '#0f1f18', '#163026', '#1f4a38', '#d8ebe2', '#fca5a5'),
     },
   },
 
@@ -241,13 +269,13 @@ export const THEMES: Record<Exclude<ThemeId, 'system'>, Theme> = {
       '--border': '#3d2a55',
       '--accent': '#c084fc',
       '--accent-hover': '#a855f7',
-      '--text-primary': '#f5f3ff',
-      '--text-secondary': '#d8b4fe',
-      '--text-muted': '#a78bfa',
+      '--text-primary': '#e4dff0',
+      '--text-secondary': '#b0a0c8',
+      '--text-muted': '#7d7096',
       '--success': '#6ee7b7',
       '--error': '#fca5a5',
       '--warning': '#fde68a',
-      ...chatFromPalette('dark', '#c084fc', '#1a1224', '#261a36', '#3d2a55', '#f5f3ff', '#fca5a5'),
+      ...chatFromPalette('dark', '#c084fc', '#1a1224', '#261a36', '#3d2a55', '#e4dff0', '#fca5a5'),
     },
   },
 
@@ -262,13 +290,13 @@ export const THEMES: Record<Exclude<ThemeId, 'system'>, Theme> = {
       '--border': '#4a3a24',
       '--accent': '#fb923c',
       '--accent-hover': '#f97316',
-      '--text-primary': '#fff7ed',
-      '--text-secondary': '#fdba74',
-      '--text-muted': '#c4a574',
+      '--text-primary': '#efe6da',
+      '--text-secondary': '#c4a88a',
+      '--text-muted': '#8f7a60',
       '--success': '#6ee7b7',
       '--error': '#fca5a5',
       '--warning': '#fde68a',
-      ...chatFromPalette('dark', '#fb923c', '#1f1810', '#2e2418', '#4a3a24', '#fff7ed', '#fca5a5'),
+      ...chatFromPalette('dark', '#fb923c', '#1f1810', '#2e2418', '#4a3a24', '#efe6da', '#fca5a5'),
     },
   },
 
@@ -283,13 +311,13 @@ export const THEMES: Record<Exclude<ThemeId, 'system'>, Theme> = {
       '--border': '#1e4a55',
       '--accent': '#22d3ee',
       '--accent-hover': '#06b6d4',
-      '--text-primary': '#ecfeff',
-      '--text-secondary': '#a5f3fc',
-      '--text-muted': '#67c4d4',
+      '--text-primary': '#d8eef2',
+      '--text-secondary': '#8fb8c2',
+      '--text-muted': '#5f8790',
       '--success': '#6ee7b7',
       '--error': '#fca5a5',
       '--warning': '#fde68a',
-      ...chatFromPalette('dark', '#22d3ee', '#0f1c22', '#163038', '#1e4a55', '#ecfeff', '#fca5a5'),
+      ...chatFromPalette('dark', '#22d3ee', '#0f1c22', '#163038', '#1e4a55', '#d8eef2', '#fca5a5'),
     },
   },
 } as const

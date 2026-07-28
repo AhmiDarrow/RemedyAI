@@ -30,9 +30,11 @@ from remedy.core.react_policy import (
     batch_has_tool_errors,
     epoch_continue_message,
     is_productive_tool_batch,
+    is_serial_explore_batch,
     looks_like_false_progress,
     mission_verify_gate_message,
     recovery_nudge_message,
+    speed_batch_nudge_message,
     strip_tool_markup,
     turn_has_unfinished_work,
 )
@@ -102,6 +104,7 @@ async def call_llm_stream(runtime, message: str,
     When *plan_mode* is True, only planning tools run (no shell/file writes).
     """
     try:
+        from remedy.core.llm_binding import LlmBinding, get_llm_binding, set_llm_binding
         from remedy.interfaces.attachments import build_multimodal_user_content
 
         # For Partner Memory ranking + quiet distillation hooks
@@ -150,10 +153,11 @@ async def call_llm_stream(runtime, message: str,
                 from remedy.interfaces.config import load_config
 
                 cfg_for_vision = load_config() or {}
+            _b = get_llm_binding(runtime)
             vres = decode_for_turn(
                 attachments,
-                provider=runtime._llm_provider,
-                model=runtime._llm_model,
+                provider=_b.provider,
+                model=_b.model,
                 cfg=cfg_for_vision,
             )
             mode = str(vres.get("mode") or "native")
@@ -185,9 +189,9 @@ async def call_llm_stream(runtime, message: str,
                 "role": "system",
                 "content": build_runtime_system_block(
                     system_prompt=runtime._system_prompt,
-                    provider=runtime._llm_provider,
-                    model=runtime._llm_model,
-                    base_url=runtime._llm_base_url,
+                    provider=get_llm_binding(runtime).provider,
+                    model=get_llm_binding(runtime).model,
+                    base_url=get_llm_binding(runtime).base_url,
                     max_steps=runtime._max_react_steps,
                     context=context,
                 ),
@@ -268,8 +272,14 @@ async def call_llm_stream(runtime, message: str,
         false_progress_nudge_count = 0
         # One automatic recovery nudge per turn after a failing tool batch.
         recovery_nudge_done = False
-        headers = runtime._provider.auth_headers(runtime._llm_api_key)
-        endpoint = runtime._provider.chat_endpoint(runtime._llm_base_url)
+        # One speed nudge if the model serializes explore as 1 tool/step.
+        speed_batch_nudge_done = False
+        serial_explore_streak = 0
+        # Per-turn binding (parallel multi-provider); never use another turn's host/key.
+        _bind = get_llm_binding(runtime)
+        _adapter = _bind.adapter()
+        headers = _adapter.auth_headers(_bind.api_key)
+        endpoint = _adapter.chat_endpoint(_bind.base_url)
 
         # Long agent runs: high wall-clock + read idle so multi-step work
         # (and long thinking streams) are not killed mid-flight.
@@ -501,11 +511,15 @@ async def call_llm_stream(runtime, message: str,
                 messages[:] = ensure_tool_call_pairings(messages)
                 # OpenAI-compatible providers (openai, deepseek, ollama, …) stream SSE.
                 # Anthropic currently uses a single JSON response (stream=False).
+                _bind = get_llm_binding(runtime)
+                _adapter = _bind.adapter()
+                headers = _adapter.auth_headers(_bind.api_key)
+                endpoint = _adapter.chat_endpoint(_bind.base_url)
                 use_openai_sse = bool(
-                    getattr(runtime._provider, "uses_openai_sse", True)
+                    getattr(_adapter, "uses_openai_sse", True)
                 )
-                body = runtime._provider.build_body(
-                    model=runtime._llm_model,
+                body = _adapter.build_body(
+                    model=_bind.model,
                     messages=messages,
                     tools=step_tools,
                     stream=use_openai_sse,
@@ -531,8 +545,8 @@ async def call_llm_stream(runtime, message: str,
 
                             get_swarm().dispatch(
                                 SwarmEvent.provider_health(
-                                    provider=getattr(runtime, "_llm_provider", None),
-                                    model=getattr(runtime, "_llm_model", None),
+                                    provider=_bind.provider,
+                                    model=_bind.model,
                                     ok=False,
                                     latency_ms=_llm_ms,
                                     error=text[:200],
@@ -543,7 +557,7 @@ async def call_llm_stream(runtime, message: str,
                         if (
                             resp.status in (401, 403)
                             and not auth_refresh_done
-                            and str(runtime._llm_provider or "").lower() == "xai"
+                            and str(_bind.provider or "").lower() == "xai"
                         ):
                             auth_refresh_done = True
                             try:
@@ -561,11 +575,17 @@ async def call_llm_stream(runtime, message: str,
                                         home = Path(hd).expanduser()
                                 refresh_if_needed(home)
                                 new_token = resolve_bearer(home)
-                                if new_token and new_token != runtime._llm_api_key:
+                                if new_token and new_token != _bind.api_key:
                                     runtime._llm_api_key = new_token
-                                    headers = runtime._provider.auth_headers(
-                                        runtime._llm_api_key
+                                    _bind = LlmBinding(
+                                        provider=_bind.provider,
+                                        model=_bind.model,
+                                        base_url=_bind.base_url,
+                                        api_key=new_token,
                                     )
+                                    set_llm_binding(_bind)
+                                    _adapter = _bind.adapter()
+                                    headers = _adapter.auth_headers(_bind.api_key)
                                     logger.warning(
                                         "xAI credentials refreshed after HTTP %s; retrying",
                                         resp.status,
@@ -603,12 +623,8 @@ async def call_llm_stream(runtime, message: str,
                                 continue
                         # Fatal: wrong/missing model — do not soft-retry 16× (looks stuck).
                         if _is_fatal_llm_api_error(resp.status, text):
-                            model_name = str(
-                                getattr(runtime, "_llm_model", None) or "unknown"
-                            )
-                            prov = str(
-                                getattr(runtime, "_llm_provider", None) or "unknown"
-                            )
+                            model_name = str(_bind.model or "unknown")
+                            prov = str(_bind.provider or "unknown")
                             yield (
                                 f"\n[LLM ERROR — HTTP {resp.status}]\n"
                                 f"{text[:500]}\n[END LLM ERROR]\n\n"
@@ -668,8 +684,8 @@ async def call_llm_stream(runtime, message: str,
 
                         get_swarm().dispatch(
                             SwarmEvent.provider_health(
-                                provider=getattr(runtime, "_llm_provider", None),
-                                model=getattr(runtime, "_llm_model", None),
+                                provider=_bind.provider,
+                                model=_bind.model,
                                 ok=True,
                                 latency_ms=_llm_ms,
                                 status_code=200,
@@ -691,9 +707,20 @@ async def call_llm_stream(runtime, message: str,
                     is_event_stream = "event-stream" in content_type
                     if use_openai_sse or is_event_stream:
                         content_iter = resp.content.__aiter__()
-                        # DeepSeek thinking can pause for minutes between tokens.
-                        # 120s was killing long reasoner streams mid-thought.
-                        sse_idle_timeout = 900.0
+                        # DeepSeek can pause a while mid-thought, but multi-minute
+                        # dead air usually means a stuck provider — cut the round
+                        # so the turn can recover (nudge / finish) instead of
+                        # looking frozen for 15 minutes. Override with
+                        # REMEDY_SSE_IDLE_SECONDS if needed.
+                        import os as _os
+
+                        try:
+                            sse_idle_timeout = float(
+                                _os.environ.get("REMEDY_SSE_IDLE_SECONDS", "180")
+                            )
+                        except ValueError:
+                            sse_idle_timeout = 180.0
+                        sse_idle_timeout = max(60.0, min(sse_idle_timeout, 900.0))
                         while True:
                             try:
                                 line = await asyncio.wait_for(
@@ -705,9 +732,19 @@ async def call_llm_stream(runtime, message: str,
                             except TimeoutError:
                                 logger.warning(
                                     "SSE stream idle >%.0fs; ending this model round "
-                                    "(will continue/promote reasoning if any)",
+                                    "(provider likely stuck; will continue/promote reasoning if any)",
                                     sse_idle_timeout,
                                 )
+                                # Surface a short note so the UI is not silent.
+                                with suppress(Exception):
+                                    if (
+                                        not round_state.content_parts
+                                        and not round_state.reasoning_parts
+                                    ):
+                                        yield (
+                                            "\n\n_(Provider stream idle — "
+                                            "ending this model round.)_\n"
+                                        )
                                 break
                             line_text = line.decode("utf-8").strip()
                             if line_text == "data: [DONE]":
@@ -721,8 +758,8 @@ async def call_llm_stream(runtime, message: str,
 
                                 u = usage_from_provider_payload(
                                     chunk,
-                                    model=getattr(runtime, "_llm_model", None),
-                                    provider=getattr(runtime, "_llm_provider", None),
+                                    model=_bind.model,
+                                    provider=_bind.provider,
                                 )
                                 if u:
                                     try:
@@ -737,8 +774,8 @@ async def call_llm_stream(runtime, message: str,
                                         pt = int(u.get("prompt_tokens") or 0)
                                         ct = int(u.get("completion_tokens") or 0)
                                         est = int(get_token_nanobot().last_estimate or 0)
-                                        prov = getattr(runtime, "_llm_provider", None)
-                                        mod = getattr(runtime, "_llm_model", None)
+                                        prov = _bind.provider
+                                        mod = _bind.model
                                         if pt > 0 and est > 0:
                                             observe_provider_usage(
                                                 est,
@@ -805,8 +842,8 @@ async def call_llm_stream(runtime, message: str,
 
                             u = usage_from_provider_payload(
                                 data,
-                                model=getattr(runtime, "_llm_model", None),
-                                provider=getattr(runtime, "_llm_provider", None),
+                                model=_bind.model,
+                                provider=_bind.provider,
                             )
                             if u:
                                 yield (
@@ -815,7 +852,7 @@ async def call_llm_stream(runtime, message: str,
                                 )
                         except Exception:
                             pass
-                        parsed = runtime._provider.extract_response(data)
+                        parsed = _adapter.extract_response(data)
                         content = parsed.get("content")
                         if content:
                             round_state.content_parts.append(content)
@@ -921,6 +958,31 @@ async def call_llm_stream(runtime, message: str,
                         with suppress(Exception):
                             runtime._maybe_auto_checkpoint(reason="auto")
                         continue
+                    # DSML/text tools detected but incomplete (truncated stream) —
+                    # nudge for real function-calling instead of hanging on junk.
+                    if pseudo_nudge_count < 2:
+                        pseudo_nudge_count += 1
+                        tools = all_tools
+                        messages.append(
+                            {
+                                "role": "user",
+                                "content": (
+                                    "Your last reply leaked incomplete tool markup "
+                                    "(DSML/XML cut off mid-call). Do **not** write "
+                                    "tool_calls as text. Call tools via the "
+                                    "function-calling API now "
+                                    "(file_read / list_dir / bash_exec / "
+                                    "repo_search / file_edit), or give a short "
+                                    "status update from context."
+                                ),
+                            }
+                        )
+                        logger.info(
+                            "Incomplete DSML/pseudo tools — recovery nudge "
+                            "(count=%s)",
+                            pseudo_nudge_count,
+                        )
+                        continue
 
                 if text_out and (not tool_calls_list or force_answer):
                     # Don't ship faux tool syntax as the final answer.
@@ -929,7 +991,7 @@ async def call_llm_stream(runtime, message: str,
                         and _looks_like_pseudo_tools(raw_round)
                         and all_tools
                         and not force_answer
-                        and pseudo_nudge_count < 1
+                        and pseudo_nudge_count < 2
                         and not pseudo_recovery_done
                     ):
                         pseudo_nudge_count += 1
@@ -947,13 +1009,13 @@ async def call_llm_stream(runtime, message: str,
                         )
                         continue
                     # Narrating "I'm processing…" without tools looks stuck in the UI.
-                    # One hard nudge: call tools now, don't restate intent.
+                    # Never accept a status-only line as the final answer while tools
+                    # are available (session bug 2026-07-28: short snippet then stop).
                     if (
                         not tool_calls_list
                         and all_tools
-                        and not force_answer
-                        and false_progress_nudge_count < 1
                         and looks_like_false_progress(text_out)
+                        and false_progress_nudge_count < 4
                     ):
                         false_progress_nudge_count += 1
                         tools = all_tools
@@ -969,15 +1031,17 @@ async def call_llm_stream(runtime, message: str,
                                 "role": "user",
                                 "content": (
                                     "Stop narrating intent. Use native function-calling "
-                                    "tools now (list_dir / file_read / file_write / "
-                                    "file_edit / bash_exec / comfyui / mission_start) "
-                                    "and keep going until the user request is finished. "
-                                    "Do not reply with only a status line."
+                                    "tools **now** (list_dir / file_read / file_write / "
+                                    "file_edit / bash_exec / comfyui / local_discover / "
+                                    "mission_start) and keep going until the user request "
+                                    "is finished. Do **not** reply with only a status line "
+                                    "or thinking — make real tool_calls."
                                 ),
                             }
                         )
                         logger.info(
-                            "False-progress nudge after step %d (no tool_calls)",
+                            "False-progress nudge %d/4 after step %d (no tool_calls)",
+                            false_progress_nudge_count,
                             step + 1,
                         )
                         continue
@@ -1195,6 +1259,29 @@ async def call_llm_stream(runtime, message: str,
                 if is_productive_tool_batch(batch_tool_msgs):
                     productive_in_epoch += 1
 
+                # Speed: denser parallel batches without reducing agency.
+                if (
+                    not force_answer
+                    and all_tools
+                    and is_serial_explore_batch(fresh_calls)
+                ):
+                    serial_explore_streak += 1
+                else:
+                    serial_explore_streak = 0
+                if (
+                    not speed_batch_nudge_done
+                    and not force_answer
+                    and all_tools
+                    and serial_explore_streak >= 3
+                ):
+                    speed_batch_nudge_done = True
+                    messages.append(speed_batch_nudge_message())
+                    logger.info(
+                        "Speed batch nudge after %d serial explore steps (step %d)",
+                        serial_explore_streak,
+                        step + 1,
+                    )
+
                 # Soft recovery: if tools failed or search empty, nudge once.
                 if (
                     not recovery_nudge_done
@@ -1267,11 +1354,15 @@ async def call_llm_stream(runtime, message: str,
                 }
             )
             messages[:] = ensure_tool_call_pairings(messages)
+            _bind = get_llm_binding(runtime)
+            _adapter = _bind.adapter()
+            headers = _adapter.auth_headers(_bind.api_key)
+            endpoint = _adapter.chat_endpoint(_bind.base_url)
             use_openai_sse = bool(
-                getattr(runtime._provider, "uses_openai_sse", True)
+                getattr(_adapter, "uses_openai_sse", True)
             )
-            body = runtime._provider.build_body(
-                model=runtime._llm_model,
+            body = _adapter.build_body(
+                model=_bind.model,
                 messages=messages,
                 tools=None,
                 stream=use_openai_sse,
@@ -1325,7 +1416,7 @@ async def call_llm_stream(runtime, message: str,
                                     yield reason
                         else:
                             data = await resp.json()
-                            parsed = runtime._provider.extract_response(data)
+                            parsed = _adapter.extract_response(data)
                             piece = parsed.get("content") or parsed.get(
                                 "reasoning_content"
                             )

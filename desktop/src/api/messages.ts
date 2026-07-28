@@ -94,6 +94,8 @@ export function streamMessage(
   planMode?: boolean,
   onUsage?: (usage: UsagePayload) => void,
   onLibrarySuggest?: (payload: Record<string, unknown>) => void,
+  /** Per-session provider — must pair with model for multi-tab multi-provider. */
+  provider?: string,
 ): AbortController {
   const controller = new AbortController()
 
@@ -110,6 +112,7 @@ export function streamMessage(
           body: JSON.stringify({
             message,
             model,
+            provider: provider || undefined,
             attachments: attachments?.length ? attachments : undefined,
             plan_mode: Boolean(planMode),
           }),

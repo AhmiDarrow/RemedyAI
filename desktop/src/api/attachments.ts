@@ -105,29 +105,36 @@ export async function uploadDroppedPayload(
     payload.data_base64,
   )
   // Always show the original OS filename — never server-side unique suffixes (_1/_4).
-  meta.name = payload.filename
-  if (meta.is_image || payload.content_type.startsWith('image/')) {
-    meta.previewUrl = `data:${payload.content_type};base64,${payload.data_base64}`
+  meta.name = payload.filename || meta.name
+  const mime = payload.content_type || meta.mime || ''
+  if (meta.is_image || mime.startsWith('image/')) {
+    if (payload.data_base64) {
+      meta.previewUrl = `data:${mime || 'image/png'};base64,${payload.data_base64}`
+    }
   }
   return meta
 }
 
 /** Optimistic chip before server upload completes (from native drop payloads). */
 export function pendingMetaFromPayload(payload: DroppedFilePayload): AttachmentMeta {
-  const isImage = payload.content_type.startsWith('image/')
+  const mime = payload.content_type || 'application/octet-stream'
+  const name = payload.filename || 'file'
+  const size = Number(payload.size) || 0
+  const b64 = payload.data_base64 || ''
+  const isImage = mime.startsWith('image/')
   return {
-    id: `pending-${payload.filename}-${payload.size}`,
-    name: payload.filename,
-    path: `(uploading) ${payload.filename}`,
-    mime: payload.content_type,
-    size: payload.size,
+    id: `pending-${name}-${size}`,
+    name,
+    path: `(uploading) ${name}`,
+    mime,
+    size,
     is_image: isImage,
     is_text: !isImage && (
-      payload.content_type.startsWith('text/')
-      || /\.(txt|md|py|ts|js|json|csv|log|toml|ya?ml)$/i.test(payload.filename)
+      mime.startsWith('text/')
+      || /\.(txt|md|py|ts|js|json|csv|log|toml|ya?ml)$/i.test(name)
     ),
-    previewUrl: isImage
-      ? `data:${payload.content_type};base64,${payload.data_base64}`
+    previewUrl: isImage && b64
+      ? `data:${mime};base64,${b64}`
       : undefined,
   }
 }
@@ -140,6 +147,19 @@ export async function readDroppedFilePaths(
     throw new Error('Native drop only available in desktop app')
   }
   return tauriInvoke<DroppedFilePayload[]>('read_dropped_files', { paths })
+}
+
+/**
+ * Native multi-file picker (rfd) — preferred in Tauri over `<input type="file">`,
+ * which is flaky in WebView2. Returns the same payloads as OS drop.
+ * Empty array = user cancelled.
+ */
+export async function pickAttachFiles(): Promise<DroppedFilePayload[]> {
+  if (!isTauri()) {
+    throw new Error('Native attach picker only available in desktop app')
+  }
+  const items = await tauriInvoke<DroppedFilePayload[]>('pick_attach_files')
+  return Array.isArray(items) ? items : []
 }
 
 /**

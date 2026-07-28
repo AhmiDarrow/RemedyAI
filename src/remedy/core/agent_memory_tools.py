@@ -253,7 +253,9 @@ def register_memory_tools(runtime: Any) -> None:
             for ln in (next_steps or "").splitlines()
             if ln.strip()
         ]
-        steps = list(getattr(runtime, "_turn_tool_steps", None) or [])
+        from remedy.core.turn_context import current_turn_tool_steps, turn_session_id
+
+        steps = list(current_turn_tool_steps(runtime))
         tools = []
         for s in steps:
             t = str(s.get("tool") or "")
@@ -261,7 +263,7 @@ def register_memory_tools(runtime: Any) -> None:
                 tools.append(t)
         cp = TurnCheckpoint(
             id=uuid4().hex[:12],
-            session_id=str(getattr(runtime, "_session_id", "") or "") or None,
+            session_id=str(turn_session_id(runtime) or "") or None,
             title=(title or "Manual checkpoint")[:200],
             done=done_list,
             next_steps=next_list or ["Continue the task"],

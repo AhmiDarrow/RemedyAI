@@ -37,10 +37,16 @@ async def post_chat(
 ) -> dict[str, Any] | str:
     """POST chat completions; one xAI re-auth attempt on 401/403.
 
-    May update ``runtime._llm_api_key`` after a successful OAuth refresh.
+    Uses per-turn ``LlmBinding`` (ContextVar) so concurrent multi-provider
+    turns do not share host/key/model. May update ``runtime._llm_api_key``
+    and the turn binding after a successful OAuth refresh.
     """
-    headers = runtime._provider.auth_headers(runtime._llm_api_key)
-    endpoint = runtime._provider.chat_endpoint(runtime._llm_base_url)
+    from remedy.core.llm_binding import LlmBinding, get_llm_binding, set_llm_binding
+
+    bind = get_llm_binding(runtime)
+    adapter = bind.adapter()
+    headers = adapter.auth_headers(bind.api_key)
+    endpoint = adapter.chat_endpoint(bind.base_url)
 
     async with (
         aiohttp.ClientSession() as session,
@@ -56,7 +62,7 @@ async def post_chat(
             # One refresh attempt for expired xAI OAuth tokens.
             if (
                 resp.status in (401, 403)
-                and str(runtime._llm_provider or "").lower() == "xai"
+                and str(bind.provider or "").lower() == "xai"
             ):
                 try:
                     from remedy.interfaces.xai_auth import (
@@ -71,9 +77,17 @@ async def post_chat(
                             home = Path(hd).expanduser()
                     refresh_if_needed(home)
                     new_token = resolve_bearer(home)
-                    if new_token and new_token != runtime._llm_api_key:
+                    if new_token and new_token != bind.api_key:
                         runtime._llm_api_key = new_token
-                        headers = runtime._provider.auth_headers(runtime._llm_api_key)
+                        bind = LlmBinding(
+                            provider=bind.provider,
+                            model=bind.model,
+                            base_url=bind.base_url,
+                            api_key=new_token,
+                        )
+                        set_llm_binding(bind)
+                        adapter = bind.adapter()
+                        headers = adapter.auth_headers(bind.api_key)
                         async with session.post(
                             endpoint,
                             headers=headers,

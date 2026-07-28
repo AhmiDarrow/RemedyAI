@@ -427,8 +427,11 @@ class BasicRuntime(AgentRuntime):
         from remedy.core.metrics import default_registry
 
         name = tool_call.tool_name
-        # Plan mode: refuse mutating tools even if they slipped into the schema
-        if getattr(self, "_plan_mode", False):
+        # Plan mode: refuse mutating tools even if they slipped into the schema.
+        # Prefer per-turn ContextVar so concurrent Build + Plan tabs do not race.
+        from remedy.core.turn_context import current_plan_mode
+
+        if current_plan_mode(self):
             from remedy.core.plan_store import PLAN_MODE_TOOL_NAMES
 
             if name not in PLAN_MODE_TOOL_NAMES:
@@ -630,28 +633,30 @@ class BasicRuntime(AgentRuntime):
         Falls back to the echo-style fallback when no API key is configured.
 
         *plan_mode*: restrict tools to planning helpers (plan_save, goals, memory search).
-        *provider* / *model*: per-session bind applied **under** the LLM turn lock.
+        *provider* / *model*: per-session bind via ContextVar (parallel multi-provider).
         """
         await self._apply_session_workspace(session_id)
 
-        from remedy.core.turn_context import begin_turn, end_turn, is_turn_aborted
+        from remedy.core.llm_binding import (
+            LlmBinding,
+            get_llm_binding,
+            reset_llm_binding,
+            set_llm_binding,
+        )
+        from remedy.core.turn_context import (
+            begin_turn,
+            current_turn_tool_steps,
+            end_turn,
+            is_turn_aborted,
+        )
 
-        # One shared provider binding per process: hold lock for the whole turn so
-        # concurrent sessions cannot interleave reconfigure_llm mid-stream.
+        # Short lock only while resolving credentials into a frozen LlmBinding.
+        # The turn itself runs unlocked so Grok + DeepSeek can stream in parallel.
         if self._llm_turn_lock is None:
             self._llm_turn_lock = asyncio.Lock()
         lock = self._llm_turn_lock
 
         async with lock:
-            # Snapshot full LLM binding; restore after so the next waiter sees
-            # a clean baseline (routes re-apply session provider on entry).
-            prev_llm = (
-                str(getattr(self, "_llm_provider", "") or ""),
-                str(getattr(self, "_llm_model", "") or ""),
-                str(getattr(self, "_llm_base_url", "") or ""),
-                str(getattr(self, "_llm_api_key", "") or ""),
-            )
-            # Bind session LLM under the lock (not before acquire — race).
             prov = (provider or "").strip() or None
             mod = (model or "").strip() or None
             if not prov and not mod and session_id and self.memory is not None:
@@ -680,65 +685,70 @@ class BasicRuntime(AgentRuntime):
             elif mod:
                 self._llm_model = mod
 
-            # Fresh per-turn tool trace for auto-learn + checkpoints
-            self._turn_tool_steps = []
-            self._last_auto_checkpoint_n = 0
-            self._plan_mode = bool(plan_mode)
-            sid_key = str(session_id or "").strip() or "_anon"
-            if session_id:
-                self._session_id = session_id
-
-            # Pin workspace to this coroutine so concurrent messenger/desktop turns
-            # do not steal each other's project jail across awaits.
-            tok_s, tok_a, tok_w = begin_turn(
-                session_id,
-                project_raw=getattr(self, "_project_path_raw", None),
-                active_path=getattr(self, "_active_project_path", None) or "",
+            bind = LlmBinding(
+                provider=str(getattr(self, "_llm_provider", None) or "openai"),
+                model=str(getattr(self, "_llm_model", None) or ""),
+                base_url=str(getattr(self, "_llm_base_url", None) or ""),
+                api_key=str(getattr(self, "_llm_api_key", None) or ""),
             )
-            self._streaming_sessions.add(sid_key)
-            try:
-                if not self._llm_api_key:
-                    yield (
-                        "[LLM not connected — no API key. "
-                        "Open Settings, enter your provider key, Save, then resend.]\n"
-                    )
-                    return
 
-                async for chunk in self._call_llm_stream(
-                    message,
-                    session_id=session_id,
-                    attachments=attachments,
-                    plan_mode=bool(plan_mode),
-                ):
-                    if is_turn_aborted():
-                        yield "@@aborted\n"
-                        break
-                    yield chunk
-            finally:
-                self._streaming_sessions.discard(sid_key)
-                end_turn(session_id, tok_s, tok_a, tok_w)
-                # Restore pre-turn provider/model/url/key (not model-only).
+        llm_tok = set_llm_binding(bind)
+        self._last_auto_checkpoint_n = 0
+        sid_key = str(session_id or "").strip() or "_anon"
+        if session_id:
+            self._session_id = session_id
+
+        tok_s, tok_a, tok_w, tok_p, tok_t = begin_turn(
+            session_id,
+            project_raw=getattr(self, "_project_path_raw", None),
+            active_path=getattr(self, "_active_project_path", None) or "",
+            plan_mode=bool(plan_mode),
+        )
+        # Legacy mirrors for code that still reads runtime attrs (prefer ContextVar).
+        self._plan_mode = bool(plan_mode)
+        self._turn_tool_steps = current_turn_tool_steps(self)
+        self._streaming_sessions.add(sid_key)
+        try:
+            if not get_llm_binding(self).api_key:
+                yield (
+                    "[LLM not connected — no API key. "
+                    "Open Settings, enter your provider key, Save, then resend.]\n"
+                )
+                return
+
+            async for chunk in self._call_llm_stream(
+                message,
+                session_id=session_id,
+                attachments=attachments,
+                plan_mode=bool(plan_mode),
+            ):
+                if is_turn_aborted():
+                    yield "@@aborted\n"
+                    break
+                yield chunk
+        finally:
+            self._streaming_sessions.discard(sid_key)
+            steps_snap = list(current_turn_tool_steps(self))
+            end_turn(session_id, tok_s, tok_a, tok_w, tok_p, tok_t)
+            with suppress(Exception):
+                reset_llm_binding(llm_tok)
+            self._plan_mode = False
+            self._turn_tool_steps = []
+            # Soft end-of-turn checkpoint if substantial tool work happened
+            if not plan_mode and not is_turn_aborted():
                 with suppress(Exception):
-                    self.reconfigure_llm(
-                        provider=prev_llm[0] or None,
-                        model=prev_llm[1] or None,
-                        base_url=prev_llm[2] or None,
-                        api_key=prev_llm[3] if prev_llm[3] else None,
-                    )
-                self._plan_mode = False
-                # Soft end-of-turn checkpoint if substantial tool work happened
-                if not plan_mode and not is_turn_aborted():
-                    with suppress(Exception):
-                        steps = list(getattr(self, "_turn_tool_steps", None) or [])
-                        if len(steps) >= 4:
-                            self._maybe_auto_checkpoint(
-                                reason="turn_end",
-                                title=(message or "Task")[:80],
-                                force=True,
-                            )
-                    # Post-turn: distill multi-step successes into probation skills
-                    with suppress(Exception):
-                        self._maybe_auto_learn_from_turn(message, session_id)
+                    if len(steps_snap) >= 4:
+                        # Temporarily expose steps for checkpoint helper
+                        self._turn_tool_steps = steps_snap
+                        self._maybe_auto_checkpoint(
+                            reason="turn_end",
+                            title=(message or "Task")[:80],
+                            force=True,
+                        )
+                with suppress(Exception):
+                    self._turn_tool_steps = steps_snap
+                    self._maybe_auto_learn_from_turn(message, session_id)
+                self._turn_tool_steps = []
 
     @property
     def _streaming(self) -> bool:
@@ -770,12 +780,13 @@ class BasicRuntime(AgentRuntime):
     ) -> None:
         """If this turn used enough successful tools, learn a probation skill."""
         from remedy.core.agent_learn import auto_learn_from_turn
+        from remedy.core.turn_context import current_turn_tool_steps
 
         auto_learn_from_turn(
             learning_loop=self._get_learning_loop(),
             message=message,
             session_id=session_id,
-            steps=list(getattr(self, "_turn_tool_steps", None) or []),
+            steps=list(current_turn_tool_steps(self)),
         )
 
     def _maybe_auto_checkpoint(
@@ -786,9 +797,15 @@ class BasicRuntime(AgentRuntime):
         force: bool = False,
     ) -> str | None:
         """Snapshot mid-turn progress for long Build runs. Returns markdown or None."""
-        if getattr(self, "_plan_mode", False):
+        from remedy.core.turn_context import (
+            current_plan_mode,
+            current_turn_tool_steps,
+            turn_session_id,
+        )
+
+        if current_plan_mode(self):
             return None
-        steps = list(getattr(self, "_turn_tool_steps", None) or [])
+        steps = list(current_turn_tool_steps(self))
         if len(steps) < 2 and not force:
             return None
         from remedy.core.checkpoint import (
@@ -806,7 +823,7 @@ class BasicRuntime(AgentRuntime):
                 return None
         cp = build_checkpoint_from_tool_steps(
             steps,
-            session_id=str(getattr(self, "_session_id", "") or "") or None,
+            session_id=str(turn_session_id(self) or "") or None,
             title=title or f"Auto checkpoint ({reason})",
             reason=reason,
         )

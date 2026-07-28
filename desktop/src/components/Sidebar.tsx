@@ -20,7 +20,11 @@ import {
   setProjectCollapsed,
   type ProjectGroup,
 } from '../utils/sessionProjects'
+import { applySidebarOrder } from '../sidebar/orderApply'
+import { useSidebarOrder } from '../sidebar/useSidebarOrder'
 import { IconEdit } from './icons'
+import { OrderButtons } from './OrderButtons'
+import { SessionBusyBadge } from './SessionBusyBadge'
 
 interface SidebarProps {
   sessions: ChatSession[]
@@ -48,6 +52,8 @@ interface SidebarProps {
   onCloseTab?: (id: string) => void
   /** Fill parent (three-frame workspace slide) instead of fixed 270px column */
   embedded?: boolean
+  /** Session ids with a live background or focused turn (Phase A). */
+  busySessionIds?: Set<string> | string[]
 }
 
 const DRAG_MIME = 'application/x-remedy-session-ids'
@@ -71,6 +77,7 @@ export function Sidebar({
   footer,
   openTabIds = [],
   embedded = false,
+  busySessionIds,
 }: SidebarProps) {
   const [query, setQuery] = useState('')
   const [meta, setMeta] = useState<Record<string, SessionMeta>>(() => getAllSessionMeta())
@@ -90,6 +97,19 @@ export function Sidebar({
   const [dropHoverKey, setDropHoverKey] = useState<string | null>(null)
   const [setDefaultOnNew, setSetDefaultOnNew] = useState(false)
   const lastClickedRef = useRef<string | null>(null)
+  const {
+    projectOrder,
+    sessionOrderMap,
+    moveProject,
+    moveSession,
+    onSessionRehomed,
+  } = useSidebarOrder()
+  const busySet = useMemo(() => {
+    if (!busySessionIds) return new Set<string>()
+    return busySessionIds instanceof Set
+      ? busySessionIds
+      : new Set(busySessionIds)
+  }, [busySessionIds])
 
   useEffect(() => {
     const id = window.setInterval(() => setTick((t) => t + 1), 60_000)
@@ -151,8 +171,18 @@ export function Sidebar({
       if (ap !== bp) return bp - ap
       return (b.updated_at || '').localeCompare(a.updated_at || '')
     })
-    return groupSessionsByProject(list, knownProjects)
-  }, [sessions, query, meta, filter, knownProjects, openIds])
+    const grouped = groupSessionsByProject(list, knownProjects)
+    const pinnedIds = new Set(
+      list.filter((s) => meta[s.id]?.pinned).map((s) => s.id),
+    )
+    return applySidebarOrder(grouped, projectOrder, sessionOrderMap, pinnedIds)
+  }, [sessions, query, meta, filter, knownProjects, openIds, projectOrder, sessionOrderMap])
+
+  const projectKeysInView = useMemo(
+    () => groups.filter((g) => g.key).map((g) => g.key),
+    // groups is derived above — recompute when groups identity changes
+    [groups],
+  )
 
   const refreshMeta = () => setMeta(getAllSessionMeta())
 
@@ -259,12 +289,6 @@ export function Sidebar({
     clearSelection()
   }
 
-  const onDragStartSession = (e: DragEvent, id: string) => {
-    const ids = selected.has(id) && selected.size > 0 ? [...selected] : [id]
-    e.dataTransfer.setData(DRAG_MIME, JSON.stringify(ids))
-    e.dataTransfer.effectAllowed = 'move'
-  }
-
   const onDropOnProject = (e: DragEvent, projectPath: string | null) => {
     e.preventDefault()
     setDropHoverKey(null)
@@ -275,6 +299,10 @@ export function Sidebar({
       ids = []
     }
     if (!ids.length) return
+    for (const id of ids) {
+      const from = sessions.find((s) => s.id === id)?.project_path
+      onSessionRehomed(id, from, projectPath)
+    }
     if (onBulkSetProject) onBulkSetProject(ids, projectPath)
     else if (onSetSessionProject) ids.forEach((id) => onSetSessionProject(id, projectPath))
     clearSelection()
@@ -502,7 +530,14 @@ export function Sidebar({
       )}
 
       <div className="flex-1 min-h-0 overflow-y-auto py-1">
-        {groups.map((group) => (
+        {groups.map((group) => {
+          const projectOnlyKeys = projectKeysInView
+          const projectIndex = group.key ? projectOnlyKeys.indexOf(group.key) : -1
+          // Manual order only among non-pinned for ↑↓ (matches applySessionOrder).
+          const movableSessionIds = group.sessions
+            .filter((s) => !meta[s.id]?.pinned)
+            .map((s) => s.id)
+          return (
           <ProjectSection
             key={group.key || '__none__'}
             group={group}
@@ -519,6 +554,7 @@ export function Sidebar({
             tagDraft={tagDraft}
             moveTarget={moveTarget}
             projectOptions={projectOptions}
+            busySet={busySet}
             onSelect={onSelect}
             onToggleSelect={toggleSelect}
             onDelete={onDelete}
@@ -531,6 +567,27 @@ export function Sidebar({
             setTagDraft={setTagDraft}
             setMoveTarget={setMoveTarget}
             refreshMeta={refreshMeta}
+            projectDisableUp={!group.key || projectIndex <= 0}
+            projectDisableDown={
+              !group.key || projectIndex < 0 || projectIndex >= projectOnlyKeys.length - 1
+            }
+            onMoveProjectUp={
+              group.key
+                ? () => moveProject(group.key, 'up', projectOnlyKeys)
+                : undefined
+            }
+            onMoveProjectDown={
+              group.key
+                ? () => moveProject(group.key, 'down', projectOnlyKeys)
+                : undefined
+            }
+            onMoveSessionUp={(id) =>
+              moveSession(id, group.path || null, 'up', movableSessionIds)
+            }
+            onMoveSessionDown={(id) =>
+              moveSession(id, group.path || null, 'down', movableSessionIds)
+            }
+            movableSessionIds={movableSessionIds}
             onNewInProject={
               onNewInProject
                 ? (path) =>
@@ -539,8 +596,11 @@ export function Sidebar({
                     })
                 : undefined
             }
-            onSetSessionProject={onSetSessionProject}
-            onDragStartSession={onDragStartSession}
+            onSetSessionProject={(id, path) => {
+              const from = sessions.find((s) => s.id === id)?.project_path
+              onSessionRehomed(id, from, path)
+              onSetSessionProject?.(id, path)
+            }}
             onDragOverProject={(e) => {
               e.preventDefault()
               e.dataTransfer.dropEffect = 'move'
@@ -554,7 +614,8 @@ export function Sidebar({
                 : undefined
             }
           />
-        ))}
+          )
+        })}
 
         {hasMore && onLoadMore && (
           <div className="px-2 mb-2">
@@ -584,7 +645,7 @@ export function Sidebar({
         className="px-3 py-1 text-[10px] border-t shrink-0"
         style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
       >
-        Checkbox multi-select · drag onto folders · Shift+click range
+        ↑↓ reorder · 📁 move · Archive / pin on hover
       </div>
       {footer}
     </div>
@@ -606,6 +667,7 @@ function ProjectSection({
   tagDraft,
   moveTarget,
   projectOptions,
+  busySet,
   onSelect,
   onToggleSelect,
   onDelete,
@@ -618,9 +680,15 @@ function ProjectSection({
   setTagDraft,
   setMoveTarget,
   refreshMeta,
+  projectDisableUp,
+  projectDisableDown,
+  onMoveProjectUp,
+  onMoveProjectDown,
+  onMoveSessionUp,
+  onMoveSessionDown,
+  movableSessionIds,
   onNewInProject,
   onSetSessionProject,
-  onDragStartSession,
   onDragOverProject,
   onDragLeaveProject,
   onDropProject,
@@ -640,6 +708,7 @@ function ProjectSection({
   tagDraft: string
   moveTarget: string | null
   projectOptions: string[]
+  busySet: Set<string>
   onSelect: (id: string) => void
   onToggleSelect: (id: string, e: React.MouseEvent) => void
   onDelete: (id: string) => void
@@ -652,9 +721,15 @@ function ProjectSection({
   setTagDraft: (v: string) => void
   setMoveTarget: (v: string | null) => void
   refreshMeta: () => void
+  projectDisableUp?: boolean
+  projectDisableDown?: boolean
+  onMoveProjectUp?: () => void
+  onMoveProjectDown?: () => void
+  onMoveSessionUp?: (id: string) => void
+  onMoveSessionDown?: (id: string) => void
+  movableSessionIds?: string[]
   onNewInProject?: (projectPath: string | null) => void
   onSetSessionProject?: (id: string, projectPath: string | null) => void
-  onDragStartSession: (e: DragEvent, id: string) => void
   onDragOverProject: (e: DragEvent) => void
   onDragLeaveProject: () => void
   onDropProject: (e: DragEvent) => void
@@ -681,25 +756,39 @@ function ProjectSection({
         onDragOver={onDragOverProject}
         onDragLeave={onDragLeaveProject}
         onDrop={onDropProject}
-        title={
-          group.path
-            ? `${group.path} — drop sessions here`
-            : 'Sessions without a project — drop to clear project'
-        }
       >
-        <span className="text-[10px] w-3 text-center" style={{ color: 'var(--text-muted)' }}>
+        <span
+          className="text-[10px] w-3 text-center"
+          style={{ color: 'var(--text-muted)' }}
+          title={collapsed ? 'Expand' : 'Collapse'}
+        >
           {collapsed ? '▸' : '▾'}
         </span>
         <span className="text-[12px]">{isNone ? '○' : '📁'}</span>
         <span
           className="truncate flex-1 min-w-0 text-xs font-semibold"
           style={{ color: 'var(--text-primary)' }}
+          title={
+            group.path
+              ? group.path
+              : 'Sessions without a project'
+          }
         >
           {group.label}
         </span>
         <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
           {count}
         </span>
+        {onMoveProjectUp && onMoveProjectDown && (
+          <OrderButtons
+            onUp={onMoveProjectUp}
+            onDown={onMoveProjectDown}
+            disableUp={projectDisableUp}
+            disableDown={projectDisableDown}
+            titleUp="Move project folder up"
+            titleDown="Move project folder down"
+          />
+        )}
         {onNewInProject && (
           <button
             type="button"
@@ -739,8 +828,8 @@ function ProjectSection({
             return (
               <div
                 key={s.id}
-                draggable={!isRenaming}
-                onDragStart={(e) => onDragStartSession(e, s.id)}
+                // Drag-to-folder is unreliable in Tauri WebView — reorder via ↑↓.
+                draggable={false}
                 className="group flex flex-col px-2 cursor-pointer text-sm relative"
                 style={{
                   background: isSel
@@ -837,8 +926,26 @@ function ProjectSection({
                                     : s.origin_channel.slice(0, 2).toUpperCase()}
                         </span>
                       )}
+                      {busySet.has(s.id) && <SessionBusyBadge />}
                       <span className="truncate">{s.title || 'New Session'}</span>
                     </span>
+                  )}
+                  {!pinned && onMoveSessionUp && onMoveSessionDown && (
+                    <OrderButtons
+                      onUp={() => onMoveSessionUp(s.id)}
+                      onDown={() => onMoveSessionDown(s.id)}
+                      disableUp={
+                        !movableSessionIds?.length
+                        || movableSessionIds.indexOf(s.id) <= 0
+                      }
+                      disableDown={
+                        !movableSessionIds?.length
+                        || movableSessionIds.indexOf(s.id)
+                          >= movableSessionIds.length - 1
+                      }
+                      titleUp="Move session up"
+                      titleDown="Move session down"
+                    />
                   )}
                   {onRename && !isRenaming && (
                     <button
@@ -853,6 +960,28 @@ function ProjectSection({
                       <IconEdit size={11} />
                     </button>
                   )}
+                  <button
+                    type="button"
+                    className={`text-[10px] shrink-0 px-1 rounded ${
+                      m.archived ? 'opacity-100' : 'opacity-0 group-hover:opacity-90'
+                    }`}
+                    style={{
+                      color: m.archived ? 'var(--accent)' : 'var(--text-muted)',
+                      border: '1px solid var(--border)',
+                      background: m.archived
+                        ? 'color-mix(in srgb, var(--accent) 12%, transparent)'
+                        : 'transparent',
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      toggleSessionArchive(s.id)
+                      refreshMeta()
+                    }}
+                    title={m.archived ? 'Unarchive session' : 'Archive session'}
+                    aria-label={m.archived ? 'Unarchive session' : 'Archive session'}
+                  >
+                    {m.archived ? 'Unarchive' : 'Archive'}
+                  </button>
                   <button
                     className="w-4 h-4 opacity-0 group-hover:opacity-70 shrink-0 text-[11px]"
                     style={{ color: 'var(--error)' }}
@@ -878,21 +1007,6 @@ function ProjectSection({
                   <span className="text-[9px] shrink-0" style={{ color: 'var(--text-muted)' }}>
                     {s.message_count} msg
                   </span>
-                  <button
-                    type="button"
-                    className="text-[9px] shrink-0 opacity-0 group-hover:opacity-80"
-                    style={{
-                      color: m.archived ? 'var(--accent)' : 'var(--text-muted)',
-                    }}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      toggleSessionArchive(s.id)
-                      refreshMeta()
-                    }}
-                    title={m.archived ? 'Unarchive' : 'Archive'}
-                  >
-                    {m.archived ? 'archived' : 'archive'}
-                  </button>
                   {(m.tags || []).slice(0, 2).map((t) => (
                     <span
                       key={t}
@@ -998,7 +1112,7 @@ function ProjectSection({
               className="px-3 py-1.5 text-[10px]"
               style={{ color: 'var(--text-muted)', marginLeft: isNone ? 0 : 4 }}
             >
-              {isNone ? 'No unattached sessions' : 'Drop sessions here or use +'}
+              {isNone ? 'No unattached sessions' : 'Empty — use + or 📁 on a session'}
             </div>
           )}
         </div>

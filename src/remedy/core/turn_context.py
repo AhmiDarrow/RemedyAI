@@ -37,6 +37,12 @@ _turn_abort: ContextVar[asyncio.Event | None] = ContextVar("remedy_turn_abort", 
 _turn_workspace: ContextVar[TurnWorkspace | None] = ContextVar(
     "remedy_turn_workspace", default=None
 )
+# Per-turn plan mode + tool trace (must not share mutable runtime lists across
+# concurrent multi-provider streams).
+_turn_plan_mode: ContextVar[bool] = ContextVar("remedy_turn_plan_mode", default=False)
+_turn_tool_steps: ContextVar[list[dict[str, Any]] | None] = ContextVar(
+    "remedy_turn_tool_steps", default=None
+)
 
 
 # session_id -> list of abort events (overlapping streams rare but possible)
@@ -85,8 +91,12 @@ def begin_turn(
     *,
     project_raw: str | None = None,
     active_path: str | Any = "",
-) -> tuple[Token, Token, Token]:
-    """Register abort + workspace for this turn. Returns (session, abort, workspace) tokens."""
+    plan_mode: bool = False,
+) -> tuple[Token, Token, Token, Token, Token]:
+    """Register abort + workspace + plan/tools for this turn.
+
+    Returns (session, abort, workspace, plan_mode, tool_steps) tokens.
+    """
     sid = str(session_id or "").strip() or None
     ev = asyncio.Event()
     path_s = str(active_path) if active_path is not None else ""
@@ -94,10 +104,37 @@ def begin_turn(
     tok_s = _turn_session_id.set(sid)
     tok_a = _turn_abort.set(ev)
     tok_w = _turn_workspace.set(ws)
+    tok_p = _turn_plan_mode.set(bool(plan_mode))
+    tok_t = _turn_tool_steps.set([])
     if sid:
         with _lock:
             _registry.setdefault(sid, []).append(ev)
-    return tok_s, tok_a, tok_w
+    return tok_s, tok_a, tok_w, tok_p, tok_t
+
+
+def current_plan_mode(runtime: Any = None) -> bool:
+    """Plan mode for this coroutine turn (ContextVar first)."""
+    # ContextVar always set by begin_turn; default False when outside a turn.
+    if _turn_tool_steps.get() is not None or _turn_session_id.get():
+        return bool(_turn_plan_mode.get())
+    if runtime is not None:
+        return bool(getattr(runtime, "_plan_mode", False))
+    return bool(_turn_plan_mode.get())
+
+
+def current_turn_tool_steps(runtime: Any = None) -> list[dict[str, Any]]:
+    """Mutable tool-step list for this turn only."""
+    steps = _turn_tool_steps.get()
+    if steps is not None:
+        return steps
+    if runtime is not None:
+        legacy = getattr(runtime, "_turn_tool_steps", None)
+        if isinstance(legacy, list):
+            return legacy
+        runtime._turn_tool_steps = []
+        return runtime._turn_tool_steps
+    empty: list[dict[str, Any]] = []
+    return empty
 
 
 def bind_turn_workspace(project_raw: str | None, active_path: str | Any) -> Token:
@@ -111,6 +148,8 @@ def end_turn(
     tok_s: Token,
     tok_a: Token,
     tok_w: Token | None = None,
+    tok_p: Token | None = None,
+    tok_t: Token | None = None,
 ) -> None:
     """Unregister abort event and reset contextvars."""
     sid = str(session_id or "").strip() or None
@@ -132,6 +171,12 @@ def end_turn(
     if tok_w is not None:
         with contextlib.suppress(Exception):
             _turn_workspace.reset(tok_w)
+    if tok_p is not None:
+        with contextlib.suppress(Exception):
+            _turn_plan_mode.reset(tok_p)
+    if tok_t is not None:
+        with contextlib.suppress(Exception):
+            _turn_tool_steps.reset(tok_t)
 
 
 def register_turn_process(proc: Any) -> None:

@@ -28,11 +28,24 @@ def register_memory_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
     """Register routes (closes over runtime/gateway/memory)."""
     # -- memory search -------------------------------------------------------
     @app.get("/api/memory/search")
-    async def search_memory(query: str = Query(...), limit: int = Query(default=10, le=50)):
+    async def search_memory(
+        query: str = Query(default=""),
+        limit: int = Query(default=10, le=50),
+    ):
         if memory is None:
             raise HTTPException(503, "Memory store not available")
 
-        entries = await memory.search(query, limit=limit)
+        # Empty query: recent human notes (panel open) — not FTS heartbeats.
+        q = (query or "").strip()
+        if not q:
+            raw = await memory.list_recent(limit=max(limit * 3, 30))
+            entries = [
+                e
+                for e in raw
+                if str(getattr(e.entry_type, "value", e.entry_type) or "") != "system"
+            ][:limit]
+        else:
+            entries = await memory.search(query, limit=limit)
         return {
             "query": query,
             "results": [

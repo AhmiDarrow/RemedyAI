@@ -63,6 +63,11 @@ _DEFAULT_SYSTEM_PROMPT = (
     "That hangs the UI — always use native tool_calls.\n"
     "- NEVER emit DSML/XML tool markup (tool_calls, invoke, invoke_parameter) as chat text.\n"
     "- Prefer parallel tool calls for independent reads; avoid repeating the same call.\n"
+    "- **Speed (coding):** each model step is expensive. In ONE tool_calls response, "
+    "emit many independent reads/searches together (typically 4–12 file_read / "
+    "list_dir / repo_search), not one file per step. Do not re-file_read a path "
+    "already returned this turn. After enough context, switch to file_edit "
+    "(multi-hunk edits=) and verify — avoid explore loops.\n"
     "- When ≥2 independent modules/paths/areas: prefer **spread_run** (silent fan-out "
     "workers → one digest) over long serial list_dir/file_read loops. "
     "Use single **job_run** for one survey; direct tools for one-file edits. "
@@ -80,8 +85,10 @@ _DEFAULT_SYSTEM_PROMPT = (
     "You are not confined to it — absolute paths work anywhere in access scope.\n"
     "- Multi-tree work: pass absolute paths to list_dir / repo_search / file_*.\n"
     "- Prefer file_edit for surgical edits; repo_search finds any text language "
-    "(no extension allowlist). Prefer parallel independent reads.\n"
-    "- When a mission has verify_command, run mission_verify before claiming done.\n\n"
+    "(no extension allowlist). Parallel independent reads in the same step.\n"
+    "- When a mission has verify_command, run mission_verify before claiming done.\n"
+    "- Scope discipline: if the user named a subsystem, stay there — do not "
+    "re-review the whole tree unless asked.\n\n"
     "Recovery (do not give up on the first failure):\n"
     "- Tool errors include Error [CODE:tool] and often a Suggestion line — follow it.\n"
     "- Path not found → list_dir on the parent or default cwd; try absolute form.\n"
@@ -102,6 +109,35 @@ RECOVERY_NUDGE = (
     "use an absolute path, try an alternate path, or adjust the shell command. "
     "Finish the user's task with corrected tool calls."
 )
+
+# Once per turn when the model serializes explore as one tool per step (slow).
+# Does not strip tools or force-answer — only asks for denser parallel batches.
+SPEED_BATCH_NUDGE = (
+    "[Speed] You are calling tools one-at-a-time. In your NEXT tool_calls response, "
+    "emit many independent reads/searches together (e.g. 4–12 file_read / list_dir / "
+    "repo_search in one step). Do not re-read paths already returned this turn. "
+    "When you have enough context, switch to file_edit (multi-hunk) and verify — "
+    "stay scoped to the user's request. Agency stays full; finish the work faster."
+)
+
+# Explore-only tool names (serial thrash of these is the usual slow pattern).
+_SERIAL_EXPLORE_TOOLS = frozenset(
+    {"file_read", "list_dir", "repo_search", "memory_search"}
+)
+
+
+def is_serial_explore_batch(tool_calls_list: list[dict[str, Any]] | None) -> bool:
+    """True when the model emitted a single explore tool (not a write/bash batch)."""
+    if not tool_calls_list or len(tool_calls_list) != 1:
+        return False
+    tc = tool_calls_list[0] if isinstance(tool_calls_list[0], dict) else {}
+    fn = tc.get("function") if isinstance(tc.get("function"), dict) else {}
+    name = str((fn or {}).get("name") or tc.get("name") or "").strip().lower()
+    return name in _SERIAL_EXPLORE_TOOLS
+
+
+def speed_batch_nudge_message() -> dict[str, str]:
+    return {"role": "user", "content": SPEED_BATCH_NUDGE}
 
 # When the failure is Ask-mode approval — do NOT invent alternate commands.
 APPROVAL_NUDGE = (
@@ -259,6 +295,11 @@ _ACTION_KICK_RE = re.compile(
     r"\bcan'?t\s+(?:finish|complete|provide)\b|"
     r"\bcomplete\s+this\b|"
     r"\bfinish\s+(?:it|this|the\s+task)\b|"
+    r"\bpick\s+up\b|"
+    r"\bwhere\s+you\s+left\s+off\b|"
+    r"\bleft\s+off\b|"
+    r"\bresume\b|"
+    r"\bpick\s+up\s+where\b|"
     r"\byes[,.]?\s*(?:please\s+)?(?:proceed|continue|do\s+it|go|implement)\b|"
     r"\bok(?:ay)?[,.]?\s*(?:please\s+)?(?:proceed|continue|do\s+it|go|implement)\b"
     r")",
@@ -274,20 +315,46 @@ _FALSE_PROGRESS_RE = re.compile(
     r"\bprocessing\b|"
     r"\bworking\s+on\s+it\b|"
     r"\bpicking\s+up\b|"
+    # Bare status lines: "Checking ComfyUI…", "Looking at hardware…"
+    r"\b(?:checking|looking\s+(?:at|into)|inspecting|verifying|examining)\b|"
     r"\bgiving\s+you\s+(?:a\s+)?(?:real\s+)?eta\b|"
     r"\bchecking\s+assets\b|"
-    r"\bdoing\s+the\s+(?:asset|logo|work)\b"
+    r"\bdoing\s+the\s+(?:asset|logo|work)\b|"
+    r"\bso\s+we\s+can\s+(?:finish|complete|continue)\b"
     r")",
     re.IGNORECASE,
 )
 
-# Pure social / chat-only (keep tools off even when short-default flips).
+# Soft affirmations: mid-task "ok" / "cool" means continue work, not chat-only.
+_SOFT_AFFIRM_RE = re.compile(
+    r"^(?:"
+    r"ok(?:ay)?|k|cool|nice|great|awesome|perfect|"
+    r"mhm+|yep|yup|sure|alright|all\s+right|"
+    r"go|yes|yeah|yuppers"
+    r")[\s!.?]*$",
+    re.IGNORECASE,
+)
+
+# Hard social only (keep tools off even with open history).
+_HARD_CHAT_ONLY_RE = re.compile(
+    r"^(?:"
+    r"hi+|hello+|hey+|yo+|sup|"
+    r"thanks?(?:\s+you)?|thx|ty|"
+    r"lol|haha|hmm+|nope|"
+    r"good\s+(?:morning|afternoon|evening|night)|"
+    r"how\s+are\s+you\??|"
+    r"bye|goodbye|see\s+ya"
+    r")[\s!.?]*$",
+    re.IGNORECASE,
+)
+
+# Full chat-only set (message_wants_tools standalone: no history context).
 _CHAT_ONLY_RE = re.compile(
     r"^(?:"
     r"hi+|hello+|hey+|yo+|sup|"
     r"thanks?(?:\s+you)?|thx|ty|"
     r"ok(?:ay)?|k|cool|nice|great|awesome|perfect|"
-    r"lol|haha|hmm+|mhm+|yep|yup|nope|"
+    r"lol|haha|hmm+|mhm+|yep|yup|nope|sure|alright|"
     r"good\s+(?:morning|afternoon|evening|night)|"
     r"how\s+are\s+you\??|"
     r"bye|goodbye|see\s+ya"
@@ -742,14 +809,55 @@ def parse_pseudo_tool_calls(text: str) -> list[dict[str, Any]]:
         if len(unique) >= MAX_PARALLEL_TOOLS:
             break
 
-    if unique:
+    # Drop incomplete recoveries (truncated DSML mid-stream is common on DeepSeek).
+    complete = [tc for tc in unique if recovered_tool_call_is_complete(tc)]
+    dropped = len(unique) - len(complete)
+    if dropped:
+        logger.warning(
+            "pseudo_tool_recovery dropped %s incomplete call(s) (truncated DSML?)",
+            dropped,
+        )
+
+    if complete:
         logger.warning(
             "pseudo_tool_recovery count=%s names=%s preview=%r",
-            len(unique),
-            [c["function"]["name"] for c in unique],
+            len(complete),
+            [c["function"]["name"] for c in complete],
             (text or "")[:200],
         )
-    return unique
+    return complete
+
+
+def recovered_tool_call_is_complete(tc: dict[str, Any]) -> bool:
+    """True when a recovered/pseudo tool call has enough args to run safely.
+
+    Incomplete DSML (e.g. ``name=\"bash_`` cut mid-token) must not be executed —
+    it wastes a step and can leave the turn looking stuck.
+    """
+    fn = tc.get("function") if isinstance(tc, dict) else None
+    if not isinstance(fn, dict):
+        return False
+    name = str(fn.get("name") or "").strip().lower()
+    if not name or name.endswith("_") or len(name) < 3:
+        return False
+    raw = fn.get("arguments") or "{}"
+    try:
+        args = json.loads(raw) if isinstance(raw, str) else (raw or {})
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return False
+    if not isinstance(args, dict):
+        return False
+    if name == "bash_exec":
+        cmd = str(args.get("command") or args.get("code") or args.get("cmd") or "").strip()
+        return len(cmd) >= 2
+    if name in ("file_read", "file_write", "list_dir"):
+        return bool(str(args.get("path") or args.get("file") or "").strip())
+    if name == "comfyui":
+        return bool(str(args.get("action") or "status").strip())
+    if name == "repo_search":
+        return bool(str(args.get("query") or args.get("pattern") or "").strip())
+    # Unknown tools: require non-empty args object
+    return bool(args)
 
 
 _parse_pseudo_tool_calls = parse_pseudo_tool_calls

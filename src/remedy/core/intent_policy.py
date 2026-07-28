@@ -50,6 +50,8 @@ _PACKS: dict[str, dict[str, Any]] = {
             "Prefer tools over monologue: file_edit (multi-hunk via edits=) for "
             "precise edits, repo_search for discovery (absolute path= when multi-tree), "
             "file_write for new files, bash_exec with timeout_seconds/workdir for builds. "
+            "Speed: batch independent file_read/list_dir/repo_search in ONE step "
+            "(many tool_calls together); do not re-read paths already in this turn. "
             "When ≥2 independent modules/paths, use spread_run (parallel silent workers) "
             "instead of long serial list_dir loops. "
             "Use job_run explore/verify/diff for a single survey. "
@@ -59,6 +61,7 @@ _PACKS: dict[str, dict[str, Any]] = {
         ),
         "prefer_tools": True,
         "suggest_tools": [
+            "skill_activate",
             "file_edit",
             "repo_search",
             "file_read",
@@ -66,6 +69,7 @@ _PACKS: dict[str, dict[str, Any]] = {
             "job_run",
             "spread_run",
         ],
+        "change_safety": True,
     },
     "autonomous": {
         "id": "autonomous",
@@ -75,7 +79,8 @@ _PACKS: dict[str, dict[str, Any]] = {
             "1) mission_start with goal, checklist steps, and verify_command "
             "(stack fingerprint may auto-fill; e.g. pytest -q or Godot headless smoke).\n"
             "2) Prefer file_edit / multi-hunk edits=; repo_search for discovery; "
-            "file_write only for new files. Use absolute paths when juggling trees.\n"
+            "file_write only for new files. Use absolute paths when juggling trees. "
+            "Batch many independent reads in one step — serial one-file-per-step is too slow.\n"
             "3) Cover ground fast: spread_run when ≥2 independent trees/modules; "
             "else job_run kind=explore|verify|diff for a single survey.\n"
             "4) mission_update after each step; mission_verify before claiming done "
@@ -90,6 +95,7 @@ _PACKS: dict[str, dict[str, Any]] = {
         ),
         "prefer_tools": True,
         "suggest_tools": [
+            "skill_activate",
             "mission_start",
             "mission_update",
             "mission_verify",
@@ -99,6 +105,7 @@ _PACKS: dict[str, dict[str, Any]] = {
             "spread_run",
             "bash_exec",
         ],
+        "change_safety": True,
     },
 }
 
@@ -161,6 +168,16 @@ def format_policy_block(pack: dict[str, Any] | None) -> str:
     if not pack:
         return ""
     text = str(pack.get("system") or "").strip()
+    # Standing change-safety for coding/autonomous turns (full checklist via skill).
+    if pack.get("change_safety"):
+        try:
+            from remedy.core.change_safety import change_safety_block
+
+            extra = change_safety_block()
+            if extra:
+                text = f"{text}\n{extra}".strip() if text else extra
+        except Exception:
+            pass
     tools = pack.get("suggest_tools") or []
     if tools and text:
         text += " Suggested tools when needed: " + ", ".join(str(t) for t in tools) + "."

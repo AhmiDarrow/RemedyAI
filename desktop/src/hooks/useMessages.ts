@@ -8,6 +8,15 @@ import {
   type UsagePayload,
 } from '../api/messages'
 import { abortSession } from '../api/sessions'
+import {
+  completeStreamJob,
+  detachStreamJob,
+  getStreamJob,
+  reattachStreamJob,
+  registerStreamJob,
+  stopStreamJob,
+  touchStreamJob,
+} from '../sessions/streamJobs'
 import type { ChatMessage } from '../types'
 import { toolLabel, type ProcessStep } from '../utils/toolLabels'
 import { emptyUsage, type UsageSnapshot } from '../utils/tokenCost'
@@ -23,6 +32,8 @@ export type QueuedSend = {
   id: string
   text: string
   model?: string
+  /** Per-session provider (paired with model). */
+  provider?: string
   sid?: string
   attachments?: {
     path: string
@@ -50,8 +61,21 @@ export function useMessages(sessionId: string | null) {
   const [streamCtrl, setStreamCtrl] = useState<AbortController | null>(null)
   const [queue, setQueue] = useState<QueuedSend[]>([])
   const [librarySuggest, setLibrarySuggest] = useState<LibrarySuggest | null>(null)
+  /** True when streaming but no SSE activity for a while (provider may be stuck). */
+  const [streamStalled, setStreamStalled] = useState(false)
+  const [stallSeconds, setStallSeconds] = useState(0)
   const streamingRef = useRef(false)
   const sendLockRef = useRef(false)
+  /** Last token / tool / progress activity (ms) for stall detection. */
+  const lastStreamActivityRef = useRef(0)
+  /** Prompt text of the in-flight turn — used by Stop & retry. */
+  const lastSentPromptRef = useRef<{
+    text: string
+    model?: string
+    sid?: string
+    attachments?: QueuedSend['attachments']
+    planMode?: boolean
+  } | null>(null)
   const processStepsRef = useRef<ProcessStep[]>([])
   const queueRef = useRef<QueuedSend[]>([])
   const streamCtrlRef = useRef<AbortController | null>(null)
@@ -76,6 +100,7 @@ export function useMessages(sessionId: string | null) {
         sid?: string,
         attachments?: QueuedSend['attachments'],
         planMode?: boolean,
+        provider?: string,
       ) => Promise<void>)
     | null
   >(null)
@@ -243,30 +268,26 @@ export function useMessages(sessionId: string | null) {
     }
   }, [hasOlder, loadingOlder, messages.length])
 
-  // Session change: always force-load history so list clicks work.
-  // Abort any in-flight stream and clear stuck flags so a dead stream cannot blank the feed.
-  // Drop the send queue — queued items are for the previous session context.
-  // Cancel previous session's server turn only if it was actively streaming
-  // (avoid extra HTTP on every idle tab hop).
-  const prevSessionForAbortRef = useRef<string | null>(null)
-  const prevStreamingForAbortRef = useRef(false)
+  // Session change: force-load history. Phase A: detach prior turn (do NOT abort)
+  // so background work continues while the user chats in another tab.
+  const prevSessionForDetachRef = useRef<string | null>(null)
+  const prevStreamingForDetachRef = useRef(false)
   useEffect(() => {
-    const prev = prevSessionForAbortRef.current
+    const prev = prevSessionForDetachRef.current
     const wasStreaming =
-      prevStreamingForAbortRef.current || streamingRef.current || sendLockRef.current
+      prevStreamingForDetachRef.current || streamingRef.current || sendLockRef.current
     if (prev && prev !== sessionId && wasStreaming) {
-      void abortSession(prev).catch(() => {})
+      // Keep server turn + SSE alive; only unbind focused UI.
+      detachStreamJob(prev)
     }
-    prevSessionForAbortRef.current = sessionId || null
-    prevStreamingForAbortRef.current = false
-    try {
-      streamCtrlRef.current?.abort()
-    } catch {
-      /* */
-    }
+    prevSessionForDetachRef.current = sessionId || null
+    prevStreamingForDetachRef.current = false
+    // Clear focused UI only — do not abort streamCtrl (job owns the controller).
     streamingRef.current = false
     sendLockRef.current = false
     setStreaming(false)
+    setStreamStalled(false)
+    setStallSeconds(0)
     setPartialText('')
     setPartialThinking('')
     setActiveTools([])
@@ -280,6 +301,18 @@ export function useMessages(sessionId: string | null) {
     setHasOlder(false)
     clearChatMediaCache()
     void load({ force: true })
+    // Re-bind UI if this session still has a live background job.
+    if (sessionId) {
+      const job = reattachStreamJob(sessionId) || getStreamJob(sessionId)
+      if (job?.status === 'running') {
+        streamingRef.current = true
+        sendLockRef.current = true
+        setStreaming(true)
+        streamCtrlRef.current = job.controller
+        setStreamCtrl(job.controller)
+        lastStreamActivityRef.current = job.lastActivityAt || Date.now()
+      }
+    }
   }, [load])
 
   useEffect(() => {
@@ -296,7 +329,14 @@ export function useMessages(sessionId: string | null) {
     try {
       const fn = sendTurnRef.current
       if (fn) {
-        await fn(next.text, next.model, next.sid, next.attachments, next.planMode)
+        await fn(
+          next.text,
+          next.model,
+          next.sid,
+          next.attachments,
+          next.planMode,
+          next.provider,
+        )
       }
     } finally {
       drainingRef.current = false
@@ -310,6 +350,7 @@ export function useMessages(sessionId: string | null) {
       sid?: string,
       attachments?: QueuedSend['attachments'],
       planMode?: boolean,
+      provider?: string,
     ) => {
       const targetId = sid || sessionId
       const hasAtt = Boolean(attachments?.length)
@@ -368,8 +409,28 @@ export function useMessages(sessionId: string | null) {
       processStepsRef.current = []
       setTaskProgress(null)
       setRunUsage(emptyUsage(model || null, null))
+      setStreamStalled(false)
+      setStallSeconds(0)
+      lastStreamActivityRef.current = Date.now()
+      lastSentPromptRef.current = {
+        text: text.trim() || '(see attached files)',
+        model,
+        sid: targetId,
+        attachments,
+        planMode,
+      }
 
       let doneReceived = false
+
+      const isFocusedTurn = () => sessionIdRef.current === targetId
+
+      const bumpActivity = () => {
+        lastStreamActivityRef.current = Date.now()
+        touchStreamJob(targetId)
+        if (!isFocusedTurn()) return
+        setStreamStalled(false)
+        setStallSeconds(0)
+      }
 
       const finishOk = async () => {
         if (doneReceived) return
@@ -402,21 +463,24 @@ export function useMessages(sessionId: string | null) {
           }
           setMessages((prev) => [...prev, optimistic])
         }
-        setStreaming(false)
-        setStreamCtrl(null)
-        streamCtrlRef.current = null
-        setPartialText('')
-        setPartialThinking('')
-        setActiveTools([])
-        setTaskProgress(null)
-        streamingRef.current = false
-        sendLockRef.current = false
-        streamAccumRef.current = ''
-        thinkingAccumRef.current = ''
+        completeStreamJob(targetId, 'done')
+        if (isFocusedTurn()) {
+          setStreaming(false)
+          setStreamStalled(false)
+          setStallSeconds(0)
+          setStreamCtrl(null)
+          streamCtrlRef.current = null
+          setPartialText('')
+          setPartialThinking('')
+          setActiveTools([])
+          setTaskProgress(null)
+          streamingRef.current = false
+          sendLockRef.current = false
+          streamAccumRef.current = ''
+          thinkingAccumRef.current = ''
+        }
         // Drop results if the user already switched sessions.
         if (sessionIdRef.current !== targetId) {
-          setProcessSteps([])
-          processStepsRef.current = []
           window.setTimeout(() => {
             void drainQueue()
           }, 40)
@@ -458,17 +522,22 @@ export function useMessages(sessionId: string | null) {
         if (doneReceived) return
         doneReceived = true
         resetStreamBuffers()
-        setStreaming(false)
-        setStreamCtrl(null)
-        streamCtrlRef.current = null
-        setPartialText('')
-        setPartialThinking('')
-        setActiveTools([])
-        setProcessSteps([])
-        processStepsRef.current = []
-        setTaskProgress(null)
-        streamingRef.current = false
-        sendLockRef.current = false
+        completeStreamJob(targetId, 'error', errMsg)
+        if (isFocusedTurn()) {
+          setStreaming(false)
+          setStreamStalled(false)
+          setStallSeconds(0)
+          setStreamCtrl(null)
+          streamCtrlRef.current = null
+          setPartialText('')
+          setPartialThinking('')
+          setActiveTools([])
+          setProcessSteps([])
+          processStepsRef.current = []
+          setTaskProgress(null)
+          streamingRef.current = false
+          sendLockRef.current = false
+        }
         // Only paint errors on the session that started this turn.
         if (sessionIdRef.current === targetId) {
           setMessages((prev) => [
@@ -501,7 +570,11 @@ export function useMessages(sessionId: string | null) {
       const ctrl = streamMessage(
         targetId,
         text.trim() || '(see attached files)',
-        (token) => appendPartialToken(token),
+        (token) => {
+          bumpActivity()
+          // Background jobs: server persists; do not touch focused UI accumulators.
+          if (isFocusedTurn()) appendPartialToken(token)
+        },
         () => {
           void finishOk()
         },
@@ -509,8 +582,13 @@ export function useMessages(sessionId: string | null) {
           void finishErr(errMsg)
         },
         model,
-        (thought) => appendPartialThinking(thought),
+        (thought) => {
+          bumpActivity()
+          if (isFocusedTurn()) appendPartialThinking(thought)
+        },
         (name, args, callId) => {
+          bumpActivity()
+          if (!isFocusedTurn()) return
           setActiveTools((prev) => [...prev, { name, status: 'running' }])
           const step: ProcessStep = {
             id: callId || `${name}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -527,6 +605,8 @@ export function useMessages(sessionId: string | null) {
           pushSteps([...processStepsRef.current, step])
         },
         (name, preview, ok = true, callId) => {
+          bumpActivity()
+          if (!isFocusedTurn()) return
           setActiveTools((prev) => {
             let done = false
             return prev.map((t) => {
@@ -574,10 +654,13 @@ export function useMessages(sessionId: string | null) {
         },
         attachments,
         (info) => {
-          setTaskProgress(info)
+          bumpActivity()
+          if (isFocusedTurn()) setTaskProgress(info)
         },
         planMode,
         (usage: UsagePayload) => {
+          bumpActivity()
+          if (!isFocusedTurn()) return
           setRunUsage({
             prompt_tokens: usage.prompt_tokens ?? 0,
             completion_tokens: usage.completion_tokens ?? 0,
@@ -591,6 +674,7 @@ export function useMessages(sessionId: string | null) {
           })
         },
         (payload) => {
+          bumpActivity()
           if (sessionIdRef.current !== targetId) return
           const id = typeof payload.id === 'string' ? payload.id : ''
           const name = typeof payload.name === 'string' ? payload.name : ''
@@ -606,8 +690,10 @@ export function useMessages(sessionId: string | null) {
             reason: typeof payload.reason === 'string' ? payload.reason : undefined,
           })
         },
+        provider,
       )
 
+      registerStreamJob(targetId, ctrl, model)
       streamCtrlRef.current = ctrl
       setStreamCtrl(ctrl)
     },
@@ -632,12 +718,13 @@ export function useMessages(sessionId: string | null) {
       sid?: string,
       attachments?: QueuedSend['attachments'],
       planMode?: boolean,
-      opts?: { mode?: 'after' | 'interrupt' },
+      opts?: { mode?: 'after' | 'interrupt'; provider?: string },
     ) => {
       const hasAtt = Boolean(attachments?.length)
       if (!text.trim() && !hasAtt) return
       const targetId = sid || sessionId
       if (!targetId) return
+      const provider = opts?.provider
 
       // Busy: queue for after current turn, or interrupt now.
       if (streamingRef.current || sendLockRef.current) {
@@ -646,6 +733,7 @@ export function useMessages(sessionId: string | null) {
           id: crypto.randomUUID(),
           text,
           model,
+          provider,
           sid: targetId,
           attachments,
           planMode,
@@ -709,26 +797,48 @@ export function useMessages(sessionId: string | null) {
         return
       }
 
-      await sendTurn(text, model, sid, attachments, planMode)
+      await sendTurn(text, model, sid, attachments, planMode, provider)
     },
     [sessionId, sendTurn, resetStreamBuffers, drainQueue],
   )
 
-  // Track streaming for session-switch abort (only abort if work was live).
+  // Track streaming for session-switch detach (background jobs stay live).
   useEffect(() => {
-    if (streaming) prevStreamingForAbortRef.current = true
+    if (streaming) prevStreamingForDetachRef.current = true
+  }, [streaming])
+
+  // Stall watchdog: no SSE activity while streaming → surface "provider stuck".
+  // DeepSeek-class models can hang mid-think/DSML without closing the stream.
+  useEffect(() => {
+    if (!streaming) {
+      setStreamStalled(false)
+      setStallSeconds(0)
+      return
+    }
+    const STALL_WARN_MS = 90_000
+    const id = window.setInterval(() => {
+      if (!streamingRef.current) return
+      const idle = Date.now() - (lastStreamActivityRef.current || Date.now())
+      const secs = Math.floor(idle / 1000)
+      setStallSeconds(secs)
+      setStreamStalled(idle >= STALL_WARN_MS)
+    }, 2000)
+    return () => window.clearInterval(id)
   }, [streaming])
 
   const stop = useCallback(() => {
     const sid = sessionIdRef.current
-    streamCtrlRef.current?.abort()
-    streamCtrl?.abort()
-    // Server-side cooperative cancel (tools/LLM keep running until this lands).
+    // Focused session only — background jobs keep running until their own stop.
     if (sid) {
-      void abortSession(sid).catch(() => {})
+      void stopStreamJob(sid)
+    } else {
+      streamCtrlRef.current?.abort()
+      streamCtrl?.abort()
     }
     resetStreamBuffers()
     setStreaming(false)
+    setStreamStalled(false)
+    setStallSeconds(0)
     setStreamCtrl(null)
     streamCtrlRef.current = null
     setActiveTools([])
@@ -770,6 +880,23 @@ export function useMessages(sessionId: string | null) {
       void drainQueue()
     }, 40)
   }, [streamCtrl, resetStreamBuffers, drainQueue])
+
+  /** Stop the stuck turn and re-send the same prompt (provider reconnect). */
+  const stopAndRetry = useCallback(() => {
+    const pending = lastSentPromptRef.current
+    stop()
+    if (!pending?.text?.trim() && !pending?.attachments?.length) return
+    window.setTimeout(() => {
+      void send(
+        pending.text,
+        pending.model,
+        pending.sid,
+        pending.attachments,
+        pending.planMode,
+        { mode: 'after' },
+      )
+    }, 80)
+  }, [stop, send])
 
   const cancelQueued = useCallback((id: string) => {
     setQueue((q) => q.filter((x) => x.id !== id))
@@ -880,6 +1007,8 @@ export function useMessages(sessionId: string | null) {
     loadingOlder,
     loadOlder,
     streaming,
+    streamStalled,
+    stallSeconds,
     partialText,
     partialThinking,
     activeTools,
@@ -891,6 +1020,7 @@ export function useMessages(sessionId: string | null) {
     clearLibrarySuggest,
     send,
     stop,
+    stopAndRetry,
     cancelQueued,
     clearQueue,
     updateQueued,

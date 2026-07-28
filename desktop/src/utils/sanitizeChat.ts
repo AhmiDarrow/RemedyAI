@@ -26,6 +26,8 @@ export function stripToolMarkup(text: string): string {
 /** Sanitize assistant text for display; empty if only tool spam. */
 export function sanitizeAssistantText(text: string): string {
   if (!text) return ''
-  if (!looksLikeToolMarkup(text)) return text
-  return stripToolMarkup(text)
+  // Control tokens that once leaked into bubbles (vision status, etc.)
+  let t = text.replace(/(?:^|\n)@@status:[^\n]*/gi, '\n')
+  if (looksLikeToolMarkup(t)) t = stripToolMarkup(t)
+  return t.replace(/\n{3,}/g, '\n\n').trim()
 }

@@ -1,4 +1,4 @@
 [[permission]]
 identifier = "allow-save-text-file"
-description = "Allow native Save dialog for session export"
-commands.allow = ["save_text_file"]
+description = "Allow native Save/Open dialogs for session export and import"
+commands.allow = ["save_text_file", "open_text_file"]

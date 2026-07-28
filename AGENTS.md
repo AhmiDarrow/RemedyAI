@@ -41,6 +41,86 @@ on demand.
 Activate **`project-etiquette`** for the full portable checklist (any repo) plus
 Remedy-specific commands. For handoffs between agents, also use **`session-handoff`**.
 
+**In-product (Remedy desktop/agent):** change-safety is **baked in**, not only this
+file — bundled skill **`change-safety`**, Build/tool intent packs inject a standing
+snippet, and **`project-etiquette`** gate 0 requires blast radius. Prefer fixing the
+product skill over only editing AGENTS.md.
+
+## Change-safety protocol (blast radius — do this *before* coding)
+
+Ship gates catch **red tests**. They do **not** catch “fixed messenger, broke title
+bar” or “desktop looks new, WebUI is stale.” Before non-trivial edits, run this
+**impact pass** (takes minutes; saves multi-hour thrash).
+
+*Product source of truth for the same protocol:* skill **`change-safety`**
+(`skill_activate(name=change-safety)`). Keep AGENTS.md aligned when the skill changes.
+
+### 1. Name the change
+
+One sentence: *what user-visible or API-visible behavior changes?*
+
+### 2. Classify the surface (pick primary + any secondary)
+
+| Surface | Typical paths | High-risk neighbors |
+|---------|---------------|---------------------|
+| **Chat / ReAct / tools** | `src/remedy/core/`, tools, sessions routes | Concurrent streams, session LLM bind, messenger turns |
+| **Messengers / gateway** | `src/remedy/gateway/` | Dual pollers, desktop SSE, outbound mirror, allowlists |
+| **Desktop shell / chrome** | `desktop/src/components/TitleBar*`, `App.tsx`, Tauri `lib.rs`, `tauri.conf` | Window controls, tray, close-to-tray, drag/hit-test |
+| **Workspace rails** | slides, Browser, Terminal, Files | Popout/fullscreen z-index, WebView2 child bounds |
+| **Settings / secrets** | settings routes, secret store, providers | Provider switch mid-session, keys, setup gate |
+| **Docs / help only** | `docs/manual/`, help articles | Version bump **not** required; still sync help copies |
+| **Release / packaging** | `scripts/sync_version.py`, CI, installers | All version surfaces + `latest.json` naming |
+
+### 3. Blast-radius checklist (answer in the session, even briefly)
+
+1. **Same SPA?** Desktop + WebUI share `desktop/src/` — UI change may need `npm run build` + **serve restart** for WebUI.  
+2. **Two processes?** Sidecar + UI, or dual `serve` / Telegram pollers — avoid dual ownership of bot tokens or ports.  
+3. **Cross-path behavior?** Messenger turn vs desktop stream vs legacy chat stream — session model/provider must match.  
+4. **Windows-only?** Paths, hidden processes, DPAPI secrets, WebView2, NSIS — run or reason about Windows CI subset.  
+5. **Hard to unit-test?** Title bar, tray, embedded browser, native drag — schedule a **manual smoke** (below).  
+6. **Architecture traps?** Prefer durable design over band-aids for known failure classes (e.g. OS decorations for window buttons, not WebView fake chrome).
+
+### 4. Required checks by surface (minimum)
+
+Always when shipping runtime/UI: full `pytest` + when desktop touched: `cd desktop && npm test && npm run build`.
+
+| If you touch… | Also verify… |
+|---------------|--------------|
+| Gateway / Telegram | Poll lock acquire in logs; single instance; inbound + desktop→outbound; no 409 spam |
+| Session stream / LLM bind | Provider switch on one tab doesn’t poison another; messenger session uses session provider |
+| `App.tsx` / SSE / messages | Streaming not force-reloaded mid-turn; session list still refreshes |
+| Title bar / `decorations` / window cmds | **OS** min/max/close still work; tray + close-to-tray + quit warning |
+| Browser slide / `browser_host` | Auto-load or Go works; ↗ external open; popout chrome still clickable |
+| Settings / secrets | Save settings, reconnect, no plaintext tokens in config |
+| Manuals | `sync_help_manual.py` + `check_docs.py` |
+| Version / release | All surfaces via `sync_version.py`; installer asset naming rules below |
+
+### 5. Manual smoke matrix (desktop — tests miss this)
+
+Run when the change touches shell, chrome, messengers, or browser. **One** clean app instance:
+
+| # | Smoke | Pass |
+|---|-------|------|
+| 1 | Launch → server ready | Status connected |
+| 2 | New chat → short reply | Stream completes |
+| 3 | Min / max / restore / close (or close-to-tray) | OS chrome works every time |
+| 4 | Open Browser rail | Page loads (or clear error + ↗ works) |
+| 5 | If messengers enabled | Telegram in → desktop; desktop reply → Telegram |
+| 6 | Quit fully → relaunch | No dual serve / dual poller |
+
+Log greps when debugging: `poll lock`, `getUpdates 409`, `browser embed`, `add_child`.
+
+### 6. Pre-commit “neighbor” rule
+
+Before commit, list **files you did not edit** that share coupling with your change
+and confirm you either tested them or have a reason they are safe. If unsure,
+add a targeted test or a one-line note in the commit body (`Risk: … / Smoke: …`).
+
+### 7. What CI does *not* prove
+
+CI does not click the title bar, drive Telegram, or exercise WebView2 multiwebview
+on a real GPU. Treat green CI as necessary, not sufficient, for those zones.
+
 ## Desktop installer / auto-update naming
 
 **Critical for in-app updates.** The signed `latest.json` URL must match the GitHub Release asset name **exactly**.

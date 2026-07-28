@@ -255,8 +255,9 @@ export function MemoryPanel({
       ) : tab === 'memory' ? (
         entries.length === 0 ? (
           <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', lineHeight: 1.45 }}>
-            No saved memories yet. Things Remedy learns about you and this project will show up
-            here.
+            No notes yet. When Remedy saves progress (memory tools, goals, long tasks), recent
+            notes appear here. Partner profile facts are separate and only fill in when you ask
+            to remember something about yourself.
           </div>
         ) : (
           entries.map((e) => (
@@ -265,8 +266,18 @@ export function MemoryPanel({
               className="mb-2 p-2 rounded"
               style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}
             >
-              <div className="font-medium truncate" style={{ color: 'var(--text-primary)' }}>
-                {e.title}
+              <div className="flex items-center gap-1.5 min-w-0">
+                <div className="font-medium truncate flex-1" style={{ color: 'var(--text-primary)' }}>
+                  {e.title}
+                </div>
+                {e.type ? (
+                  <span
+                    className="text-[9px] shrink-0 uppercase tracking-wide"
+                    style={{ color: 'var(--text-muted)' }}
+                  >
+                    {e.type}
+                  </span>
+                ) : null}
               </div>
               <div className="mt-0.5" style={{ color: 'var(--text-secondary)' }}>
                 {e.content.slice(0, 120)}

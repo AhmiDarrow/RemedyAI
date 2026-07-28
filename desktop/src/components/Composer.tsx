@@ -14,6 +14,7 @@ import {
   listenNativeFileDrop,
   takePendingFileDrops,
   pendingMetaFromPayload,
+  pickAttachFiles,
   formatBytes,
   type AttachmentMeta,
   type DroppedFilePayload,
@@ -240,8 +241,13 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const dragDepth = useRef(0)
   const attachmentsRef = useRef<AttachmentMeta[]>([])
   attachmentsRef.current = attachments
-  /** Dedupe keys for drop/event/poll triple-fire (same file was attaching 3×). */
-  const seenDropKeysRef = useRef<Set<string>>(new Set())
+  /**
+   * In-flight keys only (name|size) while a drop/pick is uploading.
+   * Prevents poll + ready event double-fire from creating 2 chips — NOT a permanent
+   * blocklist. Cleared when upload finishes or the chip is removed so the same
+   * file can always be re-attached.
+   */
+  const inflightDropKeysRef = useRef<Set<string>>(new Set())
   /** Last applied edit key — re-apply when parent issues a new edit, including remount. */
   const lastEditKeyRef = useRef<number | null>(null)
   /** Shell-style prompt history: newest first in storage; index navigates with ↑/↓. */
@@ -249,8 +255,20 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const historyIndexRef = useRef<number>(-1) // -1 = drafting current (not browsing history)
   const draftBeforeHistoryRef = useRef<string>('')
 
-  const dropKey = (p: DroppedFilePayload) =>
-    `${p.filename}|${p.size}|${(p.data_base64 || '').slice(0, 48)}`
+  const nameSizeKey = (name: string, size: number) =>
+    `${String(name || '').toLowerCase()}|${Number(size) || 0}`
+
+  /** Normalize Tauri payloads (defensive if camelCase ever appears). */
+  const normalizePayload = (raw: DroppedFilePayload | Record<string, unknown>): DroppedFilePayload => {
+    const r = raw as Record<string, unknown>
+    const filename = String(r.filename ?? r.fileName ?? 'file')
+    const content_type = String(
+      r.content_type ?? r.contentType ?? 'application/octet-stream',
+    )
+    const data_base64 = String(r.data_base64 ?? r.dataBase64 ?? '')
+    const size = Number(r.size ?? 0)
+    return { filename, content_type, data_base64, size }
+  }
 
   const flashAttached = useCallback((n: number) => {
     if (n <= 0) return
@@ -392,23 +410,34 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
    */
   const addNativePayloads = useCallback(
     async (payloads: DroppedFilePayload[]) => {
-      if (!payloads.length || disabled || streaming) return
+      // Attachments may be staged while a turn is streaming (queued with next send).
+      if (!payloads.length || disabled) return
 
-      // Drop anything already handled (or already attached by name+size).
-      const unique = payloads.filter((p) => {
-        const key = dropKey(p)
-        if (seenDropKeysRef.current.has(key)) return false
+      const normalized = payloads.map(normalizePayload).filter((p) => p.data_base64)
+
+      // Skip only if already on the rail or mid-upload (poll + ready double-fire).
+      // Removing a chip always allows re-attach of the same file.
+      const unique = normalized.filter((p) => {
+        const key = nameSizeKey(p.filename, p.size)
+        if (inflightDropKeysRef.current.has(key)) return false
         const already = attachmentsRef.current.some(
-          (a) => a.name === p.filename && a.size === p.size,
+          (a) => nameSizeKey(a.name, a.size) === key,
         )
-        if (already) {
-          seenDropKeysRef.current.add(key)
-          return false
-        }
-        seenDropKeysRef.current.add(key)
-        return true
+        return !already
       })
-      if (!unique.length) return
+      if (!unique.length) {
+        // Only show hint when user is not mid double-fire with chips already present.
+        const onRail = normalized.some((p) =>
+          attachmentsRef.current.some(
+            (a) => nameSizeKey(a.name, a.size) === nameSizeKey(p.filename, p.size),
+          ),
+        )
+        if (onRail) {
+          setUploadError('Already on this message — remove the chip to re-attach the same file.')
+          window.setTimeout(() => setUploadError(''), 3500)
+        }
+        return
+      }
 
       setUploadError('')
       setAttachNotice('')
@@ -420,6 +449,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         return
       }
       const batch = unique.slice(0, room)
+      const batchKeys = batch.map((p) => nameSizeKey(p.filename, p.size))
+      for (const k of batchKeys) inflightDropKeysRef.current.add(k)
 
       // Instant UI chips (before server round-trip).
       const optimistic = batch.map(pendingMetaFromPayload)
@@ -427,9 +458,17 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       flashAttached(batch.length)
       setUploading(true)
 
+      const releaseInflight = () => {
+        for (const k of batchKeys) inflightDropKeysRef.current.delete(k)
+      }
+
       const sid = await resolveSession()
       if (!sid) {
         setUploadError('Could not create a session for the upload.')
+        releaseInflight()
+        setAttachments((prev) =>
+          prev.filter((a) => !a.id.startsWith('pending-') || !batch.some((b) => b.filename === a.name)),
+        )
         setUploading(false)
         return
       }
@@ -454,20 +493,27 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             const merged = [...withoutOptimistic, ...uploaded]
             const seen = new Set<string>()
             return merged.filter((a) => {
-              const k = `${a.name}|${a.size}`
+              const k = nameSizeKey(a.name, a.size)
               if (seen.has(k)) return false
               seen.add(k)
               return true
             })
           })
         } else {
+          const pendingNames = new Set(batch.map((b) => b.filename))
+          setAttachments((prev) =>
+            prev.filter(
+              (a) => !(a.id.startsWith('pending-') && pendingNames.has(a.name)),
+            ),
+          )
           setUploadError((prev) => prev || 'Upload failed — files not stored for the agent.')
         }
       } finally {
+        releaseInflight()
         setUploading(false)
       }
     },
-    [disabled, streaming, resolveSession, flashAttached],
+    [disabled, resolveSession, flashAttached],
   )
 
   // Primary: poll Rust pending queue. Secondary: events only for drag highlight.
@@ -478,7 +524,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     let inFlight = false
 
     const drainPending = async () => {
-      if (cancelled || disabled || streaming || inFlight) return
+      // Drain even while streaming so drops are not stuck until the turn ends.
+      if (cancelled || disabled || inFlight) return
       inFlight = true
       try {
         const pending = await takePendingFileDrops()
@@ -499,11 +546,15 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       void drainPending()
     }, 200)
 
-    // Events: highlight only — content comes from the pending queue to avoid triple attach.
+    // Ready event carries payloads (deduped in addNativePayloads). Also drain poll queue.
     void listenNativeFileDrop(
-      () => {
-        // ready event: also drain once (queue may already be empty if poll won — that's ok)
-        void drainPending()
+      (payloads) => {
+        setDragOver(false)
+        if (payloads?.length) {
+          void addNativePayloads(payloads)
+        } else {
+          void drainPending()
+        }
       },
       (phase) => {
         if (phase === 'enter' || phase === 'over') setDragOver(true)
@@ -513,8 +564,19 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         setUploadError(msg)
         setDragOver(false)
       },
-      // No path fallback — it re-read and triple-attached the same files.
-      undefined,
+      // Path fallback: read via Rust if only paths were emitted (older path).
+      (paths) => {
+        if (!paths.length) return
+        void (async () => {
+          try {
+            const { readDroppedFilePaths } = await import('../api/attachments')
+            const payloads = await readDroppedFilePaths(paths)
+            if (payloads.length) await addNativePayloads(payloads)
+          } catch (e: unknown) {
+            setUploadError(e instanceof Error ? e.message : 'Failed to read dropped files')
+          }
+        })()
+      },
     ).then((fn) => {
       if (!cancelled) unlisten = fn
       else fn()
@@ -527,12 +589,16 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       window.clearInterval(pollId)
       unlisten?.()
     }
-  }, [addNativePayloads, disabled, streaming])
+  }, [addNativePayloads, disabled])
 
   const removeAttachment = useCallback((idx: number) => {
     setAttachments((prev) => {
       const copy = [...prev]
       const [gone] = copy.splice(idx, 1)
+      if (gone) {
+        // Free in-flight lock so the same file can be re-attached immediately.
+        inflightDropKeysRef.current.delete(nameSizeKey(gone.name, gone.size))
+      }
       if (gone?.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(gone.previewUrl)
       return copy
     })
@@ -600,7 +666,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         setAttachments([])
         setUploadError('')
         setAttachNotice('')
-        seenDropKeysRef.current.clear()
+        inflightDropKeysRef.current.clear()
       } finally {
         requestAnimationFrame(() => {
           submittingRef.current = false
@@ -1083,7 +1149,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                   }
                   setAttachments([])
                   setAttachNotice('')
-                  seenDropKeysRef.current.clear()
+                  inflightDropKeysRef.current.clear()
                 }}
               >
                 Clear all
@@ -1187,10 +1253,41 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         />
         <button
           type="button"
-          title="Attach files"
+          title={
+            streaming
+              ? 'Attach files (will send with your next / queued message)'
+              : 'Attach files'
+          }
           aria-label="Attach files"
-          disabled={disabled || streaming || uploading}
-          onClick={() => fileInputRef.current?.click()}
+          disabled={disabled || uploading}
+          onClick={() => {
+            if (disabled || uploading) return
+            void (async () => {
+              // Desktop: try native rfd first (same idea as session import).
+              // Sync command — earlier async+main-thread version deadlocked ("nothing happens").
+              if (isTauri()) {
+                try {
+                  setUploadError('')
+                  const payloads = await pickAttachFiles()
+                  if (payloads.length) {
+                    await addNativePayloads(payloads)
+                    return
+                  }
+                  // Empty = cancelled — stop (do not open a second dialog).
+                  return
+                } catch (e: unknown) {
+                  console.warn('[remedy] native attach picker failed, HTML fallback', e)
+                  setUploadError(
+                    e instanceof Error
+                      ? `${e.message} — using browser file picker`
+                      : 'Native picker failed — using browser file picker',
+                  )
+                }
+              }
+              // Proven path since 0.10: HTML file input (works when WebView allows it).
+              fileInputRef.current?.click()
+            })()
+          }}
           className="relative flex items-center justify-center rounded-xl flex-shrink-0"
           style={{
             width: 40,
@@ -1198,7 +1295,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             background: attachments.length ? 'var(--accent)' : 'var(--bg-tertiary)',
             border: '1px solid var(--border)',
             color: attachments.length ? '#fff' : 'var(--text-secondary)',
-            opacity: disabled || streaming || uploading ? 0.5 : 1,
+            opacity: disabled || uploading ? 0.5 : 1,
           }}
         >
           <IconPaperclip size={16} />

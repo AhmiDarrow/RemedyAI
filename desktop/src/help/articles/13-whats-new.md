@@ -2,11 +2,28 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current series: **v0.18.6**.
+Current series: **v0.19.0**.
 
 ## Contents
 
-- [0.18.6](#0186---os-chrome--browser-embed) · [0.18.5](#0185---telegram-poll-lock-recovery) · [0.18.4](#0184---messenger-realtime--sync) · [0.18.3](#0183---provider-switch--stability) · [0.18.2](#0182---spread-run-fix) · [0.18.1](#0181---run-until-finished--title-bar) · [0.18.0](#0180---spread--library-suggest) · [0.17.0](#0170---coding-agency--process-trail) · [0.16.0](#0160---messengers--polish) · older below
+- [0.19.0](#0190---parallel-multi-provider--background-turns) · [0.18.6](#0186---os-chrome--browser-embed) · [0.18.5](#0185---telegram-poll-lock-recovery) · [0.18.4](#0184---messenger-realtime--sync) · [0.18.3](#0183---provider-switch--stability) · [0.18.2](#0182---spread-run-fix) · [0.18.1](#0181---run-until-finished--title-bar) · [0.18.0](#0180---spread--library-suggest) · [0.17.0](#0170---coding-agency--process-trail) · older below
+
+## 0.19.0 - Parallel multi-provider + background turns
+
+- **True parallel multi-provider:** Grok and DeepSeek (or any pair) can stream at the
+  same time on one runtime — each turn freezes provider/model/key in a per-turn binding.
+- **Background turns:** switch sessions without aborting live work; sidebar busy pulse;
+  confirm before a 3rd concurrent turn.
+- **Session sticky bind:** each chat keeps its provider+model pair (no more cross-tab
+  404s sending Grok’s model to DeepSeek’s host).
+- **Sidebar:** ↑↓ reorder for projects and sessions; clearer **Archive**; no false
+  “drag onto folders” claims (Tauri drag is unreliable).
+- **Agency:** mid-task `ok` / status-only lines keep tools on and re-nudge instead of
+  stopping after a short snippet; DSML idle/stall recovery improved.
+- **Attach:** image/file attach works again (WebView drops + paperclip picker).
+- **Themes:** **Dark Forest** (muted moss on dark); calmer text on colored themes.
+- **Memory panel** shows recent notes without a search query; control tokens no longer
+  leak into chat (`@@status:…`).
 
 ## 0.18.6 - OS chrome + browser embed
 

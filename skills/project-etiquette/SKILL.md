@@ -1,10 +1,11 @@
 ---
 name: project-etiquette
 description: >
-  Default ship discipline for any serious project — fix, test, update code/docs,
-  build, commit, wait for CI, then publish only if green. Use when the user says
-  ship, release, finish the change, or "test everything then update/build/commit/CI/PyPI".
-version: 1.0.0
+  Default ship discipline for any serious project — blast radius first, then
+  fix, test, update code/docs, build, commit, wait for CI, publish only if green.
+  Use when the user says ship, release, finish, or "test everything then
+  update/build/commit/CI/PyPI".
+version: 1.1.0
 author: Remedy
 tags: [quality, release, git, ci, docs, etiquette]
 ---
@@ -16,7 +17,7 @@ tags: [quality, release, git, ci, docs, etiquette]
 Shipping is a **pipeline of gates**, not a single “push and hope.”  
 The same sequence works for **almost any project** (Python, Node, Rust, monorepos):
 
-**Fix → Test → Update project → Update docs → Build → Commit → CI green → Publish**
+**Blast radius → Fix → Test → Update project → Update docs → Build → Commit → CI green → Publish**
 
 Skip a gate only when the user **explicitly** says so (e.g. “docs later”, “no publish”).
 
@@ -30,6 +31,13 @@ Skip a gate only when the user **explicitly** says so (e.g. “docs later”, �
 ## Portable gate chain
 
 Execute **in order**. After any failure, stop advancement until that gate is green.
+
+### 0. Blast radius (before large edits)
+
+- Activate **change-safety** (`skill_activate(name=change-safety)`) when available.
+- Name the surface, list coupled neighbors, plan paired checks + manual smoke for
+  UI/chrome/messengers that unit tests miss.
+- Prefer durable architecture over patch loops for known failure classes.
 
 ### 1. Fix / implement
 
@@ -59,7 +67,7 @@ Execute **in order**. After any failure, stop advancement until that gate is gre
 - Developer-facing change → README / architecture notes as the repo expects.
 - Run any **docs sync/check** scripts the project provides.
 - Docs should describe **what the user does**, not only internal renames.
-- Docs-only → no `sync_version.py`, no PyPI, no release tag unless the user explicitly asks.
+- Docs-only → no version bump / PyPI / release tag unless the user explicitly asks.
 
 ### 5. Build
 
@@ -72,6 +80,7 @@ Execute **in order**. After any failure, stop advancement until that gate is gre
 - Message: complete sentences; conventional prefix when it fits
   (`fix:`, `feat:`, `docs:`, `release:`).
 - One logical theme per commit when practical.
+- Note `Risk:` / `Smoke:` when fragile zones were involved.
 
 ### 7. Push and wait for CI
 
@@ -92,6 +101,7 @@ After a ship sequence, summarize with a short table:
 
 | Gate | Result |
 |------|--------|
+| Blast radius | surfaces + smokes run |
 | Tests | pass / fail (+ command) |
 | Docs | updated / n/a |
 | Build | pass / fail |
@@ -107,14 +117,15 @@ If blocked, state **which gate** and the **smallest next action**.
 - Committing version bumps without changelog/docs.
 - Publishing before CI finishes (or ignoring a red run).
 - Force-pushing shared mainline branches.
-- Leaving half a release (code on main, package not published, or the reverse)
-  without telling the user.
+- Leaving half a release without telling the user.
+- Treating green CI as proof that title bar / live bots / WebView embeds work.
 
 ## Adapting to a new repo
 
 1. Read README / CONTRIBUTING / AGENTS.md / CI workflow.
 2. Map each gate to local commands (record them in the session brief if long-lived).
 3. Prefer project scripts over inventing one-off publish paths.
+4. Keep a **change-safety** checklist for this repo’s fragile zones.
 
 ---
 
@@ -124,6 +135,7 @@ Use when `cwd` is the RemedyAI tree (or user says “this project”).
 
 | Gate | Remedy command / note |
 |------|------------------------|
+| Blast radius | Root `AGENTS.md` Change-safety protocol; skill **change-safety** |
 | Test (Python) | `uv run pytest -q` |
 | Test (desktop) | `cd desktop && npm test && npm run build` |
 | Docs | Manuals in `docs/manual/`; `uv run python scripts/sync_help_manual.py`; gate `uv run python scripts/check_docs.py` |
@@ -134,5 +146,5 @@ Use when `cwd` is the RemedyAI tree (or user says “this project”).
 | Publish PyPI | After CI green: `uv publish dist/remedy_ai-{ver}.*` (token via env / `~/.pypirc`) |
 | Desktop installer | Tag `v{X.Y.Z}` → **desktop-release**; asset must be `Remedy.Desktop_{X.Y.Z}_x64-setup.exe` (see root `AGENTS.md`) |
 
-Also respect root **`AGENTS.md`** (installer naming, version surfaces).
+Also respect root **`AGENTS.md`** (installer naming, version surfaces, smoke matrix).
 For end-of-session continuity use skill **`session-handoff`**.

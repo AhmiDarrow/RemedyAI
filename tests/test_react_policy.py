@@ -7,14 +7,34 @@ import json
 from remedy.core.react_policy import (
     _DEFAULT_SYSTEM_PROMPT,
     RECOVERY_NUDGE,
+    SPEED_BATCH_NUDGE,
     batch_has_tool_errors,
+    is_serial_explore_batch,
     looks_like_pseudo_tools,
     message_wants_tools,
     parse_pseudo_tool_calls,
+    recovered_tool_call_is_complete,
     recovery_nudge_message,
+    speed_batch_nudge_message,
     tool_call_fingerprint,
     tool_content_is_error,
 )
+
+
+def test_serial_explore_batch_detection() -> None:
+    one_read = [{"function": {"name": "file_read", "arguments": "{}"}}]
+    assert is_serial_explore_batch(one_read) is True
+    two_reads = [
+        {"function": {"name": "file_read", "arguments": "{}"}},
+        {"function": {"name": "file_read", "arguments": "{}"}},
+    ]
+    assert is_serial_explore_batch(two_reads) is False
+    assert is_serial_explore_batch([{"function": {"name": "file_edit"}}]) is False
+    assert is_serial_explore_batch([]) is False
+    assert "batch" in SPEED_BATCH_NUDGE.lower() or "tool_calls" in SPEED_BATCH_NUDGE
+    msg = speed_batch_nudge_message()
+    assert msg["role"] == "user"
+    assert "Speed" in msg["content"] or "speed" in msg["content"].lower()
 
 
 def test_message_wants_tools_chat_vs_code() -> None:
@@ -92,9 +112,21 @@ def test_history_suggests_open_work_keeps_agency() -> None:
         )
         is True
     )
+    # Soft affirm mid-task must keep agency (session bug 2026-07-28).
+    assert should_enable_tools("ok", tools, has_attachments=False, history=history) is True
+    assert should_enable_tools("okay", tools, has_attachments=False, history=history) is True
+    assert should_enable_tools("sure", tools, has_attachments=False, history=history) is True
+    # Pure social still tool-free even with open history.
     assert should_enable_tools("thanks", tools, has_attachments=False, history=history) is False
+    assert should_enable_tools("hi", tools, has_attachments=False, history=history) is False
+    # Without open history, soft affirm stays chat-only.
+    assert should_enable_tools("ok", tools, has_attachments=False, history=None) is False
     assert looks_like_false_progress("Processing both logos now.") is True
+    assert looks_like_false_progress(
+        "Checking ComfyUI status and hardware so we can finish video-gen setup."
+    ) is True
     assert looks_like_false_progress("Here is the final result.") is False
+    assert message_wants_tools("sorry pick up where you left off") is True
 
 
 def test_pseudo_tool_parse_and_log(caplog) -> None:
@@ -140,6 +172,29 @@ def test_dsml_bash_curl_rewrites_to_comfyui() -> None:
     assert calls[0]["function"]["name"] == "comfyui"
     args = json.loads(calls[0]["function"]["arguments"])
     assert args.get("action") == "status"
+
+
+def test_truncated_dsml_bash_not_recovered() -> None:
+    """DeepSeek mid-stream cut-off must not invent empty bash_exec tools."""
+    text = (
+        "Ahmi, I need to dig into why this specific call is failing...\n\n"
+        "<｜DSML｜tool_calls>\n"
+        '<｜DSML｜invoke name="bash_'
+    )
+    assert looks_like_pseudo_tools(text)
+    calls = parse_pseudo_tool_calls(text)
+    assert calls == [], "truncated DSML must not yield executable tool calls"
+    incomplete = {
+        "function": {"name": "bash_exec", "arguments": json.dumps({"command": ""})},
+    }
+    assert recovered_tool_call_is_complete(incomplete) is False
+    complete = {
+        "function": {
+            "name": "bash_exec",
+            "arguments": json.dumps({"command": "echo hi"}),
+        },
+    }
+    assert recovered_tool_call_is_complete(complete) is True
 
 
 def test_dsml_list_dir_comfy_hunt_collapses_to_locate() -> None:

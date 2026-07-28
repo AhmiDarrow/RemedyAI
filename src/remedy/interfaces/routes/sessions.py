@@ -407,19 +407,31 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         request_id = str(uuid4())
 
         if memory:
+            from remedy.core.session_llm import (
+                resolve_session_llm_bind,
+                session_llm_update_fields,
+            )
             from remedy.models import ChatMessage, ChatSession
+
             existing = await memory.get_chat_session(session_id)
+            sp, sm = resolve_session_llm_bind(
+                session=existing,
+                req_provider=getattr(req, "provider", None),
+                req_model=req.model,
+            )
+            fields = session_llm_update_fields(provider=sp, model=sm)
             if existing is None:
                 default_proj = load_config().get("project_path")
                 await memory.create_chat_session(ChatSession(
                     id=session_id,
                     title=req.message[:60],
-                    model=req.model,
+                    model=fields.get("model") or req.model,
+                    llm_provider=fields.get("llm_provider"),
                     agent=req.agent,
                     project_path=default_proj,
                 ))
-            elif req.model and req.model != existing.model:
-                await memory.update_chat_session(session_id, model=req.model)
+            elif fields:
+                await memory.update_chat_session(session_id, **fields)
 
             await memory.add_chat_message(ChatMessage(
                 session_id=session_id,
@@ -427,16 +439,19 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                 content=req.message,
             ))
 
-        # Prefer per-session provider (status-bar switch) over global config.
-        sess_provider = None
+        # Sticky per-session provider+model (never model-only against another host).
+        from remedy.core.session_llm import resolve_session_llm_bind
+
+        sess_provider = getattr(req, "provider", None)
         sess_model = req.model
         if memory:
             with contextlib.suppress(Exception):
                 ex = await memory.get_chat_session(session_id)
-                if ex is not None:
-                    sess_provider = getattr(ex, "llm_provider", None)
-                    if not sess_model:
-                        sess_model = getattr(ex, "model", None)
+                sess_provider, sess_model = resolve_session_llm_bind(
+                    session=ex,
+                    req_provider=getattr(req, "provider", None),
+                    req_model=req.model,
+                )
 
         # Always re-sync credentials from disk (wizard/settings may have just saved).
         _sync_runtime_llm_from_config(
@@ -601,7 +616,18 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                     t = t[: max_len - 1].rstrip() + "…"
                 return t or "New Session"
 
+            from remedy.core.session_llm import (
+                resolve_session_llm_bind,
+                session_llm_update_fields,
+            )
+
             existing = await memory.get_chat_session(session_id)
+            sp, sm = resolve_session_llm_bind(
+                session=existing,
+                req_provider=getattr(req, "provider", None),
+                req_model=req.model,
+            )
+            fields = session_llm_update_fields(provider=sp, model=sm)
             if existing is None:
                 default_proj = load_config().get("project_path")
                 title_src = user_text or (
@@ -610,7 +636,8 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                 await memory.create_chat_session(ChatSession(
                     id=session_id,
                     title=_title_from_prompt(str(title_src)),
-                    model=req.model,
+                    model=fields.get("model") or req.model,
+                    llm_provider=fields.get("llm_provider"),
                     agent=req.agent,
                     project_path=default_proj,
                 ))
@@ -629,8 +656,12 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                             or str(att_dicts[0].get("name") if att_dicts else "Attachments")
                         ),
                     )
-                if req.model and req.model != existing.model:
-                    await memory.update_chat_session(session_id, model=req.model)
+                # Persist paired bind — never model without provider (cross-tab corruption).
+                if fields and (
+                    fields.get("model") != existing.model
+                    or fields.get("llm_provider") != getattr(existing, "llm_provider", None)
+                ):
+                    await memory.update_chat_session(session_id, **fields)
 
             await memory.add_chat_message(ChatMessage(
                 session_id=session_id,
@@ -640,17 +671,19 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                 agent=req.agent,
             ))
 
-        # Prefer per-session provider (status-bar switch) over global config.
-        # Bug: only model_override was applied → DeepSeek API + grok-4.5 model name.
-        sess_provider = None
+        # Sticky per-session provider+model (multi-tab multi-provider).
+        from remedy.core.session_llm import resolve_session_llm_bind
+
+        sess_provider = getattr(req, "provider", None)
         sess_model = req.model
         if memory:
             with contextlib.suppress(Exception):
                 ex = await memory.get_chat_session(session_id)
-                if ex is not None:
-                    sess_provider = getattr(ex, "llm_provider", None)
-                    if not sess_model:
-                        sess_model = getattr(ex, "model", None)
+                sess_provider, sess_model = resolve_session_llm_bind(
+                    session=ex,
+                    req_provider=getattr(req, "provider", None),
+                    req_model=req.model,
+                )
 
         # Always re-sync credentials from disk (first-run wizard / settings).
         api_key = _sync_runtime_llm_from_config(
@@ -787,6 +820,21 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                             payload = {"label": str(payload)}
                         event = {"type": "progress", **payload}
                         yield f"event: progress\ndata: {json.dumps(event)}\n\n"
+                    elif token.startswith("@@status:"):
+                        # Vision decode / mid-turn status — never chat body.
+                        label = token[len("@@status:") :].strip()
+                        if label:
+                            yield (
+                                "event: progress\ndata: "
+                                + json.dumps(
+                                    {
+                                        "type": "progress",
+                                        "label": label,
+                                    },
+                                    default=str,
+                                )
+                                + "\n\n"
+                            )
                     elif token.startswith("@@thinking:"):
                         thought = token[len("@@thinking:") :]
                         if thought:
@@ -815,6 +863,12 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                             yield await _sse_stream_text(md, event="token")
                     elif token == "@@tool_calls":
                         pass
+                    elif isinstance(token, str) and token.startswith("@@"):
+                        # Unknown control token — never leak into the bubble.
+                        logger.debug(
+                            "Skipping unknown stream control token: %s", token[:80]
+                        )
+                        continue
                     else:
                         # Never stream DSML / fake tool markup into the chat bubble.
                         from remedy.core.react_policy import (

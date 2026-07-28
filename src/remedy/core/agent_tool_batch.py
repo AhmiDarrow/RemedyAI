@@ -159,9 +159,11 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
             )
         result_cache[fp] = content_str
         seen_fps.add(fp)
-        # Trace step for post-turn auto-learn
+        # Trace step for post-turn auto-learn (per-turn ContextVar list)
         with suppress(Exception):
-            steps = getattr(runtime, "_turn_tool_steps", None)
+            from remedy.core.turn_context import current_turn_tool_steps, turn_session_id
+
+            steps = current_turn_tool_steps(runtime)
             if isinstance(steps, list):
                 steps.append(
                     {
@@ -180,18 +182,18 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
         with suppress(Exception):
             from remedy.core.agent_post_turn import schedule_mid_turn_warm
             from remedy.core.session_quality import get_session_quality
+            from remedy.core.turn_context import turn_session_id
             from remedy.nanoswarm import get_swarm
             from remedy.nanoswarm.events import SwarmEvent
 
-            get_session_quality(
-                str(getattr(runtime, "_session_id", "") or "")
-            ).record_tool_result(success=bool(result.success))
+            sid = str(turn_session_id(runtime) or "")
+            get_session_quality(sid).record_tool_result(success=bool(result.success))
             get_swarm().dispatch(
                 SwarmEvent.tool_step(
                     name or "unknown",
                     success=bool(result.success),
                     duration_ms=float(getattr(result, "duration_ms", 0) or 0),
-                    session_id=str(getattr(runtime, "_session_id", "") or ""),
+                    session_id=sid,
                 )
             )
             # Speculative prep while more tools / model continue

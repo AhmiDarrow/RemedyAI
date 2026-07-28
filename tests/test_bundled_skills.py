@@ -21,6 +21,7 @@ def test_bundled_skills_exist():
     assert "comfyui" in names
     assert "github" in names
     assert "project-etiquette" in names
+    assert "change-safety" in names
     for d in dirs:
         assert (d / "SKILL.md").is_file()
     comfy = bundled_skills_dir() / "comfyui"
@@ -34,6 +35,10 @@ def test_bundled_skills_exist():
     )
     assert "CI green" in etiq or "CI" in etiq
     assert "Publish" in etiq or "publish" in etiq
+    assert "blast" in etiq.lower() or "change-safety" in etiq
+    cs = (bundled_skills_dir() / "change-safety" / "SKILL.md").read_text(encoding="utf-8")
+    assert "blast" in cs.lower()
+    assert "skill_activate" in cs or "Neighbors" in cs or "neighbors" in cs
 
 def test_discover_defaults_loads_bundled(tmp_path: Path):
     reg = SkillRegistry()
@@ -47,11 +52,13 @@ def test_discover_defaults_loads_bundled(tmp_path: Path):
     assert reg.get("comfyui") is not None
     assert reg.get("github") is not None
     assert reg.get("project-etiquette") is not None
+    assert reg.get("change-safety") is not None
     # Seeded into user skills dir for customization
     assert (home / "skills" / "project-overview" / "SKILL.md").is_file()
     assert (home / "skills" / "comfyui" / "SKILL.md").is_file()
     assert (home / "skills" / "github" / "SKILL.md").is_file()
     assert (home / "skills" / "project-etiquette" / "SKILL.md").is_file()
+    assert (home / "skills" / "change-safety" / "SKILL.md").is_file()
 
 def test_skills_meta_question_skips_tools():
     assert _message_wants_tools("what skills do you have?") is False

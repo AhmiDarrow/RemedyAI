@@ -5,5 +5,9 @@ commands.allow = ["check_desktop_update", "start_desktop_update", "get_local_api
 
 [[permission]]
 identifier = "allow-read-dropped-files"
-description = "Allow reading OS drag-dropped file paths into the chat composer."
-commands.allow = ["read_dropped_files", "take_pending_file_drops"]
+description = "Allow reading OS drag-dropped / picked file paths into the chat composer."
+commands.allow = [
+  "read_dropped_files",
+  "take_pending_file_drops",
+  "pick_attach_files",
+]

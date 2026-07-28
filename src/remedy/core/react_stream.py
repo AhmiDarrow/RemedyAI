@@ -12,8 +12,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from remedy.core.react_policy import (
-    _CHAT_ONLY_RE,
+    _HARD_CHAT_ONLY_RE,
     _META_NO_TOOLS_RE,
+    _SOFT_AFFIRM_RE,
     history_suggests_open_work,
     looks_like_pseudo_tools,
     message_wants_tools,
@@ -211,13 +212,22 @@ def should_enable_tools(
     if has_attachments:
         return True
     msg = (message or "").strip()
-    # Pure social / meta questions stay tool-free even mid-session.
-    if msg and (_META_NO_TOOLS_RE.search(msg) or _CHAT_ONLY_RE.match(msg)):
+    open_work = history_suggests_open_work(history, open_tasks=open_tasks)
+    # Meta questions stay tool-free even mid-session.
+    if msg and _META_NO_TOOLS_RE.search(msg):
         return False
+    # Hard social (hi/thanks/bye): never thrash tools.
+    if msg and _HARD_CHAT_ONLY_RE.match(msg):
+        return False
+    # Soft affirmations ("ok", "cool", "yep"): continue tools when work is open.
+    # Session bug (2026-07-28): bare "ok" mid-Comfy setup forced tools=[] →
+    # force_answer → one status line and stop.
+    if msg and _SOFT_AFFIRM_RE.match(msg):
+        return bool(open_work)
     if message_wants_tools(message):
         return True
     # History-aware continuity: keep agency across multi-turn tasks.
-    return history_suggests_open_work(history, open_tasks=open_tasks)
+    return open_work
 
 
 def filter_fresh_tool_calls(

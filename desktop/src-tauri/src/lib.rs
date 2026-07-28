@@ -162,6 +162,8 @@ struct ServerState {
     pending_drops: Arc<Mutex<Vec<DroppedFilePayload>>>,
     /// Always-ready window prefs (close-to-tray / start-in-tray).
     desktop_prefs: Arc<Mutex<DesktopPrefs>>,
+    /// Kept so tray restore still works after hide/minimize (label lookup can fail).
+    main_window: Mutex<Option<tauri::WebviewWindow>>,
 }
 
 fn current_exe_dir() -> Option<std::path::PathBuf> {
@@ -662,14 +664,78 @@ fn dirs_next_home() -> Option<std::path::PathBuf> {
 
 /// Resolve the primary desktop window (label "main", else first webview).
 fn primary_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
-    app.get_webview_window("main").or_else(|| {
+    // Prefer a handle cached at startup — after hide-to-tray, label lookup
+    // has been observed empty ("no main window") while the HWND is still alive.
+    if let Some(state) = app.try_state::<ServerState>() {
+        if let Ok(g) = state.main_window.lock() {
+            if let Some(w) = g.as_ref() {
+                return Some(w.clone());
+            }
+        }
+    }
+    app.get_webview_window("main")
+        .or_else(|| {
+            app.webview_windows()
+                .into_iter()
+                .find(|(label, _)| {
+                    *label != "remedy-browser" && !label.starts_with("remedy-browser")
+                })
+                .map(|(_, w)| w)
+        })
+        .or_else(|| app.webview_windows().into_values().next())
+}
+
+/// Cache the main window for tray restore (call once window exists).
+fn cache_main_window(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("main").or_else(|| {
         app.webview_windows()
             .into_iter()
-            .find(|(label, _)| label != "remedy-browser")
+            .find(|(l, _)| *l != "remedy-browser")
             .map(|(_, w)| w)
-            .or_else(|| app.webview_windows().into_values().next())
-    })
+    }) {
+        if let Some(state) = app.try_state::<ServerState>() {
+            if let Ok(mut g) = state.main_window.lock() {
+                *g = Some(w);
+                log::info!("cached main window handle for tray restore");
+            }
+        }
+    }
 }
+
+/// Windows: ShowWindow + SetForegroundWindow — reliable after minimize or hide.
+#[cfg(windows)]
+fn win_force_show_window(w: &tauri::WebviewWindow) {
+    // Tauri WebviewWindow exposes HWND on Windows.
+    let Ok(hwnd) = w.hwnd() else {
+        log::warn!("win_force_show_window: no hwnd");
+        return;
+    };
+    let hwnd = hwnd.0 as isize;
+    #[link(name = "user32")]
+    extern "system" {
+        fn IsIconic(hwnd: isize) -> i32;
+        fn IsWindowVisible(hwnd: isize) -> i32;
+        fn ShowWindow(hwnd: isize, cmd: i32) -> i32;
+        fn SetForegroundWindow(hwnd: isize) -> i32;
+        fn BringWindowToTop(hwnd: isize) -> i32;
+    }
+    // SW_RESTORE=9, SW_SHOW=5
+    const SW_RESTORE: i32 = 9;
+    const SW_SHOW: i32 = 5;
+    unsafe {
+        if IsIconic(hwnd) != 0 || IsWindowVisible(hwnd) == 0 {
+            ShowWindow(hwnd, SW_RESTORE);
+            ShowWindow(hwnd, SW_SHOW);
+        } else {
+            ShowWindow(hwnd, SW_SHOW);
+        }
+        BringWindowToTop(hwnd);
+        SetForegroundWindow(hwnd);
+    }
+}
+
+#[cfg(not(windows))]
+fn win_force_show_window(_w: &tauri::WebviewWindow) {}
 
 /// Reliable show + unminimize + focus (taskbar minimize + tray restore).
 ///
@@ -678,22 +744,50 @@ fn primary_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
 /// `set_focus` alone is ignored after tray/taskbar hide.
 fn bring_main_to_front(app: &AppHandle) {
     let Some(w) = primary_window(app) else {
-        log::warn!("bring_main_to_front: no main window");
+        let labels: Vec<String> = app.webview_windows().into_keys().collect();
+        log::warn!(
+            "bring_main_to_front: no main window (known labels={labels:?})"
+        );
+        // Last-ditch: re-cache if a window reappeared under another path
+        cache_main_window(app);
+        if let Some(w2) = primary_window(app) {
+            bring_main_window_handle_front(&w2);
+        }
         return;
     };
+    // Refresh cache whenever we successfully resolve
+    if let Some(state) = app.try_state::<ServerState>() {
+        if let Ok(mut g) = state.main_window.lock() {
+            *g = Some(w.clone());
+        }
+    }
+    bring_main_window_handle_front(&w);
+}
+
+fn bring_main_window_handle_front(w: &tauri::WebviewWindow) {
     let _ = w.set_skip_taskbar(false);
-    // Unminimize first — show alone does not restore from taskbar minimize.
-    if w.is_minimized().unwrap_or(true) {
+    let minimized = w.is_minimized().unwrap_or(false);
+    let visible = w.is_visible().unwrap_or(false);
+    // Hidden (close-to-tray) vs minimized (taskbar) need different first steps.
+    if !visible {
+        let _ = w.show();
+    }
+    if minimized || !visible {
         let _ = w.unminimize();
     }
     let _ = w.show();
     let _ = w.unminimize();
+    // Native Win32 restore — fixes OS decorations minimize + tray hide cases
+    // where Tauri unminimize/show alone leave the HWND iconic or invisible.
+    win_force_show_window(w);
     // Pulse always-on-top so the window surfaces above other apps on Windows.
     let _ = w.set_always_on_top(true);
     let _ = w.set_focus();
     let _ = w.set_always_on_top(false);
     let _ = w.set_focus();
-    log::info!("bring_main_to_front: shown + focused");
+    log::info!(
+        "bring_main_to_front: shown + focused (was_min={minimized} was_vis={visible})"
+    );
 }
 
 /// Native folder picker (rfd — must run on the UI thread on Windows).
@@ -2668,6 +2762,70 @@ fn take_pending_file_drops(
     Ok(items)
 }
 
+/// Native multi-file picker for chat attachments.
+///
+/// Same pattern as `open_text_file` (sync rfd) — do **not** use
+/// `run_on_main_thread` + blocking recv (deadlocks the paperclip button on Windows).
+/// WebView2 `<input type="file">` remains a fallback in the UI.
+#[tauri::command]
+fn pick_attach_files() -> Result<Vec<DroppedFilePayload>, String> {
+    let paths = rfd::FileDialog::new()
+        .set_title("Attach files to message")
+        .add_filter(
+            "Images",
+            &["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"],
+        )
+        .add_filter(
+            "Text / code",
+            &[
+                "txt", "md", "json", "csv", "log", "py", "ts", "tsx", "js", "rs", "toml", "yaml",
+                "yml",
+            ],
+        )
+        .add_filter("All files", &["*"])
+        .pick_files();
+    match paths {
+        None => Ok(Vec::new()),
+        Some(ps) if ps.is_empty() => Ok(Vec::new()),
+        Some(ps) => {
+            let strs: Vec<String> = ps
+                .iter()
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect();
+            log::info!("pick_attach_files: {} path(s) selected", strs.len());
+            load_paths_as_payloads(&strs)
+        }
+    }
+}
+
+/// Queue OS-dropped paths for the composer (poll + events).
+/// Shared by WindowEvent and WebviewEvent drag-drop (WebviewWindow often only fires the latter).
+fn queue_native_file_drop(app: &AppHandle, paths: &[PathBuf]) {
+    let path_strs: Vec<String> = paths
+        .iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
+    if path_strs.is_empty() {
+        return;
+    }
+    log::info!("Native file drop: {} path(s)", path_strs.len());
+    match load_paths_as_payloads(&path_strs) {
+        Ok(payloads) => {
+            log::info!("Read {} dropped file(s) for composer", payloads.len());
+            if let Some(state) = app.try_state::<ServerState>() {
+                let pending = state.pending_drops.clone();
+                let mut q = pending.lock().unwrap_or_else(|e| e.into_inner());
+                q.extend(payloads.clone());
+            }
+            let _ = app.emit("file-drop-ready", &payloads);
+        }
+        Err(e) => {
+            log::error!("Failed to read dropped files: {}", e);
+            let _ = app.emit("file-drop-error", serde_json::json!({ "message": e }));
+        }
+    }
+}
+
 /// Kill and respawn the sidecar, wait for health, emit server-ready / server-error.
 #[tauri::command]
 fn restart_server(app: AppHandle, state: State<'_, ServerState>) -> Result<String, String> {
@@ -2706,6 +2864,7 @@ pub fn run() {
             sidecar_cmd: Arc::new(Mutex::new(None)),
             pending_drops: Arc::new(Mutex::new(Vec::new())),
             desktop_prefs: Arc::new(Mutex::new(load_desktop_prefs())),
+            main_window: Mutex::new(None),
         })
         .manage(pty_host::PtyState::default())
         .manage(browser_host::BrowserState::default())
@@ -2737,6 +2896,7 @@ pub fn run() {
             get_local_api_token,
             read_dropped_files,
             take_pending_file_drops,
+            pick_attach_files,
             pty_host::pty_open,
             pty_host::pty_write,
             pty_host::pty_resize,
@@ -2760,6 +2920,8 @@ pub fn run() {
             // Force window/taskbar icon to the circuit-R monogram (not stale PE/cache).
             // Tray already uses icons/icon.png; taskbar often stuck on old embedded ICO.
             apply_window_icons(&app_handle);
+            // Cache main window for tray restore after minimize / hide-to-tray.
+            cache_main_window(app.handle());
 
             // Tray menu (OS-native chrome; labels only - UI panels are themed in-app)
             {
@@ -3009,6 +3171,7 @@ pub fn run() {
                 }
                 // Native OS file drops (Explorer -> app). WebView2 often won't
                 // deliver HTML5 DataTransfer.files for external drops.
+                // Note: on WebviewWindow, Drop often arrives via on_webview_event instead.
                 tauri::WindowEvent::DragDrop(DragDropEvent::Enter { paths, .. }) => {
                     let paths: Vec<String> = paths
                         .iter()
@@ -3023,40 +3186,54 @@ pub fn run() {
                     let _ = window.emit("file-drag", serde_json::json!({ "phase": "leave" }));
                 }
                 tauri::WindowEvent::DragDrop(DragDropEvent::Drop { paths, .. }) => {
-                    let path_strs: Vec<String> = paths
+                    queue_native_file_drop(window.app_handle(), paths);
+                }
+                _ => {}
+            }
+        })
+        // WebviewWindow delivers file drops here more reliably than WindowEvent (esp. after
+        // label "main" + OS decorations). Skip the in-app browser embed webview.
+        .on_webview_event(|webview, event| {
+            match event {
+                tauri::WebviewEvent::DragDrop(DragDropEvent::Enter { paths, .. }) => {
+                    let label = webview.label();
+                    if label.starts_with("remedy-browser") {
+                        return;
+                    }
+                    let paths: Vec<String> = paths
                         .iter()
                         .map(|p| p.to_string_lossy().into_owned())
                         .collect();
-                    log::info!("Native file drop: {} path(s)", path_strs.len());
-                    match load_paths_as_payloads(&path_strs) {
-                        Ok(payloads) => {
-                            log::info!(
-                                "Read {} dropped file(s) for composer",
-                                payloads.len()
-                            );
-                            // Queue for polling (primary - WebView event delivery is flaky).
-                            {
-                                let pending = window.state::<ServerState>().pending_drops.clone();
-                                let mut q = pending.lock().unwrap_or_else(|e| e.into_inner());
-                                q.extend(payloads.clone());
-                                drop(q);
-                            }
-                            // Also emit for listeners that work.
-                            let _ = window.emit("file-drop-ready", &payloads);
-                            let _ = window.app_handle().emit("file-drop-ready", &payloads);
-                        }
-                        Err(e) => {
-                            log::error!("Failed to read dropped files: {}", e);
-                            let _ = window.emit(
-                                "file-drop-error",
-                                serde_json::json!({ "message": e }),
-                            );
-                            let _ = window.app_handle().emit(
-                                "file-drop-error",
-                                serde_json::json!({ "message": e }),
-                            );
-                        }
+                    let _ = webview
+                        .app_handle()
+                        .emit("file-drag", serde_json::json!({ "phase": "enter", "paths": paths }));
+                }
+                tauri::WebviewEvent::DragDrop(DragDropEvent::Over { .. }) => {
+                    if webview.label().starts_with("remedy-browser") {
+                        return;
                     }
+                    let _ = webview
+                        .app_handle()
+                        .emit("file-drag", serde_json::json!({ "phase": "over" }));
+                }
+                tauri::WebviewEvent::DragDrop(DragDropEvent::Leave) => {
+                    if webview.label().starts_with("remedy-browser") {
+                        return;
+                    }
+                    let _ = webview
+                        .app_handle()
+                        .emit("file-drag", serde_json::json!({ "phase": "leave" }));
+                }
+                tauri::WebviewEvent::DragDrop(DragDropEvent::Drop { paths, .. }) => {
+                    if webview.label().starts_with("remedy-browser") {
+                        return;
+                    }
+                    log::info!(
+                        "WebviewEvent file drop on '{}' ({} path(s))",
+                        webview.label(),
+                        paths.len()
+                    );
+                    queue_native_file_drop(webview.app_handle(), paths);
                 }
                 _ => {}
             }

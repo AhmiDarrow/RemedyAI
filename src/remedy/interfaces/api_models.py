@@ -136,6 +136,11 @@ class AttachmentUploadRequest(BaseModel):
 class SendMessageRequest(BaseModel):
     message: str = Field(default="", description="User message text")
     model: str | None = None
+    """Preferred model id for this turn (paired with provider when set)."""
+    provider: str | None = Field(
+        default=None,
+        description="Per-session LLM provider (xai, deepseek, …). Must pair with model.",
+    )
     agent: str | None = None
     attachments: list[AttachmentRef] | None = None
     plan_mode: bool = Field(

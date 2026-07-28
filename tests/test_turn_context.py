@@ -12,6 +12,8 @@ import pytest
 from remedy.core.turn_context import (
     abort_session,
     begin_turn,
+    current_plan_mode,
+    current_turn_tool_steps,
     current_turn_workspace,
     end_turn,
     is_session_streaming,
@@ -24,7 +26,9 @@ from remedy.core.turn_context import (
 
 @pytest.mark.asyncio
 async def test_abort_sets_event_and_clears_registry():
-    tok_s, tok_a, tok_w = begin_turn("sess-1", project_raw=None, active_path="/tmp/ws")
+    tok_s, tok_a, tok_w, tok_p, tok_t = begin_turn(
+        "sess-1", project_raw=None, active_path="/tmp/ws"
+    )
     try:
         assert is_session_streaming("sess-1")
         assert not is_turn_aborted()
@@ -32,7 +36,7 @@ async def test_abort_sets_event_and_clears_registry():
         assert n == 1
         assert is_turn_aborted()
     finally:
-        end_turn("sess-1", tok_s, tok_a, tok_w)
+        end_turn("sess-1", tok_s, tok_a, tok_w, tok_p, tok_t)
     assert not is_session_streaming("sess-1")
 
 
@@ -80,6 +84,27 @@ def test_turn_session_id_prefers_contextvar():
     finally:
         end_turn("ctx-session", *tok)
     assert turn_session_id(runtime) == "runtime-stale"
+
+
+def test_plan_mode_and_tool_steps_isolated_per_turn():
+    """Concurrent turns must not share plan_mode or the tool-step list."""
+    t_plan = begin_turn("plan-sess", project_raw=None, active_path=".", plan_mode=True)
+    try:
+        assert current_plan_mode() is True
+        steps = current_turn_tool_steps()
+        steps.append({"tool": "plan_save"})
+        assert len(current_turn_tool_steps()) == 1
+    finally:
+        end_turn("plan-sess", *t_plan)
+
+    t_build = begin_turn(
+        "build-sess", project_raw=None, active_path=".", plan_mode=False
+    )
+    try:
+        assert current_plan_mode() is False
+        assert current_turn_tool_steps() == []
+    finally:
+        end_turn("build-sess", *t_build)
 
 
 @pytest.mark.asyncio

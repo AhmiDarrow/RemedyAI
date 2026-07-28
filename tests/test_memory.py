@@ -69,6 +69,36 @@ async def test_list_recent(store):
 
 
 @pytest.mark.asyncio
+async def test_empty_search_like_panel_uses_recent_notes(store):
+    """Memory panel opens with query='' — must not stay blank when notes exist."""
+    from remedy.models import MemoryEntryType
+
+    await store.upsert(
+        MemoryEntry(
+            title="Comfy note",
+            content="video ready",
+            entry_type=MemoryEntryType.NOTE,
+        )
+    )
+    await store.upsert(
+        MemoryEntry(
+            title="Gateway event: heartbeat",
+            content="{}",
+            entry_type=MemoryEntryType.SYSTEM,
+        )
+    )
+    # Route logic: empty query → list_recent, drop system
+    raw = await store.list_recent(limit=30)
+    notes = [
+        e
+        for e in raw
+        if str(getattr(e.entry_type, "value", e.entry_type) or "") != "system"
+    ]
+    assert any(e.title == "Comfy note" for e in notes)
+    assert not any("heartbeat" in (e.title or "") for e in notes)
+
+
+@pytest.mark.asyncio
 async def test_list_important(store):
     await store.upsert(MemoryEntry(title="Low", importance=0.2))
     await store.upsert(MemoryEntry(title="High", importance=0.9))

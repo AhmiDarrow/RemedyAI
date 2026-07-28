@@ -16,7 +16,11 @@ def test_resolve_base_url_env(monkeypatch: pytest.MonkeyPatch) -> None:
     assert comfy.resolve_base_url("http://localhost:7777") == "http://localhost:7777"
 
 
-def test_resolve_base_url_port_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_resolve_base_url_port_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Isolate from the developer's real ~/.remedy/comfyui.json (side_url).
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path / "remedy-home"))
     monkeypatch.delenv("COMFYUI_URL", raising=False)
     monkeypatch.delenv("REMEDY_COMFYUI_URL", raising=False)
     monkeypatch.setenv("COMFYUI_PORT", "8189")
