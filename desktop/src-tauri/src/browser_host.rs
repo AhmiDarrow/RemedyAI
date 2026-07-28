@@ -3,7 +3,7 @@
 //!
 //! Requires Tauri feature `unstable` (window.add_child / multiwebview).
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use tauri::{
     AppHandle, LogicalPosition, LogicalSize, Manager, State, WebviewUrl,
@@ -14,7 +14,7 @@ use url::Url;
 
 const LABEL: &str = "remedy-browser-embed";
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct BrowserBounds {
     pub x: f64,
     pub y: f64,
@@ -321,9 +321,9 @@ pub fn browser_agent_action(
     key: Option<String>,
     button: Option<String>,
     dy: Option<i32>,
-    /// Snapshot job id — page POSTs a11y JSON to the local API with this secret.
+    // Snapshot job id — page POSTs a11y JSON to the local API with this secret.
     job_id: Option<String>,
-    /// Element ref from computer_snapshot (e.g. e3)
+    // Element ref from computer_snapshot (e.g. e3)
     r#ref: Option<String>,
 ) -> Result<String, String> {
     let wv = app
