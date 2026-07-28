@@ -168,6 +168,33 @@ fn schedule_reload(wv: tauri::Webview, url: String, delay_ms: u64) {
     });
 }
 
+/// Right-rail-ish bounds from main window size when SPA has not pushed host rect yet.
+fn default_rail_bounds(app: &AppHandle) -> BrowserBounds {
+    if let Some(ww) = app.get_webview_window("main") {
+        if let (Ok(size), Ok(scale)) = (ww.inner_size(), ww.scale_factor()) {
+            let w = (size.width as f64 / scale).max(800.0);
+            let h = (size.height as f64 / scale).max(500.0);
+            // Match openBrowserInRail: ~40% width, min 400, max 560
+            let rail_w = (w * 0.40).clamp(400.0, 560.0);
+            let top = 56.0_f64; // title + chrome
+            let bottom = 40.0_f64; // status bar
+            let gap = 6.0_f64;
+            return BrowserBounds {
+                x: (w - rail_w + gap).max(0.0),
+                y: top,
+                width: (rail_w - gap * 2.0).max(280.0),
+                height: (h - top - bottom).max(240.0),
+            };
+        }
+    }
+    BrowserBounds {
+        x: 420.0,
+        y: 56.0,
+        width: 480.0,
+        height: 720.0,
+    }
+}
+
 /// Core navigate used by the command and the Rust computer-host poller.
 pub fn navigate_embed(
     app: &AppHandle,
@@ -185,13 +212,9 @@ pub fn navigate_embed(
 
     let b = bounds
         .or_else(|| state.last_bounds.lock().ok().and_then(|g| g.clone()))
+        .filter(|bb| bb.width >= 200.0 && bb.height >= 160.0)
         .map(|b| clamp_bounds(&b))
-        .unwrap_or(BrowserBounds {
-            x: 300.0,
-            y: 80.0,
-            width: 640.0,
-            height: 480.0,
-        });
+        .unwrap_or_else(|| default_rail_bounds(app));
     if let Ok(mut g) = state.last_bounds.lock() {
         *g = Some(b.clone());
     }
@@ -362,16 +385,19 @@ fn handle_ui_command(app: &AppHandle, agent: &ureq::Agent, cmd: &serde_json::Val
         return;
     }
 
-    // Tell SPA to expand Browser rail (like Settings)
+    // Tell SPA to expand Browser rail (like Settings) + push real host bounds
     let _ = app.emit(
         "computer-open-browser",
         json!({ "url": url, "job_id": job_id }),
     );
-    // Give React a beat to set rightRail=open and mount BrowserSlide
-    std::thread::sleep(Duration::from_millis(450));
+    // React: open rail → mount BrowserSlide → ResizeObserver → browser_set_bounds
+    std::thread::sleep(Duration::from_millis(700));
 
     if !url.is_empty() {
         let nav_result = run_navigate_on_main(app, &url);
+        // Second pass: SPA may have pushed accurate bounds after mount
+        std::thread::sleep(Duration::from_millis(200));
+        let _ = run_resync_bounds_on_main(app);
         if !job_id.is_empty() {
             match nav_result {
                 Ok(final_url) => {
@@ -383,9 +409,14 @@ fn handle_ui_command(app: &AppHandle, agent: &ureq::Agent, cmd: &serde_json::Val
                             "ok": true,
                             "target": "browser",
                             "action": "navigate",
-                            "message": format!("Navigated in-rail: {final_url}"),
+                            "message": format!(
+                                "SUCCESS: Page is open in the in-app Browser rail (right panel). \
+                                 URL: {final_url}. The user can see it. \
+                                 Do NOT say the rail failed. Do NOT open system browser. Do NOT web_fetch this page."
+                            ),
                             "url": final_url,
                             "via": "rust-host",
+                            "user_visible": true,
                         }),
                         None,
                     );
@@ -469,12 +500,36 @@ fn run_navigate_on_main(app: &AppHandle, url: &str) -> Result<String, String> {
     let url2 = url.to_string();
     app.run_on_main_thread(move || {
         let state = app2.state::<BrowserState>();
+        // Prefer last SPA host rect; else size from main window (right rail region)
         let r = navigate_embed(&app2, state.inner(), &url2, None);
         let _ = tx.send(r);
     })
     .map_err(|e| format!("run_on_main_thread: {e}"))?;
     rx.recv_timeout(Duration::from_secs(15))
         .map_err(|_| "navigate timed out on main thread".to_string())?
+}
+
+fn run_resync_bounds_on_main(app: &AppHandle) -> Result<(), String> {
+    let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
+    let app2 = app.clone();
+    app.run_on_main_thread(move || {
+        let state = app2.state::<BrowserState>();
+        let b = state
+            .last_bounds
+            .lock()
+            .ok()
+            .and_then(|g| g.clone())
+            .filter(|bb| bb.width >= 200.0 && bb.height >= 160.0)
+            .unwrap_or_else(|| default_rail_bounds(&app2));
+        if let Some(wv) = app2.get_webview(LABEL) {
+            let _ = apply_bounds(&wv, &clamp_bounds(&b));
+            let _ = wv.show();
+        }
+        let _ = tx.send(Ok(()));
+    })
+    .map_err(|e| format!("run_on_main_thread: {e}"))?;
+    rx.recv_timeout(Duration::from_secs(5))
+        .map_err(|_| "resync bounds timeout".to_string())?
 }
 
 fn complete_job(

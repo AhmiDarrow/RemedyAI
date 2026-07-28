@@ -210,6 +210,8 @@ export default function App() {
         right: 'browser',
         rightOpen: true,
         rightRail: 'open',
+        // Wider rail so WebView is readable (agent + human)
+        rightWidth: Math.max(prev.rightWidth || 0, 440),
         leftOpen: prev.leftRail === 'open' || prev.leftOpen,
       }
       if (next.left === 'browser') {
@@ -220,6 +222,13 @@ export default function App() {
       saveWorkspaceLayout(next)
       return next
     })
+    // After layout paint, ask BrowserSlide host to push bounds (via custom event)
+    window.setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('remedy:browser-resync-bounds'))
+    }, 80)
+    window.setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('remedy:browser-resync-bounds'))
+    }, 320)
   }, [])
 
   // Computer use: open Browser rail (SPA event + Rust host emit).

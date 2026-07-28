@@ -30,11 +30,12 @@ function readBounds(el: HTMLElement | null): Bounds | null {
   if (r.width < 80 || r.height < 80) return null
   if (r.bottom < 0 || r.right < 0) return null
   if (r.top > window.innerHeight || r.left > window.innerWidth) return null
+  // Inset 1px so chrome borders don't clip WebView2
   return {
-    x: Math.round(r.left),
-    y: Math.round(r.top),
-    width: Math.round(r.width),
-    height: Math.round(r.height),
+    x: Math.round(r.left) + 1,
+    y: Math.round(r.top) + 1,
+    width: Math.max(80, Math.round(r.width) - 2),
+    height: Math.max(80, Math.round(r.height) - 2),
   }
 }
 
@@ -106,18 +107,28 @@ export function BrowserSlide() {
     ro.observe(el)
     const onWin = () => void pushBounds()
     window.addEventListener('resize', onWin)
+    // Agent/openBrowserInRail asks for an immediate bounds push
+    const onResync = () => {
+      void pushBounds()
+      // A few frames later — layout may still be settling
+      window.requestAnimationFrame(() => void pushBounds())
+      window.setTimeout(() => void pushBounds(), 50)
+      window.setTimeout(() => void pushBounds(), 200)
+    }
+    window.addEventListener('remedy:browser-resync-bounds', onResync)
     // Popout/fullscreen layout can settle over several frames
     let n = 0
     let raf = 0
     const tick = () => {
       void pushBounds()
       n += 1
-      if (n < 12) raf = window.requestAnimationFrame(tick)
+      if (n < 20) raf = window.requestAnimationFrame(tick)
     }
     raf = window.requestAnimationFrame(tick)
     return () => {
       ro.disconnect()
       window.removeEventListener('resize', onWin)
+      window.removeEventListener('remedy:browser-resync-bounds', onResync)
       window.cancelAnimationFrame(raf)
     }
   }, [pushBounds])
