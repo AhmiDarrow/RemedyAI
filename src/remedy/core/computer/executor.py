@@ -12,6 +12,7 @@ from remedy.core.computer.host_bridge import get_host_bridge
 from remedy.core.computer.router import (
     ComputerTarget,
     host_label,
+    looks_like_url,
     normalize_url,
     resolve_target,
 )
@@ -56,11 +57,18 @@ class ComputerExecutor:
         if act is ComputerAction.CLICK and str(kwargs.get("ref") or "").strip():
             if (target or "auto").strip().lower() in ("", "auto"):
                 req_target = "browser"
+        # Snapshot auto: browser if host connected / web hint, else desktop windows
         if act is ComputerAction.SNAPSHOT and (target or "auto").strip().lower() in (
             "",
             "auto",
         ):
-            req_target = "browser"
+            hint_s = str(hint)
+            if self.bridge.host_connected() or looks_like_url(hint_s) or (
+                "browser" in hint_s.lower() or "web" in hint_s.lower() or "page" in hint_s.lower()
+            ):
+                req_target = "browser"
+            else:
+                req_target = "desktop"
         tgt = resolve_target(
             req_target,
             url=url,
@@ -149,19 +157,45 @@ class ComputerExecutor:
                 extra={"monitors": mons},
             )
         if act is ComputerAction.SNAPSHOT:
-            # Desktop has no DOM — point model at screenshot + windows
+            elements = win.desktop_snapshot(limit=int(kwargs.get("limit") or 40))
+            self.bridge.set_last_elements(elements, target="desktop")
             return public_result(
-                ok=False,
+                ok=True,
                 target="desktop",
                 action="snapshot",
-                message=(
-                    "computer_snapshot is for the browser rail. "
-                    "Use computer_screenshot + computer_windows on desktop."
-                ),
+                message=f"{len(elements)} windows (refs w1…)",
+                extra={"elements": elements},
             )
         if act is ComputerAction.CLICK:
             if self._abort_check():
                 raise RuntimeError("Aborted by user")
+            ref = str(kwargs.get("ref") or "").strip()
+            if ref:
+                el = self.bridge.get_element_by_ref(ref)
+                if el is None:
+                    # Refresh window snapshot once
+                    elements = win.desktop_snapshot()
+                    self.bridge.set_last_elements(elements, target="desktop")
+                    el = self.bridge.get_element_by_ref(ref)
+                if el is None:
+                    return public_result(
+                        ok=False,
+                        target="desktop",
+                        action="click",
+                        message=f"Unknown ref {ref} — run computer_snapshot first",
+                    )
+                win.click_element(
+                    el,
+                    button=str(kwargs.get("button") or "left"),
+                    clicks=int(kwargs.get("clicks") or 1),
+                )
+                return public_result(
+                    ok=True,
+                    target="desktop",
+                    action="click",
+                    message=f"Clicked ref={ref} ({el.get('name', '')[:40]})",
+                    extra={"ref": ref, "x": el.get("x"), "y": el.get("y"), "hwnd": el.get("hwnd")},
+                )
             x, y = int(kwargs.get("x", 0)), int(kwargs.get("y", 0))
             win.click(
                 x,
@@ -365,12 +399,29 @@ class ComputerExecutor:
             out.setdefault("ok", True)
             out.setdefault("target", "browser")
             out.setdefault("action", act.value)
+            if act is ComputerAction.SNAPSHOT and out.get("elements"):
+                self.bridge.set_last_elements(
+                    list(out.get("elements") or []),
+                    target="browser",
+                )
             return out
         err = finished.error or finished.status
+        # Click-by-ref without host: if we have cached browser elements, click desktop coords
+        if act is ComputerAction.CLICK and str(kwargs.get("ref") or "").strip():
+            el = self.bridge.get_element_by_ref(str(kwargs.get("ref")))
+            if el and el.get("x") is not None:
+                # Browser element coords are viewport-relative; only valid with host.
+                # Fall through with clear error.
+                pass
         # Navigate fallback if host timed out
         if act is ComputerAction.NAVIGATE and payload.get("url"):
             fb = self._run_desktop(act, **kwargs)
             fb["note"] = f"browser host failed ({err}); opened system browser"
+            return fb
+        # Snapshot offline → desktop window snapshot so task can continue
+        if act is ComputerAction.SNAPSHOT:
+            fb = self._run_desktop(act, **kwargs)
+            fb["note"] = f"browser host failed ({err}); returned desktop window snapshot"
             return fb
         return public_result(
             ok=False,

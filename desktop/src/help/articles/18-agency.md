@@ -131,7 +131,7 @@ Remedy can **drive the GUI** on this PC with **in-house tools** (any chat model 
 | **Full desktop** | `computer_screenshot`, `computer_monitors`, `computer_click`, type/key, `computer_windows` | Works via local Win32 even without the rail. |
 
 **Workflow (web):** navigate → **snapshot** (refs e1, e2, …) → **click ref=eN** → type if needed → screenshot to verify.  
-**Workflow (native app):** `computer_windows` / focus → screenshot → click coordinates → type.  
+**Workflow (native app):** **snapshot** (refs w1… windows) → **click ref=wN** (focus + center) → type; or screenshot + x/y.  
 **Multi-monitor:** `computer_monitors` then `computer_screenshot` with `monitor=0` (or 1, …).
 
 Coding tools stay better for repo work. Computer use is for **GUI reality** files and shell cannot see. **Stop** cancels pending browser jobs and aborts mid-type.
@@ -139,6 +139,8 @@ Coding tools stay better for repo work. Computer use is for **GUI reality** file
 Plan mode allows see/navigate/list only (no click/type). Build runs the full surface — no separate “enable computer use” gate when the task needs it.
 
 Status bar **PC host** means the Desktop app is claiming browser jobs.
+
+Local soak (feature branch only): [computer-use-soak.md](computer-use-soak.md).
 
 ## What stays unique to Remedy
 

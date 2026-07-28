@@ -34,15 +34,20 @@ def register_computer_tools(runtime: Any) -> None:
         )
 
     async def computer_snapshot(
-        target: str = "browser",
+        target: str = "auto",
         hint: str = "",
+        limit: int = 40,
     ) -> str:
-        """List interactive page elements with refs (e1, e2, …) for click-by-ref."""
+        """List interactive elements with refs for click-by-ref.
+
+        Browser: e1… (DOM). Desktop: w1… (windows). Prefer snapshot before click.
+        """
         return ex.run(
             ComputerAction.SNAPSHOT,
-            target=target or "browser",
+            target=target or "auto",
             hint=hint,
             runtime=runtime,
+            limit=limit,
         )
 
     async def computer_monitors(hint: str = "") -> str:

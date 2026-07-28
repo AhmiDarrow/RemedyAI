@@ -246,6 +246,11 @@ def abort_session(session_id: str) -> int:
         with contextlib.suppress(Exception):
             ev.set()
     kill_session_processes(sid)
+    # Cancel in-flight computer-use browser jobs so Stop does not leave the host busy
+    with contextlib.suppress(Exception):
+        from remedy.core.computer.host_bridge import get_host_bridge
+
+        get_host_bridge().cancel_pending_and_running(reason="session_aborted")
     return len(events)
 
 

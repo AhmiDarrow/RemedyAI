@@ -229,3 +229,39 @@ def test_cancel_pending_jobs(tmp_path: Path):
     b.enqueue("click", {"x": 1, "y": 2})
     n = b.cancel_pending_and_running(reason="aborted")
     assert n == 2
+
+
+def test_desktop_snapshot_and_ref_store(tmp_path: Path):
+    import sys
+
+    if sys.platform != "win32":
+        return
+    from remedy.core.computer.desktop_win import desktop_snapshot
+    from remedy.core.computer.host_bridge import ComputerHostBridge
+
+    els = desktop_snapshot(limit=10)
+    assert isinstance(els, list)
+    if els:
+        assert els[0]["ref"].startswith("w")
+        assert "x" in els[0] and "y" in els[0]
+    b = ComputerHostBridge(home_dir=tmp_path)
+    b.set_last_elements(els, target="desktop")
+    if els:
+        got = b.get_element_by_ref(els[0]["ref"])
+        assert got is not None
+        assert got["ref"] == els[0]["ref"]
+
+
+def test_abort_session_cancels_computer_jobs(tmp_path: Path, monkeypatch):
+    from remedy.core import turn_context as tc
+    from remedy.core.computer.host_bridge import ComputerHostBridge
+
+    b = ComputerHostBridge(home_dir=tmp_path)
+    b.enqueue("navigate", {"url": "https://example.com"})
+    b.enqueue("click", {"x": 1})
+    monkeypatch.setattr(
+        "remedy.core.computer.host_bridge.get_host_bridge",
+        lambda home_dir=None: b,
+    )
+    tc.abort_session("sess-test-cu")
+    assert b.claim_next() is None

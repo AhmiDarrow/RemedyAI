@@ -66,9 +66,37 @@ class ComputerHostBridge:
         self._host_seen_at: float = 0.0
         self._browser_bounds: dict[str, float] | None = None
         self._browser_scale: float = 1.0
+        # Last a11y/desktop snapshot for click-by-ref resolution
+        self._last_elements: list[dict[str, Any]] = []
+        self._last_elements_target: str = ""
 
     def mark_host_alive(self) -> None:
         self._host_seen_at = time.time()
+
+    def set_last_elements(
+        self,
+        elements: list[dict[str, Any]],
+        *,
+        target: str = "browser",
+    ) -> None:
+        self._last_elements = list(elements or [])[:120]
+        self._last_elements_target = target
+
+    def get_element_by_ref(self, ref: str) -> dict[str, Any] | None:
+        r = (ref or "").strip().lower()
+        if not r:
+            return None
+        for el in self._last_elements:
+            if str(el.get("ref") or "").strip().lower() == r:
+                return el
+        return None
+
+    def last_elements_info(self) -> dict[str, Any]:
+        return {
+            "target": self._last_elements_target,
+            "count": len(self._last_elements),
+            "elements": list(self._last_elements),
+        }
 
     def host_connected(self, *, max_age_s: float = 15.0) -> bool:
         if self._host_seen_at <= 0:
@@ -213,14 +241,16 @@ class ComputerHostBridge:
                 return None
             if job.status not in ("pending", "running"):
                 return None
+            trimmed = elements[:120]
             job.status = "done"
             job.result = {
                 "ok": True,
                 "target": "browser",
                 "action": "snapshot",
-                "message": f"{len(elements)} interactive elements",
-                "elements": elements[:120],
+                "message": f"{len(trimmed)} interactive elements",
+                "elements": trimmed,
             }
+            self.set_last_elements(trimmed, target="browser")
             self._write(job)
             return job
 

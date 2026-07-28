@@ -416,6 +416,10 @@ def list_windows(limit: int = 40) -> list[dict[str, Any]]:
             return True
         rect = wintypes.RECT()
         user32.GetWindowRect(hwnd, ctypes.byref(rect))
+        w = int(rect.right - rect.left)
+        h = int(rect.bottom - rect.top)
+        if w < 8 or h < 8:
+            return True
         results.append(
             {
                 "hwnd": int(hwnd),
@@ -426,12 +430,60 @@ def list_windows(limit: int = 40) -> list[dict[str, Any]]:
                     "right": int(rect.right),
                     "bottom": int(rect.bottom),
                 },
+                "width": w,
+                "height": h,
             }
         )
         return True
 
     user32.EnumWindows(enum_proc, 0)
     return results
+
+
+def desktop_snapshot(limit: int = 40) -> list[dict[str, Any]]:
+    """Window-level interactive snapshot with refs w1, w2, … (desktop).
+
+    Deeper UIA control-tree can land later; window refs already enable
+    focus + center-click for multi-app workflows.
+    """
+    wins = list_windows(limit=max(1, min(int(limit or 40), 80)))
+    elements: list[dict[str, Any]] = []
+    for i, w in enumerate(wins):
+        b = w.get("bounds") or {}
+        left, top = int(b.get("left", 0)), int(b.get("top", 0))
+        right, bottom = int(b.get("right", 0)), int(b.get("bottom", 0))
+        cx = (left + right) // 2
+        cy = (top + bottom) // 2
+        ref = f"w{i + 1}"
+        elements.append(
+            {
+                "ref": ref,
+                "tag": "window",
+                "role": "window",
+                "name": str(w.get("title") or "")[:120],
+                "x": cx,
+                "y": cy,
+                "w": int(w.get("width") or max(0, right - left)),
+                "h": int(w.get("height") or max(0, bottom - top)),
+                "hwnd": w.get("hwnd"),
+                "bounds": b,
+            }
+        )
+    return elements
+
+
+def click_element(el: dict[str, Any], *, button: str = "left", clicks: int = 1) -> None:
+    """Focus window if hwnd present, then click element center."""
+    hwnd = el.get("hwnd")
+    if hwnd:
+        try:
+            focus_window(int(hwnd))
+            time.sleep(0.05)
+        except Exception:
+            pass
+    x = int(el.get("x") or 0)
+    y = int(el.get("y") or 0)
+    click(x, y, button=button, clicks=clicks)
 
 
 def focus_window(hwnd: int) -> None:
