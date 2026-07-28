@@ -50,12 +50,25 @@ _SYSTEM_BROWSER_HINTS = re.compile(
 def wants_system_browser(hint: str | None = None, target: str | None = None) -> bool:
     """True only when the user/model explicitly asks for OS browser."""
     t = (target or "").strip().lower()
-    if t in ("desktop", "os", "system", "external"):
-        # desktop target alone is not enough for navigate — check hint too
-        pass
+    # Never treat "remedy browser" / "rail" as system browser
+    if wants_rail_browser(hint):
+        return False
     if t in ("external", "system"):
         return True
     return bool(_SYSTEM_BROWSER_HINTS.search(hint or ""))
+
+
+_RAIL_HINTS = re.compile(
+    r"(?i)\b("
+    r"rail|in[- ]?app|embedded|remedy\s*browser|browser\s*rail|"
+    r"workspace\s*browser|side\s*browser|inside\s*remedy"
+    r")\b"
+)
+
+
+def wants_rail_browser(hint: str | None = None) -> bool:
+    """User asked for the in-app Browser rail specifically."""
+    return bool(_RAIL_HINTS.search(hint or ""))
 
 
 def looks_like_url(text: str | None) -> bool:

@@ -1,5 +1,7 @@
 /** Computer-use host bridge (desktop claims browser jobs from the local API). */
-import { apiFetch } from './client'
+import { apiFetch, authHeaders, ensureApiToken } from './client'
+
+const LOOPBACK_API = 'http://127.0.0.1:7400/api'
 
 export type ComputerJob = {
   id: string
@@ -17,11 +19,37 @@ export type BrowserBoundsPayload = {
   height: number
 }
 
+/**
+ * Loopback host calls — server allows these without Bearer from 127.0.0.1
+ * so the poller works even when token bootstrap is late.
+ */
+async function hostFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  await ensureApiToken().catch(() => null)
+  const headers: Record<string, string> = {
+    Accept: 'application/json',
+    ...authHeaders(),
+    ...(init?.headers as Record<string, string> | undefined),
+  }
+  if (init?.body && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json'
+  }
+  const res = await fetch(`${LOOPBACK_API}${path}`, {
+    ...init,
+    headers,
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`computer host ${path} → ${res.status} ${text.slice(0, 200)}`)
+  }
+  if (res.status === 204) return undefined as T
+  return (await res.json()) as T
+}
+
 export async function computerHostHello(opts?: {
   bounds?: BrowserBoundsPayload | null
   scale?: number
 }): Promise<{ host_connected?: boolean }> {
-  return apiFetch('/computer/host/hello', {
+  return hostFetch('/computer/host/hello', {
     method: 'POST',
     body: JSON.stringify({
       client: 'desktop',
@@ -34,8 +62,13 @@ export async function computerHostHello(opts?: {
 export async function computerHostStatus(): Promise<{
   host_connected?: boolean
   browser_bounds?: (BrowserBoundsPayload & { scale?: number }) | null
+  pending_jobs?: number
 }> {
-  return apiFetch('/computer/host/status')
+  try {
+    return await hostFetch('/computer/host/status')
+  } catch {
+    return apiFetch('/computer/host/status')
+  }
 }
 
 export async function computerCapture(body: {
@@ -53,7 +86,7 @@ export async function computerCapture(body: {
 }
 
 export async function claimComputerJob(): Promise<ComputerJob | null> {
-  const data = await apiFetch<{ job?: ComputerJob | null }>('/computer/jobs/next')
+  const data = await hostFetch<{ job?: ComputerJob | null }>('/computer/jobs/next')
   return data.job || null
 }
 
@@ -61,7 +94,7 @@ export async function completeComputerJob(
   jobId: string,
   body: { ok: boolean; result?: Record<string, unknown>; error?: string },
 ): Promise<void> {
-  await apiFetch(`/computer/jobs/${encodeURIComponent(jobId)}/complete`, {
+  await hostFetch(`/computer/jobs/${encodeURIComponent(jobId)}/complete`, {
     method: 'POST',
     body: JSON.stringify(body),
   })

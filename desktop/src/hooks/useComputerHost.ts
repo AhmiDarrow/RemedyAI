@@ -55,7 +55,14 @@ async function runBrowserJob(job: ComputerJob): Promise<Record<string, unknown>>
   if (action === 'navigate') {
     const url = String(p.url || '')
     if (!url) throw new Error('url required')
-    const { bounds } = await readEmbedBounds()
+    // Open rail first, wait for layout, then navigate (retry once if bounds missing)
+    emitComputerUi({ openBrowser: true })
+    await new Promise((r) => window.setTimeout(r, 280))
+    let { bounds } = await readEmbedBounds()
+    if (!bounds) {
+      await new Promise((r) => window.setTimeout(r, 200))
+      bounds = (await readEmbedBounds()).bounds
+    }
     const opened = await tauriInvoke<string>('browser_navigate', {
       url,
       bounds: bounds || null,

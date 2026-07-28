@@ -22,13 +22,18 @@ def test_resolve_target_url_prefers_browser():
 
 
 def test_wants_system_browser_only_when_explicit():
-    from remedy.core.computer.router import wants_system_browser
+    from remedy.core.computer.router import wants_rail_browser, wants_system_browser
 
     assert wants_system_browser("open the wiki") is False
     assert wants_system_browser("show me the fandom page") is False
     assert wants_system_browser("open in Firefox") is True
     assert wants_system_browser("use the system browser") is True
     assert wants_system_browser("open externally") is True
+    # "remedy browser" / rail must NOT mean system browser
+    assert wants_system_browser("open it in remedy browser") is False
+    assert wants_system_browser("show it to me in rail") is False
+    assert wants_rail_browser("open it in remedy browser") is True
+    assert wants_rail_browser("show it to me in the rail") is True
 
 
 def test_resolve_target_desktop_hints():
@@ -66,6 +71,29 @@ def test_host_bridge_enqueue_claim_complete(tmp_path: Path):
     assert done is not None
     assert done.status == "done"
     assert b.claim_next() is None
+
+
+def test_computer_host_routes_loopback_no_auth(tmp_path: Path):
+    """Desktop poller must claim jobs without waiting on SPA token bootstrap."""
+
+    class Cfg:
+        home_dir = str(tmp_path)
+
+    class RT:
+        config = Cfg()
+
+        def list_tasks(self):
+            return []
+
+    app = create_app(runtime=RT(), api_key="secret-test-key")
+    client = TestClient(app)
+    # No Authorization header
+    r = client.post("/api/computer/host/hello", json={"client": "desktop"})
+    assert r.status_code == 200, r.text
+    assert r.json().get("ok") is True
+    r2 = client.get("/api/computer/jobs/next")
+    assert r2.status_code == 200, r2.text
+    assert "job" in r2.json()
 
 
 def test_wait_fails_fast_when_unclaimed(tmp_path: Path):

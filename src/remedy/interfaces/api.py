@@ -237,6 +237,23 @@ def create_app(
     _AUTH_PUBLIC_PREFIXES = (
         "/api/webhooks/",
     )
+    # Computer-use Desktop host poller (loopback only). Must work even when the
+    # SPA token is not ready yet — otherwise navigate jobs sit unclaimed forever
+    # and the agent wrongly falls back to the system browser.
+    _COMPUTER_HOST_LOOPBACK_PREFIXES = (
+        "/api/computer/host/",
+        "/api/computer/jobs/",
+    )
+
+    def _client_is_loopback(request: Request) -> bool:
+        host = ""
+        if request.client is not None:
+            host = (request.client.host or "").strip().lower()
+        # Also trust X-Forwarded only when clearly local (dev proxies)
+        if host in ("127.0.0.1", "::1", "localhost", "testclient"):
+            return True
+        return host.startswith("127.") or host == "::ffff:127.0.0.1"
+
     if api_key:
         app.state.api_key = api_key  # type: ignore[attr-defined]
 
@@ -252,6 +269,11 @@ def create_app(
             if path in _AUTH_PUBLIC or path.startswith("/docs") or path.startswith("/redoc"):
                 return await call_next(request)
             if any(path.startswith(p) for p in _AUTH_PUBLIC_PREFIXES):
+                return await call_next(request)
+            # Desktop host poller on same machine — no bearer required from loopback
+            if _client_is_loopback(request) and any(
+                path.startswith(p) for p in _COMPUTER_HOST_LOOPBACK_PREFIXES
+            ):
                 return await call_next(request)
             # SPA / static Web UI (GET only) — browser loads shell then bootstraps token
             if request.method in ("GET", "HEAD") and not path.startswith("/api"):

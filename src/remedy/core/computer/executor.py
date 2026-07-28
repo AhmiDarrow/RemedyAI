@@ -15,6 +15,7 @@ from remedy.core.computer.router import (
     looks_like_url,
     normalize_url,
     resolve_target,
+    wants_rail_browser,
     wants_system_browser,
 )
 from remedy.core.computer.types import ComputerAction, public_result
@@ -440,9 +441,11 @@ class ComputerExecutor:
                 except Exception:
                     pass  # fall through to host job / full desktop
 
-        # Navigate / simple actions: fail fast if poller never claims (was 45s hangs)
-        unclaimed = 2.5 if act is ComputerAction.NAVIGATE else 3.5
-        total_wait = float(kwargs.get("timeout_s") or (12.0 if act is ComputerAction.NAVIGATE else 30.0))
+        # Navigate / simple actions: fail fast if poller never claims
+        unclaimed = 5.0 if act is ComputerAction.NAVIGATE else 4.0
+        total_wait = float(
+            kwargs.get("timeout_s") or (20.0 if act is ComputerAction.NAVIGATE else 30.0)
+        )
         job = self.bridge.enqueue(act.value, payload)
         finished = self.bridge.wait(
             job.id,
@@ -462,18 +465,27 @@ class ComputerExecutor:
                 )
             return out
         err = finished.error or finished.status
-        # Navigate fallback if host timed out / never claimed
+        # Navigate: NEVER auto-open system browser unless user asked for it.
+        # Falling back to Firefox/Chrome was misread as "remedy browser".
         if act is ComputerAction.NAVIGATE and payload.get("url"):
-            fb = self._run_desktop(act, **kwargs)
-            fb["note"] = (
-                f"in-rail browser did not pick up the job ({err}); "
-                f"opened the system default browser instead. "
-                f"Ensure Remedy Desktop is the feature/computer-use build "
-                f"and status shows PC host."
+            if wants_system_browser(hint, req_target):
+                fb = self._run_desktop(act, **kwargs)
+                fb["note"] = f"rail failed ({err}); opened system browser as requested"
+                return fb
+            return public_result(
+                ok=False,
+                target="browser",
+                action="navigate",
+                message=(
+                    f"In-app Browser rail did not load the page ({err}). "
+                    f"URL: {payload.get('url')}. "
+                    "Do NOT open the system browser unless the user asks. "
+                    "Ensure Desktop is running (status PC host), Browser rail is available, "
+                    "then retry computer_navigate. "
+                    "Do not use web_fetch for wikis that block bots (403) — use the rail."
+                ),
+                extra={"url": payload.get("url"), "job_id": job.id, "rail_failed": True},
             )
-            fb["ok"] = True
-            fb["rail_failed"] = True
-            return fb
         # Snapshot offline → desktop window snapshot so task can continue
         if act is ComputerAction.SNAPSHOT:
             fb = self._run_desktop(act, **kwargs)
