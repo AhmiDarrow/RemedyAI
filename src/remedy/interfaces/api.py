@@ -229,6 +229,8 @@ def create_app(
         "/api/auth/local-bootstrap",
         "/api/openapi.json",
         "/api/openapi.yaml",
+        # Computer-use a11y snapshot callback (job_id is one-time secret; no bearer).
+        "/api/computer/a11y/push",
     }
     # Messenger platform webhooks cannot send our Bearer token; they authenticate
     # via their own verify tokens / HMAC / JWT inside the route handlers.

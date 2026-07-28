@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 
@@ -30,6 +30,13 @@ class CaptureRequest(BaseModel):
     height: int | None = None
     scale: float = 1.0
     label: str = "capture"
+
+
+class A11yPushRequest(BaseModel):
+    """One-shot a11y snapshot from in-page script (job_id is the secret)."""
+
+    job_id: str
+    elements: list[dict[str, Any]] = Field(default_factory=list)
 
 
 def register_computer_routes(app: FastAPI, *, runtime=None, gateway=None, memory=None) -> None:
@@ -151,3 +158,34 @@ def register_computer_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         if job is None:
             raise HTTPException(404, "job not found")
         return {"job": job.to_dict()}
+
+    def _a11y_cors(resp: Response) -> Response:
+        # In-page snapshot POST from arbitrary https origins (job_id is the secret).
+        resp.headers["Access-Control-Allow-Origin"] = "*"
+        resp.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+        resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
+        resp.headers["Access-Control-Allow-Private-Network"] = "true"
+        return resp
+
+    @app.options("/api/computer/a11y/push")
+    async def computer_a11y_push_options(request: Request):
+        _ = request
+        return _a11y_cors(Response(status_code=204))
+
+    @app.post("/api/computer/a11y/push")
+    async def computer_a11y_push(req: A11yPushRequest):
+        """Complete a snapshot job from injected page JS (no API bearer)."""
+        jid = (req.job_id or "").strip()
+        if not jid or len(jid) < 8:
+            raise HTTPException(400, "invalid job_id")
+        b = _bridge()
+        elements = [e for e in (req.elements or []) if isinstance(e, dict)][:120]
+        job = b.complete_a11y_push(jid, elements)
+        if job is None:
+            raise HTTPException(404, "job not found or not a snapshot")
+        return _a11y_cors(
+            Response(
+                content='{"ok":true}',
+                media_type="application/json",
+            )
+        )

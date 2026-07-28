@@ -110,9 +110,37 @@ async function runBrowserJob(job: ComputerJob): Promise<Record<string, unknown>>
     }
   }
 
-  if (['click', 'type', 'key', 'scroll', 'drag'].includes(action)) {
+  if (action === 'snapshot' || action === 'a11y') {
+    // Inject stamps + page POSTs elements to /api/computer/a11y/push with job id.
+    // Job completion is filled by that push; host returns a short ack.
+    await tauriInvoke<string>('browser_agent_action', {
+      action: 'snapshot',
+      job_id: job.id,
+      x: null,
+      y: null,
+      x2: null,
+      y2: null,
+      text: null,
+      key: null,
+      button: null,
+      dy: null,
+      ref: null,
+    })
+    // Give the page a moment to POST; server marks job done via a11y push.
+    await new Promise((r) => window.setTimeout(r, 200))
+    return {
+      ok: true,
+      target: 'browser',
+      action: 'snapshot',
+      message: 'snapshot injected (elements via a11y push)',
+      _host_defers_complete: true,
+    }
+  }
+
+  if (['click', 'type', 'key', 'scroll', 'drag', 'click_ref'].includes(action)) {
+    const ref = p.ref != null ? String(p.ref) : null
     const res = await tauriInvoke<string>('browser_agent_action', {
-      action,
+      action: ref && action === 'click' ? 'click' : action,
       x: p.x != null ? Number(p.x) : null,
       y: p.y != null ? Number(p.y) : null,
       x2: p.x2 != null ? Number(p.x2) : null,
@@ -121,12 +149,15 @@ async function runBrowserJob(job: ComputerJob): Promise<Record<string, unknown>>
       key: p.key != null ? String(p.key) : null,
       button: p.button != null ? String(p.button) : null,
       dy: p.dy != null ? Number(p.dy) : null,
+      job_id: null,
+      ref,
     })
     return {
       ok: true,
       target: 'browser',
       action,
       message: res || `browser:${action}:ok`,
+      ref: ref || undefined,
     }
   }
 
@@ -166,12 +197,17 @@ export function useComputerHost(enabled = true): void {
         if (job?.id) {
           try {
             const result = await runBrowserJob(job)
-            await completeComputerJob(job.id, {
-              ok: result.ok !== false,
-              result,
-              error:
-                result.ok === false ? String(result.message || 'failed') : undefined,
-            })
+            // Snapshot completes via /api/computer/a11y/push — do not overwrite.
+            if (result._host_defers_complete) {
+              /* wait for page push */
+            } else {
+              await completeComputerJob(job.id, {
+                ok: result.ok !== false,
+                result,
+                error:
+                  result.ok === false ? String(result.message || 'failed') : undefined,
+              })
+            }
           } catch (e) {
             await completeComputerJob(job.id, {
               ok: false,

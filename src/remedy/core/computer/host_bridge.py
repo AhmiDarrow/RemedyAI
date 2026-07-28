@@ -180,6 +180,50 @@ class ComputerHostBridge:
             self._write(job)
             return job
 
+    def cancel_pending_and_running(self, *, reason: str = "aborted") -> int:
+        """Cancel all open jobs (Stop generation). Returns count cancelled."""
+        n = 0
+        with self._lock:
+            for path in list(self.root.glob("*.json")):
+                try:
+                    raw = json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    continue
+                if not isinstance(raw, dict):
+                    continue
+                job = ComputerJob.from_dict(raw)
+                if job.status in ("pending", "running"):
+                    job.status = "cancelled"
+                    job.error = reason
+                    self._write(job)
+                    n += 1
+        return n
+
+    def complete_a11y_push(
+        self,
+        job_id: str,
+        elements: list[dict[str, Any]],
+    ) -> ComputerJob | None:
+        """Complete a snapshot job from page-injected callback (job id is the secret)."""
+        with self._lock:
+            job = self._read(job_id)
+            if job is None:
+                return None
+            if job.action not in ("snapshot", "a11y"):
+                return None
+            if job.status not in ("pending", "running"):
+                return None
+            job.status = "done"
+            job.result = {
+                "ok": True,
+                "target": "browser",
+                "action": "snapshot",
+                "message": f"{len(elements)} interactive elements",
+                "elements": elements[:120],
+            }
+            self._write(job)
+            return job
+
     def wait(
         self,
         job_id: str,

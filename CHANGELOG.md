@@ -17,7 +17,9 @@ Work lives on **`feature/computer-use`** (do not ship/push until soak solid).
 - Region capture for browser-rail crops; host reports bounds on hello
 - System addendum teaches models the computer tool surface (any provider)
 - Desktop: auto-open Browser rail on agent navigate; status **PC host** chip
-- Plan mode: screenshot / navigate / windows list only (no click/type)
+- `computer_snapshot` + click-by-`ref` (a11y-style stamps + one-shot a11y push)
+- `computer_monitors` + screenshot `monitor=` index; Stop cancels jobs / mid-type
+- Plan mode: see/navigate/list only (no click/type); agency manual section
 
 ### Fix: Plan banner lifecycle (cancel / no sticky done)
 

@@ -51,14 +51,25 @@ class ComputerExecutor:
         )
         url = kwargs.get("url")
         hint = kwargs.get("hint") or kwargs.get("reason") or ""
+        # Ref-based click is browser a11y — force browser unless user set desktop
+        req_target = target
+        if act is ComputerAction.CLICK and str(kwargs.get("ref") or "").strip():
+            if (target or "auto").strip().lower() in ("", "auto"):
+                req_target = "browser"
+        if act is ComputerAction.SNAPSHOT and (target or "auto").strip().lower() in (
+            "",
+            "auto",
+        ):
+            req_target = "browser"
         tgt = resolve_target(
-            target,
+            req_target,
             url=url,
             hint=str(hint),
             action=act.value,
         )
         try:
             if self._abort_check():
+                self.bridge.cancel_pending_and_running(reason="aborted")
                 return json.dumps(
                     public_result(
                         ok=False,
@@ -72,6 +83,17 @@ class ComputerExecutor:
                 result = self._run_browser(act, **kwargs)
             else:
                 result = self._run_desktop(act, **kwargs)
+
+            # If Stop fired mid-action, surface abort even if partial work finished
+            if self._abort_check():
+                self.bridge.cancel_pending_and_running(reason="aborted")
+                result = public_result(
+                    ok=False,
+                    target=host_label(tgt),
+                    action=act.value,
+                    message="Aborted by user",
+                    extra={"partial": result} if result else None,
+                )
 
             log_computer_action(
                 action=act.value,
@@ -103,15 +125,43 @@ class ComputerExecutor:
         from remedy.core.computer import desktop_win as win
 
         if act is ComputerAction.SCREENSHOT:
-            info = win.screenshot_png()
+            mon = kwargs.get("monitor")
+            if mon is not None and str(mon).strip() != "" and str(mon).lower() != "all":
+                info = win.screenshot_monitor_png(int(mon))
+                msg = f"Monitor {mon} screenshot ({info['width']}x{info['height']})"
+            else:
+                info = win.screenshot_png()
+                msg = f"Screenshot saved ({info['width']}x{info['height']})"
             return public_result(
                 ok=True,
                 target="desktop",
                 action="screenshot",
-                message=f"Screenshot saved ({info['width']}x{info['height']})",
+                message=msg,
                 extra=info,
             )
+        if act is ComputerAction.MONITORS:
+            mons = win.list_monitors()
+            return public_result(
+                ok=True,
+                target="desktop",
+                action="monitors",
+                message=f"{len(mons)} monitor(s)",
+                extra={"monitors": mons},
+            )
+        if act is ComputerAction.SNAPSHOT:
+            # Desktop has no DOM — point model at screenshot + windows
+            return public_result(
+                ok=False,
+                target="desktop",
+                action="snapshot",
+                message=(
+                    "computer_snapshot is for the browser rail. "
+                    "Use computer_screenshot + computer_windows on desktop."
+                ),
+            )
         if act is ComputerAction.CLICK:
+            if self._abort_check():
+                raise RuntimeError("Aborted by user")
             x, y = int(kwargs.get("x", 0)), int(kwargs.get("y", 0))
             win.click(
                 x,
@@ -127,6 +177,8 @@ class ComputerExecutor:
                 extra={"x": x, "y": y},
             )
         if act is ComputerAction.DRAG:
+            if self._abort_check():
+                raise RuntimeError("Aborted by user")
             x1, y1 = int(kwargs.get("x", 0)), int(kwargs.get("y", 0))
             x2 = int(kwargs.get("x2", x1))
             y2 = int(kwargs.get("y2", y1))
@@ -140,7 +192,7 @@ class ComputerExecutor:
             )
         if act is ComputerAction.TYPE:
             text = str(kwargs.get("text") or "")
-            win.type_text(text)
+            win.type_text(text, abort_check=self._abort_check)
             return public_result(
                 ok=True,
                 target="desktop",
@@ -269,6 +321,7 @@ class ComputerExecutor:
             ComputerAction.CLICK,
             ComputerAction.TYPE,
             ComputerAction.SCREENSHOT,
+            ComputerAction.SNAPSHOT,
         ):
             payload.setdefault("ui", {})
             if isinstance(payload.get("ui"), dict):

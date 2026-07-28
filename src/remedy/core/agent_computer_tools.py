@@ -19,11 +19,37 @@ def register_computer_tools(runtime: Any) -> None:
     async def computer_screenshot(
         target: str = "auto",
         hint: str = "",
+        monitor: str = "",
     ) -> str:
-        """Capture the browser rail or full desktop. Prefer before click/type."""
+        """Capture the browser rail or full desktop. Prefer before click/type.
+
+        monitor: empty = full virtual screen / rail; integer index for one display.
+        """
         return ex.run(
             ComputerAction.SCREENSHOT,
             target=target or "auto",
+            hint=hint,
+            runtime=runtime,
+            monitor=monitor if str(monitor).strip() != "" else None,
+        )
+
+    async def computer_snapshot(
+        target: str = "browser",
+        hint: str = "",
+    ) -> str:
+        """List interactive page elements with refs (e1, e2, …) for click-by-ref."""
+        return ex.run(
+            ComputerAction.SNAPSHOT,
+            target=target or "browser",
+            hint=hint,
+            runtime=runtime,
+        )
+
+    async def computer_monitors(hint: str = "") -> str:
+        """List displays (index, size, primary) for multi-monitor screenshots."""
+        return ex.run(
+            ComputerAction.MONITORS,
+            target="desktop",
             hint=hint,
             runtime=runtime,
         )
@@ -33,10 +59,11 @@ def register_computer_tools(runtime: Any) -> None:
         y: int = 0,
         button: str = "left",
         clicks: int = 1,
+        ref: str = "",
         target: str = "auto",
         hint: str = "",
     ) -> str:
-        """Click at screen (desktop) or embed coordinates (browser). Use screenshot first."""
+        """Click by coordinates or by ref from computer_snapshot (e.g. ref=e3)."""
         return ex.run(
             ComputerAction.CLICK,
             target=target or "auto",
@@ -46,6 +73,7 @@ def register_computer_tools(runtime: Any) -> None:
             y=y,
             button=button,
             clicks=clicks,
+            ref=ref,
         )
 
     async def computer_type(
@@ -158,8 +186,24 @@ def register_computer_tools(runtime: Any) -> None:
 
     reg.register_builtin_handler(
         "computer_screenshot",
-        "Screenshot the in-app browser or full desktop. Call before clicking when unsure.",
+        "Screenshot the in-app browser or full desktop. Optional monitor index for multi-display.",
         computer_screenshot,
+        {
+            "type": "object",
+            "properties": {
+                "target": target_prop,
+                "hint": hint_prop,
+                "monitor": {
+                    "type": "string",
+                    "description": "Monitor index from computer_monitors (desktop only)",
+                },
+            },
+        },
+    )
+    reg.register_builtin_handler(
+        "computer_snapshot",
+        "Browser a11y-style list of interactive elements with refs (e1…). Then computer_click ref=eN.",
+        computer_snapshot,
         {
             "type": "object",
             "properties": {
@@ -169,20 +213,32 @@ def register_computer_tools(runtime: Any) -> None:
         },
     )
     reg.register_builtin_handler(
+        "computer_monitors",
+        "List monitors (index, width, height, primary) for multi-monitor capture.",
+        computer_monitors,
+        {
+            "type": "object",
+            "properties": {"hint": hint_prop},
+        },
+    )
+    reg.register_builtin_handler(
         "computer_click",
-        "Click at coordinates (desktop screen or browser embed). Prefer screenshot first.",
+        "Click by coordinates or by ref from computer_snapshot (ref=e3). Prefer snapshot on web UIs.",
         computer_click,
         {
             "type": "object",
             "properties": {
                 "x": {"type": "integer"},
                 "y": {"type": "integer"},
+                "ref": {
+                    "type": "string",
+                    "description": "Element ref from computer_snapshot, e.g. e1",
+                },
                 "button": {"type": "string", "description": "left | right | middle"},
                 "clicks": {"type": "integer", "description": "1 or 2 for double-click"},
                 "target": target_prop,
                 "hint": hint_prop,
             },
-            "required": ["x", "y"],
         },
     )
     reg.register_builtin_handler(

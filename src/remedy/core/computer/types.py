@@ -12,12 +12,14 @@ ComputerTargetName = Literal["auto", "browser", "desktop"]
 COMPUTER_TOOL_NAMES = frozenset(
     {
         "computer_screenshot",
+        "computer_snapshot",
         "computer_click",
         "computer_type",
         "computer_key",
         "computer_scroll",
         "computer_navigate",
         "computer_windows",
+        "computer_monitors",
         "computer_drag",
     }
 )
@@ -26,32 +28,38 @@ COMPUTER_TOOL_NAMES = frozenset(
 COMPUTER_PLAN_MODE_TOOLS = frozenset(
     {
         "computer_screenshot",
+        "computer_snapshot",
         "computer_navigate",
         "computer_windows",
+        "computer_monitors",
     }
 )
 
 
 class ComputerAction(str, Enum):
     SCREENSHOT = "screenshot"
+    SNAPSHOT = "snapshot"
     CLICK = "click"
     TYPE = "type"
     KEY = "key"
     SCROLL = "scroll"
     NAVIGATE = "navigate"
     WINDOWS = "windows"
+    MONITORS = "monitors"
     DRAG = "drag"
 
 
 def action_from_tool(name: str) -> ComputerAction | None:
     mapping = {
         "computer_screenshot": ComputerAction.SCREENSHOT,
+        "computer_snapshot": ComputerAction.SNAPSHOT,
         "computer_click": ComputerAction.CLICK,
         "computer_type": ComputerAction.TYPE,
         "computer_key": ComputerAction.KEY,
         "computer_scroll": ComputerAction.SCROLL,
         "computer_navigate": ComputerAction.NAVIGATE,
         "computer_windows": ComputerAction.WINDOWS,
+        "computer_monitors": ComputerAction.MONITORS,
         "computer_drag": ComputerAction.DRAG,
     }
     return mapping.get(name)

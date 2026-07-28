@@ -321,13 +321,102 @@ pub fn browser_agent_action(
     key: Option<String>,
     button: Option<String>,
     dy: Option<i32>,
+    /// Snapshot job id — page POSTs a11y JSON to the local API with this secret.
+    job_id: Option<String>,
+    /// Element ref from computer_snapshot (e.g. e3)
+    r#ref: Option<String>,
 ) -> Result<String, String> {
     let wv = app
         .get_webview(LABEL)
         .ok_or_else(|| "browser not open — navigate first".to_string())?;
     let act = action.to_lowercase();
     let js = match act.as_str() {
+        "snapshot" | "a11y" => {
+            let jid = job_id.unwrap_or_default();
+            if jid.is_empty() {
+                return Err("job_id required for snapshot".into());
+            }
+            // Stamp data-remedy-ref and POST elements to loopback (job id is the secret).
+            let escaped_jid = jid.replace('\\', "\\\\").replace('\'', "\\'");
+            format!(
+                r#"(function(){{
+  const jobId='{escaped_jid}';
+  try {{
+    document.querySelectorAll('[data-remedy-ref]').forEach(el => el.removeAttribute('data-remedy-ref'));
+  }} catch(e) {{}}
+  const sel='a,button,input,textarea,select,[role=button],[role=link],[role=textbox],[role=tab],[role=menuitem],[contenteditable=true],summary,label';
+  const nodes=[...document.querySelectorAll(sel)].filter(el => {{
+    const r=el.getBoundingClientRect();
+    const st=window.getComputedStyle(el);
+    if(st.visibility==='hidden'||st.display==='none'||st.opacity==='0') return false;
+    return r.width>2&&r.height>2&&r.bottom>0&&r.right>0&&r.top<innerHeight&&r.left<innerWidth;
+  }}).slice(0,100);
+  const elements=nodes.map((el,i) => {{
+    const r=el.getBoundingClientRect();
+    const ref='e'+(i+1);
+    try {{ el.setAttribute('data-remedy-ref', ref); }} catch(e) {{}}
+    const name=(el.getAttribute('aria-label')||el.getAttribute('title')||el.innerText||el.value||el.placeholder||el.name||el.tagName||'').trim().replace(/\s+/g,' ').slice(0,100);
+    return {{
+      ref, tag:(el.tagName||'').toLowerCase(), role:el.getAttribute('role')||'',
+      name, x:Math.round(r.x+r.width/2), y:Math.round(r.y+r.height/2),
+      w:Math.round(r.width), h:Math.round(r.height)
+    }};
+  }});
+  fetch('http://127.0.0.1:7400/api/computer/a11y/push', {{
+    method:'POST',
+    headers:{{'Content-Type':'application/json'}},
+    body: JSON.stringify({{job_id: jobId, elements}})
+  }}).catch(function(){{}});
+  return 'ok:'+elements.length;
+}})()"#
+            )
+        }
+        "click_ref" => {
+            let rf = r#ref.unwrap_or_default();
+            if rf.is_empty() {
+                return Err("ref required for click_ref".into());
+            }
+            let escaped = rf.replace('\\', "\\\\").replace('\'', "\\'");
+            format!(
+                r#"(function(){{
+  const ref='{escaped}';
+  const el=document.querySelector('[data-remedy-ref="'+ref+'"]');
+  if(!el) return 'missing-ref:'+ref;
+  try{{ el.scrollIntoView({{block:'center',inline:'center',behavior:'instant'}}); }}catch(e){{}}
+  try{{ el.focus({{preventScroll:true}}); }}catch(e){{}}
+  const r=el.getBoundingClientRect();
+  const x=r.x+r.width/2, y=r.y+r.height/2;
+  const opts={{bubbles:true,cancelable:true,clientX:x,clientY:y,view:window,button:0}};
+  el.dispatchEvent(new MouseEvent('mousedown', opts));
+  el.dispatchEvent(new MouseEvent('mouseup', opts));
+  el.dispatchEvent(new MouseEvent('click', opts));
+  if(typeof el.click==='function') try{{ el.click(); }}catch(e){{}}
+  return 'ok:'+ref+':'+(el.tagName||'?');
+}})()"#
+            )
+        }
         "click" => {
+            // Prefer ref when provided
+            if let Some(rf) = r#ref.clone().filter(|s| !s.is_empty()) {
+                let escaped = rf.replace('\\', "\\\\").replace('\'', "\\'");
+                format!(
+                    r#"(function(){{
+  const ref='{escaped}';
+  const el=document.querySelector('[data-remedy-ref="'+ref+'"]');
+  if(!el) return 'missing-ref:'+ref;
+  try{{ el.scrollIntoView({{block:'center',inline:'center',behavior:'instant'}}); }}catch(e){{}}
+  try{{ el.focus({{preventScroll:true}}); }}catch(e){{}}
+  const r=el.getBoundingClientRect();
+  const x=r.x+r.width/2, y=r.y+r.height/2;
+  const opts={{bubbles:true,cancelable:true,clientX:x,clientY:y,view:window,button:0}};
+  el.dispatchEvent(new MouseEvent('mousedown', opts));
+  el.dispatchEvent(new MouseEvent('mouseup', opts));
+  el.dispatchEvent(new MouseEvent('click', opts));
+  if(typeof el.click==='function') try{{ el.click(); }}catch(e){{}}
+  return 'ok:'+ref;
+}})()"#
+                )
+            } else {
             let cx = x.unwrap_or(0.0);
             let cy = y.unwrap_or(0.0);
             let btn = button.unwrap_or_else(|| "left".into());
@@ -353,6 +442,7 @@ pub fn browser_agent_action(
                 js_btn = js_btn,
                 btn_code = if btn == "right" { 2 } else { 0 },
             )
+            }
         }
         "type" | "type_text" => {
             let t = text.unwrap_or_default();

@@ -325,8 +325,10 @@ PLAN_MODE_TOOL_NAMES = frozenset(
         "vision_describe",
         # Computer use (research): see rail / screen; no click/type in Plan
         "computer_screenshot",
+        "computer_snapshot",
         "computer_navigate",
         "computer_windows",
+        "computer_monitors",
     }
 )
 

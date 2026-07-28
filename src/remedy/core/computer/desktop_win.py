@@ -8,7 +8,7 @@ import sys
 import time
 from ctypes import wintypes
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 # Virtual-key codes (subset)
 _VK = {
@@ -342,9 +342,22 @@ def scroll(x: int, y: int, *, dy: int = -3, dx: int = 0) -> None:
     _ = dx  # horizontal wheel later if needed
 
 
-def type_text(text: str) -> None:
+def type_text(
+    text: str,
+    *,
+    abort_check: Callable[[], bool] | None = None,
+) -> None:
+    """Type unicode text. *abort_check* callable → stop mid-string when true."""
     _require_windows()
-    for ch in text or "":
+    for i, ch in enumerate(text or ""):
+        if abort_check is not None and i > 0 and i % 8 == 0:
+            try:
+                if abort_check():
+                    raise RuntimeError("Aborted by user during type")
+            except RuntimeError:
+                raise
+            except Exception:
+                pass
         code = ord(ch)
         down = KEYBDINPUT(0, code, KEYEVENTF_UNICODE, 0, None)
         up = KEYBDINPUT(0, code, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP, 0, None)
@@ -426,3 +439,75 @@ def focus_window(hwnd: int) -> None:
     user32 = ctypes.windll.user32
     user32.ShowWindow(hwnd, 9)  # SW_RESTORE
     user32.SetForegroundWindow(hwnd)
+
+
+def list_monitors() -> list[dict[str, Any]]:
+    """Enumerate display monitors (physical pixels, DPI-aware)."""
+    _require_windows()
+    user32 = ctypes.windll.user32
+    user32.SetProcessDPIAware()
+    monitors: list[dict[str, Any]] = []
+
+    class RECT(ctypes.Structure):
+        _fields_ = [
+            ("left", wintypes.LONG),
+            ("top", wintypes.LONG),
+            ("right", wintypes.LONG),
+            ("bottom", wintypes.LONG),
+        ]
+
+    MonitorEnumProc = ctypes.WINFUNCTYPE(
+        wintypes.BOOL,
+        wintypes.HMONITOR,
+        wintypes.HDC,
+        ctypes.POINTER(RECT),
+        wintypes.LPARAM,
+    )
+
+    def _callback(hmon, _hdc, lprect, _lparam):  # type: ignore[no-untyped-def]
+        r = lprect.contents
+        idx = len(monitors)
+        monitors.append(
+            {
+                "index": idx,
+                "left": int(r.left),
+                "top": int(r.top),
+                "right": int(r.right),
+                "bottom": int(r.bottom),
+                "width": int(r.right - r.left),
+                "height": int(r.bottom - r.top),
+                "primary": idx == 0,  # refined below
+            }
+        )
+        return True
+
+    user32.EnumDisplayMonitors(0, 0, MonitorEnumProc(_callback), 0)
+    # Mark primary via GetSystemMetrics origin (0,0) usually on primary
+    for m in monitors:
+        m["primary"] = m["left"] == 0 and m["top"] == 0
+    if monitors and not any(m["primary"] for m in monitors):
+        monitors[0]["primary"] = True
+    return monitors
+
+
+def screenshot_monitor_png(
+    monitor_index: int = 0,
+    *,
+    path: Path | None = None,
+) -> dict[str, Any]:
+    """Capture one monitor by index (from list_monitors)."""
+    mons = list_monitors()
+    if not mons:
+        return screenshot_png(path)
+    idx = int(monitor_index)
+    if idx < 0 or idx >= len(mons):
+        raise ValueError(f"monitor index {idx} out of range 0..{len(mons)-1}")
+    m = mons[idx]
+    return screenshot_region_png(
+        m["left"],
+        m["top"],
+        m["width"],
+        m["height"],
+        path=path,
+        scale=1.0,
+    )
