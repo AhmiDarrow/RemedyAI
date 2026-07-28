@@ -151,11 +151,22 @@ def register_computer_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         return {"ok": True, "capture": info}
 
     @app.get("/api/computer/jobs/next")
-    async def computer_job_next():
-        """Desktop host claims the next pending browser job (or null)."""
+    async def computer_job_next(exclude: str = "", only: str = ""):
+        """Desktop host claims the next pending browser job (or null).
+
+        *exclude*: comma-separated actions to leave pending (SPA should pass
+        ``exclude=navigate`` so Rust owns in-rail navigates via ui_command).
+        *only*: if set, only claim these actions (Rust backup: ``only=navigate``).
+        """
         b = _bridge()
         b.mark_host_alive()
-        job = b.claim_next()
+        skip: set[str] | None = None
+        only_set: set[str] | None = None
+        if exclude and str(exclude).strip():
+            skip = {p.strip().lower() for p in str(exclude).split(",") if p.strip()}
+        if only and str(only).strip():
+            only_set = {p.strip().lower() for p in str(only).split(",") if p.strip()}
+        job = b.claim_next(exclude_actions=skip, only_actions=only_set)
         if job is None:
             return {"job": None}
         return {"job": job.to_dict()}

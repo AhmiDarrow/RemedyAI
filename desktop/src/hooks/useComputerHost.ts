@@ -249,9 +249,16 @@ export function useComputerHost(
         }
         let job: ComputerJob | null = null
         try {
-          job = await claimComputerJob()
+          // Never claim navigate — Rust computer-host owns rail navigates via
+          // ui_command take. Dual claim was racing the WebView main thread and
+          // causing second-nav timeouts (Google ok, wiki 8s fail).
+          job = await claimComputerJob({ exclude: 'navigate' })
         } catch (e) {
           console.warn('[computer-host] claim failed', e)
+          job = null
+        }
+        if (job?.id && (job.action || '').toLowerCase() === 'navigate') {
+          // Belt-and-suspenders: leave for Rust (should not be claimed)
           job = null
         }
         if (job?.id) {

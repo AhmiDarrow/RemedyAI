@@ -268,8 +268,23 @@ class ComputerHostBridge:
             )
         return job
 
-    def claim_next(self) -> ComputerJob | None:
-        """Desktop host: claim oldest pending job."""
+    def claim_next(
+        self,
+        *,
+        exclude_actions: set[str] | frozenset[str] | None = None,
+        only_actions: set[str] | frozenset[str] | None = None,
+    ) -> ComputerJob | None:
+        """Desktop host: claim oldest pending job.
+
+        *exclude_actions*: skip these actions (leave pending). SPA uses
+        exclude=navigate so Rust owns rail navigates via ui_command and
+        the two pollers cannot deadlock the WebView main thread.
+
+        *only_actions*: if set, only claim jobs whose action is in this set
+        (Rust backup path: only=navigate).
+        """
+        skip = {str(a).lower() for a in (exclude_actions or ())}
+        only = {str(a).lower() for a in (only_actions or ())} if only_actions else None
         with self._lock:
             self.mark_host_alive()
             files = sorted(self.root.glob("*.json"), key=lambda p: p.stat().st_mtime)
@@ -282,6 +297,11 @@ class ComputerHostBridge:
                     continue
                 job = ComputerJob.from_dict(raw)
                 if job.status != "pending":
+                    continue
+                act = job.action.lower()
+                if act in skip:
+                    continue
+                if only is not None and act not in only:
                     continue
                 job.status = "running"
                 self._write(job)
@@ -363,6 +383,26 @@ class ComputerHostBridge:
             self._write(job)
             return job
 
+    def renudge_ui_for_job(self, job: ComputerJob) -> None:
+        """Re-publish open_browser ui_command if host may have lost the first take."""
+        if job.action != "navigate":
+            return
+        if job.status not in ("pending", "running"):
+            return
+        pl = dict(job.payload or {})
+        url = str(pl.get("url") or "")
+        if not url:
+            return
+        self.set_ui_command(
+            {
+                "action": "open_browser",
+                "url": url,
+                "job_id": job.id,
+                "job_action": job.action,
+                "renudge": True,
+            }
+        )
+
     def wait(
         self,
         job_id: str,
@@ -378,10 +418,14 @@ class ComputerHostBridge:
         for this job, fail fast. Navigate jobs leave unclaimed_timeout None and
         wait for Desktop complete (or overall timeout).
 
+        Navigate: re-nudge ui_command at ~0.6s and ~2.5s if still open so a
+        lost take / busy poller still gets a second chance before timeout.
+
         Never overwrite a job that was already completed by the host (race fix).
         """
         started = time.time()
         deadline = started + max(1.0, timeout_s)
+        nudges_done = 0
         while time.time() < deadline:
             if abort_check is not None:
                 try:
@@ -403,11 +447,27 @@ class ComputerHostBridge:
                 continue
             if job.status in ("done", "error", "cancelled"):
                 return job
+            # Re-issue ui_command for navigate if host has not completed yet.
+            # Covers: take without complete, busy main thread, dropped poll.
+            elapsed = time.time() - started
+            if job.action == "navigate" and job.status in ("pending", "running"):
+                if nudges_done == 0 and elapsed >= 0.6:
+                    cmd = self.peek_ui_command()
+                    ui_for_job = (
+                        isinstance(cmd, dict)
+                        and str(cmd.get("job_id") or "") == str(job_id)
+                    )
+                    if not ui_for_job:
+                        self.renudge_ui_for_job(job)
+                    nudges_done = 1
+                elif nudges_done == 1 and elapsed >= 2.5:
+                    self.renudge_ui_for_job(job)
+                    nudges_done = 2
             # Fail fast only when no UI command is outstanding for this job
             if (
                 job.status == "pending"
                 and unclaimed_timeout_s is not None
-                and (time.time() - started) >= max(0.5, unclaimed_timeout_s)
+                and elapsed >= max(0.5, unclaimed_timeout_s)
             ):
                 cmd = self.peek_ui_command()
                 ui_for_job = (

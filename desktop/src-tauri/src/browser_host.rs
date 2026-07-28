@@ -327,13 +327,16 @@ fn computer_host_loop(app: AppHandle) {
         std::thread::sleep(Duration::from_millis(500));
     }
     log::info!("computer-host: API reachable, polling ui/command + jobs");
-    let mut last_job_id = String::new();
+    // Track last *completed* navigate job so renudge take of the same id is a
+    // real re-navigate (never fake-complete without opening the URL).
+    let mut last_completed_nav = String::new();
     let mut hello_tick: u32 = 0;
     loop {
-        std::thread::sleep(Duration::from_millis(200));
+        // Poll tightly — agent waits ~8s; 100ms keeps sub-second rail open
+        std::thread::sleep(Duration::from_millis(100));
         hello_tick = hello_tick.wrapping_add(1);
         // Hello less often — was adding latency under load
-        if hello_tick % 10 == 0 {
+        if hello_tick % 20 == 0 {
             let _ = agent
                 .post("http://127.0.0.1:7400/api/computer/host/hello")
                 .set("Content-Type", "application/json")
@@ -352,21 +355,20 @@ fn computer_host_loop(app: AppHandle) {
                         .and_then(|j| j.as_str())
                         .unwrap_or("")
                         .to_string();
-                    if !jid.is_empty() && jid == last_job_id {
-                        log::debug!("computer-host: skip duplicate job {jid}");
-                    } else {
-                        if !jid.is_empty() {
-                            last_job_id = jid.clone();
-                        }
-                        handle_ui_command(&app, &agent, cmd);
+                    // Always handle — never drop a take without navigate+complete.
+                    // Renudge may re-deliver the same job_id; re-navigate is correct.
+                    handle_ui_command(&app, &agent, cmd);
+                    if !jid.is_empty() {
+                        last_completed_nav = jid;
                     }
                 }
             }
         }
 
-        // Job queue — only claim non-navigate leftovers (navigate handled via ui take)
+        // Job queue — only claim navigate leftovers (SPA owns click/type/snapshot).
+        // Backup when ui_command was lost and Python renudged only the job file.
         if let Ok(resp) = agent
-            .get("http://127.0.0.1:7400/api/computer/jobs/next")
+            .get("http://127.0.0.1:7400/api/computer/jobs/next?only=navigate")
             .call()
         {
             if let Ok(v) = resp.into_json::<serde_json::Value>() {
@@ -380,30 +382,16 @@ fn computer_host_loop(app: AppHandle) {
                         .and_then(|i| i.as_str())
                         .unwrap_or("")
                         .to_string();
-                    // Skip navigate jobs already finished via ui_command path
-                    if action == "navigate" {
-                        if !jid.is_empty() && jid == last_job_id {
-                            // Already handled — complete as no-op if still pending was claimed
-                            complete_job(
-                                &agent,
-                                &jid,
-                                true,
-                                json!({
-                                    "ok": true,
-                                    "target": "browser",
-                                    "action": "navigate",
-                                    "message": "Already navigated via ui_command",
-                                    "via": "rust-host-dedupe",
-                                }),
-                                None,
-                            );
-                            continue;
-                        }
-                    }
-                    if !jid.is_empty() {
-                        last_job_id = jid;
+                    // NEVER fake-complete navigate. If still claimable, navigate for real.
+                    if action == "navigate" && !jid.is_empty() && jid == last_completed_nav {
+                        log::info!(
+                            "computer-host: re-claim navigate {jid} after prior complete — navigating again"
+                        );
                     }
                     handle_job(&app, &agent, job);
+                    if action == "navigate" && !jid.is_empty() {
+                        last_completed_nav = jid;
+                    }
                 }
             }
         }
@@ -442,50 +430,62 @@ fn handle_ui_command(app: &AppHandle, agent: &ureq::Agent, cmd: &serde_json::Val
         json!({ "url": url, "job_id": job_id }),
     );
     // Minimal settle — emit is enough for layout; don't burn 200ms+ on every nav
-    std::thread::sleep(Duration::from_millis(120));
+    std::thread::sleep(Duration::from_millis(80));
 
-    if !url.is_empty() {
-        // Complete job ASAP after navigate so the agent does not wait/timeout
-        let nav_result = run_navigate_on_main(app, &url);
-        if let Ok(ref final_url) = nav_result {
-            let _ = app.emit(
-                "computer-browser-url",
-                json!({ "url": final_url }),
+    if url.is_empty() {
+        // Still open the rail; only fail the job if we expected a navigate URL
+        if !job_id.is_empty() && job_action == "navigate" {
+            complete_job(
+                agent,
+                &job_id,
+                false,
+                json!({}),
+                Some("navigate ui_command missing url".into()),
             );
         }
-        if !job_id.is_empty() {
-            match &nav_result {
-                Ok(final_url) => {
-                    complete_job(
-                        agent,
-                        &job_id,
-                        true,
-                        json!({
-                            "ok": true,
-                            "target": "browser",
-                            "action": "navigate",
-                            "message": format!(
-                                "SUCCESS: Page is open in the in-app Browser rail (right panel). \
-                                 URL: {final_url}. The user can see it. \
-                                 Do NOT say the rail failed. Do NOT open system browser. Do NOT web_fetch this page. \
-                                 Reply briefly that Google (or the page) is open in the Browser rail."
-                            ),
-                            "url": final_url,
-                            "via": "rust-host",
-                            "user_visible": true,
-                        }),
-                        None,
-                    );
-                }
-                Err(e) => {
-                    log::warn!("computer-host navigate failed: {e}");
-                    complete_job(agent, &job_id, false, json!({}), Some(e.clone()));
-                }
+        return;
+    }
+
+    // Complete job ASAP after navigate so the agent does not wait/timeout
+    let nav_result = run_navigate_on_main(app, &url);
+    if let Ok(ref final_url) = nav_result {
+        let _ = app.emit(
+            "computer-browser-url",
+            json!({ "url": final_url }),
+        );
+    }
+    if !job_id.is_empty() {
+        match &nav_result {
+            Ok(final_url) => {
+                complete_job(
+                    agent,
+                    &job_id,
+                    true,
+                    json!({
+                        "ok": true,
+                        "target": "browser",
+                        "action": "navigate",
+                        "message": format!(
+                            "SUCCESS: Page is open in the in-app Browser rail (right panel). \
+                             URL: {final_url}. The user can see it. \
+                             Do NOT say the rail failed. Do NOT open system browser. Do NOT web_fetch this page. \
+                             Reply briefly that the page is open in the Browser rail."
+                        ),
+                        "url": final_url,
+                        "via": "rust-host",
+                        "user_visible": true,
+                    }),
+                    None,
+                );
+            }
+            Err(e) => {
+                log::warn!("computer-host navigate failed: {e}");
+                complete_job(agent, &job_id, false, json!({}), Some(e.clone()));
             }
         }
-        // Resync bounds after complete (non-blocking for agent wait)
-        let _ = run_resync_bounds_on_main(app);
     }
+    // Resync bounds after complete (best-effort; don't block agent wait long)
+    let _ = run_resync_bounds_on_main(app);
 }
 
 fn handle_job(app: &AppHandle, agent: &ureq::Agent, job: &serde_json::Value) {
@@ -500,7 +500,7 @@ fn handle_job(app: &AppHandle, agent: &ureq::Agent, job: &serde_json::Value) {
         return;
     }
     let _ = app.emit("computer-open-browser", json!({ "job_id": id }));
-    std::thread::sleep(Duration::from_millis(350));
+    std::thread::sleep(Duration::from_millis(80));
 
     if action == "navigate" {
         let url = payload
@@ -513,20 +513,27 @@ fn handle_job(app: &AppHandle, agent: &ureq::Agent, job: &serde_json::Value) {
             return;
         }
         match run_navigate_on_main(app, &url) {
-            Ok(final_url) => complete_job(
-                agent,
-                &id,
-                true,
-                json!({
-                    "ok": true,
-                    "target": "browser",
-                    "action": "navigate",
-                    "message": format!("Navigated in-rail: {final_url}"),
-                    "url": final_url,
-                    "via": "rust-job",
-                }),
-                None,
-            ),
+            Ok(final_url) => {
+                let _ = app.emit("computer-browser-url", json!({ "url": final_url }));
+                complete_job(
+                    agent,
+                    &id,
+                    true,
+                    json!({
+                        "ok": true,
+                        "target": "browser",
+                        "action": "navigate",
+                        "message": format!(
+                            "SUCCESS: Page is open in the in-app Browser rail. URL: {final_url}. \
+                             Do NOT web_fetch. Do NOT open system browser."
+                        ),
+                        "url": final_url,
+                        "via": "rust-job",
+                        "user_visible": true,
+                    }),
+                    None,
+                );
+            }
             Err(e) => complete_job(agent, &id, false, json!({}), Some(e)),
         }
         let _ = agent
@@ -538,6 +545,8 @@ fn handle_job(app: &AppHandle, agent: &ureq::Agent, job: &serde_json::Value) {
     }
 
     // Non-navigate jobs: leave for SPA poller (click/type need page JS) or complete with note
+    // Put job back to pending so SPA can claim — we already marked running via claim.
+    // SPA excludes only navigate; if we claimed screenshot/etc by mistake, complete with note.
     log::info!("computer-host: job {id} action={action} left for SPA or next tick");
 }
 
@@ -552,7 +561,8 @@ fn run_navigate_on_main(app: &AppHandle, url: &str) -> Result<String, String> {
         let _ = tx.send(r);
     })
     .map_err(|e| format!("run_on_main_thread: {e}"))?;
-    rx.recv_timeout(Duration::from_secs(15))
+    // Keep under agent 8s budget (with renudge headroom)
+    rx.recv_timeout(Duration::from_secs(5))
         .map_err(|_| "navigate timed out on main thread".to_string())?
 }
 

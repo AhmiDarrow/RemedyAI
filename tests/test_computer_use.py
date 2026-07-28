@@ -148,6 +148,54 @@ def test_wait_honors_ui_command_without_claim(tmp_path: Path):
     assert finished.status == "done"
 
 
+def test_claim_next_exclude_and_only(tmp_path: Path):
+    from remedy.core.computer.host_bridge import ComputerHostBridge
+
+    b = ComputerHostBridge(home_dir=tmp_path)
+    nav = b.enqueue("navigate", {"url": "https://example.com"})
+    click = b.enqueue("click", {"x": 1, "y": 2})
+    # SPA path: never steal navigates
+    claimed = b.claim_next(exclude_actions={"navigate"})
+    assert claimed is not None
+    assert claimed.id == click.id
+    assert claimed.action == "click"
+    # Navigate still pending for Rust
+    still = b.claim_next(exclude_actions={"navigate"})
+    assert still is None
+    only_nav = b.claim_next(only_actions={"navigate"})
+    assert only_nav is not None
+    assert only_nav.id == nav.id
+
+
+def test_wait_renudges_ui_command(tmp_path: Path):
+    """If host takes ui_command without completing, wait re-publishes it."""
+    import threading
+    import time
+
+    b = ComputerHostBridge(home_dir=tmp_path)
+    job = b.enqueue("navigate", {"url": "https://example.com/gta"})
+    assert b.take_ui_command() is not None  # host "lost" the take
+    assert b.peek_ui_command() is None
+
+    def complete_after_renudge() -> None:
+        # Wait until renudge restores command
+        for _ in range(40):
+            cmd = b.peek_ui_command()
+            if cmd and str(cmd.get("job_id")) == job.id:
+                b.complete(
+                    job.id,
+                    ok=True,
+                    result={"ok": True, "action": "navigate", "via": "renudge-test"},
+                )
+                return
+            time.sleep(0.05)
+
+    threading.Thread(target=complete_after_renudge, daemon=True).start()
+    finished = b.wait(job.id, timeout_s=4.0, unclaimed_timeout_s=None, poll_s=0.05)
+    assert finished.status == "done"
+    assert (finished.result or {}).get("via") == "renudge-test"
+
+
 def test_computer_api_and_tools_registered(tmp_path: Path, monkeypatch):
     class Cfg:
         home_dir = str(tmp_path)

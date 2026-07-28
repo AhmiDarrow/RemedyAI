@@ -18,7 +18,10 @@ from remedy.core.computer.host_bridge import ComputerHostBridge, canonical_home 
 
 URLS = [
     "https://www.google.com",
+    "https://en.wikipedia.org/wiki/Grand_Theft_Auto_V",
     "https://en.wikipedia.org/wiki/Baldur%27s_Gate",
+    "https://www.google.com",
+    "https://en.wikipedia.org/wiki/Grand_Theft_Auto_V",
     "https://www.google.com",
 ]
 

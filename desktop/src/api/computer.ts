@@ -85,8 +85,15 @@ export async function computerCapture(body: {
   })
 }
 
-export async function claimComputerJob(): Promise<ComputerJob | null> {
-  const data = await hostFetch<{ job?: ComputerJob | null }>('/computer/jobs/next')
+/** Claim next job. SPA must exclude navigate — Rust owns rail navigates. */
+export async function claimComputerJob(
+  opts?: { exclude?: string },
+): Promise<ComputerJob | null> {
+  const exclude = opts?.exclude ?? 'navigate'
+  const q = exclude ? `?exclude=${encodeURIComponent(exclude)}` : ''
+  const data = await hostFetch<{ job?: ComputerJob | null }>(
+    `/computer/jobs/next${q}`,
+  )
   return data.job || null
 }
 
