@@ -95,6 +95,8 @@ def register_computer_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         return {
             "host_connected": b.host_connected(),
             "browser_bounds": b.get_browser_bounds(),
+            "pending_jobs": b.pending_count(),
+            "jobs_root": str(b.root),
             "pending_hint": "claim via GET /api/computer/jobs/next",
         }
 

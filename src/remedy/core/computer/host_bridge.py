@@ -64,6 +64,7 @@ class ComputerHostBridge:
         self.root = _root(home_dir)
         self._lock = threading.Lock()
         self._host_seen_at: float = 0.0
+        self._last_claim_at: float = 0.0
         self._browser_bounds: dict[str, float] | None = None
         self._browser_scale: float = 1.0
         # Last a11y/desktop snapshot for click-by-ref resolution
@@ -72,6 +73,21 @@ class ComputerHostBridge:
 
     def mark_host_alive(self) -> None:
         self._host_seen_at = time.time()
+
+    def mark_host_dead(self) -> None:
+        """Forget host liveness after unclaimed jobs / failed drive."""
+        self._host_seen_at = 0.0
+
+    def pending_count(self) -> int:
+        n = 0
+        for path in self.root.glob("*.json"):
+            try:
+                raw = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if isinstance(raw, dict) and raw.get("status") == "pending":
+                n += 1
+        return n
 
     def set_last_elements(
         self,
@@ -177,6 +193,7 @@ class ComputerHostBridge:
                     continue
                 job.status = "running"
                 self._write(job)
+                self._last_claim_at = time.time()
                 return job
         return None
 
@@ -261,8 +278,15 @@ class ComputerHostBridge:
         timeout_s: float = 30.0,
         poll_s: float = 0.15,
         abort_check: Any | None = None,
+        unclaimed_timeout_s: float | None = 3.0,
     ) -> ComputerJob:
-        deadline = time.time() + max(1.0, timeout_s)
+        """Wait for job completion.
+
+        *unclaimed_timeout_s*: if still ``pending`` this long, treat host as
+        dead (hello-only / poller not claiming) instead of waiting full timeout.
+        """
+        started = time.time()
+        deadline = started + max(1.0, timeout_s)
         while time.time() < deadline:
             if abort_check is not None:
                 try:
@@ -279,6 +303,21 @@ class ComputerHostBridge:
                 break
             if job.status in ("done", "error", "cancelled"):
                 return job
+            # Host said hello but never claimed — fail fast (was 45s hangs)
+            if (
+                job.status == "pending"
+                and unclaimed_timeout_s is not None
+                and (time.time() - started) >= max(0.5, unclaimed_timeout_s)
+            ):
+                job.status = "error"
+                job.error = (
+                    f"host did not claim job within {unclaimed_timeout_s:.0f}s "
+                    "(Desktop poller offline or not authenticated)"
+                )
+                with self._lock:
+                    self._write(job)
+                self.mark_host_dead()
+                return job
             time.sleep(poll_s)
         job = self._read(job_id)
         if job is None:
@@ -293,6 +332,8 @@ class ComputerHostBridge:
             job.error = f"timeout waiting for desktop host ({timeout_s:.0f}s)"
             with self._lock:
                 self._write(job)
+            if job.status == "pending" or "timeout" in (job.error or ""):
+                self.mark_host_dead()
         return job
 
     def purge_old(self, *, max_age_s: float = 3600.0) -> int:

@@ -17,6 +17,18 @@ from remedy.models import AgentConfig
 def test_resolve_target_url_prefers_browser():
     assert resolve_target("auto", url="https://example.com") is ComputerTarget.BROWSER
     assert resolve_target("auto", hint="open github.com docs") is ComputerTarget.BROWSER
+    assert resolve_target("auto", hint="show me the wiki for baldur") is ComputerTarget.BROWSER
+    assert resolve_target("browser", url="https://x.com") is ComputerTarget.BROWSER
+
+
+def test_wants_system_browser_only_when_explicit():
+    from remedy.core.computer.router import wants_system_browser
+
+    assert wants_system_browser("open the wiki") is False
+    assert wants_system_browser("show me the fandom page") is False
+    assert wants_system_browser("open in Firefox") is True
+    assert wants_system_browser("use the system browser") is True
+    assert wants_system_browser("open externally") is True
 
 
 def test_resolve_target_desktop_hints():
@@ -54,6 +66,15 @@ def test_host_bridge_enqueue_claim_complete(tmp_path: Path):
     assert done is not None
     assert done.status == "done"
     assert b.claim_next() is None
+
+
+def test_wait_fails_fast_when_unclaimed(tmp_path: Path):
+    b = ComputerHostBridge(home_dir=tmp_path)
+    job = b.enqueue("navigate", {"url": "https://example.com"})
+    finished = b.wait(job.id, timeout_s=30.0, unclaimed_timeout_s=0.6, poll_s=0.1)
+    assert finished.status == "error"
+    assert "did not claim" in (finished.error or "")
+    assert not b.host_connected()
 
 
 def test_computer_api_and_tools_registered(tmp_path: Path, monkeypatch):

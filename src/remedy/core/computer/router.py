@@ -32,9 +32,30 @@ _BROWSER_HINTS = re.compile(
     r"(?i)\b("
     r"in[- ]?app\s*browser|browser\s*rail|embedded\s*browser|"
     r"web\s*page|website|url|http|https|form\s*on\s*the\s*site|"
-    r"cloud\s*console|docs\s*site|github\.com"
+    r"cloud\s*console|docs\s*site|github\.com|wiki|fandom|wikipedia|"
+    r"open\s+(the\s+)?(site|page|link)|show\s+me\s+(the\s+)?(site|page|wiki)"
     r")\b"
 )
+
+# User explicitly wants OS / external browser (not the in-app rail).
+_SYSTEM_BROWSER_HINTS = re.compile(
+    r"(?i)\b("
+    r"system\s*browser|external\s*browser|default\s*browser|"
+    r"outside\s*(the\s*)?(app|remedy)|in\s*firefox|in\s*chrome|in\s*edge|"
+    r"open\s+externally|not\s+in[- ]?(the\s+)?rail"
+    r")\b"
+)
+
+
+def wants_system_browser(hint: str | None = None, target: str | None = None) -> bool:
+    """True only when the user/model explicitly asks for OS browser."""
+    t = (target or "").strip().lower()
+    if t in ("desktop", "os", "system", "external"):
+        # desktop target alone is not enough for navigate — check hint too
+        pass
+    if t in ("external", "system"):
+        return True
+    return bool(_SYSTEM_BROWSER_HINTS.search(hint or ""))
 
 
 def looks_like_url(text: str | None) -> bool:
@@ -101,7 +122,8 @@ def resolve_target(
     if (action or "").lower() in ("navigate", "computer_navigate"):
         return ComputerTarget.BROWSER
 
-    # Default: full desktop — covers native apps and whole-screen work.
+    # Default: desktop for non-web computer actions (click/type on OS).
+    # Web navigate / URL-ish work already returned BROWSER above.
     return ComputerTarget.DESKTOP
 
 

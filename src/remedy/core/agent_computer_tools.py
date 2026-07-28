@@ -133,13 +133,17 @@ def register_computer_tools(runtime: Any) -> None:
 
     async def computer_navigate(
         url: str = "",
-        target: str = "auto",
+        target: str = "browser",
         hint: str = "",
     ) -> str:
-        """Open a URL in the in-app browser rail (preferred) or system browser."""
+        """Open a URL in the **in-app browser rail** (default).
+
+        Use target=desktop / hint about system/external browser only when the
+        user asks to open outside Remedy.
+        """
         return ex.run(
             ComputerAction.NAVIGATE,
-            target=target or "auto",
+            target=target or "browser",
             hint=hint,
             runtime=runtime,
             url=url,
@@ -304,13 +308,19 @@ def register_computer_tools(runtime: Any) -> None:
     )
     reg.register_builtin_handler(
         "computer_navigate",
-        "Open a URL in the in-app browser rail (or system browser if host offline).",
+        "Open a URL in the in-app Browser rail (default). Only use system/external browser if the user asks.",
         computer_navigate,
         {
             "type": "object",
             "properties": {
                 "url": {"type": "string"},
-                "target": target_prop,
+                "target": {
+                    "type": "string",
+                    "description": (
+                        "browser (default, in-app rail) | desktop/external only if "
+                        "user asked for system browser"
+                    ),
+                },
                 "hint": hint_prop,
             },
             "required": ["url"],

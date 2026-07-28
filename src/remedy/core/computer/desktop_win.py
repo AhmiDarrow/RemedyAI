@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+import os
 import struct
 import sys
 import time
@@ -683,6 +684,32 @@ def focus_window(hwnd: int) -> None:
     user32 = ctypes.windll.user32
     user32.ShowWindow(hwnd, 9)  # SW_RESTORE
     user32.SetForegroundWindow(hwnd)
+
+
+def open_url(url: str) -> dict[str, Any]:
+    """Open http(s) URL in the default system browser (Windows-reliable)."""
+    u = (url or "").strip()
+    if not u:
+        raise ValueError("empty url")
+    if sys.platform == "win32":
+        # os.startfile is more reliable than webbrowser on Windows (default app).
+        try:
+            os.startfile(u)  # type: ignore[attr-defined]
+            return {"url": u, "method": "os.startfile"}
+        except OSError:
+            import subprocess
+
+            # Empty title arg after start is required for URLs with & 
+            subprocess.Popen(
+                ["cmd", "/c", "start", "", u],
+                shell=False,
+                close_fds=True,
+            )
+            return {"url": u, "method": "cmd start"}
+    import webbrowser
+
+    webbrowser.open(u)
+    return {"url": u, "method": "webbrowser"}
 
 
 def list_monitors() -> list[dict[str, Any]]:

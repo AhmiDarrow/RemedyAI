@@ -192,8 +192,18 @@ export function useComputerHost(enabled = true): void {
       if (cancelled || busy.current) return
       busy.current = true
       try {
-        await hello()
-        const job = await claimComputerJob().catch(() => null)
+        try {
+          await hello()
+        } catch (e) {
+          console.warn('[computer-host] hello failed', e)
+        }
+        let job: ComputerJob | null = null
+        try {
+          job = await claimComputerJob()
+        } catch (e) {
+          console.warn('[computer-host] claim failed (auth or network)', e)
+          job = null
+        }
         if (job?.id) {
           try {
             const result = await runBrowserJob(job)
@@ -209,6 +219,7 @@ export function useComputerHost(enabled = true): void {
               })
             }
           } catch (e) {
+            console.warn('[computer-host] job failed', job.id, e)
             await completeComputerJob(job.id, {
               ok: false,
               error: e instanceof Error ? e.message : String(e),

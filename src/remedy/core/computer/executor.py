@@ -15,6 +15,7 @@ from remedy.core.computer.router import (
     looks_like_url,
     normalize_url,
     resolve_target,
+    wants_system_browser,
 )
 from remedy.core.computer.types import ComputerAction, public_result
 
@@ -54,6 +55,12 @@ class ComputerExecutor:
         hint = kwargs.get("hint") or kwargs.get("reason") or ""
         # Ref-based click is browser a11y — force browser unless user set desktop
         req_target = target
+        # Navigate defaults to in-app rail unless user asked for system/external browser
+        if act is ComputerAction.NAVIGATE:
+            if wants_system_browser(str(hint), target):
+                req_target = "desktop"
+            else:
+                req_target = "browser"
         if act is ComputerAction.CLICK and str(kwargs.get("ref") or "").strip():
             if (target or "auto").strip().lower() in ("", "auto"):
                 req_target = "browser"
@@ -65,6 +72,7 @@ class ComputerExecutor:
             hint_s = str(hint)
             if self.bridge.host_connected() or looks_like_url(hint_s) or (
                 "browser" in hint_s.lower() or "web" in hint_s.lower() or "page" in hint_s.lower()
+                or "wiki" in hint_s.lower()
             ):
                 req_target = "browser"
             else:
@@ -310,15 +318,13 @@ class ComputerExecutor:
                     action="navigate",
                     message="url required",
                 )
-            import webbrowser
-
-            webbrowser.open(url)
+            info = win.open_url(url)
             return public_result(
                 ok=True,
                 target="desktop",
                 action="navigate",
                 message=f"Opened system browser: {url}",
-                extra={"url": url},
+                extra=info,
             )
         return public_result(
             ok=False,
@@ -328,44 +334,25 @@ class ComputerExecutor:
         )
 
     def _run_browser(self, act: ComputerAction, **kwargs: Any) -> dict[str, Any]:
-        """Enqueue for desktop host; wait for result.
+        """Drive the in-app browser rail (default for web).
 
-        If the host is not connected, fall back for navigate→system browser
-        and for screenshot→desktop capture with a clear note.
+        Navigate always tries the **rail first**. System browser only if the user
+        asked for it, or the Desktop host fails to claim the job quickly.
         """
         payload = {k: v for k, v in kwargs.items() if v is not None}
         if act is ComputerAction.NAVIGATE and payload.get("url"):
             payload["url"] = normalize_url(str(payload["url"]))
 
-        # Fast path without host for a few actions
-        if not self.bridge.host_connected():
-            if act is ComputerAction.NAVIGATE:
-                # Prefer rail when host is up; else open system browser so task continues
-                r = self._run_desktop(act, **kwargs)
-                r["note"] = (
-                    "desktop host offline — used system browser; "
-                    "open Remedy Desktop for in-rail control"
-                )
-                return r
-            if act is ComputerAction.SCREENSHOT:
-                r = self._run_desktop(ComputerAction.SCREENSHOT)
-                r["note"] = (
-                    "desktop host offline — full desktop screenshot "
-                    "(start Desktop app for in-rail browser shots)"
-                )
-                r["target"] = "desktop"
-                return r
-            if act is ComputerAction.WINDOWS:
-                return self._run_desktop(act, **kwargs)
-            return public_result(
-                ok=False,
-                target="browser",
-                action=act.value,
-                message=(
-                    "Desktop host not connected. Open Remedy Desktop so the "
-                    "in-rail browser can be driven, or set target=desktop."
-                ),
-            )
+        hint = str(kwargs.get("hint") or "")
+        req_target = str(kwargs.get("target") or "auto")
+        # Explicit system/external browser request — skip rail
+        if act is ComputerAction.NAVIGATE and wants_system_browser(
+            hint, req_target
+        ):
+            r = self._run_desktop(act, **kwargs)
+            r["note"] = "Opened system browser (user/model requested external browser)"
+            r["target"] = "desktop"
+            return r
 
         # Prefer showing the Browser rail when driving the embed
         if act in (
@@ -378,6 +365,35 @@ class ComputerExecutor:
             payload.setdefault("ui", {})
             if isinstance(payload.get("ui"), dict):
                 payload["ui"]["open_browser"] = True
+
+        # Non-navigate without host: screenshots can still use OS capture
+        if not self.bridge.host_connected() and act is not ComputerAction.NAVIGATE:
+            if act is ComputerAction.SCREENSHOT:
+                r = self._run_desktop(ComputerAction.SCREENSHOT)
+                r["note"] = (
+                    "desktop host offline — full desktop screenshot "
+                    "(start Remedy Desktop for in-rail browser shots)"
+                )
+                r["target"] = "desktop"
+                return r
+            if act is ComputerAction.WINDOWS:
+                return self._run_desktop(act, **kwargs)
+            if act is ComputerAction.SNAPSHOT:
+                # fall through to enqueue briefly, then desktop snapshot fallback
+                pass
+            elif act not in (ComputerAction.NAVIGATE, ComputerAction.SNAPSHOT):
+                return public_result(
+                    ok=False,
+                    target="browser",
+                    action=act.value,
+                    message=(
+                        "Desktop host not connected. Open Remedy Desktop so the "
+                        "in-rail browser can be driven."
+                    ),
+                )
+
+        # Navigate: always queue for rail first (even if host_connected was false —
+        # poller may wake; fail fast if unclaimed).
 
         # Screenshot: prefer PrintWindow on WebView host, else crop rail bounds
         if act is ComputerAction.SCREENSHOT:
@@ -424,11 +440,15 @@ class ComputerExecutor:
                 except Exception:
                     pass  # fall through to host job / full desktop
 
+        # Navigate / simple actions: fail fast if poller never claims (was 45s hangs)
+        unclaimed = 2.5 if act is ComputerAction.NAVIGATE else 3.5
+        total_wait = float(kwargs.get("timeout_s") or (12.0 if act is ComputerAction.NAVIGATE else 30.0))
         job = self.bridge.enqueue(act.value, payload)
         finished = self.bridge.wait(
             job.id,
-            timeout_s=float(kwargs.get("timeout_s") or 45.0),
+            timeout_s=total_wait,
             abort_check=self._abort_check,
+            unclaimed_timeout_s=unclaimed,
         )
         if finished.status == "done" and finished.result:
             out = dict(finished.result)
@@ -442,17 +462,17 @@ class ComputerExecutor:
                 )
             return out
         err = finished.error or finished.status
-        # Click-by-ref without host: if we have cached browser elements, click desktop coords
-        if act is ComputerAction.CLICK and str(kwargs.get("ref") or "").strip():
-            el = self.bridge.get_element_by_ref(str(kwargs.get("ref")))
-            if el and el.get("x") is not None:
-                # Browser element coords are viewport-relative; only valid with host.
-                # Fall through with clear error.
-                pass
-        # Navigate fallback if host timed out
+        # Navigate fallback if host timed out / never claimed
         if act is ComputerAction.NAVIGATE and payload.get("url"):
             fb = self._run_desktop(act, **kwargs)
-            fb["note"] = f"browser host failed ({err}); opened system browser"
+            fb["note"] = (
+                f"in-rail browser did not pick up the job ({err}); "
+                f"opened the system default browser instead. "
+                f"Ensure Remedy Desktop is the feature/computer-use build "
+                f"and status shows PC host."
+            )
+            fb["ok"] = True
+            fb["rail_failed"] = True
             return fb
         # Snapshot offline → desktop window snapshot so task can continue
         if act is ComputerAction.SNAPSHOT:
