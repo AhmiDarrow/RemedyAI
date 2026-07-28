@@ -88,7 +88,17 @@ Fullscreen: **Exit fullscreen** / **Close** on the top bar, or **Esc**.
 
 Status bar toggle or **Ctrl+B** / Shift+Tab in composer. Desktop sends `plan_mode` so the server enforces the allowlist.
 
-**Plan banner** (above chat): **Approve → Build**, **Request changes**, refresh. Approve leaves Plan mode and seeds a kickoff prompt.
+**Plan banner** (above chat): **Approve → Build**, **Request changes**, **Cancel plan**.
+
+| Action | Effect |
+|--------|--------|
+| **Approve → Build** | Sets plan status to `approved`, leaves Plan mode, seeds a Build kickoff prompt |
+| **Continue → Build** | When already approved/active — leaves Plan mode and continues |
+| **Request changes** | Stays in Plan mode; seeds a revise prompt |
+| **Cancel plan** | Sets status to `cancelled` (durable). Banner does **not** reappear after reload |
+| **Quit plan mode** | When there is no saved plan yet — just leaves Plan mode |
+
+Finished (`done`) or cancelled plans **do not stick** in Build mode. Only **draft / approved / active** plans show the sticky card outside Plan mode. There is no cosmetic “Hide” — use **Cancel plan** to quit for good.
 
 **Structured plans** live under `~/.remedy/plans/`. Slash commands:
 
@@ -98,8 +108,9 @@ Status bar toggle or **Ctrl+B** / Shift+Tab in composer. Desktop sends `plan_mod
 | `/plan` | Show latest plan |
 | `/plan new <title>` | Create an empty draft |
 | `/plan approve` | Mark latest plan approved before Build |
+| `/plan cancel` | Cancel latest actionable plan (`/plan cancel <id>` optional) |
 
-API: `GET/POST /api/plans`, `GET /api/plans/latest`, `POST /api/plans/{id}/status`.
+API: `GET/POST /api/plans`, `GET /api/plans/latest` (`?actionable=1` skips done/cancelled), `POST /api/plans/{id}/status`.
 
 ## Time Travel (undo browser)
 

@@ -1838,6 +1838,10 @@ export default function App() {
                 setPlanMode(true)
                 setEditDraft({ text: hint, key: Date.now() })
               }}
+              onCancelled={() => {
+                // Durable cancel already persisted; leave Plan mode so tools unlock.
+                setPlanMode(false)
+              }}
             />
           </div>
 

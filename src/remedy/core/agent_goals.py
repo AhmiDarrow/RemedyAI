@@ -297,7 +297,11 @@ def register_goal_and_plan_tools(runtime: Any) -> None:
                 },
                 "status": {
                     "type": "string",
-                    "description": "draft | approved | active | done",
+                    "description": (
+                        "draft | approved | active (preferred). "
+                        "done/cancelled on a fresh save with pending steps are "
+                        "normalized to draft — use UI Cancel or status API to finish/quit."
+                    ),
                 },
             },
             "required": ["title"],

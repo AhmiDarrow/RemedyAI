@@ -106,16 +106,8 @@ export async function getLatestPlan(
   return apiFetch(`/plans/latest${q}`)
 }
 
-export async function approvePlan(planId: string): Promise<TaskPlan | null> {
-  const data = await apiFetch<{ plan: TaskPlan }>(
-    `/plans/${encodeURIComponent(planId)}/status`,
-    {
-      method: 'POST',
-      body: JSON.stringify({ status: 'approved' }),
-    },
-  )
-  return data.plan || null
-}
+/** @deprecated Prefer `approvePlan` from `./plans` — kept for panel imports. */
+export { approvePlan, cancelPlan, setPlanStatus } from './plans'
 
 export async function getSkillReuseMetrics(): Promise<{
   total_activations: number

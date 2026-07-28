@@ -14,6 +14,10 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+# Lifecycle sets used by store + desktop Plan banner.
+PLAN_TERMINAL_STATUSES = frozenset({"done", "cancelled"})
+PLAN_ACTIONABLE_STATUSES = frozenset({"draft", "approved", "active"})
+
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
@@ -191,15 +195,27 @@ class PlanStore:
                 break
         return items
 
-    def latest_for_session(self, session_id: str | None) -> TaskPlan | None:
+    def latest_for_session(
+        self,
+        session_id: str | None,
+        *,
+        actionable_only: bool = False,
+    ) -> TaskPlan | None:
         """Latest plan for *session_id*, or global latest when session is None.
 
         Never returns another session's plan when a session id is provided.
+
+        When *actionable_only* is True, skip terminal statuses (done / cancelled)
+        so the Plan banner and Build kickoff do not stick on finished/quit plans.
         """
+        # Pull a window so we can skip terminal rows without another full scan.
+        limit = 50 if actionable_only else 1
         if not session_id:
-            plans = self.list_plans(limit=1)
-            return plans[0] if plans else None
-        plans = self.list_plans(session_id=str(session_id), limit=1)
+            plans = self.list_plans(limit=limit)
+        else:
+            plans = self.list_plans(session_id=str(session_id), limit=limit)
+        if actionable_only:
+            plans = [p for p in plans if p.status not in PLAN_TERMINAL_STATUSES]
         return plans[0] if plans else None
 
     def create(
@@ -211,6 +227,7 @@ class PlanStore:
         risks: list[str] | None = None,
         session_id: str | None = None,
         status: str = "draft",
+        supersede_previous: bool = True,
     ) -> TaskPlan:
         step_objs: list[PlanStep] = []
         for i, s in enumerate(steps or []):
@@ -222,6 +239,20 @@ class PlanStore:
                 if not s.get("id"):
                     s = {**s, "id": f"s{i+1}"}
                 step_objs.append(PlanStep.from_dict(s))
+        st = status if status in ("draft", "approved", "active", "done", "cancelled") else "draft"
+        # Fresh saves with all-pending steps must not claim done/cancelled — that
+        # left the Plan banner stuck on "Plan ready · done" after chat finished.
+        if st in PLAN_TERMINAL_STATUSES and (
+            not step_objs or all(s.status == "pending" for s in step_objs)
+        ):
+            st = "draft"
+        # Supersede older actionable plans for this session *before* writing the
+        # new file so mtime order still ranks the new plan first.
+        if supersede_previous and session_id:
+            for old in self.list_plans(session_id=str(session_id), limit=50):
+                if old.status in PLAN_ACTIONABLE_STATUSES:
+                    old.status = "cancelled"
+                    self.save(old)
         pid = uuid4().hex[:12]
         plan = TaskPlan(
             id=pid,
@@ -230,7 +261,7 @@ class PlanStore:
             steps=step_objs,
             risks=[str(r) for r in (risks or [])],
             session_id=session_id,
-            status=status if status in ("draft", "approved", "active", "done", "cancelled") else "draft",
+            status=st,
         )
         return self.save(plan)
 

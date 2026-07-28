@@ -127,17 +127,22 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
         return {"plans": [p.to_dict() for p in plans]}
 
     @app.get("/api/plans/latest")
-    async def latest_plan(session_id: str | None = None):
+    async def latest_plan(
+        session_id: str | None = None,
+        actionable: bool = False,
+    ):
         """Latest plan for the session (or global latest when session_id omitted).
 
         When *session_id* is provided, never fall back to another session's plan —
         a fresh chat must show an empty Plan banner until plan_save in that session.
+
+        *actionable*=true skips done/cancelled (Plan banner / Build kickoff).
         """
         store = _plan_store()
-        if session_id:
-            plan = store.latest_for_session(session_id)
-        else:
-            plan = store.latest_for_session(None)
+        plan = store.latest_for_session(
+            session_id if session_id else None,
+            actionable_only=bool(actionable),
+        )
         if plan is None:
             return {"plan": None}
         return {"plan": plan.to_dict(), "markdown": plan.summary_markdown()}

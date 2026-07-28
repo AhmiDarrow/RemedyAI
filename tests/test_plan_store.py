@@ -81,6 +81,42 @@ def test_latest_for_session_does_not_leak_other_session(tmp_path: Path):
     assert listed == []
 
 
+def test_create_normalizes_done_with_pending_steps(tmp_path: Path):
+    """Agent must not stick the banner on done while all steps are still pending."""
+    store = PlanStore(tmp_path)
+    plan = store.create(
+        "Premature done",
+        steps=["A", "B"],
+        session_id="s1",
+        status="done",
+    )
+    assert plan.status == "draft"
+    assert all(s.status == "pending" for s in plan.steps)
+
+
+def test_create_supersedes_previous_actionable(tmp_path: Path):
+    store = PlanStore(tmp_path)
+    old = store.create("V1", steps=["a"], session_id="s1", status="draft")
+    new = store.create("V2", steps=["b"], session_id="s1", status="draft")
+    reloaded_old = store.get(old.id)
+    assert reloaded_old is not None
+    assert reloaded_old.status == "cancelled"
+    assert new.status == "draft"
+    latest = store.latest_for_session("s1", actionable_only=True)
+    assert latest is not None
+    assert latest.id == new.id
+
+
+def test_latest_actionable_skips_terminal(tmp_path: Path):
+    store = PlanStore(tmp_path)
+    store.create("Done plan", steps=["x"], session_id="s1", status="draft")
+    done = store.list_plans(session_id="s1", limit=1)[0]
+    store.set_status(done.id, "done")
+    assert store.latest_for_session("s1") is not None
+    assert store.latest_for_session("s1").status == "done"
+    assert store.latest_for_session("s1", actionable_only=True) is None
+
+
 def test_plan_mode_tool_names_exclude_shell():
     assert "plan_save" in PLAN_MODE_TOOL_NAMES
     assert "bash_exec" not in PLAN_MODE_TOOL_NAMES
@@ -150,6 +186,15 @@ def test_plans_api(tmp_path: Path, monkeypatch):
     r5 = client.get("/api/plans/latest", params={"session_id": "fresh-empty-session"})
     assert r5.status_code == 200
     assert r5.json()["plan"] is None
+
+    r6 = client.post(f"/api/plans/{pid}/status", json={"status": "cancelled"})
+    assert r6.status_code == 200
+    assert r6.json()["plan"]["status"] == "cancelled"
+
+    r7 = client.get("/api/plans/latest", params={"actionable": "true"})
+    assert r7.status_code == 200
+    # Cancelled plan must not surface as actionable latest
+    assert r7.json()["plan"] is None
 
 
 def test_call_tool_blocks_in_plan_mode():

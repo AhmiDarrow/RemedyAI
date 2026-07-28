@@ -59,7 +59,7 @@ _BUILTIN_COMMANDS: list[dict] = [
     {"name": "/plans", "description": "List structured task plans", "aliases": [], "arguments": None},
     {
         "name": "/plan",
-        "description": "Show latest plan, or /plan approve|new <title>",
+        "description": "Show latest plan, or /plan approve|cancel|new <title>",
         "aliases": [],
         "arguments": "approve|new <title>",
     },
@@ -488,6 +488,25 @@ async def handle_slash_command(
             return {
                 "text": f"Plan **approved**: {approved.title} (`{approved.id}`)\n\n"
                 "Switch to **Build** mode to execute."
+            }
+        if rest.lower().startswith("cancel"):
+            pid = rest[6:].strip()
+            plan = store.get(pid) if pid else store.latest_for_session(None, actionable_only=True)
+            if plan is None and not pid:
+                # Prefer newest non-terminal overall when no id
+                plans = store.list_plans(limit=20)
+                plan = next(
+                    (p for p in plans if p.status in ("draft", "approved", "active")),
+                    None,
+                )
+            if plan is None:
+                return {"text": "No plan to cancel. Save one first, or pass `/plan cancel <id>`."}
+            cancelled = store.set_status(plan.id, "cancelled")
+            if cancelled is None:
+                return {"text": "Failed to cancel plan."}
+            return {
+                "text": f"Plan **cancelled**: {cancelled.title} (`{cancelled.id}`).\n\n"
+                "It will no longer stick in the Plan banner. Start a new plan in **Plan** mode when ready."
             }
         if rest.lower().startswith("new "):
             title = rest[4:].strip()

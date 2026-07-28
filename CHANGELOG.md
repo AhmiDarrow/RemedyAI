@@ -4,6 +4,16 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Fix: Plan banner lifecycle (cancel / no sticky done)
+
+- **Cancel plan** on the Plan banner persists `status=cancelled` (no cosmetic Hide).
+- **Approve → Build** now writes `approved` via the status API before leaving Plan mode.
+- Terminal plans (`done` / `cancelled`) no longer stick as “Plan ready” in Build mode.
+- `GET /api/plans/latest?actionable=1` skips terminal plans for the banner.
+- `plan_save` / `PlanStore.create`: fresh saves with all-pending steps cannot claim `done`;
+  new saves supersede prior draft/approved/active plans in the same session.
+- Slash: `/plan cancel` (optional id).
+
 ## [0.19.0] - 2026-07-28
 
 ### Feat: full parallel multi-provider turns
