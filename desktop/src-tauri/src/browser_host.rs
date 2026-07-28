@@ -441,15 +441,12 @@ fn handle_ui_command(app: &AppHandle, agent: &ureq::Agent, cmd: &serde_json::Val
         "computer-open-browser",
         json!({ "url": url, "job_id": job_id }),
     );
-    // Short settle — rail open is CSS; long sleeps made every navigate feel like 30s+
-    std::thread::sleep(Duration::from_millis(220));
+    // Minimal settle — emit is enough for layout; don't burn 200ms+ on every nav
+    std::thread::sleep(Duration::from_millis(120));
 
     if !url.is_empty() {
+        // Complete job ASAP after navigate so the agent does not wait/timeout
         let nav_result = run_navigate_on_main(app, &url);
-        // One quick resync after SPA pushes host bounds
-        std::thread::sleep(Duration::from_millis(80));
-        let _ = run_resync_bounds_on_main(app);
-        // Keep SPA address bar in sync
         if let Ok(ref final_url) = nav_result {
             let _ = app.emit(
                 "computer-browser-url",
@@ -457,7 +454,7 @@ fn handle_ui_command(app: &AppHandle, agent: &ureq::Agent, cmd: &serde_json::Val
             );
         }
         if !job_id.is_empty() {
-            match nav_result {
+            match &nav_result {
                 Ok(final_url) => {
                     complete_job(
                         agent,
@@ -470,7 +467,8 @@ fn handle_ui_command(app: &AppHandle, agent: &ureq::Agent, cmd: &serde_json::Val
                             "message": format!(
                                 "SUCCESS: Page is open in the in-app Browser rail (right panel). \
                                  URL: {final_url}. The user can see it. \
-                                 Do NOT say the rail failed. Do NOT open system browser. Do NOT web_fetch this page."
+                                 Do NOT say the rail failed. Do NOT open system browser. Do NOT web_fetch this page. \
+                                 Reply briefly that Google (or the page) is open in the Browser rail."
                             ),
                             "url": final_url,
                             "via": "rust-host",
@@ -481,22 +479,13 @@ fn handle_ui_command(app: &AppHandle, agent: &ureq::Agent, cmd: &serde_json::Val
                 }
                 Err(e) => {
                     log::warn!("computer-host navigate failed: {e}");
-                    complete_job(agent, &job_id, false, json!({}), Some(e));
+                    complete_job(agent, &job_id, false, json!({}), Some(e.clone()));
                 }
             }
         }
+        // Resync bounds after complete (non-blocking for agent wait)
+        let _ = run_resync_bounds_on_main(app);
     }
-
-    // Ack UI command so it is not reprocessed forever
-    let ack_url = if job_id.is_empty() {
-        "http://127.0.0.1:7400/api/computer/ui/command/ack".to_string()
-    } else {
-        format!(
-            "http://127.0.0.1:7400/api/computer/ui/command/ack?job_id={}",
-            job_id
-        )
-    };
-    let _ = agent.post(&ack_url).call();
 }
 
 fn handle_job(app: &AppHandle, agent: &ureq::Agent, job: &serde_json::Value) {

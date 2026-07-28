@@ -443,15 +443,16 @@ class ComputerExecutor:
 
         # Navigate: ui_command opens rail (like Settings); Desktop completes job.
         # Give the SPA enough time to poll (300ms) + mount rail + WebView navigate.
-        # Navigate: short wait — Rust host usually finishes in <2s once UI take works
-        unclaimed = None if act is ComputerAction.NAVIGATE else 4.0
+        # Navigate: Rust host should complete in ~1s; poll tightly, short overall cap
+        unclaimed = None if act is ComputerAction.NAVIGATE else 3.0
         total_wait = float(
-            kwargs.get("timeout_s") or (12.0 if act is ComputerAction.NAVIGATE else 30.0)
+            kwargs.get("timeout_s") or (8.0 if act is ComputerAction.NAVIGATE else 20.0)
         )
         job = self.bridge.enqueue(act.value, payload)
         finished = self.bridge.wait(
             job.id,
             timeout_s=total_wait,
+            poll_s=0.05 if act is ComputerAction.NAVIGATE else 0.1,
             abort_check=self._abort_check,
             unclaimed_timeout_s=unclaimed,
         )

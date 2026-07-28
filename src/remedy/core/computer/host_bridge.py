@@ -21,8 +21,15 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def canonical_home(home_dir: Path | str | None = None) -> Path:
+    """Single resolved home so tool wait + API complete always share one jobs dir."""
+    if home_dir is not None and str(home_dir).strip():
+        return Path(home_dir).expanduser().resolve()
+    return (Path.home() / ".remedy").resolve()
+
+
 def _root(home_dir: Path | str | None = None) -> Path:
-    home = Path(home_dir).expanduser() if home_dir else Path.home() / ".remedy"
+    home = canonical_home(home_dir)
     p = home / "computer" / "jobs"
     p.mkdir(parents=True, exist_ok=True)
     return p
@@ -156,13 +163,18 @@ class ComputerHostBridge:
     def _write(self, job: ComputerJob) -> None:
         job.updated_at = _now()
         path = self._path(job.id)
-        path.write_text(json.dumps(job.to_dict(), indent=2), encoding="utf-8")
+        data = json.dumps(job.to_dict(), indent=2)
+        # Atomic-ish write so wait() never reads a half-written file
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(data, encoding="utf-8")
+        tmp.replace(path)
 
     def _read(self, job_id: str) -> ComputerJob | None:
         path = self._path(job_id)
         if not path.is_file():
             return None
         try:
+            # Fresh open every time (no OS cache tricks)
             raw = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return None
@@ -356,14 +368,17 @@ class ComputerHostBridge:
         job_id: str,
         *,
         timeout_s: float = 30.0,
-        poll_s: float = 0.15,
+        poll_s: float = 0.05,
         abort_check: Any | None = None,
         unclaimed_timeout_s: float | None = 3.0,
     ) -> ComputerJob:
         """Wait for job completion.
 
-        *unclaimed_timeout_s*: if still ``pending`` this long, treat host as
-        dead (hello-only / poller not claiming) instead of waiting full timeout.
+        *unclaimed_timeout_s*: if still ``pending`` this long with no UI command
+        for this job, fail fast. Navigate jobs leave unclaimed_timeout None and
+        wait for Desktop complete (or overall timeout).
+
+        Never overwrite a job that was already completed by the host (race fix).
         """
         started = time.time()
         deadline = started + max(1.0, timeout_s)
@@ -371,6 +386,10 @@ class ComputerHostBridge:
             if abort_check is not None:
                 try:
                     if abort_check():
+                        # Do not cancel if already done
+                        job = self._read(job_id)
+                        if job and job.status in ("done", "error", "cancelled"):
+                            return job
                         self.cancel(job_id)
                         job = self._read(job_id)
                         if job:
@@ -380,12 +399,11 @@ class ComputerHostBridge:
                     pass
             job = self._read(job_id)
             if job is None:
-                break
+                time.sleep(poll_s)
+                continue
             if job.status in ("done", "error", "cancelled"):
                 return job
-            # Host said hello but never claimed — fail fast (was 45s hangs).
-            # Exception: a UI command is outstanding for this job (Desktop opens
-            # Browser rail like Settings and completes without claim_next).
+            # Fail fast only when no UI command is outstanding for this job
             if (
                 job.status == "pending"
                 and unclaimed_timeout_s is not None
@@ -396,20 +414,29 @@ class ComputerHostBridge:
                     isinstance(cmd, dict)
                     and str(cmd.get("job_id") or "") == str(job_id)
                 )
-                if ui_for_job:
-                    # Keep waiting for Desktop to open rail + complete the job
-                    pass
-                else:
+                if not ui_for_job:
+                    # Final re-read — host may have just completed
+                    job2 = self._read(job_id)
+                    if job2 and job2.status in ("done", "error", "cancelled"):
+                        return job2
                     job.status = "error"
                     job.error = (
                         f"host did not claim job within {unclaimed_timeout_s:.0f}s "
                         "(Desktop poller offline or not authenticated)"
                     )
                     with self._lock:
-                        self._write(job)
-                    self.mark_host_dead()
+                        # Only write error if still open
+                        cur = self._read(job_id)
+                        if cur and cur.status in ("pending", "running"):
+                            self._write(job)
+                            self.mark_host_dead()
+                            return job
+                        if cur:
+                            return cur
                     return job
             time.sleep(poll_s)
+
+        # Timeout path — never clobber a successful host completion
         job = self._read(job_id)
         if job is None:
             return ComputerJob(
@@ -418,12 +445,28 @@ class ComputerHostBridge:
                 status="error",
                 error="job missing",
             )
-        if job.status not in ("done", "error", "cancelled"):
-            job.status = "error"
-            job.error = f"timeout waiting for desktop host ({timeout_s:.0f}s)"
-            with self._lock:
+        if job.status in ("done", "error", "cancelled"):
+            return job
+        # One more brief grace for in-flight complete
+        time.sleep(0.15)
+        job = self._read(job_id)
+        if job and job.status in ("done", "error", "cancelled"):
+            return job
+        if job is None:
+            return ComputerJob(
+                id=job_id,
+                action="?",
+                status="error",
+                error="job missing",
+            )
+        job.status = "error"
+        job.error = f"timeout waiting for desktop host ({timeout_s:.0f}s)"
+        with self._lock:
+            cur = self._read(job_id)
+            if cur and cur.status in ("done", "error", "cancelled"):
+                return cur
+            if cur and cur.status in ("pending", "running"):
                 self._write(job)
-            if job.status == "pending" or "timeout" in (job.error or ""):
                 self.mark_host_dead()
         return job
 
@@ -447,6 +490,9 @@ _bridge_lock = threading.Lock()
 def get_host_bridge(home_dir: Path | str | None = None) -> ComputerHostBridge:
     global _bridge
     with _bridge_lock:
+        home = canonical_home(home_dir)
         if _bridge is None:
-            _bridge = ComputerHostBridge(home_dir=home_dir)
+            _bridge = ComputerHostBridge(home_dir=home)
+        # If a later caller uses a different home, prefer existing singleton
+        # (must match the process that serves /api/computer/*).
         return _bridge
