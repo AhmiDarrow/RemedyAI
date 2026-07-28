@@ -70,6 +70,11 @@ class ComputerHostBridge:
         # Last a11y/desktop snapshot for click-by-ref resolution
         self._last_elements: list[dict[str, Any]] = []
         self._last_elements_target: str = ""
+        # Desktop UI command (open Browser rail like Settings) — memory + disk
+        self._ui_command: dict[str, Any] | None = None
+        home = Path(home_dir).expanduser() if home_dir else Path.home() / ".remedy"
+        self._ui_path = home / "computer" / "ui_command.json"
+        self._ui_path.parent.mkdir(parents=True, exist_ok=True)
 
     def mark_host_alive(self) -> None:
         self._host_seen_at = time.time()
@@ -165,6 +170,45 @@ class ComputerHostBridge:
             return None
         return ComputerJob.from_dict(raw)
 
+    def set_ui_command(self, command: dict[str, Any]) -> None:
+        """Ask Desktop to open the Browser rail / run UI (persisted for pollers)."""
+        cmd = dict(command or {})
+        cmd.setdefault("ts", _now())
+        with self._lock:
+            self._ui_command = cmd
+            try:
+                self._ui_path.write_text(
+                    json.dumps(cmd, indent=2), encoding="utf-8"
+                )
+            except OSError:
+                pass
+
+    def peek_ui_command(self) -> dict[str, Any] | None:
+        with self._lock:
+            if self._ui_command:
+                return dict(self._ui_command)
+            try:
+                if self._ui_path.is_file():
+                    raw = json.loads(self._ui_path.read_text(encoding="utf-8"))
+                    if isinstance(raw, dict) and raw.get("action"):
+                        self._ui_command = raw
+                        return dict(raw)
+            except (OSError, json.JSONDecodeError):
+                pass
+        return None
+
+    def clear_ui_command(self, *, job_id: str | None = None) -> None:
+        with self._lock:
+            if job_id and self._ui_command:
+                if str(self._ui_command.get("job_id") or "") != str(job_id):
+                    return
+            self._ui_command = None
+            try:
+                if self._ui_path.is_file():
+                    self._ui_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
     def enqueue(self, action: str, payload: dict[str, Any] | None = None) -> ComputerJob:
         job = ComputerJob(
             id=uuid.uuid4().hex[:16],
@@ -174,6 +218,20 @@ class ComputerHostBridge:
         )
         with self._lock:
             self._write(job)
+        # Always request rail open for browser actions (Desktop pops panel like Settings)
+        pl = dict(payload or {})
+        ui = pl.get("ui") if isinstance(pl.get("ui"), dict) else {}
+        if action in ("navigate", "snapshot", "click", "type", "screenshot") or ui.get(
+            "open_browser"
+        ):
+            self.set_ui_command(
+                {
+                    "action": "open_browser",
+                    "url": pl.get("url") or "",
+                    "job_id": job.id,
+                    "job_action": action,
+                }
+            )
         return job
 
     def claim_next(self) -> ComputerJob | None:

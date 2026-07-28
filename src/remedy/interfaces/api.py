@@ -243,6 +243,7 @@ def create_app(
     _COMPUTER_HOST_LOOPBACK_PREFIXES = (
         "/api/computer/host/",
         "/api/computer/jobs/",
+        "/api/computer/ui/",
     )
 
     def _client_is_loopback(request: Request) -> bool:

@@ -73,6 +73,20 @@ def test_host_bridge_enqueue_claim_complete(tmp_path: Path):
     assert b.claim_next() is None
 
 
+def test_enqueue_sets_ui_command_for_rail(tmp_path: Path):
+    from remedy.core.computer.host_bridge import ComputerHostBridge
+
+    b = ComputerHostBridge(home_dir=tmp_path)
+    job = b.enqueue("navigate", {"url": "https://example.com/wiki", "ui": {"open_browser": True}})
+    cmd = b.peek_ui_command()
+    assert cmd is not None
+    assert cmd.get("action") == "open_browser"
+    assert cmd.get("url") == "https://example.com/wiki"
+    assert cmd.get("job_id") == job.id
+    b.clear_ui_command(job_id=job.id)
+    assert b.peek_ui_command() is None
+
+
 def test_computer_host_routes_loopback_no_auth(tmp_path: Path):
     """Desktop poller must claim jobs without waiting on SPA token bootstrap."""
 

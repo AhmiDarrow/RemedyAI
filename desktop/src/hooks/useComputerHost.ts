@@ -1,18 +1,19 @@
 /**
  * Desktop host loop for in-house computer use.
- * Claims browser-target jobs from the local API and executes them via Tauri
- * (navigate + agent input on the embedded WebView2).
  *
- * Local branch only — do not push until soak tested.
+ * 1) Polls UI commands so Browser rail opens like Settings (no user pre-open).
+ * 2) Claims browser jobs and drives WebView2 (navigate / click / …).
  */
 import { useEffect, useRef } from 'react'
 import { isTauri, tauriInvoke } from '../api/tauri'
 import {
+  ackComputerUiCommand,
   claimComputerJob,
   completeComputerJob,
   computerCapture,
   computerHostHello,
   emitComputerUi,
+  fetchComputerUiCommand,
   type ComputerJob,
 } from '../api/computer'
 
@@ -40,43 +41,49 @@ async function readEmbedBounds(): Promise<{
   return { bounds: null, scale }
 }
 
+async function navigateInRail(url: string): Promise<string> {
+  emitComputerUi({ openBrowser: true })
+  // Wait for layout → BrowserSlide mount → bounds
+  await new Promise((r) => window.setTimeout(r, 350))
+  let { bounds } = await readEmbedBounds()
+  if (!bounds) {
+    await new Promise((r) => window.setTimeout(r, 250))
+    bounds = (await readEmbedBounds()).bounds
+  }
+  const opened = await tauriInvoke<string>('browser_navigate', {
+    url,
+    bounds: bounds || null,
+  })
+  return opened || url
+}
+
 async function runBrowserJob(job: ComputerJob): Promise<Record<string, unknown>> {
   const action = (job.action || '').toLowerCase()
   const p = job.payload || {}
   const ui = (p.ui && typeof p.ui === 'object' ? p.ui : {}) as {
     open_browser?: boolean
   }
-  if (ui.open_browser || action === 'navigate') {
+  if (ui.open_browser || action === 'navigate' || action === 'snapshot') {
     emitComputerUi({ openBrowser: true })
-    // Give the rail a moment to mount / size before navigate
-    await new Promise((r) => window.setTimeout(r, 120))
+    await new Promise((r) => window.setTimeout(r, 200))
   }
 
   if (action === 'navigate') {
     const url = String(p.url || '')
     if (!url) throw new Error('url required')
-    // Open rail first, wait for layout, then navigate (retry once if bounds missing)
-    emitComputerUi({ openBrowser: true })
-    await new Promise((r) => window.setTimeout(r, 280))
-    let { bounds } = await readEmbedBounds()
-    if (!bounds) {
-      await new Promise((r) => window.setTimeout(r, 200))
-      bounds = (await readEmbedBounds()).bounds
-    }
-    const opened = await tauriInvoke<string>('browser_navigate', {
-      url,
-      bounds: bounds || null,
-    })
+    const opened = await navigateInRail(url)
     return {
       ok: true,
       target: 'browser',
       action: 'navigate',
-      message: `Navigated in-rail: ${opened || url}`,
-      url: opened || url,
+      message: `Navigated in-rail: ${opened}`,
+      url: opened,
     }
   }
 
   if (action === 'screenshot') {
+    emitComputerUi({ openBrowser: true })
+    await new Promise((r) => window.setTimeout(r, 200))
     const { bounds, scale } = await readEmbedBounds()
     if (bounds) {
       const cap = await computerCapture({
@@ -105,7 +112,6 @@ async function runBrowserJob(job: ComputerJob): Promise<Record<string, unknown>>
         url,
       }
     }
-    // No bounds yet — full desktop via capture API
     const cap = await computerCapture({ label: 'desktop_fallback' })
     return {
       ok: true,
@@ -113,13 +119,10 @@ async function runBrowserJob(job: ComputerJob): Promise<Record<string, unknown>>
       action: 'screenshot',
       message: 'No browser bounds yet — full desktop capture',
       ...(cap.capture || {}),
-      note: 'open Browser rail for rail-cropped shots',
     }
   }
 
   if (action === 'snapshot' || action === 'a11y') {
-    // Inject stamps + page POSTs elements to /api/computer/a11y/push with job id.
-    // Job completion is filled by that push; host returns a short ack.
     await tauriInvoke<string>('browser_agent_action', {
       action: 'snapshot',
       job_id: job.id,
@@ -133,7 +136,6 @@ async function runBrowserJob(job: ComputerJob): Promise<Record<string, unknown>>
       dy: null,
       ref: null,
     })
-    // Give the page a moment to POST; server marks job done via a11y push.
     await new Promise((r) => window.setTimeout(r, 200))
     return {
       ok: true,
@@ -180,13 +182,29 @@ async function runBrowserJob(job: ComputerJob): Promise<Record<string, unknown>>
   throw new Error(`unsupported browser job action: ${action}`)
 }
 
-export function useComputerHost(enabled = true): void {
+/**
+ * @param enabled when server is ready
+ * @param onOpenBrowser optional — App passes openBrowserInRail for Settings-like panel open
+ */
+export function useComputerHost(
+  enabled = true,
+  onOpenBrowser?: () => void,
+): void {
   const busy = useRef(false)
+  const uiBusy = useRef(false)
+  const openBrowserRef = useRef(onOpenBrowser)
+  openBrowserRef.current = onOpenBrowser
 
   useEffect(() => {
     if (!enabled || !isTauri()) return
 
     let cancelled = false
+
+    const openRail = () => {
+      openBrowserRef.current?.()
+      emitComputerUi({ openBrowser: true })
+    }
+
     const hello = async () => {
       const { bounds, scale } = await readEmbedBounds()
       await computerHostHello({
@@ -195,7 +213,51 @@ export function useComputerHost(enabled = true): void {
       }).catch(() => null)
     }
 
-    const tick = async () => {
+    /** Settings-like path: server sets ui_command → we open rail + navigate. */
+    const tickUiCommand = async () => {
+      if (cancelled || uiBusy.current) return
+      uiBusy.current = true
+      try {
+        const cmd = await fetchComputerUiCommand().catch(() => null)
+        if (!cmd?.action) return
+        if (cmd.action === 'open_browser' || cmd.job_action === 'navigate') {
+          openRail()
+          const url = (cmd.url || '').trim()
+          const jobId = cmd.job_id
+          if (url && isTauri()) {
+            try {
+              await navigateInRail(url)
+              if (jobId) {
+                await completeComputerJob(jobId, {
+                  ok: true,
+                  result: {
+                    ok: true,
+                    target: 'browser',
+                    action: 'navigate',
+                    message: `Navigated in-rail: ${url}`,
+                    url,
+                    via: 'ui_command',
+                  },
+                }).catch(() => null)
+              }
+            } catch (e) {
+              console.warn('[computer-host] ui navigate failed', e)
+              if (jobId) {
+                await completeComputerJob(jobId, {
+                  ok: false,
+                  error: e instanceof Error ? e.message : String(e),
+                }).catch(() => null)
+              }
+            }
+          }
+          await ackComputerUiCommand(jobId).catch(() => null)
+        }
+      } finally {
+        uiBusy.current = false
+      }
+    }
+
+    const tickJobs = async () => {
       if (cancelled || busy.current) return
       busy.current = true
       try {
@@ -208,15 +270,15 @@ export function useComputerHost(enabled = true): void {
         try {
           job = await claimComputerJob()
         } catch (e) {
-          console.warn('[computer-host] claim failed (auth or network)', e)
+          console.warn('[computer-host] claim failed', e)
           job = null
         }
         if (job?.id) {
+          openRail()
           try {
             const result = await runBrowserJob(job)
-            // Snapshot completes via /api/computer/a11y/push — do not overwrite.
             if (result._host_defers_complete) {
-              /* wait for page push */
+              /* a11y push completes */
             } else {
               await completeComputerJob(job.id, {
                 ok: result.ok !== false,
@@ -225,6 +287,7 @@ export function useComputerHost(enabled = true): void {
                   result.ok === false ? String(result.message || 'failed') : undefined,
               })
             }
+            await ackComputerUiCommand(job.id).catch(() => null)
           } catch (e) {
             console.warn('[computer-host] job failed', job.id, e)
             await completeComputerJob(job.id, {
@@ -238,18 +301,23 @@ export function useComputerHost(enabled = true): void {
       }
     }
 
-    void tick()
+    void tickUiCommand()
+    void tickJobs()
     const helloIv = window.setInterval(() => {
       void hello()
     }, 5000)
-    const pollIv = window.setInterval(() => {
-      void tick()
+    const uiIv = window.setInterval(() => {
+      void tickUiCommand()
+    }, 300)
+    const jobIv = window.setInterval(() => {
+      void tickJobs()
     }, 400)
 
     return () => {
       cancelled = true
       window.clearInterval(helloIv)
-      window.clearInterval(pollIv)
+      window.clearInterval(uiIv)
+      window.clearInterval(jobIv)
     }
   }, [enabled])
 }

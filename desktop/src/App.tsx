@@ -196,35 +196,42 @@ export default function App() {
     })
   }, [])
 
-  // Computer use: agent opens the Browser rail when driving the embed.
+  /**
+   * Open Browser workspace rail the same way Settings opens — user does not
+   * need the rail already visible. Agent computer-use calls this.
+   */
+  const openBrowserInRail = useCallback(() => {
+    setPanel(null)
+    setWsLayout((prev) => {
+      const next: WorkspaceLayout = {
+        ...prev,
+        // Prefer right rail (sessions stay left), mirror openSettingsInRail.
+        left: prev.left === 'browser' ? prev.left : prev.left,
+        right: 'browser',
+        rightOpen: true,
+        rightRail: 'open',
+        leftOpen: prev.leftRail === 'open' || prev.leftOpen,
+      }
+      if (next.left === 'browser') {
+        next.left = 'sessions'
+        next.leftRail = 'open'
+        next.leftOpen = true
+      }
+      saveWorkspaceLayout(next)
+      return next
+    })
+  }, [])
+
+  // Computer use: open Browser rail (event from host poller + server UI command).
   useEffect(() => {
     const onComputerUi = (ev: Event) => {
       const detail = (ev as CustomEvent<{ openBrowser?: boolean }>).detail
       if (!detail?.openBrowser) return
-      setWsLayout((prev) => {
-        if (prev.left === 'browser' || prev.right === 'browser') {
-          // Ensure the side that has browser is open
-          const next = { ...prev }
-          if (prev.left === 'browser') next.leftOpen = true
-          if (prev.right === 'browser') next.rightOpen = true
-          saveWorkspaceLayout(next)
-          return next
-        }
-        // Prefer right rail for browser (sessions stay on left)
-        const next: WorkspaceLayout = {
-          ...prev,
-          right: 'browser',
-          rightOpen: true,
-          rightRail: false,
-        }
-        if (next.left === 'browser') next.left = 'files'
-        saveWorkspaceLayout(next)
-        return next
-      })
+      openBrowserInRail()
     }
     window.addEventListener('remedy:computer-ui', onComputerUi)
     return () => window.removeEventListener('remedy:computer-ui', onComputerUi)
-  }, [])
+  }, [openBrowserInRail])
 
   const swapSides = useCallback(() => {
     setWsLayout((prev) => {
@@ -359,8 +366,8 @@ export default function App() {
     lastStatus: updateLastStatus,
     updateAvailable,
   } = useUpdateChecker({ ready: serverState === 'ready' })
-  // In-house computer use: claim browser jobs while Desktop is open (local branch).
-  useComputerHost(serverState === 'ready')
+  // In-house computer use: open Browser rail (like Settings) + claim jobs.
+  useComputerHost(serverState === 'ready', openBrowserInRail)
   const [showSetupWizard, setShowSetupWizard] = useState(false)
   const [showUpdateScreen, setShowUpdateScreen] = useState(false)
   const [userName, setUserName] = useState('')

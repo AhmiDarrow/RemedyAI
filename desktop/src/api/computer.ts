@@ -100,6 +100,27 @@ export async function completeComputerJob(
   })
 }
 
+export type ComputerUiCommand = {
+  action?: string
+  url?: string
+  job_id?: string
+  job_action?: string
+  ts?: string
+}
+
+/** Server asks Desktop to open Browser rail (like Settings) + optional URL. */
+export async function fetchComputerUiCommand(): Promise<ComputerUiCommand | null> {
+  const data = await hostFetch<{ command?: ComputerUiCommand | null }>(
+    '/computer/ui/command',
+  )
+  return data.command || null
+}
+
+export async function ackComputerUiCommand(jobId?: string | null): Promise<void> {
+  const q = jobId ? `?job_id=${encodeURIComponent(jobId)}` : ''
+  await hostFetch(`/computer/ui/command/ack${q}`, { method: 'POST' })
+}
+
 /** UI event: open the Browser rail for agent computer use. */
 export const COMPUTER_UI_EVENT = 'remedy:computer-ui'
 

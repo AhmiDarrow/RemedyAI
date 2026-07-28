@@ -96,9 +96,24 @@ def register_computer_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             "host_connected": b.host_connected(),
             "browser_bounds": b.get_browser_bounds(),
             "pending_jobs": b.pending_count(),
+            "ui_command": b.peek_ui_command(),
             "jobs_root": str(b.root),
             "pending_hint": "claim via GET /api/computer/jobs/next",
         }
+
+    @app.get("/api/computer/ui/command")
+    async def computer_ui_command():
+        """Desktop polls this to open Browser rail (like Settings) without user action."""
+        b = _bridge()
+        b.mark_host_alive()
+        cmd = b.peek_ui_command()
+        return {"command": cmd}
+
+    @app.post("/api/computer/ui/command/ack")
+    async def computer_ui_command_ack(job_id: str | None = None):
+        b = _bridge()
+        b.clear_ui_command(job_id=job_id)
+        return {"ok": True}
 
     @app.post("/api/computer/capture")
     async def computer_capture(req: CaptureRequest):
