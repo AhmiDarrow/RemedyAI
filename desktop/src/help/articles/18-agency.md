@@ -131,8 +131,9 @@ Remedy can **drive the GUI** on this PC with **in-house tools** (any chat model 
 | **Full desktop** | `computer_screenshot`, `computer_monitors`, `computer_click`, type/key, `computer_windows` | Works via local Win32 even without the rail. |
 
 **Workflow (web):** navigate → **snapshot** (refs e1, e2, …) → **click ref=eN** → type if needed → screenshot to verify.  
-**Workflow (native app):** **snapshot** (refs w1… windows) → **click ref=wN** (focus + center) → type; or screenshot + x/y.  
-**Multi-monitor:** `computer_monitors` then `computer_screenshot` with `monitor=0` (or 1, …).
+**Workflow (native app):** **snapshot** (w1… windows, c1… UIA controls when comtypes is available) → **click ref=…** → type; or screenshot + x/y.  
+**Multi-monitor:** `computer_monitors` then `computer_screenshot` with `monitor=0` (or 1, …).  
+**Capture:** browser rail prefers WebView **PrintWindow** when found; else region crop; else full desktop.
 
 Coding tools stay better for repo work. Computer use is for **GUI reality** files and shell cannot see. **Stop** cancels pending browser jobs and aborts mid-type.
 

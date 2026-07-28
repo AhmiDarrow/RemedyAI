@@ -20,6 +20,7 @@ Work lives on **`feature/computer-use`** (do not ship/push until soak solid).
 - `computer_snapshot` + click-by-`ref` (browser eN + desktop window wN)
 - `computer_monitors` + screenshot `monitor=` index; Stop cancels jobs / mid-type
 - Session abort cancels computer jobs; soak checklist `docs/manual/computer-use-soak.md`
+- UIA control-tree snapshot (optional comtypes) → refs c1…; PrintWindow WebView/window capture
 - Plan mode: see/navigate/list only (no click/type); agency manual section
 
 ### Fix: Plan banner lifecycle (cancel / no sticky done)

@@ -26,7 +26,7 @@ You can operate this PC with **Remedy-native** tools (not a vendor computer-use 
 1. Prefer **coding tools** (`file_edit`, `bash_exec`, `repo_search`) for repo work — faster and precise.
 2. Use computer tools for **GUI** work the filesystem cannot see.
 3. On the web: prefer **`computer_snapshot` then `computer_click ref=eN`** over guessing pixels.
-4. On desktop: **`computer_snapshot`** → refs **w1…** (windows) then `computer_click ref=wN`, or screenshot + x/y; use `computer_monitors` if multi-display.
+4. On desktop: **`computer_snapshot`** → **w1…** windows and **c1…** UIA controls (`mode=controls` for deep tree); `computer_click ref=…`. Or screenshot + x/y; `computer_monitors` if multi-display.
 5. Coordinates: **desktop** = full screen pixels; **browser** = embed viewport (0,0 top-left of the page).
 6. Keep going until the user's GUI task is done. Do not stop because computer use is "special."
 7. User **Stop** cancels pending browser jobs and mid-type input — do not fight abort.

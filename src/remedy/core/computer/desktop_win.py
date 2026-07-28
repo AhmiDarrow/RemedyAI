@@ -440,14 +440,24 @@ def list_windows(limit: int = 40) -> list[dict[str, Any]]:
     return results
 
 
-def desktop_snapshot(limit: int = 40) -> list[dict[str, Any]]:
-    """Window-level interactive snapshot with refs w1, w2, … (desktop).
+def desktop_snapshot(
+    limit: int = 40,
+    *,
+    mode: str = "auto",
+    hwnd: int | None = None,
+) -> list[dict[str, Any]]:
+    """Desktop interactive snapshot.
 
-    Deeper UIA control-tree can land later; window refs already enable
-    focus + center-click for multi-app workflows.
+    *mode*:
+      - ``windows`` — top-level windows only (refs w1…)
+      - ``controls`` — UIA control tree when available (refs c1…), else windows
+      - ``auto`` — windows + UIA controls (merged, caps at *limit*)
+    *hwnd*: optional root window for UIA walk (focused app).
     """
-    wins = list_windows(limit=max(1, min(int(limit or 40), 80)))
-    elements: list[dict[str, Any]] = []
+    mode_s = (mode or "auto").strip().lower()
+    cap = max(1, min(int(limit or 40), 100))
+    wins = list_windows(limit=min(cap, 80))
+    win_els: list[dict[str, Any]] = []
     for i, w in enumerate(wins):
         b = w.get("bounds") or {}
         left, top = int(b.get("left", 0)), int(b.get("top", 0))
@@ -455,7 +465,7 @@ def desktop_snapshot(limit: int = 40) -> list[dict[str, Any]]:
         cx = (left + right) // 2
         cy = (top + bottom) // 2
         ref = f"w{i + 1}"
-        elements.append(
+        win_els.append(
             {
                 "ref": ref,
                 "tag": "window",
@@ -469,7 +479,189 @@ def desktop_snapshot(limit: int = 40) -> list[dict[str, Any]]:
                 "bounds": b,
             }
         )
-    return elements
+
+    if mode_s == "windows":
+        return win_els[:cap]
+
+    ctrl_els: list[dict[str, Any]] = []
+    try:
+        from remedy.core.computer.desktop_uia import uia_control_snapshot
+
+        root_hwnd = hwnd
+        if root_hwnd is None and wins:
+            # Prefer foreground window for control walk
+            try:
+                fg = int(ctypes.windll.user32.GetForegroundWindow() or 0)
+                if fg:
+                    root_hwnd = fg
+            except Exception:
+                root_hwnd = wins[0].get("hwnd")
+        raw = uia_control_snapshot(hwnd=root_hwnd, max_elements=cap)
+        if raw:
+            ctrl_els = raw
+    except Exception:
+        ctrl_els = []
+
+    if mode_s in ("controls", "uia", "deep"):
+        return (ctrl_els or win_els)[:cap]
+
+    # auto: windows first, then controls that aren't huge window frames
+    out = list(win_els)
+    seen_xy: set[tuple[int, int]] = {(int(e["x"]), int(e["y"])) for e in out}
+    for c in ctrl_els:
+        if len(out) >= cap:
+            break
+        key = (int(c.get("x") or 0), int(c.get("y") or 0))
+        if key in seen_xy:
+            continue
+        seen_xy.add(key)
+        out.append(c)
+    return out[:cap]
+
+
+def print_window_png(hwnd: int, path: Path | None = None) -> dict[str, Any]:
+    """Capture a single HWND via PrintWindow (better for layered/WebView hosts)."""
+    _require_windows()
+    user32 = ctypes.windll.user32
+    gdi32 = ctypes.windll.gdi32
+    user32.SetProcessDPIAware()
+    rect = wintypes.RECT()
+    if not user32.GetWindowRect(int(hwnd), ctypes.byref(rect)):
+        raise RuntimeError("GetWindowRect failed")
+    width = int(rect.right - rect.left)
+    height = int(rect.bottom - rect.top)
+    if width < 2 or height < 2:
+        raise RuntimeError("window too small")
+
+    hwnd_dc = user32.GetWindowDC(int(hwnd))
+    memdc = gdi32.CreateCompatibleDC(hwnd_dc)
+    bmp = gdi32.CreateCompatibleBitmap(hwnd_dc, width, height)
+    old = gdi32.SelectObject(memdc, bmp)
+    # PW_RENDERFULLCONTENT = 2 (Win8.1+) — captures DirectComposition/WebView better
+    ok = user32.PrintWindow(int(hwnd), memdc, 2)
+    if not ok:
+        ok = user32.PrintWindow(int(hwnd), memdc, 0)
+    if not ok:
+        gdi32.SelectObject(memdc, old)
+        gdi32.DeleteObject(bmp)
+        gdi32.DeleteDC(memdc)
+        user32.ReleaseDC(int(hwnd), hwnd_dc)
+        raise RuntimeError("PrintWindow failed")
+
+    class BITMAPINFOHEADER(ctypes.Structure):
+        _fields_ = [
+            ("biSize", wintypes.DWORD),
+            ("biWidth", wintypes.LONG),
+            ("biHeight", wintypes.LONG),
+            ("biPlanes", wintypes.WORD),
+            ("biBitCount", wintypes.WORD),
+            ("biCompression", wintypes.DWORD),
+            ("biSizeImage", wintypes.DWORD),
+            ("biXPelsPerMeter", wintypes.LONG),
+            ("biYPelsPerMeter", wintypes.LONG),
+            ("biClrUsed", wintypes.DWORD),
+            ("biClrImportant", wintypes.DWORD),
+        ]
+
+    class BITMAPINFO(ctypes.Structure):
+        _fields_ = [("bmiHeader", BITMAPINFOHEADER), ("bmiColors", wintypes.DWORD * 3)]
+
+    stride = (width * 3 + 3) & ~3
+    buf = ctypes.create_string_buffer(stride * height)
+    bmi = BITMAPINFO()
+    bmi.bmiHeader.biSize = ctypes.sizeof(BITMAPINFOHEADER)
+    bmi.bmiHeader.biWidth = width
+    bmi.bmiHeader.biHeight = -height
+    bmi.bmiHeader.biPlanes = 1
+    bmi.bmiHeader.biBitCount = 24
+    bmi.bmiHeader.biCompression = 0
+    gdi32.GetDIBits(memdc, bmp, 0, height, buf, ctypes.byref(bmi), 0)
+
+    gdi32.SelectObject(memdc, old)
+    gdi32.DeleteObject(bmp)
+    gdi32.DeleteDC(memdc)
+    user32.ReleaseDC(int(hwnd), hwnd_dc)
+
+    out = Path(path) if path is not None else _default_shot_path("hwnd")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    _write_png_bgr(out, width, height, bytes(buf), stride)
+    return {
+        "path": str(out),
+        "width": width,
+        "height": height,
+        "origin": {"x": int(rect.left), "y": int(rect.top)},
+        "hwnd": int(hwnd),
+        "method": "PrintWindow",
+    }
+
+
+def find_child_hwnd(
+    parent: int,
+    *,
+    class_name: str | None = None,
+    title_substr: str | None = None,
+) -> int | None:
+    """Find first child HWND matching class and/or title substring."""
+    _require_windows()
+    user32 = ctypes.windll.user32
+    found: list[int] = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def enum_child(hwnd, _lp):  # type: ignore[no-untyped-def]
+        if found:
+            return False
+        if class_name:
+            buf = ctypes.create_unicode_buffer(256)
+            user32.GetClassNameW(hwnd, buf, 256)
+            if class_name.lower() not in buf.value.lower():
+                return True
+        if title_substr:
+            length = user32.GetWindowTextLengthW(hwnd)
+            tbuf = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(hwnd, tbuf, length + 1)
+            if title_substr.lower() not in tbuf.value.lower():
+                return True
+        found.append(int(hwnd))
+        return False
+
+    user32.EnumChildWindows(int(parent), enum_child, 0)
+    return found[0] if found else None
+
+
+def find_webview_host_hwnd() -> int | None:
+    """Best-effort: locate a WebView2 / Chromium host under a Remedy-titled window."""
+    _require_windows()
+    user32 = ctypes.windll.user32
+    candidates: list[int] = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def enum_top(hwnd, _lp):  # type: ignore[no-untyped-def]
+        if not user32.IsWindowVisible(hwnd):
+            return True
+        length = user32.GetWindowTextLengthW(hwnd)
+        if length <= 0:
+            return True
+        buf = ctypes.create_unicode_buffer(length + 1)
+        user32.GetWindowTextW(hwnd, buf, length + 1)
+        title = buf.value.lower()
+        if "remedy" not in title and "tauri" not in title:
+            return True
+        # Prefer Chromium / WebView2 child
+        for cls in (
+            "Chrome_WidgetWin_1",
+            "Chrome_RenderWidgetHostHWND",
+            "WebView2",
+            "Intermediate D3D Window",
+        ):
+            child = find_child_hwnd(int(hwnd), class_name=cls)
+            if child:
+                candidates.append(child)
+                return False
+        candidates.append(int(hwnd))
+        return False
+
+    user32.EnumWindows(enum_top, 0)
+    return candidates[0] if candidates else None
 
 
 def click_element(el: dict[str, Any], *, button: str = "left", clicks: int = 1) -> None:

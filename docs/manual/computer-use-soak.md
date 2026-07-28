@@ -17,7 +17,9 @@ Run server + Desktop from this branch (not the installed stable release).
 - [ ] `computer_screenshot` saves a PNG under `~/.remedy/computer/shots/`
 - [ ] `computer_screenshot monitor=0` captures primary
 - [ ] `computer_snapshot` returns window refs `w1…` with titles
+- [ ] `computer_snapshot mode=controls` returns UIA `c1…` when comtypes installed (optional)
 - [ ] `computer_click ref=wN` focuses that window (visible raise)
+- [ ] `computer_click ref=cN` hits a control (if UIA available)
 - [ ] `computer_type` types into a focused notepad / editor
 - [ ] **Stop** mid-type stops further input (no runaway keystrokes)
 
@@ -27,7 +29,7 @@ Run server + Desktop from this branch (not the installed stable release).
 - [ ] `computer_navigate` opens URL in **in-app** Browser rail (rail auto-opens)
 - [ ] `computer_snapshot` returns `e1…` elements
 - [ ] `computer_click ref=eN` activates that control
-- [ ] `computer_screenshot` crops to rail when bounds known (path returned)
+- [ ] `computer_screenshot` returns WebView PrintWindow or rail crop (path under `~/.remedy/computer/shots/`)
 - [ ] Stop while a browser job is pending cancels it (no stuck host)
 
 ## Hybrid / routing

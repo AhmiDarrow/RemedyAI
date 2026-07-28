@@ -239,7 +239,7 @@ def test_desktop_snapshot_and_ref_store(tmp_path: Path):
     from remedy.core.computer.desktop_win import desktop_snapshot
     from remedy.core.computer.host_bridge import ComputerHostBridge
 
-    els = desktop_snapshot(limit=10)
+    els = desktop_snapshot(limit=10, mode="windows")
     assert isinstance(els, list)
     if els:
         assert els[0]["ref"].startswith("w")
@@ -250,6 +250,43 @@ def test_desktop_snapshot_and_ref_store(tmp_path: Path):
         got = b.get_element_by_ref(els[0]["ref"])
         assert got is not None
         assert got["ref"] == els[0]["ref"]
+
+
+def test_uia_module_soft_import():
+    from remedy.core.computer.desktop_uia import uia_available, uia_control_snapshot
+
+    # Must not crash without comtypes
+    avail = uia_available()
+    assert isinstance(avail, bool)
+    if not avail:
+        assert uia_control_snapshot() is None
+    else:
+        # Best-effort; may return None on restricted desktops
+        out = uia_control_snapshot(max_elements=5)
+        assert out is None or isinstance(out, list)
+
+
+def test_print_window_foreground():
+    import sys
+
+    if sys.platform != "win32":
+        return
+    import ctypes
+    from pathlib import Path
+
+    from remedy.core.computer.desktop_win import print_window_png
+
+    hwnd = int(ctypes.windll.user32.GetForegroundWindow() or 0)
+    if not hwnd:
+        return
+    out = Path.home() / ".remedy" / "computer" / "shots" / "_test_print.png"
+    try:
+        info = print_window_png(hwnd, out)
+        assert info["width"] > 0
+        assert out.is_file()
+    except RuntimeError:
+        # Some windows refuse PrintWindow — acceptable
+        pass
 
 
 def test_abort_session_cancels_computer_jobs(tmp_path: Path, monkeypatch):

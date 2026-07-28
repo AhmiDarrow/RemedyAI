@@ -133,6 +133,15 @@ class ComputerExecutor:
         from remedy.core.computer import desktop_win as win
 
         if act is ComputerAction.SCREENSHOT:
+            if kwargs.get("hwnd"):
+                info = win.print_window_png(int(kwargs["hwnd"]))
+                return public_result(
+                    ok=True,
+                    target="desktop",
+                    action="screenshot",
+                    message=f"Window PrintWindow capture ({info['width']}x{info['height']})",
+                    extra=info,
+                )
             mon = kwargs.get("monitor")
             if mon is not None and str(mon).strip() != "" and str(mon).lower() != "all":
                 info = win.screenshot_monitor_png(int(mon))
@@ -157,14 +166,23 @@ class ComputerExecutor:
                 extra={"monitors": mons},
             )
         if act is ComputerAction.SNAPSHOT:
-            elements = win.desktop_snapshot(limit=int(kwargs.get("limit") or 40))
+            mode = str(kwargs.get("mode") or "auto")
+            hwnd_raw = kwargs.get("hwnd")
+            hwnd = int(hwnd_raw) if hwnd_raw not in (None, "", 0, "0") else None
+            elements = win.desktop_snapshot(
+                limit=int(kwargs.get("limit") or 40),
+                mode=mode,
+                hwnd=hwnd,
+            )
             self.bridge.set_last_elements(elements, target="desktop")
+            n_w = sum(1 for e in elements if str(e.get("ref", "")).startswith("w"))
+            n_c = sum(1 for e in elements if str(e.get("ref", "")).startswith("c"))
             return public_result(
                 ok=True,
                 target="desktop",
                 action="snapshot",
-                message=f"{len(elements)} windows (refs w1…)",
-                extra={"elements": elements},
+                message=f"{len(elements)} elements (windows={n_w}, controls={n_c})",
+                extra={"elements": elements, "mode": mode},
             )
         if act is ComputerAction.CLICK:
             if self._abort_check():
@@ -361,8 +379,26 @@ class ComputerExecutor:
             if isinstance(payload.get("ui"), dict):
                 payload["ui"]["open_browser"] = True
 
-        # Screenshot: if we already know rail bounds, crop in-process (no host wait)
+        # Screenshot: prefer PrintWindow on WebView host, else crop rail bounds
         if act is ComputerAction.SCREENSHOT:
+            try:
+                from remedy.core.computer import desktop_win as win
+
+                wv = win.find_webview_host_hwnd()
+                if wv:
+                    info = win.print_window_png(wv)
+                    return public_result(
+                        ok=True,
+                        target="browser",
+                        action="screenshot",
+                        message=(
+                            f"WebView PrintWindow capture "
+                            f"({info['width']}x{info['height']})"
+                        ),
+                        extra={**info, "method": "PrintWindow"},
+                    )
+            except Exception:
+                pass
             bounds = self.bridge.get_browser_bounds()
             if bounds and bounds.get("width", 0) > 40 and bounds.get("height", 0) > 40:
                 try:
@@ -383,7 +419,7 @@ class ComputerExecutor:
                             f"Browser rail region capture "
                             f"({info['width']}x{info['height']})"
                         ),
-                        extra={**info, "bounds": bounds},
+                        extra={**info, "bounds": bounds, "method": "region_crop"},
                     )
                 except Exception:
                     pass  # fall through to host job / full desktop

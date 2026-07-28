@@ -37,10 +37,12 @@ def register_computer_tools(runtime: Any) -> None:
         target: str = "auto",
         hint: str = "",
         limit: int = 40,
+        mode: str = "auto",
+        hwnd: int = 0,
     ) -> str:
         """List interactive elements with refs for click-by-ref.
 
-        Browser: e1… (DOM). Desktop: w1… (windows). Prefer snapshot before click.
+        Browser: e1… (DOM). Desktop: w1… windows + c1… UIA controls (mode=auto|windows|controls).
         """
         return ex.run(
             ComputerAction.SNAPSHOT,
@@ -48,6 +50,8 @@ def register_computer_tools(runtime: Any) -> None:
             hint=hint,
             runtime=runtime,
             limit=limit,
+            mode=mode,
+            hwnd=hwnd or None,
         )
 
     async def computer_monitors(hint: str = "") -> str:
@@ -207,13 +211,22 @@ def register_computer_tools(runtime: Any) -> None:
     )
     reg.register_builtin_handler(
         "computer_snapshot",
-        "Browser a11y-style list of interactive elements with refs (e1…). Then computer_click ref=eN.",
+        "List interactive elements with refs. Browser e1…; desktop w1… windows + c1… UIA controls. Then computer_click ref=…",
         computer_snapshot,
         {
             "type": "object",
             "properties": {
                 "target": target_prop,
                 "hint": hint_prop,
+                "mode": {
+                    "type": "string",
+                    "description": "desktop: auto | windows | controls (UIA deep tree)",
+                },
+                "hwnd": {
+                    "type": "integer",
+                    "description": "Optional window handle to scope UIA walk",
+                },
+                "limit": {"type": "integer"},
             },
         },
     )
