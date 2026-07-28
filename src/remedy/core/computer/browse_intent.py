@@ -97,6 +97,32 @@ def _clean_target(target: str) -> str:
     return t
 
 
+def short_site_label(url: str) -> str:
+    """Human label for a brief confirmation (Gmail, Google, Wikipedia, …)."""
+    u = (url or "").strip().lower()
+    if "mail.google" in u or "gmail" in u:
+        return "Gmail"
+    if "google.com" in u and "mail" not in u:
+        return "Google"
+    if "youtube" in u:
+        return "YouTube"
+    if "wikipedia" in u:
+        return "Wikipedia"
+    if "github.com" in u:
+        return "GitHub"
+    if "reddit.com" in u:
+        return "Reddit"
+    try:
+        from urllib.parse import urlparse
+
+        host = (urlparse(url).hostname or "").removeprefix("www.")
+        if host:
+            return host
+    except Exception:
+        pass
+    return url or "page"
+
+
 def parse_browse_navigate_url(message: str) -> str | None:
     """If *message* is a high-confidence browse request, return the rail URL.
 

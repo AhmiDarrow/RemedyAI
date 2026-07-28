@@ -231,6 +231,26 @@ def test_find_recent_success(tmp_path: Path):
     assert found.id == j.id
 
 
+def test_navigate_rail_fast_optimistic_when_host_alive(tmp_path: Path, monkeypatch):
+    """Open-url must return SUCCESS quickly even if host is slow to complete."""
+    import json
+    from remedy.core.computer.executor import ComputerExecutor
+    from remedy.core.computer.types import ComputerAction
+    from remedy.core.computer import host_bridge as hb
+
+    # Force singleton to use tmp home
+    monkeypatch.setattr(hb, "_bridge", None)
+    ex = ComputerExecutor(home_dir=tmp_path)
+    ex.bridge.mark_host_alive()
+    t0 = __import__("time").perf_counter()
+    raw = ex.run(ComputerAction.NAVIGATE, target="browser", url="https://mail.google.com")
+    dt = __import__("time").perf_counter() - t0
+    d = json.loads(raw)
+    assert d.get("ok") is True, d
+    assert dt < 1.5, f"navigate too slow: {dt:.2f}s"
+    assert d.get("via") in ("optimistic", "rust-host", None) or d.get("url")
+
+
 def test_computer_api_and_tools_registered(tmp_path: Path, monkeypatch):
     class Cfg:
         home_dir = str(tmp_path)

@@ -457,6 +457,7 @@ class ComputerHostBridge:
         poll_s: float = 0.05,
         abort_check: Any | None = None,
         unclaimed_timeout_s: float | None = 3.0,
+        grace_s: float | None = None,
     ) -> ComputerJob:
         """Wait for job completion.
 
@@ -464,13 +465,18 @@ class ComputerHostBridge:
         for this job, fail fast. Navigate jobs leave unclaimed_timeout None and
         wait for Desktop complete (or overall timeout).
 
+        *grace_s*: extra time after the deadline to pick up a late host complete.
+        Defaults to a small fraction of *timeout_s* (capped) so fast navigate
+        paths stay sub-second.
+
         Navigate: re-nudge ui_command at ~0.6s and ~2.5s if still open so a
         lost take / busy poller still gets a second chance before timeout.
 
         Never overwrite a job that was already completed by the host (race fix).
         """
         started = time.time()
-        deadline = started + max(1.0, timeout_s)
+        # Allow sub-second waits for lightning navigate (do not force min 1s)
+        deadline = started + max(0.05, float(timeout_s))
         nudges_done = 0
         while time.time() < deadline:
             if abort_check is not None:
@@ -543,8 +549,6 @@ class ComputerHostBridge:
             time.sleep(poll_s)
 
         # Timeout path — never clobber a successful host completion.
-        # Navigate under chat load often completes 0.5–3s after the nominal
-        # deadline (session 2026-07-28: Gmail opened but agent got ok:false).
         job = self._read(job_id)
         if job is None:
             return ComputerJob(
@@ -555,11 +559,15 @@ class ComputerHostBridge:
             )
         if job.status in ("done", "error", "cancelled"):
             return job
-        # Extended grace for in-flight host complete (especially navigate)
-        grace_s = 2.5 if (job.action == "navigate") else 0.35
-        grace_deadline = time.time() + grace_s
+        # Grace scales with timeout so lightning navigate (0.45s) stays fast.
+        if grace_s is None:
+            if job.action == "navigate":
+                grace_s = min(2.5, max(0.05, float(timeout_s) * 0.25))
+            else:
+                grace_s = min(0.5, max(0.05, float(timeout_s) * 0.1))
+        grace_deadline = time.time() + max(0.0, float(grace_s))
         while time.time() < grace_deadline:
-            time.sleep(0.05)
+            time.sleep(0.02)
             job = self._read(job_id)
             if job and job.status in ("done", "error", "cancelled"):
                 return job
@@ -574,7 +582,7 @@ class ComputerHostBridge:
         if job.status in ("done", "error", "cancelled"):
             return job
         job.status = "error"
-        job.error = f"timeout waiting for desktop host ({timeout_s:.0f}s)"
+        job.error = f"timeout waiting for desktop host ({timeout_s:.1f}s)"
         with self._lock:
             cur = self._read(job_id)
             if cur and cur.status in ("done", "error", "cancelled"):

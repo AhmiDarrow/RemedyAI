@@ -5,6 +5,7 @@ from __future__ import annotations
 from remedy.core.computer.browse_intent import (
     parse_browse_navigate_url,
     resolve_site_alias,
+    short_site_label,
 )
 from remedy.core.computer.router import normalize_url
 
@@ -51,3 +52,8 @@ def test_non_browse_returns_none() -> None:
     assert parse_browse_navigate_url("hi") is None
     assert parse_browse_navigate_url("fix the login bug in src/") is None
     assert parse_browse_navigate_url("what is gmail") is None
+
+
+def test_short_site_label() -> None:
+    assert short_site_label("https://mail.google.com") == "Gmail"
+    assert short_site_label("https://www.google.com") == "Google"

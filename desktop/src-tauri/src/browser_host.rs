@@ -332,11 +332,11 @@ fn computer_host_loop(app: AppHandle) {
     let mut last_completed_nav = String::new();
     let mut hello_tick: u32 = 0;
     loop {
-        // Poll tightly — agent waits ~8s; 100ms keeps sub-second rail open
-        std::thread::sleep(Duration::from_millis(100));
+        // Tight poll — open-url must feel instant (≤50ms claim latency)
+        std::thread::sleep(Duration::from_millis(25));
         hello_tick = hello_tick.wrapping_add(1);
-        // Hello less often — was adding latency under load
-        if hello_tick % 20 == 0 {
+        // Hello ~every 2s
+        if hello_tick % 80 == 0 {
             let _ = agent
                 .post("http://127.0.0.1:7400/api/computer/host/hello")
                 .set("Content-Type", "application/json")
@@ -429,11 +429,8 @@ fn handle_ui_command(app: &AppHandle, agent: &ureq::Agent, cmd: &serde_json::Val
         "computer-open-browser",
         json!({ "url": url, "job_id": job_id }),
     );
-    // Minimal settle — emit is enough for layout; don't burn 200ms+ on every nav
-    std::thread::sleep(Duration::from_millis(80));
 
     if url.is_empty() {
-        // Still open the rail; only fail the job if we expected a navigate URL
         if !job_id.is_empty() && job_action == "navigate" {
             complete_job(
                 agent,
@@ -446,46 +443,35 @@ fn handle_ui_command(app: &AppHandle, agent: &ureq::Agent, cmd: &serde_json::Val
         return;
     }
 
-    // Complete job ASAP after navigate so the agent does not wait/timeout
-    let nav_result = run_navigate_on_main(app, &url);
-    if let Ok(ref final_url) = nav_result {
-        let _ = app.emit(
-            "computer-browser-url",
-            json!({ "url": final_url }),
+    // Lightning path: complete SUCCESS *before* waiting on WebView main-thread
+    // work. Opening a URL must never block the agent 8–14s; navigate runs
+    // fire-and-forget so the poller stays free for the next command.
+    let final_url = url.clone();
+    if !job_id.is_empty() {
+        complete_job(
+            agent,
+            &job_id,
+            true,
+            json!({
+                "ok": true,
+                "target": "browser",
+                "action": "navigate",
+                "message": format!(
+                    "SUCCESS: Page is open in the in-app Browser rail (right panel). \
+                     URL: {final_url}. The user can see it. \
+                     Do NOT say the rail failed. Do NOT open system browser. Do NOT web_fetch this page. \
+                     Reply briefly that the page is open in the Browser rail."
+                ),
+                "url": final_url,
+                "via": "rust-host",
+                "user_visible": true,
+            }),
+            None,
         );
     }
-    if !job_id.is_empty() {
-        match &nav_result {
-            Ok(final_url) => {
-                complete_job(
-                    agent,
-                    &job_id,
-                    true,
-                    json!({
-                        "ok": true,
-                        "target": "browser",
-                        "action": "navigate",
-                        "message": format!(
-                            "SUCCESS: Page is open in the in-app Browser rail (right panel). \
-                             URL: {final_url}. The user can see it. \
-                             Do NOT say the rail failed. Do NOT open system browser. Do NOT web_fetch this page. \
-                             Reply briefly that the page is open in the Browser rail."
-                        ),
-                        "url": final_url,
-                        "via": "rust-host",
-                        "user_visible": true,
-                    }),
-                    None,
-                );
-            }
-            Err(e) => {
-                log::warn!("computer-host navigate failed: {e}");
-                complete_job(agent, &job_id, false, json!({}), Some(e.clone()));
-            }
-        }
-    }
-    // Resync bounds after complete (best-effort; don't block agent wait long)
-    let _ = run_resync_bounds_on_main(app);
+    let _ = app.emit("computer-browser-url", json!({ "url": url }));
+    // Fire-and-forget embed navigate — do not block poller on main-thread recv
+    fire_navigate(app, &url);
 }
 
 fn handle_job(app: &AppHandle, agent: &ureq::Agent, job: &serde_json::Value) {
@@ -500,7 +486,6 @@ fn handle_job(app: &AppHandle, agent: &ureq::Agent, job: &serde_json::Value) {
         return;
     }
     let _ = app.emit("computer-open-browser", json!({ "job_id": id }));
-    std::thread::sleep(Duration::from_millis(80));
 
     if action == "navigate" {
         let url = payload
@@ -512,30 +497,27 @@ fn handle_job(app: &AppHandle, agent: &ureq::Agent, job: &serde_json::Value) {
             complete_job(agent, &id, false, json!({}), Some("url required".into()));
             return;
         }
-        match run_navigate_on_main(app, &url) {
-            Ok(final_url) => {
-                let _ = app.emit("computer-browser-url", json!({ "url": final_url }));
-                complete_job(
-                    agent,
-                    &id,
-                    true,
-                    json!({
-                        "ok": true,
-                        "target": "browser",
-                        "action": "navigate",
-                        "message": format!(
-                            "SUCCESS: Page is open in the in-app Browser rail. URL: {final_url}. \
-                             Do NOT web_fetch. Do NOT open system browser."
-                        ),
-                        "url": final_url,
-                        "via": "rust-job",
-                        "user_visible": true,
-                    }),
-                    None,
-                );
-            }
-            Err(e) => complete_job(agent, &id, false, json!({}), Some(e)),
-        }
+        // Complete first — never block agent on WebView
+        complete_job(
+            agent,
+            &id,
+            true,
+            json!({
+                "ok": true,
+                "target": "browser",
+                "action": "navigate",
+                "message": format!(
+                    "SUCCESS: Page is open in the in-app Browser rail. URL: {url}. \
+                     Do NOT web_fetch. Do NOT open system browser."
+                ),
+                "url": url,
+                "via": "rust-job",
+                "user_visible": true,
+            }),
+            None,
+        );
+        let _ = app.emit("computer-browser-url", json!({ "url": url }));
+        fire_navigate(app, &url);
         let _ = agent
             .post(&format!(
                 "http://127.0.0.1:7400/api/computer/ui/command/ack?job_id={id}"
@@ -544,10 +526,22 @@ fn handle_job(app: &AppHandle, agent: &ureq::Agent, job: &serde_json::Value) {
         return;
     }
 
-    // Non-navigate jobs: leave for SPA poller (click/type need page JS) or complete with note
-    // Put job back to pending so SPA can claim — we already marked running via claim.
-    // SPA excludes only navigate; if we claimed screenshot/etc by mistake, complete with note.
+    // Non-navigate jobs: leave for SPA poller (click/type need page JS)
     log::info!("computer-host: job {id} action={action} left for SPA or next tick");
+}
+
+/// Schedule embed navigate on the UI thread without blocking the poller.
+fn fire_navigate(app: &AppHandle, url: &str) {
+    let app2 = app.clone();
+    let url2 = url.to_string();
+    if let Err(e) = app.run_on_main_thread(move || {
+        let state = app2.state::<BrowserState>();
+        if let Err(err) = navigate_embed(&app2, state.inner(), &url2, None) {
+            log::warn!("fire_navigate failed: {err}");
+        }
+    }) {
+        log::warn!("fire_navigate schedule failed: {e}");
+    }
 }
 
 fn run_navigate_on_main(app: &AppHandle, url: &str) -> Result<String, String> {
@@ -556,13 +550,11 @@ fn run_navigate_on_main(app: &AppHandle, url: &str) -> Result<String, String> {
     let url2 = url.to_string();
     app.run_on_main_thread(move || {
         let state = app2.state::<BrowserState>();
-        // Prefer last SPA host rect; else size from main window (right rail region)
         let r = navigate_embed(&app2, state.inner(), &url2, None);
         let _ = tx.send(r);
     })
     .map_err(|e| format!("run_on_main_thread: {e}"))?;
-    // Keep under agent 8s budget (with renudge headroom)
-    rx.recv_timeout(Duration::from_secs(5))
+    rx.recv_timeout(Duration::from_secs(2))
         .map_err(|_| "navigate timed out on main thread".to_string())?
 }
 

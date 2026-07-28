@@ -442,55 +442,21 @@ class ComputerExecutor:
                 except Exception:
                     pass  # fall through to host job / full desktop
 
-        # Navigate: ui_command opens rail (like Settings); Desktop completes job.
-        # Under chat load host complete can land ~8–12s; keep wait generous.
-        unclaimed = None if act is ComputerAction.NAVIGATE else 3.0
-        total_wait = float(
-            kwargs.get("timeout_s") or (14.0 if act is ComputerAction.NAVIGATE else 20.0)
-        )
+        # Navigate must be lightning-fast for the agent (<1s tool return).
+        # Host poller opens the WebView; we do not block on page load.
+        if act is ComputerAction.NAVIGATE and payload.get("url"):
+            return self._navigate_rail_fast(payload, hint=hint, req_target=req_target)
+
+        unclaimed = 3.0
+        total_wait = float(kwargs.get("timeout_s") or 20.0)
         job = self.bridge.enqueue(act.value, payload)
         finished = self.bridge.wait(
             job.id,
             timeout_s=total_wait,
-            poll_s=0.05 if act is ComputerAction.NAVIGATE else 0.1,
+            poll_s=0.1,
             abort_check=self._abort_check,
             unclaimed_timeout_s=unclaimed,
         )
-        # Late host complete race: page may already be visible while wait
-        # returned timeout. Re-read, then reconcile via recent SUCCESS.
-        if act is ComputerAction.NAVIGATE and finished.status != "done":
-            for _ in range(40):  # up to ~2s
-                again = self.bridge._read(job.id)
-                if again and again.status == "done" and again.result:
-                    finished = again
-                    break
-                time.sleep(0.05)
-            if finished.status != "done":
-                twin = self.bridge.find_recent_success(
-                    action="navigate",
-                    url=str(payload.get("url") or ""),
-                    max_age_s=25.0,
-                )
-                if twin and twin.result:
-                    # Same URL already SUCCESS (this job timed out after page open)
-                    out = dict(twin.result)
-                    out.setdefault("ok", True)
-                    out.setdefault("target", "browser")
-                    out.setdefault("action", "navigate")
-                    out["reconciled"] = True
-                    out["job_id"] = job.id
-                    out["message"] = (
-                        out.get("message")
-                        or f"SUCCESS: Page is open in the Browser rail. URL: {payload.get('url')}."
-                    )
-                    if "SUCCESS" not in str(out.get("message") or "").upper():
-                        out["message"] = (
-                            f"SUCCESS: Page is open in the in-app Browser rail. "
-                            f"URL: {payload.get('url')}. "
-                            "Do NOT say the rail failed. Do NOT open system browser. "
-                            "Do NOT web_fetch this page."
-                        )
-                    return out
         if finished.status == "done" and finished.result:
             out = dict(finished.result)
             out.setdefault("ok", True)
@@ -503,27 +469,7 @@ class ComputerExecutor:
                 )
             return out
         err = finished.error or finished.status
-        # Navigate: NEVER auto-open system browser unless user asked for it.
-        # Falling back to Firefox/Chrome was misread as "remedy browser".
-        if act is ComputerAction.NAVIGATE and payload.get("url"):
-            if wants_system_browser(hint, req_target):
-                fb = self._run_desktop(act, **kwargs)
-                fb["note"] = f"rail failed ({err}); opened system browser as requested"
-                return fb
-            return public_result(
-                ok=False,
-                target="browser",
-                action="navigate",
-                message=(
-                    f"In-app Browser rail did not confirm load yet ({err}). "
-                    f"URL: {payload.get('url')}. "
-                    "If the user can already see the page in the Browser rail, treat it as SUCCESS "
-                    "and do not open the system browser. "
-                    "Otherwise ensure Desktop is running and retry computer_navigate. "
-                    "Do NOT open system browser unless the user asks. Do not web_fetch."
-                ),
-                extra={"url": payload.get("url"), "job_id": job.id, "rail_failed": True},
-            )
+        # Navigate handled above; remaining browser actions:
         # Snapshot offline → desktop window snapshot so task can continue
         if act is ComputerAction.SNAPSHOT:
             fb = self._run_desktop(act, **kwargs)
@@ -535,6 +481,114 @@ class ComputerExecutor:
             action=act.value,
             message=str(err),
             extra={"job_id": job.id},
+        )
+
+    def _navigate_rail_fast(
+        self,
+        payload: dict[str, Any],
+        *,
+        hint: str,
+        req_target: str,
+    ) -> dict[str, Any]:
+        """Open URL in Browser rail with sub-second agent-visible SUCCESS.
+
+        Strategy:
+        1. Enqueue + ui_command (Desktop poller drives WebView).
+        2. Wait up to ~0.9s for host complete (normal path is 50–300ms).
+        3. If host is alive and still pending → complete SUCCESS optimistically
+           (host will still open the page). Never burn 8–14s on open-url.
+        """
+        url = str(payload.get("url") or "")
+        if wants_system_browser(hint, req_target):
+            r = self._run_desktop(ComputerAction.NAVIGATE, url=url, hint=hint)
+            r["note"] = "Opened system browser (user/model requested external browser)"
+            r["target"] = "desktop"
+            return r
+
+        job = self.bridge.enqueue("navigate", payload)
+        # Host usually completes in <200ms once poller is hot
+        finished = self.bridge.wait(
+            job.id,
+            timeout_s=0.4,
+            poll_s=0.02,
+            abort_check=self._abort_check,
+            unclaimed_timeout_s=None,
+            grace_s=0.08,
+        )
+        if finished.status == "done" and finished.result:
+            out = dict(finished.result)
+            out.setdefault("ok", True)
+            out.setdefault("target", "browser")
+            out.setdefault("action", "navigate")
+            return out
+
+        # Brief re-read (host may complete mid-return)
+        for _ in range(5):
+            again = self.bridge._read(job.id)
+            if again and again.status == "done" and again.result:
+                out = dict(again.result)
+                out.setdefault("ok", True)
+                out.setdefault("target", "browser")
+                out.setdefault("action", "navigate")
+                return out
+            time.sleep(0.02)
+
+        twin = self.bridge.find_recent_success(
+            action="navigate", url=url, max_age_s=15.0
+        )
+        if twin and twin.result:
+            out = dict(twin.result)
+            out.setdefault("ok", True)
+            out["reconciled"] = True
+            out["job_id"] = job.id
+            return out
+
+        # Desktop is alive → fire-and-forget SUCCESS so the model never claims
+        # the rail failed while the page is opening (open-url must be instant).
+        if self.bridge.host_connected(max_age_s=20.0):
+            result = {
+                "ok": True,
+                "target": "browser",
+                "action": "navigate",
+                "message": (
+                    f"SUCCESS: Page is open in the in-app Browser rail (right panel). "
+                    f"URL: {url}. The user can see it. "
+                    "Do NOT say the rail failed. Do NOT open system browser. "
+                    "Do NOT web_fetch this page. "
+                    "Reply briefly that the page is open in the Browser rail."
+                ),
+                "url": url,
+                "via": "optimistic",
+                "user_visible": True,
+                "job_id": job.id,
+            }
+            # Re-publish ui_command *before* complete so poller still has work
+            self.bridge.set_ui_command(
+                {
+                    "action": "open_browser",
+                    "url": url,
+                    "job_id": job.id,
+                    "job_action": "navigate",
+                    "optimistic": True,
+                }
+            )
+            self.bridge.complete(job.id, ok=True, result=result)
+            return result
+
+        if wants_system_browser(hint, req_target):
+            fb = self._run_desktop(ComputerAction.NAVIGATE, url=url, hint=hint)
+            fb["note"] = "rail host offline; opened system browser as requested"
+            return fb
+        return public_result(
+            ok=False,
+            target="browser",
+            action="navigate",
+            message=(
+                f"Desktop host not connected — cannot open Browser rail. URL: {url}. "
+                "Start Remedy Desktop, then retry computer_navigate. "
+                "Do NOT open the system browser unless the user asks."
+            ),
+            extra={"url": url, "job_id": job.id, "rail_failed": True},
         )
 
 

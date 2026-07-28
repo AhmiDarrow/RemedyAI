@@ -349,7 +349,8 @@ async def call_llm_stream(runtime, message: str,
         # Coding / tool-enabled turns: Grok Build style — run until finished.
         run_until_done = bool(tools) or bool(all_tools)
 
-        # Pre-open Browser rail for clear "goto X" intents before the model speaks.
+        # Pre-open Browser rail for clear "goto X" intents — tool-call style:
+        # open URL, short confirm, **end turn** (no screenshot/snapshot spiral).
         if browse_pre_url and not plan_mode:
             has_nav = any(
                 ((t.get("function") or {}).get("name") or "") == "computer_navigate"
@@ -357,6 +358,8 @@ async def call_llm_stream(runtime, message: str,
             )
             if has_nav:
                 from uuid import uuid4
+
+                from remedy.core.computer.browse_intent import short_site_label
 
                 nav_id = f"browse_pre_{uuid4().hex[:10]}"
                 pre_calls = normalize_tool_calls(
@@ -387,6 +390,8 @@ async def call_llm_stream(runtime, message: str,
                         tool_calls=pre_calls,
                     )
                 )
+                browse_ok = False
+                browse_fail_snip = ""
                 async for event, tool_msg in execute_tool_calls(
                     runtime,
                     pre_calls,
@@ -397,17 +402,42 @@ async def call_llm_stream(runtime, message: str,
                         yield event
                     if tool_msg:
                         messages.append(tool_msg)
+                        body = str(tool_msg.get("content") or "")
+                        low = body.lower()
+                        if (
+                            "success" in low
+                            or '"ok": true' in low
+                            or '"ok":true' in low
+                            or "user_visible" in low
+                        ) and "rail_failed" not in low and '"ok": false' not in low:
+                            browse_ok = True
+                        elif '"ok": false' in low or "rail_failed" in low:
+                            browse_fail_snip = body[:400]
                 tool_batches_this_turn += 1
                 productive_in_epoch += 1
+                if browse_ok:
+                    # Pure open-URL request is done. Do not re-enter the ReAct
+                    # loop (model burns tokens on screenshot/snapshot/narration).
+                    label = short_site_label(browse_pre_url)
+                    yield f"Opened **{label}** in the Browser rail."
+                    logger.info(
+                        "browse_intent done short-circuit url=%s",
+                        browse_pre_url,
+                    )
+                    return
+                # Failed open — one short force-answer, tools off
+                force_answer_sticky = True
+                tools = []
+                run_until_done = False
                 messages.append(
                     {
                         "role": "user",
                         "content": (
-                            f"Browser rail navigate already ran for {browse_pre_url}. "
-                            "If ok/SUCCESS, reply in one short sentence that the page is "
-                            "open in the Browser rail. Do not web_fetch. Do not open the "
-                            "system browser. Do not claim the rail failed if the tool "
-                            "returned SUCCESS."
+                            f"computer_navigate for {browse_pre_url} did not succeed"
+                            f"{(': ' + browse_fail_snip) if browse_fail_snip else '.'} "
+                            "Reply in **one short sentence** with the error. "
+                            "Do **not** call more tools (no screenshot, snapshot, "
+                            "web_fetch, or system browser) unless the user asks."
                         ),
                     }
                 )
