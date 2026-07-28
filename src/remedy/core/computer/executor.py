@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -442,11 +443,10 @@ class ComputerExecutor:
                     pass  # fall through to host job / full desktop
 
         # Navigate: ui_command opens rail (like Settings); Desktop completes job.
-        # Give the SPA enough time to poll (300ms) + mount rail + WebView navigate.
-        # Navigate: Rust host should complete in ~1s; poll tightly, short overall cap
+        # Under chat load host complete can land ~8–12s; keep wait generous.
         unclaimed = None if act is ComputerAction.NAVIGATE else 3.0
         total_wait = float(
-            kwargs.get("timeout_s") or (8.0 if act is ComputerAction.NAVIGATE else 20.0)
+            kwargs.get("timeout_s") or (14.0 if act is ComputerAction.NAVIGATE else 20.0)
         )
         job = self.bridge.enqueue(act.value, payload)
         finished = self.bridge.wait(
@@ -456,6 +456,41 @@ class ComputerExecutor:
             abort_check=self._abort_check,
             unclaimed_timeout_s=unclaimed,
         )
+        # Late host complete race: page may already be visible while wait
+        # returned timeout. Re-read, then reconcile via recent SUCCESS.
+        if act is ComputerAction.NAVIGATE and finished.status != "done":
+            for _ in range(40):  # up to ~2s
+                again = self.bridge._read(job.id)
+                if again and again.status == "done" and again.result:
+                    finished = again
+                    break
+                time.sleep(0.05)
+            if finished.status != "done":
+                twin = self.bridge.find_recent_success(
+                    action="navigate",
+                    url=str(payload.get("url") or ""),
+                    max_age_s=25.0,
+                )
+                if twin and twin.result:
+                    # Same URL already SUCCESS (this job timed out after page open)
+                    out = dict(twin.result)
+                    out.setdefault("ok", True)
+                    out.setdefault("target", "browser")
+                    out.setdefault("action", "navigate")
+                    out["reconciled"] = True
+                    out["job_id"] = job.id
+                    out["message"] = (
+                        out.get("message")
+                        or f"SUCCESS: Page is open in the Browser rail. URL: {payload.get('url')}."
+                    )
+                    if "SUCCESS" not in str(out.get("message") or "").upper():
+                        out["message"] = (
+                            f"SUCCESS: Page is open in the in-app Browser rail. "
+                            f"URL: {payload.get('url')}. "
+                            "Do NOT say the rail failed. Do NOT open system browser. "
+                            "Do NOT web_fetch this page."
+                        )
+                    return out
         if finished.status == "done" and finished.result:
             out = dict(finished.result)
             out.setdefault("ok", True)
@@ -480,12 +515,12 @@ class ComputerExecutor:
                 target="browser",
                 action="navigate",
                 message=(
-                    f"In-app Browser rail did not load the page ({err}). "
+                    f"In-app Browser rail did not confirm load yet ({err}). "
                     f"URL: {payload.get('url')}. "
-                    "Do NOT open the system browser unless the user asks. "
-                    "Ensure Desktop is running (status PC host), Browser rail is available, "
-                    "then retry computer_navigate. "
-                    "Do not use web_fetch for wikis that block bots (403) — use the rail."
+                    "If the user can already see the page in the Browser rail, treat it as SUCCESS "
+                    "and do not open the system browser. "
+                    "Otherwise ensure Desktop is running and retry computer_navigate. "
+                    "Do NOT open system browser unless the user asks. Do not web_fetch."
                 ),
                 extra={"url": payload.get("url"), "job_id": job.id, "rail_failed": True},
             )

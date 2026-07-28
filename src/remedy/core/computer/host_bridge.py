@@ -321,11 +321,57 @@ class ComputerHostBridge:
             job = self._read(job_id)
             if job is None:
                 return None
-            job.status = "done" if ok else "error"
-            job.result = result
-            job.error = error
+            # Success always wins over a prior wait-timeout error so a late
+            # host complete is recorded (agent may re-read after grace).
+            if ok:
+                job.status = "done"
+                job.result = result
+                job.error = None
+            elif job.status == "done":
+                # Never downgrade SUCCESS → error
+                return job
+            else:
+                job.status = "error"
+                job.result = result
+                job.error = error
             self._write(job)
             return job
+
+    def find_recent_success(
+        self,
+        *,
+        action: str,
+        url: str,
+        max_age_s: float = 20.0,
+    ) -> ComputerJob | None:
+        """Find a recent successful job for the same action+URL (reconcile races)."""
+        want = (url or "").strip().rstrip("/")
+        if not want:
+            return None
+        cutoff = time.time() - max_age_s
+        best: ComputerJob | None = None
+        for path in self.root.glob("*.json"):
+            try:
+                if path.stat().st_mtime < cutoff:
+                    continue
+                raw = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if not isinstance(raw, dict):
+                continue
+            job = ComputerJob.from_dict(raw)
+            if job.action != action or job.status != "done":
+                continue
+            res = job.result or {}
+            if not res.get("ok", True):
+                continue
+            got = str(
+                res.get("url") or (job.payload or {}).get("url") or ""
+            ).strip().rstrip("/")
+            if got == want or got.startswith(want) or want.startswith(got):
+                if best is None or (job.updated_at or "") > (best.updated_at or ""):
+                    best = job
+        return best
 
     def cancel(self, job_id: str) -> ComputerJob | None:
         with self._lock:
@@ -496,7 +542,9 @@ class ComputerHostBridge:
                     return job
             time.sleep(poll_s)
 
-        # Timeout path — never clobber a successful host completion
+        # Timeout path — never clobber a successful host completion.
+        # Navigate under chat load often completes 0.5–3s after the nominal
+        # deadline (session 2026-07-28: Gmail opened but agent got ok:false).
         job = self._read(job_id)
         if job is None:
             return ComputerJob(
@@ -507,11 +555,15 @@ class ComputerHostBridge:
             )
         if job.status in ("done", "error", "cancelled"):
             return job
-        # One more brief grace for in-flight complete
-        time.sleep(0.15)
+        # Extended grace for in-flight host complete (especially navigate)
+        grace_s = 2.5 if (job.action == "navigate") else 0.35
+        grace_deadline = time.time() + grace_s
+        while time.time() < grace_deadline:
+            time.sleep(0.05)
+            job = self._read(job_id)
+            if job and job.status in ("done", "error", "cancelled"):
+                return job
         job = self._read(job_id)
-        if job and job.status in ("done", "error", "cancelled"):
-            return job
         if job is None:
             return ComputerJob(
                 id=job_id,
@@ -519,6 +571,8 @@ class ComputerHostBridge:
                 status="error",
                 error="job missing",
             )
+        if job.status in ("done", "error", "cancelled"):
+            return job
         job.status = "error"
         job.error = f"timeout waiting for desktop host ({timeout_s:.0f}s)"
         with self._lock:
@@ -527,7 +581,11 @@ class ComputerHostBridge:
                 return cur
             if cur and cur.status in ("pending", "running"):
                 self._write(job)
-                self.mark_host_dead()
+                # Do NOT mark host dead for navigate — host often still alive
+                # and will complete a moment later; mark_host_dead caused
+                # false "offline" cascades.
+                if job.action != "navigate":
+                    self.mark_host_dead()
         return job
 
     def purge_old(self, *, max_age_s: float = 3600.0) -> int:

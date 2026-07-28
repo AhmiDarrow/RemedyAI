@@ -196,6 +196,41 @@ def test_wait_renudges_ui_command(tmp_path: Path):
     assert (finished.result or {}).get("via") == "renudge-test"
 
 
+def test_complete_success_wins_over_timeout_error(tmp_path: Path):
+    """Late host complete must upgrade timeout error → done (Gmail race)."""
+    b = ComputerHostBridge(home_dir=tmp_path)
+    job = b.enqueue("navigate", {"url": "https://mail.google.com"})
+    job.status = "error"
+    job.error = "timeout waiting for desktop host (8s)"
+    b._write(job)
+    done = b.complete(
+        job.id,
+        ok=True,
+        result={"ok": True, "url": "https://mail.google.com", "via": "late"},
+    )
+    assert done is not None
+    assert done.status == "done"
+    assert done.error is None
+    assert (done.result or {}).get("via") == "late"
+    # Never downgrade success
+    again = b.complete(job.id, ok=False, error="nope")
+    assert again is not None
+    assert again.status == "done"
+
+
+def test_find_recent_success(tmp_path: Path):
+    b = ComputerHostBridge(home_dir=tmp_path)
+    j = b.enqueue("navigate", {"url": "https://mail.google.com"})
+    b.complete(
+        j.id,
+        ok=True,
+        result={"ok": True, "url": "https://mail.google.com", "via": "rust-host"},
+    )
+    found = b.find_recent_success(action="navigate", url="https://mail.google.com")
+    assert found is not None
+    assert found.id == j.id
+
+
 def test_computer_api_and_tools_registered(tmp_path: Path, monkeypatch):
     class Cfg:
         home_dir = str(tmp_path)
