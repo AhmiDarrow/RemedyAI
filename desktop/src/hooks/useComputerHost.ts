@@ -3,25 +3,63 @@
  * Claims browser-target jobs from the local API and executes them via Tauri
  * (navigate + agent input on the embedded WebView2).
  *
- * Local-only feature branch work — do not push until soak tested.
+ * Local branch only — do not push until soak tested.
  */
 import { useEffect, useRef } from 'react'
 import { isTauri, tauriInvoke } from '../api/tauri'
 import {
   claimComputerJob,
   completeComputerJob,
+  computerCapture,
   computerHostHello,
+  emitComputerUi,
   type ComputerJob,
 } from '../api/computer'
+
+async function readEmbedBounds(): Promise<{
+  bounds: { x: number; y: number; width: number; height: number } | null
+  scale: number
+}> {
+  const scale =
+    typeof window !== 'undefined' && window.devicePixelRatio
+      ? window.devicePixelRatio
+      : 1
+  try {
+    const b = await tauriInvoke<{
+      x: number
+      y: number
+      width: number
+      height: number
+    } | null>('browser_last_bounds')
+    if (b && b.width > 40 && b.height > 40) {
+      return { bounds: b, scale }
+    }
+  } catch {
+    /* not open */
+  }
+  return { bounds: null, scale }
+}
 
 async function runBrowserJob(job: ComputerJob): Promise<Record<string, unknown>> {
   const action = (job.action || '').toLowerCase()
   const p = job.payload || {}
+  const ui = (p.ui && typeof p.ui === 'object' ? p.ui : {}) as {
+    open_browser?: boolean
+  }
+  if (ui.open_browser || action === 'navigate') {
+    emitComputerUi({ openBrowser: true })
+    // Give the rail a moment to mount / size before navigate
+    await new Promise((r) => window.setTimeout(r, 120))
+  }
 
   if (action === 'navigate') {
     const url = String(p.url || '')
     if (!url) throw new Error('url required')
-    const opened = await tauriInvoke<string>('browser_navigate', { url, bounds: null })
+    const { bounds } = await readEmbedBounds()
+    const opened = await tauriInvoke<string>('browser_navigate', {
+      url,
+      bounds: bounds || null,
+    })
     return {
       ok: true,
       target: 'browser',
@@ -32,30 +70,43 @@ async function runBrowserJob(job: ComputerJob): Promise<Record<string, unknown>>
   }
 
   if (action === 'screenshot') {
-    // Full desktop capture is done server-side when host is offline.
-    // With host: report bounds so the model knows the rail geometry; full
-    // embed PNG capture lands in a later slice.
-    let bounds: unknown = null
-    try {
-      bounds = await tauriInvoke('browser_last_bounds')
-    } catch {
-      /* ignore */
+    const { bounds, scale } = await readEmbedBounds()
+    if (bounds) {
+      const cap = await computerCapture({
+        x: Math.round(bounds.x),
+        y: Math.round(bounds.y),
+        width: Math.round(bounds.width),
+        height: Math.round(bounds.height),
+        scale,
+        label: 'browser_rail',
+      })
+      const info = cap.capture || {}
+      let url = ''
+      try {
+        url = await tauriInvoke<string>('browser_current_url')
+      } catch {
+        /* */
+      }
+      return {
+        ok: true,
+        target: 'browser',
+        action: 'screenshot',
+        message: `Browser rail capture (${info.width || '?'}x${info.height || '?'})`,
+        ...info,
+        bounds,
+        scale,
+        url,
+      }
     }
-    let url = ''
-    try {
-      url = await tauriInvoke<string>('browser_current_url')
-    } catch {
-      /* ignore */
-    }
+    // No bounds yet — full desktop via capture API
+    const cap = await computerCapture({ label: 'desktop_fallback' })
     return {
       ok: true,
-      target: 'browser',
+      target: 'desktop',
       action: 'screenshot',
-      message:
-        'Browser host live — use target=desktop for full-screen PNG path until embed capture ships; bounds returned.',
-      bounds,
-      url,
-      note: 'embed_png_pending',
+      message: 'No browser bounds yet — full desktop capture',
+      ...(cap.capture || {}),
+      note: 'open Browser rail for rail-cropped shots',
     }
   }
 
@@ -98,11 +149,19 @@ export function useComputerHost(enabled = true): void {
     if (!enabled || !isTauri()) return
 
     let cancelled = false
+    const hello = async () => {
+      const { bounds, scale } = await readEmbedBounds()
+      await computerHostHello({
+        bounds: bounds || undefined,
+        scale,
+      }).catch(() => null)
+    }
+
     const tick = async () => {
       if (cancelled || busy.current) return
       busy.current = true
       try {
-        await computerHostHello().catch(() => null)
+        await hello()
         const job = await claimComputerJob().catch(() => null)
         if (job?.id) {
           try {
@@ -110,7 +169,8 @@ export function useComputerHost(enabled = true): void {
             await completeComputerJob(job.id, {
               ok: result.ok !== false,
               result,
-              error: result.ok === false ? String(result.message || 'failed') : undefined,
+              error:
+                result.ok === false ? String(result.message || 'failed') : undefined,
             })
           } catch (e) {
             await completeComputerJob(job.id, {
@@ -125,17 +185,17 @@ export function useComputerHost(enabled = true): void {
     }
 
     void tick()
-    const hello = window.setInterval(() => {
-      void computerHostHello().catch(() => null)
+    const helloIv = window.setInterval(() => {
+      void hello()
     }, 5000)
-    const poll = window.setInterval(() => {
+    const pollIv = window.setInterval(() => {
       void tick()
     }, 400)
 
     return () => {
       cancelled = true
-      window.clearInterval(hello)
-      window.clearInterval(poll)
+      window.clearInterval(helloIv)
+      window.clearInterval(pollIv)
     }
   }, [enabled])
 }

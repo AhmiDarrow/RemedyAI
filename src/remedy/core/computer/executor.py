@@ -263,6 +263,44 @@ class ComputerExecutor:
                 ),
             )
 
+        # Prefer showing the Browser rail when driving the embed
+        if act in (
+            ComputerAction.NAVIGATE,
+            ComputerAction.CLICK,
+            ComputerAction.TYPE,
+            ComputerAction.SCREENSHOT,
+        ):
+            payload.setdefault("ui", {})
+            if isinstance(payload.get("ui"), dict):
+                payload["ui"]["open_browser"] = True
+
+        # Screenshot: if we already know rail bounds, crop in-process (no host wait)
+        if act is ComputerAction.SCREENSHOT:
+            bounds = self.bridge.get_browser_bounds()
+            if bounds and bounds.get("width", 0) > 40 and bounds.get("height", 0) > 40:
+                try:
+                    from remedy.core.computer import desktop_win as win
+
+                    info = win.screenshot_region_png(
+                        int(bounds["x"]),
+                        int(bounds["y"]),
+                        int(bounds["width"]),
+                        int(bounds["height"]),
+                        scale=float(bounds.get("scale") or 1.0),
+                    )
+                    return public_result(
+                        ok=True,
+                        target="browser",
+                        action="screenshot",
+                        message=(
+                            f"Browser rail region capture "
+                            f"({info['width']}x{info['height']})"
+                        ),
+                        extra={**info, "bounds": bounds},
+                    )
+                except Exception:
+                    pass  # fall through to host job / full desktop
+
         job = self.bridge.enqueue(act.value, payload)
         finished = self.bridge.wait(
             job.id,

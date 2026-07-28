@@ -10,10 +10,45 @@ export type ComputerJob = {
   error?: string | null
 }
 
-export async function computerHostHello(): Promise<{ host_connected?: boolean }> {
+export type BrowserBoundsPayload = {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+export async function computerHostHello(opts?: {
+  bounds?: BrowserBoundsPayload | null
+  scale?: number
+}): Promise<{ host_connected?: boolean }> {
   return apiFetch('/computer/host/hello', {
     method: 'POST',
-    body: JSON.stringify({ client: 'desktop' }),
+    body: JSON.stringify({
+      client: 'desktop',
+      bounds: opts?.bounds || undefined,
+      scale: opts?.scale,
+    }),
+  })
+}
+
+export async function computerHostStatus(): Promise<{
+  host_connected?: boolean
+  browser_bounds?: (BrowserBoundsPayload & { scale?: number }) | null
+}> {
+  return apiFetch('/computer/host/status')
+}
+
+export async function computerCapture(body: {
+  x?: number
+  y?: number
+  width?: number
+  height?: number
+  scale?: number
+  label?: string
+}): Promise<{ ok?: boolean; capture?: Record<string, unknown> }> {
+  return apiFetch('/computer/capture', {
+    method: 'POST',
+    body: JSON.stringify(body),
   })
 }
 
@@ -30,4 +65,12 @@ export async function completeComputerJob(
     method: 'POST',
     body: JSON.stringify(body),
   })
+}
+
+/** UI event: open the Browser rail for agent computer use. */
+export const COMPUTER_UI_EVENT = 'remedy:computer-ui'
+
+export function emitComputerUi(detail: { openBrowser?: boolean }): void {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new CustomEvent(COMPUTER_UI_EVENT, { detail }))
 }

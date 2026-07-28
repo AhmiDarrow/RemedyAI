@@ -130,6 +130,12 @@ async def call_llm_stream(runtime, message: str,
                 from remedy.core.plan_store import PLAN_MODE_SYSTEM_ADDENDUM
 
                 context = (context or "") + "\n\n" + PLAN_MODE_SYSTEM_ADDENDUM
+            # In-house computer use (provider-agnostic) — always available in Build;
+            # Plan mode still only expose read/navigate tools via allowlist.
+            with suppress(Exception):
+                from remedy.core.computer.guidance import COMPUTER_USE_SYSTEM_ADDENDUM
+
+                context = (context or "") + "\n\n" + COMPUTER_USE_SYSTEM_ADDENDUM
         history = await runtime._load_session_history(session_id, message)
         # Memory Harness L0: prune send-view only (stored transcript untouched)
         with suppress(Exception):

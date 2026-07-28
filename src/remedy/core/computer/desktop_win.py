@@ -49,8 +49,8 @@ def _require_windows() -> None:
         raise RuntimeError("Desktop computer use requires Windows")
 
 
-def screenshot_png(path: Path | None = None) -> dict[str, Any]:
-    """Capture the virtual screen to a PNG file. Returns path + size."""
+def _capture_virtual_screen() -> tuple[bytes, int, int, int, int, int]:
+    """Return (bgr_bytes, stride, width, height, origin_x, origin_y)."""
     _require_windows()
     user32 = ctypes.windll.user32
     gdi32 = ctypes.windll.gdi32
@@ -105,22 +105,80 @@ def screenshot_png(path: Path | None = None) -> dict[str, Any]:
     gdi32.DeleteObject(bmp)
     gdi32.DeleteDC(memdc)
     user32.ReleaseDC(0, hdc)
+    return bytes(buf), stride, width, height, left, top
 
-    out = path
-    if out is None:
-        out_dir = Path.home() / ".remedy" / "computer" / "shots"
-        out_dir.mkdir(parents=True, exist_ok=True)
-        out = out_dir / f"desk_{int(time.time() * 1000)}.png"
-    else:
-        out = Path(out)
-        out.parent.mkdir(parents=True, exist_ok=True)
 
-    _write_png_bgr(out, width, height, bytes(buf), stride)
+def _default_shot_path(prefix: str = "desk") -> Path:
+    out_dir = Path.home() / ".remedy" / "computer" / "shots"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    return out_dir / f"{prefix}_{int(time.time() * 1000)}.png"
+
+
+def screenshot_png(path: Path | None = None) -> dict[str, Any]:
+    """Capture the virtual screen to a PNG file. Returns path + size."""
+    raw, stride, width, height, left, top = _capture_virtual_screen()
+    out = Path(path) if path is not None else _default_shot_path("desk")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    _write_png_bgr(out, width, height, raw, stride)
     return {
         "path": str(out),
         "width": width,
         "height": height,
         "origin": {"x": left, "y": top},
+    }
+
+
+def screenshot_region_png(
+    x: int,
+    y: int,
+    width: int,
+    height: int,
+    *,
+    path: Path | None = None,
+    scale: float = 1.0,
+) -> dict[str, Any]:
+    """Capture a rectangle in **screen coordinates** (physical pixels after DPI aware).
+
+    *x*/*y*/*width*/*height* may be CSS/logical pixels when *scale* is devicePixelRatio.
+    """
+    sc = float(scale) if scale and scale > 0 else 1.0
+    rx = int(round(int(x) * sc))
+    ry = int(round(int(y) * sc))
+    rw = max(1, int(round(int(width) * sc)))
+    rh = max(1, int(round(int(height) * sc)))
+
+    raw, stride, full_w, full_h, origin_x, origin_y = _capture_virtual_screen()
+    # Convert screen coords → bitmap coords
+    bx = rx - origin_x
+    by = ry - origin_y
+    # Clamp to bitmap
+    if bx < 0:
+        rw += bx
+        bx = 0
+    if by < 0:
+        rh += by
+        by = 0
+    if bx >= full_w or by >= full_h or rw <= 0 or rh <= 0:
+        raise ValueError("region outside virtual screen")
+    rw = min(rw, full_w - bx)
+    rh = min(rh, full_h - by)
+
+    crop_stride = (rw * 3 + 3) & ~3
+    crop = bytearray(crop_stride * rh)
+    for row in range(rh):
+        src_off = (by + row) * stride + bx * 3
+        dst_off = row * crop_stride
+        crop[dst_off : dst_off + rw * 3] = raw[src_off : src_off + rw * 3]
+
+    out = Path(path) if path is not None else _default_shot_path("region")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    _write_png_bgr(out, rw, rh, bytes(crop), crop_stride)
+    return {
+        "path": str(out),
+        "width": rw,
+        "height": rh,
+        "origin": {"x": origin_x + bx, "y": origin_y + by},
+        "requested": {"x": x, "y": y, "width": width, "height": height, "scale": sc},
     }
 
 

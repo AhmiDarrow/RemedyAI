@@ -16,6 +16,20 @@ class JobCompleteRequest(BaseModel):
 
 class HostHelloRequest(BaseModel):
     client: str = Field(default="desktop", description="desktop | webui")
+    # Optional CSS bounds of the browser rail (from getBoundingClientRect)
+    bounds: dict[str, float] | None = None
+    scale: float | None = Field(default=None, description="devicePixelRatio")
+
+
+class CaptureRequest(BaseModel):
+    """Screenshot full desktop or a region (physical pixels after optional scale)."""
+
+    x: int | None = None
+    y: int | None = None
+    width: int | None = None
+    height: int | None = None
+    scale: float = 1.0
+    label: str = "capture"
 
 
 def register_computer_routes(app: FastAPI, *, runtime=None, gateway=None, memory=None) -> None:
@@ -38,11 +52,30 @@ def register_computer_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                 home = None
         return get_host_bridge(home or Path.home() / ".remedy")
 
+    def _home_dir():
+        from pathlib import Path
+
+        if runtime is not None:
+            h = getattr(getattr(runtime, "config", None), "home_dir", None)
+            if h:
+                return Path(h)
+        try:
+            from remedy.interfaces.config import load_config
+
+            h = load_config().get("home_dir")
+            if h:
+                return Path(h)
+        except Exception:
+            pass
+        return Path.home() / ".remedy"
+
     @app.post("/api/computer/host/hello")
     async def computer_host_hello(req: HostHelloRequest | None = None):
         """Desktop pings this while open so tools know the rail host is live."""
         b = _bridge()
         b.mark_host_alive()
+        if req and req.bounds:
+            b.set_browser_bounds(req.bounds, scale=req.scale)
         return {
             "ok": True,
             "client": (req.client if req else "desktop"),
@@ -54,8 +87,38 @@ def register_computer_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         b = _bridge()
         return {
             "host_connected": b.host_connected(),
+            "browser_bounds": b.get_browser_bounds(),
             "pending_hint": "claim via GET /api/computer/jobs/next",
         }
+
+    @app.post("/api/computer/capture")
+    async def computer_capture(req: CaptureRequest):
+        """Server-side screenshot on this PC (full or region). Used by host + tools."""
+        import sys
+
+        if sys.platform != "win32":
+            raise HTTPException(501, "capture requires Windows")
+        from remedy.core.computer import desktop_win as win
+
+        try:
+            if (
+                req.x is not None
+                and req.y is not None
+                and req.width is not None
+                and req.height is not None
+            ):
+                info = win.screenshot_region_png(
+                    int(req.x),
+                    int(req.y),
+                    int(req.width),
+                    int(req.height),
+                    scale=float(req.scale or 1.0),
+                )
+            else:
+                info = win.screenshot_png()
+        except Exception as e:
+            raise HTTPException(500, str(e)) from e
+        return {"ok": True, "capture": info}
 
     @app.get("/api/computer/jobs/next")
     async def computer_job_next():

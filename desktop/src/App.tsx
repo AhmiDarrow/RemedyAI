@@ -196,6 +196,36 @@ export default function App() {
     })
   }, [])
 
+  // Computer use: agent opens the Browser rail when driving the embed.
+  useEffect(() => {
+    const onComputerUi = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ openBrowser?: boolean }>).detail
+      if (!detail?.openBrowser) return
+      setWsLayout((prev) => {
+        if (prev.left === 'browser' || prev.right === 'browser') {
+          // Ensure the side that has browser is open
+          const next = { ...prev }
+          if (prev.left === 'browser') next.leftOpen = true
+          if (prev.right === 'browser') next.rightOpen = true
+          saveWorkspaceLayout(next)
+          return next
+        }
+        // Prefer right rail for browser (sessions stay on left)
+        const next: WorkspaceLayout = {
+          ...prev,
+          right: 'browser',
+          rightOpen: true,
+          rightRail: false,
+        }
+        if (next.left === 'browser') next.left = 'files'
+        saveWorkspaceLayout(next)
+        return next
+      })
+    }
+    window.addEventListener('remedy:computer-ui', onComputerUi)
+    return () => window.removeEventListener('remedy:computer-ui', onComputerUi)
+  }, [])
+
   const swapSides = useCallback(() => {
     setWsLayout((prev) => {
       const next: WorkspaceLayout = {

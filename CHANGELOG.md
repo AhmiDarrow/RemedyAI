@@ -13,7 +13,10 @@ Work lives on **`feature/computer-use`** (do not ship/push until soak solid).
 - Hybrid router: web/URL → in-app browser; native/desktop hints → OS control
 - Desktop path: Win32 capture + SendInput (no vendor computer-use API)
 - Browser path: job queue + Desktop host poller → WebView2 navigate/input
-- HTTP: `/api/computer/host/*`, `/api/computer/jobs/*`
+- HTTP: `/api/computer/host/*`, `/api/computer/jobs/*`, `POST /api/computer/capture`
+- Region capture for browser-rail crops; host reports bounds on hello
+- System addendum teaches models the computer tool surface (any provider)
+- Desktop: auto-open Browser rail on agent navigate; status **PC host** chip
 - Plan mode: screenshot / navigate / windows list only (no click/type)
 
 ### Fix: Plan banner lifecycle (cancel / no sticky done)

@@ -64,6 +64,8 @@ class ComputerHostBridge:
         self.root = _root(home_dir)
         self._lock = threading.Lock()
         self._host_seen_at: float = 0.0
+        self._browser_bounds: dict[str, float] | None = None
+        self._browser_scale: float = 1.0
 
     def mark_host_alive(self) -> None:
         self._host_seen_at = time.time()
@@ -72,6 +74,31 @@ class ComputerHostBridge:
         if self._host_seen_at <= 0:
             return False
         return (time.time() - self._host_seen_at) <= max_age_s
+
+    def set_browser_bounds(
+        self,
+        bounds: dict[str, Any] | None,
+        *,
+        scale: float | None = None,
+    ) -> None:
+        if not bounds:
+            return
+        try:
+            self._browser_bounds = {
+                "x": float(bounds.get("x", 0)),
+                "y": float(bounds.get("y", 0)),
+                "width": float(bounds.get("width", 0)),
+                "height": float(bounds.get("height", 0)),
+            }
+            if scale is not None and float(scale) > 0:
+                self._browser_scale = float(scale)
+        except (TypeError, ValueError):
+            pass
+
+    def get_browser_bounds(self) -> dict[str, Any] | None:
+        if not self._browser_bounds:
+            return None
+        return {**self._browser_bounds, "scale": self._browser_scale}
 
     def _path(self, job_id: str) -> Path:
         safe = "".join(c for c in job_id if c.isalnum() or c in "-_") or "job"

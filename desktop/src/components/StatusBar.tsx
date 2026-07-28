@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { getLatestCheckpoint, getPartnerStatus } from '../api/partner'
+import { computerHostStatus } from '../api/computer'
 import { getVisionStatus, type VisionStatus } from '../api/vision'
 import type { ConnectedProvider } from '../api/providers'
 import { ThemeSwitcher } from './ThemeSwitcher'
@@ -153,6 +154,25 @@ export function StatusBar({
   const [accessScope, setAccessScope] = useState<string>('')
   const [vision, setVision] = useState<VisionStatus | null>(null)
   const [hasCheckpoint, setHasCheckpoint] = useState(false)
+  const [computerHost, setComputerHost] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    async function pollComputer() {
+      try {
+        const s = await computerHostStatus()
+        if (!cancelled) setComputerHost(Boolean(s.host_connected))
+      } catch {
+        if (!cancelled) setComputerHost(false)
+      }
+    }
+    void pollComputer()
+    const t = window.setInterval(() => void pollComputer(), 8000)
+    return () => {
+      cancelled = true
+      window.clearInterval(t)
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -520,6 +540,20 @@ export function StatusBar({
           <SegButton active={planMode} onClick={onTogglePlanMode} title="Plan mode (Ctrl+B)">
             {planMode ? 'Plan' : 'Build'}
           </SegButton>
+
+          {computerHost && (
+            <span
+              className="px-1.5 py-0.5 rounded text-[10px] font-semibold"
+              style={{
+                background: 'color-mix(in srgb, var(--accent) 18%, transparent)',
+                color: 'var(--accent)',
+                border: '1px solid var(--accent)',
+              }}
+              title="Computer-use host live: agent can drive the in-app browser rail"
+            >
+              PC host
+            </span>
+          )}
 
           <SegButton
             active={panel === 'memory'}

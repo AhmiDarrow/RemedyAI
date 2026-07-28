@@ -111,10 +111,51 @@ def test_desktop_screenshot_roundtrip(tmp_path: Path):
 
     if sys.platform != "win32":
         return
-    from remedy.core.computer.desktop_win import screenshot_png
+    from remedy.core.computer.desktop_win import screenshot_png, screenshot_region_png
 
     out = tmp_path / "shot.png"
     info = screenshot_png(out)
     assert out.is_file()
     assert info["width"] > 0 and info["height"] > 0
     assert out.stat().st_size > 100
+
+    region = tmp_path / "region.png"
+    rinfo = screenshot_region_png(0, 0, 120, 80, path=region, scale=1.0)
+    assert region.is_file()
+    assert rinfo["width"] > 0 and rinfo["height"] > 0
+
+
+def test_computer_capture_api(tmp_path: Path):
+    import sys
+
+    if sys.platform != "win32":
+        return
+
+    class Cfg:
+        home_dir = str(tmp_path)
+
+    class RT:
+        config = Cfg()
+
+        def list_tasks(self):
+            return []
+
+    app = create_app(runtime=RT(), api_key="")
+    client = TestClient(app)
+    r = client.post("/api/computer/capture", json={})
+    assert r.status_code == 200
+    assert r.json()["ok"] is True
+    assert r.json()["capture"]["path"]
+    r2 = client.post(
+        "/api/computer/capture",
+        json={"x": 0, "y": 0, "width": 64, "height": 64, "scale": 1.0},
+    )
+    assert r2.status_code == 200
+    assert r2.json()["capture"]["width"] <= 64 + 8  # clamp tolerance
+
+
+def test_computer_guidance_present():
+    from remedy.core.computer.guidance import COMPUTER_USE_SYSTEM_ADDENDUM
+
+    assert "computer_screenshot" in COMPUTER_USE_SYSTEM_ADDENDUM
+    assert "target" in COMPUTER_USE_SYSTEM_ADDENDUM
