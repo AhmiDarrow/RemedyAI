@@ -441,10 +441,11 @@ class ComputerExecutor:
                 except Exception:
                     pass  # fall through to host job / full desktop
 
-        # Navigate / simple actions: fail fast if poller never claims
-        unclaimed = 5.0 if act is ComputerAction.NAVIGATE else 4.0
+        # Navigate: ui_command opens rail (like Settings); Desktop completes job.
+        # Give the SPA enough time to poll (300ms) + mount rail + WebView navigate.
+        unclaimed = None if act is ComputerAction.NAVIGATE else 4.0
         total_wait = float(
-            kwargs.get("timeout_s") or (20.0 if act is ComputerAction.NAVIGATE else 30.0)
+            kwargs.get("timeout_s") or (25.0 if act is ComputerAction.NAVIGATE else 30.0)
         )
         job = self.bridge.enqueue(act.value, payload)
         finished = self.bridge.wait(

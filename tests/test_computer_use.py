@@ -112,11 +112,37 @@ def test_computer_host_routes_loopback_no_auth(tmp_path: Path):
 
 def test_wait_fails_fast_when_unclaimed(tmp_path: Path):
     b = ComputerHostBridge(home_dir=tmp_path)
-    job = b.enqueue("navigate", {"url": "https://example.com"})
+    # click without ui_command path → unclaimed timeout applies
+    job = b.enqueue("click", {"x": 1, "y": 2})
+    # clear ui so unclaimed logic applies
+    b.clear_ui_command()
     finished = b.wait(job.id, timeout_s=30.0, unclaimed_timeout_s=0.6, poll_s=0.1)
     assert finished.status == "error"
     assert "did not claim" in (finished.error or "")
     assert not b.host_connected()
+
+
+def test_wait_honors_ui_command_without_claim(tmp_path: Path):
+    """Navigate sets ui_command; Desktop may complete without claim_next."""
+    import threading
+    import time
+
+    b = ComputerHostBridge(home_dir=tmp_path)
+    job = b.enqueue("navigate", {"url": "https://example.com/wiki"})
+    assert b.peek_ui_command() is not None
+
+    def complete_later() -> None:
+        time.sleep(0.4)
+        b.complete(
+            job.id,
+            ok=True,
+            result={"ok": True, "action": "navigate", "url": "https://example.com/wiki"},
+        )
+        b.clear_ui_command(job_id=job.id)
+
+    threading.Thread(target=complete_later, daemon=True).start()
+    finished = b.wait(job.id, timeout_s=5.0, unclaimed_timeout_s=0.5, poll_s=0.1)
+    assert finished.status == "done"
 
 
 def test_computer_api_and_tools_registered(tmp_path: Path, monkeypatch):

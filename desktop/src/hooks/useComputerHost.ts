@@ -196,12 +196,18 @@ export function useComputerHost(
   openBrowserRef.current = onOpenBrowser
 
   useEffect(() => {
-    if (!enabled || !isTauri()) return
+    // Desktop shell only. Do not gate on server "ready" — host routes are loopback.
+    if (!isTauri()) return
+    if (!enabled) return
 
     let cancelled = false
 
     const openRail = () => {
-      openBrowserRef.current?.()
+      try {
+        openBrowserRef.current?.()
+      } catch (e) {
+        console.warn('[computer-host] openBrowserInRail failed', e)
+      }
       emitComputerUi({ openBrowser: true })
     }
 
@@ -301,17 +307,21 @@ export function useComputerHost(
       }
     }
 
-    void tickUiCommand()
-    void tickJobs()
+    // Immediate kick — don't wait for first interval
+    void (async () => {
+      await hello().catch(() => null)
+      await tickUiCommand()
+      await tickJobs()
+    })()
     const helloIv = window.setInterval(() => {
       void hello()
-    }, 5000)
+    }, 4000)
     const uiIv = window.setInterval(() => {
       void tickUiCommand()
-    }, 300)
+    }, 250)
     const jobIv = window.setInterval(() => {
       void tickJobs()
-    }, 400)
+    }, 350)
 
     return () => {
       cancelled = true

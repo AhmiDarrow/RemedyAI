@@ -366,8 +366,9 @@ export default function App() {
     lastStatus: updateLastStatus,
     updateAvailable,
   } = useUpdateChecker({ ready: serverState === 'ready' })
-  // In-house computer use: open Browser rail (like Settings) + claim jobs.
-  useComputerHost(serverState === 'ready', openBrowserInRail)
+  // Always run in Tauri — do not wait for serverState or the poller never starts
+  // and navigate looks "offline" forever. Loopback host APIs need no SPA token.
+  useComputerHost(true, openBrowserInRail)
   const [showSetupWizard, setShowSetupWizard] = useState(false)
   const [showUpdateScreen, setShowUpdateScreen] = useState(false)
   const [userName, setUserName] = useState('')

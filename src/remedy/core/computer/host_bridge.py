@@ -361,21 +361,32 @@ class ComputerHostBridge:
                 break
             if job.status in ("done", "error", "cancelled"):
                 return job
-            # Host said hello but never claimed — fail fast (was 45s hangs)
+            # Host said hello but never claimed — fail fast (was 45s hangs).
+            # Exception: a UI command is outstanding for this job (Desktop opens
+            # Browser rail like Settings and completes without claim_next).
             if (
                 job.status == "pending"
                 and unclaimed_timeout_s is not None
                 and (time.time() - started) >= max(0.5, unclaimed_timeout_s)
             ):
-                job.status = "error"
-                job.error = (
-                    f"host did not claim job within {unclaimed_timeout_s:.0f}s "
-                    "(Desktop poller offline or not authenticated)"
+                cmd = self.peek_ui_command()
+                ui_for_job = (
+                    isinstance(cmd, dict)
+                    and str(cmd.get("job_id") or "") == str(job_id)
                 )
-                with self._lock:
-                    self._write(job)
-                self.mark_host_dead()
-                return job
+                if ui_for_job:
+                    # Keep waiting for Desktop to open rail + complete the job
+                    pass
+                else:
+                    job.status = "error"
+                    job.error = (
+                        f"host did not claim job within {unclaimed_timeout_s:.0f}s "
+                        "(Desktop poller offline or not authenticated)"
+                    )
+                    with self._lock:
+                        self._write(job)
+                    self.mark_host_dead()
+                    return job
             time.sleep(poll_s)
         job = self._read(job_id)
         if job is None:
