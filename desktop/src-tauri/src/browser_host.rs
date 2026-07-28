@@ -4,9 +4,12 @@
 //! Requires Tauri feature `unstable` (window.add_child / multiwebview).
 
 use serde::{Deserialize, Serialize};
+use serde_json::json;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::time::Duration;
 use tauri::{
-    AppHandle, LogicalPosition, LogicalSize, Manager, State, WebviewUrl,
+    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, State, WebviewUrl,
 };
 use tauri::webview::WebviewBuilder;
 use tauri::utils::config::Color;
@@ -165,18 +168,14 @@ fn schedule_reload(wv: tauri::Webview, url: String, delay_ms: u64) {
     });
 }
 
-/// Open or navigate the **embedded** WebView2 inside the main window.
-/// Pass CSS-pixel bounds of the Browser slide content area (from getBoundingClientRect).
-///
-/// Must stay `async` on Windows — sync create can deadlock WebView2.
-#[tauri::command]
-pub async fn browser_navigate(
-    app: AppHandle,
-    state: State<'_, BrowserState>,
-    url: String,
+/// Core navigate used by the command and the Rust computer-host poller.
+pub fn navigate_embed(
+    app: &AppHandle,
+    state: &BrowserState,
+    url_raw: &str,
     bounds: Option<BrowserBounds>,
 ) -> Result<String, String> {
-    let url = normalize_url(&url)?;
+    let url = normalize_url(url_raw)?;
     {
         let mut cur = state.current_url.lock().map_err(|e| e.to_string())?;
         *cur = url.clone();
@@ -211,7 +210,7 @@ pub async fn browser_navigate(
             }
             Err(e) => {
                 log::warn!("browser navigate on existing embed failed ({e}); recreating");
-                destroy_embed(&app);
+                destroy_embed(app);
             }
         }
     }
@@ -221,7 +220,7 @@ pub async fn browser_navigate(
         let _ = win.destroy();
     }
 
-    let window = main_window(&app)?;
+    let window = main_window(app)?;
     // about:blank first → then navigate: avoids multiwebview white-screen on some GPUs.
     let blank: Url = "about:blank".parse().map_err(|e: url::ParseError| e.to_string())?;
     let builder = WebviewBuilder::new(LABEL, WebviewUrl::External(blank))
@@ -259,6 +258,247 @@ pub async fn browser_navigate(
         b.height
     );
     Ok(url)
+}
+
+/// Open or navigate the **embedded** WebView2 inside the main window.
+/// Pass CSS-pixel bounds of the Browser slide content area (from getBoundingClientRect).
+///
+/// Must stay `async` on Windows — sync create can deadlock WebView2.
+#[tauri::command]
+pub async fn browser_navigate(
+    app: AppHandle,
+    state: State<'_, BrowserState>,
+    url: String,
+    bounds: Option<BrowserBounds>,
+) -> Result<String, String> {
+    navigate_embed(&app, state.inner(), &url, bounds)
+}
+
+// ── Rust-side computer host (does not depend on SPA JS poller) ──────────────
+
+static COMPUTER_HOST_STARTED: AtomicBool = AtomicBool::new(false);
+
+/// Background poller: open Browser rail + drive WebView when the agent navigates.
+/// Runs in Rust so it works even if the React host hook never mounts.
+pub fn start_computer_host_poller(app: AppHandle) {
+    if COMPUTER_HOST_STARTED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    log::info!("computer-host: starting Rust poller thread");
+    let _ = std::thread::Builder::new()
+        .name("computer-host".into())
+        .spawn(move || computer_host_loop(app));
+}
+
+fn computer_host_loop(app: AppHandle) {
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(2))
+        .timeout(Duration::from_secs(8))
+        .build();
+    // Wait for sidecar API
+    for _ in 0..60 {
+        if agent.get("http://127.0.0.1:7400/api/ping").call().is_ok() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    log::info!("computer-host: API reachable, polling ui/command + jobs");
+    loop {
+        std::thread::sleep(Duration::from_millis(280));
+        let _ = agent
+            .post("http://127.0.0.1:7400/api/computer/host/hello")
+            .set("Content-Type", "application/json")
+            .send_string(r#"{"client":"desktop-rust"}"#);
+
+        // UI command path (open rail + navigate)
+        if let Ok(resp) = agent
+            .get("http://127.0.0.1:7400/api/computer/ui/command")
+            .call()
+        {
+            if let Ok(v) = resp.into_json::<serde_json::Value>() {
+                if let Some(cmd) = v.get("command").filter(|c| !c.is_null() && c.is_object()) {
+                    handle_ui_command(&app, &agent, cmd);
+                }
+            }
+        }
+
+        // Job queue path
+        if let Ok(resp) = agent
+            .get("http://127.0.0.1:7400/api/computer/jobs/next")
+            .call()
+        {
+            if let Ok(v) = resp.into_json::<serde_json::Value>() {
+                if let Some(job) = v.get("job").filter(|j| !j.is_null() && j.is_object()) {
+                    handle_job(&app, &agent, job);
+                }
+            }
+        }
+    }
+}
+
+fn handle_ui_command(app: &AppHandle, agent: &ureq::Agent, cmd: &serde_json::Value) {
+    let action = cmd
+        .get("action")
+        .and_then(|a| a.as_str())
+        .unwrap_or("")
+        .to_string();
+    let url = cmd
+        .get("url")
+        .and_then(|u| u.as_str())
+        .unwrap_or("")
+        .to_string();
+    let job_id = cmd
+        .get("job_id")
+        .and_then(|j| j.as_str())
+        .unwrap_or("")
+        .to_string();
+    let job_action = cmd
+        .get("job_action")
+        .and_then(|j| j.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    if action != "open_browser" && job_action != "navigate" {
+        return;
+    }
+
+    // Tell SPA to expand Browser rail (like Settings)
+    let _ = app.emit(
+        "computer-open-browser",
+        json!({ "url": url, "job_id": job_id }),
+    );
+    // Give React a beat to set rightRail=open and mount BrowserSlide
+    std::thread::sleep(Duration::from_millis(450));
+
+    if !url.is_empty() {
+        let nav_result = run_navigate_on_main(app, &url);
+        if !job_id.is_empty() {
+            match nav_result {
+                Ok(final_url) => {
+                    complete_job(
+                        agent,
+                        &job_id,
+                        true,
+                        json!({
+                            "ok": true,
+                            "target": "browser",
+                            "action": "navigate",
+                            "message": format!("Navigated in-rail: {final_url}"),
+                            "url": final_url,
+                            "via": "rust-host",
+                        }),
+                        None,
+                    );
+                }
+                Err(e) => {
+                    log::warn!("computer-host navigate failed: {e}");
+                    complete_job(agent, &job_id, false, json!({}), Some(e));
+                }
+            }
+        }
+    }
+
+    // Ack UI command so it is not reprocessed forever
+    let ack_url = if job_id.is_empty() {
+        "http://127.0.0.1:7400/api/computer/ui/command/ack".to_string()
+    } else {
+        format!(
+            "http://127.0.0.1:7400/api/computer/ui/command/ack?job_id={}",
+            job_id
+        )
+    };
+    let _ = agent.post(&ack_url).call();
+}
+
+fn handle_job(app: &AppHandle, agent: &ureq::Agent, job: &serde_json::Value) {
+    let id = job.get("id").and_then(|i| i.as_str()).unwrap_or("").to_string();
+    let action = job
+        .get("action")
+        .and_then(|a| a.as_str())
+        .unwrap_or("")
+        .to_string();
+    let payload = job.get("payload").cloned().unwrap_or(json!({}));
+    if id.is_empty() {
+        return;
+    }
+    let _ = app.emit("computer-open-browser", json!({ "job_id": id }));
+    std::thread::sleep(Duration::from_millis(350));
+
+    if action == "navigate" {
+        let url = payload
+            .get("url")
+            .and_then(|u| u.as_str())
+            .unwrap_or("")
+            .to_string();
+        if url.is_empty() {
+            complete_job(agent, &id, false, json!({}), Some("url required".into()));
+            return;
+        }
+        match run_navigate_on_main(app, &url) {
+            Ok(final_url) => complete_job(
+                agent,
+                &id,
+                true,
+                json!({
+                    "ok": true,
+                    "target": "browser",
+                    "action": "navigate",
+                    "message": format!("Navigated in-rail: {final_url}"),
+                    "url": final_url,
+                    "via": "rust-job",
+                }),
+                None,
+            ),
+            Err(e) => complete_job(agent, &id, false, json!({}), Some(e)),
+        }
+        let _ = agent
+            .post(&format!(
+                "http://127.0.0.1:7400/api/computer/ui/command/ack?job_id={id}"
+            ))
+            .call();
+        return;
+    }
+
+    // Non-navigate jobs: leave for SPA poller (click/type need page JS) or complete with note
+    log::info!("computer-host: job {id} action={action} left for SPA or next tick");
+}
+
+fn run_navigate_on_main(app: &AppHandle, url: &str) -> Result<String, String> {
+    let (tx, rx) = std::sync::mpsc::channel::<Result<String, String>>();
+    let app2 = app.clone();
+    let url2 = url.to_string();
+    app.run_on_main_thread(move || {
+        let state = app2.state::<BrowserState>();
+        let r = navigate_embed(&app2, state.inner(), &url2, None);
+        let _ = tx.send(r);
+    })
+    .map_err(|e| format!("run_on_main_thread: {e}"))?;
+    rx.recv_timeout(Duration::from_secs(15))
+        .map_err(|_| "navigate timed out on main thread".to_string())?
+}
+
+fn complete_job(
+    agent: &ureq::Agent,
+    job_id: &str,
+    ok: bool,
+    result: serde_json::Value,
+    error: Option<String>,
+) {
+    let body = json!({
+        "ok": ok,
+        "result": result,
+        "error": error,
+    });
+    let url = format!("http://127.0.0.1:7400/api/computer/jobs/{job_id}/complete");
+    if let Err(e) = agent
+        .post(&url)
+        .set("Content-Type", "application/json")
+        .send_json(body)
+    {
+        log::warn!("computer-host complete {job_id}: {e}");
+    } else {
+        log::info!("computer-host completed job {job_id} ok={ok}");
+    }
 }
 
 #[tauri::command]

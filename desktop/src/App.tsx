@@ -222,7 +222,7 @@ export default function App() {
     })
   }, [])
 
-  // Computer use: open Browser rail (event from host poller + server UI command).
+  // Computer use: open Browser rail (SPA event + Rust host emit).
   useEffect(() => {
     const onComputerUi = (ev: Event) => {
       const detail = (ev as CustomEvent<{ openBrowser?: boolean }>).detail
@@ -230,7 +230,21 @@ export default function App() {
       openBrowserInRail()
     }
     window.addEventListener('remedy:computer-ui', onComputerUi)
-    return () => window.removeEventListener('remedy:computer-ui', onComputerUi)
+    let unlisten: (() => void) | undefined
+    void import('./api/tauri').then(async ({ isTauri, tauriListen }) => {
+      if (!isTauri()) return
+      try {
+        unlisten = await tauriListen('computer-open-browser', () => {
+          openBrowserInRail()
+        })
+      } catch {
+        /* older shell */
+      }
+    })
+    return () => {
+      window.removeEventListener('remedy:computer-ui', onComputerUi)
+      unlisten?.()
+    }
   }, [openBrowserInRail])
 
   const swapSides = useCallback(() => {

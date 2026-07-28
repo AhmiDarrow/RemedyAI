@@ -3064,6 +3064,9 @@ pub fn run() {
             log::info!("Starting remedy: {}", remedy_cmd);
             let _ = app_handle.emit("server-starting", ());
 
+            // Rust computer-host: open Browser rail + navigate without SPA JS poller.
+            browser_host::start_computer_host_poller(app_handle.clone());
+
             // Point the sidecar at packaged SPA + local model bundle (resources/).
             if let Ok(resource) = app.path().resource_dir() {
                 env::set_var("REMEDY_RESOURCES", &resource);
