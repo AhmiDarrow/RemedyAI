@@ -41,6 +41,7 @@ import { useTheme } from './hooks/useTheme'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import { useNotifications } from './hooks/useNotifications'
 import { useUpdateChecker } from './hooks/useUpdateChecker'
+import { useComputerHost } from './hooks/useComputerHost'
 import { useSessionStreamJobs } from './sessions/useSessionStreamJobs'
 import { shouldConfirmNewTurn } from './sessions/concurrentTurns'
 import { ConcurrentTurnDialog } from './components/ConcurrentTurnDialog'
@@ -328,6 +329,8 @@ export default function App() {
     lastStatus: updateLastStatus,
     updateAvailable,
   } = useUpdateChecker({ ready: serverState === 'ready' })
+  // In-house computer use: claim browser jobs while Desktop is open (local branch).
+  useComputerHost(serverState === 'ready')
   const [showSetupWizard, setShowSetupWizard] = useState(false)
   const [showUpdateScreen, setShowUpdateScreen] = useState(false)
   const [userName, setUserName] = useState('')

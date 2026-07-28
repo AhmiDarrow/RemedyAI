@@ -12,4 +12,6 @@ commands.allow = [
   "browser_set_bounds",
   "browser_hide",
   "browser_show",
+  "browser_last_bounds",
+  "browser_agent_action",
 ]

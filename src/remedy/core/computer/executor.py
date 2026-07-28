@@ -1,0 +1,302 @@
+"""Dispatch computer actions to browser host bridge or Windows desktop."""
+
+from __future__ import annotations
+
+import json
+import threading
+from pathlib import Path
+from typing import Any
+
+from remedy.core.computer.audit import log_computer_action
+from remedy.core.computer.host_bridge import get_host_bridge
+from remedy.core.computer.router import (
+    ComputerTarget,
+    host_label,
+    normalize_url,
+    resolve_target,
+)
+from remedy.core.computer.types import ComputerAction, public_result
+
+
+class ComputerExecutor:
+    def __init__(self, home_dir: Path | str | None = None) -> None:
+        self.home_dir = home_dir
+        self.bridge = get_host_bridge(home_dir)
+
+    def _session_id(self, runtime: Any | None) -> str | None:
+        if runtime is None:
+            return None
+        return str(getattr(runtime, "_session_id", None) or "") or None
+
+    def _abort_check(self) -> bool:
+        try:
+            from remedy.core.turn_context import is_turn_aborted
+
+            return bool(is_turn_aborted())
+        except Exception:
+            return False
+
+    def run(
+        self,
+        action: ComputerAction | str,
+        *,
+        target: str = "auto",
+        runtime: Any | None = None,
+        **kwargs: Any,
+    ) -> str:
+        act = (
+            action
+            if isinstance(action, ComputerAction)
+            else ComputerAction(str(action).lower())
+        )
+        url = kwargs.get("url")
+        hint = kwargs.get("hint") or kwargs.get("reason") or ""
+        tgt = resolve_target(
+            target,
+            url=url,
+            hint=str(hint),
+            action=act.value,
+        )
+        try:
+            if self._abort_check():
+                return json.dumps(
+                    public_result(
+                        ok=False,
+                        target=host_label(tgt),
+                        action=act.value,
+                        message="Aborted by user",
+                    )
+                )
+
+            if tgt is ComputerTarget.BROWSER:
+                result = self._run_browser(act, **kwargs)
+            else:
+                result = self._run_desktop(act, **kwargs)
+
+            log_computer_action(
+                action=act.value,
+                target=host_label(tgt),
+                ok=bool(result.get("ok")),
+                detail={k: result.get(k) for k in ("path", "url", "x", "y", "message") if k in result},
+                session_id=self._session_id(runtime),
+                home_dir=self.home_dir,
+            )
+            return json.dumps(result, default=str)
+        except Exception as e:
+            err = public_result(
+                ok=False,
+                target=host_label(tgt),
+                action=act.value,
+                message=str(e),
+            )
+            log_computer_action(
+                action=act.value,
+                target=host_label(tgt),
+                ok=False,
+                detail={"error": str(e)},
+                session_id=self._session_id(runtime),
+                home_dir=self.home_dir,
+            )
+            return json.dumps(err, default=str)
+
+    def _run_desktop(self, act: ComputerAction, **kwargs: Any) -> dict[str, Any]:
+        from remedy.core.computer import desktop_win as win
+
+        if act is ComputerAction.SCREENSHOT:
+            info = win.screenshot_png()
+            return public_result(
+                ok=True,
+                target="desktop",
+                action="screenshot",
+                message=f"Screenshot saved ({info['width']}x{info['height']})",
+                extra=info,
+            )
+        if act is ComputerAction.CLICK:
+            x, y = int(kwargs.get("x", 0)), int(kwargs.get("y", 0))
+            win.click(
+                x,
+                y,
+                button=str(kwargs.get("button") or "left"),
+                clicks=int(kwargs.get("clicks") or 1),
+            )
+            return public_result(
+                ok=True,
+                target="desktop",
+                action="click",
+                message=f"Clicked ({x},{y})",
+                extra={"x": x, "y": y},
+            )
+        if act is ComputerAction.DRAG:
+            x1, y1 = int(kwargs.get("x", 0)), int(kwargs.get("y", 0))
+            x2 = int(kwargs.get("x2", x1))
+            y2 = int(kwargs.get("y2", y1))
+            win.drag(x1, y1, x2, y2)
+            return public_result(
+                ok=True,
+                target="desktop",
+                action="drag",
+                message=f"Drag ({x1},{y1})→({x2},{y2})",
+                extra={"x": x1, "y": y1, "x2": x2, "y2": y2},
+            )
+        if act is ComputerAction.TYPE:
+            text = str(kwargs.get("text") or "")
+            win.type_text(text)
+            return public_result(
+                ok=True,
+                target="desktop",
+                action="type",
+                message=f"Typed {len(text)} chars",
+                extra={"length": len(text)},
+            )
+        if act is ComputerAction.KEY:
+            key = str(kwargs.get("key") or "")
+            win.press_key(key)
+            return public_result(
+                ok=True,
+                target="desktop",
+                action="key",
+                message=f"Pressed {key}",
+                extra={"key": key},
+            )
+        if act is ComputerAction.SCROLL:
+            x, y = int(kwargs.get("x", 0)), int(kwargs.get("y", 0))
+            dy = int(kwargs.get("dy") if kwargs.get("dy") is not None else -3)
+            win.scroll(x, y, dy=dy)
+            return public_result(
+                ok=True,
+                target="desktop",
+                action="scroll",
+                message=f"Scrolled at ({x},{y}) dy={dy}",
+                extra={"x": x, "y": y, "dy": dy},
+            )
+        if act is ComputerAction.WINDOWS:
+            mode = str(kwargs.get("mode") or "list").lower()
+            if mode in ("focus", "activate"):
+                hwnd = int(kwargs.get("hwnd") or 0)
+                if not hwnd:
+                    return public_result(
+                        ok=False,
+                        target="desktop",
+                        action="windows",
+                        message="hwnd required for focus",
+                    )
+                win.focus_window(hwnd)
+                return public_result(
+                    ok=True,
+                    target="desktop",
+                    action="windows",
+                    message=f"Focused hwnd={hwnd}",
+                    extra={"hwnd": hwnd},
+                )
+            wins = win.list_windows(limit=int(kwargs.get("limit") or 40))
+            return public_result(
+                ok=True,
+                target="desktop",
+                action="windows",
+                message=f"{len(wins)} visible windows",
+                extra={"windows": wins},
+            )
+        if act is ComputerAction.NAVIGATE:
+            # Desktop navigate: open URL in system default browser
+            url = normalize_url(str(kwargs.get("url") or ""))
+            if not url:
+                return public_result(
+                    ok=False,
+                    target="desktop",
+                    action="navigate",
+                    message="url required",
+                )
+            import webbrowser
+
+            webbrowser.open(url)
+            return public_result(
+                ok=True,
+                target="desktop",
+                action="navigate",
+                message=f"Opened system browser: {url}",
+                extra={"url": url},
+            )
+        return public_result(
+            ok=False,
+            target="desktop",
+            action=act.value,
+            message=f"Unsupported desktop action: {act.value}",
+        )
+
+    def _run_browser(self, act: ComputerAction, **kwargs: Any) -> dict[str, Any]:
+        """Enqueue for desktop host; wait for result.
+
+        If the host is not connected, fall back for navigate→system browser
+        and for screenshot→desktop capture with a clear note.
+        """
+        payload = {k: v for k, v in kwargs.items() if v is not None}
+        if act is ComputerAction.NAVIGATE and payload.get("url"):
+            payload["url"] = normalize_url(str(payload["url"]))
+
+        # Fast path without host for a few actions
+        if not self.bridge.host_connected():
+            if act is ComputerAction.NAVIGATE:
+                # Prefer rail when host is up; else open system browser so task continues
+                r = self._run_desktop(act, **kwargs)
+                r["note"] = (
+                    "desktop host offline — used system browser; "
+                    "open Remedy Desktop for in-rail control"
+                )
+                return r
+            if act is ComputerAction.SCREENSHOT:
+                r = self._run_desktop(ComputerAction.SCREENSHOT)
+                r["note"] = (
+                    "desktop host offline — full desktop screenshot "
+                    "(start Desktop app for in-rail browser shots)"
+                )
+                r["target"] = "desktop"
+                return r
+            if act is ComputerAction.WINDOWS:
+                return self._run_desktop(act, **kwargs)
+            return public_result(
+                ok=False,
+                target="browser",
+                action=act.value,
+                message=(
+                    "Desktop host not connected. Open Remedy Desktop so the "
+                    "in-rail browser can be driven, or set target=desktop."
+                ),
+            )
+
+        job = self.bridge.enqueue(act.value, payload)
+        finished = self.bridge.wait(
+            job.id,
+            timeout_s=float(kwargs.get("timeout_s") or 45.0),
+            abort_check=self._abort_check,
+        )
+        if finished.status == "done" and finished.result:
+            out = dict(finished.result)
+            out.setdefault("ok", True)
+            out.setdefault("target", "browser")
+            out.setdefault("action", act.value)
+            return out
+        err = finished.error or finished.status
+        # Navigate fallback if host timed out
+        if act is ComputerAction.NAVIGATE and payload.get("url"):
+            fb = self._run_desktop(act, **kwargs)
+            fb["note"] = f"browser host failed ({err}); opened system browser"
+            return fb
+        return public_result(
+            ok=False,
+            target="browser",
+            action=act.value,
+            message=str(err),
+            extra={"job_id": job.id},
+        )
+
+
+_executor: ComputerExecutor | None = None
+_exec_lock = threading.Lock()
+
+
+def get_computer_executor(home_dir: Path | str | None = None) -> ComputerExecutor:
+    global _executor
+    with _exec_lock:
+        if _executor is None:
+            _executor = ComputerExecutor(home_dir=home_dir)
+        return _executor

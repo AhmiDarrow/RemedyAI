@@ -297,6 +297,149 @@ pub fn browser_current_url(state: State<'_, BrowserState>) -> Result<String, Str
         .map_err(|e| e.to_string())
 }
 
+/// CSS-pixel bounds of the embed (for host screenshot crop / layout).
+#[tauri::command]
+pub fn browser_last_bounds(state: State<'_, BrowserState>) -> Result<Option<BrowserBounds>, String> {
+    state
+        .last_bounds
+        .lock()
+        .map(|g| g.clone())
+        .map_err(|e| e.to_string())
+}
+
+/// Agent-driven input into the embed (coordinates relative to the page viewport).
+/// Used by the computer-use host poller — not a feature gate, task completion path.
+#[tauri::command]
+pub fn browser_agent_action(
+    app: AppHandle,
+    action: String,
+    x: Option<f64>,
+    y: Option<f64>,
+    x2: Option<f64>,
+    y2: Option<f64>,
+    text: Option<String>,
+    key: Option<String>,
+    button: Option<String>,
+    dy: Option<i32>,
+) -> Result<String, String> {
+    let wv = app
+        .get_webview(LABEL)
+        .ok_or_else(|| "browser not open — navigate first".to_string())?;
+    let act = action.to_lowercase();
+    let js = match act.as_str() {
+        "click" => {
+            let cx = x.unwrap_or(0.0);
+            let cy = y.unwrap_or(0.0);
+            let btn = button.unwrap_or_else(|| "left".into());
+            let js_btn = if btn == "right" {
+                "contextmenu"
+            } else {
+                "click"
+            };
+            format!(
+                r#"(function(){{
+  const x={cx}, y={cy};
+  const el=document.elementFromPoint(x,y)||document.body;
+  if(!el) return 'no element';
+  try{{ el.focus({{preventScroll:true}}); }}catch(e){{}}
+  const opts={{bubbles:true,cancelable:true,clientX:x,clientY:y,view:window,button:{btn_code}}};
+  el.dispatchEvent(new MouseEvent('mousedown', opts));
+  el.dispatchEvent(new MouseEvent('mouseup', opts));
+  el.dispatchEvent(new MouseEvent('{js_btn}', opts));
+  return 'ok:'+ (el.tagName||'?');
+}})()"#,
+                cx = cx,
+                cy = cy,
+                js_btn = js_btn,
+                btn_code = if btn == "right" { 2 } else { 0 },
+            )
+        }
+        "type" | "type_text" => {
+            let t = text.unwrap_or_default();
+            // Escape for JS string
+            let escaped = t
+                .replace('\\', "\\\\")
+                .replace('\'', "\\'")
+                .replace('\n', "\\n")
+                .replace('\r', "\\r");
+            format!(
+                r#"(function(){{
+  const t='{escaped}';
+  const el=document.activeElement||document.body;
+  if(el && (el.isContentEditable || /^(INPUT|TEXTAREA)$/.test(el.tagName))){{
+    const start=el.selectionStart??el.value?.length??0;
+    const end=el.selectionEnd??start;
+    if(typeof el.value==='string'){{
+      el.value=el.value.slice(0,start)+t+el.value.slice(end);
+      try{{ el.selectionStart=el.selectionEnd=start+t.length; }}catch(e){{}}
+      el.dispatchEvent(new Event('input',{{bubbles:true}}));
+    }} else {{
+      document.execCommand('insertText', false, t);
+    }}
+    return 'ok';
+  }}
+  for(const ch of t){{
+    document.activeElement?.dispatchEvent(new KeyboardEvent('keydown',{{key:ch,bubbles:true}}));
+    document.activeElement?.dispatchEvent(new KeyboardEvent('keypress',{{key:ch,bubbles:true}}));
+    document.activeElement?.dispatchEvent(new KeyboardEvent('keyup',{{key:ch,bubbles:true}}));
+  }}
+  return 'ok-fallback';
+}})()"#
+            )
+        }
+        "key" => {
+            let k = key.unwrap_or_else(|| "Enter".into());
+            let escaped = k.replace('\\', "\\\\").replace('\'', "\\'");
+            format!(
+                r#"(function(){{
+  const key='{escaped}';
+  const el=document.activeElement||document.body;
+  const opts={{key:key,code:key,bubbles:true,cancelable:true}};
+  el.dispatchEvent(new KeyboardEvent('keydown', opts));
+  el.dispatchEvent(new KeyboardEvent('keyup', opts));
+  if(key==='Enter' && el.form) try{{ el.form.requestSubmit(); }}catch(e){{}}
+  return 'ok';
+}})()"#
+            )
+        }
+        "scroll" => {
+            let cx = x.unwrap_or(0.0);
+            let cy = y.unwrap_or(0.0);
+            // dy notches: negative = scroll down (increase scrollTop)
+            let delta_y = -(dy.unwrap_or(-3) * 80);
+            format!(
+                r#"(function(){{
+  const el=document.elementFromPoint({cx},{cy})||document.scrollingElement||document.documentElement;
+  el.scrollBy({{top:{delta_y},left:0,behavior:'instant'}});
+  return 'ok';
+}})()"#,
+                cx = cx,
+                cy = cy,
+                delta_y = delta_y,
+            )
+        }
+        "drag" => {
+            let x1 = x.unwrap_or(0.0);
+            let y1 = y.unwrap_or(0.0);
+            let x2 = x2.unwrap_or(x1);
+            let y2 = y2.unwrap_or(y1);
+            format!(
+                r#"(function(){{
+  const el=document.elementFromPoint({x1},{y1})||document.body;
+  el.dispatchEvent(new MouseEvent('mousedown',{{bubbles:true,clientX:{x1},clientY:{y1}}}));
+  el.dispatchEvent(new MouseEvent('mousemove',{{bubbles:true,clientX:{x2},clientY:{y2}}}));
+  el.dispatchEvent(new MouseEvent('mouseup',{{bubbles:true,clientX:{x2},clientY:{y2}}}));
+  return 'ok';
+}})()"#
+            )
+        }
+        other => return Err(format!("unknown browser agent action: {other}")),
+    };
+    wv.eval(&js).map_err(|e| format!("browser agent action: {e}"))?;
+    log::info!("browser agent action {act}");
+    Ok(format!("browser:{act}:ok"))
+}
+
 pub fn close_browser_on_quit(app: &AppHandle) {
     destroy_embed(app);
 }

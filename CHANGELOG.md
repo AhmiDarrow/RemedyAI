@@ -4,6 +4,18 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Feat: in-house computer use (browser rail + desktop) — local branch
+
+Work lives on **`feature/computer-use`** (do not ship/push until soak solid).
+
+- Provider-agnostic tools: `computer_screenshot`, `computer_click`, `computer_type`,
+  `computer_key`, `computer_scroll`, `computer_navigate`, `computer_windows`, `computer_drag`
+- Hybrid router: web/URL → in-app browser; native/desktop hints → OS control
+- Desktop path: Win32 capture + SendInput (no vendor computer-use API)
+- Browser path: job queue + Desktop host poller → WebView2 navigate/input
+- HTTP: `/api/computer/host/*`, `/api/computer/jobs/*`
+- Plan mode: screenshot / navigate / windows list only (no click/type)
+
 ### Fix: Plan banner lifecycle (cancel / no sticky done)
 
 - **Cancel plan** on the Plan banner persists `status=cancelled` (no cosmetic Hide).

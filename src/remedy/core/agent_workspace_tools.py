@@ -988,6 +988,12 @@ def register_workspace_tools(runtime: Any) -> None:
         register_web_tools(runtime)
     except Exception:
         pass
+    try:
+        from remedy.core.agent_computer_tools import register_computer_tools
+
+        register_computer_tools(runtime)
+    except Exception:
+        pass
     # Per-turn tool trace for auto-learn (reset each stream_response)
     runtime._turn_tool_steps = []
     runtime._learning_loop = None
