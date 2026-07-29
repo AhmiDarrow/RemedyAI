@@ -748,6 +748,17 @@ pub fn browser_agent_action(
 })()"#
             .to_string()
         }
+        "ready" => {
+            // Page settle signal for agents (document + optional network quiet)
+            r#"(function(){
+  const ready=document.readyState||'';
+  const busy=!!(window.__remedy_nav_busy);
+  const title=document.title||'';
+  const url=location.href||'';
+  return JSON.stringify({ready,busy,title,url,ok: ready==='complete'||ready==='interactive'});
+})()"#
+            .to_string()
+        }
         "click_text" => {
             let needle = text.clone().unwrap_or_default();
             if needle.is_empty() {
@@ -789,6 +800,17 @@ pub fn browser_agent_action(
     const s=score(el);
     if(s>bestS){{ bestS=s; best=el; }}
   }}
+  // Scroll passes: find off-screen matches (OSWorld: re-observe after scroll)
+  if(!best||bestS<15){{
+    for(let pass=0; pass<4 && (!best||bestS<15); pass++){{
+      window.scrollBy(0, Math.floor(innerHeight*0.75));
+      const nodes2=[...document.querySelectorAll(sel)];
+      for(const el of nodes2){{
+        const s=score(el);
+        if(s>bestS){{ bestS=s; best=el; }}
+      }}
+    }}
+  }}
   if(!best||bestS<15) return 'no-match:'+q;
   try{{ best.scrollIntoView({{block:'center',inline:'center',behavior:'instant'}}); }}catch(e){{}}
   try{{ best.focus({{preventScroll:true}}); }}catch(e){{}}
@@ -799,8 +821,14 @@ pub fn browser_agent_action(
   best.dispatchEvent(new MouseEvent('mouseup', opts));
   best.dispatchEvent(new MouseEvent('click', opts));
   if(typeof best.click==='function') try{{ best.click(); }}catch(e){{}}
-  const name=(best.getAttribute('aria-label')||best.innerText||best.tagName||'').trim().replace(/\s+/g,' ').slice(0,80);
-  return 'ok:'+bestS.toFixed(0)+':'+name;
+  // inputs: select existing value so type replaces
+  if(/^(INPUT|TEXTAREA)$/.test(best.tagName)){{
+    try{{ best.select&&best.select(); }}catch(e){{}}
+  }}
+  const name=(best.getAttribute('aria-label')||best.innerText||best.placeholder||best.tagName||'').trim().replace(/\s+/g,' ').slice(0,80);
+  const tag=(best.tagName||'').toLowerCase();
+  const itype=(best.type||'').toLowerCase();
+  return 'ok:'+bestS.toFixed(0)+':'+tag+':'+itype+':'+name;
 }})()"#
             )
         }

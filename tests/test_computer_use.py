@@ -354,6 +354,7 @@ def test_computer_guidance_present():
 
     assert "computer_screenshot" in COMPUTER_USE_SYSTEM_ADDENDUM
     assert "computer_snapshot" in COMPUTER_USE_SYSTEM_ADDENDUM
+    assert "computer_act" in COMPUTER_USE_SYSTEM_ADDENDUM
     assert "target" in COMPUTER_USE_SYSTEM_ADDENDUM
 
 

@@ -1,53 +1,64 @@
-"""System-prompt guidance for in-house computer use (any provider)."""
+"""System-prompt guidance for in-house computer use (any provider).
+
+Informed by recent agent-computer-use research (OSWorld, ScreenSpot/GUI grounding,
+Anthropic computer-use / CUA patterns, Set-of-Mark): structured a11y/DOM first,
+compound actions, re-observe after failure — not vision thrash.
+"""
 
 from __future__ import annotations
 
 COMPUTER_USE_SYSTEM_ADDENDUM = """
-## Computer use (in-house — full PC + Browser rail)
+## Computer use (full PC + Browser rail) — FAST & ACCURATE
 
-You can operate this Windows PC with **Remedy-native** tools (when the Desktop app is running and the user grants use):
+Operate this Windows PC with Remedy-native tools when the Desktop is running.
 
-| Tool | Role |
+### Tools (prefer top of list)
+
+| Tool | When |
 |------|------|
-| `computer_navigate` | Open URL in **in-app Browser rail** (default) |
-| `computer_snapshot` | List interactive controls with refs (browser e1… / desktop w1… c1…) |
-| `computer_find` | Rank controls matching a text query |
-| `computer_click` | **Prefer `text=`** label, or `ref=eN`, or x/y last |
-| `computer_page_text` | Visible page text from the rail (no vision) |
-| `computer_type` / `computer_key` | Keyboard |
-| `computer_scroll` | Wheel at a point |
-| `computer_wait` | Brief settle (0.3–1.5s typical) |
-| `computer_app` | Launch notepad, calc, explorer, chrome, edge, or .exe path |
-| `computer_windows` | List / focus OS windows (`mode=focus`, `title=` or `hwnd=`) |
-| `computer_screenshot` / `computer_monitors` | Capture (prefer rail/DOM first) |
-| `computer_drag` | Drag |
+| **`computer_act`** | Multi-step in ONE call: url + click + type + key (login/search). **Prefer this.** |
+| `computer_navigate` | Open URL in **Browser rail** only |
+| `computer_click` | `text=\"Sign in\"` (preferred) or `ref=e3` or x/y last |
+| `computer_snapshot` | SoM list of controls `[e1] button \"…\"` — not for open-only |
+| `computer_find` | Rank matches for a label |
+| `computer_page_text` | Read page text (no vision) |
+| `computer_type` / `computer_key` | Type / keys after focus |
+| `computer_wait` | Short settle 0.3–1.0s if needed |
+| `computer_app` / `computer_windows` | Launch/focus OS apps |
+| `computer_screenshot` | Rare — DOM/UIA first; vision last |
+| `target` | auto | browser | desktop routing |
 
-**Routing (`target`):**
-- Web / URL / “on the page” → **browser** rail
-- Apps, Start, files, other windows → **desktop**
-- System/external browser only if the user asks
+### Research-backed loop (OSWorld / CUA / SoM)
 
-**Open-only** (“goto gmail”, “google elephant”):
-1. `computer_navigate` once → one short confirm → **stop**.
-2. No screenshot, snapshot, or extra tools.
+1. **Structured observe first** — snapshot/find (a11y/DOM), not screenshots.
+2. **Act with labels** — click by **text** or **ref**, not guessed pixels.
+3. **Compound when possible** — `computer_act(url=…, click=…, type=…, key=enter)`.
+4. **Re-observe only on failure** — one retry with snapshot; do not spiral vision.
+5. **Latest user message only** — do not resume old wiki/goals mid-task.
 
-**Page interaction** (“click membership options”, fill a form):
-1. Ensure page is open (`computer_navigate` if needed).
-2. Prefer **`computer_click text=\"…\"`** (atomic find+click in the rail).
-3. Or: `computer_snapshot` / `computer_find` → `computer_click ref=eN`.
-4. Optional: `computer_page_text` to read content — **not** vision.
-5. **Do not** loop screenshot → vision decode → click. That is slow and often wrong.
+### Open-only vs interaction
 
-**Full PC autonomy** (user asked to run the computer / do OS work):
-1. `computer_app` or `computer_windows` to open/focus the app.
-2. `computer_snapshot` (desktop) or `computer_find text=…`.
-3. `computer_click` / `computer_type` / `computer_key` until the task is done.
-4. Prefer reversible actions; confirm before destructive ones (delete, format, installers).
-5. Latest user message wins — do not resume older tasks unless asked.
+- **Open only** (“goto gmail”, “google elephant”): navigate once → short confirm → **stop**.
+- **Interaction** (“sign in”, “type my email”, “click membership”): navigate if needed → **click/type until done**.
 
-**Rules:**
-- Prefer **structured DOM/UIA** over pixels/vision.
-- After SUCCESS navigate/click, confirm briefly; do not thrash.
-- If click by text fails: snapshot once, pick best ref, click once, stop or report.
-- User **Stop** cancels pending jobs and mid-type input.
+### Login example (accurate)
+
+User: goto gmail, sign in, type user@example.com
+
+Prefer ONE tool:
+`computer_act(url=\"https://mail.google.com\", click=\"Sign in\", type=\"user@example.com\")`
+or after page open: click \"Email\" / \"Email or phone\" then type.
+
+### Full PC autonomy
+
+1. `computer_app` or `computer_windows mode=focus title=…`
+2. `computer_snapshot` / `computer_find` / `computer_click text=…`
+3. `computer_type` / `computer_key` until the task completes
+4. Reversible first; confirm destructive actions
+
+### Never
+
+- Screenshot → vision as the default click path (slow, wrong window)
+- Stopping after navigate when the user also asked to sign in / type / click
+- Replaying unrelated earlier tasks
 """.strip()

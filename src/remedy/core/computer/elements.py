@@ -1,4 +1,8 @@
-"""Match interactive elements by text/name for click-by-text autonomy."""
+"""Match interactive elements by text/name for click-by-text autonomy.
+
+Inspired by research on GUI agents (OSWorld, ScreenSpot, Set-of-Mark):
+prefer structured a11y/DOM labels + numbered marks over raw pixels.
+"""
 
 from __future__ import annotations
 
@@ -23,17 +27,24 @@ def element_search_blob(el: dict[str, Any]) -> str:
         str(el.get("tag") or ""),
         str(el.get("role") or ""),
         str(el.get("title") or ""),
+        str(el.get("type") or ""),
     ]
     return _norm(" ".join(parts))
 
 
 def score_element(el: dict[str, Any], query: str) -> float:
-    """Higher is better. Exact name match >> contains >> fuzzy tokens."""
+    """Higher is better. Exact name match >> contains >> fuzzy tokens.
+
+    Also boosts semantic field types (email/password) when the query asks for them.
+    """
     q = _norm(query)
     if not q:
         return 0.0
     name = _norm(str(el.get("name") or ""))
     blob = element_search_blob(el)
+    tag = str(el.get("tag") or "").lower()
+    role = str(el.get("role") or "").lower()
+    itype = str(el.get("type") or el.get("input_type") or "").lower()
     score = 0.0
     if name == q:
         score += 100.0
@@ -49,6 +60,18 @@ def score_element(el: dict[str, Any], query: str) -> float:
     if q_toks and b_toks:
         inter = q_toks & b_toks
         score += 15.0 * len(inter) / max(1, len(q_toks))
+    # Semantic boosts (login forms)
+    if any(t in q for t in ("email", "username", "user name", "login", "e-mail")):
+        if itype in ("email", "text") or "email" in blob or "user" in blob:
+            score += 30.0
+        if tag == "input" and itype != "password":
+            score += 10.0
+    if "password" in q or "passwd" in q:
+        if itype == "password" or "password" in blob:
+            score += 40.0
+    if any(t in q for t in ("sign in", "log in", "login", "submit", "continue", "next")):
+        if tag == "button" or role == "button" or itype == "submit":
+            score += 20.0
     # Prefer real controls over huge containers
     w = float(el.get("w") or 0)
     h = float(el.get("h") or 0)
@@ -56,13 +79,12 @@ def score_element(el: dict[str, Any], query: str) -> float:
         score += 5.0
     if w * h > 400_000:
         score -= 20.0
-    tag = str(el.get("tag") or "").lower()
-    role = str(el.get("role") or "").lower()
-    if tag in ("button", "a", "input", "summary") or role in (
+    if tag in ("button", "a", "input", "textarea", "summary") or role in (
         "button",
         "link",
         "tab",
         "menuitem",
+        "textbox",
     ):
         score += 8.0
     return score
@@ -97,3 +119,64 @@ def find_best_element(
 ) -> dict[str, Any] | None:
     hits = find_best_elements(elements, query, top_k=1, min_score=min_score)
     return hits[0] if hits else None
+
+
+def format_som_list(
+    elements: list[dict[str, Any]],
+    *,
+    limit: int = 40,
+    query: str = "",
+) -> str:
+    """Set-of-Mark style numbered list for the model (OSWorld / SoM practice).
+
+    Compact, scannable: [e3] button "Sign in" @ (120,40)
+    """
+    els = list(elements or [])[: max(1, limit)]
+    if query:
+        ranked = find_best_elements(els, query, top_k=limit, min_score=5.0)
+        if ranked:
+            # Put matches first, then rest
+            seen = {str(r.get("ref")) for r in ranked}
+            rest = [e for e in els if str(e.get("ref")) not in seen]
+            els = ranked + rest
+            els = els[:limit]
+    lines: list[str] = []
+    for el in els:
+        ref = str(el.get("ref") or "?")
+        tag = str(el.get("tag") or el.get("role") or "el")
+        name = str(el.get("name") or el.get("text") or el.get("placeholder") or "").strip()
+        name = re.sub(r"\s+", " ", name)[:60]
+        x, y = el.get("x"), el.get("y")
+        score = el.get("match_score")
+        extra = f" score={score}" if score is not None else ""
+        lines.append(f"[{ref}] {tag} \"{name}\" @({x},{y}){extra}")
+    if not lines:
+        return "(no interactive elements)"
+    header = "Elements (Set-of-Mark — click with computer_click ref= or text=):\n"
+    if query:
+        header = f"Elements ranked for {query!r} (Set-of-Mark):\n"
+    return header + "\n".join(lines)
+
+
+def extract_typed_credentials(message: str) -> dict[str, str]:
+    """Pull email/username hints from a user message for login flows."""
+    out: dict[str, str] = {}
+    msg = message or ""
+    emails = re.findall(
+        r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}",
+        msg,
+    )
+    if emails:
+        out["email"] = emails[0]
+        out["username"] = emails[0]
+    # "username X" / "user name: X"
+    m = re.search(
+        r"(?i)\b(?:user\s*name|username|login|email)\s*(?:is|=|:)?\s*([^\s,;]+)",
+        msg,
+    )
+    if m and "@" in m.group(1):
+        out["email"] = m.group(1).strip()
+        out["username"] = m.group(1).strip()
+    elif m and "username" not in out:
+        out["username"] = m.group(1).strip().strip("\"'")
+    return out

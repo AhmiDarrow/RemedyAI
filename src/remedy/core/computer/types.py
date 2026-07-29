@@ -25,6 +25,7 @@ COMPUTER_TOOL_NAMES = frozenset(
         "computer_app",
         "computer_page_text",
         "computer_find",
+        "computer_act",
     }
 )
 
@@ -58,6 +59,7 @@ class ComputerAction(str, Enum):
     APP = "app"
     PAGE_TEXT = "page_text"
     FIND = "find"
+    ACT = "act"
 
 
 def action_from_tool(name: str) -> ComputerAction | None:
@@ -76,6 +78,7 @@ def action_from_tool(name: str) -> ComputerAction | None:
         "computer_app": ComputerAction.APP,
         "computer_page_text": ComputerAction.PAGE_TEXT,
         "computer_find": ComputerAction.FIND,
+        "computer_act": ComputerAction.ACT,
     }
     return mapping.get(name)
 

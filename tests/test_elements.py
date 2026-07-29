@@ -30,3 +30,33 @@ def test_partial_match() -> None:
 def test_no_match() -> None:
     els = [{"ref": "e1", "name": "Home", "tag": "a", "w": 40, "h": 20}]
     assert find_best_element(els, "zebra warehouse", min_score=20) is None
+
+
+def test_som_list_and_email_boost() -> None:
+    from remedy.core.computer.elements import (
+        extract_typed_credentials,
+        format_som_list,
+        score_element,
+    )
+
+    els = [
+        {
+            "ref": "e1",
+            "name": "Email or phone",
+            "tag": "input",
+            "type": "email",
+            "w": 200,
+            "h": 40,
+            "x": 10,
+            "y": 20,
+        },
+        {"ref": "e2", "name": "Password", "tag": "input", "type": "password", "w": 200, "h": 40},
+    ]
+    assert score_element(els[0], "email") > score_element(els[1], "email")
+    som = format_som_list(els, query="email")
+    assert "[e1]" in som
+    assert "Set-of-Mark" in som
+    creds = extract_typed_credentials(
+        "log me in with username user@example.com please"
+    )
+    assert creds.get("email") == "user@example.com"
