@@ -591,11 +591,11 @@ export function StatusBar({
           {onUiModeChange && (
             <button
               type="button"
-              className="text-[10px] px-1.5 py-0.5 rounded font-medium capitalize"
+              className="text-[10px] px-1.5 py-0.5 rounded font-medium"
               title={
                 advanced
-                  ? 'Advanced UI — click for Simple'
-                  : 'Simple UI — click for Advanced'
+                  ? 'Advanced UI (full chrome) — click for Simple UI'
+                  : 'Simple UI (calm chrome) — click for Advanced UI'
               }
               onClick={() => onUiModeChange(advanced ? 'simple' : 'advanced')}
               style={{
@@ -606,7 +606,7 @@ export function StatusBar({
                 border: `1px solid ${advanced ? 'var(--accent)' : 'var(--border)'}`,
               }}
             >
-              {advanced ? 'Advanced' : 'Simple'}
+              {advanced ? 'Advanced UI' : 'Simple UI'}
             </button>
           )}
           {advanced && onOpenUsage && (

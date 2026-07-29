@@ -7,20 +7,30 @@ Remedy is **local-first**. Understand what is stored where and what leaves your 
 | Path | Contents |
 |------|----------|
 | `~/.remedy/config.toml` | Non-secret settings (provider id, model, persona, paths, flags) |
-| `~/.remedy/auth/` | Local API token, provider keys (DPAPI when available), xAI OAuth |
-| `~/.remedy/memory.db` | Chat sessions, memories, profile, handoffs (SQLite) |
+| `~/.remedy/auth/` | Local API token, provider keys (DPAPI when available), xAI OAuth, Google OAuth |
+| `~/.remedy/memory.db` | Chat sessions, messages, tool results, memories, profile (SQLite) |
+| `~/.remedy/assistant.json` | PA prefs, budget/debts/bills (local; not OAuth tokens) |
+| `~/.remedy/vision/` | Local model weights (SmolVLM2) + llama-server runtime |
 | `~/.remedy/skills/` | User / learned skill packs |
 | `~/.remedy/skill_stats.json` | Skill success / lifecycle stats |
 | `~/.remedy/backups/` | Optional memory backups |
 
-On Windows, `~` is your user profile (`C:\Users\<you>`).
+On Windows, `~` is your user profile (`C:\Users\<you>`).  
+**Note:** Chat history is not encrypted beyond your Windows user account. Anyone with your login can read `memory.db`.
 
-## What leaves your machine
+## What leaves your machine (30-second version)
 
-- **Chat prompts and tool results** are sent to the **LLM provider you configured** (OpenAI, xAI, etc.).  
-- **Ollama** keeps inference local if you use only local models.  
-- **Update checks** contact GitHub Releases (version metadata / installer download).  
-- There is **no** Remedy cloud account required for core chat.
+| Leaves? | What | When |
+|---------|------|------|
+| **Yes → your LLM provider** | Chat text + **tool results** for that turn | Every cloud-model reply |
+| **Yes → Google (if connected)** | Mail/calendar API traffic | When PA tools run |
+| **Yes → messenger platforms** | Messages you enable | When channels are on |
+| **Yes → public web** | URLs you fetch | Only if `web_fetch` enabled |
+| **Yes → GitHub** | Version check / update download | Update UI |
+| **No Remedy cloud** | No multi-tenant Remedy mailbox or chat cloud | — |
+| **Local only** | OAuth tokens, API keys, local VL inference | Stays on PC |
+
+**Outbound chat sanitization:** before each provider HTTP call, Remedy **redacts secret-like strings/keys** and **caps oversized tool payloads**. This reduces accidental key leakage; it does **not** remove mail subjects or code you asked the agent to handle.
 
 ## Personal assistant (Gmail / Calendar)
 
@@ -29,10 +39,25 @@ On Windows, `~` is your user profile (`C:\Users\<you>`).
 | OAuth tokens | **This PC only** (`~/.remedy/auth/google.json`, DPAPI on Windows) |
 | Client secrets | Same auth dir — never in chat or model requests |
 | Mail/calendar **API** calls | This PC ↔ Google (official APIs) |
-| Mail/calendar **content in chat** | Only as **tool results** for turns you trigger → your **chosen LLM provider** |
+| Mail/calendar **content in chat** | Tool results you trigger → **chosen LLM provider** (snippets preferred) |
 | Remedy cloud mailbox | **None** |
 
-**Consent:** Settings → Personal assistant requires accepting **Privacy & AI** and **account access** before Connect. Disconnect clears local tokens. Tools prefer short snippets; full body only via explicit read tools. Drafts do not auto-send.
+**Consent:** **Connect** opens a dialog for **Privacy & AI** + account access (not a Settings wall). Disconnect clears local tokens. Drafts do not auto-send.
+
+## Computer-use (Browser rail)
+
+| Item | Where it goes |
+|------|----------------|
+| Page text / DOM actions | On this PC via desktop host (loopback) |
+| Tool results to the model | May include page text → **LLM provider** for that turn |
+| Prefer | DOM/UIA over screenshots |
+
+## Simple / Advanced (UI)
+
+| Control | Where | Meaning |
+|---------|--------|---------|
+| **Simple UI / Advanced UI** | Bottom status bar | How busy the **chrome** is (Memory, Skills, Think, …) |
+| **Simple \| Advanced** | Settings header | How many **settings knobs** are listed |
 
 ## Design goal
 

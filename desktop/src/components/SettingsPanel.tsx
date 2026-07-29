@@ -704,7 +704,7 @@ export function SettingsPanel({
       )}
 
       <div className="px-3 pt-2 pb-1 border-b shrink-0 space-y-1.5" style={{ borderColor: 'var(--border)' }}>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1" title="How many settings sections are listed">
           {(['simple', 'advanced'] as const).map((m) => (
             <button
               key={m}
@@ -714,7 +714,7 @@ export function SettingsPanel({
                 saveSettingsMode(m)
                 if (m === 'advanced') setShowAdvanced(true)
               }}
-              className="flex-1 rounded px-2 py-1 text-[10px] font-medium capitalize"
+              className="flex-1 rounded px-2 py-1 text-[10px] font-medium"
               style={{
                 background:
                   settingsMode === m
@@ -724,7 +724,7 @@ export function SettingsPanel({
                 border: `1px solid ${settingsMode === m ? 'var(--accent)' : 'var(--border)'}`,
               }}
             >
-              {m}
+              {m === 'simple' ? 'Simple settings' : 'Advanced settings'}
             </button>
           ))}
         </div>

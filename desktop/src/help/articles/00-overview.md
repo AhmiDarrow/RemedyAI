@@ -2,6 +2,8 @@
 
 **Remedy** is your personal AI partner for knowledge, design, code, and get-it-done work on **your machine**. It is **not** a medical product.
 
+**Feel of the product:** easy, sleek, beautiful, familiar, and powerful — simple by default, full power when you want it (Simple / Advanced on the bottom bar and in Settings).
+
 Offline Help: **F1** or **Ctrl+/**.
 
 ---
@@ -27,7 +29,7 @@ Offline Help: **F1** or **Ctrl+/**.
 |------|---------|
 | **Chat partner** | Streaming chat, Plan/Build, attachments, image markup |
 | **Workspace** | **Files** · **Terminal** · **Browser** · **Scratch** beside chat |
-| **Local brain** | Optional **Qwen2.5-VL 3B** — vision briefs + efficiency (not a second persona) |
+| **Local brain** | **SmolVLM2 2.2B** (Apache 2.0) on this PC — vision briefs + local assist (not a second persona) |
 | **Continuity** | Session Brief, memory, skills, silent workers (nano swarm) |
 | **Messengers** | Telegram and modular connectors in **Settings → Messengers** |
 | **Skills** | Bundled + learned + **Library** (signed catalog) |
@@ -56,23 +58,23 @@ Sessions, Settings, and these tools live on the left/right rails. See [Chat & se
 
 ## Local brain
 
-When installed (Setup or Settings — **not** in the small installer):
+When installed (Setup or **Settings → Advanced → Local model** — download not in the tiny installer):
 
 - **Visual decoder** — screenshots become text briefs for any chat model  
-- **Prefer-local vision** — optional savings on provider vision tokens  
-- **Harness assist** — Session Brief can refresh without another paid call  
-- Binds to **127.0.0.1** only; auto-starts with Remedy  
+- **Prefer-local** — can decode on-device first to save provider vision tokens  
+- **Shared weights** — vision + nano assist share **SmolVLM2 2.2B** (Apache 2.0)  
+- Binds to **127.0.0.1** only; auto-starts with Remedy when installed  
 
-Details: [Local vision & on-device Qwen](14-visual-decoder) · Workers: [Continuity workers](17-nanoswarm)
+Details: [Local model (SmolVLM2)](14-visual-decoder) · Workers: [Continuity workers](17-nanoswarm)
 
 ---
 
 ## Quick start (60 seconds)
 
 1. Install from [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases/latest).  
-2. Setup wizard: provider + optional workspace + optional local vision.  
+2. Setup wizard: provider + workspace; install local model when prompted.  
 3. Chat, or try `/help`.  
-4. **F1** anytime for this wiki.
+4. **F1** anytime for this wiki. Bottom bar: **Simple UI** / **Advanced UI**.
 
 ---
 
@@ -82,9 +84,9 @@ Details: [Local vision & on-device Qwen](14-visual-decoder) · Workers: [Continu
 You → Desktop (chat + Files / Terminal / Browser / Scratch)
          → API 127.0.0.1:7400
               → Continuity (brief, memory, skills, budget)
-              → Local Qwen (optional) — vision · brief assist
-              → Your LLM provider
-              → Tools & messengers
+              → Local SmolVLM2 (dependency when installed) — vision · nano
+              → Your LLM provider (chat + tool results)
+              → Tools, messengers, Google APIs (if connected)
          → ~/.remedy
 ```
 
