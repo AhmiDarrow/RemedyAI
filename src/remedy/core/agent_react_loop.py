@@ -269,14 +269,22 @@ async def call_llm_stream(runtime, message: str,
                 else []
             )
 
-        # High-confidence browse kicks ("goto gmail", "bring up google"):
+        # High-confidence browse kicks ("goto gmail", "goto google and search X"):
         # force tools on + pre-run computer_navigate so the rail opens even if
         # the model only narrates intent (session bug 2026-07-28).
         browse_pre_url: str | None = None
+        clear_goals_only = False
+        pure_action_kick = False
         with suppress(Exception):
-            from remedy.core.computer.browse_intent import parse_browse_navigate_url
+            from remedy.core.computer.browse_intent import (
+                is_clear_goals_intent,
+                is_pure_action_kick,
+                parse_browse_navigate_url,
+            )
 
             browse_pre_url = parse_browse_navigate_url(message or "")
+            clear_goals_only = is_clear_goals_intent(message or "")
+            pure_action_kick = is_pure_action_kick(message or "")
         if browse_pre_url and all_tools and not plan_mode:
             tools = all_tools
 
@@ -347,10 +355,70 @@ async def call_llm_stream(runtime, message: str,
             if brief is not None:
                 open_tasks_for_wall = list(getattr(brief, "open_tasks", None) or [])
         # Coding / tool-enabled turns: Grok Build style — run until finished.
+        # Pure action kicks ("goto google and search X", "clear goals") must NOT
+        # resume older open_tasks / wiki work from history — latest message only.
         run_until_done = bool(tools) or bool(all_tools)
+        if pure_action_kick or clear_goals_only or browse_pre_url:
+            open_tasks_for_wall = []
+            # Still allow tools for the kick itself; don't treat history as unfinished
+            run_until_done = bool(browse_pre_url or clear_goals_only)
+
+        # "clear goals" / "we have none" — no LLM, no replaying earlier browses
+        if clear_goals_only and not plan_mode:
+            clear_msg = "No open goals — already clear."
+            with suppress(Exception):
+                from uuid import uuid4
+
+                has_clear = any(
+                    ((t.get("function") or {}).get("name") or "") == "goal_clear_all"
+                    for t in (all_tools or [])
+                )
+                if has_clear:
+                    cid = f"goal_clear_{uuid4().hex[:10]}"
+                    pre_calls = normalize_tool_calls(
+                        [
+                            {
+                                "id": cid,
+                                "type": "function",
+                                "function": {
+                                    "name": "goal_clear_all",
+                                    "arguments": "{}",
+                                },
+                            }
+                        ]
+                    )
+                    yield "@@tool_calls"
+                    messages.append(
+                        build_assistant_api_message(content=None, tool_calls=pre_calls)
+                    )
+                    async for event, tool_msg in execute_tool_calls(
+                        runtime,
+                        pre_calls,
+                        seen_fps=seen_fps,
+                        result_cache=result_cache,
+                    ):
+                        if event.startswith("@@"):
+                            yield event
+                        if tool_msg:
+                            messages.append(tool_msg)
+                            body = str(tool_msg.get("content") or "").strip()
+                            if body:
+                                clear_msg = body
+                else:
+                    # No tool registered — wipe session brief open_tasks only
+                    brief = getattr(runtime, "_session_brief", None)
+                    if brief is not None:
+                        brief.open_tasks = []
+                        with suppress(Exception):
+                            brief.touch()
+                        clear_msg = "Session open tasks cleared (no goal list entries)."
+            yield clear_msg if clear_msg else "Goals cleared."
+            logger.info("clear_goals short-circuit")
+            return
 
         # Pre-open Browser rail for clear "goto X" intents — tool-call style:
         # open URL, short confirm, **end turn** (no screenshot/snapshot spiral).
+        # Does NOT re-run older wiki/goals from chat history.
         if browse_pre_url and not plan_mode:
             has_nav = any(
                 ((t.get("function") or {}).get("name") or "") == "computer_navigate"
@@ -441,6 +509,21 @@ async def call_llm_stream(runtime, message: str,
                         ),
                     }
                 )
+
+        # If we still enter the LLM loop for a short kick, pin focus to latest msg
+        # so history (old wiki / goals / navigates) is not re-executed.
+        if pure_action_kick or browse_pre_url:
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "IMPORTANT: Fulfill **only** the latest user request. "
+                        "Do not reopen earlier wikis, navigates, membership flows, "
+                        "or goals unless that latest message asks for them. "
+                        "When the latest request is done, stop — no extra tools."
+                    ),
+                }
+            )
 
         async with aiohttp.ClientSession(
             timeout=timeout, connector=connector

@@ -30,6 +30,30 @@ def test_parse_goto_gmail() -> None:
     assert parse_browse_navigate_url("pull up youtube") == "https://www.youtube.com"
 
 
+def test_parse_google_search() -> None:
+    from urllib.parse import unquote_plus
+
+    u = parse_browse_navigate_url("goto google and search elephant")
+    assert u is not None
+    assert "google.com/search" in u
+    assert "elephant" in unquote_plus(u)
+    u2 = parse_browse_navigate_url("go to google and search for blue whale")
+    assert u2 and "blue+whale" in u2 or (u2 and "blue" in u2)
+    u3 = parse_browse_navigate_url("search elephant on google")
+    assert u3 and "elephant" in u3
+    assert parse_browse_navigate_url("bring up google") == "https://www.google.com"
+
+
+def test_clear_goals_intent() -> None:
+    from remedy.core.computer.browse_intent import is_clear_goals_intent, is_pure_action_kick
+
+    assert is_clear_goals_intent("clear goals") is True
+    assert is_clear_goals_intent("just clear goals, we have none") is True
+    assert is_clear_goals_intent("goto gmail") is False
+    assert is_pure_action_kick("goto google and search elephant") is True
+    assert is_pure_action_kick("clear goals") is True
+
+
 def test_parse_full_url() -> None:
     assert (
         parse_browse_navigate_url("https://mail.google.com")
@@ -57,3 +81,6 @@ def test_non_browse_returns_none() -> None:
 def test_short_site_label() -> None:
     assert short_site_label("https://mail.google.com") == "Gmail"
     assert short_site_label("https://www.google.com") == "Google"
+    assert "elephant" in short_site_label(
+        "https://www.google.com/search?q=elephant"
+    ).lower()

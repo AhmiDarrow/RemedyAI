@@ -54,6 +54,33 @@ def register_goal_and_plan_tools(runtime: Any) -> None:
             )
         return "Goals:\n" + "\n".join(lines)
 
+    async def goal_clear_all() -> str:
+        """Mark all open goals complete and wipe session open_tasks (user said clear)."""
+        from datetime import UTC, datetime
+
+        from remedy.models import TaskStatus
+
+        tasks = list(runtime.list_tasks() or [])
+        to_clear = [
+            t
+            for t in tasks
+            if t.status != TaskStatus.COMPLETED and "goal" in (t.tags or [])
+        ]
+        n = 0
+        for task in to_clear:
+            task.status = TaskStatus.COMPLETED
+            task.result_summary = "cleared by user"
+            task.completed_at = datetime.now(UTC)
+            task.updated_at = datetime.now(UTC)
+            n += 1
+        with suppress(Exception):
+            if runtime._session_brief is not None:
+                runtime._session_brief.open_tasks = []
+                runtime._session_brief.touch()
+        if n == 0:
+            return "No open goals — already clear."
+        return f"Cleared {n} open goal(s). Session open tasks wiped."
+
     async def goal_complete(title: str = "", evidence: str = "") -> str:
         from datetime import UTC, datetime
 
@@ -251,6 +278,12 @@ def register_goal_and_plan_tools(runtime: Any) -> None:
                 },
             },
         },
+    )
+    reg.register_builtin_handler(
+        "goal_clear_all",
+        "Clear all open goals and session open-tasks. Use when the user says clear goals / we have none.",
+        goal_clear_all,
+        {"type": "object", "properties": {}},
     )
     reg.register_builtin_handler(
         "goal_complete",
