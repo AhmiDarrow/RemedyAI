@@ -1,4 +1,4 @@
-/** Settings → Personal assistant — simple account connect + brief + budget. */
+/** Settings → Personal assistant — account connect + brief + budget. */
 
 import {
   useCallback,
@@ -13,6 +13,7 @@ import {
   disconnectGoogle,
   getGoogleStatus,
   pollGoogleOAuth,
+  saveGoogleApp,
   startGoogleOAuth,
   type GoogleAuthStatus,
 } from '../../api/assistant'
@@ -73,26 +74,15 @@ export interface AssistantSectionProps {
   onAccountsChanged?: () => void
 }
 
-/** Mail / calendar platforms shown in the account dropdown. */
 const ACCOUNT_PROVIDERS = [
-  {
-    id: 'google',
-    label: 'Google (Gmail)',
-    ready: true,
-  },
-  {
-    id: 'microsoft',
-    label: 'Microsoft (Outlook)',
-    ready: false,
-  },
-  {
-    id: 'yahoo',
-    label: 'Yahoo (Ymail!)',
-    ready: false,
-  },
+  { id: 'google', label: 'Google (Gmail)', ready: true },
+  { id: 'microsoft', label: 'Microsoft (Outlook)', ready: false },
+  { id: 'yahoo', label: 'Yahoo (Ymail!)', ready: false },
 ] as const
 
 type ProviderId = (typeof ACCOUNT_PROVIDERS)[number]['id']
+
+const REDIRECT = 'http://127.0.0.1:7400/api/assistant/google/callback'
 
 const inputStyle = {
   borderColor: 'var(--border)',
@@ -102,8 +92,8 @@ const inputStyle = {
 
 function shortErr(e: unknown): string {
   const raw = e instanceof Error ? e.message : String(e)
-  if (/client_id not set|not configured|not set/i.test(raw)) {
-    return 'Google sign-in isn’t available in this build yet. Restart after update, or set REMEDY_GOOGLE_OAUTH_CLIENT_ID.'
+  if (/not configured|client_id not set|not set/i.test(raw)) {
+    return 'Google OAuth app not set on this install yet — expand “Set up once” below.'
   }
   if (/405|method not allowed|404|not found/i.test(raw)) {
     return 'Server outdated — restart Remedy.'
@@ -112,12 +102,10 @@ function shortErr(e: unknown): string {
   return raw
 }
 
-/** Standard OAuth popup (system browser window). Fallback: default external open. */
 async function openOAuthPopup(url: string): Promise<void> {
   const trimmed = (url || '').trim()
   if (!trimmed) return
   try {
-    // Prefer OS browser — Google expects a real browser for OAuth, not a form paste.
     await openExternalUrl(trimmed)
   } catch {
     if (typeof window !== 'undefined') {
@@ -145,7 +133,13 @@ export function AssistantSection({
   const [provider, setProvider] = useState<ProviderId>('google')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
+  const [setupOpen, setSetupOpen] = useState(false)
+  const [devClientId, setDevClientId] = useState('')
+  const [devSecret, setDevSecret] = useState('')
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const signInReady = Boolean(google?.sign_in_ready ?? google?.app?.client_id_set)
+  const googleConnected = Boolean(google?.connected)
 
   const stopPoll = useCallback(() => {
     if (pollRef.current) {
@@ -158,6 +152,10 @@ export function AssistantSection({
     try {
       const g = await getGoogleStatus()
       setGoogle(g)
+      // Auto-open one-time setup when product OAuth is missing
+      if (!g.sign_in_ready && !g.app?.client_id_set && !g.connected) {
+        setSetupOpen(true)
+      }
       return g
     } catch {
       return null
@@ -176,7 +174,6 @@ export function AssistantSection({
     }))
   }
 
-  const googleConnected = Boolean(google?.connected)
   const summary = !enabled
     ? 'Off'
     : googleConnected
@@ -185,6 +182,31 @@ export function AssistantSection({
 
   const selected = ACCOUNT_PROVIDERS.find((p) => p.id === provider) || ACCOUNT_PROVIDERS[0]
 
+  const handleSaveApp = async () => {
+    const id = devClientId.trim()
+    if (!id) {
+      setMsg('Paste the OAuth Client ID from Google Cloud Console.')
+      return
+    }
+    setBusy(true)
+    setMsg('')
+    try {
+      await saveGoogleApp({
+        client_id: id,
+        ...(devSecret.trim() ? { client_secret: devSecret.trim() } : {}),
+        redirect_uri: REDIRECT,
+      })
+      setDevSecret('')
+      setMsg('Saved. Click Connect to sign in with Google.')
+      setSetupOpen(false)
+      await refreshGoogle()
+    } catch (e: unknown) {
+      setMsg(shortErr(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const handleConnect = async () => {
     setMsg('')
     if (!selected.ready) {
@@ -192,11 +214,16 @@ export function AssistantSection({
       return
     }
     if (provider !== 'google') {
-      setMsg('Only Google is available right now.')
+      setMsg('Only Google (Gmail) is available right now.')
       return
     }
     if (googleConnected) {
       setMsg(google?.email ? `Already connected as ${google.email}` : 'Already connected.')
+      return
+    }
+    if (!signInReady) {
+      setSetupOpen(true)
+      setMsg('Set up Google OAuth once below, then Connect.')
       return
     }
 
@@ -231,6 +258,9 @@ export function AssistantSection({
     } catch (e: unknown) {
       setBusy(false)
       setMsg(shortErr(e))
+      if (/not configured|not set/i.test(String(e instanceof Error ? e.message : e))) {
+        setSetupOpen(true)
+      }
     }
   }
 
@@ -262,7 +292,6 @@ export function AssistantSection({
         <span style={{ color: 'var(--text-primary)' }}>Enabled</span>
       </label>
 
-      {/* Accounts — dropdown + Connect (no Client ID UI) */}
       <div className="mb-2 text-[10px]" style={{ color: 'var(--text-secondary)' }}>
         <div className="font-medium mb-1" style={{ color: 'var(--text-primary)' }}>
           Accounts
@@ -318,6 +347,66 @@ export function AssistantSection({
             {busy ? 'Waiting…' : 'Connect'}
           </button>
         </div>
+
+        {/* One-time product OAuth setup — only when this install has no client */}
+        {!googleConnected && !signInReady ? (
+          <div className="mt-1.5">
+            <button
+              type="button"
+              className="text-[10px] p-0 border-0 bg-transparent cursor-pointer underline"
+              style={{ color: 'var(--accent)' }}
+              onClick={() => setSetupOpen((v) => !v)}
+            >
+              {setupOpen ? 'Hide setup' : 'Set up once (required for Google sign-in)'}
+            </button>
+            {setupOpen ? (
+              <div
+                className="mt-1 rounded border p-1.5 space-y-1"
+                style={{ borderColor: 'var(--border)' }}
+              >
+                <p className="m-0 leading-snug" style={{ color: 'var(--text-muted)' }}>
+                  Google requires a free OAuth client for <em>this app</em> (one-time). Create
+                  Desktop/Web client with redirect{' '}
+                  <code className="text-[9px]" style={{ color: 'var(--accent)' }}>
+                    {REDIRECT}
+                  </code>
+                  , enable Gmail + Calendar APIs, paste Client ID here. End users never do this
+                  when the build ships with credentials.
+                </p>
+                <input
+                  type="text"
+                  placeholder="OAuth Client ID"
+                  value={devClientId}
+                  onChange={(e) => setDevClientId(e.target.value)}
+                  className="w-full rounded border px-1.5 py-1 text-[10px] outline-none"
+                  style={inputStyle}
+                  autoComplete="off"
+                />
+                <input
+                  type="password"
+                  placeholder="Client secret (if Google shows one)"
+                  value={devSecret}
+                  onChange={(e) => setDevSecret(e.target.value)}
+                  className="w-full rounded border px-1.5 py-1 text-[10px] outline-none"
+                  style={inputStyle}
+                  autoComplete="off"
+                />
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    void handleSaveApp()
+                  }}
+                  className="rounded px-2 py-1 text-[10px] border"
+                  style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}
+                >
+                  Save & enable Connect
+                </button>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
         {msg ? (
           <div className="mt-1" style={{ color: 'var(--text-muted)' }}>
             {msg}
@@ -325,7 +414,6 @@ export function AssistantSection({
         ) : null}
       </div>
 
-      {/* Daily brief — kept as requested */}
       <div className="mb-2 text-[10px]" style={{ color: 'var(--text-secondary)' }}>
         <div className="font-medium mb-1" style={{ color: 'var(--text-primary)' }}>
           Daily brief
@@ -373,7 +461,6 @@ export function AssistantSection({
         </div>
       </div>
 
-      {/* Budget */}
       <div className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>
         <div className="font-medium mb-1" style={{ color: 'var(--text-primary)' }}>
           Budget / debt
