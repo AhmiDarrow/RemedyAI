@@ -82,6 +82,9 @@ class AssistantPrefs:
     enabled: bool = True
     timezone: str = ""  # empty → system / profile later
     money_disclaimer_accepted: bool = False
+    # AI + connected-account privacy (required before OAuth Connect)
+    privacy_ai_accepted: bool = False
+    account_access_accepted: bool = False
     default_calendar_account: str = ""
     default_mail_account: str = ""
     brief: BriefPrefs = field(default_factory=BriefPrefs)
@@ -97,6 +100,8 @@ class AssistantPrefs:
             enabled=bool(raw.get("enabled", True)),
             timezone=str(raw.get("timezone") or ""),
             money_disclaimer_accepted=bool(raw.get("money_disclaimer_accepted", False)),
+            privacy_ai_accepted=bool(raw.get("privacy_ai_accepted", False)),
+            account_access_accepted=bool(raw.get("account_access_accepted", False)),
             default_calendar_account=str(raw.get("default_calendar_account") or ""),
             default_mail_account=str(raw.get("default_mail_account") or ""),
             brief=BriefPrefs.from_dict(

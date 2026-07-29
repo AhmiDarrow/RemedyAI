@@ -67,9 +67,13 @@ def register_assistant_tools(runtime: Any) -> None:
                     if not msgs:
                         parts.append("No recent inbox messages.")
                     else:
+                        from remedy.assistant.privacy import BRIEF_SNIPPET_MAX, clip
+
                         for m in msgs:
                             parts.append(
-                                f"- {m.from_addr or '?'}: {m.subject} — {(m.snippet or '')[:80]}"
+                                f"- {clip(m.from_addr or '?', 40)}: "
+                                f"{clip(m.subject or '', 60)} — "
+                                f"{clip(m.snippet or '', BRIEF_SNIPPET_MAX)}"
                             )
                     parts.append("")
                 else:
@@ -143,8 +147,12 @@ def register_assistant_tools(runtime: Any) -> None:
         """List primary Google Calendar events (requires Connect Google)."""
         from datetime import UTC, datetime, timedelta
 
+        from remedy.assistant.privacy import consent_ok
         from remedy.assistant.providers.google_calendar import get_google_calendar
 
+        ok, reason = consent_ok(home)
+        if not ok:
+            return json.dumps({"ok": False, "message": reason}, indent=2)
         cal = get_google_calendar(home)
         if cal is None:
             return json.dumps(
@@ -194,8 +202,12 @@ def register_assistant_tools(runtime: Any) -> None:
         description: str = "",
     ) -> str:
         """Create an event on primary Google Calendar (ISO start/end or YYYY-MM-DD all-day)."""
+        from remedy.assistant.privacy import consent_ok
         from remedy.assistant.providers.google_calendar import get_google_calendar
 
+        ok, reason = consent_ok(home)
+        if not ok:
+            return json.dumps({"ok": False, "message": reason}, indent=2)
         cal = get_google_calendar(home)
         if cal is None:
             return json.dumps(
@@ -238,8 +250,16 @@ def register_assistant_tools(runtime: Any) -> None:
 
     async def mail_list(query: str = "in:inbox", limit: int = 15) -> str:
         """List Gmail messages (needs Connect Google / Gmail)."""
+        from remedy.assistant.privacy import (
+            consent_ok,
+            redact_secrets,
+            sanitize_mail_list_item,
+        )
         from remedy.assistant.providers.google_gmail import get_google_gmail
 
+        ok, reason = consent_ok(home)
+        if not ok:
+            return json.dumps({"ok": False, "message": reason}, indent=2)
         mail = get_google_gmail(home)
         if mail is None:
             return json.dumps(
@@ -255,35 +275,44 @@ def register_assistant_tools(runtime: Any) -> None:
         try:
             msgs = mail.list_messages(
                 query=(query or "in:inbox").strip() or "in:inbox",
-                limit=int(limit or 15),
+                limit=min(int(limit or 15), 25),
             )
         except Exception as exc:
             return json.dumps({"ok": False, "message": str(exc)}, indent=2)
-        return json.dumps(
-            {
-                "ok": True,
-                "count": len(msgs),
-                "query": query or "in:inbox",
-                "messages": [
+        payload = {
+            "ok": True,
+            "count": len(msgs),
+            "query": query or "in:inbox",
+            "messages": [
+                sanitize_mail_list_item(
                     {
                         "id": m.id,
                         "subject": m.subject,
                         "from": m.from_addr,
-                        "snippet": (m.snippet or "")[:200],
+                        "snippet": m.snippet,
                         "date": m.date,
                         "thread_id": m.thread_id,
                     }
-                    for m in msgs
-                ],
-                "message": f"{len(msgs)} message(s)",
-            },
-            indent=2,
-        )
+                )
+                for m in msgs
+            ],
+            "message": f"{len(msgs)} message(s)",
+            "privacy": "Tokens stay local; this list may be sent to your AI provider.",
+        }
+        return json.dumps(redact_secrets(payload), indent=2)
 
     async def mail_get(message_id: str = "") -> str:
         """Read one Gmail message by id (body snippet / plain text)."""
+        from remedy.assistant.privacy import (
+            consent_ok,
+            redact_secrets,
+            sanitize_mail_body,
+        )
         from remedy.assistant.providers.google_gmail import get_google_gmail
 
+        ok, reason = consent_ok(home)
+        if not ok:
+            return json.dumps({"ok": False, "message": reason}, indent=2)
         mail = get_google_gmail(home)
         if mail is None:
             return json.dumps(
@@ -302,20 +331,19 @@ def register_assistant_tools(runtime: Any) -> None:
             m = mail.get_message(message_id.strip())
         except Exception as exc:
             return json.dumps({"ok": False, "message": str(exc)}, indent=2)
-        return json.dumps(
-            {
-                "ok": True,
-                "message": {
-                    "id": m.id,
-                    "subject": m.subject,
-                    "from": m.from_addr,
-                    "date": m.date,
-                    "body": m.snippet,
-                    "thread_id": m.thread_id,
-                },
+        payload = {
+            "ok": True,
+            "message": {
+                "id": m.id,
+                "subject": m.subject,
+                "from": m.from_addr,
+                "date": m.date,
+                "body": sanitize_mail_body(m.snippet),
+                "thread_id": m.thread_id,
             },
-            indent=2,
-        )
+            "privacy": "Body truncated; tokens never sent to the model.",
+        }
+        return json.dumps(redact_secrets(payload), indent=2)
 
     async def mail_create_draft(
         to: str = "",
@@ -323,8 +351,12 @@ def register_assistant_tools(runtime: Any) -> None:
         body: str = "",
     ) -> str:
         """Create a Gmail draft (does not send)."""
+        from remedy.assistant.privacy import consent_ok, redact_secrets
         from remedy.assistant.providers.google_gmail import get_google_gmail
 
+        ok, reason = consent_ok(home)
+        if not ok:
+            return json.dumps({"ok": False, "message": reason}, indent=2)
         mail = get_google_gmail(home)
         if mail is None:
             return json.dumps(
@@ -344,7 +376,17 @@ def register_assistant_tools(runtime: Any) -> None:
             )
         except Exception as exc:
             return json.dumps({"ok": False, "message": str(exc)}, indent=2)
-        return json.dumps(result, indent=2)
+        # Never echo full draft body back to the model path beyond confirmation
+        safe = {
+            "ok": True,
+            "draft_id": result.get("draft_id"),
+            "message_id": result.get("message_id"),
+            "to": result.get("to"),
+            "subject": result.get("subject"),
+            "message": result.get("message"),
+            "privacy": "Draft stored at Google; body not re-sent to the model.",
+        }
+        return json.dumps(redact_secrets(safe), indent=2)
 
     async def budget_get() -> str:
         st = store.budget_status()

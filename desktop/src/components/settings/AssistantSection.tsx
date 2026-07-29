@@ -18,12 +18,15 @@ import {
   type GoogleAuthStatus,
 } from '../../api/assistant'
 import { openExternalUrl } from '../../api/auth'
+import { updateSettings } from '../../api/settings'
 import { SettingsSection } from '../SettingsSection'
 
 export type AssistantDraft = {
   enabled?: boolean
   timezone?: string
   money_disclaimer_accepted?: boolean
+  privacy_ai_accepted?: boolean
+  account_access_accepted?: boolean
   brief?: {
     enabled?: boolean
     hour_local?: number
@@ -52,6 +55,15 @@ export type AssistantStatus = {
   timezone?: string
   money_disclaimer_accepted?: boolean
   money_disclaimer?: string
+  privacy_ai_accepted?: boolean
+  account_access_accepted?: boolean
+  privacy?: {
+    privacy_ai_short?: string
+    privacy_ai_full?: string
+    privacy_ai_checkbox?: string
+    account_connect_checkbox?: string
+    google_scopes_plain?: string
+  }
   brief?: AssistantDraft['brief']
   accounts?: Array<{
     id?: string
@@ -92,6 +104,9 @@ const inputStyle = {
 
 function shortErr(e: unknown): string {
   const raw = e instanceof Error ? e.message : String(e)
+  if (/privacy|account access|Accept the AI/i.test(raw)) {
+    return 'Accept Privacy & AI notices below, then Connect.'
+  }
   if (/not configured|client_id not set|not set/i.test(raw)) {
     return 'Google OAuth app not set on this install yet — expand “Set up once” below.'
   }
@@ -128,7 +143,17 @@ export function AssistantSection({
     draft.money_disclaimer_accepted !== undefined
       ? draft.money_disclaimer_accepted
       : Boolean(assistant?.money_disclaimer_accepted)
+  const privacyAiAccepted =
+    draft.privacy_ai_accepted !== undefined
+      ? draft.privacy_ai_accepted
+      : Boolean(assistant?.privacy_ai_accepted)
+  const accountAccessAccepted =
+    draft.account_access_accepted !== undefined
+      ? draft.account_access_accepted
+      : Boolean(assistant?.account_access_accepted)
 
+  const notices = assistant?.privacy
+  const [privacyOpen, setPrivacyOpen] = useState(false)
   const [google, setGoogle] = useState<GoogleAuthStatus | null>(null)
   const [provider, setProvider] = useState<ProviderId>('google')
   const [busy, setBusy] = useState(false)
@@ -207,6 +232,14 @@ export function AssistantSection({
     }
   }
 
+  const persistConsent = async (patch: {
+    privacy_ai_accepted?: boolean
+    account_access_accepted?: boolean
+    money_disclaimer_accepted?: boolean
+  }) => {
+    await updateSettings({ assistant: patch })
+  }
+
   const handleConnect = async () => {
     setMsg('')
     if (!selected.ready) {
@@ -221,6 +254,10 @@ export function AssistantSection({
       setMsg(google?.email ? `Already connected as ${google.email}` : 'Already connected.')
       return
     }
+    if (!privacyAiAccepted || !accountAccessAccepted) {
+      setMsg('Accept Privacy & AI + account access below, then Connect.')
+      return
+    }
     if (!signInReady) {
       setSetupOpen(true)
       setMsg('Set up Google OAuth once below, then Connect.')
@@ -230,6 +267,11 @@ export function AssistantSection({
     setBusy(true)
     stopPoll()
     try {
+      // Ensure consent is on disk before OAuth (not only in UI draft)
+      await persistConsent({
+        privacy_ai_accepted: true,
+        account_access_accepted: true,
+      })
       const start = await startGoogleOAuth()
       setMsg('Complete sign-in in the browser window…')
       await openOAuthPopup(start.auth_url)
@@ -291,6 +333,80 @@ export function AssistantSection({
         />
         <span style={{ color: 'var(--text-primary)' }}>Enabled</span>
       </label>
+
+      {/* Privacy & AI — required before Connect */}
+      <div
+        className="mb-2 rounded border p-1.5 text-[10px] leading-snug"
+        style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}
+      >
+        <div className="font-medium mb-1" style={{ color: 'var(--text-primary)' }}>
+          Privacy & AI
+        </div>
+        <p className="m-0 mb-1" style={{ color: 'var(--text-muted)' }}>
+          {notices?.privacy_ai_short ||
+            'Tokens stay on this PC. Chat may send tool results (not tokens) to your chosen AI provider.'}
+        </p>
+        <button
+          type="button"
+          className="p-0 border-0 bg-transparent underline cursor-pointer text-[10px] mb-1"
+          style={{ color: 'var(--accent)' }}
+          onClick={() => setPrivacyOpen((v) => !v)}
+        >
+          {privacyOpen ? 'Hide full notice' : 'Read full privacy notice'}
+        </button>
+        {privacyOpen ? (
+          <pre
+            className="m-0 mb-1.5 whitespace-pre-wrap font-sans text-[9px] max-h-40 overflow-y-auto rounded p-1"
+            style={{
+              background: 'var(--bg-elevated)',
+              color: 'var(--text-muted)',
+            }}
+          >
+            {notices?.privacy_ai_full || ''}
+          </pre>
+        ) : null}
+        <label className="flex items-start gap-2 cursor-pointer mb-1">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={privacyAiAccepted}
+            onChange={(e) => {
+              const v = e.target.checked
+              setDraft((p) => ({ ...p, privacy_ai_accepted: v }))
+              void persistConsent({ privacy_ai_accepted: v }).catch(() => {
+                /* save with Settings if offline */
+              })
+            }}
+            style={{ accentColor: 'var(--accent)' }}
+          />
+          <span style={{ color: 'var(--text-primary)' }}>
+            {notices?.privacy_ai_checkbox ||
+              'I understand Remedy is an AI assistant; tokens stay local; tool results may go to my AI provider.'}
+          </span>
+        </label>
+        <label className="flex items-start gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={accountAccessAccepted}
+            onChange={(e) => {
+              const v = e.target.checked
+              setDraft((p) => ({ ...p, account_access_accepted: v }))
+              void persistConsent({ account_access_accepted: v }).catch(() => {})
+            }}
+            style={{ accentColor: 'var(--accent)' }}
+          />
+          <span style={{ color: 'var(--text-primary)' }}>
+            {notices?.account_connect_checkbox ||
+              'I allow official OAuth access for mail/calendar tools I use (Disconnect anytime).'}
+          </span>
+        </label>
+        {notices?.google_scopes_plain ? (
+          <p className="m-0 mt-1" style={{ color: 'var(--text-muted)' }}>
+            Google access: {notices.google_scopes_plain}
+          </p>
+        ) : null}
+      </div>
 
       <div className="mb-2 text-[10px]" style={{ color: 'var(--text-secondary)' }}>
         <div className="font-medium mb-1" style={{ color: 'var(--text-primary)' }}>

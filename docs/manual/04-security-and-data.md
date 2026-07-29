@@ -22,6 +22,18 @@ On Windows, `~` is your user profile (`C:\Users\<you>`).
 - **Update checks** contact GitHub Releases (version metadata / installer download).  
 - There is **no** Remedy cloud account required for core chat.
 
+## Personal assistant (Gmail / Calendar)
+
+| Item | Where it goes |
+|------|----------------|
+| OAuth tokens | **This PC only** (`~/.remedy/auth/google.json`, DPAPI on Windows) |
+| Client secrets | Same auth dir — never in chat or model requests |
+| Mail/calendar **API** calls | This PC ↔ Google (official APIs) |
+| Mail/calendar **content in chat** | Only as **tool results** for turns you trigger → your **chosen LLM provider** |
+| Remedy cloud mailbox | **None** |
+
+**Consent:** Settings → Personal assistant requires accepting **Privacy & AI** and **account access** before Connect. Disconnect clears local tokens. Tools prefer short snippets; full body only via explicit read tools. Drafts do not auto-send.
+
 ## Design goal
 
 **Maximum power for you on this PC** — shell, files, skills, full scope when you enable them.  
