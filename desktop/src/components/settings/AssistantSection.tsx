@@ -77,7 +77,7 @@ export interface AssistantSectionProps {
 const ACCOUNT_PROVIDERS = [
   {
     id: 'google',
-    label: 'Gmail',
+    label: 'Google (Gmail)',
     ready: true,
   },
   {
@@ -87,7 +87,7 @@ const ACCOUNT_PROVIDERS = [
   },
   {
     id: 'yahoo',
-    label: 'Yahoo Mail',
+    label: 'Yahoo (Ymail!)',
     ready: false,
   },
 ] as const
@@ -271,7 +271,7 @@ export function AssistantSection({
         {googleConnected ? (
           <div className="flex flex-wrap items-center gap-2 mb-1.5">
             <span style={{ color: 'var(--text-primary)' }}>
-              Gmail · {google?.email || 'connected'}
+              Google (Gmail) · {google?.email || 'connected'}
             </span>
             <button
               type="button"
