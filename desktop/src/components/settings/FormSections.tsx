@@ -159,6 +159,7 @@ export interface SettingsFormProps {
   assistant?: AssistantStatus | null
   assistantDraft?: AssistantDraft
   setAssistantDraft?: Dispatch<SetStateAction<AssistantDraft>>
+  onAssistantAccountsChanged?: () => void
 }
 
 export function SettingsFormSections(p: SettingsFormProps): ReactNode {
@@ -214,6 +215,7 @@ export function SettingsFormSections(p: SettingsFormProps): ReactNode {
     assistant = null,
     assistantDraft = {},
     setAssistantDraft,
+    onAssistantAccountsChanged,
   } = p
 
   return (
@@ -1489,6 +1491,7 @@ export function SettingsFormSections(p: SettingsFormProps): ReactNode {
                 assistant={assistant}
                 draft={assistantDraft}
                 setDraft={setAssistantDraft}
+                onAccountsChanged={onAssistantAccountsChanged}
               />
             ) : (
               <SettingsSection {...sectionProps('assistant')}>

@@ -26,6 +26,36 @@ def register_assistant_tools(runtime: Any) -> None:
         """On-demand brief from goals + local budget/bills (calendar/mail when linked)."""
         prefs = store.get_prefs()
         parts: list[str] = ["# Assistant brief", ""]
+        if prefs.brief.include_calendar:
+            try:
+                from datetime import UTC, datetime, timedelta
+
+                from remedy.assistant.providers.google_calendar import get_google_calendar
+
+                cal = get_google_calendar(home)
+                if cal is not None:
+                    now = datetime.now(UTC)
+                    events = cal.list_events(
+                        time_min=now.isoformat().replace("+00:00", "Z"),
+                        time_max=(now + timedelta(days=7)).isoformat().replace("+00:00", "Z"),
+                    )
+                    parts.append("## Calendar (next 7 days)")
+                    if not events:
+                        parts.append("No upcoming events on primary calendar.")
+                    else:
+                        for ev in events[:15]:
+                            parts.append(f"- {ev.start}: {ev.title}")
+                    parts.append("")
+                else:
+                    parts.append("## Calendar")
+                    parts.append(
+                        "Google Calendar not connected — Settings → Personal assistant → Connect Google."
+                    )
+                    parts.append("")
+            except Exception as exc:
+                parts.append("## Calendar")
+                parts.append(f"(Could not load calendar: {exc})")
+                parts.append("")
         if prefs.brief.include_budget:
             st = store.budget_status()
             parts.append("## Budget")
@@ -71,8 +101,8 @@ def register_assistant_tools(runtime: Any) -> None:
         accts = store.accounts_public()
         if not accts:
             parts.append(
-                "None connected yet. Google/Microsoft/Yahoo calendar & mail: Settings → "
-                "Personal assistant (OAuth coming next)."
+                "None connected yet. Connect Google Calendar in Settings → Personal assistant "
+                "(official OAuth). Microsoft/Yahoo mail next."
             )
         else:
             for a in accts:
@@ -82,6 +112,103 @@ def register_assistant_tools(runtime: Any) -> None:
         if hint:
             parts.append(f"\n(User hint: {hint[:200]})")
         return "\n".join(parts)
+
+    async def calendar_list_events(days: int = 7, time_min: str = "", time_max: str = "") -> str:
+        """List primary Google Calendar events (requires Connect Google)."""
+        from datetime import UTC, datetime, timedelta
+
+        from remedy.assistant.providers.google_calendar import get_google_calendar
+
+        cal = get_google_calendar(home)
+        if cal is None:
+            return json.dumps(
+                {
+                    "ok": False,
+                    "message": "Google Calendar not connected. Settings → Personal assistant → Connect Google.",
+                },
+                indent=2,
+            )
+        now = datetime.now(UTC)
+        tmin = (time_min or "").strip() or now.isoformat().replace("+00:00", "Z")
+        if (time_max or "").strip():
+            tmax = time_max.strip()
+        else:
+            d = max(1, min(int(days or 7), 31))
+            tmax = (now + timedelta(days=d)).isoformat().replace("+00:00", "Z")
+        try:
+            events = cal.list_events(time_min=tmin, time_max=tmax)
+        except Exception as exc:
+            return json.dumps({"ok": False, "message": str(exc)}, indent=2)
+        return json.dumps(
+            {
+                "ok": True,
+                "time_min": tmin,
+                "time_max": tmax,
+                "count": len(events),
+                "events": [
+                    {
+                        "id": e.id,
+                        "title": e.title,
+                        "start": e.start,
+                        "end": e.end,
+                        "location": e.location,
+                        "description": (e.description or "")[:400],
+                    }
+                    for e in events
+                ],
+                "message": f"{len(events)} event(s) on primary calendar",
+            },
+            indent=2,
+        )
+
+    async def calendar_create_event(
+        title: str = "",
+        start: str = "",
+        end: str = "",
+        description: str = "",
+    ) -> str:
+        """Create an event on primary Google Calendar (ISO start/end or YYYY-MM-DD all-day)."""
+        from remedy.assistant.providers.google_calendar import get_google_calendar
+
+        cal = get_google_calendar(home)
+        if cal is None:
+            return json.dumps(
+                {
+                    "ok": False,
+                    "message": "Google Calendar not connected. Settings → Personal assistant → Connect Google.",
+                },
+                indent=2,
+            )
+        if not (title or "").strip() or not (start or "").strip() or not (end or "").strip():
+            return json.dumps(
+                {
+                    "ok": False,
+                    "message": "Need title, start, and end (ISO datetime or YYYY-MM-DD for all-day).",
+                },
+                indent=2,
+            )
+        try:
+            ev = cal.create_event(
+                title=title.strip(),
+                start=start.strip(),
+                end=end.strip(),
+                description=description or "",
+            )
+        except Exception as exc:
+            return json.dumps({"ok": False, "message": str(exc)}, indent=2)
+        return json.dumps(
+            {
+                "ok": True,
+                "event": {
+                    "id": ev.id,
+                    "title": ev.title,
+                    "start": ev.start,
+                    "end": ev.end,
+                },
+                "message": f"Created: {ev.title} @ {ev.start}",
+            },
+            indent=2,
+        )
 
     async def budget_get() -> str:
         st = store.budget_status()
@@ -372,4 +499,38 @@ def register_assistant_tools(runtime: Any) -> None:
         "Show the full budget/debt tools disclaimer (organization, not advice).",
         money_disclaimer,
         {"type": "object", "properties": {}},
+    )
+    reg.register_builtin_handler(
+        "calendar_list_events",
+        "List Google Calendar primary events (needs Connect Google OAuth). days default 7.",
+        calendar_list_events,
+        {
+            "type": "object",
+            "properties": {
+                "days": {"type": "integer", "description": "Lookahead days (1–31), default 7"},
+                "time_min": {"type": "string", "description": "Optional ISO start"},
+                "time_max": {"type": "string", "description": "Optional ISO end"},
+            },
+        },
+    )
+    reg.register_builtin_handler(
+        "calendar_create_event",
+        "Create a Google Calendar event on primary calendar (official API, not browser login).",
+        calendar_create_event,
+        {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "start": {
+                    "type": "string",
+                    "description": "ISO datetime or YYYY-MM-DD (all-day)",
+                },
+                "end": {
+                    "type": "string",
+                    "description": "ISO datetime or YYYY-MM-DD (all-day exclusive end)",
+                },
+                "description": {"type": "string"},
+            },
+            "required": ["title", "start", "end"],
+        },
     )

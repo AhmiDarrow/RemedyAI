@@ -402,6 +402,19 @@ class AssistantStore:
 
     def public_status(self) -> dict[str, Any]:
         prefs = self.get_prefs()
+        google_status = "planned"
+        try:
+            from remedy.assistant.google_oauth import load_tokens
+
+            tok = load_tokens(self.home)
+            if tok.connected:
+                google_status = "connected"
+            else:
+                from remedy.assistant.google_oauth import load_app_config
+
+                google_status = "ready" if load_app_config(self.home).configured() else "planned"
+        except Exception:
+            pass
         return {
             "enabled": prefs.enabled,
             "timezone": prefs.timezone,
@@ -413,7 +426,11 @@ class AssistantStore:
             "debt_count": len(self.list_debts()),
             "bill_count": len(self.list_bills()),
             "providers_planned": [
-                {"id": "google", "name": "Google (Gmail + Calendar)", "status": "planned"},
+                {
+                    "id": "google",
+                    "name": "Google (Calendar now · Gmail soon)",
+                    "status": google_status,
+                },
                 {"id": "microsoft", "name": "Microsoft (Outlook/Hotmail)", "status": "planned"},
                 {"id": "yahoo", "name": "Yahoo Mail", "status": "planned"},
             ],
