@@ -255,7 +255,9 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
 
             vsec = vision_section_from_config(cfg)
             out["vision_enabled"] = bool(vsec.get("enabled"))
-            out["vision_model_id"] = str(vsec.get("model_id") or "qwen2.5-vl-3b")
+            from remedy.vision.catalog import DEFAULT_MODEL_ID
+
+            out["vision_model_id"] = str(vsec.get("model_id") or DEFAULT_MODEL_ID)
             out["vision_force_decode"] = bool(vsec.get("force_decode"))
             vst = vision_get_status(cfg, light=True)
             out["vision"] = {
@@ -269,8 +271,10 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             }
         except Exception as exc:
             logger.debug("settings vision summary failed: %s", exc)
+            from remedy.vision.catalog import DEFAULT_MODEL_ID
+
             out["vision_enabled"] = False
-            out["vision_model_id"] = "qwen2.5-vl-3b"
+            out["vision_model_id"] = DEFAULT_MODEL_ID
             out["vision_force_decode"] = False
         if xai_auth is not None:
             out["xai_auth"] = xai_auth
@@ -633,12 +637,16 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                 if isinstance(cfg.get("vision"), dict)
                 else False
             ),
-            "vision_model_id": str(
-                (cfg.get("vision") or {}).get("model_id")
-                if isinstance(cfg.get("vision"), dict)
-                else "qwen2.5-vl-3b"
-            )
-            or "qwen2.5-vl-3b",
+            "vision_model_id": (
+                str(
+                    (cfg.get("vision") or {}).get("model_id")
+                    if isinstance(cfg.get("vision"), dict)
+                    else ""
+                ).strip()
+                or __import__(
+                    "remedy.vision.catalog", fromlist=["DEFAULT_MODEL_ID"]
+                ).DEFAULT_MODEL_ID
+            ),
             "vision_force_decode": bool(
                 (cfg.get("vision") or {}).get("force_decode")
                 if isinstance(cfg.get("vision"), dict)

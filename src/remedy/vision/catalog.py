@@ -1,6 +1,6 @@
 """Pinned local model catalog — re-exports shared runtime catalog.
 
-All local roles (vision, nano, helper) use the same DEFAULT_MODEL_ID / Qwen GGUF.
+All local roles (vision, nano, helper) use the same DEFAULT_MODEL_ID / SmolVLM2 GGUF.
 """
 
 from __future__ import annotations

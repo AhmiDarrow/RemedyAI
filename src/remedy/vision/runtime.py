@@ -253,11 +253,20 @@ def start_server(
 ) -> dict[str, Any]:
     """Start llama-server if not already healthy.
 
-    Auto-activates the prebundled (or legacy) pinned Qwen stack when
+    Auto-activates the prebundled pinned SmolVLM2 stack when
     ``vision.json`` is missing or points at missing files — no network.
     """
     global _proc
     state = load_vision_json(home_dir)
+    # Ignore retired local model pins left in vision.json.
+    mid = str((state or {}).get("model_id") or "")
+    if mid and mid not in ("", "smolvlm2-2.2b"):
+        try:
+            from remedy.vision.catalog import get_model_spec
+
+            get_model_spec(mid)
+        except Exception:
+            state = {}
     if not state or not Path(str(state.get("model_path") or "")).is_file():
         try:
             from remedy.runtime.bundle import activate_local_bundle

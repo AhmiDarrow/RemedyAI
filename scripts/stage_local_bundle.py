@@ -55,7 +55,7 @@ def stage(
             break
     if not model_src or not mmproj_src:
         print(
-            "ERROR: pinned Qwen GGUF/mmproj not found.\n"
+            "ERROR: pinned SmolVLM2 GGUF/mmproj not found.\n"
             "  1) Run Remedy Setup once online (download into ~/.remedy/vision), or\n"
             "  2) Place files under ~/.remedy/vision/models/"
             f"{mid}/ then re-run.\n"

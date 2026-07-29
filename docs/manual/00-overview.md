@@ -97,7 +97,7 @@ You → Desktop (chat + Files / Terminal / Browser / Scratch)
 | Chapter | Topic |
 |---------|--------|
 | [How Remedy works](16-continuity-philosophy) | Continuity philosophy |
-| [Local vision & Qwen](14-visual-decoder) | On-device efficiency |
+| [Local vision & SmolVLM2](14-visual-decoder) | On-device efficiency |
 | [Continuity workers](17-nanoswarm) | Nano swarm (operators) |
 | [Install (Windows)](01-install-windows) | Installer & SmartScreen |
 | [First run](02-first-run) | Setup wizard |

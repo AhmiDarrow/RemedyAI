@@ -10,8 +10,8 @@ clinical product). Current package series: **0.12.x** (see root `CHANGELOG.md`).
 
 | Item | Policy |
 |------|--------|
-| Installer | **Does not** include Qwen GGUF / multi‑GB weights |
-| First run | Setup downloads pinned `qwen2.5-vl-3b` into `~/.remedy/vision/` |
+| Installer | **Does not** include SmolVLM2 GGUF / multi‑GB weights |
+| First run | Setup downloads pinned `smolvlm2-2.2b` into `~/.remedy/vision/` |
 | After install | llama-server **auto-starts with Remedy** |
 | Offline (optional) | `python scripts/stage_local_bundle.py --from-vision-home` then `REMEDY_LOCAL_BUNDLE=…` |
 

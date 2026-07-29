@@ -169,7 +169,7 @@ def build_context_snapshot(
         snap.signals["library_suggest_error"] = str(e)
 
     # Spread planner — HEURISTICS ONLY on the hot path.
-    # Never block chat on local Qwen (use_local only when the model calls spread_run).
+    # Never block chat on local VLM (use_local only when the model calls spread_run).
     try:
         from remedy.core.spread.planner import plan_spread
 

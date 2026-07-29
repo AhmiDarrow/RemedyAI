@@ -1055,10 +1055,10 @@ space_id = ""
 cli_path = "signal-cli"
 account = ""
 
-# Local visual decoder (llama-server + Qwen2.5-VL 3B) — opt-in; not downloaded until enabled
+# Local visual decoder (llama-server + SmolVLM2 2.2B) — first-run download; not in installer
 [vision]
 enabled = false
-model_id = "qwen2.5-vl-3b"
+model_id = "smolvlm2-2.2b"
 # Prefer local image→text even when the chat model has native vision (saves provider tokens)
 force_decode = false
 host = "127.0.0.1"

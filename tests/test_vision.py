@@ -217,6 +217,13 @@ def test_vision_section_defaults():
     assert sec["enabled"] is True
 
 
+def test_legacy_qwen_model_id_migrates_to_smolvlm2():
+    sec = vision_section_from_config(
+        {"vision": {"enabled": True, "model_id": "qwen2.5-vl-3b"}}
+    )
+    assert sec["model_id"] == DEFAULT_MODEL_ID
+
+
 def test_save_vision_json(tmp_path: Path):
     p = save_vision_json(
         {"enabled": True, "model_id": DEFAULT_MODEL_ID},
@@ -306,7 +313,7 @@ def test_decode_for_turn_force_decode_uses_mock_when_ready(tmp_path: Path):
         "running": True,
         "model_id": DEFAULT_MODEL_ID,
         "base_url": "http://127.0.0.1:8740/v1",
-        "model": {"name": "Qwen2.5-VL 3B"},
+        "model": {"name": "SmolVLM2 2.2B"},
         "not_ready_hint": None,
     }
 

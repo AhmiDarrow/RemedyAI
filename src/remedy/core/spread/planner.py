@@ -95,7 +95,7 @@ def plan_spread(
     use_local: bool = True,
     max_tasks: int = 6,
 ) -> SpreadPlan:
-    """Heuristic plan; optionally refine with local Qwen if server already up."""
+    """Heuristic plan; optionally refine with local VLM if server already up."""
     if inside_worker:
         return SpreadPlan(spread=False, reason="inside_worker", score=0)
     if plan_mode:
@@ -338,7 +338,7 @@ def _try_local_refine(
     *,
     max_tasks: int,
 ) -> SpreadPlan | None:
-    """Optional local Qwen refine — never starts server; short timeout."""
+    """Optional local VLM refine — never starts server; short timeout."""
     try:
         from remedy.vision.runtime import is_running
 

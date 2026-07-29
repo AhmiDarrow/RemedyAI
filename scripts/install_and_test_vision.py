@@ -103,7 +103,7 @@ def main() -> int:
     }
 
     if not args.skip_install and not is_installed():
-        print("Starting install (CPU llama-server + Qwen2.5-VL 3B)...", flush=True)
+        print("Starting install (CPU llama-server + SmolVLM2 2.2B)...", flush=True)
         r = start_install(
             model_id=DEFAULT_MODEL_ID,
             runtime_id="win-cpu-x64",

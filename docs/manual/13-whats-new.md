@@ -80,7 +80,7 @@ Current series: **v0.19.0**.
 - **Settings → Messengers:** connect Telegram (live) and modular Discord / Slack / Mattermost / Matrix / WhatsApp / Teams / Google Chat / Signal adapters — tokens stay in the secret store.
 - Messenger threads show up as normal sessions in the desktop; history and live updates stay in sync.
 - Skills Library refresh is smoother; empty chat shows a clean monogram; Memory Progress is calmer.
-- Owner docs showcase workspace tools, local Qwen, and messengers; download link always means **latest**.
+- Owner docs showcase workspace tools, local SmolVLM2, and messengers; download link always means **latest**.
 - WebUI and desktop share one SPA; rebuild + restart picks up UI changes correctly.
 
 ## 0.15.9 - Skills Library visibility + first-session fix

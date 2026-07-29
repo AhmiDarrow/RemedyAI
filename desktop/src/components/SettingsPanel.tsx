@@ -240,7 +240,7 @@ export function SettingsPanel({
           stopVisionPoll()
           setVisionBusy(false)
           if (phase === 'ready') {
-            setVisionMsg('Visual decoder ready — Qwen2.5-VL 3B')
+            setVisionMsg('Visual decoder ready — SmolVLM2 2.2B')
           } else if (phase === 'error') {
             setVisionMsg(vs?.progress?.error || 'Install failed')
           } else if (phase === 'cancelled') {

@@ -1,7 +1,7 @@
 """Remedy Nano Swarm — specialized local workers around the main agent.
 
 Bots: Token, Pattern, Memory, Skill (always-on, deterministic), Router
-(optional text assist on the shared bundled Qwen / llama-server).
+(optional text assist on the shared bundled SmolVLM2 / llama-server).
 """
 
 from __future__ import annotations

@@ -4,6 +4,13 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Chore: remove product Qwen VLM — SmolVLM2 only
+
+- Local vision / nano / helper catalog is **SmolVLM2 2.2B only** (`smolvlm2-2.2b`).
+- Defaults, Setup Wizard, Settings, tools, manuals, and README no longer advertise Qwen2.5-VL 3B.
+- Retired config / `vision.json` ids (`qwen2.5-vl-3b`, …) migrate to SmolVLM2 at load time.
+- Ollama **chat** model list still may include “Qwen 2.5” (third-party chat models, not the local VLM).
+
 ### Security: P0 trust audit fixes (user data + computer-use)
 
 - Browser snapshot **redacts password/OTP/sensitive input values** (`[filled]`) so secrets

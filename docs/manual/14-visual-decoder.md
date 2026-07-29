@@ -87,7 +87,7 @@ See [Security & data](04-security-and-data).
 | Not installed | Settings → Advanced → Local model → Install |
 | Stuck downloading | Check disk space; resume install |
 | CUDA issues | CPU runtime still works; GPU is optional |
-| Wrong model name in old docs | Product default is **SmolVLM2 2.2B**, not Qwen 3B |
+| Wrong model name in old docs | Product default is **SmolVLM2 2.2B**, not a retired Qwen 3B pin |
 
 ---
 

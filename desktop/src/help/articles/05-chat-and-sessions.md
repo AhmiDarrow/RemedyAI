@@ -69,7 +69,7 @@ Remedy is a **workbench**: chat in the center, real tools on the rails.
 | Rail tool | What it is |
 |-----------|------------|
 | **Sessions** | Chats, projects, messenger threads |
-| **Settings** | Provider, vision/Qwen, messengers, appearance |
+| **Settings** | Provider, vision/SmolVLM2, messengers, appearance |
 | **Files** | In-app file browser for the session/project |
 | **Terminal** | In-app PowerShell (ConPTY) on this PC |
 | **Browser** | Embedded WebView2 research pane (**↗** = system browser) |
