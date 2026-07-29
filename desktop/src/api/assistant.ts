@@ -17,6 +17,8 @@ export interface GoogleAuthStatus {
   scopes?: string[]
   app?: GoogleAppPublic
   setup_hint?: string | null
+  /** True when product OAuth client is configured (users never paste Client ID). */
+  sign_in_ready?: boolean
 }
 
 export interface GoogleOAuthStart {

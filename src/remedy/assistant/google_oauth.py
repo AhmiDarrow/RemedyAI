@@ -41,6 +41,15 @@ SCOPES = (
 
 DEFAULT_REDIRECT = "http://127.0.0.1:7400/api/assistant/google/callback"
 
+# Public OAuth client for Remedy Desktop (same idea as xAI device OAuth client).
+# Not a user secret — end users never paste this. Override at build/runtime via
+# REMEDY_GOOGLE_OAUTH_CLIENT_ID / REMEDY_GOOGLE_OAUTH_CLIENT_SECRET.
+# Register in Google Cloud as Desktop (or Web + loopback redirect DEFAULT_REDIRECT).
+DEFAULT_GOOGLE_CLIENT_ID = os.environ.get("REMEDY_GOOGLE_OAUTH_DEFAULT_CLIENT_ID", "").strip()
+DEFAULT_GOOGLE_CLIENT_SECRET = os.environ.get(
+    "REMEDY_GOOGLE_OAUTH_DEFAULT_CLIENT_SECRET", ""
+).strip()
+
 _pending: dict[str, dict[str, Any]] = {}
 _pending_lock = threading.Lock()
 _token_lock = threading.Lock()
@@ -87,22 +96,32 @@ class GoogleAppConfig:
 
 
 def load_app_config(home: Path | str | None = None) -> GoogleAppConfig:
+    """Resolve OAuth app credentials (product build → env → optional sealed override).
+
+    End users never enter Client ID in Settings. Operators set env at install/build.
+    """
     cid = (
         os.environ.get("REMEDY_GOOGLE_OAUTH_CLIENT_ID", "").strip()
         or os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "").strip()
+        or DEFAULT_GOOGLE_CLIENT_ID
     )
     secret = (
         os.environ.get("REMEDY_GOOGLE_OAUTH_CLIENT_SECRET", "").strip()
         or os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET", "").strip()
+        or DEFAULT_GOOGLE_CLIENT_SECRET
     )
     redirect = (
         os.environ.get("REMEDY_GOOGLE_OAUTH_REDIRECT_URI", "").strip() or DEFAULT_REDIRECT
     )
+    # Optional sealed override (power-user / lab only — not exposed in main Settings UI)
     raw = _read_sealed(app_config_path(home))
     if isinstance(raw, dict):
-        cid = str(raw.get("client_id") or cid).strip()
-        secret = str(raw.get("client_secret") or secret).strip()
-        redirect = str(raw.get("redirect_uri") or redirect).strip() or DEFAULT_REDIRECT
+        if str(raw.get("client_id") or "").strip():
+            cid = str(raw.get("client_id") or "").strip()
+        if str(raw.get("client_secret") or "").strip():
+            secret = str(raw.get("client_secret") or "").strip()
+        if str(raw.get("redirect_uri") or "").strip():
+            redirect = str(raw.get("redirect_uri") or "").strip() or DEFAULT_REDIRECT
     return GoogleAppConfig(client_id=cid, client_secret=secret, redirect_uri=redirect)
 
 
@@ -300,7 +319,10 @@ def start_oauth(
     """Begin auth-code + PKCE flow. Returns auth_url + state for the UI."""
     app = load_app_config(home)
     if not app.configured():
-        raise ValueError("Google Client ID not set.")
+        raise ValueError(
+            "Google sign-in is not configured for this Remedy build "
+            "(set REMEDY_GOOGLE_OAUTH_CLIENT_ID)."
+        )
     redir = (redirect_uri or app.redirect_uri or DEFAULT_REDIRECT).strip()
     verifier, challenge = _pkce_pair()
     state = secrets.token_urlsafe(24)
@@ -506,5 +528,6 @@ def public_status(home: Path | str | None = None) -> dict[str, Any]:
     return {
         **tokens.to_public(),
         "app": app.to_public(),
-        "setup_hint": None if app.configured() else "Client ID required",
+        "setup_hint": None if app.configured() else "not_configured",
+        "sign_in_ready": app.configured(),
     }
