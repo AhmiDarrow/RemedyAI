@@ -101,9 +101,28 @@ def section(title: str) -> None:
 
 
 def main() -> int:
-    print(f"=== Remedy stress @ {BASE} ===")
+    import argparse
 
-    section("0. Health / vision install progress")
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--pass", dest="pass_n", type=int, default=1, help="Outer pass number")
+    ap.add_argument("--loops", type=int, default=1, help="Repeat full suite N times")
+    args = ap.parse_args()
+    loops = max(1, int(args.loops))
+    print(f"=== Remedy stress @ {BASE} (loops={loops}) ===")
+
+    rc = 0
+    for loop in range(1, loops + 1):
+        print(f"\n######## STRESS LOOP {loop}/{loops} ########")
+        rc = max(rc, _run_once(loop))
+    print(f"\n=== ALL LOOPS DONE rc={rc} PASS={PASS} FAIL={FAIL} ===")
+    return rc
+
+
+def _run_once(loop: int) -> int:
+    global PASS, FAIL, WEAK
+    fail_before = FAIL
+    # keep cumulative PASS/FAIL across loops
+    section(f"0. Health / vision (loop {loop})")
     code, st = api("GET", "/api/status")
     mark("status", code == 200, str(st)[:80] if isinstance(st, dict) else str(st))
     code, vs = api("GET", "/api/vision/status")
@@ -410,11 +429,52 @@ def main() -> int:
             weak=True,
         )
 
-    print("\n=== STRESS RESULT ===")
-    print(f"PASS={PASS} FAIL={FAIL} WEAK_NOTES={len(WEAK)}")
-    for w in WEAK:
+    section("14. Regression: empty msg + bad model bind")
+    code, sess = api("POST", "/api/sessions", body={"title": "reg-empty", "project_path": ""})
+    sid_e = sess.get("id") if isinstance(sess, dict) else None
+    if sid_e:
+        code, out = api("POST", f"/api/sessions/{sid_e}/messages", body={"message": ""})
+        mark("empty message → 400", code == 400, f"code={code} {str(out)[:80]}")
+        code, out = api(
+            "PUT",
+            f"/api/sessions/{sid_e}/llm",
+            body={"provider": "deepseek", "model": "not-a-real-model-zzz"},
+        )
+        mark(
+            "garbage model → 400",
+            code == 400,
+            f"code={code} {str(out)[:120]}",
+        )
+        # valid rebind still works
+        code, out = api(
+            "PUT",
+            f"/api/sessions/{sid_e}/llm",
+            body={"provider": "deepseek", "model": "deepseek-v4-flash"},
+        )
+        mark("valid model bind 200", code == 200, f"code={code}")
+
+    section("15. Computer navigate (no surprise system browser)")
+    if sid_e:
+        dt, text, meta = chat(
+            sid_e,
+            "Use computer_navigate url=https://example.com target=browser. "
+            "Report the tool result JSON fields ok/target/message only. Do not open system browser.",
+            timeout=90,
+        )
+        low = text.lower()
+        surprise = "default system browser" in low and "explicit" not in low and "refusing" not in low
+        mark(
+            "navigate no surprise system browser",
+            not surprise,
+            text[:220],
+            weak="system browser" in low,
+        )
+        mark("navigate response ok", meta["code"] == 200, f"{dt:.2f}s")
+
+    print(f"\n=== STRESS LOOP {loop} RESULT (cumulative PASS={PASS} FAIL={FAIL}) ===")
+    for w in WEAK[-5:]:
         print(f"  ~ {w}")
-    return 0 if FAIL == 0 else 1
+    return 0 if FAIL == fail_before else 1
 
 
 if __name__ == "__main__":

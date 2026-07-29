@@ -53,6 +53,53 @@ def test_wants_system_browser_only_when_explicit():
     assert wants_rail_browser("show it to me in the rail") is True
 
 
+def test_desktop_navigate_refuses_system_browser_without_explicit_ask(
+    tmp_path: Path, monkeypatch
+):
+    """Mis-routed desktop navigate must not open OS browser by surprise."""
+    import json
+    from remedy.core.computer.executor import ComputerExecutor
+    from remedy.core.computer.types import ComputerAction
+    from remedy.core.computer import host_bridge as hb
+
+    monkeypatch.setattr(hb, "_bridge", None)
+    opened: list[str] = []
+
+    def fake_open(url: str):
+        opened.append(url)
+        return {"ok": True, "url": url}
+
+    monkeypatch.setattr(
+        "remedy.core.computer.desktop_win.open_url", fake_open, raising=False
+    )
+    # Patch the module path used by executor
+    import remedy.core.computer.desktop_win as win
+
+    monkeypatch.setattr(win, "open_url", fake_open)
+
+    ex = ComputerExecutor(home_dir=tmp_path)
+    # Host offline, no explicit system-browser request
+    raw = ex.run(
+        ComputerAction.NAVIGATE,
+        target="desktop",
+        url="https://example.com",
+        hint="open example in the rail",
+    )
+    d = json.loads(raw)
+    assert d.get("ok") is False or d.get("system_browser_blocked") or d.get("via")
+    assert opened == [], f"system browser should not open: {opened}"
+    # Explicit request still works
+    raw2 = ex.run(
+        ComputerAction.NAVIGATE,
+        target="system",
+        url="https://example.com",
+        hint="open in the system browser",
+    )
+    d2 = json.loads(raw2)
+    assert d2.get("ok") is True
+    assert opened == ["https://example.com"]
+
+
 def test_resolve_target_desktop_hints():
     assert (
         resolve_target("auto", hint="click the Start menu on the desktop")
