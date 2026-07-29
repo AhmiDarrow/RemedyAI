@@ -1029,16 +1029,38 @@ async def _cmd_config(args) -> None:
 
 def _cmd_serve(args) -> None:
     import sys
+    import threading
+    import time as _time
 
     import uvicorn
 
     from remedy.core.agent import BasicRuntime
     from remedy.gateway.router import Gateway
     from remedy.interfaces.api import create_app
+    from remedy.interfaces.instance_lock import (
+        heartbeat_serve_lock,
+        release_serve_lock,
+        try_acquire_serve_lock,
+    )
     from remedy.memory.store import MemoryStore
 
     home = Path(args.home).expanduser()
     home.mkdir(parents=True, exist_ok=True)
+
+    # Only one API/serve stack at a time (Desktop sidecar or CLI).
+    ok_lock, lock_msg = try_acquire_serve_lock(home)
+    if not ok_lock:
+        console.print(f"[red]{lock_msg}[/red]")
+        sys.exit(2)
+    if lock_msg and lock_msg != "acquired":
+        console.print(f"[dim]Instance lock:[/dim] {lock_msg}")
+
+    def _lock_heartbeat() -> None:
+        while True:
+            _time.sleep(30.0)
+            heartbeat_serve_lock()
+
+    threading.Thread(target=_lock_heartbeat, name="serve-lock-hb", daemon=True).start()
 
     # First-run setup: NEVER block the HTTP server for the desktop sidecar.
     # Desktop UI (SetupWizard) is the first-run experience and needs the API up.

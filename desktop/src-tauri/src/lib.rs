@@ -2906,8 +2906,81 @@ fn restart_server(app: AppHandle, state: State<'_, ServerState>) -> Result<Strin
     }
 }
 
+/// Windows: only one Remedy Desktop process at a time.
+/// Returns true if this process owns the single-instance mutex.
+#[cfg(target_os = "windows")]
+fn acquire_desktop_single_instance() -> bool {
+    use std::os::windows::ffi::OsStrExt;
+    use std::ffi::OsStr;
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn CreateMutexW(
+            lp_mutex_attributes: *const core::ffi::c_void,
+            b_initial_owner: i32,
+            lp_name: *const u16,
+        ) -> isize;
+        fn GetLastError() -> u32;
+        fn CloseHandle(h: isize) -> i32;
+    }
+    #[link(name = "user32")]
+    extern "system" {
+        fn FindWindowW(lp_class: *const u16, lp_window: *const u16) -> isize;
+        fn ShowWindow(hwnd: isize, n_cmd: i32) -> i32;
+        fn SetForegroundWindow(hwnd: isize) -> i32;
+        fn IsIconic(hwnd: isize) -> i32;
+    }
+    const ERROR_ALREADY_EXISTS: u32 = 183;
+    const SW_RESTORE: i32 = 9;
+
+    let name: Vec<u16> = OsStr::new("Local\\RemedyDesktop-SingleInstance")
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    unsafe {
+        let handle = CreateMutexW(core::ptr::null(), 1, name.as_ptr());
+        if handle == 0 {
+            // Fail open — better a second instance than no app.
+            return true;
+        }
+        if GetLastError() == ERROR_ALREADY_EXISTS {
+            // Focus existing main window if we can find it.
+            let title: Vec<u16> = OsStr::new("Remedy Desktop")
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect();
+            let hwnd = FindWindowW(core::ptr::null(), title.as_ptr());
+            if hwnd != 0 {
+                if IsIconic(hwnd) != 0 {
+                    ShowWindow(hwnd, SW_RESTORE);
+                }
+                SetForegroundWindow(hwnd);
+            }
+            CloseHandle(handle);
+            return false;
+        }
+        // Keep mutex handle for process lifetime (must not CloseHandle).
+        use std::sync::atomic::{AtomicIsize, Ordering};
+        static DESKTOP_MUTEX: AtomicIsize = AtomicIsize::new(0);
+        DESKTOP_MUTEX.store(handle, Ordering::SeqCst);
+        true
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn acquire_desktop_single_instance() -> bool {
+    // Primary single-instance enforcement is Windows (named mutex) + Python
+    // serve lock. Non-Windows Desktop can rely on serve lock / port bind.
+    true
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    if !acquire_desktop_single_instance() {
+        // Second launch: existing instance focused (Windows); exit this process.
+        return;
+    }
+
     tauri::Builder::default()
         .manage(ServerState {
             process: Arc::new(Mutex::new(None)),
