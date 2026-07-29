@@ -24,7 +24,7 @@ def test_stop_server_kills_recorded_pid(tmp_path: Path, monkeypatch):
             "port": 18765,
             "base_url": "http://127.0.0.1:18765/v1",
             "pid": 424242,
-            "model_id": "qwen2.5-vl-3b",
+            "model_id": "smolvlm2-2.2b",
         },
         home,
     )

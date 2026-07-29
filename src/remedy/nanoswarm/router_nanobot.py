@@ -1,6 +1,6 @@
 """Router nanobot — short intent labels for the nano swarm.
 
-Deterministic heuristics first. If the shared local Qwen server is already
+Deterministic heuristics first. If the shared local SmolVLM2 server is already
 running, refine via a few-token completion on the same model as vision.
 Never starts the server just to classify. Never grants shell/file power.
 """

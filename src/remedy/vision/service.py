@@ -13,6 +13,7 @@ from remedy.vision.capabilities import resolve_supports_vision
 from remedy.vision.catalog import DEFAULT_MODEL_ID, catalog_public, get_model_spec
 from remedy.vision.config import (
     load_vision_json,
+    save_vision_json,
     vision_section_from_config,
 )
 from remedy.vision.decoder import decode_images
@@ -84,6 +85,18 @@ def get_status(
     vcfg = vision_section_from_config(cfg)
     side = load_vision_json(home)
     mid = str(side.get("model_id") or vcfg.get("model_id") or DEFAULT_MODEL_ID)
+    # Drop retired local pins (e.g. smolvlm2-2.2b) → product SmolVLM2.
+    try:
+        get_model_spec(mid)
+    except KeyError:
+        mid = DEFAULT_MODEL_ID
+        if isinstance(side, dict) and side.get("model_id"):
+            side = dict(side)
+            side["model_id"] = mid
+            side.pop("model_path", None)
+            side.pop("mmproj_path", None)
+            with suppress(Exception):
+                save_vision_json(side, home)
     try:
         spec = get_model_spec(mid)
         model_public = spec.to_public_dict()
@@ -270,7 +283,7 @@ def start_install(
     runtime_id: str | None = None,
     prefer_cuda: bool = False,
 ) -> dict[str, Any]:
-    """Install pinned Qwen (first-run download) or activate existing files.
+    """Install pinned SmolVLM2 (first-run download) or activate existing files.
 
     Primary path for new PCs: network download of catalog-pinned assets.
     If files already present: activate + start server (no re-download).
@@ -278,6 +291,10 @@ def start_install(
     home = _home_from_cfg(cfg)
     vcfg = vision_section_from_config(cfg)
     mid = model_id or vcfg.get("model_id") or DEFAULT_MODEL_ID
+    try:
+        get_model_spec(mid)
+    except KeyError:
+        mid = DEFAULT_MODEL_ID
     rid = runtime_id or vcfg.get("runtime_id")
     if prefer_cuda and not rid:
         rid = "win-cuda-12.4-x64"
@@ -299,7 +316,7 @@ def start_install(
     # First-run / recovery: download the same pinned catalog model
     health = system_health(model_id=mid, runtime_id=rid, home_dir=home)
     if prefer_cuda is False and not rid:
-        # Prefer CUDA when host has NVIDIA (option B runtime pick, same Qwen weights)
+        # Prefer CUDA when host has NVIDIA (option B runtime pick, same weights)
         if health.get("nvidia_detected"):
             prefer_cuda = True
             rid = "win-cuda-12.4-x64"

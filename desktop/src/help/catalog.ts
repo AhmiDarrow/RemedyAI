@@ -171,7 +171,7 @@ const META: HelpArticleMeta[] = [
     category: 'Configuration',
     order: 14,
     tags: ['vision', 'image', 'ocr', 'llama', 'qwen', 'screenshot'],
-    summary: 'Local image→text for text-only models (Qwen2.5-VL 3B).',
+    summary: 'Local image→text for text-only models (SmolVLM2 2.2B).',
   },
   {
     id: '15-free-providers',

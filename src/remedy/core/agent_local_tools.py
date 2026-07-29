@@ -263,7 +263,7 @@ def register_vision_tools(runtime: Any) -> None:
         question: str = "",
         prefer_cuda: bool = False,
     ) -> str:
-        """Local visual decoder (llama.cpp + Qwen2.5-VL 3B).
+        """Local visual decoder (llama.cpp + SmolVLM2 2.2B).
 
         action=status   → install/ready/running + model id
         action=install  → start opt-in download of runtime + model (background)
@@ -371,7 +371,7 @@ def register_vision_tools(runtime: Any) -> None:
 
     runtime.tool_registry.register_builtin_handler(
         "vision_decode",
-        "Local visual decoder (Qwen2.5-VL 3B via llama.cpp). "
+        "Local visual decoder (SmolVLM2 2.2B via llama.cpp). "
         "status | install | decode an image path to structured text "
         "(scene, OCR, UI). Use when the chat model cannot see images, "
         "or to re-ask about an attached screenshot.",

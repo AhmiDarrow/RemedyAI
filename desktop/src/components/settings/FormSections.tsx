@@ -1207,7 +1207,7 @@ export function SettingsFormSections(p: SettingsFormProps): ReactNode {
                               startVisionInstallPoll()
                               setVisionMsg(
                                 r.message
-                                  || 'Downloading Qwen2.5-VL 3B — server starts when finished.',
+                                  || 'Downloading SmolVLM2 2.2B — server starts when finished.',
                               )
                             }
                             await refreshVision()
@@ -1349,7 +1349,7 @@ export function SettingsFormSections(p: SettingsFormProps): ReactNode {
                           color: 'var(--text-primary)',
                           border: '1px solid var(--border)',
                         }}
-                        title="Use CUDA llama-server (same Qwen weights)"
+                        title="Use CUDA llama-server (same SmolVLM2 weights)"
                         onClick={() => {
                           void (async () => {
                             setVisionBusy(true)

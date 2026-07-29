@@ -338,7 +338,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
       start_in_tray: false,
       close_to_tray: true,
       vision_enabled: enableVision,
-      vision_model_id: 'qwen2.5-vl-3b',
+      vision_model_id: 'smolvlm2-2.2b',
       ...(Object.keys(messengersBody).length > 0
         ? { messengers: messengersBody }
         : {}),
@@ -369,7 +369,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
       }
       setVisionInstalling(true)
       setVisionInstallPct(0)
-      setVisionInstallMsg('Downloading local vision model (Qwen2.5-VL 3B)…')
+      setVisionInstallMsg('Downloading local vision model (SmolVLM2 2.2B)…')
       finishAbortRef.current = false
       try {
         const preferCuda = Boolean(visionStatus?.health?.nvidia_detected)
@@ -1011,7 +1011,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                 </div>
                 <p className="text-sm leading-snug" style={mutedStyles}>
                   One-time download of pinned{' '}
-                  <strong style={{ color: 'var(--text-secondary)' }}>Qwen2.5-VL 3B</strong> (~
+                  <strong style={{ color: 'var(--text-secondary)' }}>SmolVLM2 2.2B</strong> (~
                   {formatDownloadGb(visionStatus?.model?.approx_download_bytes)}) for screenshots and
                   OCR. Same files on every PC. After install, the local server{' '}
                   <strong style={{ color: 'var(--text-secondary)' }}>starts with Remedy</strong>.
@@ -1068,7 +1068,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                       {visionInstalling ? 'Installing local model' : 'Saving setup…'}
                     </div>
                     <p className="text-sm" style={mutedStyles}>
-                      Qwen2.5-VL downloads once — progress stays visible (not frozen).
+                      SmolVLM2 downloads once — progress stays visible (not frozen).
                     </p>
                   </div>
                   <div

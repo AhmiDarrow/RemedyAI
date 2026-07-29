@@ -1,5 +1,5 @@
 # Production installers do NOT ship this tree.
-# First-run downloads the pinned Qwen into ~/.remedy/vision/.
+# First-run downloads the pinned SmolVLM2 into ~/.remedy/vision/.
 #
 # This folder is only for optional air-gap / offline staging:
 #   python scripts/stage_local_bundle.py --from-vision-home

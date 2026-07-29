@@ -123,7 +123,7 @@ def ensure_handlers_registered() -> None:
         )
 
     def _brief_update(job: LocalJob) -> Any:
-        """Session Brief refresh on local Qwen (Memory Harness background)."""
+        """Session Brief refresh on local SmolVLM2 (Memory Harness background)."""
         from remedy.memory.harness.local_brief import process_brief_update_job
 
         return process_brief_update_job(job)

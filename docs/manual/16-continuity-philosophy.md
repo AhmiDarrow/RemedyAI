@@ -33,7 +33,7 @@ You should feel **Remedy**, not a network of agents. Internal workers (continuit
 | Feeling | What is actually happening |
 |---------|----------------------------|
 | **Fast** | Hot path stays cheap: no mini-model debate on every keystroke |
-| **Cheaper** | Less tool sludge re-sent; local Qwen for vision/briefs when it helps |
+| **Cheaper** | Less tool sludge re-sent; local SmolVLM2 for vision/briefs when it helps |
 | **Accurate over long work** | Session Brief keeps intent, files, decisions, next steps |
 | **Same partner on any model** | Continuity lives on your PC, not in the vendor’s chat product |
 

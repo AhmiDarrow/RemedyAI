@@ -196,9 +196,9 @@ Incident / wipe UX ........... B- (uninstall wipe exists; granular forget weak)
 
 | ID | Severity | Doc | Issue |
 |----|----------|-----|-------|
-| D-1 | **High** | `14-visual-decoder.md` | Still **Qwen2.5-VL 3B**; product default is **SmolVLM2 2.2B Apache** |
+| D-1 | **High** | `14-visual-decoder.md` | Still **SmolVLM2 2.2B**; product default is **SmolVLM2 2.2B Apache** |
 | D-2 | **Med** | `00-overview.md` | Still mentions optional Qwen in architecture sketch lines |
-| D-3 | **Med** | `16-continuity`, `17-nanoswarm` | “Optional local Qwen” |
+| D-3 | **Med** | `16-continuity`, `17-nanoswarm` | “Optional local SmolVLM2” |
 | D-4 | **Med** | `04-security` paths | Missing `assistant.json`, vision dir, computer jobs |
 | D-5 | **Med** | Help wiki sync | Desktop help may lag manuals if sync not run |
 | D-6 | **Low** | README product surfaces | Verify release README vs SmolVLM2 |

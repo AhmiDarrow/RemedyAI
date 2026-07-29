@@ -1,6 +1,6 @@
 """Silent fan-out workers — cover more ground without multi-agent theater.
 
-Heuristics (and optional local Qwen) decide *when* to spread; workers are mostly
+Heuristics (and optional local VLM) decide *when* to spread; workers are mostly
 deterministic jobs (explore/search/diff/verify) that return digests to the parent.
 """
 

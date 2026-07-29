@@ -74,6 +74,17 @@ def vision_section_from_config(cfg: dict[str, Any] | None) -> dict[str, Any]:
     except (TypeError, ValueError):
         port = DEFAULT_PORT
     model_id = str(raw.get("model_id") or DEFAULT_MODEL_ID).strip() or DEFAULT_MODEL_ID
+    # Migrate retired local pins → SmolVLM2 (product ships a single local VLM).
+    _LEGACY_LOCAL_MODELS = {
+        "qwen2.5-vl-3b",
+        "qwen2.5-vl",
+        "qwen2.5vl-3b",
+        "qwen-vl-3b",
+        "qwen2-vl",
+        "qwen-vl",
+    }
+    if model_id.lower() in _LEGACY_LOCAL_MODELS:
+        model_id = DEFAULT_MODEL_ID
     base_url = str(raw.get("base_url") or f"http://{host}:{port}/v1").strip()
     return {
         # Bundled local model: on by default when [vision] present without explicit flag

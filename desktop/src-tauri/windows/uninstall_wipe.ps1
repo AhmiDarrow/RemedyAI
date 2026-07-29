@@ -142,7 +142,7 @@ if ($config -eq 1 -and (Test-Path -LiteralPath $homeRem)) {
     'comfyui.json'
   ) | ForEach-Object { Remove-PathSafe (Join-Path $homeRem $_) }
   Remove-PathSafe (Join-Path $homeRem 'auth')
-  # Local visual decoder: llama-server binary + Qwen GGUF/mmproj (~GBs)
+  # Local visual decoder: llama-server binary + SmolVLM2 GGUF/mmproj (~GBs)
   Remove-VisionTree
   Log 'Config wipe done (includes vision decoder / llama.cpp)'
 }

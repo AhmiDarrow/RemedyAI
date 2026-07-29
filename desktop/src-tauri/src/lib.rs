@@ -276,7 +276,7 @@ fn spawn_remedy(cmd: &str) -> Option<Child> {
     ];
 
     let webui = find_webui_dir();
-    // Packaged local Qwen + llama-server (resource dir/local) for vision + nano swarm.
+    // Packaged local SmolVLM2 + llama-server (resource dir/local) for vision + nano swarm.
     let local_bundle = env::var_os("REMEDY_LOCAL_BUNDLE")
         .map(PathBuf::from)
         .filter(|p| p.is_dir())

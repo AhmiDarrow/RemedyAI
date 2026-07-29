@@ -65,7 +65,7 @@ def test_tool_content_is_error_approval():
 
 
 def test_snapshot_spread_never_uses_local():
-    """Hot-path planner must not block on local Qwen (use_local=False)."""
+    """Hot-path planner must not block on local SmolVLM2 (use_local=False)."""
     from remedy.core.context_snapshot import build_context_snapshot
 
     snap = build_context_snapshot(
