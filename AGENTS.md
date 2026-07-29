@@ -2,6 +2,25 @@
 
 Durable facts for coding agents working in this repo. Prefer this file + `docs/` over chat memory when they conflict.
 
+## Product feel (UI / UX bar)
+
+Every desktop and settings change should feel:
+
+| Quality | Meaning |
+|---------|---------|
+| **Easy** | Defaults work; rare multi-step flows live in dialogs, not dense panels |
+| **Sleek** | Few primary controls; quiet secondary actions (text links, not button forests) |
+| **Beautiful** | Consistent theme tokens, spacing, and typography — no visual clutter |
+| **Familiar** | Patterns users already know (chat, bottom bar, Simple/Advanced) |
+| **Powerful** | Full capability is one click away (Advanced UI / Advanced Settings) — never stripped |
+
+**Practical rules**
+
+- Prefer **Simple** chrome by default; **Advanced** reveals power-user tools.
+- Settings can have its own Simple/Advanced for *sections*; main bar Simple/Advanced for *chrome* — do not conflate them.
+- Long privacy / OAuth / setup = **modal or dedicated flow**, not a wall inside Settings.
+- When in doubt: remove a control from the default surface rather than adding another toggle.
+
 ## Project etiquette — ship sequence (default for this repo)
 
 When the user asks to **finish**, **ship**, **release**, or says some form of
