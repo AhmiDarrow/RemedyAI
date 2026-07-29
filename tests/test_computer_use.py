@@ -378,6 +378,19 @@ def test_computer_guidance_present():
     assert "target" in COMPUTER_USE_SYSTEM_ADDENDUM
 
 
+def test_job_result_text_capped_on_complete(tmp_path: Path):
+    from remedy.core.computer.host_bridge import ComputerHostBridge
+
+    b = ComputerHostBridge(home_dir=tmp_path)
+    job = b.enqueue("page_text", {})
+    huge = "Z" * 20_000
+    done = b.complete(job.id, ok=True, result={"ok": True, "text": huge, "url": "https://x.test"})
+    assert done is not None
+    assert done.result is not None
+    assert len(str(done.result.get("text") or "")) < 5000
+    assert done.result.get("text_truncated") is True
+
+
 def test_a11y_push_completes_snapshot_job(tmp_path: Path):
     from remedy.core.computer.host_bridge import ComputerHostBridge, get_host_bridge
 

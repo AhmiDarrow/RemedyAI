@@ -19,6 +19,10 @@ export interface GoogleAuthStatus {
   setup_hint?: string | null
   /** True when product OAuth client is configured (users never paste Client ID). */
   sign_in_ready?: boolean
+  /** How tokens are stored on disk: dpapi | plain | missing */
+  tokens_encoding?: string
+  /** Set when connected tokens are not DPAPI-sealed (security warning). */
+  tokens_encoding_warning?: string
 }
 
 export interface GoogleOAuthStart {
