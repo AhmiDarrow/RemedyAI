@@ -35,4 +35,10 @@ winreg = "0.55"
 rfd = "0.15"
 portable-pty = "0.9.0"
 url = "2.5.8"
+# Brave adblock-rust (MPL-2.0) — in-app Browser Privacy Shield
+# single-thread disabled so Engine is Send+Sync under Mutex for Tauri commands.
+adblock = { version = "0.13.2", default-features = false, features = [
+  "embedded-domain-resolver",
+  "full-regex-handling",
+] }
 

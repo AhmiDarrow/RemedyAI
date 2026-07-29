@@ -120,6 +120,13 @@ export function SettingsPanel({
   const [browserHomeUrl, setBrowserHomeUrl] = useState(
     'https://github.com/AhmiDarrow/RemedyAI',
   )
+  const [privacyShield, setPrivacyShield] = useState<{
+    enabled: boolean
+    ready: boolean
+    message: string
+    attribution: string
+  } | null>(null)
+  const [privacyShieldBusy, setPrivacyShieldBusy] = useState(false)
   const [persona, setPersona] = useState('balanced')
   const [userName, setUserName] = useState('')
   const [agentName, setAgentName] = useState('Remedy')
@@ -289,6 +296,23 @@ export function SettingsPanel({
       setBrowserHomeUrl(
         (s.browser_home_url || '').trim() || 'https://github.com/AhmiDarrow/RemedyAI',
       )
+      // Desktop-only Privacy Shield (not available in plain web UI)
+      try {
+        const ps = await invoke<{
+          enabled: boolean
+          ready: boolean
+          message: string
+          attribution: string
+        }>('privacy_shield_status')
+        setPrivacyShield({
+          enabled: Boolean(ps.enabled),
+          ready: Boolean(ps.ready),
+          message: ps.message || '',
+          attribution: ps.attribution || '',
+        })
+      } catch {
+        setPrivacyShield(null)
+      }
       setHarnessMode(s.harness_mode || 'auto')
       {
         const mn = Number(s.harness_min_context_pct)
@@ -762,6 +786,55 @@ export function SettingsPanel({
               setProjectPath={setProjectPath}
               browserHomeUrl={browserHomeUrl}
               setBrowserHomeUrl={setBrowserHomeUrl}
+              privacyShield={
+                privacyShield
+                  ? {
+                      enabled: privacyShield.enabled,
+                      ready: privacyShield.ready,
+                      message: privacyShield.message,
+                      attribution: privacyShield.attribution,
+                      busy: privacyShieldBusy,
+                      onToggle: (on) => {
+                        setPrivacyShieldBusy(true)
+                        void invoke<{
+                          enabled: boolean
+                          ready: boolean
+                          message: string
+                          attribution: string
+                        }>('privacy_shield_set_enabled', { enabled: on })
+                          .then((ps) => {
+                            setPrivacyShield({
+                              enabled: Boolean(ps.enabled),
+                              ready: Boolean(ps.ready),
+                              message: ps.message || '',
+                              attribution: ps.attribution || '',
+                            })
+                          })
+                          .catch(() => {})
+                          .finally(() => setPrivacyShieldBusy(false))
+                      },
+                      onRefresh: () => {
+                        setPrivacyShieldBusy(true)
+                        void invoke<{
+                          enabled: boolean
+                          ready: boolean
+                          message: string
+                          attribution: string
+                        }>('privacy_shield_refresh_lists')
+                          .then((ps) => {
+                            setPrivacyShield({
+                              enabled: Boolean(ps.enabled),
+                              ready: Boolean(ps.ready),
+                              message: ps.message || '',
+                              attribution: ps.attribution || '',
+                            })
+                          })
+                          .catch(() => {})
+                          .finally(() => setPrivacyShieldBusy(false))
+                      },
+                    }
+                  : null
+              }
               persona={persona}
               setPersona={setPersona}
               userName={userName}
