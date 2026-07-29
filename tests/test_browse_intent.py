@@ -54,6 +54,26 @@ def test_clear_goals_intent() -> None:
     assert is_pure_action_kick("clear goals") is True
 
 
+def test_gmail_login_is_interaction_not_open_only() -> None:
+    from remedy.core.computer.browse_intent import (
+        is_open_only_browse,
+        is_pure_action_kick,
+        parse_browse_navigate_url,
+        wants_page_interaction,
+    )
+
+    msg = (
+        "goto gmail sign in, once there I want you to log me in "
+        "the login input my username user@example.com"
+    )
+    assert wants_page_interaction(msg) is True
+    assert is_open_only_browse(msg) is False
+    assert is_pure_action_kick(msg) is False
+    assert parse_browse_navigate_url(msg) == "https://mail.google.com"
+    assert is_open_only_browse("goto gmail") is True
+    assert parse_browse_navigate_url("goto gmail") == "https://mail.google.com"
+
+
 def test_parse_full_url() -> None:
     assert (
         parse_browse_navigate_url("https://mail.google.com")

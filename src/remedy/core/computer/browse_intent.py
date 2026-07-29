@@ -100,11 +100,25 @@ _CLEAR_GOALS_RE = re.compile(
     r")\s*[.!]?\s*$"
 )
 
+# Multi-step UI work after open — must NOT short-circuit after navigate alone
+_INTERACTION_RE = re.compile(
+    r"(?is)\b("
+    r"sign\s*in|log\s*in|login|log\s*me\s*in|sign\s*me\s*in|"
+    r"password|username|user\s*name|email\s*address|"
+    r"type|enter|fill|input|click|press|submit|select|"
+    r"once\s+there|then\s+|after\s+that|and\s+then|"
+    r"log\s+me|sign\s+me|authenticate|credentials"
+    r")\b"
+)
+
 
 def resolve_site_alias(name: str) -> str | None:
     """Map a nickname or bare host to https URL, or None if unknown."""
     raw = (name or "").strip().strip("\"'`")
     if not raw:
+        return None
+    # Never treat emails / multi-clause phrases as a site URL
+    if "@" in raw:
         return None
     key = re.sub(r"\s+", " ", raw.lower())
     key = key.rstrip("/.")
@@ -113,10 +127,13 @@ def resolve_site_alias(name: str) -> str | None:
     # strip leading www.
     if key.startswith("www.") and key[4:] in SITE_ALIASES:
         return SITE_ALIASES[key[4:]]
-    # bare domain already
-    if looks_like_url(raw) or re.match(
-        r"^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(/.*)?$", raw
-    ):
+    # Multi-word non-alias (e.g. "gmail sign in…") — not a site
+    if " " in key:
+        return None
+    # bare domain only (no spaces)
+    if re.match(r"^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(/.*)?$", raw):
+        return normalize_url(raw)
+    if raw.startswith(("http://", "https://")):
         return normalize_url(raw)
     return None
 
@@ -188,29 +205,74 @@ def is_clear_goals_intent(message: str) -> bool:
     return bool(_CLEAR_GOALS_RE.match((message or "").strip()))
 
 
+def wants_page_interaction(message: str) -> bool:
+    """True when the user wants to act on the page after open (login, type, click…)."""
+    return bool(_INTERACTION_RE.search(message or ""))
+
+
+def is_open_only_browse(message: str) -> bool:
+    """True when the request is only open/show a URL — safe to short-circuit after navigate."""
+    msg = (message or "").strip()
+    if not msg:
+        return False
+    if wants_page_interaction(msg):
+        return False
+    if is_clear_goals_intent(msg):
+        return False
+    return parse_browse_navigate_url(msg) is not None
+
+
 def is_pure_action_kick(message: str) -> bool:
     """Short latest-message-only kicks (don't resume older multi-step work)."""
     msg = (message or "").strip()
-    if not msg or len(msg) > 160:
+    if not msg or len(msg) > 200:
         return False
     if is_clear_goals_intent(msg):
         return True
+    # Multi-step login/click tasks are not pure kicks — full agent loop required
+    if wants_page_interaction(msg):
+        return False
     if parse_browse_navigate_url(msg):
         return True
     return False
 
 
-def parse_browse_navigate_url(message: str) -> str | None:
-    """If *message* is a high-confidence browse request, return the rail URL.
+def _first_site_token(target: str) -> str | None:
+    """'gmail sign in once…' → gmail; 'google and search x' handled elsewhere."""
+    t = _clean_target(target)
+    if not t:
+        return None
+    # Stop at interaction verbs so "gmail sign in" → gmail
+    m = re.match(
+        r"(?is)^(?P<head>[a-z0-9][a-z0-9.-]*)\b",
+        t,
+    )
+    if not m:
+        return None
+    head = m.group("head").lower()
+    if head in SITE_ALIASES or head in (
+        "google",
+        "gmail",
+        "youtube",
+        "github",
+        "reddit",
+        "patreon",
+    ):
+        return head
+    return None
 
-    Returns None when the message is ambiguous (coding task, multi-step, chat).
+
+def parse_browse_navigate_url(message: str) -> str | None:
+    """If *message* opens a site (with or without follow-up work), return the rail URL.
+
+    For multi-step messages (login/type after open), still returns the open URL so
+    the agent can pre-navigate; short-circuit after navigate is gated separately.
     """
     msg = (message or "").strip()
-    if not msg or len(msg) > 160:
-        # Long prompts are multi-intent — leave to the model.
+    if not msg or len(msg) > 280:
         return None
     # Full URL alone
-    if looks_like_url(msg) and " " not in msg.strip():
+    if looks_like_url(msg) and " " not in msg.strip() and "@" not in msg:
         return normalize_url(msg)
 
     # Search patterns first ("goto google and search elephant")
@@ -234,56 +296,43 @@ def parse_browse_navigate_url(message: str) -> str | None:
         if not target:
             return None
         # Nested: target is "google and search elephant"
-        inner = _SEARCH_ON_SITE_RE.match(
-            f"goto {target}" if not target.lower().startswith(("goto", "go ")) else target
-        ) or _SEARCH_ON_SITE_RE.match(f"go to {target}")
-        if not inner:
-            # parse "google and search elephant" as site+query without goto prefix
-            nested = re.match(
-                r"(?is)^(?P<site>google|bing|youtube)\s+"
-                r"(?:and\s+)?(?:search(?:\s+for)?|look\s+up|find)\s+(?:for\s+)?(?P<q>.+)$",
-                target,
-            )
-            if nested:
-                url = _search_url(nested.group("site"), nested.group("q"))
-                if url:
-                    return url
-        else:
-            site = (
-                inner.group("site")
-                or inner.group("site2")
-                or inner.group("site3")
-                or inner.group("site4")
-                or "google"
-            )
-            q = (
-                inner.group("q")
-                or inner.group("q2")
-                or inner.group("q3")
-                or inner.group("q4")
-                or ""
-            )
-            url = _search_url(site, q)
+        nested = re.match(
+            r"(?is)^(?P<site>google|bing|youtube)\s+"
+            r"(?:and\s+)?(?:search(?:\s+for)?|look\s+up|find)\s+(?:for\s+)?(?P<q>.+)$",
+            target,
+        )
+        if nested and not wants_page_interaction(msg):
+            url = _search_url(nested.group("site"), nested.group("q"))
             if url:
                 return url
 
+        # Exact site nickname
         url = resolve_site_alias(target)
         if url:
             return url
-        if looks_like_url(target):
+        # "gmail sign in, once there…" → first token site
+        head = _first_site_token(target)
+        if head:
+            url = resolve_site_alias(head)
+            if url:
+                return url
+        # Bare http(s) only — never treat emails as URLs
+        if target.startswith(("http://", "https://", "www.")):
             return normalize_url(target)
         # "gta 5 wiki" as target of "show me"
-        wm = _WIKI_TOPIC_RE.match(target) or _WIKI_TOPIC_RE.match(msg)
-        if wm:
-            topic = _clean_target(wm.group("topic") or "")
-            if topic and topic.lower() not in ("the", "a", "an"):
-                return f"https://en.wikipedia.org/wiki/{quote(topic.replace(' ', '_'))}"
+        if not wants_page_interaction(msg):
+            wm = _WIKI_TOPIC_RE.match(target) or _WIKI_TOPIC_RE.match(msg)
+            if wm:
+                topic = _clean_target(wm.group("topic") or "")
+                if topic and topic.lower() not in ("the", "a", "an"):
+                    return f"https://en.wikipedia.org/wiki/{quote(topic.replace(' ', '_'))}"
         return None
 
     # Bare "gta 5 wiki show me it"
-    wm = _WIKI_TOPIC_RE.match(msg)
-    if wm:
-        topic = _clean_target(wm.group("topic") or "")
-        if topic and len(topic) < 80:
-            return f"https://en.wikipedia.org/wiki/{quote(topic.replace(' ', '_'))}"
+    if not wants_page_interaction(msg):
+        wm = _WIKI_TOPIC_RE.match(msg)
+        if wm:
+            topic = _clean_target(wm.group("topic") or "")
+            if topic and len(topic) < 80:
+                return f"https://en.wikipedia.org/wiki/{quote(topic.replace(' ', '_'))}"
     return None
