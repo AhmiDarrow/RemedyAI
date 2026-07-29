@@ -1,4 +1,4 @@
-/** Local model API — vision + nano swarm (bundled Qwen2.5-VL 3B). */
+/** Local model API — vision + nano swarm (SmolVLM2 2.2B, Apache 2.0). */
 
 import { apiFetch } from './client'
 

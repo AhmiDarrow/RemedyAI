@@ -83,7 +83,7 @@ def test_settings_includes_light_vision(tmp_path: Path, monkeypatch):
             "llm_model": "gpt-4o-mini",
             "llm_base_url": "https://api.openai.com/v1",
             "home_dir": str(home),
-            "vision": {"enabled": True, "model_id": "qwen2.5-vl-3b"},
+            "vision": {"enabled": True, "model_id": "smolvlm2-2.2b"},
         }
         with patch(
             "remedy.interfaces.routes.settings._find_config_path",

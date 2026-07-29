@@ -32,6 +32,12 @@ import type { UpdateInfo } from '../api/updates'
 import type { ModelInfo } from '../App'
 import type { Density } from '../utils/chatPrefs'
 import {
+  loadSettingsMode,
+  saveSettingsMode,
+  isSectionVisibleInMode,
+  type SettingsMode,
+} from '../utils/settingsMode'
+import {
   normalizeToolProcess,
 
   type ToolProcessMode,
@@ -162,6 +168,7 @@ export function SettingsPanel({
   const [messengers, setMessengers] = useState<MessengerInfo[]>([])
   const [messengerDrafts, setMessengerDrafts] = useState<MessengerDraftMap>({})
   const [assistantDraft, setAssistantDraft] = useState<AssistantDraft>({})
+  const [settingsMode, setSettingsMode] = useState<SettingsMode>(() => loadSettingsMode())
 
   const primaryProviders = useMemo(
     () => catalog.filter((p) => !p.advanced),
@@ -428,22 +435,28 @@ export function SettingsPanel({
   )
 
   const sectionProps = useCallback(
-    (id: SettingsSectionId) => ({
-      id,
-      title: SETTINGS_SECTION_META[id].title,
-      summary: SETTINGS_SECTION_META[id].summary,
-      keywords: SETTINGS_SECTION_META[id].keywords,
-      forceOpen: forceSection === id || (settingsSearch.trim().length > 0 && matchSec(id)),
-      hidden: settingsSearch.trim().length > 0 && !matchSec(id),
-      onOpenChange: (isOpen: boolean) => {
-        if (isOpen) {
-          setForceSection(id)
-          saveLastSettingsSection(id)
-          if (id === 'vision') setVisionSectionOpen(true)
-        }
-      },
-    }),
-    [forceSection, matchSec, settingsSearch],
+    (id: SettingsSectionId) => {
+      const modeHidden = !isSectionVisibleInMode(id, settingsMode)
+      const searchHidden = settingsSearch.trim().length > 0 && !matchSec(id)
+      return {
+        id,
+        title: SETTINGS_SECTION_META[id].title,
+        summary: SETTINGS_SECTION_META[id].summary,
+        keywords: SETTINGS_SECTION_META[id].keywords,
+        forceOpen:
+          forceSection === id
+          || (settingsSearch.trim().length > 0 && matchSec(id) && !modeHidden),
+        hidden: modeHidden || searchHidden,
+        onOpenChange: (isOpen: boolean) => {
+          if (isOpen) {
+            setForceSection(id)
+            saveLastSettingsSection(id)
+            if (id === 'vision') setVisionSectionOpen(true)
+          }
+        },
+      }
+    },
+    [forceSection, matchSec, settingsSearch, settingsMode],
   )
 
   const handleXaiSignIn = async () => {
@@ -690,7 +703,31 @@ export function SettingsPanel({
         </div>
       )}
 
-      <div className="px-3 pt-2 pb-1 border-b shrink-0" style={{ borderColor: 'var(--border)' }}>
+      <div className="px-3 pt-2 pb-1 border-b shrink-0 space-y-1.5" style={{ borderColor: 'var(--border)' }}>
+        <div className="flex items-center gap-1">
+          {(['simple', 'advanced'] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => {
+                setSettingsMode(m)
+                saveSettingsMode(m)
+                if (m === 'advanced') setShowAdvanced(true)
+              }}
+              className="flex-1 rounded px-2 py-1 text-[10px] font-medium capitalize"
+              style={{
+                background:
+                  settingsMode === m
+                    ? 'color-mix(in srgb, var(--accent) 22%, transparent)'
+                    : 'var(--bg-tertiary)',
+                color: settingsMode === m ? 'var(--accent)' : 'var(--text-muted)',
+                border: `1px solid ${settingsMode === m ? 'var(--accent)' : 'var(--border)'}`,
+              }}
+            >
+              {m}
+            </button>
+          ))}
+        </div>
         <input
           type="search"
           value={settingsSearch}
@@ -804,6 +841,7 @@ export function SettingsPanel({
               onAssistantAccountsChanged={() => {
                 void load()
               }}
+              settingsMode={settingsMode}
               primaryProviders={primaryProviders}
               advancedProviders={advancedProviders}
               activeMeta={activeMeta ?? FALLBACK_PROVIDERS[0]}

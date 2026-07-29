@@ -1,55 +1,21 @@
-# Local model resources (optional / offline only)
+# Local model bundle (SmolVLM2 2.2B · Apache 2.0)
 
-## Production (default)
+Pinned local VLM for vision decode + nano swarm. Same download pipeline as before;
+license is Apache 2.0 (commercial-friendly).
 
-**Remedy does not package Qwen or llama-server in the installer.**
+## Assets
 
-| What | Where |
-|------|--------|
-| Installer size | Small (app + sidecar only) |
-| Model delivery | **First-run download** in Setup Wizard / Settings |
-| Install path | `~/.remedy/vision/` (models + runtime + `vision.json`) |
-| After install | Local server **starts with Remedy** |
+- id: `smolvlm2-2.2b`
+- `SmolVLM2-2.2B-Instruct-Q4_K_M.gguf`
+- `mmproj-SmolVLM2-2.2B-Instruct-Q8_0.gguf`
+- Source: [ggml-org/SmolVLM2-2.2B-Instruct-GGUF](https://huggingface.co/ggml-org/SmolVLM2-2.2B-Instruct-GGUF)
 
-Pinned model (every PC, same bytes after download):
+## Layout (install / prebundle)
 
-- id: `qwen2.5-vl-3b`
-- `Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf`
-- `mmproj-Qwen2.5-VL-3B-Instruct-Q8_0.gguf`
-
-Tauri **does not** map this folder into the NSIS bundle (`tauri.conf.json` has no `resources/local` entry).
-
-## Offline / air-gap (optional)
-
-If you must skip the network download:
-
-1. Install once on a machine with internet, **or** copy verified GGUFs + runtime.
-2. Stage into this folder (gitignored — safe to fill locally):
-
-   ```bash
-   python scripts/stage_local_bundle.py --from-vision-home
-   ```
-
-3. Run the app with:
-
-   ```bat
-   set REMEDY_LOCAL_BUNDLE=C:\path\to\RemedyAI\desktop\resources\local
-   ```
-
-4. Or copy staged files into the user’s `~/.remedy/vision/` and use **Settings → Use existing files**.
-
-Expected layout after staging:
-
-```text
-local/
-  models/qwen2.5-vl-3b/
-    Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf
-    mmproj-Qwen2.5-VL-3B-Instruct-Q8_0.gguf
-  runtime/cpu/     # llama-server + DLLs
-  runtime/cuda/    # optional NVIDIA runtime
+```
+models/smolvlm2-2.2b/
+  SmolVLM2-2.2B-Instruct-Q4_K_M.gguf
+  mmproj-SmolVLM2-2.2B-Instruct-Q8_0.gguf
 ```
 
-## Do not
-
-- Commit `*.gguf` or llama-server binaries to git  
-- Re-add `../resources/local` to `tauri.conf.json` unless you intentionally want a multi‑GB installer  
+Pin and sizes: `src/remedy/runtime/catalog.py`

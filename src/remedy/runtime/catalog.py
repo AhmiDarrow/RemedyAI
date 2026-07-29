@@ -1,7 +1,9 @@
 """Pinned local model + llama-server catalog — single source of truth.
 
 Every local role (vision, nano, helper) uses DEFAULT_LOCAL_MODEL_ID only.
-Prebundle policy: CPU + CUDA runtimes (option B); same Qwen weights everywhere.
+Prebundle policy: CPU + CUDA runtimes (option B); same weights everywhere.
+
+Default model: SmolVLM2-2.2B (Apache 2.0) — commercial-friendly dependency.
 """
 
 from __future__ import annotations
@@ -11,18 +13,18 @@ from typing import Any
 
 # Logical id used in config / vision.json / API / nanoswarm.
 # Stable across Remedy versions until an intentional catalog bump.
-DEFAULT_LOCAL_MODEL_ID = "qwen2.5-vl-3b"
+DEFAULT_LOCAL_MODEL_ID = "smolvlm2-2.2b"
 DEFAULT_MODEL_ID = DEFAULT_LOCAL_MODEL_ID  # alias for vision callers
 
-# HF repo hosting GGUF + mmproj (llama.cpp multimodal) — reference only when
-# rebuild tooling fetches assets; end users get prebundled files.
-_QWEN_HF_REPO = "ggml-org/Qwen2.5-VL-3B-Instruct-GGUF"
-_QWEN_MODEL_FILE = "Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf"
-_QWEN_MMPROJ_FILE = "mmproj-Qwen2.5-VL-3B-Instruct-Q8_0.gguf"
-_QWEN_MODEL_SHA256 = "d02fe9b69ad8cadbbd228e387667af66612c44bed29ffc8eb1e7caf9ac486c12"
-_QWEN_MMPROJ_SHA256 = "980c9b2f78c04e6cff93d277ada09e768394f112d75db3b4e9dea8a69f9fb904"
-_QWEN_MODEL_BYTES = 1_929_901_056
-_QWEN_MMPROJ_BYTES = 844_757_728
+# HF repo hosting GGUF + mmproj (llama.cpp multimodal).
+# SmolVLM2-2.2B-Instruct — Apache 2.0 (HuggingFaceTB / ggml-org GGUF).
+_SMOL_HF_REPO = "ggml-org/SmolVLM2-2.2B-Instruct-GGUF"
+_SMOL_MODEL_FILE = "SmolVLM2-2.2B-Instruct-Q4_K_M.gguf"
+_SMOL_MMPROJ_FILE = "mmproj-SmolVLM2-2.2B-Instruct-Q8_0.gguf"
+_SMOL_MODEL_SHA256 = "0cf76814555b8665149075b74ab6b5c1d428ea1d3d01c1918c12012e8d7c9f58"
+_SMOL_MMPROJ_SHA256 = "ae07ea1facd07dd3230c4483b63e8cda96c6944ad2481f33d531f79e892dd024"
+_SMOL_MODEL_BYTES = 1_112_602_656
+_SMOL_MMPROJ_BYTES = 592_523_200
 
 # Pinned llama.cpp release (Windows focus).
 LLAMA_CPP_TAG = "b10107"
@@ -56,11 +58,12 @@ class LocalModelSpec:
     hf_repo: str
     model_file: str
     mmproj_file: str
-    model_sha256: str
-    mmproj_sha256: str
+    model_sha256: str | None
+    mmproj_sha256: str | None
     model_bytes: int
     mmproj_bytes: int
     min_ram_gb: int = 6
+    license: str = "Apache-2.0"
     notes: str = ""
 
     @property
@@ -99,6 +102,7 @@ class LocalModelSpec:
             "approx_download_bytes": self.approx_download_bytes,
             "approx_download_gb": round(self.approx_download_bytes / (1024**3), 2),
             "min_ram_gb": self.min_ram_gb,
+            "license": self.license,
             "notes": self.notes,
             "is_default": self.id == DEFAULT_LOCAL_MODEL_ID,
             "bundled": True,
@@ -112,18 +116,19 @@ VisionModelSpec = LocalModelSpec
 LOCAL_MODELS: dict[str, LocalModelSpec] = {
     DEFAULT_LOCAL_MODEL_ID: LocalModelSpec(
         id=DEFAULT_LOCAL_MODEL_ID,
-        name="Qwen2.5-VL 3B",
-        hf_repo=_QWEN_HF_REPO,
-        model_file=_QWEN_MODEL_FILE,
-        mmproj_file=_QWEN_MMPROJ_FILE,
-        model_sha256=_QWEN_MODEL_SHA256,
-        mmproj_sha256=_QWEN_MMPROJ_SHA256,
-        model_bytes=_QWEN_MODEL_BYTES,
-        mmproj_bytes=_QWEN_MMPROJ_BYTES,
-        min_ram_gb=6,
+        name="SmolVLM2 2.2B",
+        hf_repo=_SMOL_HF_REPO,
+        model_file=_SMOL_MODEL_FILE,
+        mmproj_file=_SMOL_MMPROJ_FILE,
+        model_sha256=_SMOL_MODEL_SHA256,
+        mmproj_sha256=_SMOL_MMPROJ_SHA256,
+        model_bytes=_SMOL_MODEL_BYTES,
+        mmproj_bytes=_SMOL_MMPROJ_BYTES,
+        min_ram_gb=4,
+        license="Apache-2.0",
         notes=(
-            "Pinned local model (first-run download) — vision, nano swarm, helper. "
-            "Same weights on every PC for a given Remedy release; starts with Remedy."
+            "Required local model (Apache 2.0) — vision, nano swarm, helper. "
+            "First-run download; same weights on every PC for a given Remedy release."
         ),
     ),
 }
@@ -211,7 +216,7 @@ def get_model_spec(model_id: str | None = None) -> LocalModelSpec:
         raise KeyError(
             f"Unknown local model_id {mid!r}. "
             f"Known: {', '.join(sorted(LOCAL_MODELS))} "
-            f"(Remedy ships a single Qwen for all local roles)."
+            f"(Remedy ships a single local VLM for all local roles)."
         )
     return LOCAL_MODELS[mid]
 

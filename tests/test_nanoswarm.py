@@ -39,7 +39,7 @@ def test_get_model_spec_rejects_unknown():
         get_model_spec("some-other-qwen")
         raise AssertionError("expected KeyError")
     except KeyError as e:
-        assert "single Qwen" in str(e) or "Unknown" in str(e)
+        assert "single local VLM" in str(e) or "Unknown" in str(e)
 
 
 def test_token_nanobot_class_weighted():
