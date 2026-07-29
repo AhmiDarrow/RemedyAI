@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
+from remedy.interfaces.routes.assistant import register_assistant_routes
 from remedy.interfaces.routes.auth import register_auth_routes
 from remedy.interfaces.routes.catalog import register_catalog_routes
 from remedy.interfaces.routes.chat import register_chat_routes
@@ -40,6 +41,7 @@ def register_all_routes(
     register_workspace_routes(app, **kw)
     register_settings_routes(app, **kw)
     register_auth_routes(app, **kw)
+    register_assistant_routes(app, **kw)
     register_partner_routes(app, **kw)
     register_computer_routes(app, **kw)
     register_misc_routes(app, **kw)

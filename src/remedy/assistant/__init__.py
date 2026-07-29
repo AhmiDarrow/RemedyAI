@@ -1,12 +1,12 @@
 """Personal assistant layer (additive): linked accounts, budget/debts, briefs.
 
-Separate from computer-use execution. Mail/calendar use official OAuth (later);
+Separate from computer-use execution. Calendar uses official Google OAuth;
 money tools are local organization only — not financial advice.
 """
 
 from __future__ import annotations
 
-from remedy.assistant.disclaimer import MONEY_DISCLAIMER_SHORT, MONEY_DISCLAIMER_FULL
+from remedy.assistant.disclaimer import MONEY_DISCLAIMER_FULL, MONEY_DISCLAIMER_SHORT
 from remedy.assistant.store import (
     AssistantStore,
     get_assistant_store,

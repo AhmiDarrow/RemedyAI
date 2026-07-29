@@ -1,6 +1,6 @@
 """Pluggable calendar/mail providers (Google, Microsoft, Yahoo).
 
-Phase 0: interfaces only — no live OAuth yet.
+Phase 1: Google Calendar via official OAuth. Mail / other providers next.
 """
 
 from __future__ import annotations
@@ -13,12 +13,18 @@ from remedy.assistant.providers.base import (
     ProviderRegistry,
     get_provider_registry,
 )
+from remedy.assistant.providers.google_calendar import (
+    GoogleCalendarProvider,
+    get_google_calendar,
+)
 
 __all__ = [
     "CalendarEvent",
     "CalendarProvider",
+    "GoogleCalendarProvider",
     "MailMessage",
     "MailProvider",
     "ProviderRegistry",
+    "get_google_calendar",
     "get_provider_registry",
 ]

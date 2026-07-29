@@ -801,6 +801,9 @@ export function SettingsPanel({
               assistant={settings?.assistant}
               assistantDraft={assistantDraft}
               setAssistantDraft={setAssistantDraft}
+              onAssistantAccountsChanged={() => {
+                void load()
+              }}
               primaryProviders={primaryProviders}
               advancedProviders={advancedProviders}
               activeMeta={activeMeta ?? FALLBACK_PROVIDERS[0]}

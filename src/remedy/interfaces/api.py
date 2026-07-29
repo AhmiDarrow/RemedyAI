@@ -231,6 +231,8 @@ def create_app(
         "/api/openapi.yaml",
         # Computer-use a11y snapshot callback (job_id is one-time secret; no bearer).
         "/api/computer/a11y/push",
+        # Google OAuth browser redirect (state is one-time secret; no bearer).
+        "/api/assistant/google/callback",
     }
     # Messenger platform webhooks cannot send our Bearer token; they authenticate
     # via their own verify tokens / HMAC / JWT inside the route handlers.
