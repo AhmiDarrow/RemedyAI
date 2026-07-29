@@ -305,7 +305,8 @@ def test_navigate_rail_fast_optimistic_when_host_alive(tmp_path: Path, monkeypat
     # Force singleton to use tmp home
     monkeypatch.setattr(hb, "_bridge", None)
     ex = ComputerExecutor(home_dir=tmp_path)
-    ex.bridge.mark_host_alive()
+    # Real Desktop poller (jobs/ui), not a one-shot hello
+    ex.bridge.mark_host_alive(poller=True)
     t0 = __import__("time").perf_counter()
     raw = ex.run(ComputerAction.NAVIGATE, target="browser", url="https://mail.google.com")
     dt = __import__("time").perf_counter() - t0
@@ -319,6 +320,10 @@ def test_navigate_rail_fast_optimistic_when_host_alive(tmp_path: Path, monkeypat
 
 
 def test_computer_api_and_tools_registered(tmp_path: Path, monkeypatch):
+    from remedy.core.computer import host_bridge as hb
+
+    monkeypatch.setattr(hb, "_bridge", None)
+
     class Cfg:
         home_dir = str(tmp_path)
 
@@ -334,9 +339,15 @@ def test_computer_api_and_tools_registered(tmp_path: Path, monkeypatch):
     r = client.post("/api/computer/host/hello", json={"client": "desktop"})
     assert r.status_code == 200
     assert r.json()["ok"] is True
+    # Hello alone must not claim poller-connected
+    assert r.json().get("host_connected") is False, r.json()
 
     r2 = client.get("/api/computer/jobs/next")
     assert r2.status_code == 200
+    # jobs/next is a real poller heartbeat
+    st = client.get("/api/computer/host/status")
+    assert st.status_code == 200
+    assert st.json().get("host_connected") is True
     assert r2.json()["job"] is None
 
     # Enqueue via bridge used by tools
@@ -423,6 +434,16 @@ def test_computer_guidance_present():
     assert "computer_snapshot" in COMPUTER_USE_SYSTEM_ADDENDUM
     assert "computer_act" in COMPUTER_USE_SYSTEM_ADDENDUM
     assert "target" in COMPUTER_USE_SYSTEM_ADDENDUM
+
+
+def test_hello_alone_not_host_connected(tmp_path: Path):
+    from remedy.core.computer.host_bridge import ComputerHostBridge
+
+    b = ComputerHostBridge(home_dir=tmp_path)
+    b.mark_host_alive(poller=False)
+    assert b.host_connected() is False
+    b.mark_host_alive(poller=True)
+    assert b.host_connected() is True
 
 
 def test_job_result_text_capped_on_complete(tmp_path: Path):
