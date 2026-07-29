@@ -429,7 +429,7 @@ class ComputerExecutor:
                 extra={"windows": wins},
             )
         if act is ComputerAction.NAVIGATE:
-            # Desktop navigate: open URL in system default browser
+            # Desktop navigate = OS default browser — only when explicitly requested.
             raw_u = str(kwargs.get("url") or "")
             url = normalize_url(raw_u)
             if not url or not is_valid_navigate_url(url):
@@ -443,12 +443,33 @@ class ComputerExecutor:
                         f"not prose like {raw_u[:80]!r}."
                     ),
                 )
+            hint_s = str(kwargs.get("hint") or kwargs.get("reason") or "")
+            tgt_s = str(kwargs.get("target") or "desktop")
+            if not wants_system_browser(hint_s, tgt_s):
+                # Mis-routed: prefer rail / fail instead of surprising OS browser.
+                if self.bridge.host_connected(max_age_s=20.0):
+                    return self._navigate_rail_fast(
+                        {"url": url},
+                        hint=hint_s,
+                        req_target="browser",
+                    )
+                return public_result(
+                    ok=False,
+                    target="browser",
+                    action="navigate",
+                    message=(
+                        f"Refusing system browser for {url}. "
+                        "Use the in-app Browser rail (start Remedy Desktop) "
+                        "or ask explicitly for the system/external browser."
+                    ),
+                    extra={"url": url, "rail_failed": True, "system_browser_blocked": True},
+                )
             info = win.open_url(url)
             return public_result(
                 ok=True,
                 target="desktop",
                 action="navigate",
-                message=f"Opened system browser: {url}",
+                message=f"Opened system browser (explicitly requested): {url}",
                 extra=info,
             )
         if act is ComputerAction.ACT:

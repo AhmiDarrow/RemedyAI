@@ -274,6 +274,17 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                 )
 
         cfg = load_config()
+        raw_provider = (req.provider or cfg.get("llm_provider") or "openai")
+        raw_model = (req.model or cfg.get("llm_model") or "").strip()
+        # Fail closed on garbage ids (e.g. not-a-real-model-zzz) before toast/persist.
+        try:
+            from remedy.interfaces.config import validate_provider_model
+
+            if raw_model:
+                validate_provider_model(str(raw_provider), raw_model)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
         provider, model, base_url = normalize_llm_settings(
             req.provider,
             req.model or cfg.get("llm_model"),

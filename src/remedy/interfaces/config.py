@@ -719,11 +719,9 @@ def normalize_llm_settings(
         known = {m["id"] for m in default_models}
         if not mid:
             mid = default_model
-        # Closed catalogs: reject foreign model ids.
-        # Allow any deepseek-* / grok-* id (endpoint may list more than fallback).
-        if prov == "deepseek" and mid not in known and model_owner not in (None, "deepseek"):
-            mid = default_model
-        if prov == "xai" and mid not in known and model_owner not in (None, "xai"):
+        # Closed catalogs: snap foreign / garbage ids to provider default.
+        # Allow native-family prefixes (deepseek-*, grok-*) for live /models extras.
+        elif mid not in known and not _native_model_id_for_provider(prov, mid):
             mid = default_model
         if prov in _CLOSED_PROVIDERS and model_owner and model_owner != prov:
             mid = default_model
@@ -734,6 +732,57 @@ def normalize_llm_settings(
         mid = default_model
 
     return prov, mid, url
+
+
+def _native_model_id_for_provider(provider: str, model_id: str) -> bool:
+    """True when *model_id* looks like a native id for *provider* (not catalog-only)."""
+    mid = (model_id or "").strip().lower()
+    prov = (provider or "").strip().lower()
+    if not mid or not prov:
+        return False
+    if prov == "deepseek":
+        return mid.startswith("deepseek")
+    if prov == "xai":
+        return mid.startswith("grok") or mid.startswith("xai/")
+    if prov == "openai":
+        return mid.startswith(("gpt-", "o1", "o3", "o4", "chatgpt-"))
+    if prov == "anthropic":
+        return mid.startswith("claude")
+    if prov == "google":
+        return mid.startswith("gemini") or mid.startswith("models/gemini")
+    if prov == "mistral":
+        return mid.startswith(("mistral", "codestral", "open-mistral"))
+    if prov == "groq":
+        return mid.startswith("groq/") or mid in {
+            m["id"] for m in (PROVIDER_CATALOG.get("groq") or {}).get("models") or []
+        }
+    return False
+
+
+def validate_provider_model(provider: str | None, model: str | None) -> str:
+    """Return a clean model id or raise ValueError for closed-catalog garbage.
+
+    Flexible providers (ollama/custom/openrouter) accept any non-empty id.
+    Closed providers accept catalog ids + native-family prefixes only.
+    """
+    prov = (provider or "").strip().lower() or "openai"
+    mid = (model or "").strip()
+    if not mid:
+        raise ValueError("Model id is required")
+    _FLEXIBLE = frozenset({"openrouter", "custom", "ollama", "demo"})
+    if prov in _FLEXIBLE or prov not in PROVIDER_CATALOG:
+        return mid
+    # Apply legacy aliases first
+    mid = _LEGACY_MODEL_ALIASES.get(mid.lower(), mid)
+    catalog = PROVIDER_CATALOG.get(prov) or {}
+    known = {m["id"] for m in (catalog.get("models") or [])}
+    if mid in known or _native_model_id_for_provider(prov, mid):
+        return mid
+    sample = ", ".join(sorted(known)[:8]) or "(none)"
+    raise ValueError(
+        f"Unknown model {mid!r} for provider {prov!r}. "
+        f"Pick a listed model (e.g. {sample})."
+    )
 
 
 # Canonical desktop personas (aligned with SetupWizard).
