@@ -38,6 +38,7 @@ import { CommandPalette, type CommandItem } from './components/CommandPalette'
 import { useSessions } from './hooks/useSessions'
 import { useMessages } from './hooks/useMessages'
 import { useTheme } from './hooks/useTheme'
+import { loadUiMode, saveUiMode, type UiMode } from './utils/uiMode'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import { useNotifications } from './hooks/useNotifications'
 import { useUpdateChecker } from './hooks/useUpdateChecker'
@@ -315,6 +316,7 @@ export default function App() {
   const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>('high')
   const [approvalMode, setApprovalMode] = useState<ApprovalMode>('ask')
   const [toolProcessMode, setToolProcessMode] = useState<ToolProcessMode>('off')
+  const [uiMode, setUiMode] = useState<UiMode>(() => loadUiMode())
   /** Plan mode is per-session so switching chats does not stick Plan/Build. */
   const [planModeBySession, setPlanModeBySession] = useState<Record<string, boolean>>({})
   const planMode = Boolean(activeId && planModeBySession[activeId])
@@ -2207,6 +2209,11 @@ export default function App() {
           streaming={streaming}
           model={model}
           models={models}
+          uiMode={uiMode}
+          onUiModeChange={(mode) => {
+            setUiMode(mode)
+            saveUiMode(mode)
+          }}
           provider={llmProvider}
           connectedProviders={connectedProviders}
           onProviderModelChange={(prov, mid) => {
