@@ -275,17 +275,23 @@ async def call_llm_stream(runtime, message: str,
         browse_pre_url: str | None = None
         clear_goals_only = False
         pure_action_kick = False
+        open_only_browse = False
+        page_interaction = False
         with suppress(Exception):
             from remedy.core.computer.browse_intent import (
                 is_clear_goals_intent,
+                is_open_only_browse,
                 is_pure_action_kick,
                 parse_browse_navigate_url,
+                wants_page_interaction,
             )
 
             browse_pre_url = parse_browse_navigate_url(message or "")
             clear_goals_only = is_clear_goals_intent(message or "")
             pure_action_kick = is_pure_action_kick(message or "")
-        if browse_pre_url and all_tools and not plan_mode:
+            open_only_browse = is_open_only_browse(message or "")
+            page_interaction = wants_page_interaction(message or "")
+        if (browse_pre_url or page_interaction) and all_tools and not plan_mode:
             tools = all_tools
 
         seen_fps: set[str] = set()
@@ -358,10 +364,15 @@ async def call_llm_stream(runtime, message: str,
         # Pure action kicks ("goto google and search X", "clear goals") must NOT
         # resume older open_tasks / wiki work from history — latest message only.
         run_until_done = bool(tools) or bool(all_tools)
-        if pure_action_kick or clear_goals_only or browse_pre_url:
+        if pure_action_kick or clear_goals_only or browse_pre_url or page_interaction:
             open_tasks_for_wall = []
-            # Still allow tools for the kick itself; don't treat history as unfinished
-            run_until_done = bool(browse_pre_url or clear_goals_only)
+        # Open-only: short path. Interaction (login/type/click): full agent loop.
+        if page_interaction:
+            run_until_done = True
+            if all_tools:
+                tools = all_tools
+        elif pure_action_kick or clear_goals_only or open_only_browse:
+            run_until_done = bool(open_only_browse or clear_goals_only)
 
         # "clear goals" / "we have none" — no LLM, no replaying earlier browses
         if clear_goals_only and not plan_mode:
@@ -416,9 +427,9 @@ async def call_llm_stream(runtime, message: str,
             logger.info("clear_goals short-circuit")
             return
 
-        # Pre-open Browser rail for clear "goto X" intents — tool-call style:
-        # open URL, short confirm, **end turn** (no screenshot/snapshot spiral).
-        # Does NOT re-run older wiki/goals from chat history.
+        # Pre-open Browser rail for "goto X" (with or without follow-up work).
+        # Open-only → short confirm + end turn.
+        # Interaction (sign in / type / click) → navigate then CONTINUE agent loop.
         if browse_pre_url and not plan_mode:
             has_nav = any(
                 ((t.get("function") or {}).get("name") or "") == "computer_navigate"
@@ -448,8 +459,9 @@ async def call_llm_stream(runtime, message: str,
                     ]
                 )
                 logger.info(
-                    "browse_intent pre-navigate url=%s",
+                    "browse_intent pre-navigate url=%s interaction=%s",
                     browse_pre_url,
+                    page_interaction,
                 )
                 yield "@@tool_calls"
                 messages.append(
@@ -483,9 +495,8 @@ async def call_llm_stream(runtime, message: str,
                             browse_fail_snip = body[:400]
                 tool_batches_this_turn += 1
                 productive_in_epoch += 1
-                if browse_ok:
-                    # Pure open-URL request is done. Do not re-enter the ReAct
-                    # loop (model burns tokens on screenshot/snapshot/narration).
+                if browse_ok and open_only_browse and not page_interaction:
+                    # Pure open-URL — stop (no spiral).
                     label = short_site_label(browse_pre_url)
                     yield f"Opened **{label}** in the Browser rail."
                     logger.info(
@@ -493,22 +504,40 @@ async def call_llm_stream(runtime, message: str,
                         browse_pre_url,
                     )
                     return
-                # Failed open — one short force-answer, tools off
-                force_answer_sticky = True
-                tools = []
-                run_until_done = False
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": (
-                            f"computer_navigate for {browse_pre_url} did not succeed"
-                            f"{(': ' + browse_fail_snip) if browse_fail_snip else '.'} "
-                            "Reply in **one short sentence** with the error. "
-                            "Do **not** call more tools (no screenshot, snapshot, "
-                            "web_fetch, or system browser) unless the user asks."
-                        ),
-                    }
-                )
+                if browse_ok and page_interaction:
+                    # Keep going: click/type/login. Tools stay on.
+                    tools = all_tools
+                    run_until_done = True
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                f"Browser rail already opened {browse_pre_url} (SUCCESS). "
+                                "Now finish the **rest** of the latest user request only "
+                                "(sign-in, type username/email, click, etc.). "
+                                "Use computer_snapshot / computer_click text=… / "
+                                "computer_type. Do not re-navigate unless needed. "
+                                "Do not resume unrelated older tasks. "
+                                "Do not stop until the login/input steps are done or blocked."
+                            ),
+                        }
+                    )
+                elif not browse_ok and not page_interaction:
+                    # Failed open-only — one short force-answer, tools off
+                    force_answer_sticky = True
+                    tools = []
+                    run_until_done = False
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                f"computer_navigate for {browse_pre_url} did not succeed"
+                                f"{(': ' + browse_fail_snip) if browse_fail_snip else '.'} "
+                                "Reply in **one short sentence** with the error. "
+                                "Do **not** call more tools unless the user asks."
+                            ),
+                        }
+                    )
 
         # If we still enter the LLM loop for a short kick, pin focus to latest msg
         # so history (old wiki / goals / navigates) is not re-executed.
