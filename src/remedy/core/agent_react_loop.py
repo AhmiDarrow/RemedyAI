@@ -374,6 +374,79 @@ async def call_llm_stream(runtime, message: str,
         elif pure_action_kick or clear_goals_only or open_only_browse:
             run_until_done = bool(open_only_browse or clear_goals_only)
 
+        # Personal-assistant fast path: high-confidence tool-only asks skip the
+        # provider model (calendar list, budget status, brief, simple log, …).
+        # Low confidence / complex → fall through to full ReAct (unchanged).
+        if (
+            not plan_mode
+            and not attachments
+            and not browse_pre_url
+            and not page_interaction
+            and not clear_goals_only
+        ):
+            with suppress(Exception):
+                from remedy.assistant.fast_path import (
+                    assistant_fast_path_enabled,
+                    format_fast_path_reply,
+                    match_assistant_fast_path,
+                )
+
+                pa_plan = match_assistant_fast_path(message or "")
+                if pa_plan is not None and assistant_fast_path_enabled(
+                    getattr(getattr(runtime, "config", None), "home_dir", None)
+                ):
+                    has_tool = any(
+                        ((t.get("function") or {}).get("name") or "") == pa_plan.tool
+                        for t in (all_tools or [])
+                    )
+                    if has_tool:
+                        from uuid import uuid4
+
+                        fp_id = f"pa_fp_{uuid4().hex[:10]}"
+                        pre_calls = normalize_tool_calls(
+                            [
+                                {
+                                    "id": fp_id,
+                                    "type": "function",
+                                    "function": {
+                                        "name": pa_plan.tool,
+                                        "arguments": json.dumps(pa_plan.arguments),
+                                    },
+                                }
+                            ]
+                        )
+                        logger.info(
+                            "assistant_fast_path tool=%s label=%s",
+                            pa_plan.tool,
+                            pa_plan.label,
+                        )
+                        yield "@@tool_calls"
+                        messages.append(
+                            build_assistant_api_message(
+                                content=None, tool_calls=pre_calls
+                            )
+                        )
+                        tool_body = ""
+                        async for event, tool_msg in execute_tool_calls(
+                            runtime,
+                            pre_calls,
+                            seen_fps=seen_fps,
+                            result_cache=result_cache,
+                        ):
+                            if event.startswith("@@"):
+                                yield event
+                            if tool_msg:
+                                messages.append(tool_msg)
+                                tool_body = str(tool_msg.get("content") or "")
+                        reply = format_fast_path_reply(pa_plan.tool, tool_body)
+                        yield reply if reply else "Done."
+                        logger.info(
+                            "assistant_fast_path done tool=%s chars=%s",
+                            pa_plan.tool,
+                            len(reply or ""),
+                        )
+                        return
+
         # "clear goals" / "we have none" — no LLM, no replaying earlier browses
         if clear_goals_only and not plan_mode:
             clear_msg = "No open goals — already clear."
