@@ -405,6 +405,11 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             raise HTTPException(503, "Runtime not available")
 
         request_id = str(uuid4())
+        # Empty composer submits create noisy greeting turns; require real text
+        # unless attachments are present.
+        has_atts = bool(getattr(req, "attachments", None))
+        if not str(req.message or "").strip() and not has_atts:
+            raise HTTPException(400, "Message is empty")
 
         if memory:
             from remedy.core.session_llm import (
