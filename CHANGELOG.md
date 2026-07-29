@@ -4,6 +4,18 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Security: P0 trust audit fixes (user data + computer-use)
+
+- Browser snapshot **redacts password/OTP/sensitive input values** (`[filled]`) so secrets
+  do not flow into tool results → cloud LLM.
+- `assistant_brief` requires **`consent_ok`** before loading Gmail/Calendar; mail rows use
+  the same clip/redact path as list tools; **consent version** stamped on accept.
+- Google OAuth **state is single-use** (PKCE verifier consumed under lock; TTL purge).
+- Provider sanitization is **fail-closed** in the ReAct loop (no `suppress` around sanitize).
+- Optimistic rail navigate marks `ready_for_input=false`; type/click/page_text wait for settle.
+- `/api/computer/a11y/*` is **loopback-only** when API auth is on (not fully public).
+- `page_text` default cap lowered (12k → 8k); sanitize fast-path avoids deepcopy for plain messages.
+
 ### Feat: in-house computer use (browser rail + desktop) — local branch
 
 Work lives on **`feature/computer-use`** (do not ship/push until soak solid).

@@ -88,6 +88,17 @@ class AssistantStore:
                 p.brief = BriefPrefs.from_dict({**p.brief.to_dict(), **v})
             elif hasattr(p, k) and v is not None:
                 setattr(p, k, v)
+        # Stamp consent version when user accepts privacy + account access.
+        if p.privacy_ai_accepted and p.account_access_accepted:
+            from remedy.assistant.privacy import CURRENT_CONSENT_VERSION
+
+            if not str(getattr(p, "consent_version", "") or "").strip():
+                p.consent_version = CURRENT_CONSENT_VERSION
+            # Explicit re-accept with current version (Connect dialog).
+            if kwargs.get("privacy_ai_accepted") is True or kwargs.get(
+                "account_access_accepted"
+            ) is True:
+                p.consent_version = CURRENT_CONSENT_VERSION
         return self.set_prefs(p)
 
     def list_accounts(self) -> list[LinkedAccount]:
@@ -423,6 +434,7 @@ class AssistantStore:
             "money_disclaimer": MONEY_DISCLAIMER_SHORT,
             "privacy_ai_accepted": prefs.privacy_ai_accepted,
             "account_access_accepted": prefs.account_access_accepted,
+            "consent_version": str(getattr(prefs, "consent_version", "") or ""),
             "privacy": notices,
             "brief": prefs.brief.to_dict(),
             "accounts": self.accounts_public(),
