@@ -14,7 +14,7 @@ Open **Help** ( **F1** or **Ctrl+/** ) for a searchable wiki UI that loads these
 |------|--------|
 | [00-overview.md](00-overview.md) | Overview — what Remedy can do |
 | [16-continuity-philosophy.md](16-continuity-philosophy.md) | How Remedy works (continuity) |
-| [14-visual-decoder.md](14-visual-decoder.md) | Local vision & on-device Qwen |
+| [14-visual-decoder.md](14-visual-decoder.md) | Local vision & on-device SmolVLM2 |
 | [17-nanoswarm.md](17-nanoswarm.md) | Continuity workers (operators) |
 | [01-install-windows.md](01-install-windows.md) | Install (Windows) |
 | [02-first-run.md](02-first-run.md) | First run & setup |

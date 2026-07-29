@@ -3,12 +3,12 @@
 Layout (relative to bundle root)::
 
   local/
-    models/qwen2.5-vl-3b/<gguf + mmproj>
+    models/smolvlm2-2.2b/<gguf + mmproj>
     runtime/cpu/...
     runtime/cuda/...
 
 Also accepts legacy ``~/.remedy/vision`` (models + runtime flat extract) so
-existing installs count as the same pinned Qwen without re-download.
+existing installs count as the same pinned SmolVLM2 without re-download.
 """
 
 from __future__ import annotations

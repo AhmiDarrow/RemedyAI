@@ -58,7 +58,7 @@ When a request spans **independent** modules/paths (or you say “in parallel”
   Pass `tasks` as a **JSON array** (native tool-call list) or a JSON string, or use `goal=` for auto-plan.
 - You still talk to **one Remedy** — workers are not separate chat personas.
 - Workers are **depth-1** (they cannot spawn more workers).
-- Most workers are **non-LLM** jobs (fast). Optional local Qwen only refines the plan or compresses long digests when the server is already up.
+- Most workers are **non-LLM** jobs (fast). Optional local SmolVLM2 only refines the plan or compresses long digests when the server is already up.
 - Continuity may inject a **[Spread]** system hint when fan-out looks useful; pure chat and single-file edits do not spread.
 
 Config (optional, under `~/.remedy/config.toml`):

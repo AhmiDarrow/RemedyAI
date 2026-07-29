@@ -1,4 +1,4 @@
-"""Helper nanobot — offline local assist (same Qwen role reserved for later neural).
+"""Helper nanobot — offline local assist (same SmolVLM2 role reserved for later neural).
 
 Ships deterministic offline drafts now: slash/help FAQ, explain last error,
 and continuity tips. Does not start llama-server; never a second chat voice.
@@ -94,7 +94,7 @@ class HelperNanobot:
     def __init__(self) -> None:
         self.enabled = True  # offline surface on; neural assist still off
         self.jobs_run = 0
-        self.neural_enabled = False  # reserved — shared Qwen when productized
+        self.neural_enabled = False  # reserved — shared SmolVLM2 when productized
 
     def status(self) -> dict[str, Any]:
         return {

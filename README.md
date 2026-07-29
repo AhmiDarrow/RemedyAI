@@ -14,7 +14,7 @@ Knowledge, design, code, and get-it-done work. One continuous partner — not a 
 1. [What you get](#what-you-get) — product at a glance  
 2. [Why it’s different](#why-its-different) — local continuity  
 3. [Workspace on your PC](#workspace-on-your-pc) — files, terminal, browser, scratch  
-4. [Local brain (Qwen)](#local-brain-qwen) — vision + efficiency without a second persona  
+4. [Local brain (SmolVLM2)](#local-brain-smolvlm2) — vision + efficiency without a second persona  
 5. [Continuity workers](#continuity-workers) — silent nano swarm  
 6. [Messengers](#messengers) — chat where you already are  
 7. [Skills & Library](#skills--library)  
@@ -36,7 +36,7 @@ GitHub renders the full Help wiki as markdown (same chapters as in-app **F1**):
 | **Start here** | [Overview](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/00-overview.md) |
 | **All chapters** | [docs/manual/](https://github.com/AhmiDarrow/RemedyAI/tree/master/docs/manual) · [chapter index](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/README.md) |
 | **Continuity** | [How Remedy works](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/16-continuity-philosophy.md) |
-| **Local Qwen** | [Vision & on-device Qwen](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/14-visual-decoder.md) |
+| **Local SmolVLM2** | [Vision & on-device SmolVLM2](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/14-visual-decoder.md) |
 | **Chat & rails** | [Chat & sessions](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/05-chat-and-sessions.md) |
 | **Skills** | [Skills](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/07-skills.md) |
 | **What’s new** | [What’s new](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/13-whats-new.md) |
@@ -53,7 +53,7 @@ One desktop app. One local API. Your data under `~/.remedy`.
 |--|------------|
 | **Chat partner** | Streaming markdown, Plan/Build, attachments, image markup, stick-to-bottom feed |
 | **Workspace** | **Files** · **Terminal** (PowerShell) · **Browser** (embedded WebView2) · **Scratch** pad — rails beside chat |
-| **Local brain** | **Qwen2.5-VL 3B** on this PC — visual decoder + harness assist (optional download) |
+| **Local brain** | **SmolVLM2 2.2B** on this PC — visual decoder + harness assist (optional download) |
 | **Continuity** | Session Brief, memory, skills, context budget — silent workers, one voice |
 | **Messengers** | Telegram, Discord, Slack, Mattermost, Matrix, WhatsApp, Teams, Google Chat, Signal (Settings) |
 | **Skills** | Learn from real work · **Installed \| Library** · signed community catalog |
@@ -62,21 +62,21 @@ One desktop app. One local API. Your data under `~/.remedy`.
 | **Web UI** | Same SPA at `http://127.0.0.1:7400/` (Switch to WebUI → tray) |
 | **Updates** | Minisign-signed auto-update from GitHub Releases |
 
-Your **chat model** is yours: xAI, OpenAI, Anthropic, Google, DeepSeek, Groq, Mistral, OpenRouter, **Ollama**, or Custom. Continuity and local Qwen live **on disk**, not in a Remedy cloud.
+Your **chat model** is yours: xAI, OpenAI, Anthropic, Google, DeepSeek, Groq, Mistral, OpenRouter, **Ollama**, or Custom. Continuity and local SmolVLM2 live **on disk**, not in a Remedy cloud.
 
 ---
 
 ## Why it’s different
 
 ```text
-You  →  Continuity (brief · memory · skills · budget · local Qwen)  →  Your model  →  Tools
+You  →  Continuity (brief · memory · skills · budget · local SmolVLM2)  →  Your model  →  Tools
               ↑________________ learn / compress / remember ________________|
 ```
 
 | You feel | What’s actually happening |
 |----------|---------------------------|
 | **Fast** | Hot path stays cheap; heavy work is background |
-| **Cheaper** | Less tool sludge re-sent; Qwen where it saves paid calls |
+| **Cheaper** | Less tool sludge re-sent; local SmolVLM2 where it saves paid calls |
 | **Same partner** | Switch providers anytime — identity is local |
 
 Deep dive: [Continuity philosophy](docs/manual/16-continuity-philosophy.md) · In-app **F1**.
@@ -99,11 +99,11 @@ Manual: [Chat & sessions](docs/manual/05-chat-and-sessions.md) · [Desktop notes
 
 ---
 
-## Local brain (Qwen)
+## Local brain (SmolVLM2)
 
 **On-device efficiency** — not a second chatbot.
 
-| Job | Local **Qwen2.5-VL 3B** |
+| Job | Local **SmolVLM2 2.2B** |
 |-----|-------------------------|
 | **Visual decoder** | Images → structured text briefs so **any** chat model can reason about screenshots |
 | **Prefer-local vision** | Decode here first; save provider vision tokens when you want |
@@ -112,7 +112,7 @@ Manual: [Chat & sessions](docs/manual/05-chat-and-sessions.md) · [Desktop notes
 
 **How it ships:** not in the installer → one first-run download → `~/.remedy/vision/` → **llama-server** on **127.0.0.1** → auto-starts with Remedy. CPU by default; CUDA when NVIDIA is available.
 
-Manual: [Local vision & on-device Qwen](docs/manual/14-visual-decoder.md)
+Manual: [Local vision & on-device SmolVLM2](docs/manual/14-visual-decoder.md)
 
 ---
 
@@ -128,7 +128,7 @@ Silent local workers (sometimes called the **nano swarm** in code). They measure
 | Pattern | Tool sequences, stuck signals, learn pre-gate |
 | Skill | Ranking and feedback for procedures |
 
-Heuristics first; local Qwen only when already running and useful.  
+Heuristics first; local SmolVLM2 only when already running and useful.  
 Operators: [Continuity workers](docs/manual/17-nanoswarm.md) · `/harness`
 
 ---
@@ -226,7 +226,7 @@ Full list: [Commands](docs/manual/11-reference-commands.md)
 │  React SPA · tray · updates · Files/Terminal/Browser   │
 │              │                                           │
 │  remedy serve · FastAPI :7400                            │
-│    gateway · core · memory · skills · vision (Qwen)      │
+│    gateway · core · memory · skills · vision (SmolVLM2)      │
 └──────────────────────────────────────────────────────────┘
      CLI · WebUI · Telegram · Discord · Slack · …
 ```

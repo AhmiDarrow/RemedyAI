@@ -1,4 +1,4 @@
-"""Shared local runtime: pinned Qwen + llama-server for vision, nano, helper.
+"""Shared local runtime: pinned SmolVLM2 + llama-server for vision, nano, helper.
 
 One model id for every local neural role. Same bytes for every install of a
 given Remedy release (prebundled; no per-PC model download for the default).

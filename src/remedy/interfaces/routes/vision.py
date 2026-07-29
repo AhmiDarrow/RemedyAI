@@ -1,4 +1,4 @@
-"""REST API for the local visual decoder (llama.cpp + Qwen2.5-VL 3B)."""
+"""REST API for the local visual decoder (llama.cpp + SmolVLM2 2.2B)."""
 
 from __future__ import annotations
 
@@ -60,7 +60,8 @@ def register_vision_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
 
     @app.post("/api/vision/activate")
     async def vision_activate() -> dict[str, Any]:
-        """Activate prebundled/legacy pinned Qwen (no download)."""
+        """Activate prebundled/installed local VLM (SmolVLM2 — no download)."""
+        from remedy.vision.catalog import DEFAULT_MODEL_ID
         from remedy.vision.service import activate_bundle
 
         cfg = load_config()
@@ -71,7 +72,8 @@ def register_vision_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
             if path is not None:
                 vision = dict(cfg.get("vision") or {}) if isinstance(cfg.get("vision"), dict) else {}
                 vision["enabled"] = True
-                vision["model_id"] = vision.get("model_id") or "qwen2.5-vl-3b"
+                # Always pin product local model (never reintroduce retired ids).
+                vision["model_id"] = DEFAULT_MODEL_ID
                 cfg["vision"] = vision
                 _write_config(path, cfg)
         except Exception:
@@ -93,7 +95,7 @@ def register_vision_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                 vision = dict(cfg.get("vision") or {}) if isinstance(cfg.get("vision"), dict) else {}
                 vision["enabled"] = True
                 # Always pin to single product model id (ignore alternate models)
-                vision["model_id"] = "qwen2.5-vl-3b"
+                vision["model_id"] = "smolvlm2-2.2b"
                 if body.runtime_id:
                     vision["runtime_id"] = body.runtime_id
                 elif body.prefer_cuda:
@@ -104,7 +106,7 @@ def register_vision_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
             logger.exception("Failed to set vision.enabled in config")
         return start_install(
             cfg=cfg,
-            model_id="qwen2.5-vl-3b",
+            model_id="smolvlm2-2.2b",
             runtime_id=body.runtime_id,
             prefer_cuda=body.prefer_cuda,
         )

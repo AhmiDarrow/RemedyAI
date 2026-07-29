@@ -1,4 +1,4 @@
-"""Local neural roles that share the single pinned Qwen model."""
+"""Local neural roles that share the single pinned SmolVLM2 model."""
 
 from __future__ import annotations
 

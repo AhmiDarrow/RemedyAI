@@ -1048,15 +1048,15 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                 <span style={{ color: 'var(--accent)', fontWeight: 600 }}>Decoded locally</span>
                 {' · '}
                 {visionStatus.force_decode && modelHasVision
-                  ? `Prefer-local is on — image brief via ${visionStatus.model?.name || 'Qwen2.5-VL 3B'} (saves provider vision tokens).`
-                  : `This chat model is text-only; images go through ${visionStatus.model?.name || 'Qwen2.5-VL 3B'} on this PC.`}
+                  ? `Prefer-local is on — image brief via ${visionStatus.model?.name || 'SmolVLM2 2.2B'} (saves provider vision tokens).`
+                  : `This chat model is text-only; images go through ${visionStatus.model?.name || 'SmolVLM2 2.2B'} on this PC.`}
               </>
             ) : (
               <>
                 This chat model may not see images.
                 {visionStatus?.installed
                   ? ' Turn on local vision in Settings — starts with Remedy when enabled.'
-                  : ' Install local vision in Settings (one-time Qwen2.5-VL 3B download).'}
+                  : ' Install local vision in Settings (one-time SmolVLM2 2.2B download).'}
               </>
             )}
           </div>

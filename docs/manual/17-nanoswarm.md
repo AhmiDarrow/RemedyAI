@@ -16,7 +16,7 @@ so work compounds:
 | **Memory** | Session Brief touch (paths, decisions, next steps) | No |
 | **Pattern** | Tool sequence window; stuck signals; learn pre-gate | No |
 | **Skill** | Feedback + ranking cache for procedures | No |
-| **Helper** | Reserved on the same local Qwen (not shipped as UI yet) | Local only when enabled |
+| **Helper** | Reserved on the same local SmolVLM2 (not shipped as UI yet) | Local only when enabled |
 
 They share one **local SmolVLM2** runtime for vision/nano assist — never a
 second product personality.
@@ -46,14 +46,14 @@ Partner status may include swarm counters for advanced UIs.
 - **Learn only good traces** — pattern pre-gate rejects weak multi-tool noise  
 - **Spread when partitionable** — ContextSnapshot may add a **[Spread]** hint;
   the frontier then calls `spread_run` for parallel silent jobs (not multi-agent
-  chat). Local Qwen may refine the spread plan only if llama-server is already up.  
+  chat). Local SmolVLM2 may refine the spread plan only if llama-server is already up.  
 - **Library skill check** — Skill nanobot ranks the **cached** Skills Library index
   (never remote on the hot path). At most one soft Install tip; speculative prep
   refreshes the catalog in the background. 
 
 ## Local model (optional)
 
-First-run download of pinned Qwen (see [Local vision](14-visual-decoder)). When
+First-run download of pinned SmolVLM2 (see [Local vision](14-visual-decoder)). When
 installed and running:
 
 - Vision decode for text-only chat models  
@@ -95,7 +95,7 @@ any vendor merge tables.
 | `/harness` in chat | Continuity / session quality (operators) |
 | `REMEDY_LIVE_MODELS=0` | Disable live provider model listing |
 | `REMEDY_BPE=0` | Disable owned BPE; heuristic token estimates |
-| Vision enable + auto_start | Local Qwen with Remedy |
+| Vision enable + auto_start | Local SmolVLM2 with Remedy |
 
 ## Related
 

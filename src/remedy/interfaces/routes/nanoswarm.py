@@ -47,7 +47,7 @@ def register_nanoswarm_routes(app: FastAPI, *, runtime=None, gateway=None, memor
 
     @app.post("/api/nanoswarm/classify")
     async def nanoswarm_classify(body: RouterClassifyRequest) -> dict[str, Any]:
-        """Classify intent. Default: fast heuristics. Set use_local for Qwen refine."""
+        """Classify intent. Default: fast heuristics. Set use_local for local VLM refine."""
         import asyncio
 
         from remedy.nanoswarm import get_swarm

@@ -22,7 +22,7 @@ from remedy.nanoswarm.token_nanobot import get_token_nanobot
 
 
 class NanoSwarm:
-    """Remedy's nano swarm brain — modular bots, one shared local Qwen for neural assist."""
+    """Remedy's nano swarm brain — modular bots, one shared local SmolVLM2 for neural assist."""
 
     def __init__(self) -> None:
         self.token = get_token_nanobot()
