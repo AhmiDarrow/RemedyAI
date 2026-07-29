@@ -4,6 +4,13 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Fix: only one Remedy at a time
+
+- **Desktop** (Windows): named mutex `Local\RemedyDesktop-SingleInstance` — second
+  launch focuses the existing window and exits.
+- **API serve**: exclusive `~/.remedy/locks/remedy_serve.lock` so a second
+  `remedy serve` / sidecar cannot start while another API is up.
+
 ### Feat: default Dark Forest + Dark Purple (alien) theme
 
 - **Default theme** is **Dark Forest** (`forest`) for first run (no saved preference).
