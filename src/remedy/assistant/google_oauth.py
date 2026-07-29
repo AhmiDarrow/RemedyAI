@@ -300,11 +300,7 @@ def start_oauth(
     """Begin auth-code + PKCE flow. Returns auth_url + state for the UI."""
     app = load_app_config(home)
     if not app.configured():
-        raise ValueError(
-            "Google OAuth client_id not set. Create an OAuth client in Google Cloud "
-            "Console (Desktop or Web with loopback redirect), then save Client ID "
-            "in Settings → Personal assistant, or set REMEDY_GOOGLE_OAUTH_CLIENT_ID."
-        )
+        raise ValueError("Google Client ID not set.")
     redir = (redirect_uri or app.redirect_uri or DEFAULT_REDIRECT).strip()
     verifier, challenge = _pkce_pair()
     state = secrets.token_urlsafe(24)
@@ -510,12 +506,5 @@ def public_status(home: Path | str | None = None) -> dict[str, Any]:
     return {
         **tokens.to_public(),
         "app": app.to_public(),
-        "setup_hint": (
-            None
-            if app.configured()
-            else (
-                "Add a Google Cloud OAuth Client ID (Desktop app or Web with redirect "
-                f"{app.redirect_uri or DEFAULT_REDIRECT})."
-            )
-        ),
+        "setup_hint": None if app.configured() else "Client ID required",
     }
