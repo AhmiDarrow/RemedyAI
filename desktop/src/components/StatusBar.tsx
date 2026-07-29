@@ -10,6 +10,7 @@ import {
   TOOL_PROCESS_CYCLE,
   type ToolProcessMode,
 } from '../utils/toolLabels'
+import type { UiMode } from '../utils/uiMode'
 
 export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high'
 export type ApprovalMode = 'ask' | 'auto'
@@ -48,6 +49,9 @@ interface StatusBarProps {
   onToggleTimeTravel?: () => void
   /** Open multiprovider Usage & Continuity dashboard */
   onOpenUsage?: () => void
+  /** Main chrome density: Simple hides power-user controls */
+  uiMode?: UiMode
+  onUiModeChange?: (mode: UiMode) => void
 }
 
 const THINKING_OPTIONS: { id: ThinkingLevel; label: string }[] = [
@@ -145,7 +149,10 @@ export function StatusBar({
   onOpenUsage,
   timeTravelOpen = false,
   onToggleTimeTravel,
+  uiMode = 'simple',
+  onUiModeChange,
 }: StatusBarProps) {
+  const advanced = uiMode === 'advanced'
   const [version, setVersion] = useState('')
   const [status, setStatus] = useState<'connected' | 'disconnected' | 'checking'>('checking')
   const [alerts, setAlerts] = useState('')
@@ -521,24 +528,28 @@ export function StatusBar({
             {planMode ? 'Plan' : 'Build'}
           </SegButton>
 
-          <SegButton
-            active={panel === 'memory'}
-            onClick={() => onTogglePanel('memory')}
-            title={
-              hasCheckpoint
-                ? 'Memory, checkpoints & plans (checkpoint available)'
-                : 'Memory, checkpoints & plans'
-            }
-          >
-            Memory
-          </SegButton>
-          <SegButton
-            active={panel === 'skills'}
-            onClick={() => onTogglePanel('skills')}
-            title="Skills (agent skill packs)"
-          >
-            Skills
-          </SegButton>
+          {advanced && (
+            <>
+              <SegButton
+                active={panel === 'memory'}
+                onClick={() => onTogglePanel('memory')}
+                title={
+                  hasCheckpoint
+                    ? 'Memory, checkpoints & plans (checkpoint available)'
+                    : 'Memory, checkpoints & plans'
+                }
+              >
+                Memory
+              </SegButton>
+              <SegButton
+                active={panel === 'skills'}
+                onClick={() => onTogglePanel('skills')}
+                title="Skills (agent skill packs)"
+              >
+                Skills
+              </SegButton>
+            </>
+          )}
           <SegButton
             active={panel === 'settings'}
             onClick={() => onTogglePanel('settings')}
@@ -555,13 +566,15 @@ export function StatusBar({
               Help
             </SegButton>
           )}
-          <SegButton
-            active={false}
-            onClick={openWebUi}
-            title="Hide desktop to tray and open the WebUI chat in your browser"
-          >
-            WebUI
-          </SegButton>
+          {advanced && (
+            <SegButton
+              active={false}
+              onClick={openWebUi}
+              title="Hide desktop to tray and open the WebUI chat in your browser"
+            >
+              WebUI
+            </SegButton>
+          )}
 
           {updateAvailable && (
             <button
@@ -575,7 +588,28 @@ export function StatusBar({
         </div>
 
         <div className="flex items-center gap-1.5 flex-shrink-0">
-          {onOpenUsage && (
+          {onUiModeChange && (
+            <button
+              type="button"
+              className="text-[10px] px-1.5 py-0.5 rounded font-medium capitalize"
+              title={
+                advanced
+                  ? 'Advanced UI — click for Simple'
+                  : 'Simple UI — click for Advanced'
+              }
+              onClick={() => onUiModeChange(advanced ? 'simple' : 'advanced')}
+              style={{
+                background: advanced
+                  ? 'color-mix(in srgb, var(--accent) 22%, transparent)'
+                  : 'var(--bg-tertiary)',
+                color: advanced ? 'var(--accent)' : 'var(--text-muted)',
+                border: `1px solid ${advanced ? 'var(--accent)' : 'var(--border)'}`,
+              }}
+            >
+              {advanced ? 'Advanced' : 'Simple'}
+            </button>
+          )}
+          {advanced && onOpenUsage && (
             <button
               type="button"
               className="text-xs px-1.5 py-0.5 rounded"
@@ -670,81 +704,85 @@ export function StatusBar({
             </span>
           )}
 
-          <select
-            value={thinkingLevel}
-            onChange={(e) => onThinkingLevelChange?.(e.target.value as ThinkingLevel)}
-            className="text-xs rounded px-1.5 py-0.5 outline-none"
-            title="Thinking level"
-            style={{
-              background: 'var(--bg-tertiary)',
-              color: 'var(--text-primary)',
-              border: '1px solid var(--border)',
-            }}
-          >
-            {THINKING_OPTIONS.map((o) => (
-              <option key={o.id} value={o.id}>
-                Think {o.label}
-              </option>
-            ))}
-          </select>
+          {advanced && (
+            <>
+              <select
+                value={thinkingLevel}
+                onChange={(e) => onThinkingLevelChange?.(e.target.value as ThinkingLevel)}
+                className="text-xs rounded px-1.5 py-0.5 outline-none"
+                title="Thinking level"
+                style={{
+                  background: 'var(--bg-tertiary)',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--border)',
+                }}
+              >
+                {THINKING_OPTIONS.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    Think {o.label}
+                  </option>
+                ))}
+              </select>
 
-          <button
-            type="button"
-            onClick={() => onApprovalModeChange?.(autoApprove ? 'ask' : 'auto')}
-            className="flex items-center justify-center rounded px-1.5 py-0.5 text-sm"
-            title={
-              autoApprove
-                ? 'Auto-approve on — click for Ask'
-                : 'Ask before risky tools — click for Auto'
-            }
-            aria-label={autoApprove ? 'Auto-approve' : 'Ask before risky actions'}
-            style={{
-              background: autoApprove
-                ? 'color-mix(in srgb, var(--success) 25%, var(--bg-tertiary))'
-                : 'var(--bg-tertiary)',
-              color: autoApprove ? 'var(--success)' : 'var(--text-secondary)',
-              border: `1px solid ${autoApprove ? 'var(--success)' : 'var(--border)'}`,
-              minWidth: 28,
-            }}
-          >
-            {autoApprove ? '👍' : '👎'}
-          </button>
+              <button
+                type="button"
+                onClick={() => onApprovalModeChange?.(autoApprove ? 'ask' : 'auto')}
+                className="flex items-center justify-center rounded px-1.5 py-0.5 text-sm"
+                title={
+                  autoApprove
+                    ? 'Auto-approve on — click for Ask'
+                    : 'Ask before risky tools — click for Auto'
+                }
+                aria-label={autoApprove ? 'Auto-approve' : 'Ask before risky actions'}
+                style={{
+                  background: autoApprove
+                    ? 'color-mix(in srgb, var(--success) 25%, var(--bg-tertiary))'
+                    : 'var(--bg-tertiary)',
+                  color: autoApprove ? 'var(--success)' : 'var(--text-secondary)',
+                  border: `1px solid ${autoApprove ? 'var(--success)' : 'var(--border)'}`,
+                  minWidth: 28,
+                }}
+              >
+                {autoApprove ? '👍' : '👎'}
+              </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              const i = TOOL_PROCESS_CYCLE.indexOf(toolProcessMode)
-              const next =
-                TOOL_PROCESS_CYCLE[(i >= 0 ? i + 1 : 0) % TOOL_PROCESS_CYCLE.length]!
-              onToolProcessChange?.(next)
-            }}
-            className="px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide"
-            title={
-              toolProcessMode === 'off'
-                ? 'Min — step names only (click → Med)'
-                : toolProcessMode === 'medium'
-                  ? 'Med — path/command + short results (click → Full)'
-                  : 'Full — complete process output (click → Min)'
-            }
-            aria-label={`Tool process ${toolProcessMode}`}
-            style={{
-              background:
-                toolProcessMode === 'off'
-                  ? 'var(--bg-tertiary)'
+              <button
+                type="button"
+                onClick={() => {
+                  const i = TOOL_PROCESS_CYCLE.indexOf(toolProcessMode)
+                  const next =
+                    TOOL_PROCESS_CYCLE[(i >= 0 ? i + 1 : 0) % TOOL_PROCESS_CYCLE.length]!
+                  onToolProcessChange?.(next)
+                }}
+                className="px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide"
+                title={
+                  toolProcessMode === 'off'
+                    ? 'Min — step names only (click → Med)'
+                    : toolProcessMode === 'medium'
+                      ? 'Med — path/command + short results (click → Full)'
+                      : 'Full — complete process output (click → Min)'
+                }
+                aria-label={`Tool process ${toolProcessMode}`}
+                style={{
+                  background:
+                    toolProcessMode === 'off'
+                      ? 'var(--bg-tertiary)'
+                      : toolProcessMode === 'medium'
+                        ? 'color-mix(in srgb, var(--accent) 22%, var(--bg-tertiary))'
+                        : 'var(--accent)',
+                  color: isFullProcessMode(toolProcessMode) ? '#fff' : 'var(--text-secondary)',
+                  border: `1px solid ${toolProcessMode === 'off' ? 'var(--border)' : 'var(--accent)'}`,
+                  minWidth: 40,
+                }}
+              >
+                {toolProcessMode === 'off'
+                  ? 'Min'
                   : toolProcessMode === 'medium'
-                    ? 'color-mix(in srgb, var(--accent) 22%, var(--bg-tertiary))'
-                    : 'var(--accent)',
-              color: isFullProcessMode(toolProcessMode) ? '#fff' : 'var(--text-secondary)',
-              border: `1px solid ${toolProcessMode === 'off' ? 'var(--border)' : 'var(--accent)'}`,
-              minWidth: 40,
-            }}
-          >
-            {toolProcessMode === 'off'
-              ? 'Min'
-              : toolProcessMode === 'medium'
-                ? 'Med'
-                : 'Full'}
-          </button>
+                    ? 'Med'
+                    : 'Full'}
+              </button>
+            </>
+          )}
 
           <ThemeSwitcher currentId={themeId} currentTheme={theme} onChange={onThemeChange} />
         </div>
