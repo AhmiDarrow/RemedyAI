@@ -18,7 +18,7 @@ so work compounds:
 | **Skill** | Feedback + ranking cache for procedures | No |
 | **Helper** | Reserved on the same local Qwen (not shipped as UI yet) | Local only when enabled |
 
-They share one optional **local Qwen** runtime for vision/nano assist — never a
+They share one **local SmolVLM2** runtime for vision/nano assist — never a
 second product personality.
 
 ## How it attaches to a turn

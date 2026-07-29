@@ -58,23 +58,23 @@ Sessions, Settings, and these tools live on the left/right rails. See [Chat & se
 
 ## Local brain
 
-When installed (Setup or Settings — **not** in the small installer):
+When installed (Setup or **Settings → Advanced → Local model** — download not in the tiny installer):
 
 - **Visual decoder** — screenshots become text briefs for any chat model  
-- **Prefer-local vision** — optional savings on provider vision tokens  
-- **Harness assist** — Session Brief can refresh without another paid call  
-- Binds to **127.0.0.1** only; auto-starts with Remedy  
+- **Prefer-local** — can decode on-device first to save provider vision tokens  
+- **Shared weights** — vision + nano assist share **SmolVLM2 2.2B** (Apache 2.0)  
+- Binds to **127.0.0.1** only; auto-starts with Remedy when installed  
 
-Details: [Local vision & on-device Qwen](14-visual-decoder) · Workers: [Continuity workers](17-nanoswarm)
+Details: [Local model (SmolVLM2)](14-visual-decoder) · Workers: [Continuity workers](17-nanoswarm)
 
 ---
 
 ## Quick start (60 seconds)
 
 1. Install from [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases/latest).  
-2. Setup wizard: provider + optional workspace + optional local vision.  
+2. Setup wizard: provider + workspace; install local model when prompted.  
 3. Chat, or try `/help`.  
-4. **F1** anytime for this wiki.
+4. **F1** anytime for this wiki. Bottom bar: **Simple UI** / **Advanced UI**.
 
 ---
 
@@ -84,9 +84,9 @@ Details: [Local vision & on-device Qwen](14-visual-decoder) · Workers: [Continu
 You → Desktop (chat + Files / Terminal / Browser / Scratch)
          → API 127.0.0.1:7400
               → Continuity (brief, memory, skills, budget)
-              → Local Qwen (optional) — vision · brief assist
-              → Your LLM provider
-              → Tools & messengers
+              → Local SmolVLM2 (dependency when installed) — vision · nano
+              → Your LLM provider (chat + tool results)
+              → Tools, messengers, Google APIs (if connected)
          → ~/.remedy
 ```
 
