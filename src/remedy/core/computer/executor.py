@@ -63,9 +63,24 @@ class ComputerExecutor:
                 req_target = "desktop"
             else:
                 req_target = "browser"
-        if act is ComputerAction.CLICK and str(kwargs.get("ref") or "").strip():
+        if act is ComputerAction.CLICK and (
+            str(kwargs.get("ref") or "").strip() or str(kwargs.get("text") or "").strip()
+        ):
             if (target or "auto").strip().lower() in ("", "auto"):
-                req_target = "browser"
+                # text= on web UI → browser; pure coords stay auto
+                if str(kwargs.get("ref") or "").strip() or str(kwargs.get("text") or "").strip():
+                    req_target = "browser"
+        if act is ComputerAction.FIND and (target or "auto").strip().lower() in (
+            "",
+            "auto",
+        ):
+            req_target = "browser" if self.bridge.host_connected() else "desktop"
+        if act is ComputerAction.PAGE_TEXT:
+            req_target = "browser"
+        if act is ComputerAction.WAIT:
+            req_target = "desktop"  # pure sleep; target irrelevant
+        if act is ComputerAction.APP:
+            req_target = "desktop"
         # Snapshot auto: browser if host connected / web hint, else desktop windows
         if act is ComputerAction.SNAPSHOT and (target or "auto").strip().lower() in (
             "",
@@ -194,10 +209,83 @@ class ComputerExecutor:
                 message=f"{len(elements)} elements (windows={n_w}, controls={n_c})",
                 extra={"elements": elements, "mode": mode},
             )
+        if act is ComputerAction.WAIT:
+            sec = float(kwargs.get("seconds") if kwargs.get("seconds") is not None else 0.5)
+            sec = max(0.05, min(sec, 30.0))
+            time.sleep(sec)
+            return public_result(
+                ok=True,
+                target="desktop",
+                action="wait",
+                message=f"Waited {sec:.2f}s",
+                extra={"seconds": sec},
+            )
+        if act is ComputerAction.APP:
+            app = str(kwargs.get("app") or kwargs.get("name") or "")
+            info = win.open_app(app)
+            time.sleep(0.4)
+            return public_result(
+                ok=True,
+                target="desktop",
+                action="app",
+                message=f"Launched app: {app}",
+                extra=info,
+            )
+        if act is ComputerAction.FIND:
+            query = str(kwargs.get("text") or kwargs.get("query") or kwargs.get("hint") or "")
+            elements = win.desktop_snapshot(
+                limit=int(kwargs.get("limit") or 60),
+                mode=str(kwargs.get("mode") or "auto"),
+            )
+            self.bridge.set_last_elements(elements, target="desktop")
+            from remedy.core.computer.elements import find_best_elements
+
+            hits = find_best_elements(elements, query, top_k=int(kwargs.get("limit") or 8))
+            return public_result(
+                ok=True,
+                target="desktop",
+                action="find",
+                message=f"{len(hits)} match(es) for {query!r}",
+                extra={"query": query, "matches": hits, "elements": hits},
+            )
         if act is ComputerAction.CLICK:
             if self._abort_check():
                 raise RuntimeError("Aborted by user")
             ref = str(kwargs.get("ref") or "").strip()
+            text_q = str(kwargs.get("text") or "").strip()
+            if text_q and not ref:
+                elements = self.bridge._last_elements if self.bridge._last_elements_target == "desktop" else []
+                if not elements:
+                    elements = win.desktop_snapshot(limit=60, mode="auto")
+                    self.bridge.set_last_elements(elements, target="desktop")
+                from remedy.core.computer.elements import find_best_element
+
+                el = find_best_element(elements, text_q)
+                if el is None:
+                    return public_result(
+                        ok=False,
+                        target="desktop",
+                        action="click",
+                        message=f"No desktop control matching text={text_q!r} — try computer_snapshot",
+                    )
+                win.click_element(
+                    el,
+                    button=str(kwargs.get("button") or "left"),
+                    clicks=int(kwargs.get("clicks") or 1),
+                )
+                return public_result(
+                    ok=True,
+                    target="desktop",
+                    action="click",
+                    message=f"Clicked text={text_q!r} → {el.get('ref')} ({str(el.get('name') or '')[:40]})",
+                    extra={
+                        "ref": el.get("ref"),
+                        "text": text_q,
+                        "x": el.get("x"),
+                        "y": el.get("y"),
+                        "match_score": el.get("match_score"),
+                    },
+                )
             if ref:
                 el = self.bridge.get_element_by_ref(ref)
                 if el is None:
@@ -287,12 +375,29 @@ class ComputerExecutor:
             mode = str(kwargs.get("mode") or "list").lower()
             if mode in ("focus", "activate"):
                 hwnd = int(kwargs.get("hwnd") or 0)
+                title = str(kwargs.get("title") or kwargs.get("hint") or "").strip()
+                if not hwnd and title:
+                    found = win.focus_window_by_title(title)
+                    if not found:
+                        return public_result(
+                            ok=False,
+                            target="desktop",
+                            action="windows",
+                            message=f"No window matching title={title!r}",
+                        )
+                    return public_result(
+                        ok=True,
+                        target="desktop",
+                        action="windows",
+                        message=f"Focused window: {found.get('title', '')[:80]}",
+                        extra=found,
+                    )
                 if not hwnd:
                     return public_result(
                         ok=False,
                         target="desktop",
                         action="windows",
-                        message="hwnd required for focus",
+                        message="hwnd or title required for focus",
                     )
                 win.focus_window(hwnd)
                 return public_result(
@@ -363,6 +468,8 @@ class ComputerExecutor:
             ComputerAction.TYPE,
             ComputerAction.SCREENSHOT,
             ComputerAction.SNAPSHOT,
+            ComputerAction.PAGE_TEXT,
+            ComputerAction.FIND,
         ):
             payload.setdefault("ui", {})
             if isinstance(payload.get("ui"), dict):
@@ -447,8 +554,64 @@ class ComputerExecutor:
         if act is ComputerAction.NAVIGATE and payload.get("url"):
             return self._navigate_rail_fast(payload, hint=hint, req_target=req_target)
 
-        # Snapshot: eval-callback path is usually <500ms; fail fast if rail closed
+        # Atomic click-by-text in the rail (one JS pass — no vision)
+        if act is ComputerAction.CLICK:
+            text_q = str(kwargs.get("text") or "").strip()
+            ref = str(kwargs.get("ref") or "").strip()
+            if text_q and not ref:
+                return self._browser_click_text(text_q, kwargs)
+            if ref:
+                # Prefer host job click_ref; also try last elements coords
+                payload["ref"] = ref
+                payload["action"] = "click"
+            elif not (kwargs.get("x") or kwargs.get("y")):
+                return public_result(
+                    ok=False,
+                    target="browser",
+                    action="click",
+                    message="Provide ref=, text=, or x/y for computer_click",
+                )
+
+        if act is ComputerAction.FIND:
+            query = str(
+                kwargs.get("text") or kwargs.get("query") or kwargs.get("hint") or ""
+            )
+            snap = self._browser_snapshot_now(kwargs)
+            if not snap.get("ok"):
+                return snap
+            elements = list(snap.get("elements") or [])
+            from remedy.core.computer.elements import find_best_elements
+
+            hits = find_best_elements(
+                elements, query, top_k=int(kwargs.get("limit") or 8)
+            )
+            return public_result(
+                ok=True,
+                target="browser",
+                action="find",
+                message=f"{len(hits)} match(es) for {query!r}",
+                extra={"query": query, "matches": hits, "elements": hits},
+            )
+
+        if act is ComputerAction.PAGE_TEXT:
+            return self._browser_page_text()
+
+        if act is ComputerAction.WAIT:
+            sec = float(kwargs.get("seconds") if kwargs.get("seconds") is not None else 0.5)
+            sec = max(0.05, min(sec, 30.0))
+            time.sleep(sec)
+            return public_result(
+                ok=True,
+                target="browser",
+                action="wait",
+                message=f"Waited {sec:.2f}s",
+                extra={"seconds": sec},
+            )
+
+        # Snapshot: settle after navigate, then eval-callback
         if act is ComputerAction.SNAPSHOT:
+            slept = self.bridge.settle_after_navigate(min_s=0.4, max_s=1.0)
+            query = str(kwargs.get("hint") or kwargs.get("query") or "").strip()
             unclaimed = 2.0
             total_wait = float(kwargs.get("timeout_s") or 4.0)
             job = self.bridge.enqueue(act.value, payload)
@@ -465,15 +628,27 @@ class ComputerExecutor:
                 out.setdefault("ok", True)
                 out.setdefault("target", "browser")
                 out.setdefault("action", "snapshot")
-                if out.get("elements"):
-                    self.bridge.set_last_elements(
-                        list(out.get("elements") or []),
-                        target="browser",
-                    )
+                elements = list(out.get("elements") or [])
+                if elements:
+                    self.bridge.set_last_elements(elements, target="browser")
+                if query and elements:
+                    from remedy.core.computer.elements import find_best_elements
+
+                    matches = find_best_elements(elements, query, top_k=6)
+                    out["matches"] = matches
+                    out["query"] = query
+                    if matches:
+                        out["message"] = (
+                            f"{len(elements)} elements; top matches for {query!r}: "
+                            + ", ".join(
+                                f"{m.get('ref')}={str(m.get('name') or '')[:40]}"
+                                for m in matches[:4]
+                            )
+                        )
+                if slept:
+                    out["settled_s"] = round(slept, 2)
                 return out
             err = finished.error or finished.status
-            # Do NOT fall back to full desktop window snapshot — that steers
-            # the model into screenshot/vision thrash on the wrong surface.
             return public_result(
                 ok=False,
                 target="browser",
@@ -481,7 +656,7 @@ class ComputerExecutor:
                 message=(
                     f"Browser rail snapshot failed ({err}). "
                     "Open/navigate the page in the Browser rail first, then retry "
-                    "computer_snapshot. Prefer snapshot+click ref=eN — do not use "
+                    "computer_snapshot. Prefer snapshot+click ref/text — do not use "
                     "screenshot+vision as the primary path (slow and often wrong)."
                 ),
                 extra={"job_id": job.id},
@@ -517,6 +692,130 @@ class ComputerExecutor:
             extra={"job_id": job.id},
         )
 
+    def _browser_snapshot_now(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        self.bridge.settle_after_navigate(min_s=0.35, max_s=0.9)
+        payload: dict[str, Any] = {"ui": {"open_browser": True}}
+        job = self.bridge.enqueue("snapshot", payload)
+        finished = self.bridge.wait(
+            job.id,
+            timeout_s=4.0,
+            poll_s=0.04,
+            abort_check=self._abort_check,
+            unclaimed_timeout_s=2.0,
+            grace_s=0.2,
+        )
+        if finished.status == "done" and finished.result:
+            out = dict(finished.result)
+            out.setdefault("ok", True)
+            if out.get("elements"):
+                self.bridge.set_last_elements(
+                    list(out.get("elements") or []), target="browser"
+                )
+            return out
+        return public_result(
+            ok=False,
+            target="browser",
+            action="snapshot",
+            message=finished.error or "snapshot failed",
+            extra={"job_id": job.id},
+        )
+
+    def _browser_click_text(self, text_q: str, kwargs: dict[str, Any]) -> dict[str, Any]:
+        """One-shot: find control by visible text and click it in the rail."""
+        self.bridge.settle_after_navigate(min_s=0.35, max_s=0.9)
+        payload = {
+            "ui": {"open_browser": True},
+            "text": text_q,
+            "click_text": True,
+        }
+        job = self.bridge.enqueue("click", payload)
+        finished = self.bridge.wait(
+            job.id,
+            timeout_s=5.0,
+            poll_s=0.05,
+            abort_check=self._abort_check,
+            unclaimed_timeout_s=2.5,
+            grace_s=0.2,
+        )
+        if finished.status == "done" and finished.result:
+            out = dict(finished.result)
+            out.setdefault("ok", True)
+            out.setdefault("target", "browser")
+            out.setdefault("action", "click")
+            out.setdefault("text", text_q)
+            return out
+        # Fallback: snapshot + match + click ref job
+        snap = self._browser_snapshot_now(kwargs)
+        if snap.get("ok") and snap.get("elements"):
+            from remedy.core.computer.elements import find_best_element
+
+            el = find_best_element(list(snap.get("elements") or []), text_q)
+            if el and el.get("ref"):
+                payload2 = {
+                    "ui": {"open_browser": True},
+                    "ref": el["ref"],
+                    "x": el.get("x"),
+                    "y": el.get("y"),
+                }
+                job2 = self.bridge.enqueue("click", payload2)
+                fin2 = self.bridge.wait(
+                    job2.id,
+                    timeout_s=4.0,
+                    poll_s=0.05,
+                    abort_check=self._abort_check,
+                    unclaimed_timeout_s=2.0,
+                    grace_s=0.15,
+                )
+                if fin2.status == "done" and fin2.result:
+                    out = dict(fin2.result)
+                    out.setdefault("ok", True)
+                    out["text"] = text_q
+                    out["ref"] = el.get("ref")
+                    out["match_score"] = el.get("match_score")
+                    out["message"] = (
+                        f"Clicked text={text_q!r} → {el.get('ref')} "
+                        f"({str(el.get('name') or '')[:40]})"
+                    )
+                    return out
+        return public_result(
+            ok=False,
+            target="browser",
+            action="click",
+            message=(
+                f"Could not click text={text_q!r} in Browser rail. "
+                "Run computer_snapshot, then computer_click ref=eN."
+            ),
+            extra={"text": text_q, "job_id": job.id},
+        )
+
+    def _browser_page_text(self) -> dict[str, Any]:
+        self.bridge.settle_after_navigate(min_s=0.3, max_s=0.8)
+        job = self.bridge.enqueue(
+            "click",
+            {"ui": {"open_browser": True}, "browser_action": "page_text"},
+        )
+        finished = self.bridge.wait(
+            job.id,
+            timeout_s=4.0,
+            poll_s=0.05,
+            abort_check=self._abort_check,
+            unclaimed_timeout_s=2.0,
+            grace_s=0.15,
+        )
+        if finished.status == "done" and finished.result:
+            out = dict(finished.result)
+            out.setdefault("ok", True)
+            out.setdefault("action", "page_text")
+            out.setdefault("target", "browser")
+            return out
+        return public_result(
+            ok=False,
+            target="browser",
+            action="page_text",
+            message=finished.error or "page_text failed — open a page in the rail first",
+            extra={"job_id": job.id},
+        )
+
     def _navigate_rail_fast(
         self,
         payload: dict[str, Any],
@@ -549,22 +848,26 @@ class ComputerExecutor:
             unclaimed_timeout_s=None,
             grace_s=0.08,
         )
-        if finished.status == "done" and finished.result:
-            out = dict(finished.result)
+        def _nav_ok(out: dict[str, Any]) -> dict[str, Any]:
+            self.bridge.mark_navigated(url)
             out.setdefault("ok", True)
             out.setdefault("target", "browser")
             out.setdefault("action", "navigate")
+            # Brief settle so follow-up snapshot/click sees painted DOM
+            settle = float(payload.get("settle_s") if payload.get("settle_s") is not None else 0.35)
+            if settle > 0:
+                time.sleep(min(max(settle, 0.0), 1.5))
+                out["settled_s"] = min(max(settle, 0.0), 1.5)
             return out
+
+        if finished.status == "done" and finished.result:
+            return _nav_ok(dict(finished.result))
 
         # Brief re-read (host may complete mid-return)
         for _ in range(5):
             again = self.bridge._read(job.id)
             if again and again.status == "done" and again.result:
-                out = dict(again.result)
-                out.setdefault("ok", True)
-                out.setdefault("target", "browser")
-                out.setdefault("action", "navigate")
-                return out
+                return _nav_ok(dict(again.result))
             time.sleep(0.02)
 
         twin = self.bridge.find_recent_success(
@@ -572,10 +875,9 @@ class ComputerExecutor:
         )
         if twin and twin.result:
             out = dict(twin.result)
-            out.setdefault("ok", True)
             out["reconciled"] = True
             out["job_id"] = job.id
-            return out
+            return _nav_ok(out)
 
         # Desktop is alive → fire-and-forget SUCCESS so the model never claims
         # the rail failed while the page is opening (open-url must be instant).
@@ -607,7 +909,7 @@ class ComputerExecutor:
                 }
             )
             self.bridge.complete(job.id, ok=True, result=result)
-            return result
+            return _nav_ok(result)
 
         if wants_system_browser(hint, req_target):
             fb = self._run_desktop(ComputerAction.NAVIGATE, url=url, hint=hint)

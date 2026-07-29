@@ -160,15 +160,73 @@ async function runBrowserJob(job: ComputerJob): Promise<Record<string, unknown>>
     }
   }
 
+  // page_text via click-job payload (executor enqueues action=click + browser_action)
+  if (p.browser_action === 'page_text' || p.page_text) {
+    const res = await tauriInvoke<string>('browser_agent_action', {
+      action: 'page_text',
+      job_id: null,
+      x: null,
+      y: null,
+      x2: null,
+      y2: null,
+      text: null,
+      key: null,
+      button: null,
+      dy: null,
+      ref: null,
+    })
+    let parsed: Record<string, unknown> = {}
+    try {
+      parsed = JSON.parse(res || '{}') as Record<string, unknown>
+    } catch {
+      parsed = { text: res }
+    }
+    return {
+      ok: true,
+      target: 'browser',
+      action: 'page_text',
+      message: `Page text ${String(parsed.text || '').length} chars`,
+      ...parsed,
+    }
+  }
+
   if (['click', 'type', 'key', 'scroll', 'drag', 'click_ref'].includes(action)) {
     const ref = p.ref != null ? String(p.ref) : null
+    const text = p.text != null ? String(p.text) : null
+    // Atomic click-by-visible-text (preferred for "click Membership options")
+    if (action === 'click' && text && !ref && (p.click_text || p.x == null)) {
+      const res = await tauriInvoke<string>('browser_agent_action', {
+        action: 'click_text',
+        job_id: null,
+        x: null,
+        y: null,
+        x2: null,
+        y2: null,
+        text,
+        key: null,
+        button: p.button != null ? String(p.button) : null,
+        dy: null,
+        ref: null,
+      })
+      const ok = typeof res === 'string' && res.startsWith('ok:')
+      return {
+        ok,
+        target: 'browser',
+        action: 'click',
+        message: ok
+          ? `Clicked text=${text} (${res})`
+          : `click_text failed: ${res}`,
+        text,
+        detail: res,
+      }
+    }
     const res = await tauriInvoke<string>('browser_agent_action', {
       action: ref && action === 'click' ? 'click' : action,
       x: p.x != null ? Number(p.x) : null,
       y: p.y != null ? Number(p.y) : null,
       x2: p.x2 != null ? Number(p.x2) : null,
       y2: p.y2 != null ? Number(p.y2) : null,
-      text: p.text != null ? String(p.text) : null,
+      text,
       key: p.key != null ? String(p.key) : null,
       button: p.button != null ? String(p.button) : null,
       dy: p.dy != null ? Number(p.dy) : null,

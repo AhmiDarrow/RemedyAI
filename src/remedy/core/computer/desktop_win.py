@@ -686,6 +686,65 @@ def focus_window(hwnd: int) -> None:
     user32.SetForegroundWindow(hwnd)
 
 
+def focus_window_by_title(title_substr: str) -> dict[str, Any] | None:
+    """Focus first visible window whose title contains *title_substr* (case-insensitive)."""
+    needle = (title_substr or "").strip().lower()
+    if not needle:
+        return None
+    for w in list_windows(limit=80):
+        title = str(w.get("title") or "")
+        if needle in title.lower():
+            hwnd = int(w["hwnd"])
+            focus_window(hwnd)
+            return {"hwnd": hwnd, "title": title}
+    return None
+
+
+def open_app(app: str) -> dict[str, Any]:
+    """Launch an application by name/path (notepad, calc, explorer, full path, …)."""
+    _require_windows()
+    import shutil
+    import subprocess
+
+    raw = (app or "").strip()
+    if not raw:
+        raise ValueError("app name required")
+    aliases = {
+        "notepad": "notepad.exe",
+        "calc": "calc.exe",
+        "calculator": "calc.exe",
+        "explorer": "explorer.exe",
+        "cmd": "cmd.exe",
+        "powershell": "powershell.exe",
+        "pwsh": "pwsh.exe",
+        "edge": "msedge.exe",
+        "chrome": "chrome.exe",
+        "firefox": "firefox.exe",
+        "settings": "ms-settings:",
+        "terminal": "wt.exe",
+    }
+    key = raw.lower()
+    target = aliases.get(key, raw)
+    if target.startswith("ms-settings:"):
+        os.startfile(target)  # type: ignore[attr-defined]
+        return {"app": raw, "method": "startfile", "target": target}
+    # Absolute path
+    if Path(target).is_file() or (len(target) > 2 and target[1] == ":"):
+        subprocess.Popen([target], shell=False, close_fds=True)
+        return {"app": raw, "method": "path", "target": target}
+    which = shutil.which(target) or shutil.which(raw)
+    if which:
+        subprocess.Popen([which], shell=False, close_fds=True)
+        return {"app": raw, "method": "which", "target": which}
+    # Last resort: shell start
+    subprocess.Popen(
+        ["cmd", "/c", "start", "", target],
+        shell=False,
+        close_fds=True,
+    )
+    return {"app": raw, "method": "cmd start", "target": target}
+
+
 def open_url(url: str) -> dict[str, Any]:
     """Open http(s) URL in the default system browser (Windows-reliable)."""
     u = (url or "").strip()

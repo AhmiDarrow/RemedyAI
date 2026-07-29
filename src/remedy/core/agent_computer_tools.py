@@ -69,10 +69,14 @@ def register_computer_tools(runtime: Any) -> None:
         button: str = "left",
         clicks: int = 1,
         ref: str = "",
+        text: str = "",
         target: str = "auto",
         hint: str = "",
     ) -> str:
-        """Click by coordinates or by ref from computer_snapshot (e.g. ref=e3)."""
+        """Click by text (preferred), ref from snapshot, or coordinates.
+
+        Prefer text=\"Membership options\" or ref=e3 over guessing pixels.
+        """
         return ex.run(
             ComputerAction.CLICK,
             target=target or "auto",
@@ -83,6 +87,54 @@ def register_computer_tools(runtime: Any) -> None:
             button=button,
             clicks=clicks,
             ref=ref,
+            text=text,
+        )
+
+    async def computer_wait(seconds: float = 0.5, hint: str = "") -> str:
+        """Pause briefly (page paint, app launch). Prefer 0.3–1.5s, max 30s."""
+        return ex.run(
+            ComputerAction.WAIT,
+            target="desktop",
+            hint=hint,
+            runtime=runtime,
+            seconds=seconds,
+        )
+
+    async def computer_app(app: str = "", hint: str = "") -> str:
+        """Launch a desktop app (notepad, calc, explorer, chrome, path to .exe)."""
+        return ex.run(
+            ComputerAction.APP,
+            target="desktop",
+            hint=hint,
+            runtime=runtime,
+            app=app,
+        )
+
+    async def computer_page_text(hint: str = "") -> str:
+        """Extract visible text from the Browser rail page (no vision)."""
+        return ex.run(
+            ComputerAction.PAGE_TEXT,
+            target="browser",
+            hint=hint,
+            runtime=runtime,
+        )
+
+    async def computer_find(
+        text: str = "",
+        query: str = "",
+        target: str = "auto",
+        hint: str = "",
+        limit: int = 8,
+    ) -> str:
+        """Find controls matching text/name on browser or desktop (ranked matches)."""
+        return ex.run(
+            ComputerAction.FIND,
+            target=target or "auto",
+            hint=hint or text or query,
+            runtime=runtime,
+            text=text or query,
+            query=query or text,
+            limit=limit,
         )
 
     async def computer_type(
@@ -152,18 +204,20 @@ def register_computer_tools(runtime: Any) -> None:
     async def computer_windows(
         mode: str = "list",
         hwnd: int = 0,
+        title: str = "",
         limit: int = 40,
         target: str = "desktop",
         hint: str = "",
     ) -> str:
-        """List visible windows or focus one by hwnd (desktop)."""
+        """List visible windows or focus by hwnd / title substring (desktop)."""
         return ex.run(
             ComputerAction.WINDOWS,
             target=target or "desktop",
-            hint=hint,
+            hint=hint or title,
             runtime=runtime,
             mode=mode,
             hwnd=hwnd,
+            title=title,
             limit=limit,
         )
 
@@ -245,7 +299,7 @@ def register_computer_tools(runtime: Any) -> None:
     )
     reg.register_builtin_handler(
         "computer_click",
-        "Click by coordinates or by ref from computer_snapshot (ref=e3). Prefer snapshot on web UIs.",
+        "Click by text= (preferred), ref= from snapshot, or x/y. Example: text=\"Membership options\".",
         computer_click,
         {
             "type": "object",
@@ -256,8 +310,61 @@ def register_computer_tools(runtime: Any) -> None:
                     "type": "string",
                     "description": "Element ref from computer_snapshot, e.g. e1",
                 },
+                "text": {
+                    "type": "string",
+                    "description": "Visible label/name to click (preferred over coords)",
+                },
                 "button": {"type": "string", "description": "left | right | middle"},
                 "clicks": {"type": "integer", "description": "1 or 2 for double-click"},
+                "target": target_prop,
+                "hint": hint_prop,
+            },
+        },
+    )
+    reg.register_builtin_handler(
+        "computer_wait",
+        "Wait seconds for UI paint / app launch (default 0.5, max 30).",
+        computer_wait,
+        {
+            "type": "object",
+            "properties": {
+                "seconds": {"type": "number"},
+                "hint": hint_prop,
+            },
+        },
+    )
+    reg.register_builtin_handler(
+        "computer_app",
+        "Launch a Windows app: notepad, calc, explorer, chrome, edge, or path to .exe.",
+        computer_app,
+        {
+            "type": "object",
+            "properties": {
+                "app": {"type": "string", "description": "App name or path"},
+                "hint": hint_prop,
+            },
+            "required": ["app"],
+        },
+    )
+    reg.register_builtin_handler(
+        "computer_page_text",
+        "Read visible text from the in-app Browser rail page (no vision/screenshot).",
+        computer_page_text,
+        {
+            "type": "object",
+            "properties": {"hint": hint_prop},
+        },
+    )
+    reg.register_builtin_handler(
+        "computer_find",
+        "Find ranked controls matching text on browser or desktop (then computer_click ref=…).",
+        computer_find,
+        {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string"},
+                "query": {"type": "string"},
+                "limit": {"type": "integer"},
                 "target": target_prop,
                 "hint": hint_prop,
             },
@@ -328,7 +435,7 @@ def register_computer_tools(runtime: Any) -> None:
     )
     reg.register_builtin_handler(
         "computer_windows",
-        "List visible OS windows or focus by hwnd (desktop target).",
+        "List visible OS windows or focus by hwnd / title substring (desktop).",
         computer_windows,
         {
             "type": "object",
@@ -338,6 +445,10 @@ def register_computer_tools(runtime: Any) -> None:
                     "description": "list | focus",
                 },
                 "hwnd": {"type": "integer"},
+                "title": {
+                    "type": "string",
+                    "description": "Window title substring for mode=focus",
+                },
                 "limit": {"type": "integer"},
                 "target": target_prop,
                 "hint": hint_prop,

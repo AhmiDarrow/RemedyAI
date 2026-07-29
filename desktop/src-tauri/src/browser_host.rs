@@ -708,33 +708,101 @@ pub fn browser_agent_action(
     let jid_owned = job_id.clone().unwrap_or_default();
     let js = match act.as_str() {
         "snapshot" | "a11y" => {
-            // Return elements array to Rust via eval_with_callback.
-            // HTTPS pages often block fetch→http://127.0.0.1 (mixed content),
-            // which caused 8–20s snapshot timeouts on Patreon/Gmail/etc.
+            // Richer a11y-ish scrape; return array via eval_with_callback.
             r#"(function(){
   try {
     document.querySelectorAll('[data-remedy-ref]').forEach(el => el.removeAttribute('data-remedy-ref'));
   } catch(e) {}
-  const sel='a,button,input,textarea,select,[role=button],[role=link],[role=textbox],[role=tab],[role=menuitem],[role=option],[contenteditable=true],summary,label';
+  const sel='a,button,input,textarea,select,[role=button],[role=link],[role=textbox],[role=tab],[role=menuitem],[role=option],[role=checkbox],[role=switch],[contenteditable=true],summary,label,[onclick]';
   const nodes=[...document.querySelectorAll(sel)].filter(el => {
     const r=el.getBoundingClientRect();
     const st=window.getComputedStyle(el);
-    if(st.visibility==='hidden'||st.display==='none'||st.opacity==='0') return false;
+    if(st.visibility==='hidden'||st.display==='none'||st.opacity==='0'||el.disabled) return false;
     return r.width>2&&r.height>2&&r.bottom>0&&r.right>0&&r.top<innerHeight&&r.left<innerWidth;
-  }).slice(0,100);
+  }).slice(0,120);
   return nodes.map((el,i) => {
     const r=el.getBoundingClientRect();
     const ref='e'+(i+1);
     try { el.setAttribute('data-remedy-ref', ref); } catch(e) {}
-    const name=(el.getAttribute('aria-label')||el.getAttribute('title')||el.innerText||el.value||el.placeholder||el.name||el.tagName||'').trim().replace(/\s+/g,' ').slice(0,100);
+    const text=(el.innerText||'').trim().replace(/\s+/g,' ').slice(0,120);
+    const name=(el.getAttribute('aria-label')||el.getAttribute('title')||text||el.value||el.placeholder||el.name||el.tagName||'').trim().replace(/\s+/g,' ').slice(0,120);
     return {
       ref, tag:(el.tagName||'').toLowerCase(), role:el.getAttribute('role')||'',
-      name, x:Math.round(r.x+r.width/2), y:Math.round(r.y+r.height/2),
+      name, text, value:(el.value!=null?String(el.value):'').slice(0,80),
+      placeholder:(el.placeholder||'').slice(0,80),
+      href:(el.href||el.getAttribute('href')||'').slice(0,200),
+      title:(el.getAttribute('title')||'').slice(0,80),
+      x:Math.round(r.x+r.width/2), y:Math.round(r.y+r.height/2),
       w:Math.round(r.width), h:Math.round(r.height)
     };
   });
 })()"#
             .to_string()
+        }
+        "page_text" => {
+            r#"(function(){
+  const t=(document.body&&document.body.innerText)||'';
+  const title=document.title||'';
+  const url=location.href||'';
+  return JSON.stringify({title,url,text:t.replace(/\s+\n/g,'\n').trim().slice(0,12000)});
+})()"#
+            .to_string()
+        }
+        "click_text" => {
+            let needle = text.clone().unwrap_or_default();
+            if needle.is_empty() {
+                return Err("text required for click_text".into());
+            }
+            let escaped = needle
+                .replace('\\', "\\\\")
+                .replace('\'', "\\'")
+                .replace('\n', " ");
+            format!(
+                r#"(function(){{
+  const q='{escaped}'.toLowerCase().trim();
+  if(!q) return 'missing-text';
+  const sel='a,button,input,textarea,select,[role=button],[role=link],[role=tab],[role=menuitem],[role=option],[contenteditable=true],summary,label,[onclick]';
+  const nodes=[...document.querySelectorAll(sel)];
+  function score(el){{
+    const r=el.getBoundingClientRect();
+    const st=window.getComputedStyle(el);
+    if(st.visibility==='hidden'||st.display==='none'||st.opacity==='0'||el.disabled) return -1;
+    if(r.width<2||r.height<2||r.bottom<0||r.right<0||r.top>innerHeight||r.left>innerWidth) return -1;
+    const name=(el.getAttribute('aria-label')||el.getAttribute('title')||el.innerText||el.value||el.placeholder||el.name||'').trim().replace(/\s+/g,' ').toLowerCase();
+    if(!name) return -1;
+    let s=0;
+    if(name===q) s=100;
+    else if(name.includes(q)) s=70;
+    else if(q.includes(name)&&name.length>2) s=40;
+    else {{
+      const qt=q.split(/\s+/).filter(Boolean);
+      const nt=name.split(/\s+/);
+      const hit=qt.filter(t=>nt.some(n=>n.includes(t)||t.includes(n))).length;
+      if(hit) s=15*(hit/qt.length);
+      else return -1;
+    }}
+    if(r.width>8&&r.width<900&&r.height>8&&r.height<220) s+=5;
+    return s;
+  }}
+  let best=null, bestS=-1;
+  for(const el of nodes){{
+    const s=score(el);
+    if(s>bestS){{ bestS=s; best=el; }}
+  }}
+  if(!best||bestS<15) return 'no-match:'+q;
+  try{{ best.scrollIntoView({{block:'center',inline:'center',behavior:'instant'}}); }}catch(e){{}}
+  try{{ best.focus({{preventScroll:true}}); }}catch(e){{}}
+  const r=best.getBoundingClientRect();
+  const x=r.x+r.width/2, y=r.y+r.height/2;
+  const opts={{bubbles:true,cancelable:true,clientX:x,clientY:y,view:window,button:0}};
+  best.dispatchEvent(new MouseEvent('mousedown', opts));
+  best.dispatchEvent(new MouseEvent('mouseup', opts));
+  best.dispatchEvent(new MouseEvent('click', opts));
+  if(typeof best.click==='function') try{{ best.click(); }}catch(e){{}}
+  const name=(best.getAttribute('aria-label')||best.innerText||best.tagName||'').trim().replace(/\s+/g,' ').slice(0,80);
+  return 'ok:'+bestS.toFixed(0)+':'+name;
+}})()"#
+            )
         }
         "click_ref" => {
             let rf = r#ref.unwrap_or_default();
@@ -943,6 +1011,11 @@ pub fn browser_agent_action(
             }
         }
         log::info!("browser agent snapshot n={n}");
+        return Ok(raw);
+    }
+
+    if act == "page_text" {
+        log::info!("browser agent page_text len={}", raw.len());
         return Ok(raw);
     }
 

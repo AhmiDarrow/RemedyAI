@@ -77,6 +77,8 @@ class ComputerHostBridge:
         # Last a11y/desktop snapshot for click-by-ref resolution
         self._last_elements: list[dict[str, Any]] = []
         self._last_elements_target: str = ""
+        self._last_navigate_at: float = 0.0
+        self._last_navigate_url: str = ""
         # Desktop UI command (open Browser rail like Settings) — memory + disk
         self._ui_command: dict[str, Any] | None = None
         home = Path(home_dir).expanduser() if home_dir else Path.home() / ".remedy"
@@ -109,6 +111,23 @@ class ComputerHostBridge:
     ) -> None:
         self._last_elements = list(elements or [])[:120]
         self._last_elements_target = target
+
+    def mark_navigated(self, url: str = "") -> None:
+        self._last_navigate_at = time.time()
+        if url:
+            self._last_navigate_url = str(url)
+
+    def settle_after_navigate(self, *, min_s: float = 0.35, max_s: float = 1.2) -> float:
+        """Sleep remaining settle time if a navigate just happened. Returns slept seconds."""
+        if self._last_navigate_at <= 0:
+            return 0.0
+        elapsed = time.time() - self._last_navigate_at
+        need = max(0.0, float(min_s) - elapsed)
+        need = min(need, float(max_s))
+        if need > 0.02:
+            time.sleep(need)
+            return need
+        return 0.0
 
     def get_element_by_ref(self, ref: str) -> dict[str, Any] | None:
         r = (ref or "").strip().lower()

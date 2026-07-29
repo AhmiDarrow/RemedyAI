@@ -21,6 +21,10 @@ COMPUTER_TOOL_NAMES = frozenset(
         "computer_windows",
         "computer_monitors",
         "computer_drag",
+        "computer_wait",
+        "computer_app",
+        "computer_page_text",
+        "computer_find",
     }
 )
 
@@ -32,6 +36,9 @@ COMPUTER_PLAN_MODE_TOOLS = frozenset(
         "computer_navigate",
         "computer_windows",
         "computer_monitors",
+        "computer_page_text",
+        "computer_find",
+        "computer_wait",
     }
 )
 
@@ -47,6 +54,10 @@ class ComputerAction(str, Enum):
     WINDOWS = "windows"
     MONITORS = "monitors"
     DRAG = "drag"
+    WAIT = "wait"
+    APP = "app"
+    PAGE_TEXT = "page_text"
+    FIND = "find"
 
 
 def action_from_tool(name: str) -> ComputerAction | None:
@@ -61,6 +72,10 @@ def action_from_tool(name: str) -> ComputerAction | None:
         "computer_windows": ComputerAction.WINDOWS,
         "computer_monitors": ComputerAction.MONITORS,
         "computer_drag": ComputerAction.DRAG,
+        "computer_wait": ComputerAction.WAIT,
+        "computer_app": ComputerAction.APP,
+        "computer_page_text": ComputerAction.PAGE_TEXT,
+        "computer_find": ComputerAction.FIND,
     }
     return mapping.get(name)
 

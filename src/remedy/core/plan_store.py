@@ -329,6 +329,9 @@ PLAN_MODE_TOOL_NAMES = frozenset(
         "computer_navigate",
         "computer_windows",
         "computer_monitors",
+        "computer_page_text",
+        "computer_find",
+        "computer_wait",
     }
 )
 
