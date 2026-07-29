@@ -109,6 +109,13 @@ def test_start_oauth_pkce_and_complete(tmp_path):
     assert tokens.email == "user@gmail.com"
     assert go.load_tokens(tmp_path).refresh_token == "1//refresh"
     assert go.pending_status(state)["status"] == "connected"
+    # State is single-use — no code_verifier left; second exchange must fail.
+    with (
+        patch.object(go, "_http_form", side_effect=fake_form),
+        patch.object(go, "_http_get_json", side_effect=fake_userinfo),
+        pytest.raises(ValueError, match="already used|Invalid or expired"),
+    ):
+        go.complete_oauth(code="auth-code-2", state=state, home=tmp_path)
     # Linked account
     from remedy.assistant.store import get_assistant_store
 

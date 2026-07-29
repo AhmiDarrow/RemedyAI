@@ -56,6 +56,24 @@ DEFAULT_GOOGLE_CLIENT_SECRET = os.environ.get(
 _pending: dict[str, dict[str, Any]] = {}
 _pending_lock = threading.Lock()
 _token_lock = threading.Lock()
+# UI may poll success briefly; PKCE verifier must never live past exchange start.
+_DONE_TTL_S = 60.0
+_PENDING_TTL_S = 900.0
+
+
+def _purge_pending_locked(now: float | None = None) -> None:
+    """Drop expired pending rows and finished rows past UI poll window."""
+    t = time.time() if now is None else now
+    dead: list[str] = []
+    for key, row in _pending.items():
+        created = float(row.get("created_at") or 0)
+        done_at = row.get("done_at")
+        if done_at is not None and (t - float(done_at)) > _DONE_TTL_S:
+            dead.append(key)
+        elif created and (t - created) > _PENDING_TTL_S:
+            dead.append(key)
+    for key in dead:
+        _pending.pop(key, None)
 
 
 def _home(home: Path | str | None = None) -> Path:
@@ -346,6 +364,7 @@ def start_oauth(
     }
     auth_url = f"{AUTH_URL}?{urllib.parse.urlencode(params)}"
     with _pending_lock:
+        _purge_pending_locked()
         _pending[state] = {
             "code_verifier": verifier,
             "redirect_uri": redir,
@@ -364,6 +383,7 @@ def start_oauth(
 
 def pending_status(state: str) -> dict[str, Any]:
     with _pending_lock:
+        _purge_pending_locked()
         row = _pending.get(state)
     if not row:
         return {"status": "unknown", "state": state}
@@ -381,38 +401,81 @@ def complete_oauth(
     state: str,
     home: Path | str | None = None,
 ) -> GoogleTokens:
-    """Exchange authorization code for tokens; persist + mark pending done."""
-    with _pending_lock:
-        row = _pending.get(state)
-    if not row:
-        raise ValueError("Invalid or expired OAuth state — start Connect again.")
-    if time.time() - float(row.get("created_at") or 0) > 900:
-        with _pending_lock:
-            _pending.pop(state, None)
-        raise ValueError("OAuth session expired — start Connect again.")
+    """Exchange authorization code for tokens; persist + mark pending done.
 
-    app_home = home or row.get("home")
+    State is single-use: PKCE verifier is consumed under lock before the token
+    HTTP call so concurrent callbacks / replay cannot re-use the same state.
+    A minimal success/error record (no secrets) remains briefly for UI poll.
+    """
+    now = time.time()
+    with _pending_lock:
+        _purge_pending_locked(now)
+        row = _pending.get(state)
+        if not row:
+            raise ValueError("Invalid or expired OAuth state — start Connect again.")
+        status = str(row.get("status") or "pending")
+        if status in ("connected", "exchanging", "consumed", "error"):
+            raise ValueError("OAuth state already used — start Connect again.")
+        if now - float(row.get("created_at") or 0) > _PENDING_TTL_S:
+            _pending.pop(state, None)
+            raise ValueError("OAuth session expired — start Connect again.")
+        code_verifier = str(row.get("code_verifier") or "")
+        if not code_verifier:
+            _pending.pop(state, None)
+            raise ValueError("OAuth state missing verifier — start Connect again.")
+        redirect_uri = str(row.get("redirect_uri") or "")
+        row_home = row.get("home")
+        # Consume immediately — no second exchange with this state/verifier.
+        row["status"] = "exchanging"
+        row.pop("code_verifier", None)
+
+    app_home = home or row_home
     app = load_app_config(app_home)
     form: dict[str, str] = {
         "code": code,
         "client_id": app.client_id,
-        "redirect_uri": str(row.get("redirect_uri") or app.redirect_uri),
+        "redirect_uri": redirect_uri or str(app.redirect_uri),
         "grant_type": "authorization_code",
-        "code_verifier": str(row["code_verifier"]),
+        "code_verifier": code_verifier,
     }
     if app.client_secret:
         form["client_secret"] = app.client_secret
 
-    data = _http_form(TOKEN_URL, form)
-    if data.get("error"):
+    try:
+        data = _http_form(TOKEN_URL, form)
+    except Exception as exc:
         with _pending_lock:
-            if state in _pending:
-                _pending[state]["status"] = "error"
-                _pending[state]["error"] = str(data.get("error_description") or data["error"])
-        raise RuntimeError(str(data.get("error_description") or data.get("error")))
+            _pending[state] = {
+                "status": "error",
+                "error": str(exc)[:200],
+                "created_at": now,
+                "done_at": time.time(),
+                "home": str(row_home or ""),
+            }
+        raise
+
+    if data.get("error"):
+        err = str(data.get("error_description") or data["error"])
+        with _pending_lock:
+            _pending[state] = {
+                "status": "error",
+                "error": err[:300],
+                "created_at": now,
+                "done_at": time.time(),
+                "home": str(row_home or ""),
+            }
+        raise RuntimeError(err)
 
     access = str(data.get("access_token") or "")
     if not access:
+        with _pending_lock:
+            _pending[state] = {
+                "status": "error",
+                "error": "missing access_token",
+                "created_at": now,
+                "done_at": time.time(),
+                "home": str(row_home or ""),
+            }
         raise RuntimeError("Google token response missing access_token")
 
     existing = load_tokens(app_home)
@@ -434,12 +497,15 @@ def complete_oauth(
     save_tokens(tokens, app_home)
     _sync_linked_account(tokens, app_home)
 
+    # Minimal non-secret row for UI poll only (no verifier / tokens).
     with _pending_lock:
-        if state in _pending:
-            _pending[state]["status"] = "connected"
-            _pending[state]["email"] = tokens.email
-            # Keep briefly so UI poll can see success, then drop
-            _pending[state]["done_at"] = time.time()
+        _pending[state] = {
+            "status": "connected",
+            "email": tokens.email,
+            "created_at": now,
+            "done_at": time.time(),
+            "home": str(row_home or ""),
+        }
 
     return tokens
 

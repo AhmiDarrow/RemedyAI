@@ -229,8 +229,6 @@ def create_app(
         "/api/auth/local-bootstrap",
         "/api/openapi.json",
         "/api/openapi.yaml",
-        # Computer-use a11y snapshot callback (job_id is one-time secret; no bearer).
-        "/api/computer/a11y/push",
         # Google OAuth browser redirect (state is one-time secret; no bearer).
         "/api/assistant/google/callback",
     }
@@ -246,6 +244,8 @@ def create_app(
         "/api/computer/host/",
         "/api/computer/jobs/",
         "/api/computer/ui/",
+        # a11y push: same-user desktop host only (was fully public).
+        "/api/computer/a11y/",
     )
 
     def _client_is_loopback(request: Request) -> bool:

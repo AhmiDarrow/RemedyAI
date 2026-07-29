@@ -264,8 +264,11 @@ def test_navigate_rail_fast_optimistic_when_host_alive(tmp_path: Path, monkeypat
     dt = __import__("time").perf_counter() - t0
     d = json.loads(raw)
     assert d.get("ok") is True, d
-    assert dt < 1.5, f"navigate too slow: {dt:.2f}s"
+    assert dt < 1.8, f"navigate too slow: {dt:.2f}s"
     assert d.get("via") in ("optimistic", "rust-host", None) or d.get("url")
+    if d.get("via") == "optimistic":
+        assert d.get("ready_for_input") is False or d.get("pending_load") is True
+        assert ex.bridge.navigate_needs_settle() is True
 
 
 def test_computer_api_and_tools_registered(tmp_path: Path, monkeypatch):

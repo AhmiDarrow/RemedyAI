@@ -79,6 +79,8 @@ class ComputerHostBridge:
         self._last_elements_target: str = ""
         self._last_navigate_at: float = 0.0
         self._last_navigate_url: str = ""
+        # True when last navigate returned before host confirmed page load.
+        self._last_navigate_optimistic: bool = False
         # Desktop UI command (open Browser rail like Settings) — memory + disk
         self._ui_command: dict[str, Any] | None = None
         home = Path(home_dir).expanduser() if home_dir else Path.home() / ".remedy"
@@ -112,10 +114,22 @@ class ComputerHostBridge:
         self._last_elements = list(elements or [])[:120]
         self._last_elements_target = target
 
-    def mark_navigated(self, url: str = "") -> None:
+    def mark_navigated(self, url: str = "", *, optimistic: bool = False) -> None:
         self._last_navigate_at = time.time()
         if url:
             self._last_navigate_url = str(url)
+        self._last_navigate_optimistic = bool(optimistic)
+
+    def clear_navigate_optimistic(self) -> None:
+        self._last_navigate_optimistic = False
+
+    def navigate_needs_settle(self, *, max_age_s: float = 8.0) -> bool:
+        """True if last open was optimistic and still recent (type/click should wait)."""
+        if not self._last_navigate_optimistic:
+            return False
+        if self._last_navigate_at <= 0:
+            return False
+        return (time.time() - self._last_navigate_at) < float(max_age_s)
 
     def settle_after_navigate(self, *, min_s: float = 0.35, max_s: float = 1.2) -> float:
         """Sleep remaining settle time if a navigate just happened. Returns slept seconds."""

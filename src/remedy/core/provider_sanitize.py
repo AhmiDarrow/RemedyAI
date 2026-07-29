@@ -64,10 +64,24 @@ def _scrub_obj(obj: Any, *, depth: int = 0) -> Any:
 
 
 def sanitize_message(msg: dict[str, Any]) -> dict[str, Any]:
-    """Return a deep-ish sanitized copy of one chat message."""
-    m = copy.deepcopy(msg) if isinstance(msg, dict) else {"role": "user", "content": str(msg)}
-    role = str(m.get("role") or "")
-    content = m.get("content")
+    """Return a sanitized copy of one chat message (does not mutate input).
+
+    Fast path: shallow copy + string scrub for common role/content messages.
+    Deepcopy only when nested tool_calls or non-string content need isolation.
+    """
+    if not isinstance(msg, dict):
+        return {"role": "user", "content": _scrub_text(str(msg), max_len=TEXT_CONTENT_MAX)}
+
+    role = str(msg.get("role") or "")
+    content = msg.get("content")
+    has_tool_calls = isinstance(msg.get("tool_calls"), list) and bool(msg["tool_calls"])
+    nested = has_tool_calls or not isinstance(content, (str, type(None)))
+
+    if nested:
+        m = copy.deepcopy(msg)
+        content = m.get("content")
+    else:
+        m = dict(msg)
 
     if role in ("tool", "function"):
         if isinstance(content, str):
@@ -95,7 +109,13 @@ def sanitize_message(msg: dict[str, Any]) -> dict[str, Any]:
 
     # Strip any accidental secret-bearing top-level keys
     for k in list(m.keys()):
-        if _SECRET_KEY_RE.search(str(k)) and k not in ("role", "content", "tool_calls", "name", "tool_call_id"):
+        if _SECRET_KEY_RE.search(str(k)) and k not in (
+            "role",
+            "content",
+            "tool_calls",
+            "name",
+            "tool_call_id",
+        ):
             m[k] = "[redacted]"
 
     if "tool_calls" in m and isinstance(m["tool_calls"], list):
@@ -103,7 +123,7 @@ def sanitize_message(msg: dict[str, Any]) -> dict[str, Any]:
         for tc in m["tool_calls"]:
             if not isinstance(tc, dict):
                 continue
-            tcc = copy.deepcopy(tc)
+            tcc = tc if nested else copy.deepcopy(tc)
             fn = tcc.get("function")
             if isinstance(fn, dict) and isinstance(fn.get("arguments"), str):
                 args = fn["arguments"]

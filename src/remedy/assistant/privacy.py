@@ -16,6 +16,10 @@ MAIL_SNIPPET_MAX = 160
 MAIL_BODY_MAX = 2500
 BRIEF_SNIPPET_MAX = 80
 
+# Bump when Google OAuth SCOPES or privacy terms expand so users re-accept.
+# Empty stored version is grandfathered (existing installs) until next Connect.
+CURRENT_CONSENT_VERSION = "gmail_ro_compose_cal_events_v1"
+
 
 def consent_ok(home: Any = None) -> tuple[bool, str]:
     """Return (ok, reason) for OAuth / account tools."""
@@ -34,6 +38,13 @@ def consent_ok(home: Any = None) -> tuple[bool, str]:
         return (
             False,
             "Accept account access (OAuth) in Settings → Personal assistant first.",
+        )
+    cv = str(getattr(prefs, "consent_version", "") or "").strip()
+    if cv and cv != CURRENT_CONSENT_VERSION:
+        return (
+            False,
+            "Privacy terms or account scopes were updated — re-accept in "
+            "Settings → Personal assistant → Connect.",
         )
     return True, ""
 

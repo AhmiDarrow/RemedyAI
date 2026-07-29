@@ -18,6 +18,7 @@ from typing import Any
 import aiohttp
 
 from remedy.core.agent_tool_batch import execute_tool_calls
+from remedy.core.provider_sanitize import sanitize_chat_body
 from remedy.core.react_policy import (
     TOOL_RESULT_CHAR_CAP as _TOOL_RESULT_CHAR_CAP,
 )
@@ -835,10 +836,19 @@ async def call_llm_stream(runtime, message: str,
                     stream=use_openai_sse,
                     thinking_level=getattr(runtime, "_thinking_level", "high"),
                 )
-                with suppress(Exception):
-                    from remedy.core.provider_sanitize import sanitize_chat_body
-
+                # Trust boundary: fail closed — never POST unsanitized tool bodies.
+                try:
                     body = sanitize_chat_body(body if isinstance(body, dict) else {})
+                except Exception as sanitize_exc:
+                    logger.error(
+                        "provider sanitize failed (aborting LLM call): %s",
+                        sanitize_exc,
+                    )
+                    raise RuntimeError(
+                        "Refusing to send chat to provider: sanitization failed. "
+                        "Retry the turn; if it persists, check tool results for "
+                        "unexpected shapes."
+                    ) from sanitize_exc
 
                 collected: dict[str, Any] = {"content": None, "tool_calls": None}
                 round_state = StreamRoundState()
@@ -1685,10 +1695,16 @@ async def call_llm_stream(runtime, message: str,
                 stream=use_openai_sse,
                 thinking_level=getattr(runtime, "_thinking_level", "high"),
             )
-            with suppress(Exception):
-                from remedy.core.provider_sanitize import sanitize_chat_body
-
+            try:
                 body = sanitize_chat_body(body if isinstance(body, dict) else {})
+            except Exception as sanitize_exc:
+                logger.error(
+                    "provider sanitize failed (aborting LLM call): %s",
+                    sanitize_exc,
+                )
+                raise RuntimeError(
+                    "Refusing to send chat to provider: sanitization failed."
+                ) from sanitize_exc
             try:
                 async with aiohttp.ClientSession(
                     timeout=aiohttp.ClientTimeout(total=900, sock_read=900)
