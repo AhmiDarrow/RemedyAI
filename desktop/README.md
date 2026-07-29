@@ -3,6 +3,9 @@
 Native Windows desktop shell for Remedy AI: **Tauri 2 + React 19 + Vite**, with the Python
 `remedy serve` process bundled as a sidecar.
 
+**Product feel:** easy · sleek · beautiful · familiar · powerful.  
+Simple UI by default; Advanced on the status bar and Settings for full control. Prefer dialogs for multi-step flows over dense settings walls.
+
 ## Users
 
 Prefer the prebuilt installer:

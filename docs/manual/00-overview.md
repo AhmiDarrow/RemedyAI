@@ -2,6 +2,8 @@
 
 **Remedy** is your personal AI partner for knowledge, design, code, and get-it-done work on **your machine**. It is **not** a medical product.
 
+**Feel of the product:** easy, sleek, beautiful, familiar, and powerful — simple by default, full power when you want it (Simple / Advanced on the bottom bar and in Settings).
+
 Offline Help: **F1** or **Ctrl+/**.
 
 ---
@@ -27,7 +29,7 @@ Offline Help: **F1** or **Ctrl+/**.
 |------|---------|
 | **Chat partner** | Streaming chat, Plan/Build, attachments, image markup |
 | **Workspace** | **Files** · **Terminal** · **Browser** · **Scratch** beside chat |
-| **Local brain** | Optional **Qwen2.5-VL 3B** — vision briefs + efficiency (not a second persona) |
+| **Local brain** | **SmolVLM2 2.2B** (Apache 2.0) on this PC — vision briefs + local assist (not a second persona) |
 | **Continuity** | Session Brief, memory, skills, silent workers (nano swarm) |
 | **Messengers** | Telegram and modular connectors in **Settings → Messengers** |
 | **Skills** | Bundled + learned + **Library** (signed catalog) |
