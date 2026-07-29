@@ -13,6 +13,7 @@ from remedy.core.computer.host_bridge import get_host_bridge
 from remedy.core.computer.router import (
     ComputerTarget,
     host_label,
+    is_valid_navigate_url,
     looks_like_url,
     normalize_url,
     resolve_target,
@@ -429,13 +430,18 @@ class ComputerExecutor:
             )
         if act is ComputerAction.NAVIGATE:
             # Desktop navigate: open URL in system default browser
-            url = normalize_url(str(kwargs.get("url") or ""))
-            if not url:
+            raw_u = str(kwargs.get("url") or "")
+            url = normalize_url(raw_u)
+            if not url or not is_valid_navigate_url(url):
                 return public_result(
                     ok=False,
                     target="desktop",
                     action="navigate",
-                    message="url required",
+                    message=(
+                        "Invalid navigate URL (refusing task-text leak). "
+                        "Pass a real https URL e.g. https://mail.google.com — "
+                        f"not prose like {raw_u[:80]!r}."
+                    ),
                 )
             info = win.open_url(url)
             return public_result(
@@ -472,7 +478,21 @@ class ComputerExecutor:
         """
         payload = {k: v for k, v in kwargs.items() if v is not None}
         if act is ComputerAction.NAVIGATE and payload.get("url"):
-            payload["url"] = normalize_url(str(payload["url"]))
+            raw_u = str(payload.get("url") or "")
+            cleaned = normalize_url(raw_u)
+            if not cleaned or not is_valid_navigate_url(cleaned):
+                return public_result(
+                    ok=False,
+                    target="browser",
+                    action="navigate",
+                    message=(
+                        "Invalid navigate URL (blocked task-text leak into address bar). "
+                        "Use a real URL like https://mail.google.com, not the full user "
+                        f"instruction. Got: {raw_u[:100]!r}."
+                    ),
+                    extra={"rail_failed": True, "rejected_url": raw_u[:200]},
+                )
+            payload["url"] = cleaned
 
         hint = str(kwargs.get("hint") or "")
         req_target = str(kwargs.get("target") or "auto")
@@ -987,6 +1007,17 @@ class ComputerExecutor:
            (host will still open the page). Never burn 8–14s on open-url.
         """
         url = str(payload.get("url") or "")
+        if not url or not is_valid_navigate_url(url):
+            return public_result(
+                ok=False,
+                target="browser",
+                action="navigate",
+                message=(
+                    "Invalid navigate URL (blocked). "
+                    f"Got: {url[:100]!r}. Use https://mail.google.com style URLs only."
+                ),
+                extra={"rail_failed": True},
+            )
         if wants_system_browser(hint, req_target):
             r = self._run_desktop(ComputerAction.NAVIGATE, url=url, hint=hint)
             r["note"] = "Opened system browser (user/model requested external browser)"

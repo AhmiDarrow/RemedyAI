@@ -44,13 +44,54 @@ fn normalize_url(raw: &str) -> Result<String, String> {
     if u.is_empty() {
         return Err("empty url".into());
     }
+    // Block task-text leaks: "gmail sign in, type user@…" must never become
+    // https://gmail sign in… in the address bar.
+    if u.contains(' ') || u.contains('\n') || u.contains('\t') {
+        return Err("invalid url: spaces (refusing task-text leak)".into());
+    }
+    if u.contains('@') && !u.starts_with("http://") && !u.starts_with("https://") {
+        return Err("invalid url: looks like email, not a page URL".into());
+    }
+    // Commas in host (before ?) are never valid
+    let host_part = u.split('?').next().unwrap_or(u).split('#').next().unwrap_or(u);
+    if host_part.contains(',') || host_part.contains(';') || host_part.contains('"') {
+        return Err("invalid url: illegal characters in host".into());
+    }
     if u.starts_with("javascript:") || u.starts_with("data:") || u.starts_with("file:") {
         return Err("unsupported url scheme".into());
     }
-    if u.starts_with("http://") || u.starts_with("https://") || u.starts_with("about:") {
-        return Ok(u.to_string());
+    let candidate = if u.starts_with("http://")
+        || u.starts_with("https://")
+        || u.starts_with("about:")
+    {
+        u.to_string()
+    } else {
+        format!("https://{u}")
+    };
+    if candidate.starts_with("about:") {
+        return Ok(candidate);
     }
-    Ok(format!("https://{u}"))
+    let parsed: Url = candidate
+        .parse()
+        .map_err(|e: url::ParseError| format!("invalid url: {e}"))?;
+    let scheme = parsed.scheme();
+    if scheme != "http" && scheme != "https" {
+        return Err(format!("unsupported url scheme: {scheme}"));
+    }
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "invalid url: missing host".to_string())?;
+    if host.contains(' ') || host.is_empty() {
+        return Err("invalid url: bad host".into());
+    }
+    // Require a real domain (has a dot) or localhost / IPv4
+    let ok_host = host == "localhost"
+        || host.parse::<std::net::Ipv4Addr>().is_ok()
+        || host.contains('.');
+    if !ok_host {
+        return Err(format!("invalid url host: {host}"));
+    }
+    Ok(candidate)
 }
 
 fn main_window(app: &AppHandle) -> Result<tauri::Window, String> {
