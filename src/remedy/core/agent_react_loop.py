@@ -835,6 +835,10 @@ async def call_llm_stream(runtime, message: str,
                     stream=use_openai_sse,
                     thinking_level=getattr(runtime, "_thinking_level", "high"),
                 )
+                with suppress(Exception):
+                    from remedy.core.provider_sanitize import sanitize_chat_body
+
+                    body = sanitize_chat_body(body if isinstance(body, dict) else {})
 
                 collected: dict[str, Any] = {"content": None, "tool_calls": None}
                 round_state = StreamRoundState()
@@ -1681,6 +1685,10 @@ async def call_llm_stream(runtime, message: str,
                 stream=use_openai_sse,
                 thinking_level=getattr(runtime, "_thinking_level", "high"),
             )
+            with suppress(Exception):
+                from remedy.core.provider_sanitize import sanitize_chat_body
+
+                body = sanitize_chat_body(body if isinstance(body, dict) else {})
             try:
                 async with aiohttp.ClientSession(
                     timeout=aiohttp.ClientTimeout(total=900, sock_read=900)

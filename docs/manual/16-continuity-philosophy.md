@@ -13,7 +13,7 @@ You (goals, taste, judgment)
    · Memory (facts that last)
    · Skills (procedures that improve)
    · Context budget & quality
-   · Local Qwen (optional) — vision briefs, brief refresh
+   · Local SmolVLM2 (when installed) — vision briefs, nano assist
         │
         ▼
    Provider model (Grok / Claude / GPT / Ollama / …)
@@ -26,7 +26,7 @@ You (goals, taste, judgment)
 
 You should feel **Remedy**, not a network of agents. Internal workers (continuity layer / nanoswarm in code) measure, prune, rank, and distill — they do not compete for the microphone.
 
-**Local Qwen** (when installed) is part of that efficiency story: image→text for any chat model, and background harness work that would otherwise cost another paid call. See [Local vision & on-device Qwen](14-visual-decoder).
+**Local SmolVLM2** (when installed) is part of that efficiency story: image→text for any chat model, and background assist that would otherwise cost another paid call. See [Local model (SmolVLM2)](14-visual-decoder).
 
 ## What you get
 

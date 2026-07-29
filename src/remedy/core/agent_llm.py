@@ -43,17 +43,20 @@ async def post_chat(
     """
     from remedy.core.llm_binding import LlmBinding, get_llm_binding, set_llm_binding
 
+    from remedy.core.provider_sanitize import sanitize_chat_body
+
     bind = get_llm_binding(runtime)
     adapter = bind.adapter()
     headers = adapter.auth_headers(bind.api_key)
     endpoint = adapter.chat_endpoint(bind.base_url)
+    safe_body = sanitize_chat_body(body if isinstance(body, dict) else {})
 
     async with (
         aiohttp.ClientSession() as session,
         session.post(
             endpoint,
             headers=headers,
-            json=body,
+            json=safe_body,
             timeout=aiohttp.ClientTimeout(total=60),
         ) as resp,
     ):
@@ -91,7 +94,7 @@ async def post_chat(
                         async with session.post(
                             endpoint,
                             headers=headers,
-                            json=body,
+                            json=safe_body,
                             timeout=aiohttp.ClientTimeout(total=60),
                         ) as resp2:
                             if resp2.status == 200:
