@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { ALL_SLIDES, SLIDE_META, type SlideId } from '../../workspace/types'
+import { clampRailWidth } from '../../workspace/layoutPrefs'
 
 export function SlideRail({
   active,
@@ -133,7 +134,7 @@ export function SlideFrame({
             const startW = width
             const move = (ev: MouseEvent) => {
               const dx = side === 'left' ? ev.clientX - startX : startX - ev.clientX
-              onWidth(Math.min(480, Math.max(200, startW + dx)))
+              onWidth(clampRailWidth(startW + dx, startW))
             }
             const up = () => {
               window.removeEventListener('mousemove', move)

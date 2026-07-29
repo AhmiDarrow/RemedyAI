@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_BROWSER_HOME,
+  browserSearchUrl,
   isOpenableBrowserUrl,
   normalizeBrowserUrl,
+  resolveBrowserAddressBar,
   resolveBrowserHome,
 } from './browserUrl'
 
@@ -53,5 +55,16 @@ describe('browserUrl', () => {
     expect(resolveBrowserHome(null)).toBe(DEFAULT_BROWSER_HOME)
     expect(resolveBrowserHome('javascript:x')).toBe(DEFAULT_BROWSER_HOME)
     expect(resolveBrowserHome('docs.example.com')).toBe('https://docs.example.com')
+  })
+
+  it('omnibox: bare hosts stay URLs; prose becomes DuckDuckGo search', () => {
+    expect(resolveBrowserAddressBar('github.com')).toBe('https://github.com')
+    expect(resolveBrowserAddressBar('https://x.ai/path')).toBe('https://x.ai/path')
+    expect(resolveBrowserAddressBar('weather tokyo')).toBe(
+      'https://duckduckgo.com/?q=weather%20tokyo',
+    )
+    expect(resolveBrowserAddressBar('remedy ai')).toContain('duckduckgo.com')
+    expect(resolveBrowserAddressBar('javascript:alert(1)')).toBe('')
+    expect(browserSearchUrl('a & b')).toBe('https://duckduckgo.com/?q=a%20%26%20b')
   })
 })

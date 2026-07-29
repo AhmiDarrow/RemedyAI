@@ -12,6 +12,10 @@ commands.allow = [
   "browser_set_bounds",
   "browser_hide",
   "browser_show",
+  "browser_set_stack_suppressed",
   "browser_last_bounds",
   "browser_agent_action",
+  "privacy_shield_status",
+  "privacy_shield_set_enabled",
+  "privacy_shield_refresh_lists",
 ]

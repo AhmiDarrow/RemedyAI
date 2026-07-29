@@ -1,7 +1,10 @@
 import { useEffect, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { ALL_SLIDES, SLIDE_META, type SlideId } from '../../workspace/types'
-import type { RailMode } from '../../workspace/layoutPrefs'
+import {
+  clampRailWidth,
+  type RailMode,
+} from '../../workspace/layoutPrefs'
 
 const RAIL_W = 36
 const THIN_W = 10
@@ -133,7 +136,7 @@ export function WorkspaceSide({
         const startW = width
         const move = (ev: MouseEvent) => {
           const dx = side === 'left' ? ev.clientX - startX : startX - ev.clientX
-          onWidth(Math.min(480, Math.max(200, startW + dx)))
+          onWidth(clampRailWidth(startW + dx, startW))
         }
         const up = () => {
           window.removeEventListener('mousemove', move)
@@ -151,6 +154,7 @@ export function WorkspaceSide({
       style={{ background: 'var(--bg-secondary)' }}
     >
       <div
+        data-workspace-panel-header
         className="flex items-center gap-1 px-2 py-1 border-b shrink-0 text-xs font-semibold"
         style={{ borderColor: 'var(--border)', color: 'var(--text-primary)' }}
       >
