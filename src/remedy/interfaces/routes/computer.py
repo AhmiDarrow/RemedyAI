@@ -78,15 +78,21 @@ def register_computer_routes(app: FastAPI, *, runtime=None, gateway=None, memory
 
     @app.post("/api/computer/host/hello")
     async def computer_host_hello(req: HostHelloRequest | None = None):
-        """Desktop pings this while open so tools know the rail host is live."""
+        """Desktop pings this while open (bounds + soft liveness).
+
+        Does **not** alone mark the rail driveable — host_connected requires
+        jobs/next or ui/command polling (see host_bridge.host_connected).
+        """
         b = _bridge()
-        b.mark_host_alive()
+        # Soft touch only — real poller marks via jobs/ui routes.
+        b.mark_host_alive(poller=False)
         if req and req.bounds:
             b.set_browser_bounds(req.bounds, scale=req.scale)
         return {
             "ok": True,
             "client": (req.client if req else "desktop"),
             "host_connected": b.host_connected(),
+            "poller_required": True,
         }
 
     @app.get("/api/computer/host/status")
@@ -108,7 +114,7 @@ def register_computer_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         *take*=1 atomically clears the command so hosts do not re-navigate the same URL.
         """
         b = _bridge()
-        b.mark_host_alive()
+        b.mark_host_alive(poller=True)
         if take:
             cmd = b.take_ui_command()
         else:
@@ -159,7 +165,7 @@ def register_computer_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         *only*: if set, only claim these actions (Rust backup: ``only=navigate``).
         """
         b = _bridge()
-        b.mark_host_alive()
+        b.mark_host_alive(poller=True)
         skip: set[str] | None = None
         only_set: set[str] | None = None
         if exclude and str(exclude).strip():

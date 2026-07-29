@@ -62,6 +62,16 @@ class GoogleCalendarProvider:
                 msg = parsed.get("error", {}).get("message") or err
             except json.JSONDecodeError:
                 msg = err or str(e)
+            low = str(msg).lower()
+            if e.code == 403 and (
+                "has not been used" in low or "is disabled" in low
+            ):
+                raise RuntimeError(
+                    "Google Calendar API is disabled for the OAuth client's Cloud "
+                    "project. Enable **Google Calendar API** in Google Cloud Console "
+                    "(APIs & Services → Library → Google Calendar API → Enable), "
+                    f"wait ~1 minute, then retry. Detail: {msg}"
+                ) from e
             raise RuntimeError(f"Google Calendar API {e.code}: {msg}") from e
 
     def list_events(self, *, time_min: str, time_max: str) -> list[CalendarEvent]:

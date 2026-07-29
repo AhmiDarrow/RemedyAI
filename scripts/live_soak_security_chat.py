@@ -239,6 +239,14 @@ def main() -> int:
         "POST", "/api/computer/host/hello", body={"client": "live-soak"}, auth=False
     )
     ok("computer host hello loopback", code_h == 200, f"code={code_h} {hello}")
+    if isinstance(hello, dict):
+        ok(
+            "hello alone not poller-connected",
+            hello.get("host_connected") is False,
+            str(hello.get("host_connected")),
+        )
+    code_p, polled = req("GET", "/api/computer/jobs/next", auth=False)
+    ok("jobs/next poller heartbeat", code_p == 200, str(polled)[:60])
 
     # a11y push without job should 404 not 401 on loopback
     code_a, a11y = req(
