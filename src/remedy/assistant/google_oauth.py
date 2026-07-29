@@ -618,6 +618,85 @@ def disconnect(home: Path | str | None = None) -> None:
         pass
 
 
+def probe_google_apis(home: Path | str | None = None) -> dict[str, Any]:
+    """Lightweight Gmail/Calendar reachability after OAuth (detects disabled APIs)."""
+    result: dict[str, Any] = {
+        "gmail": "unknown",
+        "calendar": "unknown",
+        "ok": False,
+        "message": "",
+    }
+    tokens = load_tokens(home)
+    if not tokens.connected:
+        result["message"] = "Google not connected"
+        return result
+    try:
+        bearer = get_valid_access_token(home)
+    except Exception as exc:
+        result["message"] = f"Token refresh failed: {exc}"
+        return result
+
+    def _probe(url: str) -> str:
+        req = urllib.request.Request(
+            url,
+            headers={
+                "Authorization": f"Bearer {bearer}",
+                "Accept": "application/json",
+                "User-Agent": "RemedyDesktop-Probe/1.0",
+            },
+            method="GET",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                if int(getattr(resp, "status", 200) or 200) < 400:
+                    return "ok"
+                return "error"
+        except urllib.error.HTTPError as e:
+            err = e.read().decode("utf-8", errors="replace")
+            low = err.lower()
+            if e.code == 403 and (
+                "has not been used" in low
+                or "is disabled" in low
+                or "access not configured" in low
+                or "api has not been used" in low
+            ):
+                return "disabled"
+            if e.code in (401, 403):
+                return "forbidden"
+            return f"http_{e.code}"
+        except Exception as exc:
+            return f"error:{type(exc).__name__}"
+
+    gmail = _probe(
+        "https://gmail.googleapis.com/gmail/v1/users/me/profile"
+    )
+    cal = _probe(
+        "https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=1"
+    )
+    result["gmail"] = gmail
+    result["calendar"] = cal
+    result["ok"] = gmail == "ok" and cal == "ok"
+    if gmail == "disabled" or cal == "disabled":
+        result["message"] = (
+            "OAuth is connected, but Google Cloud APIs are not enabled for this "
+            "OAuth client project. In Google Cloud Console enable "
+            "**Gmail API** and **Google Calendar API**, then wait a minute and retry. "
+            "Project link often looks like: "
+            "https://console.developers.google.com/apis/library"
+        )
+        result["enable_gmail_url"] = (
+            "https://console.developers.google.com/apis/api/gmail.googleapis.com/overview"
+        )
+        result["enable_calendar_url"] = (
+            "https://console.developers.google.com/apis/api/calendar-json.googleapis.com/overview"
+        )
+    elif not result["ok"]:
+        result["message"] = f"Gmail={gmail}, Calendar={cal}"
+    else:
+        result["message"] = "Gmail and Calendar APIs reachable"
+    return result
+
+
 def public_status(home: Path | str | None = None) -> dict[str, Any]:
     app = load_app_config(home)
     tokens = load_tokens(home)
@@ -635,4 +714,13 @@ def public_status(home: Path | str | None = None) -> dict[str, Any]:
             "Anyone with access to your Windows user profile can read them. "
             "Fix DPAPI / re-connect if this was unexpected."
         )
+    # Probe only when connected — helps Settings show "enable Gmail API" clearly.
+    if tokens.connected:
+        try:
+            apis = probe_google_apis(home)
+            out["apis"] = apis
+            if not apis.get("ok") and apis.get("message"):
+                out["apis_warning"] = apis["message"]
+        except Exception as exc:
+            out["apis"] = {"ok": False, "message": str(exc)[:200]}
     return out

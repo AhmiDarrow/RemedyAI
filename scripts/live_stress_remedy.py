@@ -317,8 +317,21 @@ def _run_once(loop: int) -> int:
     section("7. Computer host surface")
     code, h = api("POST", "/api/computer/host/hello", body={"client": "stress"}, auth=False)
     mark("computer hello loopback", code == 200, str(h)[:80])
+    # Hello alone must not report driveable host (no real Desktop poller).
+    if isinstance(h, dict):
+        mark(
+            "hello alone not poller-connected",
+            h.get("host_connected") is False,
+            str(h.get("host_connected")),
+        )
     code, j = api("GET", "/api/computer/jobs/next", auth=False)
     mark("computer jobs next", code == 200, str(j)[:80])
+    code, st = api("GET", "/api/computer/host/status", auth=False)
+    mark(
+        "jobs poll marks host connected",
+        code == 200 and isinstance(st, dict) and st.get("host_connected") is True,
+        str(st)[:80] if isinstance(st, dict) else str(st),
+    )
     # garbage a11y
     code, a11 = api(
         "POST",

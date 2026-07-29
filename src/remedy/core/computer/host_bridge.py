@@ -106,6 +106,8 @@ class ComputerHostBridge:
         self.root = _root(home_dir)
         self._lock = threading.Lock()
         self._host_seen_at: float = 0.0
+        # Last jobs/next or ui/command poll (real Desktop poller — not a one-shot hello).
+        self._last_poll_at: float = 0.0
         self._last_claim_at: float = 0.0
         self._browser_bounds: dict[str, float] | None = None
         self._browser_scale: float = 1.0
@@ -122,12 +124,21 @@ class ComputerHostBridge:
         self._ui_path = home / "computer" / "ui_command.json"
         self._ui_path.parent.mkdir(parents=True, exist_ok=True)
 
-    def mark_host_alive(self) -> None:
-        self._host_seen_at = time.time()
+    def mark_host_alive(self, *, poller: bool = False) -> None:
+        """Note that something on loopback touched the host API.
+
+        *poller*=True only for jobs/next or ui/command polls (real Desktop).
+        A one-shot ``/host/hello`` alone must not claim the rail is driveable.
+        """
+        now = time.time()
+        self._host_seen_at = now
+        if poller:
+            self._last_poll_at = now
 
     def mark_host_dead(self) -> None:
         """Forget host liveness after unclaimed jobs / failed drive."""
         self._host_seen_at = 0.0
+        self._last_poll_at = 0.0
 
     def pending_count(self) -> int:
         n = 0
@@ -195,9 +206,18 @@ class ComputerHostBridge:
         }
 
     def host_connected(self, *, max_age_s: float = 15.0) -> bool:
-        if self._host_seen_at <= 0:
-            return False
-        return (time.time() - self._host_seen_at) <= max_age_s
+        """True when Desktop is actively polling (jobs/ui), not just hello.
+
+        Optimistic navigate and rail tools require a real poller; stress scripts
+        that only POST /host/hello must not look \"connected\".
+        """
+        now = time.time()
+        if self._last_poll_at > 0 and (now - self._last_poll_at) <= float(max_age_s):
+            return True
+        # A claim is also proof the host is working the queue.
+        if self._last_claim_at > 0 and (now - self._last_claim_at) <= float(max_age_s):
+            return True
+        return False
 
     def set_browser_bounds(
         self,
@@ -354,7 +374,7 @@ class ComputerHostBridge:
         skip = {str(a).lower() for a in (exclude_actions or ())}
         only = {str(a).lower() for a in (only_actions or ())} if only_actions else None
         with self._lock:
-            self.mark_host_alive()
+            self.mark_host_alive(poller=True)
             files = sorted(self.root.glob("*.json"), key=lambda p: p.stat().st_mtime)
             for path in files:
                 try:

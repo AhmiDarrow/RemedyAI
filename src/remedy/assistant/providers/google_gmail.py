@@ -64,6 +64,16 @@ class GoogleGmailProvider:
                 msg = parsed.get("error", {}).get("message") or err
             except json.JSONDecodeError:
                 msg = err or str(e)
+            low = str(msg).lower()
+            if e.code == 403 and (
+                "has not been used" in low or "is disabled" in low
+            ):
+                raise RuntimeError(
+                    "Gmail API is disabled for the Google Cloud project behind this "
+                    "OAuth client. Enable **Gmail API** in Google Cloud Console "
+                    "(APIs & Services → Library → Gmail API → Enable), wait ~1 minute, "
+                    f"then retry. Detail: {msg}"
+                ) from e
             raise RuntimeError(f"Gmail API {e.code}: {msg}") from e
 
     def list_messages(self, *, query: str = "", limit: int = 20) -> list[MailMessage]:
