@@ -508,17 +508,32 @@ async def call_llm_stream(runtime, message: str,
                     # Keep going: click/type/login. Tools stay on.
                     tools = all_tools
                     run_until_done = True
+                    cred_hint = ""
+                    with suppress(Exception):
+                        from remedy.core.computer.elements import (
+                            extract_typed_credentials,
+                        )
+
+                        creds = extract_typed_credentials(message or "")
+                        if creds.get("email") or creds.get("username"):
+                            u = creds.get("email") or creds.get("username")
+                            cred_hint = (
+                                f" Username/email from user message: `{u}`. "
+                                "Prefer computer_act(click=\"Sign in\" or \"Email\", "
+                                f"type=\"{u}\") or computer_click text= + computer_type."
+                            )
                     messages.append(
                         {
                             "role": "user",
                             "content": (
                                 f"Browser rail already opened {browse_pre_url} (SUCCESS). "
-                                "Now finish the **rest** of the latest user request only "
-                                "(sign-in, type username/email, click, etc.). "
-                                "Use computer_snapshot / computer_click text=… / "
-                                "computer_type. Do not re-navigate unless needed. "
-                                "Do not resume unrelated older tasks. "
-                                "Do not stop until the login/input steps are done or blocked."
+                                "Finish the **rest** of the latest user request only "
+                                "(sign-in, type username/email, click). "
+                                "Prefer **computer_act** (click+type in one call) or "
+                                "computer_click text=… then computer_type. "
+                                "Use snapshot SoM refs if click-by-text fails once. "
+                                "No screenshot/vision. No unrelated older tasks."
+                                f"{cred_hint}"
                             ),
                         }
                     )

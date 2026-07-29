@@ -332,6 +332,7 @@ PLAN_MODE_TOOL_NAMES = frozenset(
         "computer_page_text",
         "computer_find",
         "computer_wait",
+        "computer_act",
     }
 )
 

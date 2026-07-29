@@ -81,6 +81,18 @@ class ComputerExecutor:
             req_target = "desktop"  # pure sleep; target irrelevant
         if act is ComputerAction.APP:
             req_target = "desktop"
+        if act is ComputerAction.ACT:
+            # Compound browser/desktop recipe — default browser for web tasks
+            ht = str(hint) + " " + str(kwargs.get("goal") or "")
+            if wants_system_browser(ht, target):
+                req_target = "desktop"
+            elif self.bridge.host_connected() or looks_like_url(ht) or any(
+                w in ht.lower()
+                for w in ("http", "www.", "gmail", "google", "page", "site", "login", "sign")
+            ):
+                req_target = "browser"
+            else:
+                req_target = "desktop"
         # Snapshot auto: browser if host connected / web hint, else desktop windows
         if act is ComputerAction.SNAPSHOT and (target or "auto").strip().lower() in (
             "",
@@ -433,6 +445,18 @@ class ComputerExecutor:
                 message=f"Opened system browser: {url}",
                 extra=info,
             )
+        if act is ComputerAction.ACT:
+            # Prefer in-rail compound act when Desktop host is live
+            if self.bridge.host_connected():
+                return self._computer_act(
+                    dict(kwargs), hint=str(kwargs.get("hint") or ""), req_target="browser"
+                )
+            return public_result(
+                ok=False,
+                target="desktop",
+                action="act",
+                message="computer_act needs Browser rail host — open Remedy Desktop",
+            )
         return public_result(
             ok=False,
             target="desktop",
@@ -549,6 +573,10 @@ class ComputerExecutor:
                 except Exception:
                     pass  # fall through to host job / full desktop
 
+        # Compound act: navigate → wait → click/type chain (research: fewer observe steps)
+        if act is ComputerAction.ACT:
+            return self._computer_act(payload, hint=hint, req_target=req_target)
+
         # Navigate must be lightning-fast for the agent (<1s tool return).
         # Host poller opens the WebView; we do not block on page load.
         if act is ComputerAction.NAVIGATE and payload.get("url"):
@@ -631,20 +659,23 @@ class ComputerExecutor:
                 elements = list(out.get("elements") or [])
                 if elements:
                     self.bridge.set_last_elements(elements, target="browser")
-                if query and elements:
-                    from remedy.core.computer.elements import find_best_elements
+                from remedy.core.computer.elements import (
+                    find_best_elements,
+                    format_som_list,
+                )
 
+                # Set-of-Mark list for the model (OSWorld / SoM practice)
+                out["som"] = format_som_list(
+                    elements, limit=int(kwargs.get("limit") or 40), query=query
+                )
+                if query and elements:
                     matches = find_best_elements(elements, query, top_k=6)
                     out["matches"] = matches
                     out["query"] = query
-                    if matches:
-                        out["message"] = (
-                            f"{len(elements)} elements; top matches for {query!r}: "
-                            + ", ".join(
-                                f"{m.get('ref')}={str(m.get('name') or '')[:40]}"
-                                for m in matches[:4]
-                            )
-                        )
+                # Prefer SoM text as the primary message the model reads
+                out["message"] = out.get("som") or out.get("message") or (
+                    f"{len(elements)} interactive elements"
+                )
                 if slept:
                     out["settled_s"] = round(slept, 2)
                 return out
@@ -721,30 +752,49 @@ class ComputerExecutor:
         )
 
     def _browser_click_text(self, text_q: str, kwargs: dict[str, Any]) -> dict[str, Any]:
-        """One-shot: find control by visible text and click it in the rail."""
+        """One-shot: find control by visible text and click it in the rail.
+
+        Retries once after scroll (OSWorld: re-observe after failed action).
+        """
         self.bridge.settle_after_navigate(min_s=0.35, max_s=0.9)
-        payload = {
-            "ui": {"open_browser": True},
-            "text": text_q,
-            "click_text": True,
-        }
-        job = self.bridge.enqueue("click", payload)
-        finished = self.bridge.wait(
-            job.id,
-            timeout_s=5.0,
-            poll_s=0.05,
-            abort_check=self._abort_check,
-            unclaimed_timeout_s=2.5,
-            grace_s=0.2,
-        )
-        if finished.status == "done" and finished.result:
-            out = dict(finished.result)
-            out.setdefault("ok", True)
-            out.setdefault("target", "browser")
-            out.setdefault("action", "click")
-            out.setdefault("text", text_q)
-            return out
-        # Fallback: snapshot + match + click ref job
+        last_err = ""
+        for attempt in range(2):
+            payload = {
+                "ui": {"open_browser": True},
+                "text": text_q,
+                "click_text": True,
+            }
+            job = self.bridge.enqueue("click", payload)
+            finished = self.bridge.wait(
+                job.id,
+                timeout_s=5.0,
+                poll_s=0.05,
+                abort_check=self._abort_check,
+                unclaimed_timeout_s=2.5,
+                grace_s=0.2,
+            )
+            if finished.status == "done" and finished.result:
+                out = dict(finished.result)
+                ok = out.get("ok", True)
+                msg = str(out.get("message") or out.get("detail") or "")
+                if ok and "no-match" not in msg and "failed" not in msg.lower():
+                    out.setdefault("ok", True)
+                    out.setdefault("target", "browser")
+                    out.setdefault("action", "click")
+                    out.setdefault("text", text_q)
+                    out["attempt"] = attempt + 1
+                    return out
+                last_err = msg
+            else:
+                last_err = finished.error or finished.status or "timeout"
+            # Retry: scroll down then try again
+            if attempt == 0:
+                self.bridge.enqueue(
+                    "scroll",
+                    {"ui": {"open_browser": True}, "x": 200, "y": 300, "dy": -4},
+                )
+                time.sleep(0.25)
+        # Fallback: snapshot + match + click ref
         snap = self._browser_snapshot_now(kwargs)
         if snap.get("ok") and snap.get("elements"):
             from remedy.core.computer.elements import find_best_element
@@ -782,10 +832,115 @@ class ComputerExecutor:
             target="browser",
             action="click",
             message=(
-                f"Could not click text={text_q!r} in Browser rail. "
+                f"Could not click text={text_q!r} in Browser rail ({last_err}). "
                 "Run computer_snapshot, then computer_click ref=eN."
             ),
-            extra={"text": text_q, "job_id": job.id},
+            extra={"text": text_q},
+        )
+
+    def _computer_act(
+        self,
+        payload: dict[str, Any],
+        *,
+        hint: str,
+        req_target: str,
+    ) -> dict[str, Any]:
+        """High-level multi-step action (fast path for agents).
+
+        Research (OSWorld, CUA): fewer LLM rounds + structured observe-act beats
+        screenshot thrash. Supports optional navigate, click text, type, key.
+        """
+        log: list[str] = []
+        url = str(payload.get("url") or "").strip()
+        click = str(payload.get("click") or payload.get("text") or "").strip()
+        type_text = str(payload.get("type") or payload.get("type_text") or "").strip()
+        key = str(payload.get("key") or "").strip()
+        goal = str(payload.get("goal") or hint or "")
+
+        if url:
+            nav = self._navigate_rail_fast(
+                {"url": normalize_url(url), "ui": {"open_browser": True}, "settle_s": 0.45},
+                hint=hint,
+                req_target="browser",
+            )
+            log.append(f"navigate:{nav.get('ok')} {url}")
+            if not nav.get("ok"):
+                return public_result(
+                    ok=False,
+                    target="browser",
+                    action="act",
+                    message=f"act: navigate failed — {nav.get('message')}",
+                    extra={"steps": log, "detail": nav},
+                )
+
+        if click:
+            ck = self._browser_click_text(click, payload)
+            log.append(f"click:{ck.get('ok')} {click!r} → {ck.get('message', '')[:60]}")
+            if not ck.get("ok"):
+                return public_result(
+                    ok=False,
+                    target="browser",
+                    action="act",
+                    message=f"act: click failed — {ck.get('message')}",
+                    extra={"steps": log, "detail": ck},
+                )
+            time.sleep(0.25)
+
+        if type_text:
+            # Prefer focusing email/username field if goal implies login
+            if not click and any(
+                w in (goal + " " + type_text).lower()
+                for w in ("email", "user", "login", "@")
+            ):
+                for label in ("email", "email or phone", "username", "phone or email"):
+                    pre = self._browser_click_text(label, payload)
+                    if pre.get("ok"):
+                        log.append(f"focus:{label}")
+                        break
+            job = self.bridge.enqueue(
+                "type",
+                {"ui": {"open_browser": True}, "text": type_text},
+            )
+            fin = self.bridge.wait(
+                job.id,
+                timeout_s=4.0,
+                poll_s=0.05,
+                abort_check=self._abort_check,
+                unclaimed_timeout_s=2.0,
+                grace_s=0.15,
+            )
+            ok_t = fin.status == "done"
+            log.append(f"type:{ok_t} chars={len(type_text)}")
+            if not ok_t:
+                return public_result(
+                    ok=False,
+                    target="browser",
+                    action="act",
+                    message=f"act: type failed — {fin.error}",
+                    extra={"steps": log},
+                )
+
+        if key:
+            job = self.bridge.enqueue(
+                "key",
+                {"ui": {"open_browser": True}, "key": key},
+            )
+            fin = self.bridge.wait(
+                job.id,
+                timeout_s=3.0,
+                poll_s=0.05,
+                abort_check=self._abort_check,
+                unclaimed_timeout_s=2.0,
+                grace_s=0.1,
+            )
+            log.append(f"key:{fin.status == 'done'} {key}")
+
+        return public_result(
+            ok=True,
+            target="browser",
+            action="act",
+            message="SUCCESS: " + " | ".join(log),
+            extra={"steps": log, "url": url or None, "click": click or None},
         )
 
     def _browser_page_text(self) -> dict[str, Any]:

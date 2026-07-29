@@ -137,6 +137,35 @@ def register_computer_tools(runtime: Any) -> None:
             limit=limit,
         )
 
+    async def computer_act(
+        url: str = "",
+        click: str = "",
+        type: str = "",
+        key: str = "",
+        goal: str = "",
+        target: str = "browser",
+        hint: str = "",
+    ) -> str:
+        """Multi-step computer action in ONE call (fast path).
+
+        Optional: navigate url → click label → type text → key.
+        Prefer this for login/search flows instead of many tiny tool rounds.
+        Example: url=https://mail.google.com click=\"Sign in\" type=\"user@gmail.com\" key=enter
+        """
+        return ex.run(
+            ComputerAction.ACT,
+            target=target or "browser",
+            hint=hint or goal,
+            runtime=runtime,
+            url=url,
+            click=click,
+            type=type,
+            type_text=type,
+            key=key,
+            goal=goal,
+            text=click,
+        )
+
     async def computer_type(
         text: str = "",
         target: str = "auto",
@@ -365,6 +394,32 @@ def register_computer_tools(runtime: Any) -> None:
                 "text": {"type": "string"},
                 "query": {"type": "string"},
                 "limit": {"type": "integer"},
+                "target": target_prop,
+                "hint": hint_prop,
+            },
+        },
+    )
+    reg.register_builtin_handler(
+        "computer_act",
+        "ONE-CALL multi-step: optional url + click label + type + key. Prefer for login/search (fast, accurate).",
+        computer_act,
+        {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "Optional navigate URL first"},
+                "click": {
+                    "type": "string",
+                    "description": "Visible control label to click (e.g. Sign in)",
+                },
+                "type": {
+                    "type": "string",
+                    "description": "Text to type into focused field after click",
+                },
+                "key": {
+                    "type": "string",
+                    "description": "Optional key after type (enter, tab)",
+                },
+                "goal": {"type": "string", "description": "Short task description"},
                 "target": target_prop,
                 "hint": hint_prop,
             },
