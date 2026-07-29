@@ -60,7 +60,7 @@ describe('workspace layoutPrefs v3', () => {
     expect(L.left).toBe('files')
     expect(L.right).toBe('scratch')
     expect(L.leftWidth).toBe(200)
-    expect(L.rightWidth).toBe(480)
+    expect(L.rightWidth).toBe(624)
     expect(L.leftRail).toBe('icons')
     expect(L.rightRail).toBe('open')
     expect(L.leftOpen).toBe(false)

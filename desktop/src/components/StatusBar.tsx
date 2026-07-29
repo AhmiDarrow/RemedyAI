@@ -358,6 +358,7 @@ export function StatusBar({
 
   return (
     <div
+      data-remedy-status-bar
       className="flex flex-col border-t"
       style={{
         background: 'var(--bg-secondary)',

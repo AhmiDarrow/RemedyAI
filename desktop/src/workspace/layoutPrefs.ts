@@ -21,6 +21,11 @@ const KEY = 'remedy.workspaceLayout.v3'
 const LEGACY_V2 = 'remedy.workspaceLayout.v2'
 const LEGACY_V1 = 'remedy.workspaceLayout.v1'
 
+/** Side panel body width (px) — drag clamp shared by WorkspaceSide / SlideChrome. */
+export const RAIL_WIDTH_MIN = 200
+/** ~30% past the old 480px cap so Browser/Settings can open wider. */
+export const RAIL_WIDTH_MAX = 624
+
 const DEFAULTS: WorkspaceLayout = {
   left: 'sessions',
   right: 'settings',
@@ -50,10 +55,15 @@ export function coerceRailMode(value: unknown, fallback: RailMode): RailMode {
   return fallback
 }
 
-function clampWidth(n: unknown, fallback: number): number {
+/** Clamp a side-panel width to the shared min/max. */
+export function clampRailWidth(n: unknown, fallback: number = DEFAULTS.leftWidth): number {
   const v = Number(n)
   if (!Number.isFinite(v)) return fallback
-  return Math.min(480, Math.max(200, Math.floor(v)))
+  return Math.min(RAIL_WIDTH_MAX, Math.max(RAIL_WIDTH_MIN, Math.floor(v)))
+}
+
+function clampWidth(n: unknown, fallback: number): number {
+  return clampRailWidth(n, fallback)
 }
 
 function fromOpenFlags(leftOpen: boolean, rightOpen: boolean): Pick<WorkspaceLayout, 'leftRail' | 'rightRail' | 'leftOpen' | 'rightOpen'> {

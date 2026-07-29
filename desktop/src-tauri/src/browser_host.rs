@@ -121,11 +121,21 @@ fn main_window(app: &AppHandle) -> Result<tauri::Window, String> {
 }
 
 fn clamp_bounds(b: &BrowserBounds) -> BrowserBounds {
+    // Never park the embed over the in-app title strip (36px). SPA also clamps
+    // against live chrome; this is a hard floor when defaults/stale bounds win.
+    const MIN_TOP: f64 = 36.0;
+    let mut y = b.y.max(0.0);
+    let mut height = b.height.max(80.0);
+    if y < MIN_TOP {
+        let delta = MIN_TOP - y;
+        y = MIN_TOP;
+        height = (height - delta).max(80.0);
+    }
     BrowserBounds {
         x: b.x.max(0.0),
-        y: b.y.max(0.0),
+        y,
         width: b.width.max(80.0),
-        height: b.height.max(80.0),
+        height,
     }
 }
 
@@ -268,10 +278,11 @@ fn default_rail_bounds(app: &AppHandle) -> BrowserBounds {
         if let (Ok(size), Ok(scale)) = (ww.inner_size(), ww.scale_factor()) {
             let w = (size.width as f64 / scale).max(800.0);
             let h = (size.height as f64 / scale).max(500.0);
-            // Match openBrowserInRail: ~40% width, min 400, max 560
-            let rail_w = (w * 0.40).clamp(400.0, 560.0);
-            let top = 56.0_f64; // title + chrome
-            let bottom = 40.0_f64; // status bar
+            // Match SPA rail max (~624 body + icon strip); prefer ~40% when smaller
+            let rail_w = (w * 0.40).clamp(400.0, 624.0);
+            // title (36) + panel header (~30) + URL toolbar (~40)
+            let top = 108.0_f64;
+            let bottom = 48.0_f64; // app status bar
             let gap = 6.0_f64;
             return BrowserBounds {
                 x: (w - rail_w + gap).max(0.0),
@@ -283,9 +294,9 @@ fn default_rail_bounds(app: &AppHandle) -> BrowserBounds {
     }
     BrowserBounds {
         x: 420.0,
-        y: 56.0,
+        y: 108.0,
         width: 480.0,
-        height: 720.0,
+        height: 640.0,
     }
 }
 
@@ -346,11 +357,37 @@ pub fn navigate_embed(
     let window = main_window(app)?;
     // about:blank first → then navigate: avoids multiwebview white-screen on some GPUs.
     let blank: Url = "about:blank".parse().map_err(|e: url::ParseError| e.to_string())?;
+    // Keep SPA address bar in sync when the user clicks links inside the page.
+    let app_for_load = app.clone();
     // Dark chrome — pure white reads as a distracting border around the page
     // Do not focus on create — steals focus and worsens z-order over React chrome.
     let builder = WebviewBuilder::new(LABEL, WebviewUrl::External(blank))
         .focused(false)
-        .background_color(Color(18, 18, 22, 255));
+        .background_color(Color(18, 18, 22, 255))
+        // Privacy Shield: cancel document navigations that match block lists
+        .on_navigation(|url| {
+            let s = url.as_str();
+            if crate::privacy_shield::should_block_navigation(s) {
+                return false;
+            }
+            true
+        })
+        .on_page_load(move |wv, payload| {
+            let u = payload.url().as_str().to_string();
+            if u.is_empty() || u.starts_with("about:") {
+                return;
+            }
+            if let Some(st) = app_for_load.try_state::<BrowserState>() {
+                if let Ok(mut g) = st.current_url.lock() {
+                    *g = u.clone();
+                }
+            }
+            let _ = app_for_load.emit("browser-url-changed", json!({ "url": u }));
+            // Phase 1 cosmetic: hide ad/tracker elements via EasyList CSS
+            if let Some(js) = crate::privacy_shield::cosmetic_inject_js(&u) {
+                let _ = wv.eval(&js);
+            }
+        });
 
     // add_child already runs builder on main thread internally
     let wv = window
@@ -769,8 +806,45 @@ pub fn browser_go_forward(app: AppHandle) -> Result<(), String> {
         .map_err(|e| format!("forward: {e}"))
 }
 
+/// Live URL of the embed. Prefers WebView2's real location (link clicks / history);
+/// falls back to last navigated URL in state.
 #[tauri::command]
-pub fn browser_current_url(state: State<'_, BrowserState>) -> Result<String, String> {
+pub fn browser_current_url(
+    app: AppHandle,
+    state: State<'_, BrowserState>,
+) -> Result<String, String> {
+    if let Some(wv) = app.get_webview(LABEL) {
+        if let Ok(u) = wv.url() {
+            let s = u.as_str().to_string();
+            if !s.is_empty() && !s.starts_with("about:") {
+                if let Ok(mut g) = state.current_url.lock() {
+                    *g = s.clone();
+                }
+                return Ok(s);
+            }
+        }
+        // Fallback: ask the page (some navigations lag wv.url())
+        let (tx, rx) = std::sync::mpsc::channel::<String>();
+        if wv
+            .eval_with_callback(
+                "try{String(location.href||'')}catch(e){''}",
+                move |result| {
+                    let _ = tx.send(result);
+                },
+            )
+            .is_ok()
+        {
+            if let Ok(raw) = rx.recv_timeout(Duration::from_millis(400)) {
+                let s = raw.trim().trim_matches('"').to_string();
+                if !s.is_empty() && !s.starts_with("about:") {
+                    if let Ok(mut g) = state.current_url.lock() {
+                        *g = s.clone();
+                    }
+                    return Ok(s);
+                }
+            }
+        }
+    }
     state
         .current_url
         .lock()

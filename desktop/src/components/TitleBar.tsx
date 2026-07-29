@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { isTauri } from '../api/tauri'
+import { browserStackHold } from '../utils/browserStack'
 
 export type AppMenuAction =
   | 'settings'
@@ -50,6 +51,12 @@ export function TitleBar({
       document.removeEventListener('mousedown', onDoc)
       window.removeEventListener('keydown', onKey)
     }
+  }, [menuOpen])
+
+  // App menu must not sit under the native Browser embed HWND.
+  useEffect(() => {
+    if (!menuOpen) return
+    return browserStackHold('titlebar-menu')
   }, [menuOpen])
 
   const run = (action: AppMenuAction) => {
