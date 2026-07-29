@@ -16,6 +16,7 @@ import {
   type Point,
 } from '../utils/imageMarkup'
 import { shouldUseCorsForImage } from '../utils/chatMedia'
+import { browserStackHold } from '../utils/browserStack'
 
 interface ImageLightboxProps {
   src: string | null
@@ -47,6 +48,12 @@ export function ImageLightbox({ src, alt, onClose, onAttachMarkup }: ImageLightb
   const [textDraft, setTextDraft] = useState<string>('')
   const [showTextPrompt, setShowTextPrompt] = useState(false)
   const textAnchorRef = useRef<Point | null>(null)
+
+  // Full-screen overlay must sit above the native Browser embed HWND.
+  useEffect(() => {
+    if (!src) return
+    return browserStackHold('image-lightbox')
+  }, [src])
 
   // Load image whenever src changes
   useEffect(() => {

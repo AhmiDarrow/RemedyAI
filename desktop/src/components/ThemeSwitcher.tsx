@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ThemeId, Theme } from '../themes'
 import { THEME_LIST, themeSwatch, systemThemeSwatch } from '../themes'
+import { browserStackHold } from '../utils/browserStack'
 
 interface ThemeSwitcherProps {
   currentId: ThemeId
@@ -31,6 +32,12 @@ export function ThemeSwitcher({ currentId, onChange }: ThemeSwitcherProps) {
     }
     document.addEventListener('mousedown', onDoc)
     return () => document.removeEventListener('mousedown', onDoc)
+  }, [open])
+
+  // Theme menu paints under the native Browser HWND unless we suppress it.
+  useEffect(() => {
+    if (!open) return
+    return browserStackHold('theme-menu')
   }, [open])
 
   const onListKey = (e: React.KeyboardEvent) => {
