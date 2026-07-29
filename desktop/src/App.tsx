@@ -39,6 +39,7 @@ import { useSessions } from './hooks/useSessions'
 import { useMessages } from './hooks/useMessages'
 import { useTheme } from './hooks/useTheme'
 import { loadUiMode, saveUiMode, type UiMode } from './utils/uiMode'
+import { browserStackSet } from './utils/browserStack'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import { useNotifications } from './hooks/useNotifications'
 import { useUpdateChecker } from './hooks/useUpdateChecker'
@@ -1560,6 +1561,37 @@ export default function App() {
   }, [handleNewSession, openHelp, helpOpen, openSettingsInRail])
 
   useKeyboardShortcuts(globalShortcuts)
+
+  // Native Browser embed HWND paints above React — hide while full-window overlays open.
+  useEffect(() => {
+    browserStackSet('help', helpOpen)
+    browserStackSet('palette', paletteOpen)
+    browserStackSet('about', aboutOpen)
+    browserStackSet('quit-warn', quitWarnOpen)
+    browserStackSet('time-travel', timeTravelOpen)
+    browserStackSet('usage', usageOpen)
+    browserStackSet('concurrent-turn', Boolean(concurrentConfirm))
+    browserStackSet('ask-user-name', askUserName)
+    return () => {
+      browserStackSet('help', false)
+      browserStackSet('palette', false)
+      browserStackSet('about', false)
+      browserStackSet('quit-warn', false)
+      browserStackSet('time-travel', false)
+      browserStackSet('usage', false)
+      browserStackSet('concurrent-turn', false)
+      browserStackSet('ask-user-name', false)
+    }
+  }, [
+    helpOpen,
+    paletteOpen,
+    aboutOpen,
+    quitWarnOpen,
+    timeTravelOpen,
+    usageOpen,
+    concurrentConfirm,
+    askUserName,
+  ])
 
   const shellProps = {
     version: appVersion || updateInfo?.current_version || desktopInfo?.current_version,

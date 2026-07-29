@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { isTauri, tauriInvoke } from '../../api/tauri'
+import { isTauri, tauriInvoke, tauriListen } from '../../api/tauri'
 import { getSettings } from '../../api/settings'
 import {
   DEFAULT_BROWSER_HOME,
@@ -7,6 +7,7 @@ import {
   resolveBrowserHome,
 } from '../../utils/browserUrl'
 import { openExternalUrl } from '../../api/auth'
+import { browserStackSetHostVisible } from '../../utils/browserStack'
 
 type Bounds = { x: number; y: number; width: number; height: number }
 
@@ -89,6 +90,8 @@ export function BrowserSlide() {
   const pushBounds = useCallback(async () => {
     if (!isTauri() || !loaded) return
     const b = readBounds(hostRef.current)
+    // No usable host → suppress native HWND so it cannot float over chrome
+    browserStackSetHostVisible(Boolean(b))
     if (!b) return
     try {
       await tauriInvoke('browser_set_bounds', { bounds: b })
@@ -116,6 +119,34 @@ export function BrowserSlide() {
       window.setTimeout(() => void pushBounds(), 200)
     }
     window.addEventListener('remedy:browser-resync-bounds', onResync)
+    // After stack unsuppress, re-clamp to the live host rect (not stale defaults)
+    let unlistenRestored: (() => void) | undefined
+    void tauriListen('browser-stack-restored', () => {
+      void pushBounds()
+      window.requestAnimationFrame(() => void pushBounds())
+    })
+      .then((u) => {
+        unlistenRestored = u
+      })
+      .catch(() => {
+        /* web / no tauri */
+      })
+    // Native HWND ignores CSS stacking — hide when host is off-screen / covered
+    const io = new IntersectionObserver(
+      (entries) => {
+        const e = entries[0]
+        const visible = Boolean(
+          e
+          && e.isIntersecting
+          && e.intersectionRatio > 0.02
+          && readBounds(el),
+        )
+        browserStackSetHostVisible(visible)
+        if (visible) void pushBounds()
+      },
+      { threshold: [0, 0.02, 0.1, 0.5, 1], root: null },
+    )
+    io.observe(el)
     // Popout/fullscreen layout can settle over several frames
     let n = 0
     let raf = 0
@@ -127,6 +158,8 @@ export function BrowserSlide() {
     raf = window.requestAnimationFrame(tick)
     return () => {
       ro.disconnect()
+      io.disconnect()
+      unlistenRestored?.()
       window.removeEventListener('resize', onWin)
       window.removeEventListener('remedy:browser-resync-bounds', onResync)
       window.cancelAnimationFrame(raf)
@@ -143,6 +176,7 @@ export function BrowserSlide() {
     }
     return () => {
       embedMountCount = Math.max(0, embedMountCount - 1)
+      browserStackSetHostVisible(false)
       if (hideTimer) clearTimeout(hideTimer)
       hideTimer = setTimeout(() => {
         hideTimer = null

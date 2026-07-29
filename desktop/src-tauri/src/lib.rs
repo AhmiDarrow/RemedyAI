@@ -2960,6 +2960,7 @@ pub fn run() {
             browser_host::browser_set_bounds,
             browser_host::browser_hide,
             browser_host::browser_show,
+            browser_host::browser_set_stack_suppressed,
             browser_host::browser_last_bounds,
             browser_host::browser_agent_action,
         ])
