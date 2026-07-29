@@ -428,10 +428,10 @@ class AssistantStore:
             "providers_planned": [
                 {
                     "id": "google",
-                    "name": "Google (Calendar now · Gmail soon)",
+                    "name": "Gmail",
                     "status": google_status,
                 },
-                {"id": "microsoft", "name": "Microsoft (Outlook/Hotmail)", "status": "planned"},
+                {"id": "microsoft", "name": "Microsoft (Outlook)", "status": "planned"},
                 {"id": "yahoo", "name": "Yahoo Mail", "status": "planned"},
             ],
         }
