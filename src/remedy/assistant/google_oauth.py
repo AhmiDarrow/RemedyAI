@@ -202,8 +202,10 @@ class GoogleTokens:
         }
 
 
-def _write_sealed(path: Path, plain: bytes) -> None:
+def _write_sealed(path: Path, plain: bytes) -> str:
+    """Write sealed or plain bytes. Returns encoding: ``dpapi`` or ``plain``."""
     written = False
+    encoding = "plain"
     try:
         from remedy.interfaces.secret_store import _dpapi_available, _dpapi_protect, _harden_path
 
@@ -216,14 +218,21 @@ def _write_sealed(path: Path, plain: bytes) -> None:
             }
             path.write_text(json.dumps(envelope, indent=2) + "\n", encoding="utf-8")
             written = True
+            encoding = "dpapi"
             with contextlib.suppress(Exception):
                 _harden_path(path, is_dir=False)
     except Exception as exc:
         logger.warning("Google token DPAPI protect failed: %s", exc)
     if not written:
         path.write_text(plain.decode("utf-8") + "\n", encoding="utf-8")
+        encoding = "plain"
+        logger.warning(
+            "Google tokens stored as plaintext at %s (DPAPI unavailable or failed)",
+            path,
+        )
     with contextlib.suppress(OSError):
         path.chmod(0o600)
+    return encoding
 
 
 def _read_sealed(path: Path) -> dict[str, Any] | None:
@@ -247,6 +256,21 @@ def _read_sealed(path: Path) -> dict[str, Any] | None:
             logger.warning("Google token DPAPI decrypt failed: %s", exc)
             return None
     return outer
+
+
+def tokens_encoding(home: Path | str | None = None) -> str:
+    """How Google tokens are stored: ``dpapi``, ``plain``, or ``missing``."""
+    path = tokens_path(home)
+    if not path.is_file():
+        return "missing"
+    try:
+        outer = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return "plain"
+    if isinstance(outer, dict) and outer.get("v") == 2 and outer.get("dpapi"):
+        return "dpapi"
+    # Looks like raw token JSON (access_token) or non-envelope
+    return "plain"
 
 
 def load_tokens(home: Path | str | None = None) -> GoogleTokens:
@@ -597,9 +621,18 @@ def disconnect(home: Path | str | None = None) -> None:
 def public_status(home: Path | str | None = None) -> dict[str, Any]:
     app = load_app_config(home)
     tokens = load_tokens(home)
-    return {
+    enc = tokens_encoding(home)
+    out: dict[str, Any] = {
         **tokens.to_public(),
         "app": app.to_public(),
         "setup_hint": None if app.configured() else "not_configured",
         "sign_in_ready": app.configured(),
+        "tokens_encoding": enc,
     }
+    if enc == "plain" and tokens.connected:
+        out["tokens_encoding_warning"] = (
+            "Google tokens are stored as plaintext (DPAPI seal unavailable). "
+            "Anyone with access to your Windows user profile can read them. "
+            "Fix DPAPI / re-connect if this was unexpected."
+        )
+    return out

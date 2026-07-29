@@ -274,10 +274,24 @@ export function AssistantSection({
         </div>
 
         <div className="mb-2 text-[10px]" style={{ color: 'var(--text-secondary)' }}>
+          {googleConnected && google?.tokens_encoding_warning ? (
+            <div
+              className="mb-1.5 rounded-md px-2 py-1.5 text-[10px] leading-snug"
+              role="status"
+              style={{
+                color: 'var(--remedy-warning, #b8860b)',
+                background: 'color-mix(in srgb, var(--remedy-warning, #b8860b) 12%, transparent)',
+                border: '1px solid color-mix(in srgb, var(--remedy-warning, #b8860b) 35%, transparent)',
+              }}
+            >
+              {google.tokens_encoding_warning}
+            </div>
+          ) : null}
           {googleConnected ? (
             <div className="flex flex-wrap items-center gap-2">
               <span style={{ color: 'var(--text-primary)' }}>
                 {google?.email || 'Connected'}
+                {google?.tokens_encoding === 'dpapi' ? ' · sealed' : ''}
               </span>
               <button
                 type="button"

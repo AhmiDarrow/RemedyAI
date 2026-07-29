@@ -29,6 +29,7 @@ tauri-plugin-shell = "2"
 tauri-plugin-updater = "2.10.1"
 ureq = { version = "2.12", default-features = false, features = ["tls", "json"] }
 base64 = "0.22"
+sha2 = "0.10"
 # Direct registry access for legacy Run-key scrub (no PowerShell Bypass).
 winreg = "0.55"
 # Native save/open dialogs (avoids multi-second PowerShell STA cold-start on export/import).

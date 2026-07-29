@@ -12,6 +12,8 @@ use adblock::Engine;
 use adblock::lists::{FilterSet, ParseOptions};
 use adblock::request::Request;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -23,8 +25,13 @@ const PREFS_NAME: &str = "privacy_shield.json";
 const ENGINE_CACHE: &str = "engine.dat";
 const EASYLIST_FILE: &str = "easylist.txt";
 const EASYPRIVACY_FILE: &str = "easyprivacy.txt";
+const LIST_HASHES_FILE: &str = "list_hashes.json";
 /// Refresh lists if older than 3 days.
 const LIST_MAX_AGE_SECS: u64 = 3 * 24 * 3600;
+/// Minimum credible EasyList body size (guards empty/truncated MitM pages).
+const LIST_MIN_BYTES: usize = 10_000;
+/// Disable EasyList/EasyPrivacy scriptlet injection by default (CSS hide only).
+const ALLOW_SCRIPTLET_INJECT: bool = false;
 
 const EASYLIST_URL: &str = "https://easylist.to/easylist/easylist.txt";
 const EASYPRIVACY_URL: &str = "https://easylist.to/easylist/easyprivacy.txt";
@@ -142,7 +149,74 @@ fn list_paths() -> (PathBuf, PathBuf) {
     (d.join(EASYLIST_FILE), d.join(EASYPRIVACY_FILE))
 }
 
-fn download_list(url: &str, dest: &Path) -> Result<(), String> {
+fn sha256_hex(data: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+    format!("{:x}", hasher.finalize())
+}
+
+fn list_hashes_path() -> PathBuf {
+    shield_dir().join(LIST_HASHES_FILE)
+}
+
+fn load_list_hashes() -> HashMap<String, String> {
+    let p = list_hashes_path();
+    if let Ok(raw) = fs::read_to_string(&p) {
+        if let Ok(map) = serde_json::from_str::<HashMap<String, String>>(&raw) {
+            return map;
+        }
+    }
+    HashMap::new()
+}
+
+fn save_list_hashes(map: &HashMap<String, String>) {
+    let dir = shield_dir();
+    let _ = fs::create_dir_all(&dir);
+    if let Ok(raw) = serde_json::to_string_pretty(map) {
+        let _ = fs::write(list_hashes_path(), raw);
+    }
+}
+
+fn validate_list_body(url: &str, body: &str) -> Result<(), String> {
+    if body.len() < LIST_MIN_BYTES {
+        return Err(format!(
+            "list too short from {url} ({} bytes, need ≥{LIST_MIN_BYTES})",
+            body.len()
+        ));
+    }
+    // EasyList files start with a comment header; reject HTML error pages.
+    let head = body.chars().take(200).collect::<String>().to_lowercase();
+    if head.contains("<html") || head.contains("<!doctype") {
+        return Err(format!("list from {url} looks like HTML, not a filter list"));
+    }
+    if !body.contains("[") && !body.contains("!") && !body.contains("||") {
+        return Err(format!("list from {url} missing expected filter syntax"));
+    }
+    Ok(())
+}
+
+fn verify_list_file(path: &Path, expected: Option<&str>) -> Result<String, String> {
+    let bytes = fs::read(path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    if bytes.len() < LIST_MIN_BYTES {
+        return Err(format!(
+            "{} too small ({} bytes)",
+            path.display(),
+            bytes.len()
+        ));
+    }
+    let hex = sha256_hex(&bytes);
+    if let Some(exp) = expected {
+        if exp != hex {
+            return Err(format!(
+                "integrity check failed for {} (hash mismatch — re-download)",
+                path.display()
+            ));
+        }
+    }
+    Ok(hex)
+}
+
+fn download_list(url: &str, dest: &Path) -> Result<String, String> {
     let agent = ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_secs(8))
         .timeout(Duration::from_secs(60))
@@ -158,27 +232,40 @@ fn download_list(url: &str, dest: &Path) -> Result<(), String> {
     let body = resp
         .into_string()
         .map_err(|e| format!("read {url}: {e}"))?;
-    if body.len() < 200 {
-        return Err(format!("list too short from {url}"));
-    }
+    validate_list_body(url, &body)?;
     if let Some(parent) = dest.parent() {
         let _ = fs::create_dir_all(parent);
     }
-    fs::write(dest, body).map_err(|e| format!("write {}: {e}", dest.display()))?;
-    Ok(())
+    let bytes = body.into_bytes();
+    let hex = sha256_hex(&bytes);
+    fs::write(dest, &bytes).map_err(|e| format!("write {}: {e}", dest.display()))?;
+    Ok(hex)
 }
 
 fn ensure_lists(force: bool, prefs: &mut PrivacyShieldPrefs) -> Result<(), String> {
     let (el, ep) = list_paths();
     let age_ok = prefs.lists_updated_at > 0
         && now_unix().saturating_sub(prefs.lists_updated_at) < LIST_MAX_AGE_SECS;
-    let have = el.is_file() && ep.is_file();
-    if have && age_ok && !force {
+    let hashes = load_list_hashes();
+    let el_name = EASYLIST_FILE.to_string();
+    let ep_name = EASYPRIVACY_FILE.to_string();
+    let integrity_ok = el.is_file()
+        && ep.is_file()
+        && verify_list_file(&el, hashes.get(&el_name).map(|s| s.as_str())).is_ok()
+        && verify_list_file(&ep, hashes.get(&ep_name).map(|s| s.as_str())).is_ok();
+    if integrity_ok && age_ok && !force {
         return Ok(());
     }
+    if el.is_file() && ep.is_file() && !integrity_ok {
+        log::warn!("privacy-shield: list integrity failed — re-fetching");
+    }
     log::info!("privacy-shield: fetching EasyList + EasyPrivacy (force={force})");
-    download_list(EASYLIST_URL, &el)?;
-    download_list(EASYPRIVACY_URL, &ep)?;
+    let h1 = download_list(EASYLIST_URL, &el)?;
+    let h2 = download_list(EASYPRIVACY_URL, &ep)?;
+    let mut new_hashes = HashMap::new();
+    new_hashes.insert(el_name, h1);
+    new_hashes.insert(ep_name, h2);
+    save_list_hashes(&new_hashes);
     prefs.lists_updated_at = now_unix();
     save_prefs(prefs);
     Ok(())
@@ -186,6 +273,16 @@ fn ensure_lists(force: bool, prefs: &mut PrivacyShieldPrefs) -> Result<(), Strin
 
 fn build_engine_from_lists() -> Result<Engine, String> {
     let (el, ep) = list_paths();
+    let hashes = load_list_hashes();
+    // Fail closed if on-disk lists were tampered with after download.
+    verify_list_file(
+        &el,
+        hashes.get(EASYLIST_FILE).map(|s| s.as_str()),
+    )?;
+    verify_list_file(
+        &ep,
+        hashes.get(EASYPRIVACY_FILE).map(|s| s.as_str()),
+    )?;
     let mut set = FilterSet::new(true);
     let opts = ParseOptions::default();
     for path in [&el, &ep] {
@@ -338,8 +435,8 @@ pub fn cosmetic_inject_js(page_url: &str) -> Option<String> {
         ));
     }
 
-    if !resources.injected_script.is_empty() {
-        // Scriptlets from lists — only if present; wrap try/catch
+    // Scriptlets from filter lists are powerful (arbitrary page JS). Off by default.
+    if ALLOW_SCRIPTLET_INJECT && !resources.injected_script.is_empty() {
         let script = resources
             .injected_script
             .replace("</script>", "<\\/script>");

@@ -21,6 +21,41 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+# Max characters of page text / large strings kept in on-disk job JSON.
+_JOB_TEXT_MAX = 4_000
+
+
+def _scrub_job_result(result: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Cap large text fields in job results before writing to disk."""
+    if result is None:
+        return None
+    out = dict(result)
+    for key in ("text", "page_text", "content", "html", "message"):
+        val = out.get(key)
+        if isinstance(val, str) and len(val) > _JOB_TEXT_MAX:
+            out[key] = val[: _JOB_TEXT_MAX - 1] + "…"
+            out[f"{key}_truncated"] = True
+    # Snapshot elements: drop any residual value fields that look like secrets.
+    els = out.get("elements")
+    if isinstance(els, list):
+        cleaned = []
+        for el in els[:120]:
+            if not isinstance(el, dict):
+                cleaned.append(el)
+                continue
+            e = dict(el)
+            if e.get("value_redacted") or str(e.get("tag") or "").lower() == "input":
+                # Prefer not retaining long values at rest
+                v = e.get("value")
+                if isinstance(v, str) and len(v) > 0 and e.get("value_redacted"):
+                    e["value"] = "[filled]"
+                elif isinstance(v, str) and len(v) > 40:
+                    e["value"] = v[:40] + "…"
+            cleaned.append(e)
+        out["elements"] = cleaned
+    return out
+
+
 def canonical_home(home_dir: Path | str | None = None) -> Path:
     """Single resolved home so tool wait + API complete always share one jobs dir."""
     if home_dir is not None and str(home_dir).strip():
@@ -356,18 +391,25 @@ class ComputerHostBridge:
                 return None
             # Success always wins over a prior wait-timeout error so a late
             # host complete is recorded (agent may re-read after grace).
+            safe_result = _scrub_job_result(result) if result is not None else None
             if ok:
                 job.status = "done"
-                job.result = result
+                job.result = safe_result
                 job.error = None
             elif job.status == "done":
                 # Never downgrade SUCCESS → error
                 return job
             else:
                 job.status = "error"
-                job.result = result
+                job.result = safe_result
                 job.error = error
             self._write(job)
+            # Opportunistic cleanup so page_text / snapshots do not linger on disk.
+            if job.status in ("done", "error", "cancelled"):
+                try:
+                    self.purge_old(max_age_s=900.0)
+                except Exception:
+                    pass
             return job
 
     def find_recent_success(
@@ -629,7 +671,8 @@ class ComputerHostBridge:
                     self.mark_host_dead()
         return job
 
-    def purge_old(self, *, max_age_s: float = 3600.0) -> int:
+    def purge_old(self, *, max_age_s: float = 900.0) -> int:
+        """Delete finished job files older than *max_age_s* (default 15 minutes)."""
         cutoff = time.time() - max_age_s
         n = 0
         for path in list(self.root.glob("*.json")):
