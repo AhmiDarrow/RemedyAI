@@ -33,6 +33,11 @@ import type { MessengerInfo } from '../../api/settings'
 import type { MessengerDraftMap } from '../../utils/messengerDrafts'
 import { Field, PERSONAS } from './shared'
 import { MessengersSection } from './MessengersSection'
+import {
+  AssistantSection,
+  type AssistantDraft,
+  type AssistantStatus,
+} from './AssistantSection'
 
 export interface SettingsFormProps {
   sectionProps: (id: SettingsSectionId) => {
@@ -151,6 +156,9 @@ export interface SettingsFormProps {
   messengers?: MessengerInfo[]
   messengerDrafts?: MessengerDraftMap
   setMessengerDrafts?: Dispatch<SetStateAction<MessengerDraftMap>>
+  assistant?: AssistantStatus | null
+  assistantDraft?: AssistantDraft
+  setAssistantDraft?: Dispatch<SetStateAction<AssistantDraft>>
 }
 
 export function SettingsFormSections(p: SettingsFormProps): ReactNode {
@@ -203,6 +211,9 @@ export function SettingsFormSections(p: SettingsFormProps): ReactNode {
     messengers = [],
     messengerDrafts = {},
     setMessengerDrafts,
+    assistant = null,
+    assistantDraft = {},
+    setAssistantDraft,
   } = p
 
   return (
@@ -1468,6 +1479,21 @@ export function SettingsFormSections(p: SettingsFormProps): ReactNode {
               <SettingsSection {...sectionProps('channels')}>
                 <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
                   Messenger settings unavailable.
+                </div>
+              </SettingsSection>
+            )}
+
+            {setAssistantDraft ? (
+              <AssistantSection
+                sectionProps={sectionProps('assistant')}
+                assistant={assistant}
+                draft={assistantDraft}
+                setDraft={setAssistantDraft}
+              />
+            ) : (
+              <SettingsSection {...sectionProps('assistant')}>
+                <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                  Personal assistant settings unavailable.
                 </div>
               </SettingsSection>
             )}

@@ -204,3 +204,5 @@ class SettingsUpdateRequest(BaseModel):
     enabled_channels: list[str] | None = None
     # Per-messenger updates: { "telegram": { "bot_token": "…", "allow_chat_ids": "…", "clear_token": false } }
     messengers: dict[str, dict] | None = None
+    # Personal assistant prefs (nested object; also stored under ~/.remedy/assistant.json)
+    assistant: dict | None = None

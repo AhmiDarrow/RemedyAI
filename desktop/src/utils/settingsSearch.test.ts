@@ -13,4 +13,11 @@ describe('settings search', () => {
     const m = SETTINGS_SECTION_META.theme
     expect(sectionMatchesSearch('', m.title, m.summary, m.keywords)).toBe(true)
   })
+
+  it('matches personal assistant section by keyword', () => {
+    const m = SETTINGS_SECTION_META.assistant
+    expect(sectionMatchesSearch('budget', m.title, m.summary, m.keywords)).toBe(true)
+    expect(sectionMatchesSearch('gmail', m.title, m.summary, m.keywords)).toBe(true)
+    expect(sectionMatchesSearch('xyzzy-nope', m.title, m.summary, m.keywords)).toBe(false)
+  })
 })

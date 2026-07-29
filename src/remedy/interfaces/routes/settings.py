@@ -213,6 +213,39 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             logger.debug("settings messengers: %s", exc)
             out["enabled_channels"] = ["cli"]
             out["messengers"] = []
+        # Personal assistant (local store + planned OAuth providers)
+        try:
+            from remedy.assistant.store import get_assistant_store
+
+            astore = get_assistant_store(home_path)
+            # Merge light flags from config.toml if present
+            acfg = cfg.get("assistant") if isinstance(cfg.get("assistant"), dict) else {}
+            if acfg:
+                astore.patch_prefs(
+                    **{
+                        k: acfg[k]
+                        for k in (
+                            "enabled",
+                            "timezone",
+                            "money_disclaimer_accepted",
+                        )
+                        if k in acfg
+                    }
+                )
+                if isinstance(acfg.get("brief"), dict):
+                    astore.patch_prefs(brief=acfg["brief"])
+            out["assistant"] = astore.public_status()
+        except Exception as exc:
+            logger.debug("settings assistant: %s", exc)
+            out["assistant"] = {
+                "enabled": True,
+                "accounts": [],
+                "providers_planned": [
+                    {"id": "google", "name": "Google", "status": "planned"},
+                    {"id": "microsoft", "name": "Microsoft", "status": "planned"},
+                    {"id": "yahoo", "name": "Yahoo", "status": "planned"},
+                ],
+            }
         # Visual decoder summary only (full detail via /api/vision/status).
         # Always use light=True — full get_status used to block the event loop
         # for seconds when llama-server was down, freezing /api/status polls.
@@ -382,6 +415,9 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                 updates["browser_home_url"]
             )
 
+        # Hold PA prefs until home_path is known (written with messengers block).
+        assistant_update = updates.pop("assistant", None)
+
         if "allow_skill_creation" in updates and updates["allow_skill_creation"] is not None:
             updates["allow_skill_creation"] = bool(updates["allow_skill_creation"])
 
@@ -467,6 +503,37 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                     save_api_key(str(incoming_key).strip(), home=home_path)
                 except Exception as exc:
                     logger.debug("xAI settings key sync: %s", exc)
+
+        # Personal assistant prefs → assistant.json + slim mirror in config
+        if isinstance(assistant_update, dict):
+            try:
+                from remedy.assistant.store import get_assistant_store
+
+                astore = get_assistant_store(home_path)
+                ap = dict(assistant_update)
+                patch: dict = {}
+                for k in (
+                    "enabled",
+                    "timezone",
+                    "money_disclaimer_accepted",
+                    "default_calendar_account",
+                    "default_mail_account",
+                ):
+                    if k in ap:
+                        patch[k] = ap[k]
+                if isinstance(ap.get("brief"), dict):
+                    patch["brief"] = ap["brief"]
+                if patch:
+                    astore.patch_prefs(**patch)
+                prefs = astore.get_prefs()
+                cfg["assistant"] = {
+                    "enabled": prefs.enabled,
+                    "timezone": prefs.timezone,
+                    "money_disclaimer_accepted": prefs.money_disclaimer_accepted,
+                    "brief": prefs.brief.to_dict(),
+                }
+            except Exception as exc:
+                logger.warning("assistant prefs save failed: %s", exc)
 
         if isinstance(messengers_update, dict):
             try:
