@@ -1,4 +1,4 @@
-/** Settings → Personal assistant — Google Calendar (Browser rail OAuth), brief, budget. */
+/** Settings → Personal assistant — simple account connect + brief + budget. */
 
 import {
   useCallback,
@@ -13,12 +13,10 @@ import {
   disconnectGoogle,
   getGoogleStatus,
   pollGoogleOAuth,
-  saveGoogleApp,
   startGoogleOAuth,
   type GoogleAuthStatus,
 } from '../../api/assistant'
 import { openExternalUrl } from '../../api/auth'
-import { openUrlInBrowserRail } from '../../api/computer'
 import { SettingsSection } from '../SettingsSection'
 
 export type AssistantDraft = {
@@ -75,7 +73,26 @@ export interface AssistantSectionProps {
   onAccountsChanged?: () => void
 }
 
-const DEFAULT_REDIRECT = 'http://127.0.0.1:7400/api/assistant/google/callback'
+/** Mail / calendar platforms shown in the account dropdown. */
+const ACCOUNT_PROVIDERS = [
+  {
+    id: 'google',
+    label: 'Google (Calendar)',
+    ready: true,
+  },
+  {
+    id: 'microsoft',
+    label: 'Microsoft (Outlook)',
+    ready: false,
+  },
+  {
+    id: 'yahoo',
+    label: 'Yahoo Mail',
+    ready: false,
+  },
+] as const
+
+type ProviderId = (typeof ACCOUNT_PROVIDERS)[number]['id']
 
 const inputStyle = {
   borderColor: 'var(--border)',
@@ -83,17 +100,30 @@ const inputStyle = {
   color: 'var(--text-primary)',
 } as const
 
-const GOOGLE_CONSOLE = 'https://console.cloud.google.com/apis/credentials'
-
 function shortErr(e: unknown): string {
   const raw = e instanceof Error ? e.message : String(e)
-  if (/client_id not set|enter a client id/i.test(raw)) {
-    return 'Paste your Google OAuth Client ID (from Google Cloud Console), then Connect.'
+  if (/client_id not set|not configured|not set/i.test(raw)) {
+    return 'Google sign-in isn’t available in this build yet. Restart after update, or set REMEDY_GOOGLE_OAUTH_CLIENT_ID.'
   }
-  if (/405|method not allowed/i.test(raw)) return 'Server outdated — restart Remedy.'
-  if (/404|not found/i.test(raw)) return 'Server outdated — restart Remedy.'
+  if (/405|method not allowed|404|not found/i.test(raw)) {
+    return 'Server outdated — restart Remedy.'
+  }
   if (raw.length > 140) return `${raw.slice(0, 137)}…`
   return raw
+}
+
+/** Standard OAuth popup (system browser window). Fallback: default external open. */
+async function openOAuthPopup(url: string): Promise<void> {
+  const trimmed = (url || '').trim()
+  if (!trimmed) return
+  try {
+    // Prefer OS browser — Google expects a real browser for OAuth, not a form paste.
+    await openExternalUrl(trimmed)
+  } catch {
+    if (typeof window !== 'undefined') {
+      window.open(trimmed, 'remedy_oauth', 'popup=yes,width=520,height=720')
+    }
+  }
 }
 
 export function AssistantSection({
@@ -112,15 +142,10 @@ export function AssistantSection({
       : Boolean(assistant?.money_disclaimer_accepted)
 
   const [google, setGoogle] = useState<GoogleAuthStatus | null>(null)
-  const [clientId, setClientId] = useState('')
-  const [clientSecret, setClientSecret] = useState('')
+  const [provider, setProvider] = useState<ProviderId>('google')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
-  const [authUrl, setAuthUrl] = useState<string | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
-
-  const redirectUri = google?.app?.redirect_uri || DEFAULT_REDIRECT
-  const hasSavedClient = Boolean(google?.app?.client_id_set)
 
   const stopPoll = useCallback(() => {
     if (pollRef.current) {
@@ -156,46 +181,31 @@ export function AssistantSection({
     ? 'Off'
     : googleConnected
       ? `On · ${google?.email || 'Google'}`
-      : 'On · Google not connected'
+      : 'On'
 
-  const openConsole = async () => {
-    setMsg('Opening Google Cloud in Browser rail…')
-    const where = await openUrlInBrowserRail(GOOGLE_CONSOLE)
-    setMsg(
-      where === 'rail'
-        ? 'Browser rail: create OAuth client → copy Client ID here.'
-        : 'Opened Google Cloud (external). Copy Client ID back here.',
-    )
-  }
+  const selected = ACCOUNT_PROVIDERS.find((p) => p.id === provider) || ACCOUNT_PROVIDERS[0]
 
   const handleConnect = async () => {
-    setBusy(true)
     setMsg('')
-    setAuthUrl(null)
+    if (!selected.ready) {
+      setMsg(`${selected.label} — coming soon.`)
+      return
+    }
+    if (provider !== 'google') {
+      setMsg('Only Google is available right now.')
+      return
+    }
+    if (googleConnected) {
+      setMsg(google?.email ? `Already connected as ${google.email}` : 'Already connected.')
+      return
+    }
+
+    setBusy(true)
     stopPoll()
     try {
-      const id = clientId.trim()
-      if (!id && !hasSavedClient) {
-        setMsg('Need a Client ID first — use “Get Client ID”, then paste it below.')
-        setBusy(false)
-        return
-      }
-      if (id) {
-        await saveGoogleApp({
-          client_id: id,
-          ...(clientSecret.trim() ? { client_secret: clientSecret.trim() } : {}),
-        })
-        setClientSecret('')
-        await refreshGoogle()
-      }
       const start = await startGoogleOAuth()
-      setAuthUrl(start.auth_url)
-      const where = await openUrlInBrowserRail(start.auth_url)
-      setMsg(
-        where === 'rail'
-          ? 'Sign in in the Browser rail (right). Waiting…'
-          : 'Sign in in the window that opened. Waiting…',
-      )
+      setMsg('Complete sign-in in the browser window…')
+      await openOAuthPopup(start.auth_url)
       const state = start.state
       pollRef.current = setInterval(() => {
         void (async () => {
@@ -204,7 +214,6 @@ export function AssistantSection({
             if (poll.status === 'connected' || poll.credentials?.connected) {
               stopPoll()
               setBusy(false)
-              setAuthUrl(null)
               const email = poll.email || poll.credentials?.email
               setMsg(email ? `Connected · ${email}` : 'Connected')
               await refreshGoogle()
@@ -232,22 +241,12 @@ export function AssistantSection({
     try {
       await disconnectGoogle()
       setMsg('Disconnected')
-      setAuthUrl(null)
       await refreshGoogle()
       onAccountsChanged?.()
     } catch (e: unknown) {
       setMsg(shortErr(e))
     } finally {
       setBusy(false)
-    }
-  }
-
-  const copyRedirect = async () => {
-    try {
-      await navigator.clipboard.writeText(redirectUri)
-      setMsg('Redirect URI copied — paste it into your OAuth client.')
-    } catch {
-      setMsg(redirectUri)
     }
   }
 
@@ -263,14 +262,17 @@ export function AssistantSection({
         <span style={{ color: 'var(--text-primary)' }}>Enabled</span>
       </label>
 
-      {/* Google */}
+      {/* Accounts — dropdown + Connect (no Client ID UI) */}
       <div className="mb-2 text-[10px]" style={{ color: 'var(--text-secondary)' }}>
         <div className="font-medium mb-1" style={{ color: 'var(--text-primary)' }}>
-          Google Calendar
+          Accounts
         </div>
+
         {googleConnected ? (
-          <div className="flex items-center gap-2 flex-wrap">
-            <span style={{ color: 'var(--text-primary)' }}>{google?.email || 'Connected'}</span>
+          <div className="flex flex-wrap items-center gap-2 mb-1.5">
+            <span style={{ color: 'var(--text-primary)' }}>
+              Google · {google?.email || 'connected'}
+            </span>
             <button
               type="button"
               disabled={busy}
@@ -283,97 +285,47 @@ export function AssistantSection({
               Disconnect
             </button>
           </div>
-        ) : (
-          <div className="space-y-1.5">
-            <p className="m-0 leading-snug" style={{ color: 'var(--text-muted)' }}>
-              Google requires your own free OAuth client (Remedy cannot sign in as “Google”
-              without it). Sign-in opens in the <strong style={{ color: 'var(--text-secondary)' }}>Browser rail</strong>.
-            </p>
-            <ol className="m-0 pl-3.5 space-y-0.5 leading-snug" style={{ color: 'var(--text-muted)' }}>
-              <li>
-                <button
-                  type="button"
-                  className="underline p-0 border-0 bg-transparent cursor-pointer text-[10px]"
-                  style={{ color: 'var(--accent)' }}
-                  onClick={() => {
-                    void openConsole()
-                  }}
-                >
-                  Get Client ID
-                </button>
-                {' '}(Cloud Console → Credentials → Create OAuth client → Desktop or Web)
-              </li>
-              <li>
-                Add redirect{' '}
-                <button
-                  type="button"
-                  className="underline p-0 border-0 bg-transparent cursor-pointer text-[10px] font-mono"
-                  style={{ color: 'var(--accent)' }}
-                  title="Click to copy"
-                  onClick={() => {
-                    void copyRedirect()
-                  }}
-                >
-                  {redirectUri}
-                </button>
-                {' '}· enable Calendar API
-              </li>
-              <li>Paste Client ID → Connect → finish sign-in in Browser rail</li>
-            </ol>
-            <input
-              type="text"
-              placeholder={hasSavedClient ? 'Client ID saved — paste to replace' : 'Paste Client ID here'}
-              value={clientId}
-              onChange={(e) => setClientId(e.target.value)}
-              className="w-full rounded border px-1.5 py-1 text-[10px] outline-none"
-              style={inputStyle}
-              autoComplete="off"
-            />
-            <input
-              type="password"
-              placeholder="Client secret (only if Google shows one)"
-              value={clientSecret}
-              onChange={(e) => setClientSecret(e.target.value)}
-              className="w-full rounded border px-1.5 py-1 text-[10px] outline-none"
-              style={inputStyle}
-              autoComplete="off"
-            />
-            <div className="flex flex-wrap gap-1.5 items-center">
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => {
-                  void handleConnect()
-                }}
-                className="rounded px-2 py-1 text-[10px]"
-                style={{ background: 'var(--accent)', color: 'var(--accent-fg, #fff)' }}
-              >
-                {busy ? 'Waiting for Google…' : 'Connect'}
-              </button>
-              {authUrl ? (
-                <button
-                  type="button"
-                  className="rounded px-2 py-1 text-[10px] border"
-                  style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}
-                  onClick={() => {
-                    void openExternalUrl(authUrl)
-                    setMsg('Opened in system browser (fallback).')
-                  }}
-                >
-                  System browser
-                </button>
-              ) : null}
-            </div>
-          </div>
-        )}
+        ) : null}
+
+        <div className="flex flex-wrap items-center gap-1.5">
+          <select
+            value={provider}
+            onChange={(e) => setProvider(e.target.value as ProviderId)}
+            disabled={busy}
+            className="rounded border px-1.5 py-1 text-[10px] outline-none min-w-[10rem]"
+            style={inputStyle}
+          >
+            {ACCOUNT_PROVIDERS.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.label}
+                {!p.ready ? ' — soon' : ''}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            disabled={busy || (provider === 'google' && googleConnected)}
+            onClick={() => {
+              void handleConnect()
+            }}
+            className="rounded px-2.5 py-1 text-[10px]"
+            style={{
+              background: 'var(--accent)',
+              color: 'var(--accent-fg, #fff)',
+              opacity: busy || (provider === 'google' && googleConnected) ? 0.6 : 1,
+            }}
+          >
+            {busy ? 'Waiting…' : 'Connect'}
+          </button>
+        </div>
         {msg ? (
-          <div className="mt-1.5" style={{ color: 'var(--text-muted)' }}>
+          <div className="mt-1" style={{ color: 'var(--text-muted)' }}>
             {msg}
           </div>
         ) : null}
       </div>
 
-      {/* Brief */}
+      {/* Daily brief — kept as requested */}
       <div className="mb-2 text-[10px]" style={{ color: 'var(--text-secondary)' }}>
         <div className="font-medium mb-1" style={{ color: 'var(--text-primary)' }}>
           Daily brief
@@ -421,7 +373,7 @@ export function AssistantSection({
         </div>
       </div>
 
-      {/* Money */}
+      {/* Budget */}
       <div className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>
         <div className="font-medium mb-1" style={{ color: 'var(--text-primary)' }}>
           Budget / debt

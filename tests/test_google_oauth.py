@@ -50,8 +50,12 @@ def test_app_config_save_load(tmp_path):
     assert pub["redirect_uri"].endswith("/api/assistant/google/callback")
 
 
-def test_start_oauth_requires_client(tmp_path):
-    with pytest.raises(ValueError, match="client_id"):
+def test_start_oauth_requires_client(tmp_path, monkeypatch):
+    monkeypatch.delenv("REMEDY_GOOGLE_OAUTH_CLIENT_ID", raising=False)
+    monkeypatch.delenv("GOOGLE_OAUTH_CLIENT_ID", raising=False)
+    monkeypatch.delenv("REMEDY_GOOGLE_OAUTH_DEFAULT_CLIENT_ID", raising=False)
+    monkeypatch.setattr(go, "DEFAULT_GOOGLE_CLIENT_ID", "")
+    with pytest.raises(ValueError, match="not configured"):
         go.start_oauth(home=tmp_path)
 
 
