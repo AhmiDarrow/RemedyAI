@@ -75,6 +75,53 @@ export interface Settings {
   enabled_channels?: string[]
   /** Messenger connector status from catalog (no raw secrets) */
   messengers?: MessengerInfo[]
+  /** Personal assistant status (prefs + local budget/debt counts; no secrets) */
+  assistant?: AssistantStatus
+}
+
+/** Settings → Personal assistant prefs (GET status / PUT patch). */
+export interface AssistantBriefPrefs {
+  enabled?: boolean
+  hour_local?: number
+  quiet_start?: number
+  quiet_end?: number
+  include_calendar?: boolean
+  include_mail?: boolean
+  include_goals?: boolean
+  include_budget?: boolean
+  messenger_delivery?: boolean
+}
+
+export interface AssistantAccountInfo {
+  id?: string
+  provider?: string
+  email?: string
+  status?: string
+  capabilities?: string[]
+  last_sync?: string
+  error?: string
+}
+
+export interface AssistantStatus {
+  enabled?: boolean
+  timezone?: string
+  money_disclaimer_accepted?: boolean
+  money_disclaimer?: string
+  brief?: AssistantBriefPrefs
+  accounts?: AssistantAccountInfo[]
+  has_budget?: boolean
+  debt_count?: number
+  bill_count?: number
+  providers_planned?: Array<{ id: string; name: string; status: string }>
+}
+
+export interface AssistantUpdate {
+  enabled?: boolean
+  timezone?: string
+  money_disclaimer_accepted?: boolean
+  default_calendar_account?: string
+  default_mail_account?: string
+  brief?: AssistantBriefPrefs
 }
 
 export interface MessengerFieldSchema {
@@ -138,6 +185,8 @@ export interface SettingsUpdate {
   browser_home_url?: string
   enabled_channels?: string[]
   messengers?: Record<string, Record<string, unknown>>
+  /** Personal assistant prefs (also mirrored under ~/.remedy/assistant.json) */
+  assistant?: AssistantUpdate
 }
 
 export async function getSettings(): Promise<Settings> {

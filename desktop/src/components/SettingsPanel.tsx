@@ -50,6 +50,7 @@ import {
   messengersUpdateFromDrafts,
   type MessengerDraftMap,
 } from '../utils/messengerDrafts'
+import type { AssistantDraft } from './settings/AssistantSection'
 
 interface SettingsPanelProps {
   open: boolean
@@ -160,6 +161,7 @@ export function SettingsPanel({
   const [skillsBudget, setSkillsBudget] = useState(80)
   const [messengers, setMessengers] = useState<MessengerInfo[]>([])
   const [messengerDrafts, setMessengerDrafts] = useState<MessengerDraftMap>({})
+  const [assistantDraft, setAssistantDraft] = useState<AssistantDraft>({})
 
   const primaryProviders = useMemo(
     () => catalog.filter((p) => !p.advanced),
@@ -307,6 +309,8 @@ export function SettingsPanel({
         setMessengers(list)
         setMessengerDrafts(draftsFromMessengers(list))
       }
+      // Reset draft so checkboxes reflect server status after load/save.
+      setAssistantDraft({})
       {
         const am = String(s.approval_mode || 'ask').toLowerCase()
         setApprovalMode(am === 'auto' ? 'auto' : 'ask')
@@ -584,6 +588,9 @@ export function SettingsPanel({
     }
     const msgBody = messengersUpdateFromDrafts(messengers, messengerDrafts)
     if (msgBody) updates.messengers = msgBody
+    if (Object.keys(assistantDraft).length > 0) {
+      updates.assistant = { ...assistantDraft }
+    }
     try {
       try {
         await invoke('set_launch_at_login', { enabled: launchAtLogin })
@@ -791,6 +798,9 @@ export function SettingsPanel({
               messengers={messengers}
               messengerDrafts={messengerDrafts}
               setMessengerDrafts={setMessengerDrafts}
+              assistant={settings?.assistant}
+              assistantDraft={assistantDraft}
+              setAssistantDraft={setAssistantDraft}
               primaryProviders={primaryProviders}
               advancedProviders={advancedProviders}
               activeMeta={activeMeta ?? FALLBACK_PROVIDERS[0]}

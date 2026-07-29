@@ -15,6 +15,7 @@ export type SettingsSectionId =
   | 'help'
   | 'mcp'
   | 'channels'
+  | 'assistant'
   | 'about'
   | 'license'
 
@@ -97,6 +98,12 @@ export const SETTINGS_SECTION_META: Record<
     summary: 'Telegram, Discord, WhatsApp…',
     keywords:
       'telegram discord slack mattermost whatsapp teams matrix signal messenger channel bot gateway continuity',
+  },
+  assistant: {
+    title: 'Personal assistant',
+    summary: 'Calendar, mail, budget (local)',
+    keywords:
+      'assistant personal calendar gmail mail outlook hotmail yahoo budget debt bills brief oauth accounts money disclaimer',
   },
   about: {
     title: 'About',
