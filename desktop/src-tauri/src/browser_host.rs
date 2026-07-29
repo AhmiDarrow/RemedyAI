@@ -905,10 +905,25 @@ pub fn browser_agent_action(
     const ref='e'+(i+1);
     try { el.setAttribute('data-remedy-ref', ref); } catch(e) {}
     const text=(el.innerText||'').trim().replace(/\s+/g,' ').slice(0,120);
-    const name=(el.getAttribute('aria-label')||el.getAttribute('title')||text||el.value||el.placeholder||el.name||el.tagName||'').trim().replace(/\s+/g,' ').slice(0,120);
+    const tag=(el.tagName||'').toLowerCase();
+    const itype=String(el.type||'').toLowerCase();
+    const auto=String(el.getAttribute('autocomplete')||'').toLowerCase();
+    // Never ship password/OTP/secret field values into tool results → LLM.
+    const sensitive = tag==='input' && (
+      itype==='password' || itype==='hidden' ||
+      auto.includes('password') || auto.includes('one-time') || auto==='one-time-code' ||
+      auto.includes('cc-') || auto.includes('card') ||
+      (el.getAttribute('name')||'').toLowerCase().match(/pass|otp|cvv|cvc|secret|token/)
+    );
+    const rawVal = (el.value!=null?String(el.value):'');
+    const hasVal = rawVal.length>0;
+    // Prefer labels/placeholder over raw value for name (avoids password in name).
+    const name=(el.getAttribute('aria-label')||el.getAttribute('title')||text||el.placeholder||el.name||(sensitive?'':rawVal)||el.tagName||'').trim().replace(/\s+/g,' ').slice(0,120);
     return {
-      ref, tag:(el.tagName||'').toLowerCase(), role:el.getAttribute('role')||'',
-      name, text, value:(el.value!=null?String(el.value):'').slice(0,80),
+      ref, tag, role:el.getAttribute('role')||'',
+      name, text,
+      value: sensitive ? (hasVal ? '[filled]' : '') : rawVal.slice(0,80),
+      value_redacted: !!sensitive,
       placeholder:(el.placeholder||'').slice(0,80),
       href:(el.href||el.getAttribute('href')||'').slice(0,200),
       title:(el.getAttribute('title')||'').slice(0,80),
@@ -924,7 +939,8 @@ pub fn browser_agent_action(
   const t=(document.body&&document.body.innerText)||'';
   const title=document.title||'';
   const url=location.href||'';
-  return JSON.stringify({title,url,text:t.replace(/\s+\n/g,'\n').trim().slice(0,12000)});
+  // Cap page text so less personal content reaches the agent/LLM by default.
+  return JSON.stringify({title,url,text:t.replace(/\s+\n/g,'\n').trim().slice(0,8000)});
 })()"#
             .to_string()
         }

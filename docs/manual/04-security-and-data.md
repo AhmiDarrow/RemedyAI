@@ -50,7 +50,8 @@ On Windows, `~` is your user profile (`C:\Users\<you>`).
 |------|----------------|
 | Page text / DOM actions | On this PC via desktop host (loopback) |
 | Tool results to the model | May include page text → **LLM provider** for that turn |
-| Prefer | DOM/UIA over screenshots |
+| Password fields | Snapshot **does not** send password/OTP values (shows `[filled]`) |
+| Prefer | DOM/UIA over screenshots; confirm form with snapshot before typing secrets |
 
 ## Simple / Advanced (UI)
 

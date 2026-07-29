@@ -24,68 +24,102 @@ def register_assistant_tools(runtime: Any) -> None:
 
     async def assistant_brief(hint: str = "") -> str:
         """On-demand brief from goals + local budget/bills (calendar/mail when linked)."""
+        from remedy.assistant.privacy import (
+            BRIEF_SNIPPET_MAX,
+            clip,
+            consent_ok,
+            redact_secrets,
+            sanitize_mail_list_item,
+        )
+
         prefs = store.get_prefs()
         parts: list[str] = ["# Assistant brief", ""]
+        # Local budget/goals never need Google consent; mail/calendar do.
+        google_ok, google_reason = consent_ok(home)
         if prefs.brief.include_calendar:
-            try:
-                from datetime import UTC, datetime, timedelta
-
-                from remedy.assistant.providers.google_calendar import get_google_calendar
-
-                cal = get_google_calendar(home)
-                if cal is not None:
-                    now = datetime.now(UTC)
-                    events = cal.list_events(
-                        time_min=now.isoformat().replace("+00:00", "Z"),
-                        time_max=(now + timedelta(days=7)).isoformat().replace("+00:00", "Z"),
-                    )
-                    parts.append("## Calendar (next 7 days)")
-                    if not events:
-                        parts.append("No upcoming events on primary calendar.")
-                    else:
-                        for ev in events[:15]:
-                            parts.append(f"- {ev.start}: {ev.title}")
-                    parts.append("")
-                else:
-                    parts.append("## Calendar")
-                    parts.append(
-                        "Not connected — Settings → Personal assistant → Connect Google (Gmail)."
-                    )
-                    parts.append("")
-            except Exception as exc:
+            if not google_ok:
                 parts.append("## Calendar")
-                parts.append(f"(Could not load calendar: {exc})")
+                parts.append(f"(Skipped — {google_reason})")
                 parts.append("")
-        if prefs.brief.include_mail:
-            try:
-                from remedy.assistant.providers.google_gmail import get_google_gmail
+            else:
+                try:
+                    from datetime import UTC, datetime, timedelta
 
-                mail = get_google_gmail(home)
-                if mail is not None:
-                    msgs = mail.list_messages(query="in:inbox", limit=8)
-                    parts.append("## Inbox (recent)")
-                    if not msgs:
-                        parts.append("No recent inbox messages.")
+                    from remedy.assistant.providers.google_calendar import get_google_calendar
+
+                    cal = get_google_calendar(home)
+                    if cal is not None:
+                        now = datetime.now(UTC)
+                        events = cal.list_events(
+                            time_min=now.isoformat().replace("+00:00", "Z"),
+                            time_max=(now + timedelta(days=7)).isoformat().replace(
+                                "+00:00", "Z"
+                            ),
+                        )
+                        parts.append("## Calendar (next 7 days)")
+                        if not events:
+                            parts.append("No upcoming events on primary calendar.")
+                        else:
+                            for ev in events[:15]:
+                                title = clip(str(getattr(ev, "title", "") or ""), 80)
+                                start = clip(str(getattr(ev, "start", "") or ""), 40)
+                                parts.append(f"- {start}: {title}")
+                        parts.append("")
                     else:
-                        from remedy.assistant.privacy import BRIEF_SNIPPET_MAX, clip
-
-                        for m in msgs:
-                            parts.append(
-                                f"- {clip(m.from_addr or '?', 40)}: "
-                                f"{clip(m.subject or '', 60)} — "
-                                f"{clip(m.snippet or '', BRIEF_SNIPPET_MAX)}"
-                            )
+                        parts.append("## Calendar")
+                        parts.append(
+                            "Not connected — Settings → Personal assistant → Connect Google (Gmail)."
+                        )
+                        parts.append("")
+                except Exception as exc:
+                    parts.append("## Calendar")
+                    parts.append(f"(Could not load calendar: {exc})")
                     parts.append("")
-                else:
-                    parts.append("## Mail")
-                    parts.append(
-                        "Not connected — Settings → Personal assistant → Connect Google (Gmail)."
-                    )
-                    parts.append("")
-            except Exception as exc:
+        if prefs.brief.include_mail:
+            if not google_ok:
                 parts.append("## Mail")
-                parts.append(f"(Could not load mail: {exc})")
+                parts.append(f"(Skipped — {google_reason})")
                 parts.append("")
+            else:
+                try:
+                    from remedy.assistant.providers.google_gmail import get_google_gmail
+
+                    mail = get_google_gmail(home)
+                    if mail is not None:
+                        msgs = mail.list_messages(query="in:inbox", limit=8)
+                        parts.append("## Inbox (recent)")
+                        if not msgs:
+                            parts.append("No recent inbox messages.")
+                        else:
+                            for m in msgs:
+                                row = sanitize_mail_list_item(
+                                    redact_secrets(
+                                        {
+                                            "id": getattr(m, "id", "") or "",
+                                            "subject": getattr(m, "subject", "") or "",
+                                            "from": getattr(m, "from_addr", "") or "",
+                                            "snippet": getattr(m, "snippet", "") or "",
+                                            "date": getattr(m, "date", "") or "",
+                                            "thread_id": getattr(m, "thread_id", "") or "",
+                                        }
+                                    )
+                                )
+                                parts.append(
+                                    f"- {clip(str(row.get('from') or '?'), 40)}: "
+                                    f"{clip(str(row.get('subject') or ''), 60)} — "
+                                    f"{clip(str(row.get('snippet') or ''), BRIEF_SNIPPET_MAX)}"
+                                )
+                        parts.append("")
+                    else:
+                        parts.append("## Mail")
+                        parts.append(
+                            "Not connected — Settings → Personal assistant → Connect Google (Gmail)."
+                        )
+                        parts.append("")
+                except Exception as exc:
+                    parts.append("## Mail")
+                    parts.append(f"(Could not load mail: {exc})")
+                    parts.append("")
         if prefs.brief.include_budget:
             st = store.budget_status()
             parts.append("## Budget")

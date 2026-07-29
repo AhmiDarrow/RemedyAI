@@ -519,6 +519,34 @@ class ComputerExecutor:
             if isinstance(payload.get("ui"), dict):
                 payload["ui"]["open_browser"] = True
 
+        # After optimistic navigate, wait for paint before type/click/page text.
+        if act in (
+            ComputerAction.CLICK,
+            ComputerAction.TYPE,
+            ComputerAction.PAGE_TEXT,
+            ComputerAction.SNAPSHOT,
+            ComputerAction.FIND,
+        ) and self.bridge.navigate_needs_settle():
+            slept = self.bridge.settle_after_navigate(min_s=0.6, max_s=1.2)
+            # Best-effort ready probe via host job (ignore failures).
+            try:
+                ready_job = self.bridge.enqueue("ready", {"action": "ready"})
+                ready_fin = self.bridge.wait(
+                    ready_job.id,
+                    timeout_s=0.45,
+                    poll_s=0.03,
+                    abort_check=self._abort_check,
+                    unclaimed_timeout_s=None,
+                    grace_s=0.05,
+                )
+                if ready_fin and ready_fin.status == "done":
+                    self.bridge.clear_navigate_optimistic()
+                elif slept >= 0.55:
+                    # Timed settle without ready confirm — allow action but keep flag briefly.
+                    pass
+            except Exception:
+                pass
+
         # Non-navigate without host: screenshots can still use OS capture
         if not self.bridge.host_connected() and act is not ComputerAction.NAVIGATE:
             if act is ComputerAction.SCREENSHOT:
@@ -1034,27 +1062,38 @@ class ComputerExecutor:
             unclaimed_timeout_s=None,
             grace_s=0.08,
         )
-        def _nav_ok(out: dict[str, Any]) -> dict[str, Any]:
-            self.bridge.mark_navigated(url)
+        def _nav_ok(out: dict[str, Any], *, optimistic: bool = False) -> dict[str, Any]:
+            self.bridge.mark_navigated(url, optimistic=optimistic)
             out.setdefault("ok", True)
             out.setdefault("target", "browser")
             out.setdefault("action", "navigate")
             # Brief settle so follow-up snapshot/click sees painted DOM
-            settle = float(payload.get("settle_s") if payload.get("settle_s") is not None else 0.35)
+            default_settle = 0.55 if optimistic else 0.35
+            settle = float(
+                payload.get("settle_s")
+                if payload.get("settle_s") is not None
+                else default_settle
+            )
             if settle > 0:
                 time.sleep(min(max(settle, 0.0), 1.5))
                 out["settled_s"] = min(max(settle, 0.0), 1.5)
+            if optimistic:
+                out.setdefault("ready_for_input", False)
+                out.setdefault("pending_load", True)
+            else:
+                out.setdefault("ready_for_input", True)
+                self.bridge.clear_navigate_optimistic()
             return out
 
         if finished.status == "done" and finished.result:
-            return _nav_ok(dict(finished.result))
+            return _nav_ok(dict(finished.result), optimistic=False)
 
         # Brief re-read (host may complete mid-return)
-        for _ in range(5):
+        for _ in range(8):
             again = self.bridge._read(job.id)
             if again and again.status == "done" and again.result:
-                return _nav_ok(dict(again.result))
-            time.sleep(0.02)
+                return _nav_ok(dict(again.result), optimistic=False)
+            time.sleep(0.025)
 
         twin = self.bridge.find_recent_success(
             action="navigate", url=url, max_age_s=15.0
@@ -1063,25 +1102,30 @@ class ComputerExecutor:
             out = dict(twin.result)
             out["reconciled"] = True
             out["job_id"] = job.id
-            return _nav_ok(out)
+            return _nav_ok(out, optimistic=False)
 
         # Desktop is alive → fire-and-forget SUCCESS so the model never claims
         # the rail failed while the page is opening (open-url must be instant).
+        # Mark optimistic so type/click wait for settle before acting.
         if self.bridge.host_connected(max_age_s=20.0):
             result = {
                 "ok": True,
                 "target": "browser",
                 "action": "navigate",
                 "message": (
-                    f"SUCCESS: Page is open in the in-app Browser rail (right panel). "
-                    f"URL: {url}. The user can see it. "
+                    f"SUCCESS: Browser rail is opening {url}. "
+                    "The user will see the page as it loads. "
                     "Do NOT say the rail failed. Do NOT open system browser. "
                     "Do NOT web_fetch this page. "
-                    "Reply briefly that the page is open in the Browser rail."
+                    "Before typing passwords or clicking login controls, run "
+                    "computer_snapshot or computer_page_text to confirm the form "
+                    "is visible (avoid typing into the previous page)."
                 ),
                 "url": url,
                 "via": "optimistic",
                 "user_visible": True,
+                "ready_for_input": False,
+                "pending_load": True,
                 "job_id": job.id,
             }
             # Re-publish ui_command *before* complete so poller still has work
@@ -1095,7 +1139,7 @@ class ComputerExecutor:
                 }
             )
             self.bridge.complete(job.id, ok=True, result=result)
-            return _nav_ok(result)
+            return _nav_ok(result, optimistic=True)
 
         if wants_system_browser(hint, req_target):
             fb = self._run_desktop(ComputerAction.NAVIGATE, url=url, hint=hint)

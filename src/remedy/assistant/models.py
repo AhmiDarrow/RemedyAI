@@ -85,6 +85,8 @@ class AssistantPrefs:
     # AI + connected-account privacy (required before OAuth Connect)
     privacy_ai_accepted: bool = False
     account_access_accepted: bool = False
+    # Matches privacy.CURRENT_CONSENT_VERSION when user last accepted.
+    consent_version: str = ""
     default_calendar_account: str = ""
     default_mail_account: str = ""
     brief: BriefPrefs = field(default_factory=BriefPrefs)
@@ -102,6 +104,7 @@ class AssistantPrefs:
             money_disclaimer_accepted=bool(raw.get("money_disclaimer_accepted", False)),
             privacy_ai_accepted=bool(raw.get("privacy_ai_accepted", False)),
             account_access_accepted=bool(raw.get("account_access_accepted", False)),
+            consent_version=str(raw.get("consent_version") or ""),
             default_calendar_account=str(raw.get("default_calendar_account") or ""),
             default_mail_account=str(raw.get("default_mail_account") or ""),
             brief=BriefPrefs.from_dict(

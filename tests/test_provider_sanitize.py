@@ -61,3 +61,13 @@ def test_messages_list():
         [{"role": "assistant", "content": "fine"}, {"role": "tool", "content": "ok"}]
     )
     assert len(msgs) == 2
+
+
+def test_sanitize_does_not_mutate_input():
+    body = {
+        "model": "x",
+        "messages": [{"role": "tool", "content": "sk-abcdefghijklmnopqrstuvwxyz123456"}],
+    }
+    out = sanitize_chat_body(body)
+    assert "sk-abcdefghijklmnopqrstuvwxyz123456" in body["messages"][0]["content"]
+    assert "sk-abcdefghijklmnopqrstuvwxyz123456" not in out["messages"][0]["content"]
