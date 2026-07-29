@@ -7,7 +7,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from remedy.assistant.disclaimer import MONEY_DISCLAIMER_SHORT
+from remedy.assistant.disclaimer import MONEY_DISCLAIMER_SHORT, privacy_bundle
 from remedy.assistant.models import (
     AssistantPrefs,
     BillItem,
@@ -415,11 +415,15 @@ class AssistantStore:
                 google_status = "ready" if load_app_config(self.home).configured() else "planned"
         except Exception:
             pass
+        notices = privacy_bundle()
         return {
             "enabled": prefs.enabled,
             "timezone": prefs.timezone,
             "money_disclaimer_accepted": prefs.money_disclaimer_accepted,
             "money_disclaimer": MONEY_DISCLAIMER_SHORT,
+            "privacy_ai_accepted": prefs.privacy_ai_accepted,
+            "account_access_accepted": prefs.account_access_accepted,
+            "privacy": notices,
             "brief": prefs.brief.to_dict(),
             "accounts": self.accounts_public(),
             "has_budget": self.get_budget() is not None,
@@ -434,6 +438,8 @@ class AssistantStore:
                 {"id": "microsoft", "name": "Microsoft (Outlook)", "status": "planned"},
                 {"id": "yahoo", "name": "Yahoo (Ymail!)", "status": "planned"},
             ],
+            "data_residency": "local",
+            "tokens_to_model": False,
         }
 
 

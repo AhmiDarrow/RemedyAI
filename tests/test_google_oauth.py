@@ -51,15 +51,27 @@ def test_app_config_save_load(tmp_path):
 
 
 def test_start_oauth_requires_client(tmp_path, monkeypatch):
+    from remedy.assistant.store import get_assistant_store, reset_assistant_store
+
     monkeypatch.delenv("REMEDY_GOOGLE_OAUTH_CLIENT_ID", raising=False)
     monkeypatch.delenv("GOOGLE_OAUTH_CLIENT_ID", raising=False)
     monkeypatch.delenv("REMEDY_GOOGLE_OAUTH_DEFAULT_CLIENT_ID", raising=False)
     monkeypatch.setattr(go, "DEFAULT_GOOGLE_CLIENT_ID", "")
+    reset_assistant_store()
+    get_assistant_store(tmp_path).patch_prefs(
+        privacy_ai_accepted=True, account_access_accepted=True
+    )
     with pytest.raises(ValueError, match="not configured"):
         go.start_oauth(home=tmp_path)
 
 
 def test_start_oauth_pkce_and_complete(tmp_path):
+    from remedy.assistant.store import get_assistant_store, reset_assistant_store
+
+    reset_assistant_store()
+    get_assistant_store(tmp_path).patch_prefs(
+        privacy_ai_accepted=True, account_access_accepted=True
+    )
     go.save_app_config(client_id="my-client", client_secret="s", home=tmp_path)
     start = go.start_oauth(home=tmp_path)
     assert start["status"] == "pending"
@@ -200,8 +212,21 @@ def test_api_google_routes(tmp_path, monkeypatch):
     assert r2.status_code == 200
     assert r2.json()["app"]["client_id_set"] is True
 
+    # Consent required before OAuth start
+    r3_block = client.post("/api/assistant/google/oauth/start", json={})
+    assert r3_block.status_code == 403
+
+    client.put(
+        "/api/settings",
+        json={
+            "assistant": {
+                "privacy_ai_accepted": True,
+                "account_access_accepted": True,
+            }
+        },
+    )
     r3 = client.post("/api/assistant/google/oauth/start", json={})
-    assert r3.status_code == 200
+    assert r3.status_code == 200, r3.text
     body = r3.json()
     assert body["auth_url"]
     assert body["state"]

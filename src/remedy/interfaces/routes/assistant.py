@@ -85,6 +85,8 @@ def register_assistant_routes(app: FastAPI, *, runtime=None, gateway=None, memor
                 home=home,
                 redirect_uri=(req.redirect_uri if req else None),
             )
+        except PermissionError as e:
+            raise HTTPException(status_code=403, detail=str(e)) from e
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
         except Exception as e:

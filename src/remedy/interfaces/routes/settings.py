@@ -516,6 +516,8 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                     "enabled",
                     "timezone",
                     "money_disclaimer_accepted",
+                    "privacy_ai_accepted",
+                    "account_access_accepted",
                     "default_calendar_account",
                     "default_mail_account",
                 ):

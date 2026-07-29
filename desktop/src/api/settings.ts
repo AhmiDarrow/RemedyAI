@@ -102,23 +102,40 @@ export interface AssistantAccountInfo {
   error?: string
 }
 
+export interface AssistantPrivacyNotices {
+  privacy_ai_short?: string
+  privacy_ai_full?: string
+  privacy_ai_checkbox?: string
+  account_connect_checkbox?: string
+  money_disclaimer_short?: string
+  money_disclaimer_full?: string
+  google_scopes_plain?: string
+}
+
 export interface AssistantStatus {
   enabled?: boolean
   timezone?: string
   money_disclaimer_accepted?: boolean
   money_disclaimer?: string
+  privacy_ai_accepted?: boolean
+  account_access_accepted?: boolean
+  privacy?: AssistantPrivacyNotices
   brief?: AssistantBriefPrefs
   accounts?: AssistantAccountInfo[]
   has_budget?: boolean
   debt_count?: number
   bill_count?: number
   providers_planned?: Array<{ id: string; name: string; status: string }>
+  data_residency?: string
+  tokens_to_model?: boolean
 }
 
 export interface AssistantUpdate {
   enabled?: boolean
   timezone?: string
   money_disclaimer_accepted?: boolean
+  privacy_ai_accepted?: boolean
+  account_access_accepted?: boolean
   default_calendar_account?: string
   default_mail_account?: string
   brief?: AssistantBriefPrefs

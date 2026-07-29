@@ -320,6 +320,9 @@ def start_oauth(
     redirect_uri: str | None = None,
 ) -> dict[str, Any]:
     """Begin auth-code + PKCE flow. Returns auth_url + state for the UI."""
+    from remedy.assistant.privacy import require_consent
+
+    require_consent(home)
     app = load_app_config(home)
     if not app.configured():
         raise ValueError(
