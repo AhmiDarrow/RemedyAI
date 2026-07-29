@@ -78,6 +78,16 @@ _ACCOUNTS_RE = re.compile(
     r")\s*[.?!]?\s*$"
 )
 
+_MAIL_LIST_RE = re.compile(
+    r"(?is)^\s*("
+    r"(check |show |list |get |open )?(my )?(email|emails|inbox|gmail|mail)"
+    r"( messages?)?"
+    r"|any (new )?(mail|email|emails)\??"
+    r"|what('?s| is) (in )?(my )?inbox"
+    r"|mail_list"
+    r")\s*[.?!]?\s*$"
+)
+
 # log $50 to groceries / spent 12.5 on coffee
 _TX_RE = re.compile(
     r"(?is)^\s*("
@@ -138,6 +148,8 @@ def match_assistant_fast_path(message: str) -> FastPathPlan | None:
         return FastPathPlan("bill_list", {}, "bill_list")
     if _ACCOUNTS_RE.match(msg):
         return FastPathPlan("assistant_accounts", {}, "accounts")
+    if _MAIL_LIST_RE.match(msg):
+        return FastPathPlan("mail_list", {"query": "in:inbox", "limit": 12}, "mail_list")
     if _DISCLAIMER_RE.match(msg):
         return FastPathPlan("money_disclaimer", {}, "disclaimer")
 
@@ -260,11 +272,25 @@ def format_fast_path_reply(tool: str, raw: str) -> str:
                 None,
             )
             st = (g or {}).get("status") or "not connected"
-            lines.append(f"- Google Calendar: {st}")
+            lines.append(f"- Google (Gmail): {st}")
         lines.append(
             f"Budget: {'set' if data.get('has_budget') else 'none'} · "
             f"debts {data.get('debt_count', 0)} · bills {data.get('bill_count', 0)}"
         )
+        return "\n".join(lines)
+
+    if tool == "mail_list":
+        messages = data.get("messages") or []
+        if not messages:
+            return str(data.get("message") or "No messages.")
+        lines = [f"**Inbox** ({data.get('count', len(messages))}):"]
+        for m in messages[:20]:
+            if not isinstance(m, dict):
+                continue
+            lines.append(
+                f"- {m.get('from') or '?'}: {m.get('subject') or '(no subject)'} "
+                f"— {(m.get('snippet') or '')[:60]}"
+            )
         return "\n".join(lines)
 
     # Generic

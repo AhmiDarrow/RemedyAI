@@ -49,12 +49,38 @@ def register_assistant_tools(runtime: Any) -> None:
                 else:
                     parts.append("## Calendar")
                     parts.append(
-                        "Google Calendar not connected — Settings → Personal assistant → Connect Google."
+                        "Not connected — Settings → Personal assistant → Connect Google (Gmail)."
                     )
                     parts.append("")
             except Exception as exc:
                 parts.append("## Calendar")
                 parts.append(f"(Could not load calendar: {exc})")
+                parts.append("")
+        if prefs.brief.include_mail:
+            try:
+                from remedy.assistant.providers.google_gmail import get_google_gmail
+
+                mail = get_google_gmail(home)
+                if mail is not None:
+                    msgs = mail.list_messages(query="in:inbox", limit=8)
+                    parts.append("## Inbox (recent)")
+                    if not msgs:
+                        parts.append("No recent inbox messages.")
+                    else:
+                        for m in msgs:
+                            parts.append(
+                                f"- {m.from_addr or '?'}: {m.subject} — {(m.snippet or '')[:80]}"
+                            )
+                    parts.append("")
+                else:
+                    parts.append("## Mail")
+                    parts.append(
+                        "Not connected — Settings → Personal assistant → Connect Google (Gmail)."
+                    )
+                    parts.append("")
+            except Exception as exc:
+                parts.append("## Mail")
+                parts.append(f"(Could not load mail: {exc})")
                 parts.append("")
         if prefs.brief.include_budget:
             st = store.budget_status()
@@ -101,8 +127,8 @@ def register_assistant_tools(runtime: Any) -> None:
         accts = store.accounts_public()
         if not accts:
             parts.append(
-                "None connected yet. Connect Google Calendar in Settings → Personal assistant "
-                "(official OAuth). Microsoft/Yahoo mail next."
+                "None connected yet. Connect Google (Gmail) in Settings → Personal assistant. "
+                "Microsoft/Yahoo next."
             )
         else:
             for a in accts:
@@ -209,6 +235,116 @@ def register_assistant_tools(runtime: Any) -> None:
             },
             indent=2,
         )
+
+    async def mail_list(query: str = "in:inbox", limit: int = 15) -> str:
+        """List Gmail messages (needs Connect Google / Gmail)."""
+        from remedy.assistant.providers.google_gmail import get_google_gmail
+
+        mail = get_google_gmail(home)
+        if mail is None:
+            return json.dumps(
+                {
+                    "ok": False,
+                    "message": (
+                        "Gmail not connected. Settings → Personal assistant → "
+                        "Google (Gmail) → Connect."
+                    ),
+                },
+                indent=2,
+            )
+        try:
+            msgs = mail.list_messages(
+                query=(query or "in:inbox").strip() or "in:inbox",
+                limit=int(limit or 15),
+            )
+        except Exception as exc:
+            return json.dumps({"ok": False, "message": str(exc)}, indent=2)
+        return json.dumps(
+            {
+                "ok": True,
+                "count": len(msgs),
+                "query": query or "in:inbox",
+                "messages": [
+                    {
+                        "id": m.id,
+                        "subject": m.subject,
+                        "from": m.from_addr,
+                        "snippet": (m.snippet or "")[:200],
+                        "date": m.date,
+                        "thread_id": m.thread_id,
+                    }
+                    for m in msgs
+                ],
+                "message": f"{len(msgs)} message(s)",
+            },
+            indent=2,
+        )
+
+    async def mail_get(message_id: str = "") -> str:
+        """Read one Gmail message by id (body snippet / plain text)."""
+        from remedy.assistant.providers.google_gmail import get_google_gmail
+
+        mail = get_google_gmail(home)
+        if mail is None:
+            return json.dumps(
+                {
+                    "ok": False,
+                    "message": "Gmail not connected. Settings → Personal assistant → Connect.",
+                },
+                indent=2,
+            )
+        if not (message_id or "").strip():
+            return json.dumps(
+                {"ok": False, "message": "message_id required (from mail_list)."},
+                indent=2,
+            )
+        try:
+            m = mail.get_message(message_id.strip())
+        except Exception as exc:
+            return json.dumps({"ok": False, "message": str(exc)}, indent=2)
+        return json.dumps(
+            {
+                "ok": True,
+                "message": {
+                    "id": m.id,
+                    "subject": m.subject,
+                    "from": m.from_addr,
+                    "date": m.date,
+                    "body": m.snippet,
+                    "thread_id": m.thread_id,
+                },
+            },
+            indent=2,
+        )
+
+    async def mail_create_draft(
+        to: str = "",
+        subject: str = "",
+        body: str = "",
+    ) -> str:
+        """Create a Gmail draft (does not send)."""
+        from remedy.assistant.providers.google_gmail import get_google_gmail
+
+        mail = get_google_gmail(home)
+        if mail is None:
+            return json.dumps(
+                {
+                    "ok": False,
+                    "message": "Gmail not connected. Settings → Personal assistant → Connect.",
+                },
+                indent=2,
+            )
+        if not (to or "").strip():
+            return json.dumps({"ok": False, "message": "to address required"}, indent=2)
+        try:
+            result = mail.create_draft(
+                to=to.strip(),
+                subject=(subject or "").strip(),
+                body=body or "",
+            )
+        except Exception as exc:
+            return json.dumps({"ok": False, "message": str(exc)}, indent=2)
+        return json.dumps(result, indent=2)
 
     async def budget_get() -> str:
         st = store.budget_status()
@@ -532,5 +668,46 @@ def register_assistant_tools(runtime: Any) -> None:
                 "description": {"type": "string"},
             },
             "required": ["title", "start", "end"],
+        },
+    )
+    reg.register_builtin_handler(
+        "mail_list",
+        "List Gmail messages (query e.g. in:inbox, from:x). Needs Connect Google (Gmail).",
+        mail_list,
+        {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Gmail search query (default in:inbox)",
+                },
+                "limit": {"type": "integer", "description": "Max messages 1–50"},
+            },
+        },
+    )
+    reg.register_builtin_handler(
+        "mail_get",
+        "Read one Gmail message by id from mail_list (plain text / snippet).",
+        mail_get,
+        {
+            "type": "object",
+            "properties": {
+                "message_id": {"type": "string"},
+            },
+            "required": ["message_id"],
+        },
+    )
+    reg.register_builtin_handler(
+        "mail_create_draft",
+        "Create a Gmail draft (does not send). Needs Connect Google (Gmail).",
+        mail_create_draft,
+        {
+            "type": "object",
+            "properties": {
+                "to": {"type": "string"},
+                "subject": {"type": "string"},
+                "body": {"type": "string"},
+            },
+            "required": ["to"],
         },
     )

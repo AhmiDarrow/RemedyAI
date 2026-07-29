@@ -28,6 +28,13 @@ def test_match_brief_and_budget():
     assert match_assistant_fast_path("list bills").tool == "bill_list"
 
 
+def test_match_mail_inbox():
+    p = match_assistant_fast_path("check my email")
+    assert p is not None
+    assert p.tool == "mail_list"
+    assert match_assistant_fast_path("what's in my inbox").tool == "mail_list"
+
+
 def test_match_expense_log():
     p = match_assistant_fast_path("log $50 to groceries")
     assert p is not None

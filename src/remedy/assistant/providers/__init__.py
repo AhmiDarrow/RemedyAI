@@ -17,14 +17,20 @@ from remedy.assistant.providers.google_calendar import (
     GoogleCalendarProvider,
     get_google_calendar,
 )
+from remedy.assistant.providers.google_gmail import (
+    GoogleGmailProvider,
+    get_google_gmail,
+)
 
 __all__ = [
     "CalendarEvent",
     "CalendarProvider",
     "GoogleCalendarProvider",
+    "GoogleGmailProvider",
     "MailMessage",
     "MailProvider",
     "ProviderRegistry",
     "get_google_calendar",
+    "get_google_gmail",
     "get_provider_registry",
 ]
