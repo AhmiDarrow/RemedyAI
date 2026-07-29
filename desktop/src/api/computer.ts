@@ -138,3 +138,48 @@ export function emitComputerUi(detail: { openBrowser?: boolean }): void {
   if (typeof window === 'undefined') return
   window.dispatchEvent(new CustomEvent(COMPUTER_UI_EVENT, { detail }))
 }
+
+/**
+ * Open a URL in Remedy's in-rail Browser (default for webpages).
+ * Falls back to system browser only if Tauri navigate is unavailable.
+ */
+export async function openUrlInBrowserRail(url: string): Promise<'rail' | 'external'> {
+  const trimmed = (url || '').trim()
+  if (!trimmed) return 'external'
+  try {
+    const { isTauri, tauriInvoke } = await import('./tauri')
+    if (isTauri()) {
+      emitComputerUi({ openBrowser: true })
+      await new Promise((r) => window.setTimeout(r, 350))
+      // Best-effort bounds from Browser slide host
+      let bounds: BrowserBoundsPayload | null = null
+      try {
+        const el = document.querySelector('[data-browser-embed-host]') as HTMLElement | null
+        if (el) {
+          const r = el.getBoundingClientRect()
+          if (r.width > 40 && r.height > 40) {
+            bounds = {
+              x: Math.round(r.x),
+              y: Math.round(r.y),
+              width: Math.round(r.width),
+              height: Math.round(r.height),
+            }
+          }
+        }
+      } catch {
+        /* layout later */
+      }
+      await tauriInvoke('browser_navigate', { url: trimmed, bounds })
+      return 'rail'
+    }
+  } catch {
+    /* fall through */
+  }
+  try {
+    const { openExternalUrl } = await import('./auth')
+    await openExternalUrl(trimmed)
+  } catch {
+    if (typeof window !== 'undefined') window.open(trimmed, '_blank', 'noopener,noreferrer')
+  }
+  return 'external'
+}
