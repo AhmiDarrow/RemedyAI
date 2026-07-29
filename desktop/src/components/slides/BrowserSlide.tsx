@@ -4,17 +4,84 @@ import { getSettings } from '../../api/settings'
 import {
   DEFAULT_BROWSER_HOME,
   normalizeBrowserUrl,
+  resolveBrowserAddressBar,
   resolveBrowserHome,
 } from '../../utils/browserUrl'
+import {
+  isBookmarked,
+  loadBookmarks,
+  toggleBookmark,
+  type BrowserBookmark,
+} from '../../utils/browserBookmarks'
 import { openExternalUrl } from '../../api/auth'
-import { browserStackSetHostVisible } from '../../utils/browserStack'
+import {
+  browserStackProbeHostCoverage,
+  browserStackSetHostVisible,
+  browserStackHold,
+} from '../../utils/browserStack'
 
 type Bounds = { x: number; y: number; width: number; height: number }
 
+/** Keep native embed below app title / popout chrome and above status bar. */
+function chromeSafeBand(hostRect: DOMRect): { minY: number; maxBottom: number } {
+  let minY = 0
+  let maxBottom = window.innerHeight
+
+  const title = document.querySelector('.titlebar')
+  if (title) {
+    minY = Math.max(minY, title.getBoundingClientRect().bottom)
+  } else {
+    // Custom title strip is 36px when present
+    minY = Math.max(minY, 36)
+  }
+
+  const popChrome = document.querySelector('[data-popout-chrome]')
+  if (popChrome) {
+    const pr = popChrome.getBoundingClientRect()
+    if (pr.height > 8 && pr.bottom > minY) {
+      minY = Math.max(minY, pr.bottom)
+    }
+  }
+
+  // URL toolbar for *this* browser panel (horizontal overlap with host)
+  for (const tb of document.querySelectorAll('[data-browser-toolbar]')) {
+    const tr = tb.getBoundingClientRect()
+    if (tr.height < 4) continue
+    if (tr.right < hostRect.left + 4 || tr.left > hostRect.right - 4) continue
+    minY = Math.max(minY, tr.bottom)
+  }
+
+  // Panel "Browser" header row (WorkspaceSide) when it sits above the host
+  for (const hd of document.querySelectorAll('[data-workspace-panel-header]')) {
+    const hr = hd.getBoundingClientRect()
+    if (hr.height < 4) continue
+    if (hr.right < hostRect.left + 4 || hr.left > hostRect.right - 4) continue
+    if (hr.bottom <= hostRect.top + 2 || hr.top < hostRect.top) {
+      minY = Math.max(minY, hr.bottom)
+    }
+  }
+
+  const status = document.querySelector('[data-remedy-status-bar]')
+  if (status) {
+    maxBottom = Math.min(maxBottom, status.getBoundingClientRect().top)
+  }
+
+  // Browser slide status strip under the host
+  for (const st of document.querySelectorAll('[data-browser-status]')) {
+    const sr = st.getBoundingClientRect()
+    if (sr.height < 4) continue
+    if (sr.right < hostRect.left + 4 || sr.left > hostRect.right - 4) continue
+    if (sr.top >= hostRect.top) {
+      maxBottom = Math.min(maxBottom, sr.top)
+    }
+  }
+
+  return { minY, maxBottom }
+}
+
 /**
  * CSS-pixel bounds for the native WebView2 child.
- * Only report a usable host so the embed never covers PopoutOverlay chrome
- * or zero-size rail leftovers.
+ * Clamped so the embed never covers title bar, panel header, or URL toolbar.
  */
 function readBounds(el: HTMLElement | null): Bounds | null {
   if (!el || !el.isConnected) return null
@@ -31,13 +98,17 @@ function readBounds(el: HTMLElement | null): Bounds | null {
   if (r.width < 80 || r.height < 80) return null
   if (r.bottom < 0 || r.right < 0) return null
   if (r.top > window.innerHeight || r.left > window.innerWidth) return null
-  // Flush to host box — no inset (inset showed a white/dark border halo)
-  return {
-    x: Math.round(r.left),
-    y: Math.round(r.top),
-    width: Math.max(80, Math.round(r.width)),
-    height: Math.max(80, Math.round(r.height)),
-  }
+
+  const { minY, maxBottom } = chromeSafeBand(r)
+  const x = Math.round(r.left)
+  const y = Math.round(Math.max(r.top, minY))
+  const right = Math.round(r.right)
+  const bottom = Math.round(Math.min(r.bottom, maxBottom))
+  const width = Math.max(0, right - x)
+  const height = Math.max(0, bottom - y)
+  if (width < 80 || height < 80) return null
+
+  return { x, y, width, height }
 }
 
 /** Delay hide so rail↔popout remounts do not flash-hide the native child. */
@@ -58,6 +129,26 @@ export function BrowserSlide() {
   const [busy, setBusy] = useState(false)
   const autoStarted = useRef(false)
   const goRef = useRef<(raw: string) => Promise<void>>(async () => {})
+  /** True while user is editing the address bar — do not clobber with live URL. */
+  const urlEditing = useRef(false)
+  const [bookmarks, setBookmarks] = useState<BrowserBookmark[]>(() => loadBookmarks())
+  const [bmOpen, setBmOpen] = useState(false)
+  const bmPanelRef = useRef<HTMLDivElement | null>(null)
+  const [shieldOn, setShieldOn] = useState(true)
+
+  // Privacy Shield status (desktop)
+  useEffect(() => {
+    if (!isTauri()) return
+    let cancelled = false
+    void tauriInvoke<{ enabled?: boolean }>('privacy_shield_status')
+      .then((s) => {
+        if (!cancelled) setShieldOn(Boolean(s?.enabled))
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   // Settings → browser_home_url (default: Remedy GitHub)
   useEffect(() => {
@@ -89,9 +180,11 @@ export function BrowserSlide() {
 
   const pushBounds = useCallback(async () => {
     if (!isTauri() || !loaded) return
-    const b = readBounds(hostRef.current)
+    const host = hostRef.current
+    const b = readBounds(host)
     // No usable host → suppress native HWND so it cannot float over chrome
     browserStackSetHostVisible(Boolean(b))
+    browserStackProbeHostCoverage(host)
     if (!b) return
     try {
       await tauriInvoke('browser_set_bounds', { bounds: b })
@@ -147,6 +240,11 @@ export function BrowserSlide() {
       { threshold: [0, 0.02, 0.1, 0.5, 1], root: null },
     )
     io.observe(el)
+    // Catch theme menus / overlays that open over the host (no React wiring needed)
+    const coverIv = window.setInterval(() => {
+      browserStackProbeHostCoverage(el)
+      void pushBounds()
+    }, 200)
     // Popout/fullscreen layout can settle over several frames
     let n = 0
     let raf = 0
@@ -160,6 +258,7 @@ export function BrowserSlide() {
       ro.disconnect()
       io.disconnect()
       unlistenRestored?.()
+      window.clearInterval(coverIv)
       window.removeEventListener('resize', onWin)
       window.removeEventListener('remedy:browser-resync-bounds', onResync)
       window.cancelAnimationFrame(raf)
@@ -216,11 +315,13 @@ export function BrowserSlide() {
 
   const go = useCallback(
     async (raw: string) => {
-      const u = normalizeBrowserUrl(raw)
+      // Omnibox: real URL if possible, else DuckDuckGo search
+      const u = resolveBrowserAddressBar(raw)
       if (!u) {
-        setStatus('Enter an http(s) URL')
+        setStatus('Enter a URL or search')
         return
       }
+      urlEditing.current = false
       setUrl(u)
       setActiveUrl(u)
       if (!isTauri()) {
@@ -269,13 +370,22 @@ export function BrowserSlide() {
   )
   goRef.current = go
 
+  const applyLiveUrl = useCallback((raw: string) => {
+    const u = (raw || '').trim()
+    if (!u || u.startsWith('about:')) return
+    setActiveUrl(u)
+    // Only rewrite the address bar when the user is not typing a new URL
+    if (!urlEditing.current) {
+      setUrl(u)
+    }
+  }, [])
+
   // Sync address bar when agent/Rust navigates (does not reload the page).
   useEffect(() => {
     const onSetUrl = (ev: Event) => {
       const u = (ev as CustomEvent<{ url?: string }>).detail?.url
       if (!u) return
-      setUrl(u)
-      setActiveUrl(u)
+      applyLiveUrl(u)
       setLoaded(true)
       setStatus(`Loaded ${u}`)
       autoStarted.current = true
@@ -283,9 +393,9 @@ export function BrowserSlide() {
     }
     window.addEventListener('remedy:browser-set-url', onSetUrl)
     return () => window.removeEventListener('remedy:browser-set-url', onSetUrl)
-  }, [pushBounds])
+  }, [pushBounds, applyLiveUrl])
 
-  // Poll live URL from WebView (user navigated inside the page).
+  // Live URL from WebView2 (page load + poll). Old code only stored last navigate target.
   useEffect(() => {
     if (!isTauri() || !loaded) return
     let cancelled = false
@@ -293,21 +403,44 @@ export function BrowserSlide() {
       if (cancelled) return
       try {
         const cur = await tauriInvoke<string>('browser_current_url')
-        if (cur && cur !== activeUrl && !cur.startsWith('about:')) {
-          setActiveUrl(cur)
-          setUrl(cur)
-        }
+        if (cur) applyLiveUrl(cur)
       } catch {
         /* embed closed */
       }
     }
     void tick()
-    const iv = window.setInterval(() => void tick(), 1200)
+    const iv = window.setInterval(() => void tick(), 800)
+    let unlisten: (() => void) | undefined
+    void tauriListen('browser-url-changed', (payload) => {
+      const u = (payload as { url?: string } | null)?.url
+      if (u) applyLiveUrl(u)
+    })
+      .then((u) => {
+        unlisten = u
+      })
+      .catch(() => {})
     return () => {
       cancelled = true
       window.clearInterval(iv)
+      unlisten?.()
     }
-  }, [loaded, activeUrl])
+  }, [loaded, applyLiveUrl])
+
+  // Bookmarks dropdown: close on outside click; suppress embed while open
+  useEffect(() => {
+    if (!bmOpen) return
+    const release = browserStackHold('bookmarks-menu')
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (bmPanelRef.current?.contains(t)) return
+      setBmOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    return () => {
+      release()
+      document.removeEventListener('mousedown', onDoc)
+    }
+  }, [bmOpen])
 
   // Auto-load homepage only if embed is not already open (side-switch remount).
   useEffect(() => {
@@ -400,6 +533,7 @@ export function BrowserSlide() {
     <div className="flex flex-col h-full min-h-0 max-h-full overflow-hidden text-xs">
       {/* React toolbar stays above native WebView2 (hostRef only below this) */}
       <form
+        data-browser-toolbar
         className="flex gap-1 px-2 py-1.5 border-b shrink-0"
         style={{
           borderColor: 'var(--border)',
@@ -424,6 +558,37 @@ export function BrowserSlide() {
         <button
           type="button"
           className="px-1.5 py-1 rounded"
+          style={{
+            border: '1px solid var(--border)',
+            color: shieldOn ? 'var(--success)' : 'var(--text-muted)',
+          }}
+          title={
+            shieldOn
+              ? 'Privacy Shield on — blocks ad/tracker navigations & hides many ads (Settings to toggle)'
+              : 'Privacy Shield off — enable in Settings → Project / Browser'
+          }
+          onClick={() => {
+            if (!isTauri()) return
+            const next = !shieldOn
+            void tauriInvoke<{ enabled?: boolean }>('privacy_shield_set_enabled', {
+              enabled: next,
+            })
+              .then((s) => {
+                setShieldOn(Boolean(s?.enabled ?? next))
+                setStatus(
+                  s?.enabled ?? next
+                    ? 'Privacy Shield on'
+                    : 'Privacy Shield off',
+                )
+              })
+              .catch(() => {})
+          }}
+        >
+          {shieldOn ? '🛡' : '○'}
+        </button>
+        <button
+          type="button"
+          className="px-1.5 py-1 rounded"
           style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
           title="Reload"
           disabled={!loaded || busy}
@@ -439,14 +604,23 @@ export function BrowserSlide() {
         <input
           value={url}
           onChange={(e) => setUrl(e.target.value)}
+          onFocus={() => {
+            urlEditing.current = true
+          }}
+          onBlur={() => {
+            // Defer so a click on Go still sees the typed value first
+            window.setTimeout(() => {
+              urlEditing.current = false
+            }, 180)
+          }}
           className="flex-1 min-w-0 rounded px-1.5 py-1 outline-none"
           style={{
             background: 'var(--bg-primary)',
             border: '1px solid var(--border)',
             color: 'var(--text-primary)',
           }}
-          placeholder="https://"
-          aria-label="Browser URL"
+          placeholder="Search or enter URL"
+          aria-label="Browser address — URL or search"
           spellCheck={false}
         />
         <button
@@ -457,6 +631,104 @@ export function BrowserSlide() {
         >
           Go
         </button>
+        <button
+          type="button"
+          className="px-1.5 py-1 rounded"
+          style={{
+            border: '1px solid var(--border)',
+            color: isBookmarked(activeUrl || url, bookmarks)
+              ? 'var(--accent)'
+              : 'var(--text-secondary)',
+          }}
+          title={
+            isBookmarked(activeUrl || url, bookmarks)
+              ? 'Remove bookmark'
+              : 'Bookmark this page'
+          }
+          disabled={!normalizeBrowserUrl(activeUrl || url)}
+          onClick={() => {
+            const target = activeUrl || url
+            const { list, added } = toggleBookmark(target)
+            setBookmarks(list)
+            setStatus(added ? 'Bookmarked' : 'Bookmark removed')
+          }}
+        >
+          {isBookmarked(activeUrl || url, bookmarks) ? '★' : '☆'}
+        </button>
+        <div className="relative" ref={bmPanelRef}>
+          <button
+            type="button"
+            className="px-1.5 py-1 rounded"
+            style={{
+              border: '1px solid var(--border)',
+              color: bmOpen ? 'var(--accent)' : 'var(--text-secondary)',
+            }}
+            title="Bookmarks"
+            aria-expanded={bmOpen}
+            onClick={() => setBmOpen((o) => !o)}
+          >
+            ☰
+          </button>
+          {bmOpen && (
+            <div
+              className="absolute right-0 top-full mt-1 z-30 rounded-lg py-1 min-w-[220px] max-w-[320px] max-h-[280px] overflow-auto shadow-xl"
+              style={{
+                background: 'var(--bg-secondary)',
+                border: '1px solid var(--border)',
+              }}
+              role="listbox"
+              aria-label="Bookmarks"
+            >
+              {bookmarks.length === 0 ? (
+                <div
+                  className="px-3 py-2 text-[11px]"
+                  style={{ color: 'var(--text-muted)' }}
+                >
+                  No bookmarks yet. Star a page to save it here.
+                </div>
+              ) : (
+                bookmarks.map((b) => (
+                  <div
+                    key={b.id}
+                    className="flex items-center gap-1 px-1"
+                    role="option"
+                    aria-selected={false}
+                  >
+                    <button
+                      type="button"
+                      className="flex-1 min-w-0 text-left px-2 py-1.5 rounded text-[11px] truncate"
+                      style={{ color: 'var(--text-primary)' }}
+                      title={b.url}
+                      onClick={() => {
+                        setBmOpen(false)
+                        void go(b.url)
+                      }}
+                    >
+                      <span className="font-medium">{b.title}</span>
+                      <span
+                        className="block truncate"
+                        style={{ color: 'var(--text-muted)', fontSize: 10 }}
+                      >
+                        {b.url}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="px-1.5 py-1 rounded shrink-0"
+                      style={{ color: 'var(--text-muted)' }}
+                      title="Remove"
+                      onClick={() => {
+                        setBookmarks(toggleBookmark(b.url).list)
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+        </div>
         <button
           type="button"
           className="px-1.5 py-1 rounded"
@@ -527,6 +799,7 @@ export function BrowserSlide() {
 
       {status && (
         <div
+          data-browser-status
           className="px-2 py-1 border-t truncate shrink-0"
           style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
           title={status}
