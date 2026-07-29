@@ -45,15 +45,51 @@ def run_step(name: str, args: list[str], timeout: int) -> tuple[bool, float, str
         return False, dt, str(e)[:200]
 
 
+def wait_for_api(timeout_s: float = 120.0) -> bool:
+    import urllib.error
+    import urllib.request
+
+    token_path = Path.home() / ".remedy" / "auth" / "local_api_token"
+    if not token_path.is_file():
+        print("no API token file", flush=True)
+        return False
+    token = token_path.read_text(encoding="utf-8").strip()
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        try:
+            req = urllib.request.Request(
+                "http://127.0.0.1:7400/api/status",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                if resp.status == 200:
+                    return True
+        except Exception:
+            time.sleep(1.5)
+    return False
+
+
 def main() -> int:
     cycle = 0
     ok_n = fail_n = 0
     print(f"=== Continuous Remedy test @ {datetime.now(UTC).isoformat()} ===", flush=True)
     print(f"root={ROOT}", flush=True)
+    print("Waiting for API on :7400 ...", flush=True)
+    if not wait_for_api(180):
+        print("API not reachable — abort continuous test", flush=True)
+        return 2
+    print("API ready", flush=True)
     try:
         while True:
             cycle += 1
             print(f"\n######## CYCLE {cycle} {datetime.now(UTC).strftime('%H:%M:%S')}Z ########", flush=True)
+            if not wait_for_api(30):
+                print("  [WAIT] API dropped — waiting for recovery", flush=True)
+                if not wait_for_api(120):
+                    fail_n += 1
+                    print("  [FAIL] API still down", flush=True)
+                    time.sleep(10)
+                    continue
             steps = [
                 ("soak", ["scripts/live_soak_security_chat.py"], 180),
                 ("stress", ["scripts/live_stress_remedy.py", "--loops", "1"], 240),
