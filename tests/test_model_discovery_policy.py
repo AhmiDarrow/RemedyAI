@@ -54,3 +54,18 @@ def test_deepseek_allows_endpoint_style_ids() -> None:
 def test_xai_allows_endpoint_style_ids() -> None:
     _, m, _ = normalize_llm_settings("xai", "grok-4.5", None)
     assert m == "grok-4.5"
+
+
+def test_garbage_model_snaps_to_default_on_closed_provider() -> None:
+    _, m, _ = normalize_llm_settings("deepseek", "not-a-real-model-zzz", None)
+    assert m == "deepseek-v4-flash"
+
+
+def test_validate_provider_model_rejects_garbage() -> None:
+    from remedy.interfaces.config import validate_provider_model
+    import pytest
+
+    with pytest.raises(ValueError, match="Unknown model"):
+        validate_provider_model("deepseek", "not-a-real-model-zzz")
+    assert validate_provider_model("deepseek", "deepseek-v4-flash") == "deepseek-v4-flash"
+    assert validate_provider_model("deepseek", "deepseek-v4-pro") == "deepseek-v4-pro"
