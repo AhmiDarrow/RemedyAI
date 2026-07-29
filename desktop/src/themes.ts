@@ -6,8 +6,12 @@ export type ThemeId =
   | 'forest'
   | 'green'
   | 'purple'
+  | 'alien'
   | 'orange'
   | 'cyan'
+
+/** Default theme for first run (no localStorage preference). */
+export const DEFAULT_THEME_ID: ThemeId = 'forest'
 
 export interface ThemeColors {
   '--bg-primary': string
@@ -276,6 +280,32 @@ export const THEMES: Record<Exclude<ThemeId, 'system'>, Theme> = {
       '--error': '#fca5a5',
       '--warning': '#fde68a',
       ...chatFromPalette('dark', '#c084fc', '#1a1224', '#261a36', '#3d2a55', '#e4dff0', '#fca5a5'),
+    },
+  },
+
+  /**
+   * Dark Purple — deep void base + electric “alien purple” accent.
+   * Distinct from Amethyst (softer lilac) and classic Dark (milder violet).
+   */
+  alien: {
+    id: 'alien',
+    name: 'Dark Purple',
+    kind: 'dark',
+    colors: {
+      '--bg-primary': '#07040f',
+      '--bg-secondary': '#0f081a',
+      '--bg-tertiary': '#1a0f2e',
+      '--border': '#3b1d66',
+      // Alien purple — saturated electric violet
+      '--accent': '#b026ff',
+      '--accent-hover': '#9d00ff',
+      '--text-primary': '#f2e8ff',
+      '--text-secondary': '#c4a0e8',
+      '--text-muted': '#8a6aad',
+      '--success': '#5eead4',
+      '--error': '#ff6b9d',
+      '--warning': '#f0abfc',
+      ...chatFromPalette('dark', '#b026ff', '#0f081a', '#1a0f2e', '#3b1d66', '#f2e8ff', '#ff6b9d'),
     },
   },
 
