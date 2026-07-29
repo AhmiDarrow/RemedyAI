@@ -29,15 +29,16 @@ from remedy.vision.prompts import decode_user_prompt
 from remedy.vision.service import decode_for_turn, get_status
 
 
-def test_default_model_is_qwen25_vl_3b():
-    assert DEFAULT_MODEL_ID == "qwen2.5-vl-3b"
+def test_default_model_is_smolvlm2_2_2b():
+    assert DEFAULT_MODEL_ID == "smolvlm2-2.2b"
     assert DEFAULT_MODEL_ID in VISION_MODELS
     spec = get_model_spec()
     assert spec.model_file.endswith("Q4_K_M.gguf")
     assert "mmproj" in spec.mmproj_file
-    assert spec.model_sha256
-    assert spec.mmproj_sha256
-    assert spec.approx_download_bytes > 2_000_000_000  # ~2.7GB model+mmproj
+    assert "SmolVLM2" in spec.model_file
+    assert getattr(spec, "license", "") in ("Apache-2.0", "Apache 2.0", "")
+    assert spec.approx_download_bytes > 1_000_000_000  # ~1.6GB model+mmproj
+    assert spec.approx_download_bytes < 2_500_000_000
     pub = catalog_public()
     assert pub["default_model_id"] == DEFAULT_MODEL_ID
     assert any(m["id"] == DEFAULT_MODEL_ID for m in pub["models"])
@@ -227,7 +228,7 @@ def test_save_vision_json(tmp_path: Path):
 
 def test_catalog_pins_are_complete():
     spec = get_model_spec(DEFAULT_MODEL_ID)
-    assert spec.model_file == "Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf"
+    assert spec.model_file == "SmolVLM2-2.2B-Instruct-Q4_K_M.gguf"
     assert "mmproj" in spec.mmproj_file
     assert len(spec.model_sha256) == 64
     assert len(spec.mmproj_sha256) == 64

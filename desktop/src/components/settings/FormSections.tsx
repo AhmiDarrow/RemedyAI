@@ -22,6 +22,7 @@ import { ThemeColorDot } from '../ThemeSwitcher'
 import { HOTKEYS } from '../../hotkeys'
 import type { ModelInfo } from '../../App'
 import type { Density } from '../../utils/chatPrefs'
+import type { SettingsMode } from '../../utils/settingsMode'
 import {
 
   TOOL_PROCESS_MODES,
@@ -160,6 +161,7 @@ export interface SettingsFormProps {
   assistantDraft?: AssistantDraft
   setAssistantDraft?: Dispatch<SetStateAction<AssistantDraft>>
   onAssistantAccountsChanged?: () => void
+  settingsMode?: SettingsMode
 }
 
 export function SettingsFormSections(p: SettingsFormProps): ReactNode {
@@ -216,6 +218,7 @@ export function SettingsFormSections(p: SettingsFormProps): ReactNode {
     assistantDraft = {},
     setAssistantDraft,
     onAssistantAccountsChanged,
+    settingsMode = 'simple',
   } = p
 
   return (
@@ -927,14 +930,14 @@ export function SettingsFormSections(p: SettingsFormProps): ReactNode {
               </div>
             </SettingsSection>
 
-            {/* Local vision — user-facing; no swarm branding */}
+            {/* Local model — required dependency (Apache 2.0 SmolVLM2) */}
             <SettingsSection
               {...sectionProps('vision')}
             >
               <div className="text-[10px] leading-snug mb-2" style={{ color: 'var(--text-muted)' }}>
-                Optional local <strong style={{ color: 'var(--text-secondary)' }}>Qwen2.5-VL 3B</strong>{' '}
-                (llama.cpp) for image understanding when your chat model is text-only. One-time
-                download (~2.8 GB), same model on every PC. Starts with Remedy when enabled.
+                Local <strong style={{ color: 'var(--text-secondary)' }}>SmolVLM2 2.2B</strong>{' '}
+                (Apache 2.0 · llama.cpp) — image understanding + local assist. Required dependency
+                when your chat model is text-only. One-time download (~1.6 GB). Starts with Remedy.
               </div>
               {(vision?.warnings?.length || 0) > 0 && (
                 <div
@@ -960,7 +963,7 @@ export function SettingsFormSections(p: SettingsFormProps): ReactNode {
               >
                 <div className="flex justify-between gap-2">
                   <span style={{ color: 'var(--text-muted)' }}>Model</span>
-                  <span>{vision?.model?.name || 'Qwen2.5-VL 3B'}</span>
+                  <span>{vision?.model?.name || 'SmolVLM2 2.2B'}</span>
                 </div>
                 <div className="flex justify-between gap-2">
                   <span style={{ color: 'var(--text-muted)' }}>Status</span>
@@ -1492,6 +1495,7 @@ export function SettingsFormSections(p: SettingsFormProps): ReactNode {
                 draft={assistantDraft}
                 setDraft={setAssistantDraft}
                 onAccountsChanged={onAssistantAccountsChanged}
+                settingsMode={settingsMode}
               />
             ) : (
               <SettingsSection {...sectionProps('assistant')}>

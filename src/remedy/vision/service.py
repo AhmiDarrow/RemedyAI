@@ -157,11 +157,11 @@ def get_status(
             if decode_ready
             else (
                 "Local model is off. Enable Vision & nano swarm in Settings — "
-                f"{model_public.get('name', 'Qwen2.5-VL 3B')} starts with Remedy when ready."
+                f"{model_public.get('name', 'SmolVLM2 2.2B')} starts with Remedy when ready."
                 if installed
                 else (
                     "Local model not installed yet. Open Settings → Vision & nano swarm "
-                    f"to download pinned {model_public.get('name', 'Qwen2.5-VL 3B')} "
+                    f"to download pinned {model_public.get('name', 'SmolVLM2 2.2B')} "
                     "(one-time; then starts with Remedy)."
                 )
             )
@@ -314,7 +314,7 @@ def start_install(
     result["warnings"] = list(health.get("warnings") or [])
     result["mode"] = "download"
     result["message"] = (
-        "Downloading pinned Qwen2.5-VL 3B + llama-server (same files on every PC). "
+        "Downloading pinned SmolVLM2 2.2B + llama-server (same files on every PC). "
         "Server starts automatically when install finishes."
     )
     return result

@@ -193,5 +193,7 @@ class RouterNanobot:
             "last_label": self.last_label,
             "last_method": self.last_method,
             "model_calls": self.model_calls,
-            "role_model": "qwen2.5-vl-3b",  # same as vision — never a second model
+            "role_model": __import__(
+                "remedy.runtime.catalog", fromlist=["DEFAULT_LOCAL_MODEL_ID"]
+            ).DEFAULT_LOCAL_MODEL_ID,  # same as vision — never a second model
         }

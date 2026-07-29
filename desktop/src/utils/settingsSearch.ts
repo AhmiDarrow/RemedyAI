@@ -64,9 +64,9 @@ export const SETTINGS_SECTION_META: Record<
     keywords: 'process trail full medium off diagnostics',
   },
   vision: {
-    title: 'Local vision',
-    summary: 'Image decode',
-    keywords: 'vision qwen llama screenshot ocr image',
+    title: 'Local model',
+    summary: 'SmolVLM2 · image decode',
+    keywords: 'vision local model smolvlm llama screenshot ocr image dependency',
   },
   'memory-harness': {
     title: 'Memory harness',

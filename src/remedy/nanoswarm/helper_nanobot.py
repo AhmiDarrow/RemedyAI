@@ -102,7 +102,9 @@ class HelperNanobot:
             "enabled": self.enabled,
             "neural_enabled": self.neural_enabled,
             "jobs_run": self.jobs_run,
-            "role_model": "qwen2.5-vl-3b",
+            "role_model": __import__(
+                "remedy.runtime.catalog", fromlist=["DEFAULT_LOCAL_MODEL_ID"]
+            ).DEFAULT_LOCAL_MODEL_ID,
             "note": "Offline FAQ/error drafts; neural helper reserved.",
         }
 

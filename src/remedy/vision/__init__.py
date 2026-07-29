@@ -1,6 +1,6 @@
 """Local visual decoder for text-only chat models.
 
-Opt-in install of llama-server + pinned Qwen2.5-VL 3B. Decodes images to
+Install of llama-server + pinned SmolVLM2 2.2B (Apache 2.0). Decodes images to
 structured text so the main agent can reason without native multimodal.
 """
 

@@ -95,7 +95,7 @@ def vision_section_from_config(cfg: dict[str, Any] | None) -> dict[str, Any]:
 
 def default_vision_toml_block() -> str:
     return f"""
-# Local model (Qwen2.5-VL 3B) — vision + nano swarm (+ helper later)
+# Local model (SmolVLM2 2.2B, Apache 2.0) — vision + nano swarm (+ helper)
 # First-run download of pinned files (not in installer). Same model on every PC.
 # auto_start: llama-server starts with Remedy once installed.
 [vision]
