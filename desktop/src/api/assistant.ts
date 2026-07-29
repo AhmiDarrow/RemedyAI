@@ -23,6 +23,17 @@ export interface GoogleAuthStatus {
   tokens_encoding?: string
   /** Set when connected tokens are not DPAPI-sealed (security warning). */
   tokens_encoding_warning?: string
+  /** Gmail/Calendar API probe after OAuth (ok / disabled / …). */
+  apis?: {
+    gmail?: string
+    calendar?: string
+    ok?: boolean
+    message?: string
+    enable_gmail_url?: string
+    enable_calendar_url?: string
+  }
+  /** Human-readable guidance when OAuth works but Cloud APIs are off. */
+  apis_warning?: string
 }
 
 export interface GoogleOAuthStart {

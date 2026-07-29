@@ -3,6 +3,7 @@ import {
   type ThemeId,
   THEMES,
   THEME_LIST,
+  DEFAULT_THEME_ID,
   applyTheme,
   getResolvedTheme,
   resolveThemeId,
@@ -26,7 +27,8 @@ function loadTheme(): ThemeId {
   } catch {
     // localStorage unavailable
   }
-  return 'system'
+  // First run / no preference: Dark Forest
+  return DEFAULT_THEME_ID
 }
 
 function saveTheme(id: ThemeId): void {
