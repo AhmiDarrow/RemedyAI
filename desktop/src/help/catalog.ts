@@ -54,6 +54,14 @@ const META: HelpArticleMeta[] = [
       'file_edit, repo_search, missions, silent jobs — multi-hour coding with one partner.',
   },
   {
+    id: 'computer-use-soak',
+    title: 'Computer-use soak notes',
+    category: 'Reference',
+    order: 18,
+    tags: ['computer-use', 'browser', 'rail', 'soak', 'navigate'],
+    summary: 'Browser rail / computer-use soak checklist and operator notes.',
+  },
+  {
     id: '01-install-windows',
     title: 'Install (Windows)',
     category: 'Start here',
