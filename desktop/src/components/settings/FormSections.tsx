@@ -63,6 +63,16 @@ export interface SettingsFormProps {
   setProjectPath: Dispatch<SetStateAction<string>>
   browserHomeUrl: string
   setBrowserHomeUrl: Dispatch<SetStateAction<string>>
+  /** Desktop Privacy Shield (Brave adblock) — optional; web UI omits. */
+  privacyShield?: {
+    enabled: boolean
+    ready: boolean
+    message: string
+    attribution: string
+    onToggle: (on: boolean) => void
+    onRefresh: () => void
+    busy?: boolean
+  } | null
   persona: string
   setPersona: Dispatch<SetStateAction<string>>
   userName: string
@@ -174,6 +184,7 @@ export function SettingsFormSections(p: SettingsFormProps): ReactNode {
     apiKeySet,
     projectPath, setProjectPath,
     browserHomeUrl, setBrowserHomeUrl,
+    privacyShield = null,
     persona, setPersona,
     userName, setUserName,
     agentName, setAgentName,
@@ -692,6 +703,58 @@ export function SettingsFormSections(p: SettingsFormProps): ReactNode {
               <div className="text-[10px] leading-snug" style={{ color: 'var(--text-muted)' }}>
                 In-app Browser (⌂ Home). Default is the Remedy GitHub repo. Use http(s) only.
               </div>
+              {privacyShield && (
+                <div
+                  className="mt-3 rounded px-2 py-2"
+                  style={{
+                    background: 'var(--bg-tertiary)',
+                    border: '1px solid var(--border)',
+                  }}
+                >
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <label
+                      className="text-xs font-medium flex items-center gap-2"
+                      style={{ color: 'var(--text-primary)' }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={privacyShield.enabled}
+                        onChange={(e) => privacyShield.onToggle(e.target.checked)}
+                        disabled={privacyShield.busy}
+                      />
+                      Browser Privacy Shield
+                    </label>
+                    <button
+                      type="button"
+                      className="text-[10px] px-1.5 py-0.5 rounded"
+                      style={{
+                        border: '1px solid var(--border)',
+                        color: 'var(--text-secondary)',
+                        opacity: privacyShield.busy ? 0.5 : 1,
+                      }}
+                      disabled={privacyShield.busy}
+                      onClick={() => privacyShield.onRefresh()}
+                      title="Re-download EasyList / EasyPrivacy"
+                    >
+                      {privacyShield.busy ? 'Updating…' : 'Update lists'}
+                    </button>
+                  </div>
+                  <div className="text-[10px] leading-snug" style={{ color: 'var(--text-muted)' }}>
+                    {privacyShield.message}
+                    {!privacyShield.ready && privacyShield.enabled
+                      ? ' (first run downloads filter lists).'
+                      : ''}
+                  </div>
+                  <div
+                    className="text-[9px] leading-snug mt-1"
+                    style={{ color: 'var(--text-muted)', opacity: 0.85 }}
+                    title={privacyShield.attribution}
+                  >
+                    Blocks ad/tracker navigations and hides many page ads (Brave engine + EasyList).
+                    Not a full browser extension — use ↗ system browser for full uBlock Origin.
+                  </div>
+                </div>
+              )}
             </SettingsSection>
 
             {/* Access */}
