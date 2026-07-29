@@ -1,7 +1,7 @@
-"""Google OAuth (authorization code + PKCE) for Calendar — local desktop loopback.
+"""Google OAuth (authorization code + PKCE) for Gmail + Calendar — loopback.
 
 Tokens stored under ``~/.remedy/auth/google.json`` (DPAPI on Windows).
-Client id/secret from env or Settings (user's Google Cloud OAuth app).
+Product OAuth client from env/build (end users never paste Client ID).
 
 Not computer-use: official Google sign-in in the system browser only.
 """
@@ -31,11 +31,14 @@ TOKEN_URL = "https://oauth2.googleapis.com/token"
 USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
 REVOKE_URL = "https://oauth2.googleapis.com/revoke"
 
-# Calendar Phase 1 scopes (+ identity for account email label).
+# Gmail + Calendar (+ identity for account email label).
+# readonly + compose: list/read + drafts only (no silent send).
 SCOPES = (
     "openid",
     "email",
     "profile",
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.compose",
     "https://www.googleapis.com/auth/calendar.events",
 )
 
@@ -448,7 +451,7 @@ def _sync_linked_account(tokens: GoogleTokens, home: Path | str | None) -> None:
             id="google_primary",
             provider="google",
             email=tokens.email,
-            capabilities=["calendar"],
+            capabilities=["mail", "calendar"],
             status="connected" if tokens.connected else "disconnected",
             last_sync=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         )
@@ -514,7 +517,7 @@ def disconnect(home: Path | str | None = None) -> None:
                 id="google_primary",
                 provider="google",
                 email=tokens.email,
-                capabilities=["calendar"],
+                capabilities=["mail", "calendar"],
                 status="disconnected",
             )
         )
