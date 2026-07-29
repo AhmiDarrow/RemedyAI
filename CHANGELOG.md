@@ -4,6 +4,12 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Feat: default Dark Forest + Dark Purple (alien) theme
+
+- **Default theme** is **Dark Forest** (`forest`) for first run (no saved preference).
+- New theme **Dark Purple** (`alien`): deep void base + electric alien-purple accent (`#b026ff`).
+- Existing Amethyst / classic Dark unchanged; saved user theme preference still wins.
+
 ### Chore: remove product Qwen VLM — SmolVLM2 only
 
 - Local vision / nano / helper catalog is **SmolVLM2 2.2B only** (`smolvlm2-2.2b`).
