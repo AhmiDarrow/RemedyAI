@@ -11,6 +11,7 @@ import {
   type HelpArticle,
 } from '../help/catalog'
 import { openReportIssue } from '../utils/reportIssue'
+import { browserStackHold } from '../utils/browserStack'
 
 export interface HelpPanelProps {
   open: boolean
@@ -53,6 +54,12 @@ export function HelpPanel({ open, onClose, initialArticleId, version }: HelpPane
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
   }, [open, onClose])
+
+  // WebView2 child always tops React; suppress embed while Help covers the window.
+  useEffect(() => {
+    if (!open) return
+    return browserStackHold('help-panel')
+  }, [open])
 
   const navigate = useCallback((id: string, push = true) => {
     const art = getArticle(id)

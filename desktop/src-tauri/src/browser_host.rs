@@ -28,6 +28,9 @@ pub struct BrowserBounds {
 pub struct BrowserState {
     current_url: Mutex<String>,
     last_bounds: Mutex<Option<BrowserBounds>>,
+    /// When true, do not show() the embed (Settings/Help/overlays cover the host).
+    /// Prevents the native WebView2 HWND from floating above React chrome.
+    stack_suppressed: AtomicBool,
 }
 
 impl Default for BrowserState {
@@ -35,6 +38,7 @@ impl Default for BrowserState {
         Self {
             current_url: Mutex::new("https://github.com/AhmiDarrow/RemedyAI".into()),
             last_bounds: Mutex::new(None),
+            stack_suppressed: AtomicBool::new(false),
         }
     }
 }
@@ -125,13 +129,21 @@ fn clamp_bounds(b: &BrowserBounds) -> BrowserBounds {
     }
 }
 
-fn apply_bounds(wv: &tauri::Webview, b: &BrowserBounds) -> Result<(), String> {
+fn apply_bounds(wv: &tauri::Webview, b: &BrowserBounds, allow_show: bool) -> Result<(), String> {
     wv.set_position(LogicalPosition::new(b.x, b.y))
         .map_err(|e| format!("set_position: {e}"))?;
     wv.set_size(LogicalSize::new(b.width, b.height))
         .map_err(|e| format!("set_size: {e}"))?;
-    let _ = wv.show();
+    if allow_show {
+        let _ = wv.show();
+    } else {
+        let _ = wv.hide();
+    }
     Ok(())
+}
+
+fn embed_may_show(state: &BrowserState) -> bool {
+    !state.stack_suppressed.load(Ordering::SeqCst)
 }
 
 fn destroy_embed(app: &AppHandle) {
@@ -169,9 +181,43 @@ pub fn browser_hide(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn browser_show(app: AppHandle) -> Result<(), String> {
+pub fn browser_show(app: AppHandle, state: State<'_, BrowserState>) -> Result<(), String> {
+    if !embed_may_show(state.inner()) {
+        return Ok(());
+    }
     if let Some(wv) = app.get_webview(LABEL) {
         wv.show().map_err(|e| format!("show: {e}"))?;
+    }
+    Ok(())
+}
+
+/// Suppress (hide) or restore the embed while React overlays cover the host.
+/// Does not destroy the webview — navigations may continue while hidden.
+#[tauri::command]
+pub fn browser_set_stack_suppressed(
+    app: AppHandle,
+    state: State<'_, BrowserState>,
+    suppressed: bool,
+) -> Result<(), String> {
+    state
+        .stack_suppressed
+        .store(suppressed, Ordering::SeqCst);
+    if suppressed {
+        if let Some(wv) = app.get_webview(LABEL) {
+            let _ = wv.hide();
+        }
+        log::debug!("browser embed stack suppressed");
+    } else if let Some(wv) = app.get_webview(LABEL) {
+        // Re-apply last bounds then show — SPA should also push fresh host rect.
+        let b = state
+            .last_bounds
+            .lock()
+            .ok()
+            .and_then(|g| g.clone())
+            .unwrap_or_else(|| default_rail_bounds(&app));
+        let _ = apply_bounds(&wv, &clamp_bounds(&b), true);
+        let _ = app.emit("browser-stack-restored", json!({ "ok": true }));
+        log::debug!("browser embed stack restored");
     }
     Ok(())
 }
@@ -187,13 +233,14 @@ pub fn browser_set_bounds(
     if let Ok(mut g) = state.last_bounds.lock() {
         *g = Some(b.clone());
     }
+    let may_show = embed_may_show(state.inner());
     if let Some(wv) = app.get_webview(LABEL) {
-        apply_bounds(&wv, &b)?;
+        apply_bounds(&wv, &b, may_show)?;
     }
     Ok(())
 }
 
-fn schedule_reload(wv: tauri::Webview, url: String, delay_ms: u64) {
+fn schedule_reload(wv: tauri::Webview, url: String, delay_ms: u64, allow_show: bool) {
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(delay_ms));
         if let Ok(u) = url.parse::<Url>() {
@@ -201,11 +248,17 @@ fn schedule_reload(wv: tauri::Webview, url: String, delay_ms: u64) {
                 log::warn!("browser delayed navigate failed: {e}");
             }
         }
-        let _ = wv.show();
+        if allow_show {
+            let _ = wv.show();
+        } else {
+            let _ = wv.hide();
+        }
         // Force paint if WebView2 stayed white (known multiwebview glitch).
-        let _ = wv.eval(
-            "try{if(!document.body||document.body.childElementCount===0){location.reload()}}catch(e){}",
-        );
+        if allow_show {
+            let _ = wv.eval(
+                "try{if(!document.body||document.body.childElementCount===0){location.reload()}}catch(e){}",
+            );
+        }
     });
 }
 
@@ -260,16 +313,22 @@ pub fn navigate_embed(
         *g = Some(b.clone());
     }
 
+    let may_show = embed_may_show(state);
+
     // Already embedded — navigate + re-bounds; recreate if navigate fails (stale child).
     if let Some(wv) = app.get_webview(LABEL) {
-        if let Err(e) = apply_bounds(&wv, &b) {
+        if let Err(e) = apply_bounds(&wv, &b, may_show) {
             log::warn!("browser bounds on existing embed failed: {e}");
         }
         match wv.navigate(parsed.clone()) {
             Ok(()) => {
-                let _ = wv.show();
-                schedule_reload(wv.clone(), url.clone(), 200);
-                log::info!("browser embed navigate {url}");
+                if may_show {
+                    let _ = wv.show();
+                } else {
+                    let _ = wv.hide();
+                }
+                schedule_reload(wv.clone(), url.clone(), 200, may_show);
+                log::info!("browser embed navigate {url} show={may_show}");
                 return Ok(url);
             }
             Err(e) => {
@@ -288,8 +347,9 @@ pub fn navigate_embed(
     // about:blank first → then navigate: avoids multiwebview white-screen on some GPUs.
     let blank: Url = "about:blank".parse().map_err(|e: url::ParseError| e.to_string())?;
     // Dark chrome — pure white reads as a distracting border around the page
+    // Do not focus on create — steals focus and worsens z-order over React chrome.
     let builder = WebviewBuilder::new(LABEL, WebviewUrl::External(blank))
-        .focused(true)
+        .focused(false)
         .background_color(Color(18, 18, 22, 255));
 
     // add_child already runs builder on main thread internally
@@ -306,14 +366,18 @@ pub fn navigate_embed(
             )
         })?;
 
-    let _ = wv.show();
+    if may_show {
+        let _ = wv.show();
+    } else {
+        let _ = wv.hide();
+    }
     // Immediate navigate to target
     if let Err(e) = wv.navigate(parsed) {
         log::warn!("browser initial navigate failed: {e}");
     }
     // Delayed re-navigate + paint (known multiwebview white-screen workaround)
-    schedule_reload(wv.clone(), url.clone(), 120);
-    schedule_reload(wv.clone(), url.clone(), 400);
+    schedule_reload(wv.clone(), url.clone(), 120, may_show);
+    schedule_reload(wv.clone(), url.clone(), 400, may_show);
 
     log::info!(
         "browser embed created {url} @ ({},{}) {}x{}",
@@ -631,6 +695,7 @@ fn run_navigate_on_main(app: &AppHandle, url: &str) -> Result<String, String> {
 }
 
 fn run_resync_bounds_on_main(app: &AppHandle) -> Result<(), String> {
+    // Keep signature for potential future use; prefer browser_set_bounds from SPA.
     let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
     let app2 = app.clone();
     app.run_on_main_thread(move || {
@@ -643,8 +708,8 @@ fn run_resync_bounds_on_main(app: &AppHandle) -> Result<(), String> {
             .filter(|bb| bb.width >= 200.0 && bb.height >= 160.0)
             .unwrap_or_else(|| default_rail_bounds(&app2));
         if let Some(wv) = app2.get_webview(LABEL) {
-            let _ = apply_bounds(&wv, &clamp_bounds(&b));
-            let _ = wv.show();
+            let may = embed_may_show(state.inner());
+            let _ = apply_bounds(&wv, &clamp_bounds(&b), may);
         }
         let _ = tx.send(Ok(()));
     })
