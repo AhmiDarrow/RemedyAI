@@ -287,6 +287,24 @@ export function AssistantSection({
               {google.tokens_encoding_warning}
             </div>
           ) : null}
+          {googleConnected && google?.apis_warning ? (
+            <div
+              className="mb-1.5 rounded-md px-2 py-1.5 text-[10px] leading-snug"
+              role="status"
+              style={{
+                color: 'var(--remedy-warning, #b8860b)',
+                background: 'color-mix(in srgb, var(--remedy-warning, #b8860b) 12%, transparent)',
+                border: '1px solid color-mix(in srgb, var(--remedy-warning, #b8860b) 35%, transparent)',
+              }}
+            >
+              {google.apis_warning}
+              {google.apis?.enable_gmail_url ? (
+                <div className="mt-1">
+                  Enable Gmail API in Google Cloud Console, then retry tools.
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           {googleConnected ? (
             <div className="flex flex-wrap items-center gap-2">
               <span style={{ color: 'var(--text-primary)' }}>
