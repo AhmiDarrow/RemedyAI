@@ -16,6 +16,14 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 - `/api/computer/a11y/*` is **loopback-only** when API auth is on (not fully public).
 - `page_text` default cap lowered (12k → 8k); sanitize fast-path avoids deepcopy for plain messages.
 
+### Security: medium follow-ups (storage + Privacy Shield)
+
+- Google **tokens_encoding** (`dpapi`/`plain`) in public status + Settings warning when plain.
+- Privacy Shield: **SHA-256 integrity** for EasyList/EasyPrivacy after download; reject HTML/
+  short bodies; **scriptlet inject off** by default (CSS hide only).
+- Session `tool_results` **capped + scrubbed** on save; computer job JSON text capped;
+  job purge default **15 minutes** (was 1 hour).
+
 ### Feat: in-house computer use (browser rail + desktop) — local branch
 
 Work lives on **`feature/computer-use`** (do not ship/push until soak solid).

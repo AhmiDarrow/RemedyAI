@@ -26,6 +26,42 @@ from remedy.models import (
     SessionSummary,
 )
 
+# Cap persisted tool bodies so mail/page text does not accumulate unbounded in memory.db.
+_TOOL_RESULT_CONTENT_MAX = 4_000
+
+
+def _cap_tool_results_for_storage(results: list[Any] | None) -> list[Any]:
+    """Return a storage-safe copy of tool_results (size-capped, secret-scrubbed)."""
+    if not results:
+        return []
+    try:
+        from remedy.core.provider_sanitize import sanitize_message
+    except Exception:
+        sanitize_message = None  # type: ignore[assignment]
+
+    out: list[Any] = []
+    for item in results[:80]:
+        if not isinstance(item, dict):
+            out.append(item)
+            continue
+        row = dict(item)
+        content = row.get("content")
+        if isinstance(content, str) and len(content) > _TOOL_RESULT_CONTENT_MAX:
+            row["content"] = content[: _TOOL_RESULT_CONTENT_MAX - 1] + "…"
+            row["content_truncated"] = True
+        if sanitize_message is not None:
+            # Reuse provider scrub on a synthetic tool message.
+            scrubbed = sanitize_message(
+                {
+                    "role": "tool",
+                    "content": row.get("content") if isinstance(row.get("content"), str) else str(row.get("content") or ""),
+                }
+            )
+            if isinstance(scrubbed.get("content"), str):
+                row["content"] = scrubbed["content"]
+        out.append(row)
+    return out
+
 _SCHEMA = """
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
@@ -1001,6 +1037,11 @@ class MemoryStore:
 
     async def add_chat_message(self, msg: ChatMessage) -> ChatMessage:
         msg.created_at = datetime.now(UTC)
+        safe_results = _cap_tool_results_for_storage(
+            list(msg.tool_results) if msg.tool_results else []
+        )
+        # Keep in-memory object aligned with what we persist.
+        msg.tool_results = safe_results
         with self._locked():
             db = self._ensure_db()
             db.execute(
@@ -1010,7 +1051,7 @@ class MemoryStore:
                 (
                     str(msg.id), msg.session_id, msg.role.value, msg.content,
                     msg.thinking, json.dumps(msg.tool_calls),
-                    json.dumps(msg.tool_results), msg.model, msg.agent,
+                    json.dumps(safe_results), msg.model, msg.agent,
                     msg.tokens, msg.created_at.isoformat(), int(msg.reverted),
                 ),
             )
