@@ -1,5 +1,6 @@
 mod pty_host;
 mod browser_host;
+mod privacy_shield;
 use std::env;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpStream};
@@ -2917,6 +2918,7 @@ pub fn run() {
         })
         .manage(pty_host::PtyState::default())
         .manage(browser_host::BrowserState::default())
+        .manage(std::sync::Arc::new(privacy_shield::PrivacyShieldState::default()))
         .invoke_handler(tauri::generate_handler![
             open_data_folder,
             pick_folder,
@@ -2963,11 +2965,21 @@ pub fn run() {
             browser_host::browser_set_stack_suppressed,
             browser_host::browser_last_bounds,
             browser_host::browser_agent_action,
+            privacy_shield::privacy_shield_status,
+            privacy_shield::privacy_shield_set_enabled,
+            privacy_shield::privacy_shield_refresh_lists,
         ])
         .setup(|app| {
             let _shell = app.handle().plugin(tauri_plugin_shell::init())?;
             let _updater = app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
             let app_handle = app.handle().clone();
+
+            // Privacy Shield (Brave adblock-rust + EasyList) — background list load
+            {
+                let st = app_handle.state::<std::sync::Arc<privacy_shield::PrivacyShieldState>>();
+                privacy_shield::install_global((*st).clone());
+                privacy_shield::bootstrap();
+            }
 
             // Force window/taskbar icon to the circuit-R monogram (not stale PE/cache).
             // Tray already uses icons/icon.png; taskbar often stuck on old embedded ICO.
