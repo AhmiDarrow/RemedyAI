@@ -25,6 +25,20 @@ describe('browserUrl', () => {
     expect(normalizeBrowserUrl('')).toBe('')
   })
 
+  it('rejects task-text leaks (spaces / emails / prose)', () => {
+    expect(
+      normalizeBrowserUrl(
+        'gmail sign in, once there type user@example.com',
+      ),
+    ).toBe('')
+    expect(normalizeBrowserUrl('user@example.com')).toBe('')
+    expect(
+      normalizeBrowserUrl(
+        'https:gmail, in the login inout my username x@y.com',
+      ),
+    ).toBe('')
+  })
+
   it('isOpenableBrowserUrl matches external open allowlist', () => {
     expect(isOpenableBrowserUrl('https://a.com')).toBe(true)
     expect(isOpenableBrowserUrl('http://a.com')).toBe(true)

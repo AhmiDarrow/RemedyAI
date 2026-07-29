@@ -75,32 +75,105 @@ def looks_like_url(text: str | None) -> bool:
     t = (text or "").strip()
     if not t:
         return False
+    # Reject emails and multi-word phrases (user task text is not a URL)
+    if "@" in t and not t.startswith(("http://", "https://")):
+        return False
+    if " " in t or "\n" in t or "\t" in t:
+        return False
     if t.startswith(("http://", "https://", "about:", "file:")):
         return True
-    return bool(_URL_RE.search(t))
+    return bool(_URL_RE.fullmatch(t) or re.match(
+        r"^(?:www\.)?[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?(?:\.[a-zA-Z]{2,})+(?:/.*)?$",
+        t,
+    ))
+
+
+def is_valid_navigate_url(url: str | None) -> bool:
+    """True only for real http(s)/about URLs safe to load in the Browser rail.
+
+    Blocks leaked task text like \"gmail sign in, type user@…\" which used to
+    become ``https://gmail sign in…`` and show in the address bar.
+    """
+    u = (url or "").strip()
+    if not u:
+        return False
+    if any(c in u for c in (" ", "\n", "\t", ",", ";", '"', "'")):
+        # commas/spaces never appear in a clean host path before query
+        # allow query string commas rarely — reject host part
+        host_part = u.split("?", 1)[0].split("#", 1)[0]
+        if any(c in host_part for c in (" ", "\n", "\t", ",", '"', "'")):
+            return False
+    try:
+        from urllib.parse import urlparse
+
+        p = urlparse(u if "://" in u or u.startswith("about:") else f"https://{u}")
+        if p.scheme not in ("http", "https", "about"):
+            return False
+        if p.scheme == "about":
+            return True
+        host = (p.hostname or "").strip()
+        if not host or " " in host or "," in host:
+            return False
+        # Reject single-label hosts like "gmail" without a TLD (except localhost)
+        if host == "localhost":
+            return True
+        if re.match(r"^\d{1,3}(\.\d{1,3}){3}$", host):
+            return True
+        if not re.match(r"^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", host):
+            return False
+        return True
+    except Exception:
+        return False
 
 
 def normalize_url(url: str) -> str:
+    """Normalize nicknames/bare hosts to https URL; return \"\" if invalid."""
     u = (url or "").strip()
     if not u:
-        return u
-    if u.startswith(("http://", "https://", "about:", "file:")):
-        return u
+        return ""
+    # Never promote task prose / emails to https://
+    if "@" in u and not u.startswith(("http://", "https://")):
+        # nickname path may still resolve (gmail alone has no @)
+        try:
+            from remedy.core.computer.browse_intent import resolve_site_alias
+
+            alias = resolve_site_alias(u)
+            if alias and is_valid_navigate_url(alias):
+                return alias
+        except Exception:
+            pass
+        return ""
+    if any(c in u for c in (" ", "\n", "\t")) and not u.startswith("about:"):
+        # Try alias on first token only
+        first = u.split()[0].strip(",.;:")
+        try:
+            from remedy.core.computer.browse_intent import resolve_site_alias
+
+            alias = resolve_site_alias(first)
+            if alias and is_valid_navigate_url(alias):
+                return alias
+        except Exception:
+            pass
+        return ""
+    if u.startswith(("http://", "https://", "about:")):
+        return u if is_valid_navigate_url(u) else ""
     if u.startswith("www."):
-        return "https://" + u
+        cand = "https://" + u
+        return cand if is_valid_navigate_url(cand) else ""
     # bare domain
     if re.match(r"^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(/.*)?$", u):
-        return "https://" + u
-    # Nicknames: gmail → mail.google.com (lazy import avoids cycle with browse_intent)
+        cand = "https://" + u
+        return cand if is_valid_navigate_url(cand) else ""
+    # Nicknames: gmail → mail.google.com
     try:
         from remedy.core.computer.browse_intent import resolve_site_alias
 
         alias = resolve_site_alias(u)
-        if alias:
+        if alias and is_valid_navigate_url(alias):
             return alias
     except Exception:
         pass
-    return u
+    return ""
 
 
 def resolve_target(

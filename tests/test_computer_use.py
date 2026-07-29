@@ -21,6 +21,23 @@ def test_resolve_target_url_prefers_browser():
     assert resolve_target("browser", url="https://x.com") is ComputerTarget.BROWSER
 
 
+def test_normalize_url_rejects_task_text_leak():
+    """User prose must never become the Browser rail address bar."""
+    from remedy.core.computer.router import is_valid_navigate_url, normalize_url
+
+    junk = "gmail sign in, once I want you to log me in the login input my username user@example.com"
+    assert normalize_url(junk) == ""
+    assert is_valid_navigate_url(junk) is False
+    assert is_valid_navigate_url("https://" + junk) is False
+    assert normalize_url("user@example.com") == ""
+    assert normalize_url("https://mail.google.com") == "https://mail.google.com"
+    assert is_valid_navigate_url("https://mail.google.com") is True
+    # nickname still works
+    assert normalize_url("gmail") == "https://mail.google.com"
+    # first-token recovery from multi-word
+    assert normalize_url("gmail sign in please") == "https://mail.google.com"
+
+
 def test_wants_system_browser_only_when_explicit():
     from remedy.core.computer.router import wants_rail_browser, wants_system_browser
 

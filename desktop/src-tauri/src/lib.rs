@@ -2696,13 +2696,57 @@ fn guess_content_type(path: &Path) -> String {
     .to_string()
 }
 
+/// FedCM / browser-credential noise that must never attach as chat files.
+/// Seen leaking as chips: gmail.com_hrd, *_identity_provider, email-named files.
+fn is_browser_credential_noise(path: &Path) -> bool {
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if name.is_empty() {
+        return true;
+    }
+    if name.contains("identity_provider")
+        || name.ends_with("_hrd")
+        || name.contains("_hrd_")
+        || name.ends_with("_hrd_metadata")
+        || name.contains("fedcm")
+    {
+        return true;
+    }
+    // email-looking bare filenames (no extension)
+    if name.contains('@') && path.extension().is_none() {
+        return true;
+    }
+    // domain_hrd style without extension
+    if path.extension().is_none() && name.contains(".com") {
+        return true;
+    }
+    // Paths under WebView/Edge credential stores
+    let full = path.to_string_lossy().to_ascii_lowercase();
+    if full.contains("webview2") && (full.contains("fedcm") || full.contains("identity")) {
+        return true;
+    }
+    false
+}
+
 fn load_paths_as_payloads(paths: &[String]) -> Result<Vec<DroppedFilePayload>, String> {
     use base64::Engine;
 
     let mut out = Vec::new();
+    let mut skipped_noise = 0u32;
     for raw in paths {
         let path = PathBuf::from(raw);
         if !path.is_file() {
+            continue;
+        }
+        if is_browser_credential_noise(&path) {
+            skipped_noise += 1;
+            log::warn!(
+                "Skipping browser credential/FedCM noise drop: {}",
+                path.display()
+            );
             continue;
         }
         let meta = std::fs::metadata(&path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -2734,6 +2778,11 @@ fn load_paths_as_payloads(paths: &[String]) -> Result<Vec<DroppedFilePayload>, S
         }
     }
     if out.is_empty() {
+        if skipped_noise > 0 {
+            return Err(
+                "Dropped files looked like browser login/FedCM noise and were ignored".into(),
+            );
+        }
         return Err("No readable files in drop".into());
     }
     Ok(out)
