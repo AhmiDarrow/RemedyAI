@@ -123,7 +123,9 @@ async function runBrowserJob(job: ComputerJob): Promise<Record<string, unknown>>
   }
 
   if (action === 'snapshot' || action === 'a11y') {
-    await tauriInvoke<string>('browser_agent_action', {
+    // eval_with_callback returns the elements JSON directly (no page→localhost
+    // fetch — that timed out on HTTPS sites like Patreon/Gmail).
+    const res = await tauriInvoke<string>('browser_agent_action', {
       action: 'snapshot',
       job_id: job.id,
       x: null,
@@ -136,13 +138,25 @@ async function runBrowserJob(job: ComputerJob): Promise<Record<string, unknown>>
       dy: null,
       ref: null,
     })
-    await new Promise((r) => window.setTimeout(r, 200))
+    let elements: unknown[] = []
+    try {
+      const parsed = JSON.parse(res || '[]') as unknown
+      if (Array.isArray(parsed)) elements = parsed
+      else if (parsed && typeof parsed === 'object' && Array.isArray((parsed as { elements?: unknown }).elements)) {
+        elements = (parsed as { elements: unknown[] }).elements
+      }
+    } catch {
+      elements = []
+    }
     return {
       ok: true,
       target: 'browser',
       action: 'snapshot',
-      message: 'snapshot injected (elements via a11y push)',
-      _host_defers_complete: true,
+      message: `${elements.length} interactive elements`,
+      elements,
+      via: 'eval-callback',
+      // Complete immediately — Rust may also complete; both ok.
+      _host_defers_complete: false,
     }
   }
 
@@ -303,7 +317,7 @@ export function useComputerHost(
     }, 250)
     const jobIv = window.setInterval(() => {
       void tickJobs()
-    }, 350)
+    }, 120)
 
     return () => {
       cancelled = true

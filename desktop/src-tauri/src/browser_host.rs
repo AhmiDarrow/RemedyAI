@@ -365,10 +365,10 @@ fn computer_host_loop(app: AppHandle) {
             }
         }
 
-        // Job queue — only claim navigate leftovers (SPA owns click/type/snapshot).
-        // Backup when ui_command was lost and Python renudged only the job file.
+        // Claim navigate leftovers + snapshot (SPA may also claim snapshot;
+        // only one wins). Snapshot via eval-callback is fast and reliable.
         if let Ok(resp) = agent
-            .get("http://127.0.0.1:7400/api/computer/jobs/next?only=navigate")
+            .get("http://127.0.0.1:7400/api/computer/jobs/next?only=navigate,snapshot")
             .call()
         {
             if let Ok(v) = resp.into_json::<serde_json::Value>() {
@@ -526,7 +526,38 @@ fn handle_job(app: &AppHandle, agent: &ureq::Agent, job: &serde_json::Value) {
         return;
     }
 
-    // Non-navigate jobs: leave for SPA poller (click/type need page JS)
+    if action == "snapshot" || action == "a11y" {
+        // Eval-with-callback on poller thread (do not nest run_on_main_thread —
+        // that deadlocks waiting for the eval callback).
+        match browser_agent_action(
+            app.clone(),
+            "snapshot".into(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(id.clone()),
+            None,
+        ) {
+            Ok(raw) => log::info!("computer-host snapshot job {id} ok len={}", raw.len()),
+            Err(e) => {
+                log::warn!("computer-host snapshot job {id}: {e}");
+                complete_job(agent, &id, false, json!({}), Some(e));
+            }
+        }
+        let _ = agent
+            .post(&format!(
+                "http://127.0.0.1:7400/api/computer/ui/command/ack?job_id={id}"
+            ))
+            .call();
+        return;
+    }
+
+    // click/type left for SPA poller
     log::info!("computer-host: job {id} action={action} left for SPA or next tick");
 }
 
@@ -665,7 +696,7 @@ pub fn browser_agent_action(
     key: Option<String>,
     button: Option<String>,
     dy: Option<i32>,
-    // Snapshot job id — page POSTs a11y JSON to the local API with this secret.
+    // Snapshot job id — complete via eval result (not page→localhost fetch).
     job_id: Option<String>,
     // Element ref from computer_snapshot (e.g. e3)
     r#ref: Option<String>,
@@ -674,46 +705,36 @@ pub fn browser_agent_action(
         .get_webview(LABEL)
         .ok_or_else(|| "browser not open — navigate first".to_string())?;
     let act = action.to_lowercase();
+    let jid_owned = job_id.clone().unwrap_or_default();
     let js = match act.as_str() {
         "snapshot" | "a11y" => {
-            let jid = job_id.unwrap_or_default();
-            if jid.is_empty() {
-                return Err("job_id required for snapshot".into());
-            }
-            // Stamp data-remedy-ref and POST elements to loopback (job id is the secret).
-            let escaped_jid = jid.replace('\\', "\\\\").replace('\'', "\\'");
-            format!(
-                r#"(function(){{
-  const jobId='{escaped_jid}';
-  try {{
+            // Return elements array to Rust via eval_with_callback.
+            // HTTPS pages often block fetch→http://127.0.0.1 (mixed content),
+            // which caused 8–20s snapshot timeouts on Patreon/Gmail/etc.
+            r#"(function(){
+  try {
     document.querySelectorAll('[data-remedy-ref]').forEach(el => el.removeAttribute('data-remedy-ref'));
-  }} catch(e) {{}}
-  const sel='a,button,input,textarea,select,[role=button],[role=link],[role=textbox],[role=tab],[role=menuitem],[contenteditable=true],summary,label';
-  const nodes=[...document.querySelectorAll(sel)].filter(el => {{
+  } catch(e) {}
+  const sel='a,button,input,textarea,select,[role=button],[role=link],[role=textbox],[role=tab],[role=menuitem],[role=option],[contenteditable=true],summary,label';
+  const nodes=[...document.querySelectorAll(sel)].filter(el => {
     const r=el.getBoundingClientRect();
     const st=window.getComputedStyle(el);
     if(st.visibility==='hidden'||st.display==='none'||st.opacity==='0') return false;
     return r.width>2&&r.height>2&&r.bottom>0&&r.right>0&&r.top<innerHeight&&r.left<innerWidth;
-  }}).slice(0,100);
-  const elements=nodes.map((el,i) => {{
+  }).slice(0,100);
+  return nodes.map((el,i) => {
     const r=el.getBoundingClientRect();
     const ref='e'+(i+1);
-    try {{ el.setAttribute('data-remedy-ref', ref); }} catch(e) {{}}
+    try { el.setAttribute('data-remedy-ref', ref); } catch(e) {}
     const name=(el.getAttribute('aria-label')||el.getAttribute('title')||el.innerText||el.value||el.placeholder||el.name||el.tagName||'').trim().replace(/\s+/g,' ').slice(0,100);
-    return {{
+    return {
       ref, tag:(el.tagName||'').toLowerCase(), role:el.getAttribute('role')||'',
       name, x:Math.round(r.x+r.width/2), y:Math.round(r.y+r.height/2),
       w:Math.round(r.width), h:Math.round(r.height)
-    }};
-  }});
-  fetch('http://127.0.0.1:7400/api/computer/a11y/push', {{
-    method:'POST',
-    headers:{{'Content-Type':'application/json'}},
-    body: JSON.stringify({{job_id: jobId, elements}})
-  }}).catch(function(){{}});
-  return 'ok:'+elements.length;
-}})()"#
-            )
+    };
+  });
+})()"#
+            .to_string()
         }
         "click_ref" => {
             let rf = r#ref.unwrap_or_default();
@@ -869,9 +890,68 @@ pub fn browser_agent_action(
         }
         other => return Err(format!("unknown browser agent action: {other}")),
     };
-    wv.eval(&js).map_err(|e| format!("browser agent action: {e}"))?;
-    log::info!("browser agent action {act}");
-    Ok(format!("browser:{act}:ok"))
+
+    // Prefer eval_with_callback so snapshot returns elements in-process
+    // (no HTTPS→localhost fetch). Other actions also get real JS return values.
+    let (tx, rx) = std::sync::mpsc::channel::<String>();
+    wv.eval_with_callback(js, move |result| {
+        let _ = tx.send(result);
+    })
+    .map_err(|e| format!("browser agent action: {e}"))?;
+    let raw = rx
+        .recv_timeout(Duration::from_secs(3))
+        .map_err(|_| "browser agent action timed out on webview".to_string())?;
+
+    if act == "snapshot" || act == "a11y" {
+        // raw is JSON array of elements (or null/error string)
+        let elements_val: serde_json::Value =
+            serde_json::from_str(&raw).unwrap_or_else(|_| json!([]));
+        let elements: Vec<serde_json::Value> = elements_val
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        let n = elements.len();
+        if !jid_owned.is_empty() {
+            // Prefer a11y push first (sets last_elements on bridge for click-by-ref)
+            let agent = ureq::AgentBuilder::new()
+                .timeout_connect(Duration::from_secs(1))
+                .timeout(Duration::from_secs(3))
+                .build();
+            let push_ok = agent
+                .post("http://127.0.0.1:7400/api/computer/a11y/push")
+                .set("Content-Type", "application/json")
+                .send_json(json!({
+                    "job_id": jid_owned,
+                    "elements": elements_val,
+                }))
+                .is_ok();
+            if !push_ok {
+                complete_job(
+                    &agent,
+                    &jid_owned,
+                    true,
+                    json!({
+                        "ok": true,
+                        "target": "browser",
+                        "action": "snapshot",
+                        "message": format!("{n} interactive elements"),
+                        "elements": elements,
+                        "via": "eval-callback",
+                    }),
+                    None,
+                );
+            }
+        }
+        log::info!("browser agent snapshot n={n}");
+        return Ok(raw);
+    }
+
+    log::info!("browser agent action {act} → {raw}");
+    Ok(if raw.is_empty() {
+        format!("browser:{act}:ok")
+    } else {
+        raw
+    })
 }
 
 pub fn close_browser_on_quit(app: &AppHandle) {

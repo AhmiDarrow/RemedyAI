@@ -447,13 +447,53 @@ class ComputerExecutor:
         if act is ComputerAction.NAVIGATE and payload.get("url"):
             return self._navigate_rail_fast(payload, hint=hint, req_target=req_target)
 
+        # Snapshot: eval-callback path is usually <500ms; fail fast if rail closed
+        if act is ComputerAction.SNAPSHOT:
+            unclaimed = 2.0
+            total_wait = float(kwargs.get("timeout_s") or 4.0)
+            job = self.bridge.enqueue(act.value, payload)
+            finished = self.bridge.wait(
+                job.id,
+                timeout_s=total_wait,
+                poll_s=0.04,
+                abort_check=self._abort_check,
+                unclaimed_timeout_s=unclaimed,
+                grace_s=0.2,
+            )
+            if finished.status == "done" and finished.result:
+                out = dict(finished.result)
+                out.setdefault("ok", True)
+                out.setdefault("target", "browser")
+                out.setdefault("action", "snapshot")
+                if out.get("elements"):
+                    self.bridge.set_last_elements(
+                        list(out.get("elements") or []),
+                        target="browser",
+                    )
+                return out
+            err = finished.error or finished.status
+            # Do NOT fall back to full desktop window snapshot — that steers
+            # the model into screenshot/vision thrash on the wrong surface.
+            return public_result(
+                ok=False,
+                target="browser",
+                action="snapshot",
+                message=(
+                    f"Browser rail snapshot failed ({err}). "
+                    "Open/navigate the page in the Browser rail first, then retry "
+                    "computer_snapshot. Prefer snapshot+click ref=eN — do not use "
+                    "screenshot+vision as the primary path (slow and often wrong)."
+                ),
+                extra={"job_id": job.id},
+            )
+
         unclaimed = 3.0
-        total_wait = float(kwargs.get("timeout_s") or 20.0)
+        total_wait = float(kwargs.get("timeout_s") or 12.0)
         job = self.bridge.enqueue(act.value, payload)
         finished = self.bridge.wait(
             job.id,
             timeout_s=total_wait,
-            poll_s=0.1,
+            poll_s=0.08,
             abort_check=self._abort_check,
             unclaimed_timeout_s=unclaimed,
         )
@@ -469,12 +509,6 @@ class ComputerExecutor:
                 )
             return out
         err = finished.error or finished.status
-        # Navigate handled above; remaining browser actions:
-        # Snapshot offline → desktop window snapshot so task can continue
-        if act is ComputerAction.SNAPSHOT:
-            fb = self._run_desktop(act, **kwargs)
-            fb["note"] = f"browser host failed ({err}); returned desktop window snapshot"
-            return fb
         return public_result(
             ok=False,
             target="browser",

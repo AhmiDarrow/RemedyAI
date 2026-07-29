@@ -31,7 +31,10 @@ You can operate this PC with **Remedy-native** tools (not a vendor computer-use 
 4. To show a website or wiki: **`computer_navigate`** (rail) with a **full https URL**. Nicknames work (`gmail` → mail.google.com). Do **not** open Firefox/Chrome/system browser unless the user explicitly asks.
 5. **Never** reply with only “I'll open …” without a real `computer_navigate` tool call.
 6. If `computer_navigate` returns **ok: true** / **SUCCESS** / **user_visible** / **reconciled** / **optimistic**: the page **is open**. Confirm in **one short sentence** and **end the turn**. Do not claim failure, web_fetch, open system browser, or “verify” with more tools unless the user asked to interact with the page.
-7. Only use snapshot/click/type **after** open when the user wants you to **do something on the page** (click, fill form, read a field) — not for a bare “goto”.
+7. **Page interaction** (“click membership options”, fill a form):  
+   `computer_snapshot` → `computer_click ref=eN` (or type/key). **One snapshot, then act.**  
+   **Do not** loop screenshot → vision decode → snapshot — that is slow and often captures the wrong window.  
+   If snapshot fails: navigate once to the right URL, snapshot again, then stop or click — no vision thrash.
 8. **Do not** use `web_fetch` for wikis that block bots when the user wants to *see* the page.
 9. Coordinates: **desktop** = screen pixels; **browser** = embed viewport.
 10. User **Stop** cancels pending browser jobs.
