@@ -335,7 +335,8 @@ export function StatusBar({
           setStatus('connected')
           if (ver) setVersion(ver)
           try {
-            const p = await getPartnerStatus()
+            // Scope quality/metabolism + session approvals to the focused chat tab.
+            const p = await getPartnerStatus(sessionId)
             if (cancelled) return
             const bits: string[] = []
             if (p.pending_approvals > 0) bits.push(`${p.pending_approvals} approve`)
@@ -379,7 +380,7 @@ export function StatusBar({
       cancelled = true
       clearInterval(interval)
     }
-  }, [])
+  }, [sessionId])
 
   // Latest mid-task checkpoint (opens Memory panel → Checkpoint tab via Memory button)
   useEffect(() => {

@@ -8,11 +8,18 @@ import {
   type UsagePayload,
 } from '../api/messages'
 import {
+  appendJobThinking,
+  appendJobToken,
   completeStreamJob,
   detachStreamJob,
+  getJobPaint,
   getStreamJob,
   reattachStreamJob,
   registerStreamJob,
+  setJobActiveTools,
+  setJobProcessSteps,
+  setJobRunUsage,
+  setJobTaskProgress,
   stopStreamJob,
   touchStreamJob,
 } from '../sessions/streamJobs'
@@ -301,6 +308,7 @@ export function useMessages(sessionId: string | null) {
     clearChatMediaCache()
     void load({ force: true })
     // Re-bind UI if this session still has a live background job.
+    // Restore paint buffers so concurrent multi-tab turns do not flash blank.
     if (sessionId) {
       const job = reattachStreamJob(sessionId) || getStreamJob(sessionId)
       if (job?.status === 'running') {
@@ -310,6 +318,26 @@ export function useMessages(sessionId: string | null) {
         streamCtrlRef.current = job.controller
         setStreamCtrl(job.controller)
         lastStreamActivityRef.current = job.lastActivityAt || Date.now()
+        const paint = getJobPaint(sessionId) || job.paint
+        streamAccumRef.current = paint.partialText || ''
+        thinkingAccumRef.current = paint.partialThinking || ''
+        setPartialText(paint.partialText || '')
+        setPartialThinking(paint.partialThinking || '')
+        processStepsRef.current = paint.processSteps || []
+        setProcessSteps(paint.processSteps || [])
+        setActiveTools(paint.activeTools || [])
+        setTaskProgress(paint.taskProgress || null)
+        if (paint.runUsage) {
+          setRunUsage({
+            prompt_tokens: paint.runUsage.prompt_tokens ?? 0,
+            completion_tokens: paint.runUsage.completion_tokens ?? 0,
+            total_tokens: paint.runUsage.total_tokens ?? 0,
+            estimated_cost_usd: paint.runUsage.estimated_cost_usd ?? 0,
+            source: paint.runUsage.source,
+            model: paint.runUsage.model ?? null,
+            provider: paint.runUsage.provider ?? null,
+          })
+        }
       }
     }
   }, [load])
@@ -435,9 +463,19 @@ export function useMessages(sessionId: string | null) {
         if (doneReceived) return
         doneReceived = true
         resetStreamBuffers()
-        const stepsSnapshot = [...processStepsRef.current]
-        const assistantText = streamAccumRef.current
-        const thinkingText = thinkingAccumRef.current || null
+        // Prefer per-job paint (survives detach + concurrent tabs) over hook refs.
+        const paint = getJobPaint(targetId)
+        const stepsSnapshot = paint?.processSteps?.length
+          ? [...paint.processSteps]
+          : [...processStepsRef.current]
+        const assistantText =
+          (paint?.partialText && paint.partialText.length
+            ? paint.partialText
+            : streamAccumRef.current) || ''
+        const thinkingText =
+          (paint?.partialThinking && paint.partialThinking.length
+            ? paint.partialThinking
+            : thinkingAccumRef.current) || null
         // Optimistic: promote stream into a permanent bubble immediately (no blank gap).
         if (assistantText.trim() && sessionIdRef.current === targetId) {
           const optimistic: ChatMessage = {
@@ -562,16 +600,23 @@ export function useMessages(sessionId: string | null) {
       }
 
       const pushSteps = (next: ProcessStep[]) => {
-        processStepsRef.current = next
-        setProcessSteps(next)
+        // Always write job paint (background turns keep process trail).
+        setJobProcessSteps(targetId, next)
+        if (isFocusedTurn()) {
+          processStepsRef.current = next
+          setProcessSteps(next)
+        }
       }
 
+      // streamMessage returns its AbortController synchronously (before fetch).
+      // Register immediately so background tokens always hit job.paint.
       const ctrl = streamMessage(
         targetId,
         text.trim() || '(see attached files)',
         (token) => {
           bumpActivity()
-          // Background jobs: server persists; do not touch focused UI accumulators.
+          // Always accumulate on the job so reattach/finish see full text.
+          appendJobToken(targetId, token)
           if (isFocusedTurn()) appendPartialToken(token)
         },
         () => {
@@ -583,12 +628,20 @@ export function useMessages(sessionId: string | null) {
         model,
         (thought) => {
           bumpActivity()
+          appendJobThinking(targetId, thought)
           if (isFocusedTurn()) appendPartialThinking(thought)
         },
         (name, args, callId) => {
           bumpActivity()
-          if (!isFocusedTurn()) return
-          setActiveTools((prev) => [...prev, { name, status: 'running' }])
+          const paint = getJobPaint(targetId)
+          const tools = [
+            ...(paint?.activeTools || []),
+            { name, status: 'running' as const },
+          ]
+          setJobActiveTools(targetId, tools)
+          if (isFocusedTurn()) {
+            setActiveTools(tools)
+          }
           const step: ProcessStep = {
             id: callId || `${name}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
             name,
@@ -601,22 +654,31 @@ export function useMessages(sessionId: string | null) {
                 ? JSON.stringify(args, null, 2)
                 : undefined,
           }
-          pushSteps([...processStepsRef.current, step])
+          const prevSteps =
+            paint?.processSteps?.length
+              ? paint.processSteps
+              : processStepsRef.current
+          pushSteps([...prevSteps, step])
         },
         (name, preview, ok = true, callId) => {
           bumpActivity()
-          if (!isFocusedTurn()) return
-          setActiveTools((prev) => {
-            let done = false
-            return prev.map((t) => {
-              if (!done && t.name === name && t.status === 'running') {
-                done = true
-                return { ...t, status: ok ? ('done' as const) : ('error' as const) }
-              }
-              return t
-            })
+          const paint = getJobPaint(targetId)
+          let tools = paint?.activeTools || []
+          let toolDone = false
+          tools = tools.map((t) => {
+            if (!toolDone && t.name === name && t.status === 'running') {
+              toolDone = true
+              return { ...t, status: ok ? ('done' as const) : ('error' as const) }
+            }
+            return t
           })
-          const prev = processStepsRef.current
+          setJobActiveTools(targetId, tools)
+          if (isFocusedTurn()) setActiveTools(tools)
+
+          const prev =
+            paint?.processSteps?.length
+              ? paint.processSteps
+              : processStepsRef.current
           let hit = false
           const next = prev.map((s) => {
             if (hit || s.status !== 'running') return s
@@ -654,13 +716,13 @@ export function useMessages(sessionId: string | null) {
         attachments,
         (info) => {
           bumpActivity()
+          setJobTaskProgress(targetId, info)
           if (isFocusedTurn()) setTaskProgress(info)
         },
         planMode,
         (usage: UsagePayload) => {
           bumpActivity()
-          if (!isFocusedTurn()) return
-          setRunUsage({
+          const snap = {
             prompt_tokens: usage.prompt_tokens ?? 0,
             completion_tokens: usage.completion_tokens ?? 0,
             total_tokens:
@@ -670,7 +732,9 @@ export function useMessages(sessionId: string | null) {
             source: usage.source,
             model: usage.model ?? model ?? null,
             provider: usage.provider ?? null,
-          })
+          }
+          setJobRunUsage(targetId, snap)
+          if (isFocusedTurn()) setRunUsage(snap)
         },
         (payload) => {
           bumpActivity()

@@ -25,7 +25,7 @@ remedy config init
 remedy config show
 remedy auth login xai
 remedy serve --host 127.0.0.1 --port 7400
-remedy skill list
+remedy skill list              # hides learned probation; --all / --learned
 remedy memory search "query"
 remedy mcp serve          # MCP stdio host for external MCP clients
 ```
