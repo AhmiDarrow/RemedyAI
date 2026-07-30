@@ -192,6 +192,8 @@ def apply_auto_harness_send_policy(
         max_pct=max_pct,
         project_path=project_path,
         full_snapshot=full_snap,
+        # Reuse pre_tier so snapshot force_spread skips a second classify walk
+        turn_tier=pre_tier,
     )
     runtime._last_context_snapshot = snap
     est = snap.token_estimate

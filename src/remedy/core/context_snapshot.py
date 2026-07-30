@@ -59,6 +59,7 @@ def build_context_snapshot(
     apply_brief_touch: bool = True,
     apply_remedies: bool = True,
     full_snapshot: bool | None = None,
+    turn_tier: int | None = None,
 ) -> ContextSnapshot:
     """One-pass continuity snapshot (deterministic; no network).
 
@@ -224,13 +225,31 @@ def build_context_snapshot(
             with suppress(Exception):
                 from remedy.core.metabolism.tier import TurnTier, classify_turn_tier
 
-                t = classify_turn_tier(
-                    user_text or "",
-                    intent=intent,
-                    tools_enabled=True,
-                )
-                force_spread = t >= TurnTier.L3_DEEP
-                snap.signals["turn_tier"] = int(t)
+                # Prefer caller pre_tier (send_policy already classified this turn).
+                # Only re-walk when intent can elevate to L3 (autonomous) or no hint.
+                intent_l = (intent or "chat").strip().lower()
+                if turn_tier is not None and int(turn_tier) >= int(TurnTier.L3_DEEP):
+                    force_spread = True
+                    snap.signals["turn_tier"] = int(turn_tier)
+                    snap.signals["turn_tier_reused"] = True
+                elif intent_l == "autonomous":
+                    force_spread = True
+                    snap.signals["turn_tier"] = int(TurnTier.L3_DEEP)
+                    snap.signals["turn_tier_reused"] = True
+                elif turn_tier is not None:
+                    # Same text flags as send_policy; non-autonomous intent cannot
+                    # raise L0–L2 → L3 without the autonomous keyword path above.
+                    force_spread = False
+                    snap.signals["turn_tier"] = int(turn_tier)
+                    snap.signals["turn_tier_reused"] = True
+                else:
+                    t = classify_turn_tier(
+                        user_text or "",
+                        intent=intent,
+                        tools_enabled=True,
+                    )
+                    force_spread = t >= TurnTier.L3_DEEP
+                    snap.signals["turn_tier"] = int(t)
             spread_plan = plan_spread(
                 user_text or "",
                 intent=intent,
