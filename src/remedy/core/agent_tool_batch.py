@@ -189,6 +189,61 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
                 )
             return result, content_str
 
+        # Shadow rehearsal (L2/L3 high-blast only) — never replaces write jail.
+        shadow_outcome = "pass"
+        with suppress(Exception):
+            from remedy.core.metabolism.shadow import rehearse, should_shadow
+            from remedy.core.session_quality import get_session_quality
+            from remedy.core.turn_context import turn_session_id
+
+            tier = int(getattr(runtime, "_turn_tier", 2) or 2)
+            if should_shadow(name, tier=tier):
+                roots = list(getattr(runtime, "_work_roots", None) or [])
+                if not roots:
+                    pp = getattr(runtime, "_project_path", None)
+                    if pp:
+                        roots = [str(pp)]
+                map_hint: dict[str, Any] = {}
+                with suppress(Exception):
+                    from remedy.core.metabolism.machine_map import get_machine_map
+
+                    sid_m = str(turn_session_id(runtime) or "")
+                    sl = get_machine_map(sid_m).get("browser", "rail")
+                    if sl is not None:
+                        map_hint["browser_settled"] = bool(
+                            (sl.data or {}).get("settled")
+                        )
+                sh = rehearse(
+                    name,
+                    args if isinstance(args, dict) else {},
+                    tier=tier,
+                    work_roots=roots,
+                    map_hint=map_hint or None,
+                )
+                shadow_outcome = sh.outcome
+                if sh.blocked:
+                    content_str = format_tool_error(
+                        f"shadow rehearsal blocked: {sh.reason}",
+                        code="SHADOW_BLOCK",
+                        tool_name=name or "unknown",
+                        suggestion=(
+                            "Choose a safer path inside the project write roots, "
+                            "or confirm intent if this was deliberate."
+                        ),
+                    )
+                    result_cache[fp] = content_str
+                    seen_fps.add(fp)
+                    with suppress(Exception):
+                        get_session_quality(
+                            str(turn_session_id(runtime) or "")
+                        ).record_shadow_catch()
+                    return content_str
+                if sh.outcome == "soft_warn":
+                    with suppress(Exception):
+                        get_session_quality(
+                            str(turn_session_id(runtime) or "")
+                        ).record_shadow_catch()
+
         lock_key = _write_path_key(name, args)
         if lock_key:
             lock = path_locks.setdefault(lock_key, asyncio.Lock())
@@ -203,6 +258,10 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
             content_str = (
                 content_str[:cap]
                 + f"\n…[safety cap {cap} chars — re-run with a narrower query if needed]"
+            )
+        if shadow_outcome == "soft_warn":
+            content_str = (
+                f"[shadow: soft_warn — double-check target]\n{content_str}"
             )
         result_cache[fp] = content_str
         seen_fps.add(fp)
@@ -237,6 +296,23 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
                 result=content_str or "",
                 success=bool(result.success),
                 tool_call_id=tc_id,
+            )
+        # Metabolism: evidence ledger + decision currency + action IR
+        with suppress(Exception):
+            from remedy.core.metabolism.turn import after_tool_batch
+            from remedy.core.turn_context import turn_session_id
+
+            tc_id = str(tc.get("id") or tc.get("tool_call_id") or "")
+            after_tool_batch(
+                session_id=str(turn_session_id(runtime) or ""),
+                tool_name=name or "unknown",
+                arguments=args if isinstance(args, dict) else {},
+                content=content_str or "",
+                tool_call_id=tc_id,
+                success=bool(result.success),
+                tier=int(getattr(runtime, "_turn_tier", 2) or 2),
+                action_ir=getattr(runtime, "_action_ir", None),
+                shadow_outcome=shadow_outcome,
             )
         # Background continuity: pattern observation + stuck signals
         with suppress(Exception):

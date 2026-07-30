@@ -49,6 +49,22 @@ def schedule_post_turn_prep(
             project_path=project_path,
             memory=getattr(runtime, "memory", None),
         )
+        # Metabolism: finish IR, promote Time Crystal, optional critical verify
+        with suppress(Exception):
+            from remedy.core.metabolism.turn import end_turn_metabolism
+
+            home = getattr(getattr(runtime, "config", None), "home_dir", None)
+            end_turn_metabolism(
+                session_id=sid,
+                action_ir=getattr(runtime, "_action_ir", None),
+                status="done",
+                assistant_text="",
+                allow_verify=bool(
+                    getattr(runtime, "_metabolism_allow_verify", False)
+                ),
+                home=home,
+            )
+            runtime._action_ir = None
 
 
 def distill_user_message_now(
