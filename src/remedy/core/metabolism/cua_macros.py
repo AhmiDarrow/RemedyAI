@@ -6,14 +6,53 @@ Macros are local procedure hints (not multi-agent). Secrets never stored.
 from __future__ import annotations
 
 import json
+import os
 import re
+import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse, urlunparse
+
+from remedy.core.metabolism.redact import looks_like_secret_text
 
 
+def _sanitize_url(val: str) -> str:
+    """Strip query string and userinfo (user:pass@host) from stored URLs."""
+    v = (val or "")[:200]
+    if not v:
+        return v
+    try:
+        # Ensure parseable
+        raw = v if "://" in v else f"https://{v}"
+        p = urlparse(raw)
+        # Drop credentials
+        host = p.hostname or ""
+        if p.port:
+            netloc = f"{host}:{p.port}"
+        else:
+            netloc = host
+        # Keep path; drop query/fragment (tokens often live there)
+        cleaned = urlunparse((p.scheme or "https", netloc, p.path or "", "", "", ""))
+        # If input had no scheme and we added https, strip it back only when original lacked it
+        if "://" not in v and cleaned.startswith("https://"):
+            cleaned = cleaned[len("https://") :]
+        return cleaned[:200]
+    except Exception:
+        if "?" in v:
+            v = v.split("?", 1)[0]
+        if "@" in v:
+            # crude userinfo strip: scheme://user:pass@host → scheme://host
+            try:
+                pre, rest = v.split("://", 1)
+                if "@" in rest:
+                    rest = rest.split("@", 1)[1]
+                    v = f"{pre}://{rest}"
+            except Exception:
+                pass
+        return v[:200]
 
 
 @dataclass
@@ -60,13 +99,12 @@ class CuaMacroStore:
                 if k in args and args[k] is not None:
                     val = str(args[k])[:200]
                     try:
-                        from remedy.core.metabolism.redact import looks_like_secret_text
-
+                        # Sanitize URLs *before* secret check so userinfo/query
+                        # tokens do not drop the whole navigation step.
+                        if k == "url":
+                            val = _sanitize_url(val)
                         if looks_like_secret_text(val):
                             continue
-                        # Strip query-string tokens from URLs
-                        if k == "url" and "?" in val:
-                            val = val.split("?", 1)[0]
                     except Exception:
                         pass
                     safe_args[k] = val
@@ -123,7 +161,20 @@ class CuaMacroStore:
                     "version": 1,
                     "macros": {k: v.to_public() for k, v in self.macros.items()},
                 }
-            path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            payload = json.dumps(data, indent=2)
+            fd, tmp_name = tempfile.mkstemp(prefix=".macros.", suffix=".tmp", dir=str(d))
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    fh.write(payload)
+                    fh.flush()
+                    os.fsync(fh.fileno())
+                os.replace(tmp_name, path)
+            except Exception:
+                try:
+                    Path(tmp_name).unlink(missing_ok=True)
+                except Exception:
+                    pass
+                raise
             return path
         except Exception:
             return None

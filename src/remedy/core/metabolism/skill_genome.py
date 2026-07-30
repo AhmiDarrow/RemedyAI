@@ -104,6 +104,9 @@ class SkillGenome:
 
     def persist(self, home: Path | str | None = None) -> Path | None:
         try:
+            import os
+            import tempfile
+
             root = Path(home).expanduser() if home else Path.home() / ".remedy"
             d = root / "skill_genome"
             d.mkdir(parents=True, exist_ok=True)
@@ -113,7 +116,21 @@ class SkillGenome:
                     "version": 1,
                     "skills": {k: v.to_public() for k, v in self.phenotypes.items()},
                 }
-            path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            payload = json.dumps(data, indent=2)
+            # Atomic replace so concurrent readers never see a half-written file
+            fd, tmp_name = tempfile.mkstemp(prefix=".phenotypes.", suffix=".tmp", dir=str(d))
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    fh.write(payload)
+                    fh.flush()
+                    os.fsync(fh.fileno())
+                os.replace(tmp_name, path)
+            except Exception:
+                try:
+                    Path(tmp_name).unlink(missing_ok=True)
+                except Exception:
+                    pass
+                raise
             return path
         except Exception:
             return None

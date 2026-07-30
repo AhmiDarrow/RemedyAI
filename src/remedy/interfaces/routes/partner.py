@@ -463,12 +463,20 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
     @app.post("/api/partner/identity/import")
     async def partner_identity_import(req: IdentityImportRequest):
         """Decrypt identity package (preview counts). Full merge is opt-in later."""
+        import time
         from pathlib import Path
 
         from remedy.core.metabolism.identity_export import import_identity
         from remedy.core.metabolism.time_crystal import get_time_crystal
 
-        # Constrain import source: absolute path only; refuse huge/odd names
+        # Process-level rate limit (mirror export — anti-abuse on local API)
+        now = time.time()
+        last = float(getattr(app.state, "_identity_import_ts", 0) or 0)
+        if now - last < 2.0:
+            raise HTTPException(429, "identity import rate limit — wait a moment")
+        app.state._identity_import_ts = now
+
+        # Constrain import source: refuse path traversal tokens
         src_path = Path(req.source).expanduser()
         if ".." in Path(req.source).parts:
             raise HTTPException(400, "import path must not contain '..'")
