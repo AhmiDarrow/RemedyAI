@@ -515,6 +515,57 @@ def test_complete_success_wins_over_timeout_error(tmp_path: Path):
     assert again.status == "done"
 
 
+def test_cancel_never_clobbers_terminal_status(tmp_path: Path):
+    """Abort/cancel must not rewrite a host-completed job as cancelled.
+
+    wait() abort races with host complete: cancel() used to overwrite done →
+    cancelled and lose the successful click/navigate result.
+    """
+    b = ComputerHostBridge(home_dir=tmp_path)
+    job = b.enqueue("click", {"text": "Sign in", "ui": {"open_browser": True}})
+    done = b.complete(
+        job.id,
+        ok=True,
+        result={"ok": True, "action": "click", "text": "Sign in", "via": "host"},
+    )
+    assert done is not None and done.status == "done"
+    cancelled = b.cancel(job.id)
+    assert cancelled is not None
+    assert cancelled.status == "done"
+    assert (cancelled.result or {}).get("via") == "host"
+    # Open jobs still cancel
+    open_job = b.enqueue("type", {"text": "hello"})
+    assert open_job.status == "pending"
+    c2 = b.cancel(open_job.id)
+    assert c2 is not None and c2.status == "cancelled"
+    # Error is terminal too — leave it alone
+    err_job = b.enqueue("snapshot", {})
+    b.complete(err_job.id, ok=False, error="boom")
+    left = b.cancel(err_job.id)
+    assert left is not None and left.status == "error"
+
+
+def test_purge_old_spares_open_jobs(tmp_path: Path):
+    """purge_old must not delete pending/running work (docstring: finished only)."""
+    import os
+    import time
+
+    b = ComputerHostBridge(home_dir=tmp_path)
+    open_j = b.enqueue("navigate", {"url": "https://example.com/open"})
+    done_j = b.enqueue("snapshot", {})
+    b.complete(done_j.id, ok=True, result={"ok": True, "elements": []})
+    # Age both files past cutoff
+    old = time.time() - 10_000
+    for jid in (open_j.id, done_j.id):
+        p = b._path(jid)
+        os.utime(p, (old, old))
+    n = b.purge_old(max_age_s=60.0)
+    assert n >= 1
+    assert b._read(open_j.id) is not None
+    assert b._read(open_j.id).status == "pending"
+    assert b._read(done_j.id) is None
+
+
 def test_find_recent_success(tmp_path: Path):
     b = ComputerHostBridge(home_dir=tmp_path)
     j = b.enqueue("navigate", {"url": "https://mail.google.com"})

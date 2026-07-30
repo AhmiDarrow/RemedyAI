@@ -287,7 +287,9 @@ class ComputerHostBridge:
         self._last_navigate_optimistic: bool = False
         # Desktop UI command (open Browser rail like Settings) — memory + disk
         self._ui_command: dict[str, Any] | None = None
-        home = Path(home_dir).expanduser() if home_dir else Path.home() / ".remedy"
+        # Same resolved home as jobs/ so ui_command and job JSON never diverge
+        # when callers pass a relative or non-canonical home_dir.
+        home = canonical_home(home_dir)
         self._ui_path = home / "computer" / "ui_command.json"
         self._ui_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -641,10 +643,17 @@ class ComputerHostBridge:
         return best
 
     def cancel(self, job_id: str) -> ComputerJob | None:
+        """Cancel an open job. Never clobbers terminal status (done/error/cancelled).
+
+        Host complete can race with wait() abort — success (and prior errors)
+        must stick so we do not rewrite a finished click/navigate as cancelled.
+        """
         with self._lock:
             job = self._read(job_id)
             if job is None:
                 return None
+            if job.status in ("done", "error", "cancelled"):
+                return job
             job.status = "cancelled"
             job.error = "cancelled"
             job.payload = _scrub_retained_payload(job.payload)
@@ -876,14 +885,31 @@ class ComputerHostBridge:
         return job
 
     def purge_old(self, *, max_age_s: float = 900.0) -> int:
-        """Delete finished job files older than *max_age_s* (default 15 minutes)."""
+        """Delete finished job files older than *max_age_s* (default 15 minutes).
+
+        Open work (pending/running) is never deleted — only terminal jobs and
+        unreadable/corrupt JSON files past the age cutoff.
+        """
         cutoff = time.time() - max_age_s
         n = 0
         for path in list(self.root.glob("*.json")):
             try:
-                if path.stat().st_mtime < cutoff:
+                if path.stat().st_mtime >= cutoff:
+                    continue
+                try:
+                    raw = json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    # Corrupt leftover — safe to drop when aged out
                     path.unlink(missing_ok=True)
                     n += 1
+                    continue
+                if isinstance(raw, dict) and str(raw.get("status") or "") in (
+                    "pending",
+                    "running",
+                ):
+                    continue
+                path.unlink(missing_ok=True)
+                n += 1
             except OSError:
                 continue
         return n
