@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Any
 
 HORIZONS = ("turn", "session", "project_week", "life")
+# Bound fact list growth (was 300) — hot_block sort + inject size stay cheap.
+MAX_CRYSTAL_FACTS = 128
 
 
 @dataclass
@@ -45,6 +47,8 @@ class TimeCrystal:
     facts: list[CrystalFact] = field(default_factory=list)
     promotions: int = 0
     blocked_secret: int = 0
+    # Bumps on admit / hit / promote so hot_block cache cannot serve stale order.
+    _rev: int = field(default=0, repr=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def admit(
@@ -73,6 +77,7 @@ class TimeCrystal:
                 if f.text.lower()[:200] == key and f.horizon == horizon:
                     f.hits += 1
                     f.ts = time.time()
+                    self._rev += 1
                     return f
             fact = CrystalFact(
                 text=t[:400],
@@ -82,9 +87,34 @@ class TimeCrystal:
                 session_id=self.session_id,
             )
             self.facts.append(fact)
-            if len(self.facts) > 300:
-                self.facts = self.facts[-300:]
+            if len(self.facts) > MAX_CRYSTAL_FACTS:
+                # Prefer durable horizons when trimming: drop oldest turn/session first.
+                self._trim_facts_locked()
+            self._rev += 1
             return fact
+
+    def _trim_facts_locked(self) -> None:
+        """Keep <= MAX_CRYSTAL_FACTS: durable first, then newest session/turn.
+
+        Newest admits must survive trim so hit-dedupe still works on the hot path.
+        """
+        if len(self.facts) <= MAX_CRYSTAL_FACTS:
+            return
+        durable = [f for f in self.facts if f.horizon in ("life", "project_week")]
+        rest = [f for f in self.facts if f.horizon not in ("life", "project_week")]
+        if len(durable) > MAX_CRYSTAL_FACTS:
+            durable.sort(
+                key=lambda f: (
+                    0 if f.horizon == "life" else 1,
+                    -f.hits,
+                    -f.ts,
+                )
+            )
+            self.facts = durable[:MAX_CRYSTAL_FACTS]
+            return
+        budget = MAX_CRYSTAL_FACTS - len(durable)
+        # Preserve insertion order: drop oldest rest first
+        self.facts = durable + rest[-budget:]
 
     def promote_session_to_project(self, *, min_hits: int = 2) -> int:
         """Repeated session decisions → project_week."""
@@ -95,6 +125,8 @@ class TimeCrystal:
                     f.horizon = "project_week"
                     self.promotions += 1
                     n += 1
+            if n:
+                self._rev += 1
         return n
 
     def promote_pins_to_life(self, texts: list[str]) -> int:
@@ -105,15 +137,16 @@ class TimeCrystal:
                 n += 1
                 with self._lock:
                     self.promotions += 1
+                    self._rev += 1
         return n
 
     def hot_block(self, *, max_chars: int = 1200) -> str:
         """Always-hot life + project_week + session heads for injection.
 
-        Cached until next admit (avoids re-sort every inject).
+        Cached until next admit/hit/promote (avoids re-sort every inject).
         """
         with self._lock:
-            cache_key = (max_chars, len(self.facts), self.promotions)
+            cache_key = (max_chars, self._rev, len(self.facts), self.promotions)
             cached = getattr(self, "_hot_cache", None)
             if (
                 isinstance(cached, tuple)

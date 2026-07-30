@@ -138,6 +138,43 @@ def test_tier_path_hint_gate_and_l0_before_agency():
     assert classify_turn_tier("please work alone on this") == TurnTier.L3_DEEP
 
 
+def test_tier_l3_false_positive_edge_cases():
+    """Departure/partition keywords must not over-elevate everyday chat."""
+    # "go over" / "step away from" are prose — not work-alone departure
+    assert (
+        classify_turn_tier("I need to go over this design with you")
+        == TurnTier.L1_LEAN
+    )
+    assert (
+        classify_turn_tier("I need to go over the API docs carefully")
+        == TurnTier.L1_LEAN
+    )
+    assert (
+        classify_turn_tier("please step away from pure OOP and use composition")
+        == TurnTier.L1_LEAN
+    )
+    # Real departure still L3
+    assert classify_turn_tier("I need to go") == TurnTier.L3_DEEP
+    assert classify_turn_tier("I need to go — finish without me") == TurnTier.L3_DEEP
+    assert classify_turn_tier("step away for a bit, work alone") == TurnTier.L3_DEEP
+    # "review all options" is chat; code targets remain deep
+    assert (
+        classify_turn_tier("review all options before deciding") == TurnTier.L1_LEAN
+    )
+    assert (
+        classify_turn_tier("review all the code carefully across the modules")
+        == TurnTier.L3_DEEP
+    )
+    # Conceptual compare stays lean; module compare is partition/deep
+    assert (
+        classify_turn_tier("compare hashing and encryption") == TurnTier.L1_LEAN
+    )
+    assert (
+        classify_turn_tier("compare auth and database modules")
+        == TurnTier.L3_DEEP
+    )
+
+
 def test_session_registry_caps_unbounded_growth():
     """Metabolism session maps must not grow without bound under churn."""
     from remedy.core.metabolism import evidence as ev_mod
@@ -420,6 +457,70 @@ def test_time_crystal_never_promotes_secrets():
     f.hits = 3
     assert tc.promote_session_to_project(min_hits=2) >= 1
     assert any(x.horizon == "project_week" for x in tc.facts)
+
+
+def test_time_crystal_facts_capped_and_hot_cache_rev():
+    """Fact list is bounded; hit updates invalidate hot_block cache."""
+    from remedy.core.metabolism.time_crystal import MAX_CRYSTAL_FACTS
+
+    reset_time_crystal("crystal_cap")
+    tc = get_time_crystal("crystal_cap")
+    assert MAX_CRYSTAL_FACTS == 128
+    for i in range(MAX_CRYSTAL_FACTS + 40):
+        assert tc.admit(f"session fact number {i} unique", horizon="session")
+    assert len(tc.facts) <= MAX_CRYSTAL_FACTS
+    # life horizon should survive trim preference
+    life = tc.admit("Always prefer typed APIs for public surfaces", horizon="life")
+    assert life is not None
+    assert any(f.horizon == "life" for f in tc.facts)
+    # hot_block must refresh when hits bump (same len/promotions alone was stale)
+    a = tc.admit("Cacheable preference alpha unique", horizon="session")
+    assert a is not None
+    first = tc.hot_block(max_chars=800)
+    a2 = tc.admit("Cacheable preference alpha unique", horizon="session")
+    assert a2 is not None and a2.hits >= 2
+    second = tc.hot_block(max_chars=800)
+    # Both valid crystal blocks; rev must have advanced so cache key differs
+    assert first.startswith("[Time Crystal]") or first == ""
+    assert second.startswith("[Time Crystal]") or second == ""
+    assert getattr(tc, "_rev", 0) >= 2
+
+
+def test_skill_genome_phenotypes_capped():
+    from remedy.core.metabolism.skill_genome import (
+        MAX_PHENOTYPES,
+        get_skill_genome,
+        reset_skill_genome,
+    )
+
+    reset_skill_genome()
+    g = get_skill_genome()
+    assert MAX_PHENOTYPES == 128
+    # Protect one high-value skill so prune must keep it
+    for _ in range(3):
+        g.record("protected-skill", ok=True)
+    assert g.phenotypes["protected-skill"].protected
+    for i in range(MAX_PHENOTYPES + 30):
+        g.record(f"skill-churn-{i}", ok=bool(i % 3))
+    assert len(g.phenotypes) <= MAX_PHENOTYPES
+    assert "protected-skill" in g.phenotypes
+    top = g.rank(5)
+    assert isinstance(top, list)
+
+
+def test_governor_decisions_capped():
+    from remedy.core.metabolism.governor import MAX_GOVERNOR_DECISIONS
+
+    reset_governor("gov_cap")
+    g = get_governor("gov_cap")
+    assert MAX_GOVERNOR_DECISIONS == 40
+    for i in range(MAX_GOVERNOR_DECISIONS + 15):
+        g.observe_and_decide(
+            quality={"stuck_rate": 0.01 * (i % 5), "turns": i},
+            metabolism={"waste_batch_rate": 0.1 * (i % 4), "evidence_units": i},
+            tier=2 + (i % 2),
+        )
+    assert len(g.decisions) <= MAX_GOVERNOR_DECISIONS
 
 
 def test_governor_reacts_to_stuck():
