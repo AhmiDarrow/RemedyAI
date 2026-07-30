@@ -90,6 +90,64 @@ def test_pinned_fetch_blocks_url_userinfo():
         _pinned_fetch("http://alice@8.8.8.8/", max_chars=1000)
 
 
+def test_pinned_fetch_revalidates_redirect_private_and_userinfo():
+    """Redirect hops must re-run SSRF + userinfo checks (no open-redirect pivot).
+
+    Gap: unit coverage previously only exercised first-hop userinfo / private
+    hosts. A 302 Location to loopback or user:pass@host must fail closed before
+    the next connect.
+    """
+    from unittest.mock import MagicMock
+
+    from remedy.core.agent_web_tools import _pinned_fetch
+
+    def _fake_conn_factory(location: str):
+        class _Conn:
+            def __init__(self, *a, **k):
+                pass
+
+            def request(self, *a, **k):
+                pass
+
+            def getresponse(self):
+                resp = MagicMock()
+                resp.status = 302
+                resp.reason = "Found"
+                resp.headers = {}
+                resp.getheader = lambda name, default=None: (
+                    location if str(name).lower() == "location" else default
+                )
+                resp.read = lambda *a, **k: b""
+                return resp
+
+            def close(self):
+                pass
+
+        return _Conn
+
+    # First hop is a public literal so host/DNS checks pass; pin uses that IP.
+    with patch(
+        "remedy.core.agent_web_tools.http.client.HTTPConnection",
+        _fake_conn_factory("http://127.0.0.1/metadata"),
+    ):
+        with pytest.raises(ValueError, match="SSRF_BLOCKED_REDIRECT"):
+            _pinned_fetch("http://1.1.1.1/start", max_chars=1000)
+
+    with patch(
+        "remedy.core.agent_web_tools.http.client.HTTPConnection",
+        _fake_conn_factory("http://user:pass@8.8.8.8/leak"),
+    ):
+        with pytest.raises(ValueError, match="USERINFO"):
+            _pinned_fetch("http://1.1.1.1/start", max_chars=1000)
+
+    with patch(
+        "remedy.core.agent_web_tools.http.client.HTTPConnection",
+        _fake_conn_factory("http://169.254.169.254/latest/meta-data/"),
+    ):
+        with pytest.raises(ValueError, match="SSRF_BLOCKED_REDIRECT"):
+            _pinned_fetch("http://1.1.1.1/start", max_chars=1000)
+
+
 def test_blocks_ipv6_ula_link_local_loopback_and_mapped():
     """IPv6 ULA/doc/link-local/loopback/multicast and IPv4-mapped loopback stay blocked.
 
