@@ -292,6 +292,18 @@ def ensure_tool_call_pairings(
     if not messages:
         return messages
 
+    # Fast path: no tool_calls / tool roles → identity (common L1 chat)
+    has_tools = False
+    for m in messages:
+        if not isinstance(m, dict):
+            continue
+        r = m.get("role")
+        if r == "tool" or (r == "assistant" and m.get("tool_calls")):
+            has_tools = True
+            break
+    if not has_tools:
+        return messages
+
     out: list[dict[str, Any]] = []
     i = 0
     n = len(messages)
