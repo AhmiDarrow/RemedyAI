@@ -490,8 +490,15 @@ def register_workspace_routes(app: FastAPI, *, runtime=None, gateway=None, memor
         cut_at = msg.created_at.isoformat() if hasattr(msg.created_at, "isoformat") else str(msg.created_at or "")
         original = msg.content if isinstance(msg.content, str) else str(msg.content or "")
 
-        # Workspace file restore (best-effort) before soft-delete markers
-        files = {"restored": 0, "deleted": 0, "skipped": 0, "paths": []}
+        # Workspace file restore (best-effort) before soft-delete markers.
+        # Prefer message_id cut (exact undo tags) with timestamp fallback.
+        files = {
+            "restored": 0,
+            "deleted": 0,
+            "skipped": 0,
+            "blocked": 0,
+            "paths": [],
+        }
         try:
             from remedy.core.time_travel import SessionUndoLog
 
@@ -502,7 +509,9 @@ def register_workspace_routes(app: FastAPI, *, runtime=None, gateway=None, memor
                 cfg = load_config()
                 home = cfg.get("home_dir")
             files = SessionUndoLog(home).restore_after(
-                session_id, cut_created_at=cut_at
+                session_id,
+                cut_message_id=str(target_id),
+                cut_created_at=cut_at or None,
             )
         except Exception as exc:
             logger.debug("time-travel file restore: %s", exc)

@@ -102,6 +102,12 @@ class GoalNanobot:
             s["tool_steps"] = 0
             s["stale"] = False
 
+    def clear_session(self, session_id: str | None = None) -> bool:
+        """Drop per-session goal state (session delete / full reset)."""
+        key = self._key(session_id)
+        with self._lock:
+            return self._sessions.pop(key, None) is not None
+
     def system_hint(self, session_id: str | None = None) -> str:
         snap = self.snapshot(session_id)
         open_g = snap.get("open") or []

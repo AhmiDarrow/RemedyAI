@@ -7,6 +7,7 @@ and invokes them on behalf of the agent runtime.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 from typing import Any
@@ -92,8 +93,40 @@ class MCPClient:
             logger.error("MCP connect failed: %s", e)
             return False
 
+    def _purge_server_tools(self, server_name: str) -> int:
+        """Drop residual tool registrations for a server (disconnect / rediscover)."""
+        prefix = f"mcp:{server_name}:"
+        uri_prefix = f"mcp://{server_name}/"
+        drop = [
+            k
+            for k, t in self._tools.items()
+            if k.startswith(prefix)
+            or (getattr(t, "uri", None) or "").startswith(uri_prefix)
+        ]
+        for k in drop:
+            self._tools.pop(k, None)
+        return len(drop)
+
+    def _fail_pending(self, reason: str = "MCP server disconnected") -> int:
+        """Fail any in-flight JSON-RPC futures (process gone / reconnect)."""
+        n = 0
+        for rid, fut in list(self._pending.items()):
+            self._pending.pop(rid, None)
+            if fut is not None and not fut.done():
+                try:
+                    fut.set_exception(ConnectionError(reason))
+                except Exception:
+                    with contextlib.suppress(Exception):
+                        fut.cancel()
+                n += 1
+        return n
+
     async def disconnect(self, server_name: str) -> None:
-        """Gracefully disconnect from an MCP server."""
+        """Gracefully disconnect from an MCP server.
+
+        Also purges residual tool registrations so disconnected servers cannot
+        still appear in ``list_tools`` / resolve for ``call_tool``.
+        """
         if server_name in self._readers:
             self._readers[server_name].cancel()
             del self._readers[server_name]
@@ -109,17 +142,36 @@ class MCPClient:
                 pass
 
         self._servers.pop(server_name, None)
+        # Residual tools after disconnect would still match by name/uri.
+        self._purge_server_tools(server_name)
+        # Pending requests cannot complete once the process is gone.
+        if not self._processes:
+            self._fail_pending()
 
     async def disconnect_all(self) -> None:
         for name in list(self._servers.keys()):
             await self.disconnect(name)
+        # Belt-and-suspenders: no servers left → no MCP tools should linger.
+        self._tools = {
+            k: t
+            for k, t in self._tools.items()
+            if not (k.startswith("mcp:") or str(getattr(t, "uri", "") or "").startswith("mcp://"))
+        }
+        self._fail_pending()
 
     # -- tool discovery ------------------------------------------------------
 
     async def discover_tools(self, server_name: str) -> list[ToolDefinition]:
-        """Fetch tool list from an MCP server and register them."""
+        """Fetch tool list from an MCP server and register them.
+
+        Replaces the previous tool set for *server_name* so tools removed on
+        the server do not linger as residual registrations.
+        """
         result = await self._send_request(server_name, "tools/list", {})
         tools_raw = result.get("tools", [])
+
+        # Drop prior registrations for this server before re-registering.
+        self._purge_server_tools(server_name)
 
         discovered: list[ToolDefinition] = []
         for tool_raw in tools_raw:
@@ -357,3 +409,8 @@ class MCPClient:
             logger.exception("MCP reader error for %s", server_name)
         finally:
             self._servers.pop(server_name, None)
+            self._processes.pop(server_name, None)
+            # Reader exit (crash / EOF) must not leave residual tools callable.
+            self._purge_server_tools(server_name)
+            if not self._processes:
+                self._fail_pending("MCP server closed")
