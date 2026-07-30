@@ -22,6 +22,13 @@ from remedy.models import ChannelKind, EventKind, GatewayEvent
 logger = logging.getLogger(__name__)
 
 
+def _safe_err(msg: object) -> str:
+    """Log-safe fragment: never echo bot token from Telegram API URLs."""
+    from remedy.gateway.messengers import redact_messenger_secrets
+
+    return redact_messenger_secrets(str(msg) if msg is not None else "")[:200]
+
+
 class TelegramChannel(ChannelAdapter):
     """Telegram bot with long-poll getUpdates + sendMessage."""
 
@@ -181,10 +188,10 @@ class TelegramChannel(ChannelAdapter):
             ) as resp:
                 if resp.status != 200:
                     body = await resp.text()
-                    logger.warning("Telegram send %s: %s", resp.status, body[:160])
+                    logger.warning("Telegram send %s: %s", resp.status, _safe_err(body[:160]))
                 return resp.status == 200
         except Exception as e:
-            logger.error("Telegram send failed: %s", e)
+            logger.error("Telegram send failed: %s", _safe_err(e))
             return False
 
     async def send_typing(self, chat_id: str) -> None:
@@ -271,7 +278,7 @@ class TelegramChannel(ChannelAdapter):
             # Network blips — don't spam
             now = time.monotonic()
             if now - self._last_err_log > 30:
-                logger.warning("Telegram getUpdates network: %s", e)
+                logger.warning("Telegram getUpdates network: %s", _safe_err(e))
                 self._last_err_log = now
             await asyncio.sleep(2.0)
             return []
@@ -283,7 +290,7 @@ class TelegramChannel(ChannelAdapter):
                 logger.error(
                     "Telegram getUpdates 404 — bot token invalid/revoked. "
                     "Re-paste from @BotFather in Settings → Messengers. %s",
-                    text[:120],
+                    _safe_err(text[:120]),
                 )
                 self._last_err_log = now
             await asyncio.sleep(30.0)
@@ -301,7 +308,7 @@ class TelegramChannel(ChannelAdapter):
             await asyncio.sleep(5.0)
             return
         if now - self._last_err_log > 15:
-            logger.warning("Telegram getUpdates %s: %s", status, text[:160])
+            logger.warning("Telegram getUpdates %s: %s", status, _safe_err(text[:160]))
             self._last_err_log = now
         await asyncio.sleep(2.0)
 
