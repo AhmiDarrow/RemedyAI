@@ -6,6 +6,7 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ### Gauntlet: continuous security + perf loop (feature/computer-use)
 
+- **L2 agency accuracy:** git/VCS verbs, package install/sync, start/stop server, `what files are here`, `find where … defined`, `tail`/`head` logs, CUA scroll/type-into, add unit test / update changelog / bump version — no longer collapse to L1 (tools stripped)
 - **Project scan jail:** `/api/projects/scan` resolves under access-scope roots and refuses `auth/**` (was unrestricted absolute-path recon)
 - **Media auth refuse:** `/api/media` never serves `~/.remedy/auth` even under the broad home allowlist
 - **Catalog custom path:** `safe_path(user, base)` argument order fixed for custom commands/agents

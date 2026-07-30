@@ -80,6 +80,29 @@ def test_tier_l2_common_agency_phrasing():
         "create a new skill",
         "help me fix this bug",
         "package.json",
+        # VCS / install / process / list / find / CUA / docs
+        "git status",
+        "git diff",
+        "pull the latest changes",
+        "commit these changes",
+        "install the dependencies",
+        "uv sync",
+        "pip install -r requirements.txt",
+        "start the server",
+        "restart the api",
+        "kill the process",
+        "what files are here",
+        "please dump the directory listing",
+        "tail the log file",
+        "find where authenticate is defined",
+        "where is the login handler",
+        "open that PR on github",
+        "scroll down on the page",
+        "type into the search box",
+        "add a unit test for this",
+        "update the changelog",
+        "make sure the build works",
+        "bump the version",
     ]
     for msg in agency:
         t = classify_turn_tier(msg, tools_enabled=True)
@@ -88,6 +111,15 @@ def test_tier_l2_common_agency_phrasing():
     assert (
         classify_turn_tier("please open that site", browse=True) == TurnTier.L2_AGENCY
     )
+    # Pure chat must stay lean (not elevated by new agency patterns)
+    for chat in (
+        "tell me about quantum physics",
+        "explain recursion simply",
+        "how are you",
+        "walk me through the architecture",
+        "can you summarize this conversation",
+    ):
+        assert classify_turn_tier(chat) == TurnTier.L1_LEAN, chat
 
 
 def test_tier_l1_chat():
