@@ -42,6 +42,13 @@ def test_message_wants_tools_chat_vs_code() -> None:
     assert message_wants_tools("what skills do you have?") is False
     assert message_wants_tools("list the files in src/") is True
     assert message_wants_tools("please review the codebase architecture") is True
+    # Frozenset early-out greets / acks still False
+    for g in ("hi", "thanks", "ok", "great"):
+        assert message_wants_tools(g) is False, g
+    # Action kicks still True (must not be swallowed by short-set)
+    assert message_wants_tools("proceed") is True
+    assert message_wants_tools("continue") is True
+    assert message_wants_tools("sounds good") is True
 
 
 def test_message_wants_tools_action_kicks() -> None:

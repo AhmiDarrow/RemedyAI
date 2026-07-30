@@ -225,11 +225,13 @@ _ledgers_lock = threading.Lock()
 
 
 def get_evidence_ledger(session_id: str | None = None) -> EvidenceLedger:
+    from remedy.core.metabolism.session_registry import registry_get
+
     key = (session_id or "").strip() or "_default"
     with _ledgers_lock:
-        if key not in _ledgers:
-            _ledgers[key] = EvidenceLedger(session_id=key)
-        return _ledgers[key]
+        return registry_get(
+            _ledgers, key, lambda: EvidenceLedger(session_id=key)
+        )
 
 
 def reset_evidence_ledger(session_id: str | None = None) -> None:

@@ -66,10 +66,60 @@ _SECRET_KEY_NAMES = frozenset(
 )
 
 
+def _needs_secret_scan(text: str) -> bool:
+    """Cheap gate before multi-regex secret scans (hot path on tool results)."""
+    if not text or len(text) < 8:
+        return False
+    # Pure short alphabetic prose almost never holds keys — skip full scan.
+    has_digit = False
+    has_special = False
+    for c in text:
+        if c.isdigit():
+            has_digit = True
+        elif c in ":=/_+@.-":
+            has_special = True
+        if has_digit and has_special:
+            return True
+    if not (has_digit or has_special):
+        return False
+    low = text.lower() if len(text) <= 400 else text[:400].lower()
+    return any(
+        k in low
+        for k in (
+            "key",
+            "token",
+            "secret",
+            "pass",
+            "bearer",
+            "auth",
+            "sk-",
+            "sk_",
+            "rk_",
+            "xai-",
+            "ghp_",
+            "xox",
+            "akia",
+            "aiza",
+            "hf_",
+            "npm_",
+            "ya29",
+            "begin ",
+            "mongo",
+            "postgre",
+            "mysql",
+            "redis",
+            "eyj",
+            "private",
+        )
+    )
+
+
 def redact_text(text: str) -> str:
     """Redact secret-shaped substrings in free text."""
     if not text:
         return ""
+    if not _needs_secret_scan(text):
+        return text
     out = text
     for rx in _SECRET_PATTERNS:
         out = rx.sub("[redacted]", out)
@@ -80,6 +130,8 @@ def looks_like_secret_text(text: str) -> bool:
     if not text or len(text) < 8:
         return False
     t = text.strip()
+    if not _needs_secret_scan(t):
+        return False
     for rx in _SECRET_PATTERNS:
         if rx.search(t):
             return True

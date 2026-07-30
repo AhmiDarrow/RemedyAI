@@ -118,6 +118,48 @@ def test_tier_early_exits_empty_and_greetings():
     assert classify_turn_tier("package.json") == TurnTier.L2_AGENCY
 
 
+def test_tier_path_hint_gate_and_l0_before_agency():
+    """Path regex only when path-ish; L0 short-circuits before L2 scans."""
+    # Extension / slash elevates via path gate even without agency verbs
+    assert classify_turn_tier("please open config.toml") >= TurnTier.L2_AGENCY
+    assert classify_turn_tier("see src/remedy/core/agent.py") >= TurnTier.L2_AGENCY
+    # No path chars → stays lean for pure explanation
+    assert (
+        classify_turn_tier(
+            "What is the difference between hashing and encryption conceptually?"
+        )
+        == TurnTier.L1_LEAN
+    )
+    # L0 patterns still win on short single-line queries
+    assert classify_turn_tier("what model am I using?") == TurnTier.L0_INSTANT
+    assert classify_turn_tier("list my skills") == TurnTier.L0_INSTANT
+    # Autonomous intent flag / keywords
+    assert classify_turn_tier("hello", intent="autonomous") == TurnTier.L3_DEEP
+    assert classify_turn_tier("please work alone on this") == TurnTier.L3_DEEP
+
+
+def test_session_registry_caps_unbounded_growth():
+    """Metabolism session maps must not grow without bound under churn."""
+    from remedy.core.metabolism import evidence as ev_mod
+    from remedy.core.metabolism.session_registry import MAX_SESSION_ENTRIES
+
+    # Isolate global map
+    with ev_mod._ledgers_lock:
+        ev_mod._ledgers.clear()
+    try:
+        n = MAX_SESSION_ENTRIES + 20
+        for i in range(n):
+            get_evidence_ledger(f"cap_sess_{i}")
+        with ev_mod._ledgers_lock:
+            assert len(ev_mod._ledgers) <= MAX_SESSION_ENTRIES
+            # Most recent keys retained
+            assert f"cap_sess_{n - 1}" in ev_mod._ledgers
+            assert "cap_sess_0" not in ev_mod._ledgers
+    finally:
+        with ev_mod._ledgers_lock:
+            ev_mod._ledgers.clear()
+
+
 def test_decision_tier_recorded_only_on_change():
     d = get_decision_tracker("test_meta_sess")
     assert d.record_tier_if_changed("L1_lean") is not None
@@ -400,6 +442,10 @@ def test_redact_shared_patterns():
         red = redact_text(f"key={sample}")
         assert sample not in red
         assert "[redacted]" in red
+    # Early-out: ordinary prose unchanged (no multi-regex pass)
+    prose = "I prefer dark mode and short answers please."
+    assert looks_like_secret_text(prose) is False
+    assert redact_text(prose) == prose
 
 
 def test_identity_import_requires_hmac(tmp_path: Path):

@@ -162,6 +162,9 @@ def test_full_scope_allows_absolute_under_user(tmp_path: Path):
 
 def test_protected_secret_path_detects_auth_tree(tmp_path: Path, monkeypatch):
     """.../.remedy/auth and $REMEDY_HOME/auth are always protected."""
+    from remedy.core.security import clear_protected_auth_roots_cache
+
+    clear_protected_auth_roots_cache()
     # Path-part form (works even when Path.home is unrelated)
     remedy = tmp_path / "uhome" / ".remedy"
     auth = remedy / "auth"
@@ -183,6 +186,16 @@ def test_protected_secret_path_detects_auth_tree(tmp_path: Path, monkeypatch):
     c_secret = c_auth / "xai.json"
     c_secret.write_text("{}", encoding="utf-8")
     monkeypatch.setenv("REMEDY_HOME", str(custom))
+    clear_protected_auth_roots_cache()
+    assert is_protected_secret_path(c_secret) is True
+    # Nested under auth + case-insensitive segment still blocked
+    nested = c_auth / "oauth" / "tokens.json"
+    nested.parent.mkdir(parents=True)
+    nested.write_text("{}", encoding="utf-8")
+    assert is_protected_secret_path(nested) is True
+    # Non-auth sibling under REMEDY_HOME is allowed
+    assert is_protected_secret_path(custom / "config.toml") is False
+    # Auth roots cache is stable across repeated checks (same env)
     assert is_protected_secret_path(c_secret) is True
 
 

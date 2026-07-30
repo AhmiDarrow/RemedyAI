@@ -6,12 +6,16 @@ vulnerabilities like path traversal, injection, and unsafe defaults.
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
 from remedy.core.errors import SecurityError
 
 _HOME_DIR: Path | None = None
+# Resolved auth roots (no mkdir) — invalidated when REMEDY_HOME changes.
+_auth_roots_cache: list[Path] | None = None
+_auth_roots_env: str | None = None
 
 
 def get_home_dir() -> Path:
@@ -31,6 +35,46 @@ VALID_TAG_RE = re.compile(r"^[a-zA-Z0-9_\- ]{1,50}$")
 VALID_CHARACTER_ID_RE = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 )
+
+
+def _resolved_auth_roots() -> list[Path]:
+    """Cached list of auth secret dirs (never mkdir — hot path for path gates)."""
+    global _auth_roots_cache, _auth_roots_env
+    env_home = (os.environ.get("REMEDY_HOME") or "").strip()
+    if _auth_roots_cache is not None and _auth_roots_env == env_home:
+        return _auth_roots_cache
+    roots: list[Path] = []
+    seen: set[str] = set()
+    candidates: list[Path] = []
+    if env_home:
+        candidates.append(Path(env_home).expanduser() / "auth")
+    try:
+        candidates.append(Path.home() / ".remedy" / "auth")
+    except Exception:
+        pass
+    for auth in candidates:
+        try:
+            a = auth.expanduser().resolve(strict=False)
+        except (OSError, RuntimeError):
+            try:
+                a = auth.expanduser().absolute()
+            except Exception:
+                continue
+        key = str(a).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        roots.append(a)
+    _auth_roots_cache = roots
+    _auth_roots_env = env_home
+    return roots
+
+
+def clear_protected_auth_roots_cache() -> None:
+    """Test helper — drop cached auth roots (REMEDY_HOME changes mid-test)."""
+    global _auth_roots_cache, _auth_roots_env
+    _auth_roots_cache = None
+    _auth_roots_env = None
 
 
 def is_protected_secret_path(path: Path | str | None) -> bool:
@@ -59,28 +103,7 @@ def is_protected_secret_path(path: Path | str | None) -> bool:
             return True
 
     # Do not call secret_store.auth_dir() here — that mkdir's on import/check.
-    candidates: list[Path] = []
-    try:
-        import os
-
-        env_home = (os.environ.get("REMEDY_HOME") or "").strip()
-        if env_home:
-            candidates.append(Path(env_home).expanduser() / "auth")
-    except Exception:
-        pass
-    try:
-        candidates.append(Path.home() / ".remedy" / "auth")
-    except Exception:
-        pass
-
-    for auth in candidates:
-        try:
-            a = auth.expanduser().resolve(strict=False)
-        except (OSError, RuntimeError):
-            try:
-                a = auth.expanduser().absolute()
-            except Exception:
-                continue
+    for a in _resolved_auth_roots():
         try:
             if p == a or p.is_relative_to(a):
                 return True
