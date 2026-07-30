@@ -195,6 +195,13 @@ def collect_default_payload(home: Path | str | None = None) -> dict[str, Any]:
     except Exception:
         pass
 
+    try:
+        from remedy.core.metabolism.skill_genome import get_skill_genome
+
+        skill_ranks = get_skill_genome().rank(40)
+    except Exception:
+        pass
+
     # Profile facts if available (module shape varies by version)
     try:
         from remedy.memory import partner_memory as pm

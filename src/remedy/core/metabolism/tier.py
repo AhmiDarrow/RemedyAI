@@ -71,11 +71,13 @@ _L3_PARTITION = re.compile(
 _L2_AGENCY = re.compile(
     r"(?is)\b("
     r"implement|refactor|debug|fix (the |this |a )|"
-    r"file_edit|create file|write (a |the )|"
+    r"file_edit|file_read|create file|write (a |the )|"
+    r"read (the |this |a |my )?(file|path|code|script|module|src)|"
+    r"\bread\s+[\w./\\-]+\.(py|ts|tsx|js|md|json|toml|rs|go)\b|"
     r"bash|shell|pytest|npm run|cargo |"
     r"computer_|navigate|screenshot|click |"
     r"edit |open (the )?project|in (the )?repo|"
-    r"mission_|spread_run|job_run"
+    r"list_dir|repo_search|mission_|spread_run|job_run"
     r")\b"
 )
 _L2_PATH = re.compile(

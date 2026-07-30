@@ -256,3 +256,61 @@ def test_spread_force_lowers_bar():
     )
     # force path should be more willing to spread when multi-area
     assert strong.spread or strong.score >= weak.score
+
+
+def test_skill_genome_protects_multi_success():
+    from remedy.core.metabolism.skill_genome import get_skill_genome, reset_skill_genome
+
+    reset_skill_genome()
+    g = get_skill_genome()
+    for _ in range(3):
+        g.record("change-safety", ok=True)
+    ph = g.phenotypes["change-safety"]
+    assert ph.protected
+    g.record("change-safety", ok=False)
+    assert ph.fail == 0  # protected
+
+
+def test_cua_macro_no_typed_secrets():
+    from remedy.core.metabolism.cua_macros import get_cua_macros, reset_cua_macros
+
+    reset_cua_macros()
+    store = get_cua_macros()
+    m = store.observe_chain(
+        [
+            {"tool": "computer_navigate", "args": {"url": "https://example.com"}},
+            {"tool": "computer_type", "args": {"text": "password=supersecret"}},
+            {"tool": "computer_click", "args": {"ref": "e1"}},
+        ],
+        success=True,
+    )
+    assert m is not None
+    blob = json.dumps(m.to_public())
+    assert "supersecret" not in blob
+    assert "[omitted]" in blob
+
+
+def test_governor_compress_earlier_flag():
+    from remedy.core.metabolism.governor import get_governor, reset_governor
+
+    reset_governor("gov1")
+    g = get_governor("gov1")
+    g.observe_and_decide(
+        quality={"stuck_rate": 0.25, "max_tool_fail_streak": 4, "turns": 3},
+        metabolism={},
+        tier=2,
+    )
+    assert g.compress_earlier
+
+
+def test_begin_force_spread_inject():
+    meta = begin_turn_metabolism(
+        session_id="test_meta_sess",
+        user_text="work alone across the whole codebase",
+        intent="autonomous",
+        tools_enabled=True,
+    )
+    assert meta["tier"] == 3
+    assert meta["force_spread"]
+    joined = "\n".join(meta.get("injects") or [])
+    assert "Spread" in joined or "spread" in joined.lower()

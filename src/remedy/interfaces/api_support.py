@@ -477,6 +477,17 @@ async def handle_slash_command(
             await memory.save_user_profile(profile)
             if not touched:
                 return {"text": f"Could not pin “{text[:120]}”."}
+            # Time Crystal life horizon (explicit pins)
+            with contextlib.suppress(Exception):
+                from remedy.core.metabolism.time_crystal import get_time_crystal
+
+                sid_p = ""
+                if runtime is not None:
+                    sid_p = str(getattr(runtime, "_session_id", "") or "")
+                tc = get_time_crystal(sid_p or "_default")
+                for f in touched[:8]:
+                    fact = getattr(f, "fact", None) or str(f)
+                    tc.admit(str(fact)[:400], horizon="life", source="pin")
             return {
                 "text": "Pinned:\n"
                 + "\n".join(f"- {f.fact}" for f in touched[:8])
