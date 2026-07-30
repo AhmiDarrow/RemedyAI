@@ -950,18 +950,37 @@ export function useMessages(sessionId: string | null) {
     [sessionId, load],
   )
 
+  /** Empty the feed in-place (used by /reset) without waiting on the API. */
+  const clearLocalHistory = useCallback(() => {
+    clearStreamAccum()
+    setMessages([])
+    setLoadError(null)
+    setHasOlder(false)
+    setLoading(false)
+    setPartialText('')
+    setPartialThinking('')
+    setActiveTools([])
+    setProcessSteps([])
+    processStepsRef.current = []
+    setTaskProgress(null)
+    setRunUsage(null)
+    setStreamStalled(false)
+    setStallSeconds(0)
+  }, [clearStreamAccum])
+
   const runCommand = useCallback(
     async (
       command: string,
       sid?: string,
-    ): Promise<{ text: string; action?: string; session_id?: string }> => {
+    ): Promise<{ text: string; action?: string; session_id?: string; cleared?: number }> => {
       const targetId = sid || sessionId
       if (!targetId) return { text: 'No session' }
       try {
         const r = await executeCommand(targetId, command)
         return r
-      } catch {
-        return { text: `Error executing ${command}` }
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e || 'request failed')
+        return { text: `Error executing ${command}: ${msg}` }
       }
     },
     [sessionId],
@@ -1026,6 +1045,7 @@ export function useMessages(sessionId: string | null) {
     updateQueued,
     promoteQueued,
     runCommand,
+    clearLocalHistory,
     load,
     addCommandMessage,
     beginEdit,

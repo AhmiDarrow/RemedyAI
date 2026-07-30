@@ -239,9 +239,22 @@ def register_workspace_tools(runtime: Any) -> None:
         new_body = content if content is not None else ""
         # Refuse writing provider-history summaries as file bodies (corrupts tree).
         head = (new_body or "")[:240]
-        if any(m in head for m in _HISTORY_STUB_MARKERS) or (
-            new_body.strip().startswith("[")
-            and "omitted from provider history" in new_body
+        body_s = new_body if isinstance(new_body, str) else str(new_body)
+        if (
+            any(m in head for m in _HISTORY_STUB_MARKERS)
+            or any(m in body_s for m in _HISTORY_STUB_MARKERS)
+            or (
+                body_s.strip().startswith("[")
+                and "omitted from provider history" in body_s
+            )
+            or (
+                isinstance(content, dict)
+                and (
+                    content.get("_invalid_json")
+                    or content.get("_truncated")
+                    or content.get("_history_summarized")
+                )
+            )
         ):
             return format_tool_error(
                 "refusing to write provider-history summary stub as file content "
@@ -254,7 +267,19 @@ def register_workspace_tools(runtime: Any) -> None:
                     "if replacing a large existing file)."
                 ),
             )
-        target = runtime.resolve_tool_path(path)
+        try:
+            target = runtime.resolve_tool_path(path, for_write=True)
+        except Exception as e:
+            return format_tool_error(
+                f"path not allowed for write: {path} ({e})",
+                code="PATH_DENIED",
+                tool_name="file_write",
+                suggestion=(
+                    "Writes stay inside the project folder under project scope. "
+                    "Use a path under the focus folder, or raise access_scope "
+                    "to home/full in Settings for multi-tree edits."
+                ),
+            )
         _note_path(target)
         # Capture prior content for time-travel undo (best-effort).
         existed = False
@@ -388,7 +413,18 @@ def register_workspace_tools(runtime: Any) -> None:
                 "Do not invent success. Tell the user this needs approval "
                 f"(or /approve {item.id}), then retry file_edit."
             )
-        target = runtime.resolve_tool_path(path)
+        try:
+            target = runtime.resolve_tool_path(path, for_write=True)
+        except Exception as e:
+            return format_tool_error(
+                f"path not allowed for edit: {path} ({e})",
+                code="PATH_DENIED",
+                tool_name="file_edit",
+                suggestion=(
+                    "Edits stay inside the project folder under project scope. "
+                    "Raise access_scope to home/full only for intentional multi-tree edits."
+                ),
+            )
         _note_path(target)
         if not target.is_file():
             return format_tool_error(
@@ -568,9 +604,11 @@ def register_workspace_tools(runtime: Any) -> None:
                 )
                 continue
             try:
-                target = runtime.resolve_tool_path(p)
+                target = runtime.resolve_tool_path(p, for_write=True)
             except Exception as e:
-                reports.append(f"[{i}] {p}: resolve error {e}")
+                reports.append(
+                    f"[{i}] {p}: PATH_DENIED (writes stay in project under project scope): {e}"
+                )
                 continue
             _note_path(target)
             if not target.is_file():
@@ -881,7 +919,8 @@ def register_workspace_tools(runtime: Any) -> None:
                     suggestion="Use a normal directory for workdir.",
                 )
             try:
-                cwd = runtime.resolve_tool_path(wd_raw)
+                # Shell cwd is a mutation surface — jail to write roots.
+                cwd = runtime.resolve_tool_path(wd_raw, for_write=True)
                 if cwd.is_file():
                     cwd = cwd.parent
             except Exception as e:
@@ -889,7 +928,10 @@ def register_workspace_tools(runtime: Any) -> None:
                     f"invalid workdir: {e}",
                     code="BAD_WORKDIR",
                     tool_name="bash_exec",
-                    suggestion="Pass an absolute path or a path under allowed roots.",
+                    suggestion=(
+                        "Pass a workdir under the project folder (project scope). "
+                        "Raise access_scope to home/full for shell outside the project."
+                    ),
                 )
         try:
             timeout = float(timeout_seconds if timeout_seconds is not None else 60.0)
@@ -897,7 +939,43 @@ def register_workspace_tools(runtime: Any) -> None:
             timeout = 60.0
         timeout = max(5.0, min(600.0, timeout))
 
-        roots = runtime.allowed_roots()
+        try:
+            roots = runtime.write_roots()
+        except Exception:
+            roots = runtime.allowed_roots()
+
+        # Project write jail for shell mutations (not just cwd).
+        # Blocks Set-Content/Out-File/redirects to sibling trees while focus is bound.
+        try:
+            from remedy.core.shell_write_jail import check_shell_write_jail
+
+            bound = True
+            with suppress(Exception):
+                bound = not bool(runtime.project_path_is_unset())
+            scope = "project"
+            with suppress(Exception):
+                scope = str(runtime.access_scope() or "project")
+            jail_hit = check_shell_write_jail(
+                command,
+                write_roots=list(roots or [root]),
+                cwd=cwd,
+                project_bound=bound,
+                access_scope=scope,
+            )
+            if jail_hit:
+                return format_tool_error(
+                    jail_hit,
+                    code="WRITE_JAIL",
+                    tool_name="bash_exec",
+                    suggestion=(
+                        "Stay inside the focus project. Prefer file_write/file_edit. "
+                        "Do not retarget sibling folders (SecretFolder vs SecretSticky). "
+                        "To edit another tree, switch session project explicitly with the user."
+                    ),
+                )
+        except Exception:
+            pass
+
         argv = [*win_shell_prefix(), command]
         sandbox = SubprocessSandbox(allowed_paths=roots or [root, cwd])
         env = path_env_with_local_bins(cwd)

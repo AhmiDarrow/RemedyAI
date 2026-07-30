@@ -50,6 +50,7 @@ puts the file on the composer rail so you can point things out to Remedy.
 ## Sessions
 
 - **New session** — Ctrl+N, logo menu, or `/new` (root session — no project)  
+- **Reset this session** — `/reset` or `/clear` full clean slate **in place** (history, plans, brief, attachments; same session id; does not open another). Durable memory kept.  
 - **Click a session** — loads that chat in the middle pane  
 - **Add project folder** — paste a path or **Browse…** (native folder picker)  
 - **Archive** — filter + auto-hide after 30 days (not pinned); row toggle  

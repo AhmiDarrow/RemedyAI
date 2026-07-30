@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from remedy.core.provider_sanitize import (
     TOOL_CONTENT_MAX,
     sanitize_chat_body,
@@ -136,6 +138,100 @@ def test_file_write_large_content_summarized_not_half_clipped():
     assert parsed.get("_content_chars") == len(body)
     # Must not be a bare mid-file clip of the original
     assert not content.startswith("line\nline\nline")
+
+
+def test_normalize_tool_calls_preserves_large_file_write_content():
+    """Regression: execute path must not 8k-clip or history-stub file_write bodies.
+
+    ``normalize_tool_calls`` feeds ``execute_tool_calls`` — clipping here wrote
+    truncated source (ellipsis) or history stubs onto disk.
+    """
+    from remedy.core.provider_sanitize import coerce_tool_arguments_json
+    from remedy.core.react_stream import normalize_tool_calls
+
+    body = "line\n" * 5000  # 25k > TOOL_ARGS_VALUE_MAX (8k)
+    args = json.dumps({"path": "src/Big.tsx", "content": body})
+    # Coerce alone preserves
+    coerced = json.loads(coerce_tool_arguments_json(args))
+    assert coerced.get("content") == body
+    assert len(coerced["content"]) == len(body)
+
+    out = normalize_tool_calls(
+        [
+            {
+                "id": "call_big",
+                "type": "function",
+                "function": {"name": "file_write", "arguments": args},
+            }
+        ]
+    )
+    assert len(out) == 1
+    parsed = json.loads(out[0]["function"]["arguments"])
+    assert parsed.get("path") == "src/Big.tsx"
+    assert parsed.get("content") == body
+    assert "history_stub" not in (parsed.get("content") or "")
+    assert "NOT_SOURCE_CODE" not in (parsed.get("content") or "")
+    assert not (parsed.get("content") or "").endswith("…")
+
+
+def test_sanitize_message_still_stubs_file_write_for_provider():
+    """Outbound history still summarizes large file_write (stubs only upstream)."""
+    body = "line\n" * 5000
+    args = json.dumps({"path": "src/Big.tsx", "content": body})
+    m = sanitize_message(
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "c1",
+                    "type": "function",
+                    "function": {"name": "file_write", "arguments": args},
+                }
+            ],
+        }
+    )
+    out_args = json.loads(m["tool_calls"][0]["function"]["arguments"])
+    content = out_args.get("content") or ""
+    assert "history_stub" in content or "NOT_SOURCE_CODE" in content
+    assert out_args.get("_content_chars") == len(body)
+    # Original message must remain full fidelity (sanitize copies)
+    orig = json.loads(args)
+    assert orig["content"] == body
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_calls_blocks_history_stub_args(tmp_path):
+    """Execute path must refuse stub/summarized args before touching disk."""
+    from pathlib import Path
+
+    from remedy.core.agent_tool_batch import execute_tool_calls
+    from remedy.models import ToolCall, ToolResult
+
+    class RT:
+        async def call_tool(self, tc: ToolCall) -> ToolResult:
+            raise AssertionError("call_tool must not run for history stubs")
+
+    stub = (
+        "<<NOT_SOURCE_CODE history_stub kind=file_write content chars=99 "
+        "DO_NOT_file_write_this_string file_read_the_path_instead>>"
+    )
+    args = json.dumps({"path": str(tmp_path / "x.py"), "content": stub})
+    tcs = [
+        {
+            "id": "c_stub",
+            "type": "function",
+            "function": {"name": "file_write", "arguments": args},
+        }
+    ]
+    outs = []
+    async for _ev, msg in execute_tool_calls(RT(), tcs, seen_fps=set(), result_cache={}):
+        if isinstance(msg, dict) and msg.get("role") == "tool":
+            outs.append(msg)
+    assert outs
+    body = outs[0].get("content") or ""
+    assert "HISTORY_STUB" in body or "history" in body.lower()
+    assert not Path(tmp_path / "x.py").exists()
 
 
 def test_repair_and_strip_tool_args_in_history():

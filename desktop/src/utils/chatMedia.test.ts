@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  isAuthenticatedApiUrl,
   isLocalMediaPath,
   isRemoteOrDataUrl,
   normalizeLocalMediaPath,
@@ -21,15 +22,38 @@ describe('chatMedia path helpers', () => {
     )
     expect(isLocalMediaPath('file:///C:/Users/a/b.png')).toBe(true)
     expect(isLocalMediaPath('https://cdn.example/x.png')).toBe(false)
+    // Loopback API attachments are not "local paths" — they use authed fetch
+    expect(
+      isLocalMediaPath(
+        'http://127.0.0.1:7400/api/sessions/s/attachments/a.png',
+      ),
+    ).toBe(false)
+    expect(isLocalMediaPath('/api/sessions/s/attachments/a.png')).toBe(false)
   })
 
-  it('normalizes file urls', () => {
+  it('detects authenticated loopback API image urls', () => {
+    expect(isAuthenticatedApiUrl('/api/sessions/s/attachments/a.png')).toBe(true)
+    expect(
+      isAuthenticatedApiUrl(
+        'http://127.0.0.1:7400/api/sessions/s/attachments/a.png',
+      ),
+    ).toBe(true)
+    expect(isAuthenticatedApiUrl('https://cdn.example/x.png')).toBe(false)
+    expect(isAuthenticatedApiUrl('C:/Users/a/b.png')).toBe(false)
+  })
+
+  it('normalizes file urls and angle brackets', () => {
     expect(normalizeLocalMediaPath('file:///C:/Users/a/b.png')).toMatch(
       /^C:[/\\]Users[/\\]a[/\\]b\.png$/i,
     )
     expect(normalizeLocalMediaPath('assets/previews/x.png')).toBe(
       'assets/previews/x.png',
     )
+    expect(
+      normalizeLocalMediaPath(
+        '<C:/Users/Administrator/.remedy/attachments/s/shot.png>',
+      ),
+    ).toBe('C:/Users/Administrator/.remedy/attachments/s/shot.png')
   })
 
   it('never sets CORS on blob/data (WebView image viewer)', () => {

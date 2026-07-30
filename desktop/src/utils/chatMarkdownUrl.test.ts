@@ -36,6 +36,12 @@ describe('chatMarkdownUrlTransform', () => {
         'C:/Users/Administrator/.remedy/attachments/x/shot.png',
       ),
     ).toContain('C:/Users')
+    // GFM angle-bracket destinations with spaces
+    expect(
+      chatMarkdownUrlTransform(
+        '<C:/Users/Administrator/.remedy/attachments/x/Screenshot 1.png>',
+      ),
+    ).toBe('C:/Users/Administrator/.remedy/attachments/x/Screenshot 1.png')
   })
 
   it('allows relative project paths', () => {

@@ -120,10 +120,11 @@ def normalize_access_scope(raw: str | None) -> str:
 
 
 def user_profile_work_folders(*, home: Path | None = None) -> list[Path]:
-    """Desktop / Documents / Downloads — common targets for partner tasks.
+    """Desktop / Documents / Downloads — common *read/research* targets.
 
-    Included even under ``project`` scope so ``file_write`` to the Desktop works
-    without forcing full home access or shell workarounds.
+    Included under non-untrusted **read** roots so the agent can open notes,
+    downloads, and desktop files without raising access scope. Writes still
+    use :func:`write_roots_for_scope` (project-only under ``project`` scope).
     """
     h = (home or Path.home()).expanduser()
     try:
@@ -142,36 +143,80 @@ def user_profile_work_folders(*, home: Path | None = None) -> list[Path]:
     return out
 
 
+def _primary_project_root(project_root: Path) -> Path:
+    try:
+        return ensure_project_dir(project_root)
+    except Exception:
+        return resolve_project_path(str(project_root))
+
+
+def _home_root(*, home: Path | None = None) -> Path:
+    h = (home or Path.home()).expanduser()
+    try:
+        return h.resolve()
+    except OSError:
+        return h.absolute()
+
+
 def allowed_roots_for_scope(
     scope: str,
     project_root: Path,
     *,
     home: Path | None = None,
 ) -> list[Path]:
-    """Roots the agent may touch for the given access scope."""
-    roots: list[Path] = []
-    try:
-        roots.append(ensure_project_dir(project_root))
-    except Exception:
-        roots.append(resolve_project_path(str(project_root)))
+    """Roots the agent may **read / research** under for the given access scope.
+
+    Under ``project`` scope this includes the focus folder plus Desktop /
+    Documents / Downloads when present (view-only convenience). Mutations use
+    :func:`write_roots_for_scope` instead — project scope writes stay in the
+    project folder only.
+    """
+    roots: list[Path] = [_primary_project_root(project_root)]
     scope = normalize_access_scope(scope)
     # Untrusted: project root only (no Desktop/Documents/Downloads).
     if scope != "untrusted":
-        # Always allow standard user work folders (Desktop/Documents/Downloads).
         for folder in user_profile_work_folders(home=home):
             if folder not in roots:
                 roots.append(folder)
     if scope in ("home", "full"):
-        h = (home or Path.home()).expanduser()
-        try:
-            h = h.resolve()
-        except OSError:
-            h = h.absolute()
+        h = _home_root(home=home)
         if h not in roots:
             roots.append(h)
     # full: roots still list project + home for cwd defaults; absolute paths
     # under the user's OS permissions are allowed via resolve_under_roots.
     return roots
+
+
+def write_roots_for_scope(
+    scope: str,
+    project_root: Path,
+    *,
+    home: Path | None = None,
+) -> list[Path]:
+    """Roots the agent may **create / edit / shell-cwd** under.
+
+    When a real project folder is set, mutations stay inside the focus tree:
+
+    - ``project`` / ``untrusted`` / ``full`` → **project root only**.
+      ``full`` still expands *read* roots and absolute *reads*; it must not
+      defeat the project write jail (view/research outside is OK; edits
+      outside are not).
+    - ``home`` → project + user home (intentional multi-folder edits).
+
+    Profile work folders (Desktop/Documents/Downloads) are **never** write
+    roots while a project is bound — use relative paths under the project
+    or raise scope to ``home`` only when home-wide edits are intended.
+    """
+    primary = _primary_project_root(project_root)
+    scope = normalize_access_scope(scope)
+    if scope == "home":
+        roots: list[Path] = [primary]
+        h = _home_root(home=home)
+        if h not in roots:
+            roots.append(h)
+        return roots
+    # project | untrusted | full (with a project bound) → project only
+    return [primary]
 
 
 def resolve_under_roots(
@@ -296,25 +341,31 @@ def workspace_context_block(
         )
     elif scope == "project":
         lines.append(
-            "Relative paths resolve under the focus folder. Absolute paths still work "
-            "when within access scope. Raise access scope in Settings if you need more roots."
+            "Relative paths resolve under the focus folder. You may **read/list** "
+            "Desktop/Documents/Downloads for research, but **file_write / file_edit "
+            "and shell workdir stay inside the focus folder only**. Raise access "
+            "scope in Settings (home/full) only when intentional multi-tree edits "
+            "are needed."
         )
     elif scope == "home":
         lines.append(
-            "Focus folder plus user home profile are allowed. "
+            "Focus folder plus user home profile are allowed for edits. "
             "Absolute paths are fine; relative paths resolve from the focus folder."
         )
     elif scope == "untrusted":
         lines.append(
-            "Untrusted scope: focus folder only; high-impact tools stay on Ask."
+            "Untrusted scope: focus folder only for reads and writes; "
+            "high-impact tools stay on Ask."
         )
     else:
         lines.append(
-            "Access scope is full user machine (no silent admin elevation). "
-            "Absolute paths preferred for multi-tree work; prefer reversible actions."
+            "Access scope is full for **reads** across the user machine "
+            "(no silent admin elevation). **Writes/edits and shell workdir "
+            "still stay inside the focus folder** when one is set — raise "
+            "scope to home only for intentional home-wide edits."
         )
     if extra_roots:
-        lines.append("Allowed roots: " + ", ".join(str(r) for r in extra_roots[:6]))
+        lines.append("Read roots: " + ", ".join(str(r) for r in extra_roots[:6]))
     if project_unset:
         lines.append(
             "Coding without a focus folder is first-class — list_dir / repo_search / "
@@ -322,8 +373,9 @@ def workspace_context_block(
         )
     else:
         lines.append(
-            "Relative paths are convenient under the focus folder; absolute paths "
-            "remain valid for other trees in scope."
+            "Prefer relative paths under the focus folder for edits. Absolute paths "
+            "are OK for reading other trees in read scope; do not write outside "
+            "the project unless access scope is home/full."
         )
     entries = list_workspace_entries(root)
     if entries:

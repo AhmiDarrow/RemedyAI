@@ -4,6 +4,8 @@ import type { ChatSession } from '../types'
 
 const KNOWN_KEY = 'remedy.knownProjects.v1'
 const COLLAPSE_KEY = 'remedy.projectCollapse.v1'
+/** Project folder keys the user locked (no reorder / remove from sidebar). */
+const LOCKED_KEY = 'remedy.projectLocked.v1'
 
 /** True when session has no real project folder. */
 export function isNoProjectPath(raw: string | null | undefined): boolean {
@@ -79,13 +81,67 @@ export function addKnownProject(path: string): string[] {
 
 export function removeKnownProject(path: string): string[] {
   const key = projectKey(path)
+  if (isProjectLocked(key)) {
+    // Hard guard: locked folders cannot be removed from the sidebar.
+    return getKnownProjects()
+  }
   const next = getKnownProjects().filter((p) => p !== key)
   try {
     localStorage.setItem(KNOWN_KEY, JSON.stringify(next))
   } catch {
     /* */
   }
+  // Drop lock entry if present (defensive; locked path never reaches here).
+  setProjectLocked(key, false)
   return next
+}
+
+/** Set of locked project keys (normalized via projectKey). */
+export function getLockedProjects(): Set<string> {
+  try {
+    const raw = localStorage.getItem(LOCKED_KEY)
+    if (!raw) return new Set()
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return new Set()
+    return new Set(
+      parsed
+        .filter((x): x is string => typeof x === 'string' && !isNoProjectPath(x))
+        .map((x) => projectKey(x))
+        .filter(Boolean),
+    )
+  } catch {
+    return new Set()
+  }
+}
+
+function writeLockedProjects(keys: Set<string>): void {
+  try {
+    localStorage.setItem(LOCKED_KEY, JSON.stringify([...keys].sort()))
+  } catch {
+    /* quota */
+  }
+}
+
+export function isProjectLocked(path: string | null | undefined): boolean {
+  const key = projectKey(path)
+  if (!key) return false
+  return getLockedProjects().has(key)
+}
+
+export function setProjectLocked(path: string, locked: boolean): Set<string> {
+  const key = projectKey(path)
+  if (!key) return getLockedProjects()
+  const next = getLockedProjects()
+  if (locked) next.add(key)
+  else next.delete(key)
+  writeLockedProjects(next)
+  return next
+}
+
+export function toggleProjectLocked(path: string): Set<string> {
+  const key = projectKey(path)
+  if (!key) return getLockedProjects()
+  return setProjectLocked(key, !isProjectLocked(key))
 }
 
 export function getCollapsedProjects(): Record<string, boolean> {

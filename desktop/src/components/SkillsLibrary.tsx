@@ -199,12 +199,26 @@ export function SkillsLibrary({
     <div className="flex flex-col gap-2 h-full min-h-0">
       <div className="flex gap-1 items-center">
         <input
+          type="search"
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          onKeyDown={(e) =>
-            e.key === 'Enter' && void load({ force: false, silent: false, reason: 'search' })
-          }
+          onKeyDown={(e) => {
+            // Don't let global/composer handlers treat Enter as "send".
+            e.stopPropagation()
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              void load({ force: false, silent: false, reason: 'search' })
+            }
+          }}
+          onMouseDown={(e) => {
+            // Ensure click focuses the field even while stream UI is updating.
+            e.stopPropagation()
+          }}
           placeholder="Search library…"
+          autoComplete="off"
+          spellCheck={false}
+          data-keep-focus
+          aria-label="Search skills library"
           className="flex-1 text-xs px-2 py-1.5 rounded"
           style={{
             background: 'var(--bg-primary)',

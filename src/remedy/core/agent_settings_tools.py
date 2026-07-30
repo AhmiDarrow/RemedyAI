@@ -52,6 +52,7 @@ def register_settings_tools(runtime: Any) -> None:
         user_name: str | None = None,
         persona: str | None = None,
         project_path: str | None = None,
+        force_project_switch: bool | str = False,
         access_scope: str | None = None,
         thinking_level: str | None = None,
         approval_mode: str | None = None,
@@ -193,6 +194,42 @@ def register_settings_tools(runtime: Any) -> None:
                 tool_name="update_settings",
             )
 
+        # Project focus jail: refuse silently retargeting to a sibling tree
+        # (SecretSticky session → update_settings(project_path=SecretFolder)).
+        force_switch = force_project_switch in (True, "true", "1", "yes", "on")
+        if "force_project_switch" in patch:
+            fv = patch.pop("force_project_switch", None)
+            if fv in (True, "true", "1", "yes", "on"):
+                force_switch = True
+        if "project_path" in patch and not force_switch:
+            try:
+                from remedy.core.workspace import (
+                    is_unset_project_path,
+                    resolve_project_path,
+                )
+
+                new_raw = patch.get("project_path")
+                if not is_unset_project_path(new_raw) and not runtime.project_path_is_unset():
+                    cur = runtime.effective_project_path().resolve()
+                    nxt = resolve_project_path(str(new_raw)).resolve()
+                    if cur != nxt:
+                        return format_tool_error(
+                            (
+                                f"refusing to switch project focus from {cur} to {nxt}. "
+                                "Session/project write jail stays on the current tree. "
+                                "Do not retarget sibling projects mid-work."
+                            ),
+                            code="PROJECT_JAIL",
+                            tool_name="update_settings",
+                            suggestion=(
+                                "Keep editing under the current focus folder. "
+                                "If the user explicitly asked to switch projects, call "
+                                "update_settings(project_path=…, force_project_switch=true)."
+                            ),
+                        )
+            except Exception:
+                pass
+
         try:
             result = await apply_settings_update(
                 patch,
@@ -237,7 +274,9 @@ def register_settings_tools(runtime: Any) -> None:
         "Do not only tell them to open Settings. "
         "Examples: setup='web tools'; web_tools_enabled=true; approval_mode='auto'; "
         "user_name='Ahmi'; llm_provider='deepseek'; llm_model='deepseek-v4-flash'; "
-        "vision_enabled=true; access_scope='full'.",
+        "vision_enabled=true; access_scope='full'. "
+        "project_path changes require force_project_switch=true when a focus folder "
+        "is already bound (prevents sibling-project retarget).",
         update_settings,
         {
             "type": "object",
@@ -247,6 +286,14 @@ def register_settings_tools(runtime: Any) -> None:
                     "description": (
                         "Short phrase shortcut: 'web tools', 'auto approval', "
                         "'vision', 'thinking medium', 'full access', 'finish setup', …"
+                    ),
+                },
+                "force_project_switch": {
+                    "type": "boolean",
+                    "description": (
+                        "Set true only when the user explicitly asked to change the "
+                        "project folder. Without it, project_path updates are refused "
+                        "if a different focus is already bound."
                     ),
                 },
                 "settings": {

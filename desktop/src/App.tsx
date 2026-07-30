@@ -160,6 +160,7 @@ export default function App() {
     updateQueued,
     promoteQueued,
     runCommand,
+    clearLocalHistory,
     addCommandMessage,
     beginEdit,
     load: reloadMessages,
@@ -436,71 +437,74 @@ export default function App() {
     Record<string, { provider: string; model: string }>
   >({})
   const [switchToast, setSwitchToast] = useState<string | null>(null)
-  /** After a status-bar pick, ignore background settings/session overwrites briefly. */
-  const llmUserPinRef = useRef<{ provider: string; model: string; until: number } | null>(
-    null,
+  /**
+   * Authoritative per-session LLM binds. Status bar + send() read this only.
+   * Never clobber an existing entry from session-list polls (that caused the
+   * second tab / SecretFolder status bar to flash back to Grok).
+   */
+  const setSessionBind = useCallback(
+    (sessionId: string, provider: string, modelId: string) => {
+      const p = (provider || '').trim()
+      const m = (modelId || '').trim()
+      if (!sessionId || !p || !m) return
+      setSessionLlmMap((prev) => {
+        const cur = prev[sessionId]
+        if (cur?.provider === p && cur?.model === m) return prev
+        return { ...prev, [sessionId]: { provider: p, model: m } }
+      })
+      // Keep legacy state in sync only when this is the active tab.
+      if (sessionId === activeId) {
+        setLlmProvider(p)
+        setModel(m)
+      }
+    },
+    [activeId],
   )
-  const pinUserLlm = useCallback((provider: string, model: string, ms = 45_000) => {
-    llmUserPinRef.current = {
-      provider,
-      model,
-      until: Date.now() + ms,
-    }
-  }, [])
 
-  // Hydrate session LLM map from server — keep stable identity when unchanged
-  // so we do not re-fire tab restore and thrash status-bar provider/model.
-  // While the user pin is active, never overwrite the pinned session entry.
+  // Seed map from server for tabs that have never been bound locally.
   useEffect(() => {
     setSessionLlmMap((prev) => {
       let changed = false
       const next = { ...prev }
-      const pin = llmUserPinRef.current
-      const pinLive = pin && Date.now() <= pin.until
       for (const s of sessions) {
-        if (s.llm_provider && s.model) {
-          if (
-            pinLive
-            && activeId
-            && s.id === activeId
-            && (s.llm_provider !== pin.provider || s.model !== pin.model)
-          ) {
-            // Server lag / settings race — keep optimistic pin in the map.
-            continue
-          }
-          const cur = next[s.id]
-          if (!cur || cur.provider !== s.llm_provider || cur.model !== s.model) {
-            next[s.id] = { provider: s.llm_provider, model: s.model }
-            changed = true
-          }
-        }
+        if (!s.llm_provider || !s.model) continue
+        if (next[s.id]?.provider && next[s.id]?.model) continue
+        next[s.id] = { provider: s.llm_provider, model: s.model }
+        changed = true
       }
       return changed ? next : prev
     })
-  }, [sessions, activeId])
+  }, [sessions])
 
-  // Restore per-session provider/model only when the *tab* changes — not on every
-  // sessions poll / map hydrate (that fought global Settings save and flipped
-  // Demo ↔ xAI continuously).
-  const lastLlmTabRef = useRef<string>('')
+  // On tab switch only: load that tab's bind into bar state (no poll thrash).
   useEffect(() => {
     if (!activeId) return
-    if (lastLlmTabRef.current === activeId) return
-    lastLlmTabRef.current = activeId
     const ov = sessionLlmMap[activeId]
-    if (ov) {
+    if (ov?.provider && ov?.model) {
       setLlmProvider(ov.provider)
       setModel(ov.model)
       return
     }
     const sess = sessions.find((s) => s.id === activeId)
-    if (sess?.llm_provider) {
-      setLlmProvider(sess.llm_provider)
-      if (sess.model) setModel(sess.model)
+    if (sess?.llm_provider && sess?.model) {
+      setSessionBind(activeId, String(sess.llm_provider), String(sess.model))
     }
-    // sessionLlmMap/sessions read intentionally only on activeId change
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- tab change only
   }, [activeId])
+
+  /** Status bar display — always the active session map, never global config. */
+  const barProvider = useMemo(() => {
+    if (activeId && sessionLlmMap[activeId]?.provider) {
+      return sessionLlmMap[activeId]!.provider
+    }
+    return llmProvider
+  }, [activeId, sessionLlmMap, llmProvider])
+  const barModel = useMemo(() => {
+    if (activeId && sessionLlmMap[activeId]?.model) {
+      return sessionLlmMap[activeId]!.model
+    }
+    return model
+  }, [activeId, sessionLlmMap, model])
 
   const sessionUsage: UsageSnapshot = useMemo(() => {
     let prompt = 0
@@ -846,6 +850,7 @@ export default function App() {
           id: m.id,
           name: m.name,
           provider: 'demo',
+          default: Boolean((m as ModelInfo).default),
         }))
         setModels(list)
         if (opts?.selectDefault) {
@@ -1057,11 +1062,19 @@ export default function App() {
   }, [serverState])
 
   const handleNewSession = useCallback(async () => {
-    const s = await create()
+    // Stamp with *current bar* bind (active session), not a floating global.
+    const prov = barProvider
+    const mid = barModel
+    const s = await create(undefined, { provider: prov, model: mid })
     if (s) {
       setOpenTabs((prev) => new Set([...prev, s.id]))
+      setSessionBind(
+        s.id,
+        String(s.llm_provider || prov),
+        String(s.model || mid),
+      )
     }
-  }, [create])
+  }, [create, barProvider, barModel, setSessionBind])
 
   const handleSelect = useCallback(
     (id: string) => {
@@ -1302,9 +1315,75 @@ export default function App() {
         return { text: 'Import session…', action: 'import_session' }
       }
 
+      // /reset needs an existing session — never create one just to wipe it.
+      if (stripped === '/reset' || stripped === '/clear') {
+        if (!activeId) {
+          return {
+            text: 'No active session to reset. Open a chat first, or use `/new`.',
+          }
+        }
+        // Quiet the stream first so abort does not race the wipe.
+        stop()
+        clearQueue()
+        const result = await runCommand(command, activeId)
+        const ok =
+          result.action === 'reset_session'
+          || (typeof result.cleared === 'number' && result.cleared >= 0
+            && !String(result.text || '').startsWith('Error executing')
+            && !String(result.text || '').toLowerCase().includes('could not reset')
+            && !String(result.text || '').toLowerCase().includes('unknown command'))
+
+        if (ok) {
+          // Instant empty feed — stay on this session id (no jump to /new).
+          clearLocalHistory()
+          try {
+            const { clearChatMediaCache } = await import('./utils/chatMedia')
+            clearChatMediaCache()
+          } catch {
+            /* ignore */
+          }
+          // Best-effort revalidate; load() swallows errors into loadError.
+          await reloadMessages({ force: true })
+          // Never leave "Cannot reach local API" up after a confirmed wipe —
+          // history is empty either way; confirmation bubble is enough.
+          clearLocalHistory()
+          try {
+            await refreshSessions()
+          } catch {
+            /* ignore */
+          }
+          const note =
+            result.text
+            || 'Session fully reset. Same tab — send a message to start as if new.'
+          addCommandMessage(command, note)
+          return { ...result, text: note, action: result.action || 'reset_session' }
+        }
+
+        // Failed — keep history; show the real error.
+        if (result.text) addCommandMessage(command, result.text)
+        return result
+      }
+
       const sid = activeId || (await create())?.id
       if (!sid) return { text: 'No session available.' }
       const result = await runCommand(command, sid)
+      if (result.action === 'reset_session') {
+        stop()
+        clearQueue()
+        clearLocalHistory()
+        try {
+          await reloadMessages({ force: true })
+        } catch {
+          clearLocalHistory()
+        }
+        try {
+          await refreshSessions()
+        } catch {
+          /* */
+        }
+        if (result.text) addCommandMessage(command, result.text)
+        return result
+      }
       if (result.text && sid) {
         addCommandMessage(command, result.text)
       }
@@ -1328,6 +1407,10 @@ export default function App() {
       handleImport,
       refreshSessions,
       setActiveId,
+      stop,
+      clearQueue,
+      clearLocalHistory,
+      reloadMessages,
     ],
   )
 
@@ -1362,15 +1445,13 @@ export default function App() {
           return
         }
         // Ensure a model id is set before streaming (first paint race after boot).
+        // Never pull global settings into the status bar when a session is open —
+        // that flipped the second tab (e.g. SecretFolder) between providers.
         let useModel = model
         if (!useModel?.trim()) {
           try {
             const s = await getSettings()
-            if (s.llm_model) {
-              useModel = s.llm_model
-              setModel(s.llm_model)
-            }
-            if (s.llm_provider) setLlmProvider(s.llm_provider)
+            if (s.llm_model) useModel = s.llm_model
           } catch {
             /* keep empty — server may still default */
           }
@@ -1406,15 +1487,21 @@ export default function App() {
           return
         }
         skipConcurrentConfirmRef.current = false
-        // Sticky multi-tab bind: prefer this session's provider+model pair.
+        // Sticky multi-tab bind: map for *this* sid only (never the other tab).
         const mapOv = sessionLlmMap[sid!]
         const useProvider =
           mapOv?.provider
           || sess?.llm_provider
+          || barProvider
           || llmProvider
           || undefined
         if (mapOv?.model) useModel = mapOv.model
         else if (sess?.model && sess.llm_provider) useModel = sess.model
+        else if (barModel) useModel = barModel
+        // Persist bind before stream so list polls cannot re-seed empty.
+        if (sid && useProvider && useModel) {
+          setSessionBind(sid, String(useProvider), String(useModel))
+        }
         // While streaming, send() queues (after) or interrupts based on opts.mode.
         void send(text, useModel, sid, attachments, usePlan, {
           ...opts,
@@ -1441,6 +1528,9 @@ export default function App() {
       streaming,
       sessionLlmMap,
       llmProvider,
+      barProvider,
+      barModel,
+      setSessionBind,
     ],
   )
 
@@ -1844,9 +1934,21 @@ export default function App() {
       onNew={handleNewSession}
       onNewInProject={(projectPath, opts) => {
         void (async () => {
-          const s = await createInProject(projectPath, undefined, opts)
+          // New project session starts with whatever is on the bar *now*;
+          // user can switch provider immediately — map entry is sticky after that.
+          const prov = barProvider
+          const mid = barModel
+          const s = await createInProject(projectPath, undefined, {
+            ...opts,
+            llm: { provider: prov, model: mid },
+          })
           if (s?.id) {
             setOpenTabs((prev) => new Set([...prev, s.id]))
+            setSessionBind(
+              s.id,
+              String(s.llm_provider || prov),
+              String(s.model || mid),
+            )
           }
         })()
       }}
@@ -1883,8 +1985,8 @@ export default function App() {
           run={displayRunUsage}
           session={sessionUsage}
           streaming={streaming}
-          model={model}
-          provider={llmProvider}
+          model={barModel}
+          provider={barProvider}
         />
       }
     />
@@ -1930,23 +2032,21 @@ export default function App() {
               void getSettings()
                 .then((s) => {
                   if (s.llm_provider && s.llm_model) {
-                    pinUserLlm(String(s.llm_provider), String(s.llm_model))
-                    setLlmProvider(s.llm_provider)
-                    setModel(s.llm_model)
                     if (activeId) {
-                      setSessionLlmMap((prev) => ({
-                        ...prev,
-                        [activeId]: {
-                          provider: String(s.llm_provider),
-                          model: String(s.llm_model),
-                        },
-                      }))
+                      setSessionBind(
+                        activeId,
+                        String(s.llm_provider),
+                        String(s.llm_model),
+                      )
                       void applySessionLlm(
                         activeId,
                         String(s.llm_provider),
                         String(s.llm_model),
                         true,
                       ).catch(() => {})
+                    } else {
+                      setLlmProvider(String(s.llm_provider))
+                      setModel(String(s.llm_model))
                     }
                   }
                   setUserName((s.user_name || '').trim())
@@ -2180,8 +2280,8 @@ export default function App() {
               run={displayRunUsage}
               session={sessionUsage}
               streaming={streaming}
-              model={model}
-              provider={llmProvider}
+              model={barModel}
+              provider={barProvider}
             />
             <LibrarySuggestChip
               suggestion={librarySuggest}
@@ -2326,25 +2426,23 @@ export default function App() {
         onSettingsSaved={() => {
           void getSettings()
             .then((s) => {
-              // Explicit Save Settings: become the pin source of truth.
+              // Settings Save = global default + active session only.
               if (s.llm_provider && s.llm_model) {
-                pinUserLlm(String(s.llm_provider), String(s.llm_model))
-                setLlmProvider(s.llm_provider)
-                setModel(s.llm_model)
                 if (activeId) {
-                  setSessionLlmMap((prev) => ({
-                    ...prev,
-                    [activeId]: {
-                      provider: String(s.llm_provider),
-                      model: String(s.llm_model),
-                    },
-                  }))
+                  setSessionBind(
+                    activeId,
+                    String(s.llm_provider),
+                    String(s.llm_model),
+                  )
                   void applySessionLlm(
                     activeId,
                     String(s.llm_provider),
                     String(s.llm_model),
                     true,
                   ).catch(() => {})
+                } else {
+                  setLlmProvider(String(s.llm_provider))
+                  setModel(String(s.llm_model))
                 }
               }
               setUserName((s.user_name || '').trim())
@@ -2360,90 +2458,60 @@ export default function App() {
       <StatusBar
           sessionId={activeId}
           streaming={streaming}
-          model={model}
+          model={barModel}
           models={models}
           uiMode={uiMode}
           onUiModeChange={(mode) => {
             setUiMode(mode)
             saveUiMode(mode)
           }}
-          provider={llmProvider}
+          provider={barProvider}
           connectedProviders={connectedProviders}
           onProviderModelChange={(prov, mid) => {
             if (streaming) return
-            // Optimistic UI — pin this pick; ignore server renames that thrash the bar.
-            pinUserLlm(prov, mid)
-            setLlmProvider(prov)
-            setModel(mid)
-            if (activeId) {
-              setSessionLlmMap((prev) => ({
-                ...prev,
-                [activeId]: { provider: prov, model: mid },
-              }))
-            }
-            const apply = async () => {
-              if (activeId) {
-                try {
-                  // Persist session + global so boot/settings reload keep the choice.
-                  const r = await applySessionLlm(activeId, prov, mid, true)
-                  // Do not adopt server-normalized provider/model here — that caused
-                  // Demo ↔ xAI flips when global config lagged the session.
-                  if (r.toast) {
-                    setSwitchToast(r.toast)
-                    window.setTimeout(() => setSwitchToast(null), 4200)
-                  }
-                  return
-                } catch {
-                  /* fall through to settings */
-                }
-              }
-              await updateSettings({ llm_provider: prov, llm_model: mid })
-            }
-            void apply()
-              .then(() =>
-                Promise.all([
-                  listConnectedProviders(),
-                  // Live discover models for the *selected* provider endpoint
-                  refreshModels({ provider: prov }),
-                ]),
+            if (!activeId) {
+              setLlmProvider(prov)
+              setModel(mid)
+              void updateSettings({ llm_provider: prov, llm_model: mid }).catch(
+                () => {},
               )
-              .then(([conn]) => {
+              return
+            }
+            // Sticky per-session bind — status bar reads barProvider from map only.
+            setSessionBind(activeId, prov, mid)
+            void applySessionLlm(activeId, prov, mid, false)
+              .then((r) => {
+                if (r.toast) {
+                  setSwitchToast(r.toast)
+                  window.setTimeout(() => setSwitchToast(null), 4200)
+                }
+              })
+              .catch(() => {})
+            // Warm model list for this provider without writing global active_*.
+            void refreshModels({ provider: prov }).catch(() => {})
+            void listConnectedProviders()
+              .then((conn) => {
                 setConnectedProviders(
                   conn.picker?.length ? conn.picker : conn.connected || [],
                 )
-                // Re-assert *user* pick after async (not server active_*).
-                setLlmProvider(prov)
-                setModel(mid)
               })
               .catch(() => {})
           }}
           onModelChange={(id) => {
-            pinUserLlm(llmProvider, id)
-            setModel(id)
-            if (activeId) {
-              setSessionLlmMap((prev) => ({
-                ...prev,
-                [activeId]: {
-                  provider: prev[activeId]?.provider || llmProvider,
-                  model: id,
-                },
-              }))
-              void applySessionLlm(activeId, llmProvider, id, true)
-                .then((r) => {
-                  // Keep the id the user chose — no server snap.
-                  setModel(id)
-                  if (r.toast) {
-                    setSwitchToast(r.toast)
-                    window.setTimeout(() => setSwitchToast(null), 4200)
-                  }
-                })
-                .catch(() => {
-                  updateSettings({ llm_model: id }).catch(() => {})
-                })
+            if (!activeId) {
+              setModel(id)
+              void updateSettings({ llm_model: id }).catch(() => {})
               return
             }
-            updateSettings({ llm_model: id })
-              .then(() => setModel(id))
+            const prov = barProvider || llmProvider
+            setSessionBind(activeId, prov, id)
+            void applySessionLlm(activeId, prov, id, false)
+              .then((r) => {
+                if (r.toast) {
+                  setSwitchToast(r.toast)
+                  window.setTimeout(() => setSwitchToast(null), 4200)
+                }
+              })
               .catch(() => {})
           }}
           onOpenUsage={() => setUsageOpen(true)}
@@ -2526,8 +2594,8 @@ export default function App() {
           open={usageOpen}
           onClose={() => setUsageOpen(false)}
           sessionId={activeId}
-          provider={llmProvider}
-          model={model}
+          provider={barProvider}
+          model={barModel}
         />
 
         {switchToast && (

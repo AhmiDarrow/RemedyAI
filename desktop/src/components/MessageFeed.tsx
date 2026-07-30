@@ -166,14 +166,15 @@ function ThinkingPanel({
     if (openDefault) setOpen(true)
   }, [openDefault])
   // Stick to bottom of thinking while it grows (unless user scrolled up).
+  // Never force-scroll when openDefault alone — that trapped the panel during streams.
   useEffect(() => {
     const el = bodyRef.current
     if (!el || !open) return
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
-    if (nearBottom || openDefault) {
+    if (nearBottom) {
       el.scrollTop = el.scrollHeight
     }
-  }, [text, open, openDefault])
+  }, [text, open])
   if (!text.trim()) return null
   // Flat strip with left accent — same look at every process mode.
   return (
@@ -433,11 +434,12 @@ const MessageBubble = memo(function MessageBubble({
                             </span>
                           )
                         }
-                        // Avoid remount thrash when src is a multi-KB data URI.
+                        // Stable key: remounting re-fetches media and flickers.
+                        // data: URIs are huge — key on length+prefix only.
                         const imgKey =
                           src.length > 96
-                            ? `${alt || 'img'}-${src.length}-${src.slice(0, 24)}`
-                            : src
+                            ? `img-${alt || 'x'}-${src.length}-${src.slice(0, 48)}`
+                            : `img-${src}`
                         return (
                           <ChatImage
                             key={imgKey}

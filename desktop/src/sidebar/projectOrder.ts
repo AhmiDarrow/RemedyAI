@@ -1,6 +1,6 @@
 /** Client preference: order of project folders in the sidebar (localStorage). */
 
-import { projectKey } from '../utils/sessionProjects'
+import { isProjectLocked, projectKey } from '../utils/sessionProjects'
 
 const KEY = 'remedy.projectOrder.v1'
 
@@ -69,11 +69,16 @@ export function moveProject(
 ): string[] {
   const k = projectKey(key)
   if (!k) return mergeProjectOrder(readOrder(), activeKeys)
+  // Locked project folders keep their place (also blocks swaps into them from neighbors).
+  if (isProjectLocked(k)) return mergeProjectOrder(readOrder(), activeKeys)
   const list = mergeProjectOrder(readOrder(), activeKeys)
   const i = list.indexOf(k)
   if (i < 0) return list
   const j = dir === 'up' ? i - 1 : i + 1
   if (j < 0 || j >= list.length) return list
+  // Do not swap past another locked folder either — keeps locked slots fixed.
+  const neighbor = list[j]!
+  if (isProjectLocked(neighbor)) return list
   const next = [...list]
   ;[next[i], next[j]] = [next[j]!, next[i]!]
   return setProjectOrder(next)

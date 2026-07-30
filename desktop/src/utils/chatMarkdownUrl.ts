@@ -17,7 +17,8 @@ const BLOCKED_DATA = /^data:(?!image\/)/i
  * https/mailto on anchors.
  */
 export function chatMarkdownUrlTransform(url: string): string {
-  const v = (url || '').trim()
+  // Strip angle-bracket destinations (![alt](<C:/path with spaces.png>))
+  const v = (url || '').trim().replace(/^<|>$/g, '')
   if (!v) return ''
 
   if (BLOCKED.test(v) || BLOCKED_DATA.test(v)) return ''
