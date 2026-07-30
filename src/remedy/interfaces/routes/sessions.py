@@ -1116,7 +1116,16 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             except Exception as e:
                 status = "error"
                 logger.exception("SSE stream error")
-                yield f"event: error\ndata: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+                # Never stream raw exception text — may embed keys / tokens.
+                try:
+                    from remedy.core.metabolism.redact import redact_text
+
+                    safe_msg = redact_text(str(e))[:800]
+                except Exception:
+                    safe_msg = "Stream error (details redacted)"
+                if not safe_msg.strip():
+                    safe_msg = "Stream error"
+                yield f"event: error\ndata: {json.dumps({'type': 'error', 'message': safe_msg})}\n\n"
             finally:
                 default_registry.counter(
                     "remedy_chat_requests_total", path="session_stream", status=status
@@ -1175,7 +1184,15 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                     yield await _sse_stream_text(token, event="token")
             except Exception as e:
                 status = "error"
-                yield f"event: error\ndata: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+                try:
+                    from remedy.core.metabolism.redact import redact_text
+
+                    safe_msg = redact_text(str(e))[:800]
+                except Exception:
+                    safe_msg = "Stream error (details redacted)"
+                if not safe_msg.strip():
+                    safe_msg = "Stream error"
+                yield f"event: error\ndata: {json.dumps({'type': 'error', 'message': safe_msg})}\n\n"
 
             yield f"event: done\ndata: {json.dumps({'type': 'done', 'request_id': request_id})}\n\n"
             default_registry.counter(

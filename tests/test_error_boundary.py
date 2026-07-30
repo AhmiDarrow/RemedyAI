@@ -56,3 +56,17 @@ def test_as_remedy_error_passthrough_and_wrap() -> None:
     wrapped = as_remedy_error(ValueError("nope"))
     assert isinstance(wrapped, RemedyError)
     assert "nope" in str(wrapped)
+
+
+def test_stream_error_surface_redacts_secrets() -> None:
+    """SSE / LLM error paths must scrub secret-shaped exception / provider text."""
+    from remedy.core.metabolism.redact import redact_text
+
+    raw = (
+        "LLM failed: Authorization: Bearer sk-abcdefghijklmnopqrstuvwxyz0123 "
+        "api_key=sk-proj-ABCDEFGHIJKLMNOP"
+    )
+    safe = redact_text(raw)
+    assert "sk-abcdefghijklmnopqrstuvwxyz0123" not in safe
+    assert "sk-proj-ABCDEFGHIJKLMNOP" not in safe
+    assert "[redacted]" in safe

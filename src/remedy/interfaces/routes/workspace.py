@@ -584,8 +584,13 @@ def register_workspace_routes(app: FastAPI, *, runtime=None, gateway=None, memor
         if memory is None:
             raise HTTPException(503, "Memory store not available")
 
+        # Cap import size to avoid RAM/DB floods from huge dumps.
+        _IMPORT_MAX_CHARS = 2_000_000
+        _IMPORT_MAX_MESSAGES = 2_000
+
         text = (req.text or "").strip()
         if not text and req.path:
+            from remedy.core.security import is_protected_secret_path
             from remedy.core.workspace import (
                 allowed_roots_for_scope,
                 default_project_from_config,
@@ -602,20 +607,45 @@ def register_workspace_routes(app: FastAPI, *, runtime=None, gateway=None, memor
                 )
             except Exception as exc:
                 raise HTTPException(400, f"Path not allowed: {exc}") from exc
+            if is_protected_secret_path(path):
+                raise HTTPException(
+                    400,
+                    "Path not allowed: protected Remedy secrets location",
+                )
             if not path.is_file():
                 raise HTTPException(404, f"File not found: {path}")
             try:
-                text = path.read_text(encoding="utf-8")
+                # Bound read — refuse multi-GB "imports" of arbitrary files.
+                raw_bytes = path.read_bytes()
+            except OSError as exc:
+                raise HTTPException(400, f"Cannot read path: {exc}") from exc
+            if len(raw_bytes) > _IMPORT_MAX_CHARS * 4:
+                raise HTTPException(
+                    400,
+                    f"Import file too large (max ~{_IMPORT_MAX_CHARS} chars)",
+                )
+            try:
+                text = raw_bytes.decode("utf-8")
             except UnicodeDecodeError:
-                text = path.read_text(encoding="utf-8", errors="replace")
+                text = raw_bytes.decode("utf-8", errors="replace")
 
         if not text.strip():
             raise HTTPException(400, "Provide text or path to a session .txt / .md export")
+        if len(text) > _IMPORT_MAX_CHARS:
+            raise HTTPException(
+                400,
+                f"Import text too large ({len(text)} > {_IMPORT_MAX_CHARS} chars)",
+            )
 
         try:
             parsed = parse_session_text(text)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
+        if len(parsed.messages) > _IMPORT_MAX_MESSAGES:
+            raise HTTPException(
+                400,
+                f"Import has too many messages ({len(parsed.messages)} > {_IMPORT_MAX_MESSAGES})",
+            )
 
         title = (req.title or parsed.title or "Imported Session").strip()
         model = req.model or parsed.model

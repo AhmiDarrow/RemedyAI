@@ -33,6 +33,76 @@ VALID_CHARACTER_ID_RE = re.compile(
 )
 
 
+def is_protected_secret_path(path: Path | str | None) -> bool:
+    """True when *path* resolves under a Remedy auth secrets directory.
+
+    Always blocks ``~/.remedy/auth/**`` (and ``$REMEDY_HOME/auth/**``) even
+    under ``access_scope=full``. Prevents file tools / session import from
+    reading provider keys, OAuth tokens, or the local API bearer — including
+    via junctions/symlinks that resolve into the auth tree.
+    """
+    if path is None:
+        return False
+    try:
+        p = Path(path).expanduser()
+        try:
+            p = p.resolve(strict=False)
+        except (OSError, RuntimeError):
+            p = p.absolute()
+    except (TypeError, ValueError, RuntimeError):
+        return False
+
+    parts_lower = [str(x).lower() for x in p.parts]
+    # .../.remedy/auth/...  (default layout on any drive)
+    for i, part in enumerate(parts_lower):
+        if part == ".remedy" and i + 1 < len(parts_lower) and parts_lower[i + 1] == "auth":
+            return True
+
+    # Do not call secret_store.auth_dir() here — that mkdir's on import/check.
+    candidates: list[Path] = []
+    try:
+        import os
+
+        env_home = (os.environ.get("REMEDY_HOME") or "").strip()
+        if env_home:
+            candidates.append(Path(env_home).expanduser() / "auth")
+    except Exception:
+        pass
+    try:
+        candidates.append(Path.home() / ".remedy" / "auth")
+    except Exception:
+        pass
+
+    for auth in candidates:
+        try:
+            a = auth.expanduser().resolve(strict=False)
+        except (OSError, RuntimeError):
+            try:
+                a = auth.expanduser().absolute()
+            except Exception:
+                continue
+        try:
+            if p == a or p.is_relative_to(a):
+                return True
+        except (ValueError, TypeError, OSError):
+            try:
+                p.relative_to(a)
+                return True
+            except Exception:
+                continue
+    return False
+
+
+def refuse_protected_secret_path(path: Path | str | None) -> None:
+    """Raise SecurityError when *path* is a protected secrets location."""
+    if is_protected_secret_path(path):
+        raise SecurityError(
+            "Path is a protected Remedy secrets location (auth/)",
+            rule="protected_secret_path",
+            detail={"path": str(path)},
+        )
+
+
 def safe_path(user_input: str, base_dir: Path | None = None) -> Path:
     """Resolve a user-supplied path safely within a base directory.
 
@@ -63,6 +133,7 @@ def safe_path(user_input: str, base_dir: Path | None = None) -> Path:
             rule="path_chars",
         )
 
+    refuse_protected_secret_path(candidate)
     return candidate
 
 

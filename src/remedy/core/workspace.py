@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 
 from remedy.core.errors import SecurityError
-from remedy.core.security import safe_path
+from remedy.core.security import refuse_protected_secret_path, safe_path
 
 # Skip noise when listing a workspace root for the agent system prompt.
 _SKIP_DIR_NAMES = {
@@ -235,7 +235,9 @@ def resolve_under_roots(
         roots = [Path.cwd()]
     primary = roots[0]
     if not user_path or user_path in (".", "./"):
-        return ensure_project_dir(primary)
+        out = ensure_project_dir(primary)
+        refuse_protected_secret_path(out)
+        return out
 
     candidate = Path(user_path).expanduser()
     if candidate.is_absolute():
@@ -243,6 +245,9 @@ def resolve_under_roots(
             resolved = candidate.resolve()
         except OSError:
             resolved = candidate.absolute()
+        # Always refuse auth secrets — including under access_scope=full and
+        # when a junction/symlink resolves into ~/.remedy/auth.
+        refuse_protected_secret_path(resolved)
         if scope == "full":
             # Block a few clearly dangerous locations
             parts_lower = {p.lower() for p in resolved.parts}
