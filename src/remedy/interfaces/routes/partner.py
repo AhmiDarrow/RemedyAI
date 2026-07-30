@@ -404,17 +404,47 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
 
     @app.get("/api/partner/metabolism")
     async def partner_metabolism(session_id: str | None = None):
-        """Advanced: silent metabolism snapshot (tier, EU/DU, governor, map)."""
+        """Advanced: silent metabolism snapshot (tier, EU/DU, governor, map).
+
+        Top-level ``tier`` / ``evidence_units`` / ``decision_units`` mirror the
+        session quality counters so Advanced UI and operators need not dig
+        through nested ``session_quality.metabolism``.
+        """
         from remedy.core.metabolism.turn import metabolism_public_snapshot
         from remedy.core.session_quality import get_session_quality
 
-        sid = session_id
+        sid = (session_id or "").strip() or None
         if not sid and runtime is not None:
-            sid = str(getattr(runtime, "_session_id", "") or "")
+            raw = getattr(runtime, "_session_id", None)
+            sid = str(raw).strip() if raw else None
+        key = sid or "_default"
+        qsnap = get_session_quality(key).snapshot()
+        meta = metabolism_public_snapshot(key)
+        # Prefer live quality counters; fall back to organ snapshots.
+        qmeta = qsnap.get("metabolism") if isinstance(qsnap, dict) else None
+        if not isinstance(qmeta, dict):
+            qmeta = {}
+        evid = meta.get("evidence") if isinstance(meta, dict) else None
+        dec = meta.get("decisions") if isinstance(meta, dict) else None
+        eu = qmeta.get("evidence_units")
+        if eu is None and isinstance(evid, dict):
+            eu = evid.get("evidence_units") or evid.get("unit_count")
+        du = qmeta.get("decision_units")
+        if du is None and isinstance(dec, dict):
+            du = dec.get("decision_units")
+        tier = qmeta.get("last_tier")
+        if tier is None and isinstance(dec, dict):
+            # last_tier_label like "L2_agency" → 2 when possible
+            lab = str(dec.get("last_tier_label") or "")
+            if lab.startswith("L") and len(lab) >= 2 and lab[1].isdigit():
+                tier = int(lab[1])
         return {
-            "session_id": sid or "_default",
-            "session_quality": get_session_quality(sid).snapshot(),
-            "metabolism": metabolism_public_snapshot(sid),
+            "session_id": key,
+            "tier": int(tier) if tier is not None else None,
+            "evidence_units": int(eu) if eu is not None else 0,
+            "decision_units": int(du) if du is not None else 0,
+            "session_quality": qsnap,
+            "metabolism": meta,
         }
 
     @app.post("/api/partner/identity/export")

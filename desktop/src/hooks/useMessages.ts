@@ -7,7 +7,6 @@ import {
   type StreamProgress,
   type UsagePayload,
 } from '../api/messages'
-import { abortSession } from '../api/sessions'
 import {
   completeStreamJob,
   detachStreamJob,
@@ -742,9 +741,11 @@ export function useMessages(sessionId: string | null) {
         if (mode === 'interrupt') {
           // Stop current stream + server turn, then send this first (ahead of after-queue).
           const sidAbort = sessionIdRef.current
-          streamCtrlRef.current?.abort()
           if (sidAbort) {
-            void abortSession(sidAbort).catch(() => {})
+            // Mark job aborted so busy badges clear (mirror stopStreamJob).
+            void stopStreamJob(sidAbort).catch(() => {})
+          } else {
+            streamCtrlRef.current?.abort()
           }
           resetStreamBuffers()
           setStreaming(false)

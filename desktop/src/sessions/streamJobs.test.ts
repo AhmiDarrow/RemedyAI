@@ -44,4 +44,13 @@ describe('streamJobs', () => {
     await stopStreamJob('s3')
     expect(c.signal.aborted).toBe(true)
   })
+
+  it('completeStreamJob does not revive terminal status', async () => {
+    const c = new AbortController()
+    registerStreamJob('s4', c)
+    await stopStreamJob('s4')
+    // stop already set aborted — a late onDone must not flip to done
+    completeStreamJob('s4', 'done')
+    expect(countRunningJobs()).toBe(0)
+  })
 })

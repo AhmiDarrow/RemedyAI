@@ -762,6 +762,59 @@ def test_begin_and_after_tool_metabolism():
     assert "evidence" in pub and "governor" in pub
 
 
+def test_partner_metabolism_snapshot_api_top_level_fields(tmp_path: Path):
+    """GET /api/partner/metabolism exposes tier + EU/DU at the top level."""
+    import asyncio
+
+    from fastapi.testclient import TestClient
+
+    from remedy.core.session_quality import get_session_quality, reset_session_quality
+    from remedy.interfaces.api import create_app
+    from remedy.memory.store import MemoryStore
+
+    sid = "meta_api_sess"
+    reset_session_quality(sid)
+    reset_evidence_ledger(sid)
+    reset_decision_tracker(sid)
+    get_session_quality(sid).record_metabolism(
+        tier=2, evidence_units=3, decision_units=1
+    )
+    get_evidence_ledger(sid).admit_tool_result(
+        tool_name="file_read",
+        content="path=a.py\nline1\n",
+        success=True,
+    )
+    get_decision_tracker(sid).record_tier_if_changed("L2_agency")
+
+    async def _init():
+        store = MemoryStore(str(tmp_path / "mem.db"))
+        await store.initialize()
+        return store
+
+    store = asyncio.run(_init())
+    rt = type(
+        "RT",
+        (),
+        {
+            "skills": type("S", (), {"count": 0, "skills": []})(),
+            "_session_id": sid,
+            "_streaming_sessions": set(),
+        },
+    )()
+    app = create_app(runtime=rt, memory=store, api_key="")
+    with TestClient(app) as client:
+        r = client.get(f"/api/partner/metabolism?session_id={sid}")
+        assert r.status_code == 200
+        data = r.json()
+    assert data.get("session_id") == sid
+    assert data.get("tier") == 2
+    assert int(data.get("evidence_units") or 0) >= 3
+    assert int(data.get("decision_units") or 0) >= 1
+    assert isinstance(data.get("metabolism"), dict)
+    assert "governor" in data["metabolism"] or "machine_map" in data["metabolism"]
+    reset_session_quality(sid)
+
+
 def test_identity_export_import_roundtrip(tmp_path: Path):
     payload = build_identity_payload(
         partner_memory=[{"text": "Prefers dark mode"}],

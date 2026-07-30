@@ -861,12 +861,23 @@ async def call_llm_stream(runtime, message: str,
                         tool_steps_this_turn=tool_batches_this_turn,
                         open_tasks=open_tasks_for_wall or None,
                     )
+                    # Active agency: unfinished brief/mission, tools already used,
+                    # or tools still armed (run_until_done coding turns).
+                    tools_armed = bool(tools or all_tools)
                     coding_in_flight = run_until_done and (
                         unfinished
                         or tool_batches_this_turn > 0
-                        or bool(tools or all_tools)
+                        or tools_armed
                     )
                     if coding_in_flight:
+                        # Tools armed but never called this turn — stronger nudge
+                        # (was dead code: `elif run_until_done and all_tools` never
+                        # ran because coding_in_flight was always true when armed).
+                        never_used_tools = (
+                            tool_batches_this_turn <= 0
+                            and bool(all_tools)
+                            and not unfinished
+                        )
                         # Stale only when an epoch had *zero* tool calls (dead air).
                         # Failed tools still count as activity — keep recovering.
                         if tool_batches_in_epoch <= 0 and productive_in_epoch <= 0:
@@ -894,6 +905,33 @@ async def call_llm_stream(runtime, message: str,
                                     yield "@@checkpoint"
                             force_answer_sticky = True
                             tools = []
+                        elif never_used_tools:
+                            # Model is chatting without function calls — re-arm.
+                            epoch_index += 1
+                            tools = all_tools
+                            logger.info(
+                                "ReAct tools-now nudge → epoch %d at step %d "
+                                "(no tool_calls yet this turn)",
+                                epoch_index,
+                                step,
+                            )
+                            yield (
+                                f"@@status:Nudge — use tools to finish "
+                                f"(epoch {epoch_index}, step {step})…\n"
+                            )
+                            messages.append(
+                                {
+                                    "role": "user",
+                                    "content": (
+                                        "Keep going until the user request is finished. "
+                                        "Use tools now (do not stop for a step count). "
+                                        "Call list_dir / file_read / file_edit / bash_exec / "
+                                        "mission_* / spread_run as needed and complete the work."
+                                    ),
+                                }
+                            )
+                            productive_in_epoch = 0
+                            tool_batches_in_epoch = 0
                         else:
                             epoch_index += 1
                             logger.info(
@@ -946,23 +984,6 @@ async def call_llm_stream(runtime, message: str,
                     elif step >= epoch_size and not run_until_done:
                         # Pure chat (tools never enabled) — wrap up.
                         force_answer_sticky = True
-                    elif step >= epoch_size and run_until_done and all_tools:
-                        # Tools enabled but model has not used them yet — nudge, keep going.
-                        epoch_index += 1
-                        tools = all_tools
-                        messages.append(
-                            {
-                                "role": "user",
-                                "content": (
-                                    "Keep going until the user request is finished. "
-                                    "Use tools now (do not stop for a step count). "
-                                    "Call list_dir / file_read / file_edit / bash_exec / "
-                                    "mission_* / spread_run as needed and complete the work."
-                                ),
-                            }
-                        )
-                        productive_in_epoch = 0
-                        tool_batches_in_epoch = 0
 
                 is_final_step = step >= max_total - 1
                 # Absolute safety wall only — soft epochs never force-answer alone.

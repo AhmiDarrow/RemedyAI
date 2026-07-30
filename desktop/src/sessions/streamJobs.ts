@@ -126,6 +126,8 @@ export function completeStreamJob(
 ) {
   const j = jobs.get(sessionId)
   if (!j) return
+  // Do not revive a terminal job (e.g. stopStreamJob → aborted, then onDone → done).
+  if (j.status !== 'running') return
   j.status = status
   if (error) j.error = error
   j.lastActivityAt = Date.now()
