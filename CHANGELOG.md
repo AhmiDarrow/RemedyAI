@@ -6,6 +6,9 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ### Gauntlet: continuous security + perf loop (feature/computer-use)
 
+- **Agency re-arm coding verbs:** short stubs for implement/debug/fix/refactor/test re-arm tools (parity with review); false-progress also catches coding narration
+- **bash_exec hard blocks with tools on:** dangerous wipe/privilege/host-kill still SECURITY_BLOCK when tools registered (L2/L3); approvals off does not bypass
+- **L3 work alone:** bare `work alone` / finish-without-me peers stay L3 with tools + force_spread (not demoted by tools_enabled=False)
 - **L0 model/version phrasing:** `what model are you using?` / `what is the version` / `what's the version` classify as L0 instant (local reply, no frontier)
 - **metabolism_public_snapshot(lean=):** end-turn + partner status + `/harness` use counters-only (no recent lists / skill·CUA ranking sorts); full snapshot remains on `GET /api/partner/metabolism`
 - **Hot path re-arm:** `_rearm_agency_tools` always restores schemas **and** `run_until_done` (agency recovery no longer soft-epoch force-answers mid review/implement)

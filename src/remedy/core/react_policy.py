@@ -335,7 +335,11 @@ _FALSE_PROGRESS_RE = re.compile(
     r"start|starting|do(?:ing)?|handle|handling|run|running|"
     r"try|trying|open|opening|navigate|navigating|bring|bringing|"
     r"load|loading|pull|pulling|launch|launching|"
-    r"activate|activating)\b|"
+    r"activate|activating|"
+    # Coding/long-task narration without tool_calls (parity with review)
+    r"implement|implementing|debug|debugging|fix|fixing|"
+    r"refactor|refactoring|edit|editing|patch|patching|"
+    r"test|testing|apply|applying)\b|"
     r"\bprocessing\b|"
     r"\bworking\s+on\s+it\b|"
     r"\bpicking\s+up\b|"
@@ -575,7 +579,7 @@ _AGENCY_TOOL_PROMISE_HARD = (
     "i will call tools",
 )
 # Soft phrases: only on short stubs so full written reviews are not interrupted.
-# Include coding/long-task promises ("I'll implement…") — not only review.
+# Include coding/long-task promises ("I'll implement/debug/fix…") — same class as review.
 _AGENCY_TOOL_PROMISE_SOFT = (
     "let me review",
     "i'll review",
@@ -587,18 +591,33 @@ _AGENCY_TOOL_PROMISE_SOFT = (
     "let me fix",
     "i'll fix",
     "i will fix",
+    "let me debug",
+    "i'll debug",
+    "i will debug",
     "let me edit",
     "i'll edit",
     "i will edit",
     "let me apply",
     "i'll apply",
     "i will apply",
+    "let me refactor",
+    "i'll refactor",
+    "i will refactor",
+    "let me test",
+    "i'll test",
+    "i will test",
     "let me write the test",
     "i'll write the test",
     "i will write the test",
     "let me write tests",
     "i'll write tests",
     "i will write tests",
+    "let me run the test",
+    "i'll run the test",
+    "i will run the test",
+    "let me run the tests",
+    "i'll run the tests",
+    "i will run the tests",
     "i'll start coding",
     "i will start coding",
     "let me start coding",
@@ -606,6 +625,8 @@ _AGENCY_TOOL_PROMISE_SOFT = (
     "i will patch",
     "working on the fix now",
     "applying the change",
+    "debugging now",
+    "fixing this now",
 )
 
 AGENCY_REARM_NUDGE = (

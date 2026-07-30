@@ -112,6 +112,96 @@ def test_windows_dangerous_commands_blocked():
     assert check_dangerous_command(["del", "/f", "/s", "/q", "C:\\temp"]) is not None
 
 
+@pytest.mark.asyncio
+async def test_bash_exec_dangerous_still_blocked_with_tools_on(tmp_path, monkeypatch):
+    """Agency/tools-on must never bypass hard security on bash_exec.
+
+    Gauntlet: L2/L3 leave tools armed; dangerous wipe/privilege cmds must still
+    return SECURITY_BLOCK before approval or subprocess.
+    """
+    from types import SimpleNamespace
+
+    from remedy.core.agent_workspace_tools import register_workspace_tools
+    from remedy.core.approvals import APPROVALS
+    from remedy.skills.tool_registry import ToolRegistry
+
+    # If security were skipped, ask-mode would still gate — force approvals off
+    # so only the hard security gate can produce the block.
+    monkeypatch.setattr(APPROVALS, "needs_ask", lambda *a, **k: None)
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+
+    class _RT:
+        def __init__(self) -> None:
+            self.tool_registry = ToolRegistry()
+            self.config = SimpleNamespace(home_dir=str(tmp_path / "remedy_home"))
+            self._session_id = "tools-on-sec"
+            # Mirror agency path: tools registered / "on"
+            self._turn_tier = 3  # L3 work-alone
+
+        def effective_project_path(self):
+            return proj.resolve()
+
+        def access_scope(self):
+            return "project"
+
+        def write_roots(self):
+            return [proj.resolve()]
+
+        def resolve_tool_path(self, path, for_write=False):
+            return (proj / (path or ".")).resolve()
+
+        def _track_artifact(self, *_a, **_k):
+            pass
+
+        def _register_comfyui_tools(self):
+            pass
+
+        def _register_vision_tools(self):
+            pass
+
+        def _register_local_discover_tools(self):
+            pass
+
+        def _register_skill_tools(self):
+            pass
+
+    rt = _RT()
+    register_workspace_tools(rt)
+    reg = rt.tool_registry
+    assert reg.get("bash_exec") is not None or reg.get_definition("bash_exec") is not None
+
+    dangerous = (
+        "rm -rf /",
+        "rm -rf ~",
+        r"del /f /s /q C:\Windows",
+        "format C:",
+        "shutdown /s /t 0",
+        "Get-Process app | Stop-Process -Force",
+        "taskkill /F /IM remedy.exe",
+    )
+    for cmd in dangerous:
+        out = await reg.execute("bash_exec", command=cmd)
+        low = (out or "").lower()
+        assert (
+            "security" in low
+            or "blocked" in low
+            or "SECURITY_BLOCK" in (out or "")
+        ), f"expected hard block for {cmd!r}, got: {out!r}"
+        # Must not look like a successful shell run
+        assert "exit_code=0" not in low
+        assert "APPROVAL_REQUIRED" not in (out or "")
+
+    # Safe command still reaches approval/exec path (approvals mocked off → may run)
+    # At minimum it must not be SECURITY_BLOCK'd for a benign echo.
+    ok = await reg.execute("bash_exec", command="echo remedy-safe")
+    assert "SECURITY_BLOCK" not in (ok or "")
+    assert "blocked by security policy" not in (ok or "").lower()
+
+
 def test_dev_stderr_redirect_not_flagged_alone():
     # Bare 2>/dev/null is normal in scripts — must not block.
     assert check_dangerous_command(["make", "2>/dev/null"]) is None or (
