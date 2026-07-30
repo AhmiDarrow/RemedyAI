@@ -43,6 +43,12 @@ def test_full_wipe_paths_documented_in_ps1():
     assert "llama-server" in text
     assert "vision" in text
     assert "Remove-VisionTree" in text or "vision" in text
+    # Full wipe must clear user + public/common desktop & Start Menu shortcuts
+    assert "CommonDesktopDirectory" in text
+    assert "CommonPrograms" in text
+    assert "CommonStartup" in text
+    assert "PUBLIC" in text
+    assert "Remedy Desktop.lnk" in text
 
 
 def test_wipe_config_removes_vision_tree(tmp_path: Path, monkeypatch):

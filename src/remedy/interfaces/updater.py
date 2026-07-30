@@ -26,30 +26,72 @@ from remedy.execution.process import run_hidden
 
 console = Console()
 
-PYPI_URL = "https://pypi.org/pypi/remedy/json"
+# PyPI distribution is remedy-ai (import package remains `remedy`).
+# Never use pypi.org/pypi/remedy — that is an unrelated occupied name.
+PYPI_DIST_NAME = "remedy-ai"
+PYPI_URL = f"https://pypi.org/pypi/{PYPI_DIST_NAME}/json"
+# Legacy dist names (editable / pre-rename installs) tried after remedy-ai.
+_DIST_NAME_CANDIDATES = (PYPI_DIST_NAME, "remedy")
+
+
+def _distribution_version() -> str | None:
+    """Installed dist version from metadata (prefer remedy-ai)."""
+    for name in _DIST_NAME_CANDIDATES:
+        try:
+            return importlib_version(name)
+        except PackageNotFoundError:
+            continue
+        except Exception:
+            continue
+    return None
+
+
+def _get_distribution():
+    """Return importlib.metadata.Distribution for remedy-ai (or legacy name)."""
+    from importlib.metadata import distribution
+
+    for name in _DIST_NAME_CANDIDATES:
+        try:
+            dist = distribution(name)
+            if dist is not None:
+                return dist
+        except Exception:
+            continue
+    return None
 
 
 def _get_installed_version() -> str:
-    """Returns the currently installed version string."""
+    """Returns the currently installed version string.
+
+    Prefer ``remedy.__version__`` (source tree / frozen pyproject aware) so a
+    stale site-packages dist-info (e.g. old ``remedy``/``remedy-ai`` wheel)
+    cannot mask the checkout or sidecar version used for update decisions.
+    """
     try:
-        return importlib_version("remedy")
-    except PackageNotFoundError:
-        try:
-            from remedy import __version__
-            return __version__
-        except ImportError:
-            return "unknown"
+        from remedy import __version__
+
+        if __version__ and str(__version__) != "0.0.0":
+            return str(__version__)
+    except ImportError:
+        pass
+    ver = _distribution_version()
+    if ver:
+        return ver
+    return "unknown"
 
 
 def _get_latest_version() -> str | None:
-    """Fetch latest PyPI version. Returns None on failure."""
+    """Fetch latest PyPI version for remedy-ai. Returns None on failure."""
     import json
     import urllib.request
 
     try:
         req = urllib.request.Request(
             PYPI_URL,
-            headers={"Accept": "application/json"},
+            headers={
+                "Accept": "application/json",
+                "User-Agent": "Remedy-Updater",
+            },
         )
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read().decode())
@@ -64,9 +106,7 @@ def _detect_install_source() -> str:
     Returns one of: 'git-editable', 'git-folder', 'pip', 'unknown'
     """
     try:
-        from importlib.metadata import distribution
-
-        dist = distribution("remedy")
+        dist = _get_distribution()
         if dist is None:
             return "unknown"
 
@@ -212,6 +252,19 @@ def _memory_check() -> bool:
     return True  # db may not exist yet for fresh installs
 
 
+def _is_remedy_pyproject(text: str) -> bool:
+    """True if pyproject.toml is this product (remedy-ai), not unrelated 'remedy'."""
+    # Prefer explicit dist name; also accept project.description / package layout markers.
+    if 'name = "remedy-ai"' in text or "name = 'remedy-ai'" in text:
+        return True
+    # Pre-rename checkouts still used name = "remedy" with our description keywords.
+    if ('name = "remedy"' in text or "name = 'remedy'" in text) and (
+        "coding agent" in text.lower() or "remedy-ai" in text or "Ahmi" in text
+    ):
+        return True
+    return False
+
+
 def _find_project_root() -> Path | None:
     """Try to locate the git-cloned project root for editable installs."""
     try:
@@ -225,12 +278,14 @@ def _find_project_root() -> Path | None:
                 if (root / "pyproject.toml").exists():
                     try:
                         text = (root / "pyproject.toml").read_text(encoding="utf-8")
-                        if 'name = "remedy"' in text or "name = 'remedy'" in text:
+                        if _is_remedy_pyproject(text):
                             return root
                     except OSError:
                         pass
                 if (root / ".git").exists() and (root / "src" / "remedy").exists():
-                    return root
+                    # Extra guard: must have our package layout
+                    if (root / "src" / "remedy" / "interfaces" / "updater.py").is_file():
+                        return root
     except Exception:
         pass
     return None
@@ -280,14 +335,19 @@ def run_update(check_only: bool = False) -> None:
                     text=True,
                     timeout=30,
                 )
-                r2 = run_hidden(
-                    [git, "rev-list", "--count", "HEAD..origin/master", "--"],
-                    cwd=project_root,
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                )
-                behind = r2.stdout.strip()
+                # Prefer origin/HEAD; fall back to master then main.
+                behind = ""
+                for ref in ("@{upstream}", "origin/master", "origin/main"):
+                    r2 = run_hidden(
+                        [git, "rev-list", "--count", f"HEAD..{ref}", "--"],
+                        cwd=project_root,
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                    )
+                    if r2.returncode == 0 and (r2.stdout or "").strip().isdigit():
+                        behind = (r2.stdout or "").strip()
+                        break
                 if behind and behind != "0":
                     git_behind = True
                     console.print(f"  Git behind by: [yellow]{behind} commits[/yellow]")
@@ -339,5 +399,8 @@ def run_update(check_only: bool = False) -> None:
         _run_post_update_checks()
     else:
         console.print("\n[red]Update failed. Try manually:[/red]")
-        console.print("  git clone https://github.com/AhmiDarrow/Remedy.git && cd Remedy")
+        console.print(
+            "  git clone https://github.com/AhmiDarrow/RemedyAI.git && cd RemedyAI"
+        )
         console.print("  pip install -e .")
+        console.print("  # or: pip install --upgrade remedy-ai")

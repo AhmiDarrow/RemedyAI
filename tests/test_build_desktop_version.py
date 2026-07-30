@@ -52,3 +52,55 @@ def test_write_sidecar_version_file_has_product_identity(bd, tmp_path, monkeypat
         "filevers=(0, 11, 1, 0)",
     ):
         assert needle in text, f"missing {needle!r}"
+
+
+def test_sync_versions_stamps_package_lock(bd, tmp_path, monkeypatch) -> None:
+    """Build-time sync must not leave package-lock.json root version stale."""
+    import json
+
+    root = tmp_path
+    (root / "pyproject.toml").write_text(
+        '[project]\nname = "remedy-ai"\nversion = "0.19.9"\n',
+        encoding="utf-8",
+    )
+    desktop = root / "desktop"
+    desktop.mkdir()
+    (desktop / "package.json").write_text(
+        json.dumps({"name": "remedy-desktop", "version": "0.1.0"}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    (desktop / "package-lock.json").write_text(
+        json.dumps(
+            {
+                "name": "remedy-desktop",
+                "version": "0.1.0",
+                "lockfileVersion": 3,
+                "packages": {"": {"name": "remedy-desktop", "version": "0.1.0"}},
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    tauri = root / "desktop" / "src-tauri"
+    tauri.mkdir(parents=True)
+    (tauri / "tauri.conf.json").write_text(
+        json.dumps({"version": "0.1.0"}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    (tauri / "Cargo.toml").write_text(
+        '[package]\nname = "app"\nversion = "0.1.0"\n',
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(bd, "ROOT", root)
+    out = bd.sync_versions()
+    assert out == "0.19.9"
+
+    lock = json.loads((desktop / "package-lock.json").read_text(encoding="utf-8"))
+    assert lock["version"] == "0.19.9"
+    assert lock["packages"][""]["version"] == "0.19.9"
+    pkg = json.loads((desktop / "package.json").read_text(encoding="utf-8"))
+    assert pkg["version"] == "0.19.9"
+    conf = json.loads((tauri / "tauri.conf.json").read_text(encoding="utf-8"))
+    assert conf["version"] == "0.19.9"
