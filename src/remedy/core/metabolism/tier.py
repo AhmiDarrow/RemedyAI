@@ -107,6 +107,50 @@ _COMPLEX = re.compile(
     r"plan (this|out)|break (this )?down"
     r")\b"
 )
+# Pure chat greets / acks — skip L2/L3 regexes entirely (hot path).
+_CHAT_SHORT = frozenset(
+    {
+        "hi",
+        "hey",
+        "hello",
+        "yo",
+        "sup",
+        "hi!",
+        "hey!",
+        "hello!",
+        "thanks",
+        "thank you",
+        "thanks!",
+        "thx",
+        "ty",
+        "ok",
+        "okay",
+        "k",
+        "yes",
+        "no",
+        "yep",
+        "nope",
+        "sure",
+        "cool",
+        "nice",
+        "bye",
+        "goodbye",
+        "good morning",
+        "good night",
+        "gm",
+        "gn",
+        "lol",
+        "lmao",
+        "np",
+        "got it",
+        "sounds good",
+        "perfect",
+        "great",
+        "awesome",
+    }
+)
+# Path-ish chars — only run _L2_PATH when present (avoids regex on pure prose).
+_PATH_HINT = re.compile(r"[\\/]|\.\w{1,8}\b|[A-Za-z]:")
 
 
 @dataclass(frozen=True)
@@ -227,21 +271,31 @@ def classify_turn_tier(
     pure_action: bool = False,
     browse: bool = False,
 ) -> TurnTier:
-    """Heuristic tier classification — deterministic, no network."""
-    ut = (user_text or "").strip()
-    low = ut.lower()
-    intent_l = (intent or "chat").strip().lower()
+    """Heuristic tier classification — deterministic, no network.
 
+    Cheap flag / length / greeting exits run before multi-regex scans.
+    """
+    # Flag short-circuits (no text work)
     if has_attachments or pure_action or browse:
         return TurnTier.L2_AGENCY
 
-    if _L3_AUTONOMOUS.search(ut) or intent_l == "autonomous":
-        return TurnTier.L3_DEEP
-    if _L3_PARTITION.search(ut):
+    ut = (user_text or "").strip()
+    if not ut:
+        return TurnTier.L1_LEAN
+
+    n = len(ut)
+    intent_l = (intent or "chat").strip().lower()
+    if intent_l == "autonomous":
         return TurnTier.L3_DEEP
 
-    # L0 instant (only short, single-clause)
-    if ut and len(ut) <= 120 and "\n" not in ut:
+    # Ultra-short pure chat (hi / thanks / ok) — no regexes
+    if n <= 24 and "\n" not in ut:
+        low_short = ut.lower().rstrip("!.?")
+        if low_short in _CHAT_SHORT or ut.lower() in _CHAT_SHORT:
+            return TurnTier.L1_LEAN
+
+    # L0 instant (only short, single-clause) before heavier L2/L3 scans
+    if n <= 120 and "\n" not in ut:
         if (
             _L0_WHOAMI.match(ut)
             or _L0_MODEL.match(ut)
@@ -251,25 +305,44 @@ def classify_turn_tier(
         ):
             return TurnTier.L0_INSTANT
 
+    # L3 only when text is long enough for keywords (min ~6–8 chars)
+    if n >= 6 and _L3_AUTONOMOUS.search(ut):
+        return TurnTier.L3_DEEP
+    if n >= 10 and _L3_PARTITION.search(ut):
+        return TurnTier.L3_DEEP
+
     if plan_mode:
         return TurnTier.L2_AGENCY if tools_enabled else TurnTier.L1_LEAN
 
-    if intent_l in ("tool", "skill") or _L2_AGENCY.search(ut) or _L2_PATH.search(ut):
-        if _COMPLEX.search(ut) and _L3_PARTITION.search(ut):
+    if intent_l in ("tool", "skill"):
+        return TurnTier.L2_AGENCY
+
+    # Agency heuristics — skip path regex when no path-ish chars
+    agency = bool(_L2_AGENCY.search(ut))
+    if not agency and _PATH_HINT.search(ut):
+        agency = bool(_L2_PATH.search(ut))
+    if agency:
+        # Nested L3 only when complex multi-step + partition language
+        if n >= 20 and _COMPLEX.search(ut) and _L3_PARTITION.search(ut):
             return TurnTier.L3_DEEP
         return TurnTier.L2_AGENCY
 
-    if intent_l in ("memory", "plan"):
-        return TurnTier.L1_LEAN if intent_l == "memory" else TurnTier.L2_AGENCY
+    if intent_l == "memory":
+        return TurnTier.L1_LEAN
+    if intent_l == "plan":
+        return TurnTier.L2_AGENCY
 
     if not tools_enabled:
         return TurnTier.L1_LEAN
 
-    # Default chat
-    if len(ut) > 400 or _COMPLEX.search(ut):
-        return TurnTier.L2_AGENCY if any(
-            w in low for w in ("code", "file", "project", "repo", "bug", "error")
-        ) else TurnTier.L1_LEAN
+    # Default chat — complex multi-step with code words elevates
+    if n > 400 or (n >= 12 and _COMPLEX.search(ut)):
+        low = ut.lower()
+        return (
+            TurnTier.L2_AGENCY
+            if any(w in low for w in ("code", "file", "project", "repo", "bug", "error"))
+            else TurnTier.L1_LEAN
+        )
 
     return TurnTier.L1_LEAN
 

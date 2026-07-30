@@ -217,9 +217,18 @@ def apply_auto_harness_send_policy(
     if snap.remedy_system:
         injects.append(snap.remedy_system)
     with suppress(Exception):
-        from remedy.core.project_learning import pinned_constraints_block
+        # Prefer pins already loaded on the snapshot (same turn — no second disk hit)
+        pin = ""
+        pins = (getattr(snap, "signals", None) or {}).get("project_pins")
+        if pins:
+            lines = ["[Project continuity notes]"]
+            for p in list(pins)[:5]:
+                lines.append(f"- {p}")
+            pin = "\n".join(lines)
+        if not pin:
+            from remedy.core.project_learning import pinned_constraints_block
 
-        pin = pinned_constraints_block(project_path)
+            pin = pinned_constraints_block(project_path)
         if pin:
             injects.append(pin)
     # Metabolism injects (evidence/crystal/CUA) owned by begin_turn_metabolism —

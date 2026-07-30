@@ -24,6 +24,10 @@ class ToolRegistry:
         self._invocation_history: list[dict[str, Any]] = []
         self._mcp_servers: dict[str, dict[str, Any]] = {}
         self._handlers: dict[str, Callable] = {}
+        # OpenAI tools payload cache — rebuild only when registry mutates
+        self._schema_gen: int = 0
+        self._openai_payload_cache: list[dict[str, Any]] | None = None
+        self._openai_payload_gen: int = -1
 
     @property
     def tools(self) -> list[ToolDefinition]:
@@ -33,10 +37,17 @@ class ToolRegistry:
     def tool_count(self) -> int:
         return len(self._tools)
 
+    @property
+    def schema_generation(self) -> int:
+        """Bumps on every register — used to cache OpenAI tool schemas."""
+        return int(self._schema_gen)
+
     def register(self, tool: ToolDefinition) -> ToolDefinition:
         key = f"{tool.source.value}:{tool.name}"
         self._tools[key] = tool
         self._by_source[tool.source].append(tool.name)
+        self._schema_gen += 1
+        self._openai_payload_cache = None
         return tool
 
     def register_builtin(
