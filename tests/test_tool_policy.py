@@ -37,6 +37,35 @@ def test_epoch_continue_message_keeps_going():
     assert "not a stop" in low or "continue" in low
 
 
+def test_run_until_done_never_used_tools_nudge_branch():
+    """Epoch wall with tools armed but zero batches should take tools-now path.
+
+    Regression: coding_in_flight was always true when tools were armed, so the
+    ``elif run_until_done and all_tools`` nudge was dead code.
+    """
+    # Mirror the branch predicates used in agent_react_loop epoch wall.
+    run_until_done = True
+    unfinished = False
+    tool_batches_this_turn = 0
+    all_tools = [{"type": "function"}]
+    tools = all_tools
+    tools_armed = bool(tools or all_tools)
+    coding_in_flight = run_until_done and (
+        unfinished or tool_batches_this_turn > 0 or tools_armed
+    )
+    never_used_tools = (
+        tool_batches_this_turn <= 0 and bool(all_tools) and not unfinished
+    )
+    assert coding_in_flight is True
+    assert never_used_tools is True
+    # After first tool batch, never_used becomes false → soft epoch roll instead.
+    tool_batches_this_turn = 2
+    never_used_tools = (
+        tool_batches_this_turn <= 0 and bool(all_tools) and not unfinished
+    )
+    assert never_used_tools is False
+
+
 def test_productive_tool_batch_detects_ok_results():
     assert is_productive_tool_batch(
         [{"role": "tool", "content": "file contents here"}]

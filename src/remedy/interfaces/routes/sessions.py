@@ -866,14 +866,10 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                 collected_tool_calls: list[dict] = []
                 collected_tool_results: list[dict] = []
                 usage_acc: dict | None = None
-                if not api_key:
-                    status = "no_key"
-                    msg = (
-                        "No LLM API key configured. Complete first-run setup or open Settings, "
-                        "set your provider API key, and Save — then try again."
-                    )
-                    yield f"event: error\ndata: {json.dumps({'type': 'error', 'message': msg})}\n\n"
-                    return
+                # Always enter stream_response: L0 (list skills / model / version /
+                # whoami / status) works without a provider key. Non-L0 without a
+                # key still gets a clear notice from the agent (streamed as text).
+                aborted = False
 
                 async for token in runtime.stream_response(
                     user_text or "(see attached files)",
@@ -885,9 +881,17 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                 ):
                     if isinstance(token, str) and token.startswith("@@aborted"):
                         status = "aborted"
+                        aborted = True
+                        # Cooperative stop — not an error. Client Stop / abort.
                         yield (
-                            "event: error\ndata: "
-                            + json.dumps({"type": "error", "message": "Generation stopped"})
+                            "event: aborted\ndata: "
+                            + json.dumps(
+                                {
+                                    "type": "aborted",
+                                    "message": "Generation stopped",
+                                    "request_id": request_id,
+                                }
+                            )
                             + "\n\n"
                         )
                         break
@@ -1042,6 +1046,20 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                         full_response += token
                         yield await _sse_stream_text(token, event="token")
 
+                # Metrics: no provider key notice from agent (L0 never hits this).
+                if (
+                    not aborted
+                    and status == "ok"
+                    and not api_key
+                    and full_response
+                    and "no API key" in full_response
+                ):
+                    status = "no_key"
+
+                # Abort path already emitted event:aborted — skip usage/done.
+                if aborted:
+                    return
+
                 # Final usage: prefer provider totals; fall back to char estimate.
                 final_usage: dict | None = None
                 try:
@@ -1111,8 +1129,19 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                 yield f"event: done\ndata: {json.dumps(done_payload)}\n\n"
 
             except asyncio.CancelledError:
+                # Client disconnect / ASGI cancel — kill shell children + CUA jobs
+                # so Stop / tab close does not leave tools running.
                 status = "cancelled"
-                yield f"event: error\ndata: {json.dumps({'type': 'error', 'message': 'Request cancelled.'})}\n\n"
+                with contextlib.suppress(Exception):
+                    from remedy.core.turn_context import abort_session as _abort_turn
+
+                    _abort_turn(session_id)
+                if runtime is not None:
+                    with contextlib.suppress(Exception):
+                        ss = getattr(runtime, "_streaming_sessions", None)
+                        if isinstance(ss, set):
+                            ss.discard(str(session_id))
+                raise
             except Exception as e:
                 status = "error"
                 logger.exception("SSE stream error")

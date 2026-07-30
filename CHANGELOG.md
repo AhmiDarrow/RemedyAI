@@ -6,6 +6,10 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ### Gauntlet: continuous security + perf loop (feature/computer-use)
 
+- **L0 SSE without key:** `/sessions/{id}/messages/stream` no longer hard-errors before `stream_response` — list skills / model / version / whoami work with zero provider key (agent L0 short-circuit)
+- **Stream abort:** cooperative `@@aborted` emits `event:aborted` (not error); client disconnect `CancelledError` calls `abort_session` (kills shell + CUA jobs); interrupt path uses `stopStreamJob`; terminal stream jobs are not revived by late `onDone`
+- **run_until_done epoch:** tools-armed but never-used turns get the "Use tools now" nudge (was dead code behind always-true `coding_in_flight`)
+- **Partner metabolism API:** `GET /api/partner/metabolism` exposes top-level `tier` / `evidence_units` / `decision_units` for Advanced/operator consumers
 - **Coding skill catalog:** demote auto-learned tool-chain skills (`file_read-list_dir-…`) in `match_skills` so curated procedures (`write-tests`, `change-safety`, …) win on implement/refactor queries; reject trivial low-diversity traces at learn gate; trivial effort no longer elevates to VALIDATED
 - **Agency re-arm coding:** short stubs like "I'll implement/fix/apply/write tests" re-arm tools (same path as skill-promise prose)
 - **CLI `remedy skill list`:** hide learned probation by default (`--all` / `--learned`); session CLI remains `start`/`end` only
