@@ -479,8 +479,15 @@ def register_catalog_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
     @app.get("/api/commands/custom/{name}")
     async def get_custom_command(name: str):
         cmd_dir = Path.home() / ".remedy" / "commands"
-        path = safe_path(cmd_dir, name + ".md")
-        if not path or not path.exists():
+        # safe_path(user_input, base_dir) — never invert (was always traversal).
+        stem = Path(str(name or "")).name.strip()
+        if not stem or stem in (".", "..") or "/" in stem or "\\" in stem:
+            raise HTTPException(400, "Invalid command name")
+        try:
+            path = safe_path(f"{stem}.md", base_dir=cmd_dir)
+        except Exception as exc:
+            raise HTTPException(400, f"Invalid command name: {exc}") from exc
+        if not path.exists():
             raise HTTPException(404, f"Command '{name}' not found")
         return {"content": path.read_text(encoding="utf-8", errors="replace")}
 
@@ -511,8 +518,14 @@ def register_catalog_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
     @app.get("/api/agents/custom/{name}")
     async def get_custom_agent(name: str):
         agent_dir = Path.home() / ".remedy" / "agents"
-        path = safe_path(agent_dir, name + ".md")
-        if not path or not path.exists():
+        stem = Path(str(name or "")).name.strip()
+        if not stem or stem in (".", "..") or "/" in stem or "\\" in stem:
+            raise HTTPException(400, "Invalid agent name")
+        try:
+            path = safe_path(f"{stem}.md", base_dir=agent_dir)
+        except Exception as exc:
+            raise HTTPException(400, f"Invalid agent name: {exc}") from exc
+        if not path.exists():
             raise HTTPException(404, f"Agent '{name}' not found")
         return {"content": path.read_text(encoding="utf-8", errors="replace")}
 

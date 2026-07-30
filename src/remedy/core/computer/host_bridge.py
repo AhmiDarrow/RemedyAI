@@ -8,6 +8,7 @@ use this queue (they run in-process via Win32).
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 import uuid
@@ -15,6 +16,10 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+_SECRET_FIELD_TOKEN_RE = re.compile(
+    r"(?i)(^|[^a-z])(pass|token|pin|otp)([^a-z]|$)"
+)
 
 
 def _now() -> str:
@@ -54,6 +59,71 @@ _PAYLOAD_SECRET_KEYS = frozenset(
 )
 
 
+def _element_looks_like_secret_field(el: dict[str, Any]) -> bool:
+    """True when an a11y/DOM element is likely a password/token field."""
+    itype = str(
+        el.get("type") or el.get("input_type") or el.get("itype") or ""
+    ).lower()
+    if itype == "password":
+        return True
+    autocomplete = str(
+        el.get("autocomplete") or el.get("autoComplete") or ""
+    ).lower()
+    if any(
+        k in autocomplete
+        for k in (
+            "password",
+            "one-time-code",
+            "otp",
+            "cc-number",
+            "cc-csc",
+            "new-password",
+            "current-password",
+        )
+    ):
+        return True
+    # name / id / aria / placeholder hints (pwd, pass, secret, token, …)
+    blob = " ".join(
+        str(el.get(k) or "")
+        for k in (
+            "name",
+            "id",
+            "label",
+            "aria-label",
+            "aria_label",
+            "placeholder",
+            "role",
+            "title",
+        )
+    ).lower()
+    if any(
+        k in blob
+        for k in (
+            "password",
+            "passwd",
+            "passcode",
+            "passphrase",
+            "pwd",
+            "secret",
+            "api_key",
+            "apikey",
+            "access_token",
+            "refresh_token",
+            "auth_token",
+            "bearer",
+            "credential",
+            "ssn",
+            "cvv",
+            "cvc",
+        )
+    ):
+        return True
+    # bare "pass" / "token" as whole-ish name tokens
+    if _SECRET_FIELD_TOKEN_RE.search(blob):
+        return True
+    return False
+
+
 def _scrub_elements(els: Any) -> list[Any]:
     """Drop password / redacted input values from snapshot element lists."""
     if not isinstance(els, list):
@@ -68,9 +138,11 @@ def _scrub_elements(els: Any) -> list[Any]:
         itype = str(
             e.get("type") or e.get("input_type") or e.get("itype") or ""
         ).lower()
-        is_password = itype == "password" or "password" in str(e.get("name") or "").lower()
+        is_password = _element_looks_like_secret_field(e) or bool(
+            e.get("value_redacted")
+        )
         v = e.get("value")
-        if is_password or e.get("value_redacted"):
+        if is_password:
             if isinstance(v, str) and v:
                 e["value"] = "[filled]"
                 e["value_redacted"] = True

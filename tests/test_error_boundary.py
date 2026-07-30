@@ -70,3 +70,31 @@ def test_stream_error_surface_redacts_secrets() -> None:
     assert "sk-abcdefghijklmnopqrstuvwxyz0123" not in safe
     assert "sk-proj-ABCDEFGHIJKLMNOP" not in safe
     assert "[redacted]" in safe
+
+
+def test_sse_error_payload_redacts_exception_text() -> None:
+    """Mirrors sessions.py event:error path — never yield raw exception secrets."""
+    import json
+
+    from remedy.core.metabolism.redact import redact_text
+
+    class FakeProviderError(Exception):
+        pass
+
+    e = FakeProviderError(
+        "upstream 401 Authorization: Bearer sk-abcdefghijklmnopqrstuvwxyz9999 "
+        "refresh_token=1//abcXYZ_secret_value"
+    )
+    try:
+        safe_msg = redact_text(str(e))[:800]
+    except Exception:
+        safe_msg = "Stream error (details redacted)"
+    if not safe_msg.strip():
+        safe_msg = "Stream error"
+    frame = f"event: error\ndata: {json.dumps({'type': 'error', 'message': safe_msg})}\n\n"
+    assert "sk-abcdefghijklmnopqrstuvwxyz9999" not in frame
+    assert "1//abcXYZ_secret_value" not in frame
+    assert "event: error" in frame
+    payload = json.loads(frame.split("data: ", 1)[1].strip())
+    assert payload["type"] == "error"
+    assert "[redacted]" in payload["message"]
