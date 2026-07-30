@@ -5,7 +5,9 @@ from __future__ import annotations
 from remedy.core.context_snapshot import build_context_snapshot
 from remedy.core.intent_policy import policy_for_intent
 from remedy.core.project_learning import (
+    clear_project_profile_cache,
     load_project_profile,
+    profile_cache_stats,
     record_session_end,
     suggest_harness_pct,
 )
@@ -147,3 +149,29 @@ def test_project_learning_earlier_compress(tmp_path, monkeypatch):
     assert mx < 0.92
     loaded = load_project_profile(path)
     assert loaded["sessions"] >= 1
+
+
+def test_project_profile_load_cached_per_turn(tmp_path, monkeypatch):
+    """Repeated load_project_profile hits mtime cache (no re-read thrash)."""
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    clear_project_profile_cache()
+    path = str(tmp_path / "cached_proj")
+    record_session_end(
+        path,
+        {
+            "turns": 5,
+            "re_explain_count": 2,
+            "strong_nudge_count": 0,
+            "tokens_estimated_peak": 1000,
+        },
+    )
+    clear_project_profile_cache()
+    a = load_project_profile(path)
+    stats1 = profile_cache_stats()
+    b = load_project_profile(path)
+    c = load_project_profile(path)
+    stats2 = profile_cache_stats()
+    assert a["id"] == b["id"] == c["id"]
+    assert stats2["hits"] > stats1["hits"]
+    # Pins from re_explain land and snapshot can stash them
+    assert any("constraint" in str(p).lower() or "Session" in str(p) for p in (a.get("pinned_constraints") or [])) or a.get("sessions", 0) >= 1

@@ -96,6 +96,28 @@ def test_tier_l1_chat():
     assert classify_turn_tier("hi") == TurnTier.L1_LEAN
 
 
+def test_tier_early_exits_empty_and_greetings():
+    """Cheap early exits: empty + greets stay L1; flags still force L2."""
+    assert classify_turn_tier("") == TurnTier.L1_LEAN
+    assert classify_turn_tier("   ") == TurnTier.L1_LEAN
+    for g in ("hey", "thanks", "ok", "sounds good", "great"):
+        assert classify_turn_tier(g) == TurnTier.L1_LEAN, g
+    # Flags win over greeting text
+    assert classify_turn_tier("hi", browse=True) == TurnTier.L2_AGENCY
+    assert classify_turn_tier("ok", pure_action=True) == TurnTier.L2_AGENCY
+    assert classify_turn_tier("yo", has_attachments=True) == TurnTier.L2_AGENCY
+    # Path-less pure prose does not falsely elevate via path regex
+    assert (
+        classify_turn_tier(
+            "Can you explain the theory of relativity in simple terms please?"
+        )
+        == TurnTier.L1_LEAN
+    )
+    # Short agency still works (ls / path)
+    assert classify_turn_tier("ls") == TurnTier.L2_AGENCY
+    assert classify_turn_tier("package.json") == TurnTier.L2_AGENCY
+
+
 def test_decision_tier_recorded_only_on_change():
     d = get_decision_tracker("test_meta_sess")
     assert d.record_tier_if_changed("L1_lean") is not None

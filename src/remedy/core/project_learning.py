@@ -13,7 +13,14 @@ import time
 from pathlib import Path
 from typing import Any
 
-_lock = threading.Lock()
+_lock = threading.RLock()  # RLock: load_project_profile → load_all re-entrancy
+# Hot-path cache: profiles.json rarely changes mid-turn; avoid re-read + parse.
+_all_cache: dict[str, Any] | None = None
+_all_cache_path: str | None = None
+_all_cache_mtime_ns: int | None = None
+_all_cache_size: int | None = None
+_profile_hit = 0
+_profile_miss = 0
 
 
 def _home() -> Path:
@@ -42,17 +49,77 @@ def _store_path() -> Path:
     return d / "profiles.json"
 
 
+def _invalidate_all_cache() -> None:
+    global _all_cache, _all_cache_path, _all_cache_mtime_ns, _all_cache_size
+    _all_cache = None
+    _all_cache_path = None
+    _all_cache_mtime_ns = None
+    _all_cache_size = None
+
+
+def clear_project_profile_cache() -> None:
+    """Test / settings helper — drop in-memory profiles.json cache."""
+    global _profile_hit, _profile_miss
+    with _lock:
+        _invalidate_all_cache()
+        _profile_hit = 0
+        _profile_miss = 0
+
+
+def profile_cache_stats() -> dict[str, int]:
+    """Cheap accuracy/perf counters for harness diagnostics."""
+    with _lock:
+        return {"hits": int(_profile_hit), "misses": int(_profile_miss)}
+
+
 def load_all() -> dict[str, Any]:
-    path = _store_path()
-    if not path.is_file():
-        return {"version": 1, "projects": {}}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        if isinstance(data, dict) and "projects" in data:
-            return data
-    except Exception:
-        pass
-    return {"version": 1, "projects": {}}
+    """Load all project profiles (mtime/size cache — safe across process turns)."""
+    global _all_cache, _all_cache_path, _all_cache_mtime_ns, _all_cache_size
+    global _profile_hit, _profile_miss
+    with _lock:
+        path = _store_path()
+        path_s = str(path)
+        if not path.is_file():
+            empty = {"version": 1, "projects": {}}
+            _all_cache = empty
+            _all_cache_path = path_s
+            _all_cache_mtime_ns = None
+            _all_cache_size = None
+            _profile_miss += 1
+            return empty
+        try:
+            st = path.stat()
+            mtime_ns = int(getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9)))
+            size = int(st.st_size)
+        except OSError:
+            _profile_miss += 1
+            return {"version": 1, "projects": {}}
+        if (
+            _all_cache is not None
+            and _all_cache_path == path_s
+            and _all_cache_mtime_ns == mtime_ns
+            and _all_cache_size == size
+        ):
+            _profile_hit += 1
+            return _all_cache
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and "projects" in data:
+                _all_cache = data
+                _all_cache_path = path_s
+                _all_cache_mtime_ns = mtime_ns
+                _all_cache_size = size
+                _profile_miss += 1
+                return data
+        except Exception:
+            pass
+        empty = {"version": 1, "projects": {}}
+        _all_cache = empty
+        _all_cache_path = path_s
+        _all_cache_mtime_ns = mtime_ns
+        _all_cache_size = size
+        _profile_miss += 1
+        return empty
 
 
 def save_all(data: dict[str, Any]) -> None:
@@ -60,6 +127,19 @@ def save_all(data: dict[str, Any]) -> None:
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
     tmp.replace(path)
+    # Keep cache coherent with what we just wrote
+    global _all_cache, _all_cache_path, _all_cache_mtime_ns, _all_cache_size
+    with _lock:
+        try:
+            st = path.stat()
+            _all_cache = data
+            _all_cache_path = str(path)
+            _all_cache_mtime_ns = int(
+                getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9))
+            )
+            _all_cache_size = int(st.st_size)
+        except OSError:
+            _invalidate_all_cache()
 
 
 def load_project_profile(project_path: str | None) -> dict[str, Any]:

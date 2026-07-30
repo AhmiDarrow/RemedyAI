@@ -168,37 +168,55 @@ async def build_turn_context(runtime: Any) -> str:
     )
 
     # Skills catalog (progressive disclosure stage 1) — ranked, not full bodies.
+    # Prefer warm rank cache from speculative prep / prior turns (skip re-rank).
     with suppress(Exception):
         reg = getattr(runtime, "skills", None)
         count = int(getattr(reg, "count", 0) or 0) if reg is not None else 0
         if reg is not None and count > 0:
-            ws = str(runtime.effective_project_path())
-            # Single ranked catalog with workspace hint (no double rank / discard)
-            ranked_lines = reg.summary_lines(limit=24, query="")
-            if hasattr(reg, "match_skills"):
-                top = reg.match_skills(
-                    "",
-                    limit=24,
-                    workspace_hint=ws,
-                )
-                if top:
-                    # Rebuild lines from ranked order with status badges
-                    lines = []
-                    for skill, _sc in top:
-                        m = skill.manifest
-                        st = (
-                            m.status.value
-                            if hasattr(m.status, "value")
-                            else str(m.status)
-                        )
-                        desc = (m.description or "").strip()
-                        if len(desc) > 140:
-                            desc = desc[:137] + "…"
-                        lines.append(f"- **{m.name}** [{st}]: {desc}")
-                    lines.append(
-                        "_Activate with skill_activate(name=…); rank with skill_search._"
+            ranked_lines: list[str] = []
+            used_warm = False
+            with suppress(Exception):
+                from remedy.nanoswarm import get_swarm
+
+                warm = list(getattr(get_swarm().skill, "_rank_cache", None) or [])
+                # Warm is usable when it lists at least a few skills (not stale empty)
+                if len(warm) >= 3:
+                    ranked_lines = warm[:24]
+                    used_warm = True
+            if not ranked_lines:
+                ws = str(runtime.effective_project_path())
+                # One rank pass with workspace hint (avoid summary_lines + match_skills)
+                if hasattr(reg, "match_skills"):
+                    top = reg.match_skills(
+                        "",
+                        limit=24,
+                        workspace_hint=ws,
                     )
-                    ranked_lines = lines
+                    if top:
+                        lines = []
+                        for skill, _sc in top:
+                            m = skill.manifest
+                            st = (
+                                m.status.value
+                                if hasattr(m.status, "value")
+                                else str(m.status)
+                            )
+                            desc = (m.description or "").strip()
+                            if len(desc) > 140:
+                                desc = desc[:137] + "…"
+                            lines.append(f"- **{m.name}** [{st}]: {desc}")
+                        lines.append(
+                            "_Activate with skill_activate(name=…); rank with skill_search._"
+                        )
+                        ranked_lines = lines
+                if not ranked_lines and hasattr(reg, "summary_lines"):
+                    ranked_lines = list(reg.summary_lines(limit=24, query="") or [])
+                # Seed warm cache for next turn / library chip path
+                if ranked_lines:
+                    with suppress(Exception):
+                        from remedy.nanoswarm import get_swarm
+
+                        get_swarm().skill._rank_cache = list(ranked_lines)
             parts.append(
                 "Skills catalog (name+status only — call skill_activate to load "
                 "full procedure; skill_search to rank by task):\n"
@@ -210,6 +228,10 @@ async def build_turn_context(runtime: Any) -> str:
                 default_registry.gauge("remedy_context_skills_listed").set(
                     float(min(count, 24))
                 )
+                if used_warm:
+                    default_registry.counter("remedy_skills_catalog_warm_hit").inc()
+                else:
+                    default_registry.counter("remedy_skills_catalog_warm_miss").inc()
         else:
             parts.append(
                 "Skills loaded: (none yet — bundled defaults load on server start)."

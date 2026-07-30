@@ -75,13 +75,17 @@ def build_context_snapshot(
     snap = ContextSnapshot()
     swarm = get_swarm()
 
-    # Project-level harness tuning (compound learning)
+    # Project-level harness tuning (compound learning; profile load is mtime-cached)
     min_use, max_use = min_pct, max_pct
     if project_path:
         try:
             prof = load_project_profile(project_path)
             min_use, max_use = suggest_harness_pct(prof, min_pct, max_pct)
             snap.signals["project_profile"] = prof.get("id")
+            # Stash pins so send_policy can skip a second profile load this turn
+            pins = prof.get("pinned_constraints") or []
+            if pins:
+                snap.signals["project_pins"] = list(pins)[:8]
         except Exception:
             pass
 

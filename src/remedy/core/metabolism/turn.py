@@ -59,12 +59,26 @@ def begin_turn_metabolism(
     elif project_path:
         mmap.set_work_roots([project_path])
 
+    # One SessionQuality handle for the whole begin_turn (no double registry lookup)
+    sq = None
+    with suppress(Exception):
+        from remedy.core.session_quality import get_session_quality
+
+        sq = get_session_quality(sid)
+
+    # Cheap accuracy metric — tier distribution (no labels overhead beyond key)
+    with suppress(Exception):
+        from remedy.core.metrics import default_registry
+
+        default_registry.counter(
+            "remedy_turn_tier_total", tier=policy.label
+        ).inc()
+
     # L0: minimal metabolism — no governor/map/crystal/IR (instant path)
     if int(tier) == 0:
-        with suppress(Exception):
-            from remedy.core.session_quality import get_session_quality
-
-            get_session_quality(sid).record_metabolism(tier=0)
+        if sq is not None:
+            with suppress(Exception):
+                sq.record_metabolism(tier=0)
         return {
             "session_id": sid,
             "tier": 0,
@@ -88,12 +102,11 @@ def begin_turn_metabolism(
     if user_text and len(user_text) < 240:
         crystal.admit(user_text[:200], horizon="session", source="user")
 
-    # Quality + metabolism for governor (L1+ only)
+    # Quality + metabolism for governor (L1+ only) — reuse sq handle
     quality: dict[str, Any] = {}
-    with suppress(Exception):
-        from remedy.core.session_quality import get_session_quality
-
-        quality = get_session_quality(sid).snapshot()
+    if sq is not None:
+        with suppress(Exception):
+            quality = sq.snapshot()
 
     meta_snap = {
         "evidence_units": ledger.evidence_units,
@@ -161,18 +174,16 @@ def begin_turn_metabolism(
     # Only record when tier label changes — skip identical L1 every chat turn
     decisions.record_tier_if_changed(policy.label)
 
-    # Session quality metabolism counters
-    with suppress(Exception):
-        from remedy.core.session_quality import get_session_quality
-
-        sq = get_session_quality(sid)
-        sq.record_metabolism(
-            tier=int(tier),
-            evidence_units=ledger.evidence_units,
-            decision_units=decisions.decision_units,
-            waste_tokens=ledger.waste_tokens,
-            force_spread=bool(policy.force_spread or gov.force_spread),
-        )
+    # Session quality metabolism counters (same handle as governor snapshot)
+    if sq is not None:
+        with suppress(Exception):
+            sq.record_metabolism(
+                tier=int(tier),
+                evidence_units=ledger.evidence_units,
+                decision_units=decisions.decision_units,
+                waste_tokens=ledger.waste_tokens,
+                force_spread=bool(policy.force_spread or gov.force_spread),
+            )
 
     # Hot path: skip expensive organ snapshots (use metabolism_public_snapshot for Advanced)
     return {
