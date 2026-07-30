@@ -24,6 +24,10 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 - **Learning loop:** skill dir names path-jailed (`is_safe_skill_name` + slug); reflection tool prefix slugified
 - **MCP client:** scrub child env of provider secrets; strip `_mcp_server` from tools/call args
 - **Zip import:** reject Unix symlink members; **provider sanitize:** redact secret-like computer type payloads
+- **Attachments path jail:** client `AttachmentRef` paths must resolve under the attachments tree before inject/vision; SVG refused as vision payload; raster magic-byte check
+- **Partner memory:** `force=True` never bypasses secret guard; `memory_fact` refuses credentials
+- **open_url:** http(s)-only (blocks `file://` / bare paths); CLI host UI navigate re-validates URL
+- **Uninstall wipe:** refuse non-`.remedy` / drive-root / system-path wipe roots; GET attachment uses `relative_to` not `startswith`
 - Docs: README pytest count ~1174
 
 ### Security/perf: metabolism hardening pass

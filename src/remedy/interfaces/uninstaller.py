@@ -25,6 +25,47 @@ console = Console()
 REMEDY_HOME = Path("~/.remedy").expanduser()
 
 
+def _assert_safe_wipe_root(home: Path | None = None) -> Path:
+    """Refuse wipe unless path is a ``.remedy`` dir with a non-root parent.
+
+    Guards against a mis-set ``REMEDY_HOME`` that would ``rmtree`` the user
+    profile, a drive root, or an arbitrary non-product tree. Tests may point
+    ``REMEDY_HOME`` at ``tmp_path/.remedy`` — still named ``.remedy`` and not
+    at a filesystem root, so allowed.
+    """
+    target = Path(home or REMEDY_HOME).expanduser()
+    try:
+        resolved = target.resolve()
+    except OSError:
+        resolved = target.absolute()
+    # Must be named .remedy — never wipe arbitrary trees
+    if resolved.name.lower() != ".remedy":
+        raise RuntimeError(
+            f"Refuse wipe: path must be a .remedy directory, got {resolved}"
+        )
+    parent = resolved.parent
+    # Never wipe drive/filesystem root or the path itself
+    if resolved.parent == resolved or parent == parent.parent:
+        raise RuntimeError(f"Refuse wipe of .remedy at drive/FS root: {resolved}")
+    try:
+        user_home = Path.home().expanduser().resolve()
+    except OSError:
+        user_home = Path.home().expanduser().absolute()
+    if resolved == user_home:
+        raise RuntimeError(f"Refuse wipe of user home: {resolved}")
+    # Refuse known high-value OS dirs even if somehow named .remedy (paranoia)
+    blocked_names = {
+        "windows",
+        "system32",
+        "program files",
+        "program files (x86)",
+        "programdata",
+    }
+    if any(part.lower() in blocked_names for part in resolved.parts[:-1]):
+        raise RuntimeError(f"Refuse wipe under system path: {resolved}")
+    return resolved
+
+
 def _get_package_path() -> Path | None:
     """Locate the installed remedy package directory."""
     try:
@@ -78,12 +119,13 @@ def _pip_uninstall() -> bool:
 
 def _wipe_config() -> None:
     """Remove config/auth/desktop prefs; leave skills and memory."""
+    home = _assert_safe_wipe_root()
     for name in ("config.toml", "config.yaml", "config.yml", "desktop.json", "comfyui.json"):
-        p = REMEDY_HOME / name
+        p = home / name
         if p.exists():
             p.unlink(missing_ok=True)
             console.print(f"  removed [dim]{p}[/dim]")
-    auth = REMEDY_HOME / "auth"
+    auth = home / "auth"
     if auth.exists():
         shutil.rmtree(auth, ignore_errors=True)
         console.print(f"  removed [dim]{auth}[/dim]")
@@ -120,12 +162,13 @@ def _wipe_vision() -> None:
     Always stops llama-server first, then deletes runtime binaries, GGUF models,
     downloads, and vision.json so reinstall starts clean.
     """
+    home = _assert_safe_wipe_root()
     _stop_llama_server_processes()
-    vision = REMEDY_HOME / "vision"
+    vision = home / "vision"
     try:
         from remedy.vision.install import wipe_vision_data
 
-        result = wipe_vision_data(REMEDY_HOME)
+        result = wipe_vision_data(home)
         if vision.exists():
             shutil.rmtree(vision, ignore_errors=True)
         console.print(
@@ -138,18 +181,19 @@ def _wipe_vision() -> None:
             console.print(f"  removed [dim]{vision}[/dim]")
     # Legacy stray paths
     for stray in ("llama-server", "llama.cpp"):
-        p = REMEDY_HOME / stray
+        p = home / stray
         if p.exists():
             shutil.rmtree(p, ignore_errors=True) if p.is_dir() else p.unlink(missing_ok=True)
 
 
 def _wipe_skills() -> None:
-    skills = REMEDY_HOME / "skills"
+    home = _assert_safe_wipe_root()
+    skills = home / "skills"
     if skills.exists():
         shutil.rmtree(skills, ignore_errors=True)
         console.print(f"  removed [dim]{skills}[/dim]")
     # Durable skill execution stats live next to the skills tree
-    stats = REMEDY_HOME / "skill_stats.json"
+    stats = home / "skill_stats.json"
     if stats.exists():
         stats.unlink(missing_ok=True)
         console.print(f"  removed [dim]{stats}[/dim]")
@@ -239,14 +283,19 @@ def run_uninstall(
     console.print("\n[bold]Uninstalling package...[/bold]")
     _pip_uninstall()
 
-    # Data wipe
+    # Data wipe (path-safety guard before any rmtree)
     if purge and REMEDY_HOME.exists():
-        console.print(f"\n[bold]Full wipe {REMEDY_HOME}...[/bold]")
+        try:
+            wipe_root = _assert_safe_wipe_root()
+        except RuntimeError as e:
+            console.print(f"[red]Wipe aborted: {e}[/red]")
+            return
+        console.print(f"\n[bold]Full wipe {wipe_root}...[/bold]")
         # Stop vision server before deleting weights/runtime
         with contextlib.suppress(Exception):
             _wipe_vision()
         try:
-            shutil.rmtree(REMEDY_HOME)
+            shutil.rmtree(wipe_root)
             console.print("[green]Remedy data removed.[/green]")
         except Exception as e:
             console.print(f"[red]Failed to remove data: {e}[/red]")

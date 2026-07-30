@@ -325,7 +325,9 @@ def upsert_profile_fact(
     text = re.sub(r"\s+", " ", (text or "").strip())
     if not text:
         return None, "skipped"
-    if looks_like_secret(text) and not force:
+    # Secrets never promote — ``force`` only relaxes stability heuristics,
+    # never credential / key-shaped content (fail closed).
+    if looks_like_secret(text):
         return None, "skipped"
     if not force and not is_stable_fact_text(text) and confidence < 0.95:
         return None, "skipped"

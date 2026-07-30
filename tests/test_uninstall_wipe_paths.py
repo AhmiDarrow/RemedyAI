@@ -62,3 +62,23 @@ def test_wipe_config_removes_vision_tree(tmp_path: Path, monkeypatch):
 
     assert not (home / "vision").exists()
     assert mem.exists()  # memory preserved on config wipe
+
+
+def test_assert_safe_wipe_root_refuses_non_remedy_paths(tmp_path: Path):
+    """Wipe must refuse profile dirs, arbitrary trees, and misnamed homes."""
+    import pytest
+
+    # Valid tmp .remedy (tests + intentional product data trees)
+    good = tmp_path / ".remedy"
+    good.mkdir()
+    assert uninst._assert_safe_wipe_root(good) == good.resolve()  # noqa: SLF001
+
+    # Wrong leaf name
+    bad_name = tmp_path / "not-remedy"
+    bad_name.mkdir()
+    with pytest.raises(RuntimeError, match="must be a .remedy"):
+        uninst._assert_safe_wipe_root(bad_name)  # noqa: SLF001
+
+    # User home itself
+    with pytest.raises(RuntimeError):
+        uninst._assert_safe_wipe_root(Path.home())  # noqa: SLF001

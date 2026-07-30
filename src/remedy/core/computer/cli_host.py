@@ -116,9 +116,14 @@ class LocalComputerHost:
         if action in ("open_browser", "navigate") and url:
             try:
                 from remedy.core.computer import desktop_win as win
+                from remedy.core.computer.router import is_valid_navigate_url, normalize_url
 
-                win.open_url(url)
-                self.last_action = f"ui_open:{url[:80]}"
+                cleaned = normalize_url(url)
+                if not cleaned or not is_valid_navigate_url(cleaned):
+                    self.last_error = f"ui open refused invalid URL: {url[:80]!r}"
+                    return
+                win.open_url(cleaned)
+                self.last_action = f"ui_open:{cleaned[:80]}"
             except Exception as exc:
                 self.last_error = f"ui open failed: {exc}"
         # If ui_command carried a job_id and job is still pending, leave it for claim_next
