@@ -25,6 +25,7 @@ MAX_FACT_LEN = 280
 MAX_AUTO_FACTS_PER_PASS = 5
 
 # Explicit preference / identity patterns (user lines only)
+# Confidence ≥ AUTO_ACCEPT_CONFIDENCE (0.85) is auto-stored.
 _PREF_PATTERNS: list[tuple[re.Pattern[str], str, float]] = [
     (
         re.compile(
@@ -58,13 +59,30 @@ _PREF_PATTERNS: list[tuple[re.Pattern[str], str, float]] = [
         "constraint",
         0.86,
     ),
+    # Explicit remember — highest priority; capture short key=value too
     (
         re.compile(
-            r"(?:remember(?: that)?|note that|for (?:future|later) reference)[:\s]+(.+?)(?:[.!?\n]|$)",
+            r"(?:please\s+)?remember(?:\s+(?:this|that|the))?(?:\s+fact)?[:\s]+(.+?)(?:[.!?\n]|$)",
             re.I,
         ),
         "general",
-        0.9,
+        0.97,
+    ),
+    (
+        re.compile(
+            r"(?:note that|for (?:future|later) reference|don'?t forget)[:\s]+(.+?)(?:[.!?\n]|$)",
+            re.I,
+        ),
+        "general",
+        0.93,
+    ),
+    (
+        re.compile(
+            r"(?:store|save|keep)\s+(?:this\s+)?(?:in\s+)?(?:memory|partner memory)[:\s]+(.+?)(?:[.!?\n]|$)",
+            re.I,
+        ),
+        "general",
+        0.95,
     ),
     (
         re.compile(
@@ -75,6 +93,19 @@ _PREF_PATTERNS: list[tuple[re.Pattern[str], str, float]] = [
         0.8,
     ),
 ]
+
+# Explicit user intent to persist — bypass short-text guards
+_EXPLICIT_REMEMBER_RE = re.compile(
+    r"(?i)\b("
+    r"remember(?:\s+(?:this|that|the|fact))?"
+    r"|note that"
+    r"|for (?:future|later) reference"
+    r"|don'?t forget"
+    r"|store (?:this )?(?:in )?memory"
+    r"|save (?:this )?(?:to|in) memory"
+    r"|/remember\b"
+    r")\b"
+)
 
 _SECRET_RE = re.compile(
     r"(?i)("
@@ -121,10 +152,14 @@ def normalize_fact_key(text: str) -> str:
     return t[:MAX_FACT_LEN]
 
 
-def is_stable_fact_text(text: str) -> bool:
-    """Reject ephemeral task chatter."""
+def is_stable_fact_text(text: str, *, explicit: bool = False) -> bool:
+    """Reject ephemeral task chatter.
+
+    *explicit*=True when the user said “remember …” — allow shorter key=value facts.
+    """
     t = (text or "").strip()
-    if len(t) < 8 or len(t) > MAX_FACT_LEN:
+    min_len = 4 if explicit else 8
+    if len(t) < min_len or len(t) > MAX_FACT_LEN:
         return False
     if _NOISE_RE.match(t):
         return False
@@ -141,11 +176,24 @@ def is_stable_fact_text(text: str) -> bool:
     # Avoid pure paths as identity (unless preference-shaped)
     if re.fullmatch(r"[A-Za-z]:\\[^\n]{0,200}|/[^\s]{8,}", t):
         return False
-    # Prefer multi-word durable statements
-    if len(t.split()) < 3 and not re.search(r"(?i)\b(prefer|typescript|python|rust)\b", t):
-        return False
+    # Prefer multi-word durable statements; explicit remember allows key=value
+    words = t.split()
+    if len(words) < 3:
+        if explicit and (
+            "=" in t
+            or re.search(r"(?i)\b(prefer|typescript|python|rust|means|is)\b", t)
+            or re.fullmatch(r"[\w.\-]+", t)  # single token codes
+        ):
+            return True
+        if not re.search(r"(?i)\b(prefer|typescript|python|rust)\b", t):
+            return False
     # Avoid huge code dumps
     return not (t.count("\n") > 3 or t.count("{") > 2)
+
+
+def is_explicit_remember_intent(user_text: str) -> bool:
+    """True when the user clearly asked to store something durable."""
+    return bool(_EXPLICIT_REMEMBER_RE.search(user_text or ""))
 
 
 def extract_heuristic_facts(user_text: str) -> list[ExtractedFact]:
@@ -154,6 +202,7 @@ def extract_heuristic_facts(user_text: str) -> list[ExtractedFact]:
     if not text or looks_like_secret(text):
         return []
 
+    explicit = is_explicit_remember_intent(text)
     found: list[ExtractedFact] = []
     seen: set[str] = set()
 
@@ -164,32 +213,35 @@ def extract_heuristic_facts(user_text: str) -> list[ExtractedFact]:
             if m.lastindex and m.lastindex >= 2:
                 raw = re.sub(r"\s+", " ", m.group(0).strip())
             raw = re.sub(r"\s+", " ", raw).strip(" \t\"'")
-            if not is_stable_fact_text(raw):
+            # Strip leading "fact " noise: "Remember fact X=Y" → "X=Y"
+            raw = re.sub(r"(?i)^(?:this\s+)?fact\s+", "", raw).strip()
+            if not is_stable_fact_text(raw, explicit=explicit or conf >= 0.95):
                 # Store fuller phrase when capture is too short
                 full = m.group(0).strip()
                 full = re.sub(r"\s+", " ", full)
-                if not is_stable_fact_text(full):
+                if not is_stable_fact_text(full, explicit=explicit or conf >= 0.95):
                     continue
                 fact_text = full[:MAX_FACT_LEN]
             else:
                 # Prefer human-readable full clause for short captures
-                if len(raw) < 20 and m.group(0):
+                if len(raw) < 20 and m.group(0) and conf < 0.95:
                     fact_text = re.sub(r"\s+", " ", m.group(0).strip())[:MAX_FACT_LEN]
                 else:
                     fact_text = raw[:MAX_FACT_LEN]
             # Final gate — reject ephemeral task chatter even if capture looked fine
-            if not is_stable_fact_text(fact_text):
+            if not is_stable_fact_text(fact_text, explicit=explicit or conf >= 0.95):
                 continue
             key = normalize_fact_key(fact_text)
             if key in seen:
                 continue
             seen.add(key)
+            src = "explicit" if (explicit or conf >= 0.95) else "heuristic"
             found.append(
                 ExtractedFact(
                     text=fact_text,
                     category=category,
                     confidence=conf,
-                    source="heuristic",
+                    source=src,
                 )
             )
             if len(found) >= MAX_AUTO_FACTS_PER_PASS:
@@ -614,9 +666,10 @@ async def distill_user_text(
                         profile.display_name = name[:60]
                         name_changed = True
 
-        # High-confidence heuristics inject immediately; weaker stay sub-threshold
+        # High-confidence / explicit remember inject immediately
         accept_conf = cand.confidence
-        if not should_auto_accept(cand):
+        force = cand.source == "explicit" or cand.confidence >= 0.95
+        if not force and not should_auto_accept(cand):
             accept_conf = min(cand.confidence, MIN_INJECT_CONFIDENCE - 0.01)
 
         # Project-ish decisions/constraints get scoped when we have a project
@@ -628,12 +681,32 @@ async def distill_user_text(
             confidence=accept_conf,
             source=cand.source,
             project_path=use_proj,
+            force=force,
         )
         if action == "skipped" or uf is None:
             result["skipped"] += 1
             continue
         if action == "added":
             result["added"] += 1
+            # Also land in entry store so memory_search FTS finds it
+            if force or cand.source == "explicit":
+                with __import__("contextlib").suppress(Exception):
+                    from remedy.models import MemoryEntry, MemoryEntryType
+
+                    if hasattr(memory, "upsert"):
+                        import asyncio
+                        import inspect
+
+                        entry = MemoryEntry(
+                            title=(cand.text[:80] or "Remembered"),
+                            content=cand.text,
+                            entry_type=MemoryEntryType.NOTE,
+                            importance=0.85,
+                        )
+                        res = memory.upsert(entry)
+                        if inspect.isawaitable(res):
+                            # We're already async in distill_user_text
+                            await res  # type: ignore[misc]
         else:
             result["reinforced"] += 1
         result["facts"].append(uf.fact)
@@ -656,8 +729,13 @@ def distill_user_text_sync(
     session_id: str | None = None,
     project_path: str | None = None,
 ) -> dict[str, Any]:
-    """Sync wrapper for background worker threads."""
+    """Sync wrapper safe from both plain threads and a running asyncio loop.
+
+    Never calls ``run_until_complete`` on a nested loop in the same thread
+    (that fails under ReAct and was silently dropping remember-facts).
+    """
     import asyncio
+    import concurrent.futures
 
     async def _run() -> dict[str, Any]:
         return await distill_user_text(
@@ -670,14 +748,16 @@ def distill_user_text_sync(
 
     try:
         asyncio.get_running_loop()
+        in_async = True
     except RuntimeError:
+        in_async = False
+
+    if not in_async:
         return asyncio.run(_run())
-    # Nested async context: use a dedicated loop on this thread.
-    loop = asyncio.new_event_loop()
-    try:
-        return loop.run_until_complete(_run())
-    finally:
-        loop.close()
+
+    # Running loop: own loop on a worker thread
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(lambda: asyncio.run(_run())).result(timeout=15)
 
 
 async def search_partner_and_entries(

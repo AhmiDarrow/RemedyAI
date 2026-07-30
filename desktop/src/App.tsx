@@ -436,25 +436,57 @@ export default function App() {
     Record<string, { provider: string; model: string }>
   >({})
   const [switchToast, setSwitchToast] = useState<string | null>(null)
+  /** After a status-bar pick, ignore background settings/session overwrites briefly. */
+  const llmUserPinRef = useRef<{ provider: string; model: string; until: number } | null>(
+    null,
+  )
+  const pinUserLlm = useCallback((provider: string, model: string, ms = 45_000) => {
+    llmUserPinRef.current = {
+      provider,
+      model,
+      until: Date.now() + ms,
+    }
+  }, [])
 
-  // Hydrate session LLM map from server session records
+  // Hydrate session LLM map from server — keep stable identity when unchanged
+  // so we do not re-fire tab restore and thrash status-bar provider/model.
+  // While the user pin is active, never overwrite the pinned session entry.
   useEffect(() => {
     setSessionLlmMap((prev) => {
+      let changed = false
       const next = { ...prev }
+      const pin = llmUserPinRef.current
+      const pinLive = pin && Date.now() <= pin.until
       for (const s of sessions) {
         if (s.llm_provider && s.model) {
-          next[s.id] = { provider: s.llm_provider, model: s.model }
-        } else if (s.model && !next[s.id]) {
-          // model-only legacy sessions keep map empty until first switch
+          if (
+            pinLive
+            && activeId
+            && s.id === activeId
+            && (s.llm_provider !== pin.provider || s.model !== pin.model)
+          ) {
+            // Server lag / settings race — keep optimistic pin in the map.
+            continue
+          }
+          const cur = next[s.id]
+          if (!cur || cur.provider !== s.llm_provider || cur.model !== s.model) {
+            next[s.id] = { provider: s.llm_provider, model: s.model }
+            changed = true
+          }
         }
       }
-      return next
+      return changed ? next : prev
     })
-  }, [sessions])
+  }, [sessions, activeId])
 
-  // Restore per-session provider/model when switching tabs
+  // Restore per-session provider/model only when the *tab* changes — not on every
+  // sessions poll / map hydrate (that fought global Settings save and flipped
+  // Demo ↔ xAI continuously).
+  const lastLlmTabRef = useRef<string>('')
   useEffect(() => {
     if (!activeId) return
+    if (lastLlmTabRef.current === activeId) return
+    lastLlmTabRef.current = activeId
     const ov = sessionLlmMap[activeId]
     if (ov) {
       setLlmProvider(ov.provider)
@@ -466,7 +498,9 @@ export default function App() {
       setLlmProvider(sess.llm_provider)
       if (sess.model) setModel(sess.model)
     }
-  }, [activeId, sessionLlmMap, sessions])
+    // sessionLlmMap/sessions read intentionally only on activeId change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId])
 
   const sessionUsage: UsageSnapshot = useMemo(() => {
     let prompt = 0
@@ -785,21 +819,64 @@ export default function App() {
     }
   }, [runUpdateCheckVisible, openSettingsInRail])
 
-  /** Refresh model list only — does not change the selected model unless asked. */
-  const refreshModels = useCallback(async (opts?: { selectDefault?: boolean }) => {
+  /** Refresh model list via GET /models[?provider=…] (live endpoint discovery).
+   *  Stable deps (no `model`) so picking a model cannot re-fire boot load loops. */
+  const refreshModels = useCallback(async (opts?: {
+    selectDefault?: boolean
+    /** Discover for this provider without requiring it to be active in config. */
+    provider?: string
+  }) => {
     try {
-      const data = await apiFetch<{ models: ModelInfo[]; default: string; provider?: string }>('/models')
-      setModels(data.models)
+      const q = opts?.provider
+        ? `?provider=${encodeURIComponent(opts.provider)}`
+        : ''
+      const data = await apiFetch<{
+        models: ModelInfo[]
+        default: string
+        provider?: string
+      }>(`/models${q}`)
+      let list = data.models || []
+      const activeProv = (
+        data.provider || opts?.provider || llmProvider || ''
+      ).toLowerCase()
+      if (activeProv === 'demo') {
+        const { demoModelOptions, isDemoModelAllowed, DEMO_DEFAULT_MODEL } =
+          await import('./utils/demoModels')
+        list = demoModelOptions(list).map((m) => ({
+          id: m.id,
+          name: m.name,
+          provider: 'demo',
+        }))
+        setModels(list)
+        if (opts?.selectDefault) {
+          const def =
+            list.find((m) => m.id === data.default && isDemoModelAllowed(m.id))
+            ?? list.find((m) => m.id === DEMO_DEFAULT_MODEL)
+            ?? list[0]
+          if (def) setModel(def.id)
+        }
+        return { ...data, models: list, provider: 'demo' }
+      }
+      // Keep prior models for *other* providers so switching back stays warm;
+      // replace entries for this provider with the live list.
+      setModels((prev) => {
+        const others = prev.filter((m) => m.provider && m.provider !== activeProv)
+        const tagged = list.map((m) => ({
+          ...m,
+          provider: m.provider || activeProv,
+        }))
+        return [...tagged, ...others]
+      })
       if (opts?.selectDefault) {
-        const def = data.models.find((m) => m.id === data.default) ?? data.models[0]
+        const def = list.find((m) => m.id === data.default) ?? list[0]
         if (def) setModel(def.id)
       }
-      return data
+      return { ...data, models: list }
     } catch (e: unknown) {
       console.warn('Model refresh failed:', e instanceof Error ? e.message : e)
       return null
     }
-  }, [])
+  }, [llmProvider])
 
   useEffect(() => {
     if (serverState !== 'ready') return
@@ -1852,11 +1929,31 @@ export default function App() {
             onSettingsSaved={() => {
               void getSettings()
                 .then((s) => {
-                  if (s.llm_model) setModel(s.llm_model)
-                  if (s.llm_provider) setLlmProvider(s.llm_provider)
+                  if (s.llm_provider && s.llm_model) {
+                    pinUserLlm(String(s.llm_provider), String(s.llm_model))
+                    setLlmProvider(s.llm_provider)
+                    setModel(s.llm_model)
+                    if (activeId) {
+                      setSessionLlmMap((prev) => ({
+                        ...prev,
+                        [activeId]: {
+                          provider: String(s.llm_provider),
+                          model: String(s.llm_model),
+                        },
+                      }))
+                      void applySessionLlm(
+                        activeId,
+                        String(s.llm_provider),
+                        String(s.llm_model),
+                        true,
+                      ).catch(() => {})
+                    }
+                  }
                   setUserName((s.user_name || '').trim())
                   setToolProcessMode(normalizeToolProcess(s.tool_process))
-                  return refreshModels()
+                  return refreshModels({
+                    provider: s.llm_provider ? String(s.llm_provider) : undefined,
+                  })
                 })
                 .catch(() => refreshModels())
             }}
@@ -1948,6 +2045,9 @@ export default function App() {
               planMode={planMode}
               sessionId={activeId}
               onApproveBuild={() => {
+                // Leave Plan mode → Build. Banner hides once status is
+                // approved/active so the plan card does not stick over chat
+                // while implementation is in motion (re-open Plan via Ctrl+B).
                 setPlanMode(false)
                 setEditDraft({
                   text: 'Implement the approved plan. Follow the saved steps carefully.',
@@ -2226,11 +2326,32 @@ export default function App() {
         onSettingsSaved={() => {
           void getSettings()
             .then((s) => {
-              if (s.llm_model) setModel(s.llm_model)
-              if (s.llm_provider) setLlmProvider(s.llm_provider)
+              // Explicit Save Settings: become the pin source of truth.
+              if (s.llm_provider && s.llm_model) {
+                pinUserLlm(String(s.llm_provider), String(s.llm_model))
+                setLlmProvider(s.llm_provider)
+                setModel(s.llm_model)
+                if (activeId) {
+                  setSessionLlmMap((prev) => ({
+                    ...prev,
+                    [activeId]: {
+                      provider: String(s.llm_provider),
+                      model: String(s.llm_model),
+                    },
+                  }))
+                  void applySessionLlm(
+                    activeId,
+                    String(s.llm_provider),
+                    String(s.llm_model),
+                    true,
+                  ).catch(() => {})
+                }
+              }
               setUserName((s.user_name || '').trim())
               setToolProcessMode(normalizeToolProcess(s.tool_process))
-              return refreshModels()
+              return refreshModels({
+                provider: s.llm_provider ? String(s.llm_provider) : undefined,
+              })
             })
             .catch(() => refreshModels())
         }}
@@ -2250,6 +2371,8 @@ export default function App() {
           connectedProviders={connectedProviders}
           onProviderModelChange={(prov, mid) => {
             if (streaming) return
+            // Optimistic UI — pin this pick; ignore server renames that thrash the bar.
+            pinUserLlm(prov, mid)
             setLlmProvider(prov)
             setModel(mid)
             if (activeId) {
@@ -2261,10 +2384,10 @@ export default function App() {
             const apply = async () => {
               if (activeId) {
                 try {
-                  // Session override by default — does not rewrite global default
-                  const r = await applySessionLlm(activeId, prov, mid, false)
-                  if (r.provider) setLlmProvider(r.provider)
-                  if (r.model) setModel(r.model)
+                  // Persist session + global so boot/settings reload keep the choice.
+                  const r = await applySessionLlm(activeId, prov, mid, true)
+                  // Do not adopt server-normalized provider/model here — that caused
+                  // Demo ↔ xAI flips when global config lagged the session.
                   if (r.toast) {
                     setSwitchToast(r.toast)
                     window.setTimeout(() => setSwitchToast(null), 4200)
@@ -2280,20 +2403,22 @@ export default function App() {
               .then(() =>
                 Promise.all([
                   listConnectedProviders(),
-                  apiFetch<{ models: ModelInfo[]; default: string; provider?: string }>(
-                    '/models',
-                  ).catch(() => null),
+                  // Live discover models for the *selected* provider endpoint
+                  refreshModels({ provider: prov }),
                 ]),
               )
-              .then(([conn, modelsData]) => {
+              .then(([conn]) => {
                 setConnectedProviders(
                   conn.picker?.length ? conn.picker : conn.connected || [],
                 )
-                if (modelsData?.models?.length) setModels(modelsData.models)
+                // Re-assert *user* pick after async (not server active_*).
+                setLlmProvider(prov)
+                setModel(mid)
               })
               .catch(() => {})
           }}
           onModelChange={(id) => {
+            pinUserLlm(llmProvider, id)
             setModel(id)
             if (activeId) {
               setSessionLlmMap((prev) => ({
@@ -2303,8 +2428,10 @@ export default function App() {
                   model: id,
                 },
               }))
-              void applySessionLlm(activeId, llmProvider, id, false)
+              void applySessionLlm(activeId, llmProvider, id, true)
                 .then((r) => {
+                  // Keep the id the user chose — no server snap.
+                  setModel(id)
                   if (r.toast) {
                     setSwitchToast(r.toast)
                     window.setTimeout(() => setSwitchToast(null), 4200)
@@ -2316,9 +2443,7 @@ export default function App() {
               return
             }
             updateSettings({ llm_model: id })
-              .then((r) => {
-                if (r.llm_model) setModel(r.llm_model)
-              })
+              .then(() => setModel(id))
               .catch(() => {})
           }}
           onOpenUsage={() => setUsageOpen(true)}

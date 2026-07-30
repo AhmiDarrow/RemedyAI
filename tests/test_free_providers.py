@@ -20,6 +20,42 @@ def test_demo_in_catalog():
     assert meta.get("free_tier") == "instant"
     assert meta.get("auth") == ["none"]
     assert "llm7.io" in str(meta.get("base_url") or "")
+    assert meta.get("live_models") is False
+    ids = [m["id"] for m in (meta.get("models") or [])]
+    assert "codestral-latest" in ids
+    # Never ship image/promo/foreign paid brands in the curated demo list
+    for bad in ("deepseek", "flux", "kling", "seedance", "gpt-image", "veo"):
+        assert not any(bad in i.lower() for i in ids)
+
+
+def test_poe_in_catalog():
+    assert "poe" in PROVIDER_CATALOG
+    meta = PROVIDER_CATALOG["poe"]
+    assert "api.poe.com" in str(meta.get("base_url") or "")
+    assert "POE_API_KEY" in (meta.get("env_keys") or [])
+    ids = [m["id"] for m in (meta.get("models") or [])]
+    assert "Claude-Sonnet-4.6" in ids
+    p, m, u = normalize_llm_settings("poe", "Grok-4", None)
+    assert p == "poe"
+    assert m == "Grok-4"
+    assert "api.poe.com" in u
+    # Flexible: foreign-looking ids stay (Poe bot names)
+    p2, m2, _ = normalize_llm_settings("poe", "Some-Community-Bot", None)
+    assert p2 == "poe"
+    assert m2 == "Some-Community-Bot"
+    by_id = {i["id"]: i for i in public_provider_catalog()}
+    assert by_id["poe"]["auth"] == ["api_key"]
+    assert by_id["poe"]["default_model"]
+
+
+def test_demo_model_allowlist_blocks_junk():
+    from remedy.interfaces.routes.catalog import _demo_model_allowed
+
+    catalog = PROVIDER_CATALOG["demo"]["models"]
+    assert _demo_model_allowed("codestral-latest", catalog)
+    assert not _demo_model_allowed("deepseek-v4-flash", catalog)
+    assert not _demo_model_allowed("flux-kontext-max", catalog)
+    assert not _demo_model_allowed("kling-v3.0-pro", catalog)
 
 
 def test_free_options_public_includes_demo_and_free_keys():
@@ -78,6 +114,14 @@ def test_bootstrap_prefers_demo_when_empty(monkeypatch):
         "GROQ_API_KEY",
         "REMEDY_LLM_API_KEY",
         "REMEDY_PREFER_OLLAMA",
+        "POE_API_KEY",
+        "REMEDY_POE_API_KEY",
+        "OPENROUTER_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "MISTRAL_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "GOOGLE_API_KEY",
+        "GEMINI_API_KEY",
     ):
         monkeypatch.delenv(k, raising=False)
     monkeypatch.delenv("REMEDY_DEMO_DISABLED", raising=False)
@@ -90,7 +134,16 @@ def test_bootstrap_prefers_demo_when_empty(monkeypatch):
 
 
 def test_bootstrap_skips_demo_when_disabled(monkeypatch):
-    for k in ("XAI_API_KEY", "OPENAI_API_KEY", "GROQ_API_KEY", "REMEDY_LLM_API_KEY"):
+    for k in (
+        "XAI_API_KEY",
+        "OPENAI_API_KEY",
+        "GROQ_API_KEY",
+        "REMEDY_LLM_API_KEY",
+        "POE_API_KEY",
+        "REMEDY_POE_API_KEY",
+        "OPENROUTER_API_KEY",
+        "DEEPSEEK_API_KEY",
+    ):
         monkeypatch.delenv(k, raising=False)
     monkeypatch.setenv("REMEDY_DEMO_DISABLED", "1")
     cfg = apply_env_provider_bootstrap(

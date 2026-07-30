@@ -1,7 +1,7 @@
 # Local model bundle (SmolVLM2 2.2B · Apache 2.0)
 
-Pinned local VLM for vision decode + nano swarm. Same download pipeline as before;
-license is Apache 2.0 (commercial-friendly).
+**Not packaged in the installer** — downloaded on **first run** (or via Settings).
+Pinned local VLM for vision decode + nano swarm. License is Apache 2.0 (commercial-friendly).
 
 ## Assets
 

@@ -289,368 +289,64 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
     async def update_settings(req: SettingsUpdateRequest):
         from fastapi import HTTPException
 
-        config_path = _find_config_path()
-        if config_path is None:
-            config_path = _default_config_path()
-            config_path.parent.mkdir(parents=True, exist_ok=True)
+        from remedy.interfaces.settings_apply import apply_settings_update
 
-        from remedy.interfaces.config import (
-            migrate_provider_keys,
-            resolve_provider_api_key,
-            set_provider_key,
-        )
-        from remedy.interfaces.secret_store import scrub_config_secrets
-
-        # Corrupt TOML previously caused load → {} then a bad re-write; still accept
-        # the PUT so setup can heal the file (scalars-before-tables writer).
-        raw_cfg = load_config()
-        cfg = migrate_provider_keys(raw_cfg if isinstance(raw_cfg, dict) else {})
-        prev_provider = str(cfg.get("llm_provider") or "").strip().lower()
         updates = req.model_dump(exclude_none=True)
-
-        if "llm_api_key" in updates and not updates["llm_api_key"]:
-            del updates["llm_api_key"]
-
-        # Merge then normalize provider/model/url so cross-provider combos
-        # (e.g. deepseek + claude-3-haiku) cannot be persisted.
-        merged = {**cfg, **updates}
-        provider, model, base_url = normalize_llm_settings(
-            merged.get("llm_provider"),
-            merged.get("llm_model"),
-            merged.get("llm_base_url"),
-        )
-        updates["llm_provider"] = provider
-        updates["llm_model"] = model
-        updates["llm_base_url"] = base_url
-        if prev_provider and prev_provider != provider:
-            updates["last_llm_provider"] = prev_provider
-
-        # Normalize project_path to an absolute directory when provided.
-        if "project_path" in updates and updates["project_path"] is not None:
-            from remedy.core.workspace import ensure_project_dir, resolve_project_path
-
-            raw_pp = str(updates["project_path"]).strip()
-            if raw_pp and raw_pp not in (".", "./"):
-                try:
-                    updates["project_path"] = str(
-                        ensure_project_dir(resolve_project_path(raw_pp))
-                    )
-                except Exception:
-                    updates["project_path"] = str(resolve_project_path(raw_pp))
-            else:
-                # Explicit clear → store empty so sessions fall back to cwd
-                updates["project_path"] = ""
-
-        if "access_scope" in updates and updates["access_scope"] is not None:
-            from remedy.core.workspace import normalize_access_scope
-
-            updates["access_scope"] = normalize_access_scope(str(updates["access_scope"]))
-
-        if "harness_mode" in updates and updates["harness_mode"] is not None:
-            hm = str(updates["harness_mode"]).strip().lower()
-            updates["harness_mode"] = hm if hm in ("off", "manual", "auto") else "auto"
-
-        if "enabled_providers" in updates and updates["enabled_providers"] is not None:
-            raw_ep = updates["enabled_providers"]
-            if isinstance(raw_ep, list):
-                updates["enabled_providers"] = [
-                    str(x).strip().lower() for x in raw_ep if str(x).strip()
-                ]
-            elif isinstance(raw_ep, str) and raw_ep.strip():
-                updates["enabled_providers"] = [
-                    x.strip().lower() for x in raw_ep.split(",") if x.strip()
-                ]
-            else:
-                updates["enabled_providers"] = []
-
-        if "enabled_models" in updates and updates["enabled_models"] is not None:
-            raw_em = updates["enabled_models"]
-            if isinstance(raw_em, dict):
-                clean: dict[str, list[str]] = {}
-                for k, v in raw_em.items():
-                    if isinstance(v, list):
-                        clean[str(k).lower()] = [str(x) for x in v if str(x).strip()]
-                updates["enabled_models"] = clean
-            else:
-                updates.pop("enabled_models", None)
-
-        if "last_model_by_provider" in updates and updates["last_model_by_provider"] is not None:
-            raw_lm = updates["last_model_by_provider"]
-            if isinstance(raw_lm, dict):
-                updates["last_model_by_provider"] = {
-                    str(k).lower(): str(v)
-                    for k, v in raw_lm.items()
-                    if str(k).strip() and str(v).strip()
-                }
-            else:
-                updates.pop("last_model_by_provider", None)
-
-        if "skills_active_budget" in updates and updates["skills_active_budget"] is not None:
-            try:
-                b = int(updates["skills_active_budget"])
-                updates["skills_active_budget"] = max(10, min(500, b))
-            except (TypeError, ValueError):
-                updates["skills_active_budget"] = 80
-
-        if "thinking_level" in updates and updates["thinking_level"] is not None:
-            tl = str(updates["thinking_level"]).strip().lower()
-            updates["thinking_level"] = (
-                tl if tl in ("off", "low", "medium", "high") else "high"
-            )
-
-        if "approval_mode" in updates and updates["approval_mode"] is not None:
-            am = str(updates["approval_mode"]).strip().lower()
-            updates["approval_mode"] = am if am in ("ask", "auto") else "ask"
-            try:
-                from remedy.core.approvals import APPROVALS
-
-                APPROVALS.set_mode(updates["approval_mode"])
-            except Exception:
-                pass
-
-        if "web_tools_enabled" in updates and updates["web_tools_enabled"] is not None:
-            updates["web_tools_enabled"] = bool(updates["web_tools_enabled"])
-
-        if "http_bootstrap" in updates and updates["http_bootstrap"] is not None:
-            updates["http_bootstrap"] = bool(updates["http_bootstrap"])
-
-        if "browser_home_url" in updates and updates["browser_home_url"] is not None:
-            updates["browser_home_url"] = _normalize_browser_home_url(
-                updates["browser_home_url"]
-            )
-
-        # Hold PA prefs until home_path is known (written with messengers block).
-        assistant_update = updates.pop("assistant", None)
-
-        if "allow_skill_creation" in updates and updates["allow_skill_creation"] is not None:
-            updates["allow_skill_creation"] = bool(updates["allow_skill_creation"])
-
-        if "sarcasm_mode" in updates and updates["sarcasm_mode"] is not None:
-            updates["sarcasm_mode"] = bool(updates["sarcasm_mode"])
-
-        if "auto_approve_threshold" in updates and updates["auto_approve_threshold"] is not None:
-            try:
-                t = float(updates["auto_approve_threshold"])
-                updates["auto_approve_threshold"] = max(0.0, min(1.0, t))
-            except (TypeError, ValueError):
-                updates["auto_approve_threshold"] = 0.8
-
-        if "log_level" in updates and updates["log_level"] is not None:
-            ll = str(updates["log_level"]).strip().upper()
-            updates["log_level"] = (
-                ll if ll in ("DEBUG", "INFO", "WARNING", "ERROR") else "INFO"
-            )
-
-        if "harness_min_context_pct" in updates and updates["harness_min_context_pct"] is not None:
-            try:
-                v = float(updates["harness_min_context_pct"])
-                updates["harness_min_context_pct"] = max(0.05, min(0.95, v))
-            except (TypeError, ValueError):
-                updates.pop("harness_min_context_pct", None)
-
-        if "harness_max_context_pct" in updates and updates["harness_max_context_pct"] is not None:
-            try:
-                v = float(updates["harness_max_context_pct"])
-                updates["harness_max_context_pct"] = max(0.1, min(0.99, v))
-            except (TypeError, ValueError):
-                updates.pop("harness_max_context_pct", None)
-
-        # tool_process: off | medium | full (legacy show_tool_calls / full+ → full)
-        if "tool_process" in updates and updates["tool_process"] is not None:
-            updates["tool_process"] = _normalize_tool_process(raw=updates["tool_process"])
-        elif "show_tool_calls" in updates and updates["show_tool_calls"] is not None:
-            updates["tool_process"] = (
-                "full" if updates["show_tool_calls"] else "off"
-            )
-        updates.pop("show_tool_calls", None)
-
-        # Nested [vision] table — do not flatten vision_* onto root TOML.
-        vision_enabled = updates.pop("vision_enabled", None)
-        vision_model_id = updates.pop("vision_model_id", None)
-        vision_force_decode = updates.pop("vision_force_decode", None)
-        if (
-            vision_enabled is not None
-            or vision_model_id is not None
-            or vision_force_decode is not None
-        ):
-            vision_tbl = dict(cfg.get("vision") or {}) if isinstance(cfg.get("vision"), dict) else {}
-            if vision_enabled is not None:
-                vision_tbl["enabled"] = bool(vision_enabled)
-            if vision_model_id is not None and str(vision_model_id).strip():
-                vision_tbl["model_id"] = str(vision_model_id).strip()
-            if vision_force_decode is not None:
-                vision_tbl["force_decode"] = bool(vision_force_decode)
-            cfg["vision"] = vision_tbl
-
-        messengers_update = updates.pop("messengers", None)
-        if "enabled_channels" in updates and updates["enabled_channels"] is not None:
-            from remedy.interfaces.messenger_settings import normalize_enabled_channels
-
-            updates["enabled_channels"] = normalize_enabled_channels(
-                updates["enabled_channels"]
-            )
-
-        # Secrets go ONLY to the secure store — never into config.toml.
-        incoming_key = updates.pop("llm_api_key", None)
-        cfg.update(updates)
-        home = cfg.get("home_dir")
-        home_path = Path(home).expanduser() if home else None
-
-        if incoming_key is not None and str(incoming_key).strip():
-            set_provider_key(
-                cfg, provider, str(incoming_key).strip(), home=home_path
-            )
-            if provider == "xai":
-                try:
-                    from remedy.interfaces.xai_auth import save_api_key
-
-                    save_api_key(str(incoming_key).strip(), home=home_path)
-                except Exception as exc:
-                    logger.debug("xAI settings key sync: %s", exc)
-
-        # Personal assistant prefs → assistant.json + slim mirror in config
-        if isinstance(assistant_update, dict):
-            try:
-                from remedy.assistant.store import get_assistant_store
-
-                astore = get_assistant_store(home_path)
-                ap = dict(assistant_update)
-                patch: dict = {}
-                for k in (
-                    "enabled",
-                    "timezone",
-                    "money_disclaimer_accepted",
-                    "privacy_ai_accepted",
-                    "account_access_accepted",
-                    "default_calendar_account",
-                    "default_mail_account",
-                ):
-                    if k in ap:
-                        patch[k] = ap[k]
-                if isinstance(ap.get("brief"), dict):
-                    patch["brief"] = ap["brief"]
-                if patch:
-                    astore.patch_prefs(**patch)
-                prefs = astore.get_prefs()
-                cfg["assistant"] = {
-                    "enabled": prefs.enabled,
-                    "timezone": prefs.timezone,
-                    "money_disclaimer_accepted": prefs.money_disclaimer_accepted,
-                    "brief": prefs.brief.to_dict(),
-                }
-            except Exception as exc:
-                logger.warning("assistant prefs save failed: %s", exc)
-
-        if isinstance(messengers_update, dict):
-            try:
-                from remedy.interfaces.messenger_settings import apply_messengers_update
-
-                apply_messengers_update(
-                    cfg, messengers_update, home_path=home_path
-                )
-            except Exception:
-                logger.exception("messenger settings update failed")
-            # Hot-reload adapters so new tokens work without full app quit.
-            try:
-                from remedy.gateway.channel_hot_reload import reload_messenger_channels
-
-                await reload_messenger_channels(gateway, cfg)
-            except Exception:
-                logger.debug("messenger hot-reload skipped", exc_info=True)
-
-        # Keep profile.display_name in sync so the agent addresses the user correctly.
-        if "user_name" in updates and updates["user_name"] is not None:
-            uname = str(updates["user_name"]).strip()
-            updates["user_name"] = uname
-            if memory is not None and uname:
-                try:
-                    profile = await memory.get_or_create_profile()
-                    profile.display_name = uname
-                    await memory.save_user_profile(profile)
-                except Exception as exc:
-                    logger.debug("sync user_name → profile: %s", exc)
-
-        # Always scrub before disk write (no llm_api_key / provider_keys).
-        cfg = scrub_config_secrets(cfg)
-        cfg["llm_api_key"] = ""
-        cfg.pop("provider_keys", None)
+        cache = getattr(app.state, "_model_discovery_cache", None)
         try:
-            _write_config(config_path, cfg)
+            result = await apply_settings_update(
+                updates,
+                runtime=runtime,
+                gateway=gateway,
+                memory=memory,
+                model_discovery_cache=cache if isinstance(cache, dict) else None,
+            )
+        except ValueError as exc:
+            # Empty body is a no-op success (Settings Save sometimes sends {})
+            if not updates:
+                return {
+                    "status": "saved",
+                    "changes": [],
+                    "config_path": str(_find_config_path() or _default_config_path()),
+                }
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         except OSError as exc:
-            logger.exception("Failed to write settings to %s", config_path)
+            logger.exception("Failed to write settings")
             raise HTTPException(
                 status_code=500,
                 detail=f"Failed to write config.toml: {exc}",
             ) from exc
         except Exception as exc:
-            logger.exception("Settings save failed for %s", config_path)
+            logger.exception("Settings save failed")
             raise HTTPException(
                 status_code=500,
                 detail=f"Failed to save settings: {exc}",
             ) from exc
 
-        # Invalidate model discovery cache after provider/url changes.
-        cache = getattr(app.state, "_model_discovery_cache", None)
-        if isinstance(cache, dict):
-            cache.clear()
-
-        # Hot-reload live agent so the next chat uses the saved provider's own key.
-        api_key_for_runtime = resolve_provider_api_key(cfg, provider)
-        _apply_llm_to_runtime(
-            runtime,
-            provider=provider,
-            model=model,
-            base_url=base_url,
-            api_key=api_key_for_runtime or None,
-            persona=updates.get("persona"),
-            name=updates.get("name"),
-            project_path=updates.get("project_path", cfg.get("project_path")),
-            access_scope=cfg.get("access_scope"),
-            harness_mode=cfg.get("harness_mode"),
-            harness_min_context_pct=cfg.get("harness_min_context_pct"),
-            harness_max_context_pct=cfg.get("harness_max_context_pct"),
-            thinking_level=cfg.get("thinking_level"),
-            approval_mode=cfg.get("approval_mode"),
-        )
-
-        changes = list(updates.keys())
+        # Keep response shape compatible with desktop SettingsPanel
         return {
-            "status": "saved",
-            "changes": changes,
-            "config_path": str(config_path),
-            "llm_provider": provider,
-            "llm_model": model,
-            "llm_base_url": base_url,
-            "persona": cfg.get("persona"),
-            "project_path": cfg.get("project_path"),
-            "access_scope": cfg.get("access_scope", "project"),
-            "launch_at_login": bool(cfg.get("launch_at_login", False)),
-            "start_in_tray": bool(cfg.get("start_in_tray", False)),
-            "close_to_tray": bool(cfg.get("close_to_tray", False)),
-            "harness_mode": cfg.get("harness_mode", "auto"),
-            "thinking_level": str(cfg.get("thinking_level") or "high"),
-            "approval_mode": str(cfg.get("approval_mode") or "ask"),
-            "user_name": str(cfg.get("user_name") or "").strip(),
-            "tool_process": _normalize_tool_process(cfg),
-            "vision_enabled": bool(
-                (cfg.get("vision") or {}).get("enabled")
-                if isinstance(cfg.get("vision"), dict)
-                else False
-            ),
-            "vision_model_id": (
-                str(
-                    (cfg.get("vision") or {}).get("model_id")
-                    if isinstance(cfg.get("vision"), dict)
-                    else ""
-                ).strip()
-                or __import__(
-                    "remedy.vision.catalog", fromlist=["DEFAULT_MODEL_ID"]
-                ).DEFAULT_MODEL_ID
-            ),
-            "vision_force_decode": bool(
-                (cfg.get("vision") or {}).get("force_decode")
-                if isinstance(cfg.get("vision"), dict)
-                else False
-            ),
+            "status": result.get("status", "saved"),
+            "changes": result.get("changes") or [],
+            "config_path": result.get("config_path", ""),
+            "llm_provider": result.get("llm_provider"),
+            "llm_model": result.get("llm_model"),
+            "llm_base_url": result.get("llm_base_url"),
+            "persona": result.get("persona"),
+            "project_path": result.get("project_path"),
+            "access_scope": result.get("access_scope", "project"),
+            "launch_at_login": bool(result.get("launch_at_login", False)),
+            "start_in_tray": bool(result.get("start_in_tray", False)),
+            "close_to_tray": bool(result.get("close_to_tray", False)),
+            "harness_mode": result.get("harness_mode", "auto"),
+            "thinking_level": str(result.get("thinking_level") or "high"),
+            "approval_mode": str(result.get("approval_mode") or "ask"),
+            "user_name": str(result.get("user_name") or "").strip(),
+            "tool_process": result.get("tool_process") or "off",
+            "vision_enabled": bool(result.get("vision_enabled")),
+            "vision_model_id": result.get("vision_model_id") or "",
+            "vision_force_decode": bool(result.get("vision_force_decode")),
+            "name": result.get("name"),
+            "web_tools_enabled": bool(result.get("web_tools_enabled")),
+            "http_bootstrap": bool(result.get("http_bootstrap", True)),
         }
 

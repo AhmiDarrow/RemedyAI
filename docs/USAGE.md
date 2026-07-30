@@ -121,6 +121,7 @@ In chat (desktop or `POST /api/sessions/{id}/command`):
 | `/compact` / `/harness` | Memory Harness |
 | `/approve` / `/deny` | High-impact shell approvals |
 | `/import <folder>` | Import markdown/text notes into memory |
+| `/security-status` / `/security` / `/secstatus` | Show partner control settings (approvals mode, web tools, execution timeout, scope) |
 
 Composer: **↑** previous prompt, **↓** next (stored locally).
 

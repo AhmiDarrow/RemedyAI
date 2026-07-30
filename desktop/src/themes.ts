@@ -10,8 +10,29 @@ export type ThemeId =
   | 'orange'
   | 'cyan'
 
-/** Default theme for first run (no localStorage preference). */
+/**
+ * Default theme for first install / first run (no localStorage preference).
+ * Always Dark Forest — not System, not classic purple Dark.
+ */
 export const DEFAULT_THEME_ID: ThemeId = 'forest'
+
+const THEME_ID_SET = new Set<string>([
+  'system',
+  'dark',
+  'neutral',
+  'light',
+  'forest',
+  'green',
+  'purple',
+  'alien',
+  'orange',
+  'cyan',
+])
+
+/** True if *id* is a known theme preference (including System). */
+export function isThemeId(id: string | null | undefined): id is ThemeId {
+  return typeof id === 'string' && THEME_ID_SET.has(id)
+}
 
 export interface ThemeColors {
   '--bg-primary': string
@@ -352,16 +373,46 @@ export const THEMES: Record<Exclude<ThemeId, 'system'>, Theme> = {
   },
 } as const
 
-/** UI list: System first, then concrete themes. */
-export const THEME_LIST: { id: ThemeId; name: string; kind: 'dark' | 'light' | 'system'; colors: ThemeColors }[] = [
-  {
+export type ThemeListEntry = {
+  id: ThemeId
+  name: string
+  kind: 'dark' | 'light' | 'system'
+  colors: ThemeColors
+}
+
+/**
+ * Flat menu order (no section headers):
+ *  1. System
+ *  2. Light
+ *  3. Themes whose name does **not** start with "Dark" (except Neutral Dark)
+ *  4. Themes whose name starts with "Dark", with Neutral Dark right under Dark
+ */
+function buildThemeList(): ThemeListEntry[] {
+  const system: ThemeListEntry = {
     id: 'system',
     name: 'System',
     kind: 'system',
     colors: THEMES.dark.colors,
-  },
-  ...Object.values(THEMES),
-]
+  }
+  const concrete = Object.values(THEMES)
+  const light = concrete.filter((t) => t.id === 'light')
+  // Neutral Dark sits with the "Dark*" block (directly under Dark), not the colored accents.
+  const rest = concrete.filter((t) => t.id !== 'light' && t.id !== 'neutral')
+  const notDarkName = rest.filter((t) => !t.name.startsWith('Dark'))
+  const darkName = rest.filter((t) => t.name.startsWith('Dark'))
+  const byName = (a: Theme, b: Theme) => a.name.localeCompare(b.name)
+  notDarkName.sort(byName)
+  darkName.sort(byName)
+  // Dark → Neutral Dark → Dark Forest → Dark Purple …
+  const darkBlock: Theme[] = []
+  for (const t of darkName) {
+    darkBlock.push(t)
+    if (t.id === 'dark') darkBlock.push(THEMES.neutral)
+  }
+  return [system, ...light, ...notDarkName, ...darkBlock]
+}
+
+export const THEME_LIST: ThemeListEntry[] = buildThemeList()
 
 export function systemPrefersLight(): boolean {
   try {

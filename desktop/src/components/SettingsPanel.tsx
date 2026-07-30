@@ -42,6 +42,7 @@ import {
 
   type ToolProcessMode,
 } from '../utils/toolLabels'
+import { demoModelOptions } from '../utils/demoModels'
 import { sectionMatchesSearch } from './SettingsSection'
 import {
   SETTINGS_SECTION_META,
@@ -189,7 +190,14 @@ export function SettingsPanel({
   const showBaseUrl = Boolean(activeMeta?.show_base_url || provider === 'custom')
 
   // Prefer live discovered models; fall back to catalog models for this provider.
+  // Demo: ALWAYS full curated set — never partial/live llm7 dumps.
   const providerModels = useMemo(() => {
+    if (provider === 'demo') {
+      return demoModelOptions(activeMeta?.models || []).map((m) => ({
+        ...m,
+        provider: 'demo' as const,
+      }))
+    }
     const fromApi = models.filter(
       (m) =>
         !m.provider
@@ -204,6 +212,22 @@ export function SettingsPanel({
       provider,
     }))
   }, [models, provider, activeMeta])
+
+  // Snap invalid Demo selection once (seedance/deepseek junk) — never fight user picks.
+  useEffect(() => {
+    if (provider !== 'demo') return
+    if (!model) {
+      setModel(providerModels[0]?.id || 'codestral-latest')
+      return
+    }
+    const allowed = new Set(providerModels.map((m) => m.id))
+    if (!allowed.has(model)) {
+      setModel(providerModels[0]?.id || 'codestral-latest')
+    }
+    // Intentionally only re-run when provider changes or model becomes invalid —
+    // not when providerModels array identity changes every parent render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- stable snap, avoid stutter loops
+  }, [provider, model])
 
   const stopXaiPoll = useCallback(() => {
     if (xaiPollRef.current) {
@@ -615,7 +639,11 @@ export function SettingsPanel({
       sarcasm_mode: sarcasmMode,
     }
     if (enabledProviders !== null) {
-      updates.enabled_providers = enabledProviders
+      // Demo must stay available for zero-setup; never save a list that drops it.
+      const ep = enabledProviders.includes('demo')
+        ? enabledProviders
+        : ['demo', ...enabledProviders]
+      updates.enabled_providers = ep
     }
     if (Object.keys(enabledModels).length > 0) {
       updates.enabled_models = enabledModels

@@ -5,6 +5,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import re
 import time
 from pathlib import Path
 from uuid import uuid4
@@ -422,6 +423,41 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         if not str(req.message or "").strip() and not has_atts:
             raise HTTPException(400, "Message is empty")
 
+        try:
+            return await _send_message_body(
+                session_id=session_id,
+                req=req,
+                request_id=request_id,
+                runtime=runtime,
+                memory=memory,
+                gateway=gateway,
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            # Session deleted mid-turn (FK / missing row) → 404, not opaque 500
+            if memory is not None:
+                with contextlib.suppress(Exception):
+                    still = await memory.get_chat_session(session_id)
+                    if still is None:
+                        logger.info(
+                            "send_message session gone mid-turn id=%s err=%s",
+                            session_id,
+                            exc,
+                        )
+                        raise HTTPException(404, "Session not found") from exc
+            logger.exception("send_message failed session=%s", session_id)
+            raise HTTPException(500, "Internal Server Error") from exc
+
+    async def _send_message_body(
+        *,
+        session_id: str,
+        req: SendMessageRequest,
+        request_id: str,
+        runtime,
+        memory,
+        gateway,
+    ):
         if memory:
             from remedy.core.session_llm import (
                 resolve_session_llm_bind,
@@ -492,6 +528,11 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             if isinstance(token, str) and token.startswith("@@"):
                 continue
             response_text += token
+            # Bail if session vanished mid-stream (user closed tab / deleted)
+            if memory is not None and len(response_text) % 64 == 0:
+                with contextlib.suppress(Exception):
+                    if await memory.get_chat_session(session_id) is None:
+                        raise HTTPException(404, "Session not found")
         elapsed_s = time.perf_counter() - start
         elapsed = elapsed_s * 1000
         default_registry.counter(
@@ -502,6 +543,12 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         ).observe(elapsed_s)
 
         if memory and response_text:
+            from remedy.models import ChatMessage
+
+            # Session may have been deleted during generation
+            still = await memory.get_chat_session(session_id)
+            if still is None:
+                raise HTTPException(404, "Session not found")
             await memory.add_chat_message(ChatMessage(
                 session_id=session_id,
                 role=ChatMessageRole.ASSISTANT,
@@ -618,6 +665,40 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         if memory:
             from remedy.models import ChatMessage, ChatSession
 
+            def _looks_like_path_title(text: str) -> bool:
+                t = (text or "").strip()
+                if not t:
+                    return False
+                if re.match(r"^[A-Za-z]:[\\/]", t):
+                    return True
+                if t.startswith("\\\\") or t.startswith("/Users/") or t.startswith("/home/"):
+                    return True
+                if "\\" in t and re.search(
+                    r"\.(png|jpe?g|gif|webp|bmp|heic|pdf|docx?)$", t, re.I
+                ):
+                    return True
+                if re.match(r"^Screenshot\b", t, re.I) and re.search(
+                    r"\.(png|jpe?g|gif|webp)$", t, re.I
+                ):
+                    return True
+                return False
+
+            def _title_from_attachment_name(name: str, *, max_len: int = 52) -> str:
+                raw = (name or "").strip().replace("/", "\\")
+                if not raw:
+                    return "Attachment"
+                base = raw.rsplit("\\", 1)[-1]
+                pretty = re.sub(
+                    r"\.(png|jpe?g|gif|webp|bmp|heic)$", "", base, flags=re.I
+                )
+                t = re.sub(r"[_-]+", " ", pretty)
+                t = " ".join(t.split()).strip() or "Image"
+                if re.match(r"^Screenshot\b", t, re.I):
+                    t = re.sub(r"\s+\d{4}.*$", "", t).strip() or "Screenshot"
+                if len(t) > max_len:
+                    t = t[: max_len - 1].rstrip() + "…"
+                return t
+
             def _title_from_prompt(text: str, *, max_len: int = 52) -> str:
                 t = " ".join((text or "").strip().split())
                 if not t:
@@ -627,7 +708,9 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                     t = t.split("📎", 1)[0].strip() or t
                 if t.startswith("(") and "see attached" in t.lower():
                     name = (att_dicts[0].get("name") if att_dicts else "") or "Attachments"
-                    t = str(name)
+                    t = _title_from_attachment_name(str(name), max_len=max_len)
+                elif _looks_like_path_title(t):
+                    t = _title_from_attachment_name(t, max_len=max_len)
                 if len(t) > max_len:
                     t = t[: max_len - 1].rstrip() + "…"
                 return t or "New Session"
@@ -659,19 +742,41 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                 ))
             else:
                 # Auto-name placeholder sessions from the first real prompt.
+                # Also replace path-only titles (e.g. full OneDrive screenshot path)
+                # when the user later sends a real message or plan prompt.
                 cur_title = (existing.title or "").strip()
                 placeholder = (
                     not cur_title
-                    or cur_title.lower() in ("new session", "new chat", "untitled")
+                    or cur_title.lower()
+                    in (
+                        "new session",
+                        "new chat",
+                        "untitled",
+                        "attachments",
+                        "attachment",
+                        "image",
+                        "screenshot",
+                    )
+                    or _looks_like_path_title(cur_title)
                 )
                 if placeholder and (user_text or att_dicts):
-                    await memory.update_chat_session(
-                        session_id,
-                        title=_title_from_prompt(
-                            user_text
-                            or str(att_dicts[0].get("name") if att_dicts else "Attachments")
-                        ),
+                    new_title = _title_from_prompt(
+                        user_text
+                        or str(
+                            att_dicts[0].get("name") if att_dicts else "Attachments"
+                        )
                     )
+                    # Prefer real user text over another path-ish attachment name
+                    if user_text.strip() and not _looks_like_path_title(new_title):
+                        await memory.update_chat_session(
+                            session_id, title=new_title
+                        )
+                    elif placeholder and (
+                        _looks_like_path_title(cur_title) or not cur_title
+                    ):
+                        await memory.update_chat_session(
+                            session_id, title=new_title
+                        )
                 # Persist paired bind — never model without provider (cross-tab corruption).
                 if fields and (
                     fields.get("model") != existing.model
@@ -913,9 +1018,13 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                         provider=getattr(runtime, "_llm_provider", None),
                     )
                     if usage_acc and usage_acc.get("source") == "provider":
+                        # Provider totals already sum each LLM round; never add
+                        # char-heuristic estimate on top (that inflated costs).
+                        final_usage = merge_usage(usage_acc)
+                    elif usage_acc:
                         final_usage = merge_usage(usage_acc)
                     else:
-                        final_usage = merge_usage(est, usage_acc)
+                        final_usage = merge_usage(est)
                     yield (
                         "event: usage\ndata: "
                         + json.dumps({"type": "usage", **final_usage})

@@ -275,11 +275,26 @@ def register_workspace_routes(app: FastAPI, *, runtime=None, gateway=None, memor
 
     @app.get("/api/files/search")
     async def search_files(
-        query: str = Query(..., min_length=1),
+        query: str | None = Query(default=None, min_length=1),
+        q: str | None = Query(default=None, min_length=1, description="Alias for query"),
         session_id: str | None = Query(default=None),
+        path: str | None = Query(
+            default=None,
+            description="Optional root (absolute or project-relative); default project root",
+        ),
     ):
         """Search the project directory tree for matching files."""
-        if session_id and memory is not None:
+        query = (query or q or "").strip()
+        if not query:
+            raise HTTPException(400, "query (or q) is required")
+        if path and str(path).strip():
+            try:
+                from remedy.core.workspace import ensure_project_dir, resolve_project_path
+
+                base = ensure_project_dir(resolve_project_path(str(path).strip()))
+            except Exception:
+                base = _files_base()
+        elif session_id and memory is not None:
             sess = await memory.get_chat_session(session_id)
             if sess and sess.project_path:
                 from remedy.core.workspace import ensure_project_dir, resolve_project_path
@@ -296,28 +311,74 @@ def register_workspace_routes(app: FastAPI, *, runtime=None, gateway=None, memor
         safe_query = query.replace("/", "").replace("\\", "").replace("..", "")
         if not safe_query:
             return {"query": query, "results": [], "root": str(base)}
+        # Bound walk — home-scoped trees can hang with unbounded rglob
+        skip_dirs = {
+            ".git",
+            "__pycache__",
+            "node_modules",
+            ".venv",
+            "venv",
+            "dist",
+            "build",
+            ".tox",
+            ".mypy_cache",
+            ".pytest_cache",
+            "AppData",
+            "Library",
+            "Caches",
+            ".cache",
+            "target",
+        }
+        max_results = 50
+        max_scanned = 8000
+        max_depth = 8
         try:
-            results = []
-            for p in base.rglob(f"*{safe_query}*"):
-                if ".git" in p.parts or "__pycache__" in p.parts or "node_modules" in p.parts:
-                    continue
-                if p.name.startswith("."):
-                    continue
+            results: list[dict] = []
+            scanned = 0
+            base_resolved = base.resolve()
+            for root, dirs, files in os.walk(base_resolved):
+                # prune depth + noise dirs
                 try:
-                    rel = str(p.relative_to(base))
+                    depth = len(Path(root).relative_to(base_resolved).parts)
                 except ValueError:
-                    continue
-                results.append({
-                    "name": p.name,
-                    "path": rel,
-                    "is_dir": p.is_dir(),
-                })
-                if len(results) >= 50:
+                    depth = 0
+                if depth >= max_depth:
+                    dirs[:] = []
+                else:
+                    dirs[:] = [
+                        d
+                        for d in dirs
+                        if d not in skip_dirs and not d.startswith(".")
+                    ]
+                for name in files + list(dirs):
+                    scanned += 1
+                    if scanned > max_scanned:
+                        break
+                    if safe_query.lower() not in name.lower():
+                        continue
+                    if name.startswith("."):
+                        continue
+                    p = Path(root) / name
+                    try:
+                        rel = str(p.relative_to(base_resolved))
+                    except ValueError:
+                        continue
+                    results.append(
+                        {
+                            "name": name,
+                            "path": rel,
+                            "is_dir": p.is_dir(),
+                        }
+                    )
+                    if len(results) >= max_results:
+                        break
+                if len(results) >= max_results or scanned > max_scanned:
                     break
             return {
                 "query": query,
                 "results": sorted(results, key=lambda r: len(r["path"])),
                 "root": str(base),
+                "scanned": scanned,
             }
         except Exception:
             return {"query": query, "results": [], "root": str(base)}

@@ -19,7 +19,6 @@ export function ThemeSwitcher({ currentId, onChange }: ThemeSwitcherProps) {
     if (!open) return
     const idx = Math.max(0, THEME_LIST.findIndex((t) => t.id === currentId))
     setFocusIdx(idx)
-    // Focus list for keyboard nav
     requestAnimationFrame(() => listRef.current?.focus())
   }, [open, currentId])
 
@@ -101,7 +100,7 @@ export function ThemeSwitcher({ currentId, onChange }: ThemeSwitcherProps) {
           aria-label="Themes"
           aria-activedescendant={`theme-opt-${THEME_LIST[focusIdx]?.id}`}
           onKeyDown={onListKey}
-          className="absolute bottom-full mb-1 right-0 z-20 rounded-lg p-1.5 flex flex-col gap-0.5 min-w-[170px] outline-none"
+          className="absolute bottom-full mb-1 right-0 z-20 rounded-lg p-1.5 flex flex-col gap-0.5 min-w-[170px] max-h-[min(70vh,420px)] overflow-y-auto outline-none"
           style={{
             background: 'var(--bg-secondary)',
             border: '1px solid var(--border)',

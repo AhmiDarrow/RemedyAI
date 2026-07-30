@@ -386,9 +386,14 @@ _META_NO_TOOLS_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Any registered-style tool id (snake_case) models invent in text.
+_TOOL_ID = r"[a-z][a-z0-9_]{1,64}"
 # Models sometimes emit tool syntax as plain text instead of function-calls.
 _PSEUDO_TOOL_RE = re.compile(
-    r"\b(file_read|file_write|list_dir|bash_exec|comfyui|local_discover)\s*\(",
+    rf"\b(file_read|file_write|list_dir|bash_exec|comfyui|local_discover|"
+    rf"get_settings|update_settings|mail_list|mail_send|mail_create_draft|"
+    rf"calendar_list_events|calendar_create_event|budget_set|bill_upsert|"
+    rf"debt_upsert|assistant_brief)\s*\(",
     re.IGNORECASE,
 )
 # Leaked "tool markup" (DSML / XML-ish tool_calls) that must never show as chat text.
@@ -396,11 +401,12 @@ _PSEUDO_TOOL_RE = re.compile(
 _DSML_TOOL_RE = re.compile(
     r"(tool[_\s-]?calls|function[_\s-]?calls|DSML|"
     r"</?invoke\b|invoke_parameter|invoke_step|"
-    r"</?parameter\b|name\s*=\s*[\"'](?:file_read|bash_exec|comfyui|list_dir))",
+    r"</?parameter\b|name\s*=\s*[\"']" + _TOOL_ID + r"[\"'])",
     re.IGNORECASE,
 )
+# Accept any snake_case tool name in invoke markup (not only workspace tools).
 _DSML_INVOKE_RE = re.compile(
-    r"""name\s*=\s*["'](file_read|file_write|list_dir|bash_exec|comfyui|local_discover)["']""",
+    rf"""name\s*=\s*["']({_TOOL_ID})["']""",
     re.IGNORECASE,
 )
 # Supports both <parameter name="path">val</parameter> and unclosed ...name="path"...>val
@@ -494,15 +500,23 @@ def looks_like_pseudo_tools(text: str) -> bool:
     if _PSEUDO_TOOL_RE.search(text):
         return True
     if _DSML_NOISE_RE.search(text) and re.search(
-        r"tool|invoke|parameter|comfyui|bash_exec|list_dir", text, re.I
+        r"tool|invoke|parameter|comfyui|bash_exec|list_dir|settings|mail_|calendar_",
+        text,
+        re.I,
     ):
         return True
-    # Any leaked tool_calls / invoke markup counts — even without a clean name=.
+    # Any leaked tool_calls / function_calls / invoke markup (incl. truncated)
+    if re.search(
+        r"(?i)(<\s*function_calls\b|</\s*function_calls\s*>|<\s*tool_call\b|"
+        r"<\s*function_c|get_settings\s*$)",
+        text,
+    ):
+        return True
+    if text.strip() in ("<", "<>", "<function_c"):
+        return True
     if _DSML_TOOL_RE.search(text) and (
         _DSML_INVOKE_RE.search(text)
-        or re.search(
-            r"\b(list_dir|bash_exec|file_read|comfyui|local_discover)\b", text, re.I
-        )
+        or re.search(rf"\b({_TOOL_ID})\b", text, re.I)
     ):
         return True
     return bool("&&" in text and re.search(r"\w+\(\s*[\"']", text))
@@ -518,18 +532,35 @@ def strip_tool_markup(text: str) -> str:
     t = text
     # Strip DSML wrapper tokens
     t = _DSML_NOISE_RE.sub(" ", t)
+    # Full XML-ish function_calls / tool_call blocks (complete or truncated)
+    t = re.sub(r"(?is)<\s*function_calls\b[^>]*>.*?(?:</\s*function_calls\s*>|$)", " ", t)
+    t = re.sub(r"(?is)<\s*tool_call\b[^>]*>.*?(?:</\s*tool_call\s*>|$)", " ", t)
+    t = re.sub(r"(?is)<\s*function_c\w*[^>]*>.*?(?:>|$)", " ", t)
     # Remove tool_calls … blocks (greedy enough for multi-invoke dumps)
     t = re.sub(
         r"(?is)(?:tool[_\s-]?calls|function[_\s-]?calls)\b.*?(?=(?:\n{2,}|\Z))",
         " ",
         t,
     )
-    t = re.sub(r"(?is)</?(?:invoke|parameter|invoke_parameter|invoke_step)[^>]*>", " ", t)
+    t = re.sub(r"(?is)</?(?:invoke|parameter|invoke_parameter|invoke_step|tool_call)[^>]*>", " ", t)
     t = re.sub(
-        r"""(?is)name\s*=\s*["'](?:file_read|file_write|list_dir|bash_exec|comfyui|local_discover)["'][^<\n]*""",
+        rf"""(?is)name\s*=\s*["']{_TOOL_ID}["'][^<\n]*""",
         " ",
         t,
     )
+    # Orphan angle-brackets from truncated dumps ("<" alone, "<function_c")
+    t = re.sub(r"(?m)^\s*<\s*$", " ", t)
+    t = re.sub(r"<\s*function_c\w*", " ", t, flags=re.I)
+    t = re.sub(r"(?is)<\s*details\b.*?</\s*details\s*>", " ", t)
+    t = re.sub(r"(?is)</?function_results\b[^>]*>", " ", t)
+    t = re.sub(r"(?is)```json\s*\{[^`]*\"name\"\s*:\s*\"[^\"]+\"[^`]*\}```", " ", t)
+    t = re.sub(r"(?i)\bcomposing tool\b", " ", t)
+    # Lone residual tokens after strip
+    if re.fullmatch(
+        r"(?i)\s*(function|tool|invoke|tool_call|get_settings|composing tool)\s*",
+        t or "",
+    ):
+        return ""
     t = re.sub(r"[ \t]{2,}", " ", t)
     t = re.sub(r"\n{3,}", "\n\n", t)
     return t.strip()
@@ -627,13 +658,15 @@ def _parse_dsml_tool_calls(text: str) -> list[dict[str, Any]]:
         ]
 
     out: list[dict[str, Any]] = []
-    # Split on invoke boundaries when possible
-    chunks = re.split(r"(?i)(?:invoke\b|tool_call\b|tool_calls\b)", text)
+    # Split on invoke / function_calls boundaries when possible
+    chunks = re.split(
+        r"(?i)(?:invoke\b|tool_call\b|tool_calls\b|function_calls\b)", text
+    )
     for i, chunk in enumerate(chunks):
         m = _DSML_INVOKE_RE.search(chunk)
         if not m:
             m = re.search(
-                r"""["'](file_read|file_write|list_dir|bash_exec|comfyui)["']""",
+                rf"""["']({_TOOL_ID})["']""",
                 chunk,
                 re.IGNORECASE,
             )
@@ -651,12 +684,24 @@ def _parse_dsml_tool_calls(text: str) -> list[dict[str, Any]]:
         else:
             name = m.group(1).lower()
 
+        # Skip non-tool XML attributes accidentally matched
+        if name in ("true", "false", "string", "integer", "object", "array", "type"):
+            continue
+
         params: dict[str, str] = {}
         for pm in _DSML_PARAM_RE.finditer(chunk):
             params[pm.group(1).lower()] = pm.group(2).strip()
-        if not params:
+        # Fallback positional scrape only for classic workspace tools (avoid
+        # mistaking invoke name="get_settings" for a parameter).
+        if not params and name in (
+            "bash_exec",
+            "file_read",
+            "file_write",
+            "list_dir",
+            "comfyui",
+        ):
             code_m = re.search(
-                r"""(?:code|command|path|relative_path|prompt|action)\s*[:=]\s*["']?([^"'<\n]+)""",
+                r"(?:code|command|path|relative_path|prompt|action)\s*[:=]\s*[\"']?([^\"'<\n]+)",
                 chunk,
                 re.IGNORECASE,
             )
@@ -708,7 +753,20 @@ def _parse_dsml_tool_calls(text: str) -> list[dict[str, Any]]:
                 "content": params.get("content") or params.get("code") or "",
             }
         else:
-            continue
+            # Generic tools (get_settings, bill_upsert, mail_send, …): pass params through
+            args = dict(params)
+            # Coerce simple numerics when models put numbers as strings
+            for k, v in list(args.items()):
+                if isinstance(v, str) and re.fullmatch(r"-?\d+", v.strip()):
+                    try:
+                        args[k] = int(v.strip())
+                    except ValueError:
+                        pass
+                elif isinstance(v, str) and re.fullmatch(r"-?\d+\.\d+", v.strip()):
+                    try:
+                        args[k] = float(v.strip())
+                    except ValueError:
+                        pass
 
         if name == "bash_exec" and not args.get("command"):
             continue
@@ -872,8 +930,26 @@ def recovered_tool_call_is_complete(tc: dict[str, Any]) -> bool:
         return bool(str(args.get("action") or "status").strip())
     if name == "repo_search":
         return bool(str(args.get("query") or args.get("pattern") or "").strip())
-    # Unknown tools: require non-empty args object
-    return bool(args)
+    # No-arg tools (status/list/get) are complete with empty args
+    _NO_ARG_OK = frozenset(
+        {
+            "get_settings",
+            "assistant_accounts",
+            "assistant_brief",
+            "budget_get",
+            "budget_status",
+            "debt_list",
+            "bill_list",
+            "money_disclaimer",
+            "calendar_list_events",
+            "mail_list",
+            "local_discover",
+        }
+    )
+    if name in _NO_ARG_OK:
+        return True
+    # Unknown tools: empty args OK if name looks complete (invoke with no params)
+    return True
 
 
 _parse_pseudo_tool_calls = parse_pseudo_tool_calls

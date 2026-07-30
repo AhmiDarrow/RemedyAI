@@ -37,9 +37,12 @@ export function isPlanActionable(status?: string | null): boolean {
 
 /**
  * Whether the sticky Plan banner should render for this session state.
- * - Plan mode: always (empty state or current plan).
- * - Build mode: only for actionable plans (draft / approved / active).
- * - done / cancelled never stick in Build mode.
+ *
+ * - **Plan mode**: always (empty state, draft, or review mid-flight).
+ * - **Build mode + draft**: show so the user can still Approve → Build.
+ * - **Build mode + approved/active**: hide — plan is already in motion;
+ *   the full card only steals chat space. Re-open Plan (Ctrl+B) to revise/cancel.
+ * - **done / cancelled**: never stick in Build mode.
  */
 export function shouldShowPlanBanner(
   plan: TaskPlan | null,
@@ -47,7 +50,12 @@ export function shouldShowPlanBanner(
 ): boolean {
   if (planMode) return true
   if (!plan?.id) return false
-  return isPlanActionable(plan.status)
+  const s = String(plan.status || 'draft').toLowerCase()
+  // Work already kicked off — don't pin the plan card over the feed.
+  if (s === 'approved' || s === 'active') return false
+  if (s === 'done' || s === 'cancelled') return false
+  // Draft still waiting for Approve even if the user flipped to Build early.
+  return s === 'draft'
 }
 
 /**

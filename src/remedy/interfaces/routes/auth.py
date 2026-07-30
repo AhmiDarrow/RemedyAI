@@ -143,15 +143,51 @@ def register_auth_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
             elif keys.get(pid) or keys_set.get(pid):
                 connected = True
                 reason = "api_key"
-            # custom with base_url may still need a key — treat key/env as connected
+            # Env / OAuth keys (e.g. POE_API_KEY) resolve but are not always in
+            # the secure-store key list — still treat as connected for the picker.
+            if not connected and pid not in ("demo", "ollama"):
+                with contextlib.suppress(Exception):
+                    from remedy.interfaces.config import resolve_provider_api_key
+
+                    resolved = str(resolve_provider_api_key(cfg, pid) or "").strip()
+                    if resolved and resolved not in ("local", "unused"):
+                        connected = True
+                        reason = "resolved_key"
 
             enabled = True if enabled_set is None else (pid in enabled_set)
+            # Guest demo must always be switchable when connected (zero-setup path).
+            if pid == "demo" and connected:
+                enabled = True
             models = list(meta.get("models") or [])
             allow = enabled_models_cfg.get(pid)
-            if isinstance(allow, list) and allow:
+            # Demo: always full curated catalog (enabled_models must not hide Gemini Flash Lite).
+            # enabled_models is a soft preference list for the *connected catalog
+            # preview only* — never shrink to a single stale id when the allowlist
+            # is a leftover subset (e.g. deepseek-chat after V4 rename). If the
+            # filter would leave 0–1 models while the catalog has more, ignore it
+            # so the status bar can show live/catalog intelligence.
+            if pid != "demo" and isinstance(allow, list) and allow:
                 allow_set = {str(x) for x in allow}
-                models = [m for m in models if str(m.get("id")) in allow_set]
+                filtered = [m for m in models if str(m.get("id")) in allow_set]
+                if len(filtered) >= 2 or len(models) <= 1:
+                    models = filtered
+                # else: keep full catalog; live /api/models is still authoritative
             last_model = last_by.get(pid) or meta.get("default_model")
+            # Never keep a demo-only id as last_model for a non-demo provider
+            if pid != "demo" and last_model:
+                low = str(last_model).lower()
+                if any(
+                    x in low
+                    for x in (
+                        "gemini-3.1-flash-lite",
+                        "codestral-latest",
+                        "gpt-oss:20b",
+                        "kimi-k3",
+                    )
+                ) or "(demo)" in low or low.endswith(" demo"):
+                    last_model = (
+                        models[0].get("id") if models else meta.get("default_model")
+                    )
             if models and last_model and not any(
                 str(m.get("id")) == str(last_model) for m in models
             ):
