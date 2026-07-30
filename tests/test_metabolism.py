@@ -145,16 +145,25 @@ def test_action_ir_redacts_and_persists(tmp_path: Path):
     ir = start_action_ir(session_id="test_meta_sess", tier=2, brief_head="fix bug")
     ir.add_step(
         tool="file_write",
-        arguments={"path": "a.txt", "api_key": "sk-secretvalue123456"},
+        arguments={
+            "path": "a.txt",
+            "content": "password=supersecret_body_value",
+            "api_key": "sk-secretvalue123456",
+        },
         result="ok",
         eu_delta=1,
     )
     pub = ir.to_public()
-    assert pub["steps"][0]["args"]["api_key"] == "[redacted]"
+    args = pub["steps"][0]["args"]
+    # Write bodies never persisted — only path + content hash
+    assert "content" not in args or args.get("content") in (None, "[omitted]")
+    assert "content_sha16" in args or "path" in args
     path = ir.persist(tmp_path)
     assert path is not None and path.is_file()
     data = json.loads(path.read_text(encoding="utf-8"))
-    assert "sk-secretvalue" not in json.dumps(data)
+    blob = json.dumps(data)
+    assert "sk-secretvalue" not in blob
+    assert "supersecret_body_value" not in blob
 
 
 def test_time_crystal_never_promotes_secrets():
@@ -243,6 +252,32 @@ def test_identity_export_import_roundtrip(tmp_path: Path):
     assert "api_keys" in (got.get("excludes") or [])
     with pytest.raises(ValueError):
         import_identity(path, passphrase="wrong-password-xx")
+    # HMAC tamper detection
+    raw = path.read_text(encoding="utf-8")
+    path.write_text(raw.replace("Prefers", "HackedX"), encoding="utf-8")
+    # ciphertext base64 may not contain that plaintext; flip a cipher byte instead
+    import json as _json
+    import base64
+
+    pkg = _json.loads(path.read_text(encoding="utf-8") if "ciphertext" in raw else raw)
+    # re-export clean and tamper ciphertext
+    path = export_identity(clean, tmp_path / "id2.remedy", passphrase="test-pass-12")
+    pkg = _json.loads(path.read_text(encoding="utf-8"))
+    ct = bytearray(base64.b64decode(pkg["ciphertext_b64"]))
+    ct[0] ^= 0xFF
+    pkg["ciphertext_b64"] = base64.b64encode(bytes(ct)).decode("ascii")
+    path.write_text(_json.dumps(pkg), encoding="utf-8")
+    with pytest.raises(ValueError):
+        import_identity(path, passphrase="test-pass-12")
+
+
+def test_redact_shared_patterns():
+    from remedy.core.metabolism.redact import redact_text, looks_like_secret_text
+
+    assert looks_like_secret_text("api_key=sk-abcdefghijklmnopqrst")
+    s = redact_text("Authorization: Bearer abcdefghijklmnop")
+    assert "abcdefghijklmnop" not in s
+    assert "[redacted]" in s
 
 
 def test_spread_force_lowers_bar():

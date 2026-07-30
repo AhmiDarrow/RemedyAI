@@ -83,11 +83,12 @@ def rehearse(
     tier: int = 2,
     work_roots: list[str] | None = None,
     map_hint: dict[str, Any] | None = None,
+    strict: bool = False,
 ) -> ShadowResult:
     """Local dry-run impact predict. Deterministic; no network."""
     name = (tool_name or "").strip()
     args = arguments or {}
-    if not should_shadow(name, tier=tier):
+    if not should_shadow(name, tier=tier, strict=strict):
         return ShadowResult("pass", "not_high_blast", "low", name)
 
     if name == "bash_exec":
