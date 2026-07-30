@@ -20,6 +20,30 @@ def test_export_tool_role_is_aggressively_capped() -> None:
     assert "truncated" in out.lower()
 
 
+def test_export_redacts_secret_shaped_content() -> None:
+    """Portable exports must not ship API keys / bearer tokens verbatim."""
+    secret = "config api_key=sk-abcdefghijklmnopqrstuvwxyz012345 and Bearer ya29.secretvalueHERE"
+    out = _export_content(secret, role="user")
+    assert "sk-abcdefghijklmnopqrstuvwxyz012345" not in out
+    assert "ya29.secretvalueHERE" not in out
+    assert "[redacted]" in out
+
+    body = format_session_txt(
+        title="Secrets",
+        session_id="sid-sec",
+        messages=[
+            {"role": "user", "content": "my key is sk-abcdefghijklmnopqrstuvwxyz999"},
+            {
+                "role": "tool",
+                "content": "Authorization: Bearer sk-proj-ABCDEFGHIJKLMNOPQRSTUV",
+            },
+        ],
+    )
+    assert "sk-abcdefghijklmnopqrstuvwxyz999" not in body
+    assert "sk-proj-ABCDEFGHIJKLMNOPQRSTUV" not in body
+    assert "Bearer sk-proj" not in body
+
+
 def test_format_session_txt_basic() -> None:
     body = format_session_txt(
         title="T",

@@ -72,6 +72,21 @@ def test_open_url_refuses_non_http_schemes():
             win.open_url(bad)
 
 
+def test_open_url_refuses_userinfo_credentials():
+    """https://user:pass@host must not open (credentials in address bar / OS)."""
+    import pytest
+
+    from remedy.core.computer import desktop_win as win
+
+    for bad in (
+        "https://user:pass@example.com/",
+        "http://alice:s3cret@localhost:8080/x",
+        "https://token@evil.example/path",
+    ):
+        with pytest.raises(ValueError, match="userinfo|credential"):
+            win.open_url(bad)
+
+
 def test_computer_audit_redacts_secrets(tmp_path: Path):
     from remedy.core.computer.audit import audit_path, log_computer_action
 

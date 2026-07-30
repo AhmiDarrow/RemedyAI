@@ -12,7 +12,18 @@ logger = logging.getLogger(__name__)
 
 
 def openai_tools_payload(tool_registry: Any) -> list[dict[str, Any]]:
-    """Build OpenAI-style tools list from a ToolRegistry."""
+    """Build OpenAI-style tools list from a ToolRegistry.
+
+    Caches the payload on the registry keyed by schema generation so L1/L2
+    turns do not re-walk every tool definition each request. Callers that
+    strip tools for L1 still share the same cached all_tools list.
+    """
+    gen = int(getattr(tool_registry, "schema_generation", -1) or -1)
+    cached = getattr(tool_registry, "_openai_payload_cache", None)
+    cached_gen = int(getattr(tool_registry, "_openai_payload_gen", -2) or -2)
+    if cached is not None and cached_gen == gen and gen >= 0:
+        return cached
+
     tools: list[dict[str, Any]] = []
     for t in tool_registry.tools:
         params = t.parameters if t.parameters else {"type": "object", "properties": {}}
@@ -28,6 +39,11 @@ def openai_tools_payload(tool_registry: Any) -> list[dict[str, Any]]:
                 },
             }
         )
+    try:
+        tool_registry._openai_payload_cache = tools
+        tool_registry._openai_payload_gen = gen
+    except Exception:
+        pass
     return tools
 
 
@@ -62,6 +78,12 @@ async def post_chat(
     ):
         if resp.status != 200:
             text = await resp.text()
+            try:
+                from remedy.core.metabolism.redact import redact_text
+
+                safe_err = redact_text(text or "")
+            except Exception:
+                safe_err = "[redacted provider error]"
             # One refresh attempt for expired xAI OAuth tokens.
             if (
                 resp.status in (401, 403)
@@ -100,10 +122,18 @@ async def post_chat(
                             if resp2.status == 200:
                                 return await resp2.json()
                             text = await resp2.text()
+                            try:
+                                from remedy.core.metabolism.redact import (
+                                    redact_text as _rt,
+                                )
+
+                                safe_err = _rt(text or "")
+                            except Exception:
+                                safe_err = "[redacted provider error]"
                             logger.error(
                                 "LLM API error %d after reauth: %s",
                                 resp2.status,
-                                text[:500],
+                                safe_err[:500],
                             )
                             return (
                                 "\n[auth required] xAI session expired. "
@@ -111,9 +141,9 @@ async def post_chat(
                             )
                 except Exception as auth_exc:
                     logger.debug("xAI re-auth in post_chat failed: %s", auth_exc)
-            logger.error("LLM API error %d: %s", resp.status, text[:500])
+            logger.error("LLM API error %d: %s", resp.status, safe_err[:500])
             return (
-                f"\n[LLM ERROR — HTTP {resp.status}]\n{text[:500]}\n[END LLM ERROR]"
+                f"\n[LLM ERROR — HTTP {resp.status}]\n{safe_err[:500]}\n[END LLM ERROR]"
             )
         return await resp.json()
 
