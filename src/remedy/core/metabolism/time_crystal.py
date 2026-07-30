@@ -14,10 +14,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-_SECRETISH = re.compile(
-    r"(?i)(api[_-]?key|secret|password|token|bearer\s|sk-[a-z0-9]{10,})"
-)
-
 HORIZONS = ("turn", "session", "project_week", "life")
 
 
@@ -62,7 +58,9 @@ class TimeCrystal:
         t = (text or "").strip()
         if not t or len(t) < 4:
             return None
-        if _SECRETISH.search(t):
+        from remedy.core.metabolism.redact import looks_like_secret_text
+
+        if looks_like_secret_text(t):
             with self._lock:
                 self.blocked_secret += 1
             return None

@@ -170,6 +170,23 @@ async def call_llm_stream(runtime, message: str,
 
                 context = (context or "") + "\n\n" + COMPUTER_USE_SYSTEM_ADDENDUM
         history = await runtime._load_session_history(session_id, message)
+        # Early L0: skip harness + full context snapshot for instant local answers
+        if not plan_mode and not attachments:
+            with suppress(Exception):
+                from remedy.core.metabolism.l0 import try_l0_system_reply
+                from remedy.core.metabolism.tier import TurnTier, classify_turn_tier
+
+                if classify_turn_tier(message or "", tools_enabled=False) == TurnTier.L0_INSTANT:
+                    l0_early = try_l0_system_reply(runtime, message or "")
+                    if l0_early:
+                        with suppress(Exception):
+                            from remedy.core.session_quality import get_session_quality
+
+                            get_session_quality(
+                                str(session_id or getattr(runtime, "_session_id", "") or "")
+                            ).record_metabolism(tier=0)
+                        yield l0_early
+                        return
         # Memory Harness L0: light prune of send-view (stored transcript untouched).
         # auto mode skips this pre-pass — apply_auto_harness_send_policy owns full
         # prune/offload/budget and would re-walk the same history (double work).
@@ -922,7 +939,8 @@ async def call_llm_stream(runtime, message: str,
                 )
                 step_tools = None if force_answer else tools
 
-                # Metabolism: mark model boundary + inject evidence delta before call
+                # Metabolism: inject evidence delta FIRST, then mark model boundary
+                # (mark_model_call advances last_model_eu_index — inject after = empty)
                 with suppress(Exception):
                     from remedy.core.metabolism.turn import mark_model_call
                     from remedy.core.metabolism.evidence import get_evidence_ledger
@@ -930,13 +948,19 @@ async def call_llm_stream(runtime, message: str,
                     sid_mm = str(
                         getattr(runtime, "_session_id", "") or session_id or ""
                     )
-                    mark_model_call(sid_mm)
-                    if int(getattr(runtime, "_turn_tier", 1) or 1) >= 2:
-                        eblock = get_evidence_ledger(sid_mm).pointer_block(limit=8)
-                        if eblock and tool_batches_this_turn > 0:
+                    if (
+                        int(getattr(runtime, "_turn_tier", 1) or 1) >= 2
+                        and tool_batches_this_turn > 0
+                    ):
+                        led = get_evidence_ledger(sid_mm)
+                        eblock = led.pointer_block(limit=8)
+                        last_eu = int(getattr(runtime, "_evidence_inject_eu", -1) or -1)
+                        if eblock and led.evidence_units > last_eu:
                             messages.append(
                                 {"role": "system", "content": eblock}
                             )
+                            runtime._evidence_inject_eu = led.evidence_units
+                    mark_model_call(sid_mm)
 
                 if (
                     force_answer

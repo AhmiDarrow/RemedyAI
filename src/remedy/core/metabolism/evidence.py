@@ -28,17 +28,10 @@ _DECISION_RE = re.compile(
 _TEST_RE = re.compile(
     r"(?i)\b(\d+\s+passed|\d+\s+failed|ERROR|FAILED|ok\b|exit code\s*[:=]?\s*\d+)\b"
 )
-_SECRETISH = re.compile(
-    r"(?i)(api[_-]?key|secret|password|token|bearer\s+[a-z0-9._-]{12,}|"
-    r"sk-[a-z0-9]{10,}|xai-[a-z0-9]{10,})"
-)
-
-
 def _redact(text: str) -> str:
-    if not text:
-        return ""
-    out = _SECRETISH.sub("[redacted]", text)
-    return out
+    from remedy.core.metabolism.redact import redact_text
+
+    return redact_text(text or "")
 
 
 def _eu_fingerprint(kind: str, body: str) -> str:
@@ -100,6 +93,8 @@ class EvidenceLedger:
         raw = _redact(content or "")
         if not raw.strip():
             return []
+        # Cap parse cost on huge tool dumps (paths/tests live in head)
+        parse_src = raw if len(raw) <= 16_000 else (raw[:12_000] + "\n" + raw[-4_000:])
         result_hash = hashlib.sha256(
             raw.encode("utf-8", errors="replace")
         ).hexdigest()[:16]
@@ -107,17 +102,17 @@ class EvidenceLedger:
         admitted: list[EvidenceUnit] = []
         kinds_bodies: list[tuple[str, str]] = []
 
-        paths = list(dict.fromkeys(_PATH_RE.findall(raw)))[:24]
+        paths = list(dict.fromkeys(_PATH_RE.findall(parse_src)))[:24]
         for p in paths:
             kinds_bodies.append(("path", p[:240]))
-        if _DECISION_RE.search(raw):
-            line = raw.strip().split("\n", 1)[0][:200]
+        if _DECISION_RE.search(parse_src):
+            line = parse_src.strip().split("\n", 1)[0][:200]
             kinds_bodies.append(("decision", line))
-        if _TEST_RE.search(raw):
-            m = _TEST_RE.search(raw)
+        if _TEST_RE.search(parse_src):
+            m = _TEST_RE.search(parse_src)
             kinds_bodies.append(("test", (m.group(0) if m else "test")[:120]))
         # Always one tool summary EU
-        first = raw.strip().split("\n", 1)[0][:160]
+        first = parse_src.strip().split("\n", 1)[0][:160]
         kinds_bodies.append(
             (
                 "tool",

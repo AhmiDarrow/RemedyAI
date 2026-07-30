@@ -55,11 +55,36 @@ def begin_turn_metabolism(
     elif project_path:
         mmap.set_work_roots([project_path])
 
+    # L0: minimal metabolism — no governor/map/crystal/IR (instant path)
+    if int(tier) == 0:
+        with suppress(Exception):
+            from remedy.core.session_quality import get_session_quality
+
+            get_session_quality(sid).record_metabolism(tier=0)
+        return {
+            "session_id": sid,
+            "tier": 0,
+            "tier_label": policy.label,
+            "policy": policy.to_public(),
+            "force_spread": False,
+            "full_snapshot": False,
+            "shadow_high_blast": False,
+            "record_ir": False,
+            "allow_critical_verify": False,
+            "injects": [],
+            "action_ir": None,
+            "governor": {},
+            "evidence": ledger.snapshot(),
+            "decisions": decisions.snapshot(),
+            "machine_map": {},
+            "time_crystal": {},
+        }
+
     # Session horizon: admit short intent line (no secrets path)
     if user_text and len(user_text) < 240:
         crystal.admit(user_text[:200], horizon="session", source="user")
 
-    # Quality + metabolism for governor
+    # Quality + metabolism for governor (L1+ only)
     quality: dict[str, Any] = {}
     with suppress(Exception):
         from remedy.core.session_quality import get_session_quality
@@ -73,9 +98,6 @@ def begin_turn_metabolism(
         "force_spread_signal": policy.force_spread,
     }
     gov.observe_and_decide(quality=quality, metabolism=meta_snap, tier=int(tier))
-    if gov.force_spread:
-        # promote force_spread even if tier was L2
-        pass
 
     injects: list[str] = []
     note = tier_system_block(tier)
@@ -97,10 +119,6 @@ def begin_turn_metabolism(
     crystal_block = crystal.hot_block(max_chars=800)
     if crystal_block and int(tier) >= 1:
         injects.append(crystal_block)
-    # Pending critical-verify remedy from prior turn (silent)
-    with suppress(Exception):
-        # runtime not in begin_turn — caller may pass via injects later
-        pass
     # Evidence delta from prior tools (after first model call mark)
     eblock = ledger.pointer_block(limit=12)
     if eblock and int(tier) >= 2:

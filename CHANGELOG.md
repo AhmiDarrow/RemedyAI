@@ -4,6 +4,15 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Security/perf: metabolism hardening pass
+
+- Shared secret redaction (`metabolism/redact.py`) for ledger, IR, crystal, macros, UI tool args, partner-state previews
+- Identity export: HMAC-authenticated packages; export path constrained under `home/exports` when home set
+- Action IR: never stores full `file_write`/`bash_exec` bodies (path + content/command hashes only)
+- Shell write jail: fail-closed on `-EncodedCommand`, Expand-Archive, tar extract, certutil -decode, BITS
+- Hot path: early L0 before harness; evidence inject **before** mark_model_call (delta was empty); no double metabolism inject; mid-turn slim skipped for L0/L1 + cheap char gate; L0 begin_turn skips governor/map/IR
+- Evidence parse capped at 16k chars for huge dumps
+
 ### Feat: Partner Metabolism OS (speed · accuracy · trust) — full program
 
 Local silent metabolism so any provider model acts like a durable partner —

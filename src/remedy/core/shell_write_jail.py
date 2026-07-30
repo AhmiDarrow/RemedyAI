@@ -79,6 +79,20 @@ _INTERPRETER_ONESHOT_RE = re.compile(
     r")"
 )
 
+# Encoded / archive / decode writers — path often hidden; fail closed when project-bound.
+_OPAQUE_MUTATION_RE = re.compile(
+    r"(?ix)"
+    r"(?:"
+    # -EncodedCommand / -enc (no \b before '-' — space and '-' are both non-word)
+    r"(?:^|[\s;|&])-(?:encodedcommand|enc|ec)\b"
+    r"|\bexpand-archive\b|\bcompress-archive\b"
+    r"|\btar\s+-[a-z]*x|\btar\s+--extract\b"
+    r"|\bcertutil\b[^\n]*-decode\b"
+    r"|\bbitsadmin\b|\bstart-bitstransfer\b"
+    r"|\binvoke-webrequest\b[^\n]*-outfile\b"
+    r")"
+)
+
 # Absolute Windows / Unix path tokens in a command line.
 _ABS_PATH_RE = re.compile(
     r"(?:"
@@ -240,6 +254,16 @@ def check_shell_write_jail(
     cmd = command or ""
     if not cmd.strip():
         return None
+
+    # Encoded / archive / decode writers hide destinations — fail closed when bound.
+    if _OPAQUE_MUTATION_RE.search(cmd):
+        roots_s = ", ".join(str(r) for r in _norm_roots(write_roots)[:4])
+        return (
+            "shell write jail: encoded/archive/decode mutation cannot be proven "
+            f"under write roots [{roots_s}]. Prefer file_write/file_edit with "
+            "paths under the focus folder (or Expand-Archive with explicit "
+            "DestinationPath under the project)."
+        )
 
     if not looks_like_mutation(cmd):
         return None

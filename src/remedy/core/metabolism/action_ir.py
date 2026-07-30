@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 import threading
 import time
 import uuid
@@ -12,35 +11,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-_SECRETISH = re.compile(
-    r"(?i)(api[_-]?key|secret|password|token|bearer\s+[a-z0-9._-]{12,}|"
-    r"sk-[a-z0-9]{10,}|xai-[a-z0-9]{10,})"
-)
-
-
 def _redact_obj(obj: Any) -> Any:
-    if isinstance(obj, str):
-        return _SECRETISH.sub("[redacted]", obj)[:4000]
-    if isinstance(obj, dict):
-        out = {}
-        for k, v in obj.items():
-            kl = str(k).lower()
-            if kl in (
-                "password",
-                "token",
-                "api_key",
-                "apikey",
-                "authorization",
-                "secret",
-                "cookie",
-            ):
-                out[k] = "[redacted]"
-            else:
-                out[k] = _redact_obj(v)
-        return out
-    if isinstance(obj, list):
-        return [_redact_obj(x) for x in obj[:50]]
-    return obj
+    from remedy.core.metabolism.redact import redact_obj
+
+    return redact_obj(obj)
 
 
 def _hash_obj(obj: Any) -> str:
@@ -98,10 +72,40 @@ class ActionIR:
         shadow_outcome: str = "",
         ok: bool = True,
     ) -> IrStep:
-        args_r = _redact_obj(dict(arguments or {}))
+        from remedy.core.metabolism.redact import redact_text
+
+        raw_args = dict(arguments or {})
+        # Never persist full file bodies / shell commands in IR — path + hashes only
+        body_tools = {
+            "file_write",
+            "file_edit",
+            "file_edit_batch",
+            "bash_exec",
+            "computer_type",
+        }
+        if (tool or "") in body_tools:
+            slim: dict[str, Any] = {}
+            for k in ("path", "workdir", "timeout_seconds", "ref", "url", "monitor"):
+                if k in raw_args:
+                    slim[k] = raw_args[k]
+            if "command" in raw_args:
+                cmd = str(raw_args.get("command") or "")
+                slim["command_sha16"] = _hash_obj(cmd[:2000])
+                slim["command_chars"] = len(cmd)
+            if "content" in raw_args:
+                c = str(raw_args.get("content") or "")
+                slim["content_sha16"] = _hash_obj(c[:8000])
+                slim["content_chars"] = len(c)
+            if "edits" in raw_args and isinstance(raw_args["edits"], list):
+                slim["edits_count"] = len(raw_args["edits"])
+            if "text" in raw_args:
+                slim["text"] = "[omitted]"
+            args_r = _redact_obj(slim)
+        else:
+            args_r = _redact_obj(raw_args)
         if not isinstance(args_r, dict):
             args_r = {}
-        res_r = _SECRETISH.sub("[redacted]", result or "")
+        res_r = redact_text(result or "")[:2000]
         step = IrStep(
             tool=tool,
             args_hash=_hash_obj(args_r),
