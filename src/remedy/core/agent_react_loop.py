@@ -899,23 +899,9 @@ async def call_llm_stream(runtime, message: str,
                                 )
                                 if md:
                                     yield "@@checkpoint"
-                            with suppress(Exception):
-                                from remedy.memory.harness.send_policy import (
-                                    slim_messages_mid_turn,
-                                )
-
-                                messages[:] = slim_messages_mid_turn(
-                                    runtime,
-                                    messages,
-                                    session_id=str(
-                                        getattr(runtime, "_session_id", "")
-                                        or session_id
-                                        or ""
-                                    ),
-                                    tool_result_char_cap=int(
-                                        _TOOL_RESULT_CHAR_CAP or 0
-                                    ),
-                                )
+                            # Mid-turn slim runs once below (step > 0) after the
+                            # epoch continue message is appended — do not slim
+                            # here (was double prune/offload on every roll).
                             with suppress(Exception):
                                 from remedy.memory.partner_state import (
                                     ensure_partner_state,

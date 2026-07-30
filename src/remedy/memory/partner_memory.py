@@ -23,6 +23,9 @@ MIN_INJECT_CONFIDENCE = 0.55
 AUTO_ACCEPT_CONFIDENCE = 0.85
 MAX_FACT_LEN = 280
 MAX_AUTO_FACTS_PER_PASS = 5
+# Hot-path inject caps (ranked facts / traits in every-turn block)
+MAX_HOT_FACTS = 12
+MAX_HOT_TRAITS = 8
 
 # Explicit preference / identity patterns (user lines only)
 # Confidence ≥ AUTO_ACCEPT_CONFIDENCE (0.85) is auto-stored.
@@ -524,7 +527,7 @@ def build_partner_memory_block(
     if name:
         lines.append(f"- Call the user: {name}")
 
-    for key, trait in list(profile.traits.items())[:12]:
+    for key, trait in list(profile.traits.items())[:MAX_HOT_TRAITS]:
         if trait.confidence < 0.4:
             continue
         lines.append(f"- {key}: {trait.value}")
@@ -533,7 +536,7 @@ def build_partner_memory_block(
         profile,
         query=query,
         min_confidence=min_confidence,
-        limit=20,
+        limit=MAX_HOT_FACTS,
         project_path=project_path,
     )
     for f in facts:

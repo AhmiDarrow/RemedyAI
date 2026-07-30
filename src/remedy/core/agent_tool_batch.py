@@ -32,6 +32,10 @@ from remedy.models import ToolCall
 
 logger = logging.getLogger(__name__)
 
+# SSE/UI process-trace preview only (model payload uses TOOL_RESULT_CHAR_CAP / tier).
+# Keep below typical L2/L3 model caps (12k) so fat dumps stay readable in Process Trace.
+UI_TOOL_RESULT_PREVIEW_CHARS = 8_000
+
 
 def progress_marker(
     *,
@@ -508,7 +512,8 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
                 content_str = content_str[:2000] + "\n…[image already sent to user]"
         # UI process-trace preview (Full mode). Model still receives full content
         # below — only the SSE/UI surface is redacted + capped.
-        ui_trace_cap = 500_000
+        # 12k is plenty for Process Trace; 500k blew up SSE/DOM on fat tool dumps.
+        ui_trace_cap = UI_TOOL_RESULT_PREVIEW_CHARS
         preview = content_str
         with suppress(Exception):
             from remedy.core.metabolism.redact import redact_text
