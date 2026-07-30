@@ -452,12 +452,25 @@ def _decode_images_queued(
         )
 
 
-def _cache_key(path: Path) -> str:
+def _cache_key(
+    path: Path,
+    *,
+    model_id: str = "",
+    base_url: str = "",
+) -> str:
+    """Cache key for decode briefs — must include decoder identity.
+
+    Path+mtime alone is wrong after model/runtime switch: Settings can pin a
+    new GGUF while attachment files are unchanged, and the old brief would be
+    replayed as if freshly decoded.
+    """
+    mid = str(model_id or "").strip() or "_"
+    base = str(base_url or "").rstrip("/").strip() or "_"
     try:
         st = path.stat()
-        return f"{path.resolve()}::{st.st_mtime_ns}::{st.st_size}"
+        return f"{path.resolve()}::{st.st_mtime_ns}::{st.st_size}::{mid}::{base}"
     except OSError:
-        return str(path)
+        return f"{path}::{mid}::{base}"
 
 
 def decode_for_turn(
@@ -598,11 +611,15 @@ def decode_for_turn(
                 "hint": started.get("error"),
             }
 
+    # Decoder model identity for cache keys (vision.json pin, not chat model).
+    decoder_model_id = str(
+        side.get("model_id") or vcfg.get("model_id") or DEFAULT_MODEL_ID or ""
+    )
     briefs: list[str] = []
     events: list[str] = []
     paths_to_decode: list[Path] = []
     for p in images:
-        key = _cache_key(p)
+        key = _cache_key(p, model_id=decoder_model_id, base_url=base)
         if key in _decode_cache:
             briefs.append(_decode_cache[key])
             events.append(f"Visual decode (cached): {p.name}")
@@ -622,7 +639,7 @@ def decode_for_turn(
             elapsed = time.time() - t0
             if r.get("ok") and r.get("text"):
                 text = str(r["text"])
-                ck = _cache_key(p)
+                ck = _cache_key(p, model_id=decoder_model_id, base_url=base)
                 # FIFO eviction when full (dict preserves insertion order).
                 while len(_decode_cache) >= _DECODE_CACHE_MAX and ck not in _decode_cache:
                     try:
