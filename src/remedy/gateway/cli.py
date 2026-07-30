@@ -223,11 +223,38 @@ def main_gateway(args) -> None:
 
 
 def _serve_api(db_path: Path) -> None:
+    """Start the HTTP API with the same fail-closed auth as ``remedy serve``.
+
+    Historical bug: this path called ``create_app()`` without ``api_key``, which
+    disabled Bearer middleware entirely (open loopback). Always load/generate the
+    local API token unless ``REMEDY_API_AUTH=0``.
+    """
+    import os
+
     import uvicorn
 
     from remedy import __version__
     from remedy.interfaces.api import create_app
+    from remedy.interfaces.local_auth import ensure_local_api_token
 
-    app = create_app(title="Remedy AI", version=__version__)
+    # db_path is …/memory.db under REMEDY_HOME; auth lives under home/auth/
+    home = db_path.parent if db_path.suffix else db_path
+    api_key = ensure_local_api_token(
+        home,
+        explicit=os.environ.get("REMEDY_API_KEY") or None,
+    )
+    app = create_app(
+        title="Remedy AI",
+        version=__version__,
+        api_key=api_key,
+    )
+    if api_key:
+        console.print(
+            "[dim]API auth:[/dim] enabled (Bearer token under auth/local_api_token)"
+        )
+    else:
+        console.print(
+            "[yellow]API auth disabled[/yellow] (REMEDY_API_AUTH=0) — open loopback"
+        )
     console.print("[green]Starting Remedy API on http://127.0.0.1:7400[/green]")
     uvicorn.run(app, host="127.0.0.1", port=7400, log_level="info")

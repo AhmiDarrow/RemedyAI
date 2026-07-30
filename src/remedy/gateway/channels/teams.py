@@ -53,6 +53,71 @@ def _jwt_payload_unverified(token: str) -> dict[str, Any] | None:
         return None
 
 
+# Known Bot Framework / Azure AD token issuers (claim structure only — not JWKS).
+_BF_ISS_SUFFIXES = (
+    "sts.windows.net",
+    "login.microsoftonline.com",
+    "login.microsoft.com",
+    "api.botframework.com",
+)
+
+
+def _jwt_claims_structurally_valid(
+    claims: dict[str, Any],
+    *,
+    app_id: str,
+    now: float | None = None,
+) -> bool:
+    """Fail-closed claim checks without cryptographic signature verification.
+
+    - ``aud`` must be present and match app_id (or ``api://{app_id}``)
+    - ``exp`` must be present and not expired (60s skew)
+    - ``nbf`` if present must not be in the future (60s skew)
+    - ``iss`` if present must look like a Bot Framework / Azure AD issuer
+    """
+    app_id = (app_id or "").strip()
+    if not app_id or not isinstance(claims, dict):
+        return False
+    aud = claims.get("aud")
+    if isinstance(aud, list):
+        auds = [str(a) for a in aud if a is not None]
+    elif aud is not None and str(aud).strip():
+        auds = [str(aud)]
+    else:
+        auds = []
+    # Fail closed: missing aud previously accepted any forged payload.
+    if not auds:
+        return False
+    if app_id not in auds and f"api://{app_id}" not in auds:
+        return False
+
+    ts = time.time() if now is None else float(now)
+    exp = claims.get("exp")
+    if exp is None or exp is False or exp == "":
+        return False
+    try:
+        exp_f = float(exp)
+    except (TypeError, ValueError):
+        return False
+    if ts >= exp_f + 60:
+        return False
+
+    nbf = claims.get("nbf")
+    if nbf is not None and nbf is not False and nbf != "":
+        try:
+            if ts + 60 < float(nbf):
+                return False
+        except (TypeError, ValueError):
+            return False
+
+    iss = claims.get("iss")
+    if iss is not None and str(iss).strip():
+        iss_l = str(iss).strip().lower()
+        if not any(s in iss_l for s in _BF_ISS_SUFFIXES):
+            return False
+    return True
+
+
 class TeamsChannel(HttpSessionMixin, ChannelAdapter):
     """Outbound uses Bot Framework connector; inbound via /api/webhooks/teams."""
 
@@ -159,9 +224,10 @@ class TeamsChannel(HttpSessionMixin, ChannelAdapter):
     def verify_inbound_auth(self, authorization: str | None) -> bool:
         """Lightweight Bot Framework JWT gate (no PyJWT dependency).
 
-        Requires Bearer JWT when ``app_id`` is configured. Checks ``aud`` claim
-        matches app_id when present. Full signature verification against Azure
-        OpenID keys is not performed here (optional future enhancement).
+        Requires Bearer JWT when ``app_id`` is configured. Fail-closed claim
+        checks: ``aud`` must match app_id, ``exp`` required and not expired,
+        optional ``nbf``/``iss`` hygiene. Full JWKS signature verification is
+        still not performed here (residual risk if the webhook is reachable).
         Set ``REMEDY_TEAMS_SKIP_JWT=1`` only for local tunnel debugging.
         """
         import os
@@ -185,17 +251,10 @@ class TeamsChannel(HttpSessionMixin, ChannelAdapter):
         if not claims:
             logger.warning("Teams webhook Authorization is not a JWT")
             return False
-        aud = claims.get("aud")
-        # aud may be str or list
-        auds: list[str]
-        if isinstance(aud, list):
-            auds = [str(a) for a in aud]
-        elif aud is not None:
-            auds = [str(aud)]
-        else:
-            auds = []
-        if auds and self.app_id not in auds and f"api://{self.app_id}" not in auds:
-            logger.warning("Teams JWT aud mismatch (expected app_id)")
+        if not _jwt_claims_structurally_valid(claims, app_id=self.app_id):
+            logger.warning(
+                "Teams JWT claim check failed (aud/exp/nbf/iss fail-closed)"
+            )
             return False
         return True
 

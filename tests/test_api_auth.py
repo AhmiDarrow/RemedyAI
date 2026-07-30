@@ -123,3 +123,87 @@ def test_cors_allows_tauri_https_origin(auth_on, tmp_path):
     )
     assert r.status_code == 200
     assert r.headers.get("access-control-allow-origin") == "https://tauri.localhost"
+
+
+def test_gateway_serve_api_enables_auth(auth_on, tmp_path, monkeypatch):
+    """``remedy gateway serve`` must not open the loopback API without Bearer."""
+    import types
+
+    from remedy.gateway import cli as gateway_cli
+    import remedy.interfaces.api as api_mod
+
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    db = tmp_path / "memory.db"
+    db.write_bytes(b"")
+
+    captured: dict = {}
+
+    def _fake_create_app(*_a, **kwargs):
+        captured.update(kwargs)
+
+        class _App:
+            pass
+
+        return _App()
+
+    monkeypatch.setattr(api_mod, "create_app", _fake_create_app)
+
+    fake_uv = types.ModuleType("uvicorn")
+    fake_uv.run = lambda *a, **k: None  # type: ignore[attr-defined]
+    monkeypatch.setitem(__import__("sys").modules, "uvicorn", fake_uv)
+
+    gateway_cli._serve_api(db)  # noqa: SLF001
+    assert captured.get("api_key")
+    assert len(str(captured["api_key"])) >= 16
+
+
+def test_auth_length_mismatch_is_401_not_500(auth_on, tmp_path):
+    """Unequal Bearer length must not raise from compare_digest."""
+    tok = ensure_local_api_token(tmp_path)
+    app = create_app(api_key=tok)
+    client = TestClient(app)
+    r = client.get("/api/skills", headers={"Authorization": "Bearer x"})
+    assert r.status_code == 401
+
+
+def test_generic_webhook_fail_closed_without_secret(auth_on, tmp_path, monkeypatch):
+    """With API auth on and no shared secret, unauthenticated webhook is rejected."""
+    monkeypatch.delenv("REMEDY_WEBHOOK_SECRET", raising=False)
+    monkeypatch.delenv("REMEDY_API_KEY", raising=False)
+
+    class _GW:
+        async def enqueue(self, _event):
+            raise AssertionError("must not enqueue unauthenticated webhook")
+
+    # Empty api_key but auth still "enabled" via env — create_app won't install
+    # middleware; webhook route uses local_auth.auth_enabled() independently.
+    # When api_key is set, expected is present; when not, must 503.
+    app = create_app(gateway=_GW(), api_key="")
+    client = TestClient(app)
+    r = client.post(
+        "/api/webhook/ci",
+        json={"source": "ci", "event": "push", "data": {"x": 1}},
+    )
+    assert r.status_code in (401, 503)
+
+
+def test_generic_webhook_accepts_bearer(auth_on, tmp_path):
+    class _GW:
+        def __init__(self):
+            self.n = 0
+
+        async def enqueue(self, _event):
+            self.n += 1
+
+    tok = ensure_local_api_token(tmp_path)
+    gw = _GW()
+    app = create_app(gateway=gw, api_key=tok)
+    client = TestClient(app)
+    r = client.post(
+        "/api/webhook/ci",
+        json={"source": "ci", "event": "push", "data": {"x": 1}},
+        headers={"Authorization": f"Bearer {tok}"},
+    )
+    assert r.status_code == 200
+    assert r.json()["status"] == "accepted"
+    assert gw.n == 1
