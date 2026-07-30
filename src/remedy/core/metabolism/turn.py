@@ -35,18 +35,41 @@ def begin_turn_metabolism(
     project_path: str = "",
     work_roots: list[str] | None = None,
     brief_head: str = "",
+    pre_tier: int | None = None,
 ) -> dict[str, Any]:
-    """Classify tier, warm map/ledger/governor, return policy + inject notes."""
+    """Classify tier, warm map/ledger/governor, return policy + inject notes.
+
+    When *pre_tier* is set (e.g. send_policy already classified this turn),
+    reuse it and skip a second ``classify_turn_tier`` walk — unless intent is
+    autonomous (can elevate to L3 beyond text-only pre-classification).
+    """
     sid = (session_id or "").strip() or "_default"
-    tier = classify_turn_tier(
-        user_text,
-        intent=intent,
-        plan_mode=plan_mode,
-        has_attachments=has_attachments,
-        tools_enabled=tools_enabled,
-        pure_action=pure_action,
-        browse=browse,
-    )
+    intent_l = (intent or "chat").strip().lower()
+    # Reuse send_policy pre_tier (same turn) — avoid dual classify work.
+    # Autonomous intent may raise L0–L2 → L3; re-walk only then.
+    if pre_tier is not None and intent_l != "autonomous":
+        try:
+            tier = TurnTier(int(pre_tier))
+        except (TypeError, ValueError):
+            tier = classify_turn_tier(
+                user_text,
+                intent=intent,
+                plan_mode=plan_mode,
+                has_attachments=has_attachments,
+                tools_enabled=tools_enabled,
+                pure_action=pure_action,
+                browse=browse,
+            )
+    else:
+        tier = classify_turn_tier(
+            user_text,
+            intent=intent,
+            plan_mode=plan_mode,
+            has_attachments=has_attachments,
+            tools_enabled=tools_enabled,
+            pure_action=pure_action,
+            browse=browse,
+        )
     policy = tier_policy(tier)
 
     # Cheap accuracy metric — tier distribution (no labels overhead beyond key)

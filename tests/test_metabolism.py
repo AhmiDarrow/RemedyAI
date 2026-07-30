@@ -403,6 +403,32 @@ def test_l0_begin_turn_skips_full_organ_snapshots():
     assert "recent" not in (meta.get("decisions") or {})
 
 
+def test_begin_turn_accepts_pre_tier_without_reclassify():
+    """agent_react_loop passes pre_tier from send_policy; must not TypeError.
+
+    Regression: unexpected pre_tier kwarg was swallowed by suppress(Exception)
+    around begin_turn_metabolism → tier never set → L1 strip on agency turns.
+    """
+    # Reuse L2 even when text alone might look lean
+    meta = begin_turn_metabolism(
+        session_id="test_meta_sess",
+        user_text="hi",
+        intent="chat",
+        tools_enabled=True,
+        pre_tier=int(TurnTier.L2_AGENCY),
+    )
+    assert meta["tier"] == int(TurnTier.L2_AGENCY)
+    assert meta["policy"]["allow_tools"] is True
+    # Autonomous intent still elevates past pre_tier
+    meta3 = begin_turn_metabolism(
+        session_id="test_meta_sess",
+        user_text="hello",
+        intent="autonomous",
+        pre_tier=int(TurnTier.L1_LEAN),
+    )
+    assert meta3["tier"] == int(TurnTier.L3_DEEP)
+
+
 def test_evidence_redacts_secrets():
     led = get_evidence_ledger("test_meta_sess")
     led.admit_tool_result(
