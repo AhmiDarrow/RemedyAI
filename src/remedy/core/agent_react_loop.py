@@ -1702,6 +1702,62 @@ async def call_llm_stream(runtime, message: str,
                             continue
                     return
 
+                # Agency fail-open: model narrated "activating skill / using tools"
+                # but emitted zero native tool_calls (often after L1 strip). Put
+                # tools back and demand real function calls — do not end the turn
+                # on a stub promise. Only on short stubs so full answers are kept.
+                if (
+                    not tool_calls_list
+                    and all_tools
+                    and not force_answer_sticky
+                    and not is_final_step
+                    and (text_out or reasoning_out)
+                ):
+                    claim = f"{text_out or ''}\n{reasoning_out or ''}".lower()
+                    stub = len((text_out or "").strip()) < 480
+                    hard = any(
+                        p in claim
+                        for p in (
+                            "activating skill",
+                            "activate skill",
+                            "activating the review",
+                            "activating the skill",
+                            "using tools now",
+                            "i'll use tools",
+                            "i will use tools",
+                            "calling skill",
+                            "skill_activate",
+                        )
+                    )
+                    soft = stub and any(
+                        p in claim
+                        for p in (
+                            "let me review",
+                            "i'll review",
+                            "i will review",
+                            "dedicated procedure",
+                        )
+                    )
+                    if hard or soft:
+                        tools = all_tools
+                        force_answer_sticky = False
+                        messages.append(
+                            {
+                                "role": "user",
+                                "content": (
+                                    "Do not only *say* you will use tools or activate "
+                                    "a skill. Call tools now via the function-calling API "
+                                    "(e.g. skill_activate, list_dir, repo_search, "
+                                    "file_read). Start the real review/work immediately."
+                                ),
+                            }
+                        )
+                        logger.info(
+                            "Agency re-arm after tool-promise prose (step %d)",
+                            step + 1,
+                        )
+                        continue
+
                 if not tool_calls_list or force_answer:
                     # Empty content after tools/thinking: never soft-give-up while
                     # we still have budget. DeepSeek often leaves content blank
