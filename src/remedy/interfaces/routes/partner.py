@@ -383,7 +383,9 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
             from remedy.core.metabolism.turn import metabolism_public_snapshot
 
             sid_m = getattr(runtime, "_session_id", None) if runtime is not None else None
-            metabolism = metabolism_public_snapshot(str(sid_m or ""))
+            # Partner status is polled — lean counters only (no recent lists / sorts).
+            # Full Advanced detail lives on GET /api/partner/metabolism.
+            metabolism = metabolism_public_snapshot(str(sid_m or ""), lean=True)
         except Exception:
             metabolism = {}
 

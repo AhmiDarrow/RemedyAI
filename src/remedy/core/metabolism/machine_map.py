@@ -205,18 +205,23 @@ class MachineMap:
                 return ""
             return "[Machine map] " + " | ".join(parts)
 
-    def snapshot(self) -> dict[str, Any]:
+    def snapshot(self, *, lean: bool = False) -> dict[str, Any]:
+        """Map stats. *lean* skips per-slice public copies."""
         with self._lock:
             total = self.hit_count + self.miss_count
-            return {
+            out: dict[str, Any] = {
                 "session_id": self.session_id,
                 "slice_count": len(self.slices),
                 "work_roots": list(self.work_roots)[:8],
                 "hit_count": self.hit_count,
                 "miss_count": self.miss_count,
                 "hit_rate": round(self.hit_count / total, 4) if total else 0.0,
-                "slices": [s.to_public() for s in list(self.slices.values())[-12:]],
             }
+            if not lean:
+                out["slices"] = [
+                    s.to_public() for s in list(self.slices.values())[-12:]
+                ]
+            return out
 
 
 _maps: dict[str, MachineMap] = {}

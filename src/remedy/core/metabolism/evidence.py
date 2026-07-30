@@ -195,17 +195,20 @@ class EvidenceLedger:
             lines.append(f"- {eu.id} ({eu.kind}) {eu.summary[:180]}{ptr}")
         return "\n".join(lines)
 
-    def snapshot(self) -> dict[str, Any]:
+    def snapshot(self, *, lean: bool = False) -> dict[str, Any]:
+        """Public counters. *lean* skips recent-unit list + fingerprint size."""
         with self._lock:
-            return {
+            out: dict[str, Any] = {
                 "session_id": self.session_id,
                 "evidence_units": self.evidence_units,
                 "unit_count": len(self.units),
                 "waste_tokens": self.waste_tokens,
-                "unique_fps": len(self.seen_fps),
-                "last_model_eu_index": self.last_model_eu_index,
-                "recent": [u.to_public() for u in self.units[-12:]],
             }
+            if not lean:
+                out["unique_fps"] = len(self.seen_fps)
+                out["last_model_eu_index"] = self.last_model_eu_index
+                out["recent"] = [u.to_public() for u in self.units[-12:]]
+            return out
 
     def persist_index(self, home: Path | str | None = None) -> Path | None:
         """Write redacted index only (not full tool bodies). Fail soft.

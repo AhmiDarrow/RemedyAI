@@ -379,32 +379,57 @@ def end_turn_metabolism(
     with suppress(Exception):
         ledger.persist_index(home)
 
-    out["metabolism"] = metabolism_public_snapshot(sid)
+    # Lean counters only on end-turn hot path (full Advanced uses GET endpoint)
+    out["metabolism"] = metabolism_public_snapshot(sid, lean=True)
     return out
 
 
-def metabolism_public_snapshot(session_id: str | None = None) -> dict[str, Any]:
-    """Aggregate Advanced/operator snapshot (calm fields only)."""
-    sid = (session_id or "").strip() or "_default"
-    from remedy.core.metabolism.action_ir import ir_coverage_count
+def metabolism_public_snapshot(
+    session_id: str | None = None,
+    *,
+    lean: bool = False,
+) -> dict[str, Any]:
+    """Aggregate Advanced/operator snapshot (calm fields only).
 
+    *lean*: counters + flags only — no recent lists, no skill/CUA ranking sorts,
+    no IR coverage scan. Use on every end-turn and partner-status polls.
+    Full snapshot (default) for ``GET /api/partner/metabolism``.
+    """
+    sid = (session_id or "").strip() or "_default"
     skill_snap: dict = {}
     cua_snap: dict = {}
-    with suppress(Exception):
-        from remedy.core.metabolism.skill_genome import get_skill_genome
+    ir_total = 0
+    if not lean:
+        with suppress(Exception):
+            from remedy.core.metabolism.skill_genome import get_skill_genome
 
-        skill_snap = get_skill_genome().snapshot()
-    with suppress(Exception):
-        from remedy.core.metabolism.cua_macros import get_cua_macros
+            skill_snap = get_skill_genome().snapshot(lean=False)
+        with suppress(Exception):
+            from remedy.core.metabolism.cua_macros import get_cua_macros
 
-        cua_snap = get_cua_macros().snapshot()
+            cua_snap = get_cua_macros().snapshot(lean=False)
+        with suppress(Exception):
+            from remedy.core.metabolism.action_ir import ir_coverage_count
+
+            ir_total = ir_coverage_count()
+    else:
+        # Count-only genome/macros (no sort) — still useful for Advanced badges
+        with suppress(Exception):
+            from remedy.core.metabolism.skill_genome import get_skill_genome
+
+            skill_snap = get_skill_genome().snapshot(lean=True)
+        with suppress(Exception):
+            from remedy.core.metabolism.cua_macros import get_cua_macros
+
+            cua_snap = get_cua_macros().snapshot(lean=True)
     return {
-        "evidence": get_evidence_ledger(sid).snapshot(),
-        "decisions": get_decision_tracker(sid).snapshot(),
-        "machine_map": get_machine_map(sid).snapshot(),
-        "governor": get_governor(sid).snapshot(),
-        "time_crystal": get_time_crystal(sid).snapshot(),
+        "evidence": get_evidence_ledger(sid).snapshot(lean=lean),
+        "decisions": get_decision_tracker(sid).snapshot(lean=lean),
+        "machine_map": get_machine_map(sid).snapshot(lean=lean),
+        "governor": get_governor(sid).snapshot(lean=lean),
+        "time_crystal": get_time_crystal(sid).snapshot(lean=lean),
         "skill_genome": skill_snap,
         "cua_macros": cua_snap,
-        "ir_coverage_total": ir_coverage_count(),
+        "ir_coverage_total": ir_total,
+        "lean": bool(lean),
     }

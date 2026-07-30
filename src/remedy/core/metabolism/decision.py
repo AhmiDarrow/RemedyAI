@@ -81,21 +81,24 @@ class DecisionTracker:
             total_b = self.productive_tool_batches + self.waste_tool_batches
             return (self.waste_tool_batches / total_b) if total_b else 0.0
 
-    def snapshot(self) -> dict[str, Any]:
+    def snapshot(self, *, lean: bool = False) -> dict[str, Any]:
+        """Public counters. *lean* skips the recent DecisionUnit list copy."""
         with self._lock:
             total_b = self.productive_tool_batches + self.waste_tool_batches
             waste_rate = (
                 self.waste_tool_batches / total_b if total_b else 0.0
             )
-            return {
+            out: dict[str, Any] = {
                 "session_id": self.session_id,
                 "decision_units": self.decision_units,
                 "productive_tool_batches": self.productive_tool_batches,
                 "waste_tool_batches": self.waste_tool_batches,
                 "waste_batch_rate": round(waste_rate, 4),
                 "last_tier_label": self.last_tier_label,
-                "recent": [u.to_public() for u in self.units[-8:]],
             }
+            if not lean:
+                out["recent"] = [u.to_public() for u in self.units[-8:]]
+            return out
 
 
 _trackers: dict[str, DecisionTracker] = {}

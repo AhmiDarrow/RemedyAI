@@ -151,10 +151,13 @@ class CuaMacroStore:
                 lines.append(f"- {m.name} (hits={m.hits})")
             return "\n".join(lines)
 
-    def snapshot(self) -> dict[str, Any]:
+    def snapshot(self, *, lean: bool = False) -> dict[str, Any]:
         with self._lock:
+            count = len(self.macros)
+            if lean:
+                return {"count": count}
             top = sorted(self.macros.values(), key=lambda x: -x.hits)[:8]
-            return {"count": len(self.macros), "top": [m.to_public() for m in top]}
+            return {"count": count, "top": [m.to_public() for m in top]}
 
     def persist(self, home: Path | str | None = None) -> Path | None:
         try:
