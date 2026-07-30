@@ -17,6 +17,7 @@ import { TaskProgress, type TaskProgressInfo } from './TaskProgress'
 import { ImageLightbox } from './ImageLightbox'
 import { ChatImage } from './ChatImage'
 import { linkifyBareImagePaths } from '../utils/linkifyImages'
+import { chatMarkdownUrlTransform } from '../utils/chatMarkdownUrl'
 import { RemedyLogo } from './RemedyLogo'
 import {
   IconBtn,
@@ -399,6 +400,8 @@ const MessageBubble = memo(function MessageBubble({
                 ) : (
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
+                    // Default strip data:/Windows paths → blank images in chat.
+                    urlTransform={chatMarkdownUrlTransform}
                     components={{
                       pre({ children }) {
                         return <>{children}</>
@@ -416,10 +419,28 @@ const MessageBubble = memo(function MessageBubble({
                         )
                       },
                       img({ src, alt }) {
-                        if (!src) return null
+                        if (!src) {
+                          return (
+                            <span
+                              className="chat-img-error text-xs block my-1 px-2 py-1 rounded"
+                              style={{
+                                color: 'var(--warning)',
+                                background: 'var(--bg-tertiary)',
+                                border: '1px solid var(--border)',
+                              }}
+                            >
+                              Image unavailable{alt ? `: ${alt}` : ''}
+                            </span>
+                          )
+                        }
+                        // Avoid remount thrash when src is a multi-KB data URI.
+                        const imgKey =
+                          src.length > 96
+                            ? `${alt || 'img'}-${src.length}-${src.slice(0, 24)}`
+                            : src
                         return (
                           <ChatImage
-                            key={src}
+                            key={imgKey}
                             src={src}
                             alt={alt}
                             onOpen={(url, a) => onOpenImage?.(url, a)}
