@@ -74,3 +74,22 @@ def test_stale_heartbeat_reclaim(tmp_path, monkeypatch):
     lock = MessengerPollLock(tmp_path, "telegram")
     assert lock.try_acquire() is True
     lock.release()
+
+
+def test_inprocess_dual_acquire_refused(tmp_path):
+    """Second MessengerPollLock in the same process must not dual-poll."""
+    a = MessengerPollLock(tmp_path, "telegram")
+    b = MessengerPollLock(tmp_path, "telegram")
+    assert a.try_acquire() is True
+    assert b.try_acquire() is False
+    a.release()
+    assert b.try_acquire() is True
+    b.release()
+
+
+def test_try_acquire_idempotent_when_held(tmp_path):
+    lock = MessengerPollLock(tmp_path, "discord")
+    assert lock.try_acquire() is True
+    assert lock.try_acquire() is True  # same object re-entry
+    lock.release()
+

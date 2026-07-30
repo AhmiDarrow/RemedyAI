@@ -82,9 +82,18 @@ class WhatsAppChannel(HttpSessionMixin, ChannelAdapter):
     def verify_webhook_challenge(
         self, mode: str, token: str, challenge: str
     ) -> str | None:
-        if mode == "subscribe" and token and token == self.verify_token:
-            return challenge
-        return None
+        if mode != "subscribe":
+            return None
+        presented = (token or "").strip()
+        expected = (self.verify_token or "").strip()
+        if not presented or not expected:
+            return None
+        # Constant-time; unequal lengths → False (do not raise → no 500).
+        if len(presented) != len(expected):
+            return None
+        if not hmac.compare_digest(presented, expected):
+            return None
+        return challenge
 
     def verify_signature(self, body: bytes, signature_header: str) -> bool:
         # Fail closed: inbound POST requires app_secret + valid HMAC.

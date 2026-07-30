@@ -72,6 +72,11 @@ def _parse_lock_payload(raw: str) -> tuple[int, float] | None:
     return pid, ts
 
 
+# In-process holders: flock is re-entrant on Unix, so a second MessengerPollLock
+# in the same process must not start a dual getUpdates poller.
+_PROCESS_HOLDERS: dict[str, "MessengerPollLock"] = {}
+
+
 class MessengerPollLock:
     """Non-blocking exclusive lock for one messenger channel poller."""
 
@@ -82,8 +87,24 @@ class MessengerPollLock:
         self._fh = None  # keep open so Windows exclusive share holds
         self.held = False
 
+    def _key(self) -> str:
+        try:
+            return str(self.path.resolve())
+        except OSError:
+            return str(self.path)
+
     def try_acquire(self) -> bool:
         """Return True if this process owns the poller. False → do not start poll loop."""
+        if self.held:
+            return True
+        key = self._key()
+        other = _PROCESS_HOLDERS.get(key)
+        if other is not None and other is not self and getattr(other, "held", False):
+            logger.warning(
+                "%s poll lock already held in-process — not starting long-poll (avoid dual poll)",
+                self.channel,
+            )
+            return False
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
         except OSError as e:
@@ -155,6 +176,7 @@ class MessengerPollLock:
 
             self._write_payload()
             self.held = True
+            _PROCESS_HOLDERS[self._key()] = self
             logger.info(
                 "%s poll lock acquired (pid=%s path=%s)",
                 self.channel,
@@ -212,6 +234,9 @@ class MessengerPollLock:
                         self.path.unlink(missing_ok=True)
         finally:
             self.held = False
+            key = self._key()
+            if _PROCESS_HOLDERS.get(key) is self:
+                _PROCESS_HOLDERS.pop(key, None)
 
 
 def load_update_offset(home: Path | str | None, channel: str = "telegram") -> int:
