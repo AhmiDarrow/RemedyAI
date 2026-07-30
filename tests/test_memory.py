@@ -220,3 +220,48 @@ async def test_context_manager(tmp_path):
 
     # Should be closed after context manager
     assert s._db is None
+
+
+@pytest.mark.asyncio
+async def test_revert_from_resyncs_message_count(store):
+    """Time-travel soft-delete must drop session list badges, not leave +N forever."""
+    from remedy.models import ChatMessage, ChatMessageRole, ChatSession
+
+    sid = "sess-tt-1"
+    await store.create_chat_session(ChatSession(id=sid, title="TT"))
+    m1 = await store.add_chat_message(
+        ChatMessage(session_id=sid, role=ChatMessageRole.USER, content="u1")
+    )
+    await store.add_chat_message(
+        ChatMessage(session_id=sid, role=ChatMessageRole.ASSISTANT, content="a1")
+    )
+    m3 = await store.add_chat_message(
+        ChatMessage(session_id=sid, role=ChatMessageRole.USER, content="u2")
+    )
+    await store.add_chat_message(
+        ChatMessage(session_id=sid, role=ChatMessageRole.ASSISTANT, content="a2")
+    )
+    sess = await store.get_chat_session(sid)
+    assert sess is not None
+    assert sess.message_count == 4
+
+    # Roll back to second user turn (soft-delete u2 + a2)
+    n = await store.revert_from(sid, str(m3.id))
+    assert n == 2
+    sess2 = await store.get_chat_session(sid)
+    assert sess2 is not None
+    assert sess2.message_count == 2
+    live = await store.get_chat_messages(sid, limit=50)
+    assert len(live) == 2
+    assert [m.content for m in live] == ["u1", "a1"]
+
+    # Single-message revert also resyncs
+    ok = await store.revert_message(str(m1.id))
+    assert ok is True
+    sess3 = await store.get_chat_session(sid)
+    assert sess3 is not None
+    # a1 remains (reverted only m1); count = non-reverted rows
+    assert sess3.message_count == 1
+    live2 = await store.get_chat_messages(sid, limit=50)
+    assert len(live2) == 1
+    assert live2[0].content == "a1"
