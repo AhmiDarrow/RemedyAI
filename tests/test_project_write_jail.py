@@ -381,6 +381,22 @@ def test_shell_write_jail_blocks_encoded_and_archive(tmp_path: Path):
     assert block2 is not None
 
 
+def test_shell_write_jail_blocks_mutation_without_paths(tmp_path: Path):
+    from remedy.core.shell_write_jail import check_shell_write_jail
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    # Mutation-class with no extractable path tokens
+    block = check_shell_write_jail(
+        "Remove-Item -Recurse -Force",
+        write_roots=[proj],
+        cwd=proj,
+        project_bound=True,
+    )
+    assert block is not None
+    assert "no proven path" in block.lower() or "write roots" in block.lower()
+
+
 def test_shell_write_jail_blocks_interpreter_oneshot_without_paths(tmp_path: Path):
     """Issue 10: python -c / node -e without extractable paths fail closed."""
     sticky = tmp_path / "SecretSticky"

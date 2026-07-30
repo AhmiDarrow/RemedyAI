@@ -359,29 +359,34 @@ def build_context_snapshot(
     else:
         snap.signals["scout"] = {"skipped": True, "reason": "light_phase"}
 
-    # Goal — open checklist stale detection
-    try:
-        swarm.goal.sync_from_brief(brief if apply_brief_touch else None, session_id=session_id)
-        gsnap = swarm.goal.snapshot(session_id)
-        snap.signals["goal"] = gsnap
-        _append_remedy(swarm.goal.system_hint(session_id))
-    except Exception as e:
-        snap.signals["goal_error"] = str(e)
+    # Goal + health — skip on lean light phase (L0/L1) for hot-path speed
+    if not lean:
+        try:
+            swarm.goal.sync_from_brief(
+                brief if apply_brief_touch else None, session_id=session_id
+            )
+            gsnap = swarm.goal.snapshot(session_id)
+            snap.signals["goal"] = gsnap
+            _append_remedy(swarm.goal.system_hint(session_id))
+        except Exception as e:
+            snap.signals["goal_error"] = str(e)
 
-    # Health — flaky provider note (no network probe)
-    try:
-        h = swarm.health.snapshot(provider=provider, model=model)
-        snap.signals["health"] = {
-            "error_rate": h.get("error_rate"),
-            "rate_limit_hits": h.get("rate_limit_hits"),
-            "avg_latency_ms": h.get("avg_latency_ms"),
-            "flaky": h.get("flaky"),
-            "samples": h.get("samples"),
-        }
-        if h.get("flaky"):
-            _append_remedy(str(h.get("system_hint") or ""))
-    except Exception as e:
-        snap.signals["health_error"] = str(e)
+        try:
+            h = swarm.health.snapshot(provider=provider, model=model)
+            snap.signals["health"] = {
+                "error_rate": h.get("error_rate"),
+                "rate_limit_hits": h.get("rate_limit_hits"),
+                "avg_latency_ms": h.get("avg_latency_ms"),
+                "flaky": h.get("flaky"),
+                "samples": h.get("samples"),
+            }
+            if h.get("flaky"):
+                _append_remedy(str(h.get("system_hint") or ""))
+        except Exception as e:
+            snap.signals["health_error"] = str(e)
+    else:
+        snap.signals["goal"] = {"skipped": True, "reason": "light_phase"}
+        snap.signals["health"] = {"skipped": True, "reason": "light_phase"}
 
     # Swarm status counters (shared coordinator — locked API, no private races)
     with suppress(Exception):
