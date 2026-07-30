@@ -240,7 +240,7 @@ def after_tool_batch(
         ][:12]
         mmap.note_desktop_windows(len(titles), titles)
 
-    if action_ir is not None:
+    if action_ir is not None and int(tier) >= 2:
         with suppress(Exception):
             action_ir.add_step(
                 tool=name,
@@ -251,15 +251,19 @@ def after_tool_batch(
                 ok=success,
             )
 
+    # Throttle session_quality metabolism writes (every 3rd tool or on write)
     with suppress(Exception):
         from remedy.core.session_quality import get_session_quality
 
-        get_session_quality(sid).record_metabolism(
-            evidence_units=ledger.evidence_units,
-            decision_units=decisions.decision_units,
-            waste_tokens=ledger.waste_tokens,
-            ir_steps=1 if action_ir is not None else 0,
-        )
+        n = int(getattr(after_tool_batch, "_n", 0) or 0) + 1
+        after_tool_batch._n = n  # type: ignore[attr-defined]
+        if n % 3 == 0 or name in ("file_write", "file_edit", "bash_exec"):
+            get_session_quality(sid).record_metabolism(
+                evidence_units=ledger.evidence_units,
+                decision_units=decisions.decision_units,
+                waste_tokens=ledger.waste_tokens,
+                ir_steps=1 if action_ir is not None else 0,
+            )
 
     return {
         "eu_new": len(admitted),
