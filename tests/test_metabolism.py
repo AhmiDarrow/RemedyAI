@@ -299,6 +299,25 @@ def test_redact_shared_patterns():
     assert "[redacted]" in s
 
 
+def test_evidence_delta_before_mark_model_call():
+    """pointer_block must be non-empty before mark; empty after (order matters)."""
+    from remedy.core.metabolism.evidence import get_evidence_ledger, reset_evidence_ledger
+
+    reset_evidence_ledger("eu_order")
+    led = get_evidence_ledger("eu_order")
+    led.admit_tool_result(
+        tool_name="file_read",
+        content="ok\npath: C:\\Users\\Administrator\\RemedyAI\\src\\foo.py\n",
+        success=True,
+    )
+    before = led.pointer_block(limit=8)
+    assert before
+    assert "eu_" in before or "path" in before.lower() or "tool" in before.lower()
+    led.mark_model_call()
+    after = led.pointer_block(limit=8)
+    assert after == ""
+
+
 def test_spread_force_lowers_bar():
     from remedy.core.spread.planner import plan_spread
 
