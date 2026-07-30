@@ -93,6 +93,12 @@ def _purge_runtime_state(session_id: str, runtime: Any) -> None:
 
         with _brief_registry_lock:
             _brief_registry.pop(sid, None)
+    # Continuity process cache (tab rebind stash) — drop this session so a
+    # later rebound cannot resurrect a wiped brief / work roots.
+    with contextlib.suppress(Exception):
+        from remedy.core.session_continuity import drop_session_continuity_cache
+
+        drop_session_continuity_cache(sid)
 
     # Partner State registry (subgoals / txns / graph) — drop this session only
     with contextlib.suppress(Exception):

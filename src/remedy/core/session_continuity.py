@@ -136,16 +136,60 @@ def bind_session_continuity(runtime: Any, session_id: str | None) -> dict[str, A
     if meta["switched"] or meta["cleared_orphan"]:
         with suppress(Exception):
             runtime._prospective_session_fired = False
+        # Turn scratch is process-global on the shared runtime — never carry
+        # tab A's tool trail / stream accum into tab B's first turn.
+        with suppress(Exception):
+            for attr in (
+                "_turn_tool_steps",
+                "_last_tool_steps",
+                "_pending_tool_results",
+                "_stream_accum",
+            ):
+                if not hasattr(runtime, attr):
+                    continue
+                val = getattr(runtime, attr)
+                if isinstance(val, list):
+                    val.clear()
+                elif isinstance(val, dict):
+                    val.clear()
+                elif isinstance(val, set):
+                    val.clear()
+                else:
+                    setattr(runtime, attr, None if val is not None else val)
+            # One-shot mid-turn flags must not bleed across tabs either
+            for attr, default in (
+                ("_mission_gate_nudge_done", False),
+                ("_evidence_inject_eu", -1),
+            ):
+                if hasattr(runtime, attr):
+                    setattr(runtime, attr, default)
+            meta["turn_scratch_cleared"] = True
 
     if meta["switched"]:
         logger.info(
-            "Session continuity rebound %s → %s (brief=%s partner=%s)",
+            "Session continuity rebound %s → %s (brief=%s partner=%s scratch=%s)",
             prev,
             sid,
             meta.get("brief_bound"),
             meta.get("partner_bound"),
+            meta.get("turn_scratch_cleared"),
         )
     return meta
+
+
+def drop_session_continuity_cache(session_id: str | None) -> None:
+    """Drop cached brief/work-roots for a session (reset / delete)."""
+    sid = str(session_id or "").strip()
+    if not sid:
+        return
+    _brief_by_session.pop(sid, None)
+    _work_roots_by_session.pop(sid, None)
+
+
+def clear_all_continuity_caches() -> None:
+    """Test/helper: wipe in-process continuity caches."""
+    _brief_by_session.clear()
+    _work_roots_by_session.clear()
 
 
 def session_isolation_system_line(runtime: Any) -> str:

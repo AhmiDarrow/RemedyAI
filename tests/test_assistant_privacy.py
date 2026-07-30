@@ -95,7 +95,31 @@ def test_public_status_includes_privacy(tmp_path):
     assert pub["data_residency"] == "local"
     assert "privacy_ai_full" in pub["privacy"]
     assert "consent_version" in pub
+    assert "current_consent_version" in pub
+    assert pub["consent_ok"] is False
+    assert pub["needs_reaccept"] is False  # never accepted → not "re"-accept
     assert clip("hello", 3) == "he…"
+
+
+def test_public_status_needs_reaccept_on_stale_version(tmp_path):
+    from remedy.assistant.privacy import CURRENT_CONSENT_VERSION
+    from remedy.assistant.store import get_assistant_store
+
+    store = get_assistant_store(tmp_path)
+    store.patch_prefs(privacy_ai_accepted=True, account_access_accepted=True)
+    store.patch_prefs(consent_version="ancient_scopes_v0")
+    pub = store.public_status()
+    assert pub["needs_reaccept"] is True
+    assert pub["consent_ok"] is False
+    assert pub["current_consent_version"] == CURRENT_CONSENT_VERSION
+    assert "updated" in (pub.get("consent_reason") or "").lower() or "re-accept" in (
+        pub.get("consent_reason") or ""
+    ).lower()
+    # Fresh accept clears the flag
+    store.patch_prefs(privacy_ai_accepted=True, account_access_accepted=True)
+    pub2 = store.public_status()
+    assert pub2["needs_reaccept"] is False
+    assert pub2["consent_ok"] is True
 
 
 @pytest.mark.asyncio

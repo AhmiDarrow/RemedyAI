@@ -34,9 +34,16 @@ export type UsagePayload = {
   provider?: string | null
 }
 
+export type StreamDonePayload = {
+  request_id: string
+  usage?: UsagePayload
+  /** Cooperative Stop / server abort — not a successful completion. */
+  aborted?: boolean
+}
+
 export type StreamHandlers = {
   onToken: (text: string) => void
-  onDone: (data: { request_id: string; usage?: UsagePayload }) => void
+  onDone: (data: StreamDonePayload) => void
   onError: (message: string) => void
   onThinking?: (text: string) => void
   onToolCall?: (
@@ -74,7 +81,7 @@ export function streamMessage(
   sessionId: string,
   message: string,
   onToken: (text: string) => void,
-  onDone: (data: { request_id: string; usage?: UsagePayload }) => void,
+  onDone: (data: StreamDonePayload) => void,
   onError: (message: string) => void,
   model?: string,
   onThinking?: (text: string) => void,
@@ -223,15 +230,16 @@ export function streamMessage(
             if (payload.usage && typeof payload.usage === 'object') {
               onUsage?.(payload.usage as UsagePayload)
             }
-            onDone(payload as { request_id: string; usage?: UsagePayload })
+            onDone(payload as StreamDonePayload)
             break
           case 'aborted':
-            // Cooperative Stop — not an error. Still finish cleanly so UI/job
-            // state clears if the client had not already called stopStreamJob.
+            // Cooperative Stop — not an error, but not success either.
+            // Callers complete the job as 'aborted' and mark partials [Stopped].
             finished = true
             onDone({
               request_id:
                 typeof payload.request_id === 'string' ? payload.request_id : '',
+              aborted: true,
             })
             break
           case 'error':

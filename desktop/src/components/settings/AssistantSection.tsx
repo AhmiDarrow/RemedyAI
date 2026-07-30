@@ -57,6 +57,12 @@ export type AssistantStatus = {
   money_disclaimer?: string
   privacy_ai_accepted?: boolean
   account_access_accepted?: boolean
+  consent_version?: string
+  current_consent_version?: string
+  consent_ok?: boolean
+  consent_reason?: string
+  /** True when prior accept is stale after scope/terms bump. */
+  needs_reaccept?: boolean
   privacy?: {
     privacy_ai_short?: string
     privacy_ai_full?: string
@@ -274,6 +280,38 @@ export function AssistantSection({
         </div>
 
         <div className="mb-2 text-[10px]" style={{ color: 'var(--text-secondary)' }}>
+          {assistant?.needs_reaccept ? (
+            <div
+              className="mb-1.5 rounded-md px-2 py-1.5 text-[10px] leading-snug flex flex-wrap items-center gap-2"
+              role="status"
+              style={{
+                color: 'var(--remedy-warning, #b8860b)',
+                background: 'color-mix(in srgb, var(--remedy-warning, #b8860b) 12%, transparent)',
+                border: '1px solid color-mix(in srgb, var(--remedy-warning, #b8860b) 35%, transparent)',
+              }}
+            >
+              <span className="flex-1 min-w-[10rem]">
+                {assistant.consent_reason
+                  || 'Privacy terms or account scopes were updated — re-accept before Connect or account tools.'}
+              </span>
+              <button
+                type="button"
+                className="px-2 py-0.5 rounded font-semibold"
+                style={{
+                  background: 'var(--accent)',
+                  color: '#fff',
+                  border: 'none',
+                  cursor: 'pointer',
+                }}
+                onClick={() => {
+                  setMsg('')
+                  setDialogOpen(true)
+                }}
+              >
+                Review &amp; accept
+              </button>
+            </div>
+          ) : null}
           {googleConnected && google?.tokens_encoding_warning ? (
             <div
               className="mb-1.5 rounded-md px-2 py-1.5 text-[10px] leading-snug"

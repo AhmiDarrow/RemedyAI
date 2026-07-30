@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from remedy.interfaces.config import (
     DEMO_DUMMY_API_KEY,
     PROVIDER_CATALOG,
@@ -11,6 +13,7 @@ from remedy.interfaces.config import (
     provider_credentials_ready,
     public_provider_catalog,
     resolve_provider_api_key,
+    validate_provider_model,
 )
 
 
@@ -116,6 +119,22 @@ def test_normalize_demo_settings():
     assert p == "demo"
     assert m
     assert "llm7.io" in u
+
+
+def test_normalize_demo_clamps_junk_models():
+    """Guest free path must not keep image/foreign ids from a previous provider."""
+    default = PROVIDER_CATALOG["demo"]["models"][0]["id"]
+    p, m, u = normalize_llm_settings("demo", "deepseek-v4-flash", None)
+    assert p == "demo"
+    assert m == default
+    assert "llm7.io" in u
+    p2, m2, _ = normalize_llm_settings("demo", "flux-kontext-max", None)
+    assert m2 == default
+    p3, m3, _ = normalize_llm_settings("demo", "codestral-latest", None)
+    assert m3 == "codestral-latest"
+    with pytest.raises(ValueError, match="demo model"):
+        validate_provider_model("demo", "kling-v3.0-pro")
+    assert validate_provider_model("demo", "codestral-latest") == "codestral-latest"
 
 
 def test_bootstrap_prefers_demo_when_empty(monkeypatch):

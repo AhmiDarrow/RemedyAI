@@ -427,6 +427,16 @@ class AssistantStore:
         except Exception:
             pass
         notices = privacy_bundle()
+        from remedy.assistant.privacy import CURRENT_CONSENT_VERSION, consent_ok
+
+        ok, reason = consent_ok(self.home)
+        stored_cv = str(getattr(prefs, "consent_version", "") or "")
+        # Re-accept only when the user already accepted but scopes/terms moved on.
+        needs_reaccept = bool(
+            prefs.privacy_ai_accepted
+            and prefs.account_access_accepted
+            and not ok
+        )
         return {
             "enabled": prefs.enabled,
             "timezone": prefs.timezone,
@@ -434,7 +444,11 @@ class AssistantStore:
             "money_disclaimer": MONEY_DISCLAIMER_SHORT,
             "privacy_ai_accepted": prefs.privacy_ai_accepted,
             "account_access_accepted": prefs.account_access_accepted,
-            "consent_version": str(getattr(prefs, "consent_version", "") or ""),
+            "consent_version": stored_cv,
+            "current_consent_version": CURRENT_CONSENT_VERSION,
+            "consent_ok": bool(ok),
+            "consent_reason": "" if ok else str(reason or ""),
+            "needs_reaccept": needs_reaccept,
             "privacy": notices,
             "brief": prefs.brief.to_dict(),
             "accounts": self.accounts_public(),
