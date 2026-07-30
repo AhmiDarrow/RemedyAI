@@ -6,8 +6,11 @@ import json
 
 from remedy.core.react_policy import (
     _DEFAULT_SYSTEM_PROMPT,
+    AGENCY_REARM_NUDGE,
     RECOVERY_NUDGE,
     SPEED_BATCH_NUDGE,
+    agency_rearm_nudge_message,
+    agency_tool_promise_claim,
     batch_has_tool_errors,
     is_serial_explore_batch,
     looks_like_pseudo_tools,
@@ -40,8 +43,10 @@ def test_serial_explore_batch_detection() -> None:
 def test_message_wants_tools_chat_vs_code() -> None:
     assert message_wants_tools("hello!") is False
     assert message_wants_tools("what skills do you have?") is False
+    assert message_wants_tools("list my skills") is False
     assert message_wants_tools("list the files in src/") is True
     assert message_wants_tools("please review the codebase architecture") is True
+    assert message_wants_tools("review project") is True
     # Frozenset early-out greets / acks still False
     for g in ("hi", "thanks", "ok", "great"):
         assert message_wants_tools(g) is False, g
@@ -49,6 +54,58 @@ def test_message_wants_tools_chat_vs_code() -> None:
     assert message_wants_tools("proceed") is True
     assert message_wants_tools("continue") is True
     assert message_wants_tools("sounds good") is True
+
+
+def test_agency_tool_promise_claim_hard_and_soft() -> None:
+    """Model said 'Activating skill now' without tool_calls → re-arm claim."""
+    assert agency_tool_promise_claim("Activating skill now") is True
+    assert agency_tool_promise_claim("Activating skill now.") is True
+    assert agency_tool_promise_claim("I'll use tools now") is True
+    assert agency_tool_promise_claim("using tools now") is True
+    assert agency_tool_promise_claim("Calling skill_activate next") is True
+    # Soft only on short stubs
+    assert agency_tool_promise_claim("Let me review the project") is True
+    assert agency_tool_promise_claim("I'll review this") is True
+    # Soft claim buried in a long written answer must not re-arm
+    long_review = ("Here is a full architecture review.\n" * 40) + "let me review"
+    assert len(long_review) >= 480
+    assert agency_tool_promise_claim(long_review) is False
+    # Hard phrase still wins even when long
+    assert agency_tool_promise_claim(long_review + " Activating skill now") is True
+    # Reasoning-only path
+    assert agency_tool_promise_claim("", "Activating skill now") is True
+    assert agency_tool_promise_claim(None, "I will use tools") is True
+    # Clean final answers / greets
+    assert agency_tool_promise_claim("Here is the final result.") is False
+    assert agency_tool_promise_claim("hi") is False
+    assert agency_tool_promise_claim("", "") is False
+    assert agency_tool_promise_claim(None, None) is False
+    # Nudge message shape for loop injection
+    nudge = agency_rearm_nudge_message()
+    assert nudge["role"] == "user"
+    assert AGENCY_REARM_NUDGE in nudge["content"]
+    assert "function-calling" in nudge["content"].lower()
+
+
+def test_message_wants_tools_skill_activate_and_audit() -> None:
+    """Skill progressive disclosure + audit must keep tools (not L1 strip)."""
+    for msg in (
+        "activate change-safety",
+        "activate the change-safety skill",
+        "skill_activate change-safety",
+        "skill_activate(name=change-safety)",
+        "use skill project-etiquette",
+        "load the project-etiquette skill",
+        "follow the change-safety skill",
+        "security audit",
+        "audit security",
+        "list files",
+        "inspect the project",
+    ):
+        assert message_wants_tools(msg) is True, msg
+    # Meta skill *listing* stays tool-free (L0 answers from catalog)
+    assert message_wants_tools("list skills") is False
+    assert message_wants_tools("show my skills") is False
 
 
 def test_message_wants_tools_action_kicks() -> None:
@@ -150,6 +207,15 @@ def test_history_suggests_open_work_keeps_agency() -> None:
     assert looks_like_false_progress(
         "Let me bring up Google there now."
     ) is True
+    # Skill prose without skill_activate tool_calls
+    assert looks_like_false_progress("Activating skill now.") is True
+    assert looks_like_false_progress(
+        "I am activating the change-safety skill."
+    ) is True
+    assert looks_like_false_progress(
+        "Loading SKILL.md for change-safety…"
+    ) is True
+    assert looks_like_false_progress("I will use skill_activate now") is True
 
 
 def test_pseudo_tool_parse_and_log(caplog) -> None:
@@ -244,6 +310,31 @@ def test_dsml_list_dir_comfy_hunt_collapses_to_locate() -> None:
 def test_message_wants_comfyui() -> None:
     assert message_wants_tools("use local comfyui to generate an image") is True
     assert message_wants_tools("generate an image for me") is True
+
+
+def test_message_wants_tools_aligns_with_l2_agency_tier() -> None:
+    """L2 agency phrases must not be stripped by L1 path (wants_tools True)."""
+    from remedy.core.metabolism.tier import TurnTier, classify_turn_tier, tier_policy
+
+    agency_msgs = (
+        "review project",
+        "activate change-safety",
+        "security audit",
+        "list files",
+        "skill_activate change-safety",
+        "inspect the project",
+    )
+    for msg in agency_msgs:
+        tier = classify_turn_tier(msg)
+        assert tier >= TurnTier.L2_AGENCY, f"tier {msg!r} → {tier!r}"
+        assert tier_policy(tier).allow_tools is True
+        assert message_wants_tools(msg) is True, msg
+    # L0 skill list: tools off for message_wants; tier is instant
+    assert classify_turn_tier("list my skills") == TurnTier.L0_INSTANT
+    assert message_wants_tools("list my skills") is False
+    # Pure chat stays lean + no tools
+    assert classify_turn_tier("hi") == TurnTier.L1_LEAN
+    assert message_wants_tools("hi") is False
 
 
 def test_tool_call_fingerprint_stable() -> None:

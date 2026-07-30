@@ -26,6 +26,8 @@ from remedy.core.react_policy import (
     _looks_like_pseudo_tools,
     _parse_pseudo_tool_calls,
     _tool_call_fingerprint,
+    agency_rearm_nudge_message,
+    agency_tool_promise_claim,
     batch_has_approval_required,
     batch_has_empty_search,
     batch_has_tool_errors,
@@ -370,6 +372,14 @@ async def call_llm_stream(runtime, message: str,
             roots_m: list[str] = []
             with suppress(Exception):
                 roots_m = list(getattr(runtime, "_work_roots", None) or [])
+            # Reuse send_policy pre_tier when present (same turn — no dual classify).
+            pre_tier_m = None
+            with suppress(Exception):
+                raw_pt = getattr(runtime, "_turn_tier_preclassified", None)
+                if raw_pt is None:
+                    raw_pt = getattr(runtime, "_turn_tier", None)
+                if raw_pt is not None:
+                    pre_tier_m = int(raw_pt)
             meta = begin_turn_metabolism(
                 session_id=sid_m,
                 user_text=message or "",
@@ -382,6 +392,7 @@ async def call_llm_stream(runtime, message: str,
                 project_path=str(getattr(runtime, "_project_path", "") or ""),
                 work_roots=roots_m or None,
                 brief_head=(message or "")[:200],
+                pre_tier=pre_tier_m,
             )
             runtime._turn_tier = int(meta.get("tier") or 1)
             runtime._turn_tier_label = str(meta.get("tier_label") or "")
@@ -1604,6 +1615,25 @@ async def call_llm_stream(runtime, message: str,
                             }
                         )
                         continue
+                    # Agency fail-open (content path): "Activating skill now" etc.
+                    # Must run *before* false-progress / final-answer acceptance —
+                    # skill/tool promise claims get a dedicated re-arm nudge
+                    # (skill_activate, list_dir, …), not a generic status nudge.
+                    if (
+                        not tool_calls_list
+                        and all_tools
+                        and not force_answer_sticky
+                        and not is_final_step
+                        and agency_tool_promise_claim(text_out, reasoning_out)
+                    ):
+                        tools = all_tools
+                        force_answer_sticky = False
+                        messages.append(agency_rearm_nudge_message())
+                        logger.info(
+                            "Agency re-arm after tool-promise prose (step %d)",
+                            step + 1,
+                        )
+                        continue
                     # Narrating "I'm processing…" without tools looks stuck in the UI.
                     # Never accept a status-only line as the final answer while tools
                     # are available (session bug 2026-07-28: short snippet then stop).
@@ -1702,61 +1732,24 @@ async def call_llm_stream(runtime, message: str,
                             continue
                     return
 
-                # Agency fail-open: model narrated "activating skill / using tools"
-                # but emitted zero native tool_calls (often after L1 strip). Put
-                # tools back and demand real function calls — do not end the turn
-                # on a stub promise. Only on short stubs so full answers are kept.
+                # Agency fail-open (reasoning / empty-content path): model
+                # narrated skill/tool intent only in reasoning_content, or
+                # content was stripped — re-arm tools instead of ending.
                 if (
                     not tool_calls_list
                     and all_tools
                     and not force_answer_sticky
                     and not is_final_step
-                    and (text_out or reasoning_out)
+                    and agency_tool_promise_claim(text_out, reasoning_out)
                 ):
-                    claim = f"{text_out or ''}\n{reasoning_out or ''}".lower()
-                    stub = len((text_out or "").strip()) < 480
-                    hard = any(
-                        p in claim
-                        for p in (
-                            "activating skill",
-                            "activate skill",
-                            "activating the review",
-                            "activating the skill",
-                            "using tools now",
-                            "i'll use tools",
-                            "i will use tools",
-                            "calling skill",
-                            "skill_activate",
-                        )
+                    tools = all_tools
+                    force_answer_sticky = False
+                    messages.append(agency_rearm_nudge_message())
+                    logger.info(
+                        "Agency re-arm after tool-promise prose (step %d)",
+                        step + 1,
                     )
-                    soft = stub and any(
-                        p in claim
-                        for p in (
-                            "let me review",
-                            "i'll review",
-                            "i will review",
-                            "dedicated procedure",
-                        )
-                    )
-                    if hard or soft:
-                        tools = all_tools
-                        force_answer_sticky = False
-                        messages.append(
-                            {
-                                "role": "user",
-                                "content": (
-                                    "Do not only *say* you will use tools or activate "
-                                    "a skill. Call tools now via the function-calling API "
-                                    "(e.g. skill_activate, list_dir, repo_search, "
-                                    "file_read). Start the real review/work immediately."
-                                ),
-                            }
-                        )
-                        logger.info(
-                            "Agency re-arm after tool-promise prose (step %d)",
-                            step + 1,
-                        )
-                        continue
+                    continue
 
                 if not tool_calls_list or force_answer:
                     # Empty content after tools/thinking: never soft-give-up while

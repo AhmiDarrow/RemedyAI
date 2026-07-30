@@ -169,32 +169,70 @@ async def build_turn_context(runtime: Any) -> str:
 
     # Skills catalog (progressive disclosure stage 1) — ranked, not full bodies.
     # Prefer warm rank cache from speculative prep / prior turns (skip re-rank).
+    # Concrete tasks ("review project") re-rank and may auto-inject the top
+    # procedure so the model has a real checklist without a skill_activate hop.
     with suppress(Exception):
         reg = getattr(runtime, "skills", None)
         count = int(getattr(reg, "count", 0) or 0) if reg is not None else 0
         if reg is not None and count > 0:
+            import re as _re
+
             ranked_lines: list[str] = []
             used_warm = False
+            task_q = ""
+            top_ranked: list[tuple[Any, float]] = []
+            with suppress(Exception):
+                task_q = str(
+                    getattr(runtime, "_turn_user_text", None)
+                    or getattr(runtime, "_last_user_text", None)
+                    or ""
+                ).strip()[:240]
+            # Greets / one-word acks are not skill-ranking queries — keep warm cache.
+            if task_q and (
+                len(task_q) < 4
+                or task_q.lower().rstrip("!.?")
+                in {
+                    "hi",
+                    "hey",
+                    "hello",
+                    "thanks",
+                    "thank you",
+                    "ok",
+                    "okay",
+                    "yes",
+                    "no",
+                    "yep",
+                    "nope",
+                    "sure",
+                    "cool",
+                    "bye",
+                }
+            ):
+                task_q = ""
             with suppress(Exception):
                 from remedy.nanoswarm import get_swarm
 
                 warm = list(getattr(get_swarm().skill, "_rank_cache", None) or [])
-                # Warm is usable when it lists at least a few skills (not stale empty)
-                if len(warm) >= 3:
+                # Warm is usable for pure chat / empty query; for concrete tasks
+                # re-rank so "review project" surfaces the right skills.
+                if len(warm) >= 3 and not task_q:
                     ranked_lines = warm[:24]
                     used_warm = True
             if not ranked_lines:
                 ws = str(runtime.effective_project_path())
-                # One rank pass with workspace hint (avoid summary_lines + match_skills)
+                # One rank pass with workspace + task query
                 if hasattr(reg, "match_skills"):
-                    top = reg.match_skills(
-                        "",
-                        limit=24,
-                        workspace_hint=ws,
+                    top_ranked = list(
+                        reg.match_skills(
+                            task_q,
+                            limit=24,
+                            workspace_hint=ws,
+                        )
+                        or []
                     )
-                    if top:
+                    if top_ranked:
                         lines = []
-                        for skill, _sc in top:
+                        for skill, _sc in top_ranked:
                             m = skill.manifest
                             st = (
                                 m.status.value
@@ -222,6 +260,75 @@ async def build_turn_context(runtime: Any) -> str:
                 "full procedure; skill_search to rank by task):\n"
                 + "\n".join(ranked_lines)
             )
+            # Auto-suggest: high-confidence task match → inject procedure body
+            # (stage-2 progressive disclosure without waiting for a tool hop).
+            # Targets review/coding turns so "review project" gets change-safety
+            # (or best match) checklist in context immediately.
+            with suppress(Exception):
+                _TASK_PROC = _re.compile(
+                    r"\b("
+                    r"review|audit|refactor|implement|fix|debug|ship|release|"
+                    r"codebase|code review|blast.?radius|change.?safety|"
+                    r"project.?etiquette|test suite|multi-?file|neighbors"
+                    r")\b",
+                    _re.I,
+                )
+                # Cap keeps one skill from dominating (change-safety ~3.5k).
+                _PROC_CAP = 4_000
+                _MIN_SCORE = 0.48
+                if (
+                    task_q
+                    and _TASK_PROC.search(task_q)
+                    and top_ranked
+                    and float(top_ranked[0][1]) >= _MIN_SCORE
+                ):
+                    best_skill, best_score = top_ranked[0]
+                    m = best_skill.manifest
+                    meta = m.metadata or {}
+                    # Never auto-inject quarantined / inactive skills
+                    if meta.get("quarantine"):
+                        best_skill = None  # type: ignore[assignment]
+                    st = (
+                        m.status.value
+                        if hasattr(m.status, "value")
+                        else str(m.status)
+                    )
+                    if str(st).lower() in (
+                        "disabled",
+                        "archived",
+                        "deprecated",
+                    ):
+                        best_skill = None  # type: ignore[assignment]
+                    if best_skill is not None:
+                        body = (getattr(best_skill, "instructions", None) or "").strip()
+                        if not body and hasattr(reg, "skill_body"):
+                            raw = reg.skill_body(m.name) or ""
+                            # skill_body includes headers — prefer instructions when present
+                            body = raw.strip()
+                        if body:
+                            if len(body) > _PROC_CAP:
+                                body = (
+                                    body[:_PROC_CAP]
+                                    + f"\n\n…[auto-suggest truncated at {_PROC_CAP} chars"
+                                    " — skill_activate for full procedure]"
+                                )
+                            parts.append(
+                                f"[Skill auto-suggest] Top match for this task: "
+                                f"**{m.name}** (score={float(best_score):.2f}). "
+                                "Procedure loaded into context — follow it; "
+                                f"skill_activate(name={m.name}) only if you need "
+                                "references or a refresh.\n\n"
+                                f"{body}"
+                            )
+                            with suppress(Exception):
+                                from remedy.core.metrics import default_registry
+
+                                default_registry.counter(
+                                    "remedy_skill_auto_suggest_inject_total"
+                                ).inc()
+                                # Treat as soft activation for genome / learning
+                                with suppress(Exception):
+                                    reg.mark_activated(m.name)
             with suppress(Exception):
                 from remedy.core.metrics import default_registry
 

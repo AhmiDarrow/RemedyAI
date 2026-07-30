@@ -243,6 +243,10 @@ _TOOL_HINT_RE = re.compile(
     r"read|write|edit|create|delete|list|ls|cat|open|save|"
     r"file|files|folder|directory|path|workspace|codebase|repo|repository|project|"
     r"review|analyze|analyse|explore|overview|inspect|structure|architecture|"
+    r"audit|"
+    # Skill progressive disclosure (session: "activate change-safety" with tools=[]
+    # → model only wrote "Activating skill now" with zero skill_activate calls)
+    r"skill_activate|skill_search|skill_run|activate|skill|"
     r"run|execute|shell|bash|command|terminal|install|build|test|"
     r"implement|implemen\w*|refactor|debug|fix(?:es)?|bug|error|stack|trace|"
     r"patch|apply|ship|deploy|"
@@ -330,7 +334,8 @@ _FALSE_PROGRESS_RE = re.compile(
     r"(?:process|processing|check|checking|work|working|pick(?:ing)?\s+up|"
     r"start|starting|do(?:ing)?|handle|handling|run|running|"
     r"try|trying|open|opening|navigate|navigating|bring|bringing|"
-    r"load|loading|pull|pulling|launch|launching)\b|"
+    r"load|loading|pull|pulling|launch|launching|"
+    r"activate|activating)\b|"
     r"\bprocessing\b|"
     r"\bworking\s+on\s+it\b|"
     r"\bpicking\s+up\b|"
@@ -340,6 +345,12 @@ _FALSE_PROGRESS_RE = re.compile(
     r"\bchecking\s+assets\b|"
     r"\bdoing\s+the\s+(?:asset|logo|work)\b|"
     r"\bso\s+we\s+can\s+(?:finish|complete|continue)\b|"
+    # Skill prose without skill_activate tool_calls (review-project class bug)
+    r"\bactivat(?:e|ing)\s+(?:the\s+)?(?:[\w.-]+\s+)?skill\b|"
+    r"\bactivat(?:e|ing)\s+(?:the\s+)?[\w.-]{2,48}\b|"
+    r"\bskill_activate\b|"
+    r"\bloading\s+(?:the\s+)?skill\b|"
+    r"\bloading\s+skill\.?md\b|"
     # Browser rail intent-only lines (session 2026-07-28 Gmail)
     r"\bbrowser\s+rail\b|"
     r"\bin[- ]?app\s+browser\b|"
@@ -387,10 +398,15 @@ _CHAT_ONLY_RE = re.compile(
 )
 
 # Meta questions that must be answered from context (no shell / file thrash).
+# Keep aligned with L0 skill/list patterns so "list my skills" stays tool-free.
 _META_NO_TOOLS_RE = re.compile(
-    r"\b(what skills|which skills|list skills|your skills|"
+    r"\b("
+    r"what skills|which skills|list skills|your skills|"
+    r"list (?:my |your |the )?skills|"
+    r"show (?:my |your |the )?skills|"
     r"what tools|which tools|list tools|your tools|"
-    r"what can you do|who are you|what are you)\b",
+    r"what can you do|who are you|what are you"
+    r")\b",
     re.IGNORECASE,
 )
 
@@ -540,6 +556,63 @@ def history_suggests_open_work(
 def looks_like_false_progress(text: str) -> bool:
     """True when the model claims to be working without native tool_calls."""
     return bool(text and _FALSE_PROGRESS_RE.search(text))
+
+
+# Hard phrases: always re-arm tools (even if the model wrote a longer stub).
+_AGENCY_TOOL_PROMISE_HARD = (
+    "activating skill",
+    "activate skill",
+    "activating the review",
+    "activating the skill",
+    "using tools now",
+    "i'll use tools",
+    "i will use tools",
+    "calling skill",
+    "skill_activate",
+)
+# Soft phrases: only on short stubs so full written reviews are not interrupted.
+_AGENCY_TOOL_PROMISE_SOFT = (
+    "let me review",
+    "i'll review",
+    "i will review",
+    "dedicated procedure",
+)
+
+AGENCY_REARM_NUDGE = (
+    "Do not only *say* you will use tools or activate "
+    "a skill. Call tools now via the function-calling API "
+    "(e.g. skill_activate, list_dir, repo_search, "
+    "file_read). Start the real review/work immediately."
+)
+
+
+def agency_tool_promise_claim(
+    text_out: str | None,
+    reasoning_out: str | None = None,
+    *,
+    stub_char_limit: int = 480,
+) -> bool:
+    """True when the model narrated skill/tool use without native tool_calls.
+
+    Used by the ReAct loop to re-arm tools instead of accepting a stub promise
+    ("Activating skill now") as the final answer.
+    """
+    text = (text_out or "").strip()
+    reasoning = (reasoning_out or "").strip()
+    if not text and not reasoning:
+        return False
+    claim = f"{text}\n{reasoning}".lower()
+    if any(p in claim for p in _AGENCY_TOOL_PROMISE_HARD):
+        return True
+    stub = len(text) < max(1, int(stub_char_limit))
+    if stub and any(p in claim for p in _AGENCY_TOOL_PROMISE_SOFT):
+        return True
+    return False
+
+
+def agency_rearm_nudge_message() -> dict[str, str]:
+    """User-role message that demands real function calls after a prose promise."""
+    return {"role": "user", "content": AGENCY_REARM_NUDGE}
 
 
 # Back-compat alias used by older tests / imports.
