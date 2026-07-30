@@ -6,6 +6,7 @@ remember those roots so orientation/fingerprint can follow real work.
 
 from __future__ import annotations
 
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -60,7 +61,10 @@ def discover_work_root(path: Path | str | None) -> Path | None:
 
 
 def note_work_path(runtime: Any, path: Path | str | None) -> Path | None:
-    """Record a touched path's work root on *runtime*. Returns root if found."""
+    """Record a touched path's work root on *runtime*. Returns root if found.
+
+    Also mirrors into the session-scoped work-roots cache when a session is bound.
+    """
     root = discover_work_root(path)
     if root is None:
         return None
@@ -73,6 +77,14 @@ def note_work_path(runtime: Any, path: Path | str | None) -> Path | None:
     roots = [r for r in roots if r.lower() != key.lower()]
     roots.insert(0, key)
     runtime._work_roots = roots[:_MAX_ROOTS]
+    # Keep session cache in sync so tab switches restore the right set
+    with suppress(Exception):
+        from remedy.core.session_continuity import _work_roots_by_session, _trim_cache
+
+        sid = str(getattr(runtime, "_session_id", "") or "").strip()
+        if sid:
+            _work_roots_by_session[sid] = list(runtime._work_roots)
+            _trim_cache(_work_roots_by_session)
     return root
 
 

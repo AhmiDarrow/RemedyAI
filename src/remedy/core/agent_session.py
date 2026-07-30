@@ -9,12 +9,21 @@ from remedy.core.workspace import is_unset_project_path
 
 
 async def apply_session_workspace(runtime: Any, session_id: str | None) -> None:
-    """Bind tools/cwd to the **session** project for this turn.
+    """Bind tools/cwd + continuity state to the **session** for this turn.
 
     Tree contract: a session under a project folder uses that path as the tool
     jail; a **No project** session gets unset → full access. Global Settings
     default is only used when there is no session row.
+
+    Continuity: rebind Session Brief / Partner State / work roots so another
+    tab's project never injects stale facts into this turn.
     """
+    # Continuity rebind first (uses previous runtime._session_id for stash)
+    with suppress(Exception):
+        from remedy.core.session_continuity import bind_session_continuity
+
+        bind_session_continuity(runtime, session_id)
+
     if session_id:
         runtime._session_id = session_id
     session_path: str | None = None

@@ -20,6 +20,14 @@ async def build_turn_context(runtime: Any) -> str:
 
     parts: list[str] = []
 
+    # Hard isolation banner — model must not continue other tabs' work
+    with suppress(Exception):
+        from remedy.core.session_continuity import session_isolation_system_line
+
+        iso = session_isolation_system_line(runtime)
+        if iso:
+            parts.append(iso)
+
     # Project workspace (default directory for this session)
     with suppress(Exception):
         parts.append(
