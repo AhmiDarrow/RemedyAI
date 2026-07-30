@@ -198,6 +198,15 @@ async def apply_settings_update(
             f"Known keys include: {', '.join(sorted(SETTABLE_KEYS)[:20])}…"
         )
 
+    # Always re-resolve config path (honors REMEDY_HOME; avoid stale path cache
+    # across tests or alternate homes).
+    try:
+        from remedy.interfaces.api_support import invalidate_config_cache
+
+        invalidate_config_cache()
+    except Exception:
+        pass
+
     config_path = _find_config_path()
     if config_path is None:
         config_path = _default_config_path()
