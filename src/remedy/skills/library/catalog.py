@@ -16,7 +16,11 @@ from remedy.skills.library.keys import (
     DEFAULT_CATALOG_SIG_URL,
     DEFAULT_CATALOG_URL,
 )
-from remedy.skills.library.security import verify_catalog_signature
+from remedy.skills.library.security import (
+    is_allowed_catalog_url,
+    skills_dev_mode,
+    verify_catalog_signature,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +124,21 @@ async def get_skills_catalog(
     cache_dir = _home_cache_dir(home)
     cache_file = cache_dir / "catalog.json"
     cache_sig = cache_dir / "catalog.json.sig"
-    pubkey = public_key_b64 or os.environ.get("REMEDY_SKILLS_CATALOG_PUBKEY") or CATALOG_PUBLIC_KEY_B64
+    dev = skills_dev_mode()
+    # Non-default verify keys only with REMEDY_SKILLS_DEV (S-SKILL-01).
+    requested_pub = (
+        public_key_b64
+        or os.environ.get("REMEDY_SKILLS_CATALOG_PUBKEY")
+        or CATALOG_PUBLIC_KEY_B64
+    )
+    if requested_pub != CATALOG_PUBLIC_KEY_B64 and not dev:
+        logger.warning(
+            "Ignoring non-default REMEDY_SKILLS_CATALOG_PUBKEY "
+            "(set REMEDY_SKILLS_DEV=1 for dogfood keys)"
+        )
+        pubkey = CATALOG_PUBLIC_KEY_B64
+    else:
+        pubkey = requested_pub
 
     if not refresh and cache_file.is_file() and cache_sig.is_file():
         age = datetime.now(UTC).timestamp() - cache_file.stat().st_mtime
@@ -139,6 +157,14 @@ async def get_skills_catalog(
     surl = sig_url or os.environ.get("REMEDY_SKILLS_CATALOG_SIG_URL") or DEFAULT_CATALOG_SIG_URL
 
     try:
+        # Fail closed: catalog fetch hosts match zip allowlist (S-SKILL-01).
+        if not dev and not (
+            is_allowed_catalog_url(url) and is_allowed_catalog_url(surl)
+        ):
+            raise RuntimeError(
+                "Skills catalog URL not allowlisted "
+                f"(url={url[:120]!r}); set REMEDY_SKILLS_DEV=1 for dogfood"
+            )
         data = await _http_get(url)
         sig_bytes = await _http_get(surl)
         sig = sig_bytes.decode("utf-8").strip()

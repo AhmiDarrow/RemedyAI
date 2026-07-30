@@ -149,19 +149,22 @@ def register_misc_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
         return buf.getvalue()
 
     # -- OpenAPI schema export -----------------------------------------------
-    @app.get("/api/openapi.yaml", include_in_schema=False)
-    async def export_openapi_yaml():
-        return Response(
-            content=_yaml_schema(),
-            media_type="application/yaml",
-        )
+    # Hidden when packaged/frozen or REMEDY_DISABLE_API_DOCS=1 (S-AUTH-05).
+    if not getattr(getattr(app, "state", None), "disable_api_docs", False):
 
-    @app.get("/api/openapi.json", include_in_schema=False)
-    async def export_openapi_json():
-        return Response(
-            content=json.dumps(app.openapi(), indent=2),
-            media_type="application/json",
-        )
+        @app.get("/api/openapi.yaml", include_in_schema=False)
+        async def export_openapi_yaml():
+            return Response(
+                content=_yaml_schema(),
+                media_type="application/yaml",
+            )
+
+        @app.get("/api/openapi.json", include_in_schema=False)
+        async def export_openapi_json():
+            return Response(
+                content=json.dumps(app.openapi(), indent=2),
+                media_type="application/json",
+            )
 
     # -- project init scanner -------------------------------------------------
     @app.post("/api/projects/scan")

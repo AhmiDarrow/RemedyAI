@@ -11,8 +11,13 @@ from nacl.signing import SigningKey
 
 from remedy.skills.library.catalog import SkillsCatalog, get_skills_catalog, search_catalog
 from remedy.skills.library.install import install_skill_from_catalog
-from remedy.skills.library.keys import CATALOG_PUBLIC_KEY_B64
+from remedy.skills.library.keys import (
+    CATALOG_PUBLIC_KEY_B64,
+    DEFAULT_CATALOG_URL,
+    RAW_CATALOG_URL,
+)
 from remedy.skills.library.security import (
+    is_allowed_catalog_url,
     is_allowed_download_url,
     is_safe_skill_name,
     verify_catalog_signature,
@@ -61,6 +66,19 @@ def test_allowlist_urls():
         "https://objects.githubusercontent.com/github-production-release-asset/1/x",
         allow_cdn_redirect=True,
     )
+
+
+def test_catalog_url_allowlist():
+    """S-SKILL-01: catalog fetch hosts match zip allowlist (+ raw GH for this repo)."""
+    assert is_allowed_catalog_url(DEFAULT_CATALOG_URL)
+    assert is_allowed_catalog_url(DEFAULT_CATALOG_URL + ".sig")
+    assert is_allowed_catalog_url(RAW_CATALOG_URL)
+    assert is_allowed_catalog_url(RAW_CATALOG_URL + ".sig")
+    assert not is_allowed_catalog_url("https://evil.example/catalog.json")
+    assert not is_allowed_catalog_url(
+        "https://raw.githubusercontent.com/evil/repo/main/catalog.json"
+    )
+    assert not is_allowed_catalog_url("http://127.0.0.1:1/missing")
 
 
 def test_safe_skill_name():
