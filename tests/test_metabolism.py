@@ -65,8 +65,64 @@ def test_tier_l2_agency():
     assert pol.allow_tools and pol.record_ir and pol.shadow_high_blast
 
 
+def test_tier_l2_common_agency_phrasing():
+    """Everyday tool asks must not collapse to L1 (tools stripped on hot path)."""
+    agency = [
+        "goto gmail",
+        "open google and search weather",
+        "check package.json",
+        "show me the README",
+        "look at the error in the logs",
+        "what files are in src/",
+        "run the tests",
+        "ls the project root",
+        "search the codebase for begin_turn",
+        "create a new skill",
+        "help me fix this bug",
+        "package.json",
+    ]
+    for msg in agency:
+        t = classify_turn_tier(msg, tools_enabled=True)
+        assert t >= TurnTier.L2_AGENCY, f"{msg!r} → {t!r}"
+    # Browse flag alone is enough even without keyword match
+    assert (
+        classify_turn_tier("please open that site", browse=True) == TurnTier.L2_AGENCY
+    )
+
+
 def test_tier_l1_chat():
     assert classify_turn_tier("explain how hashing works briefly") == TurnTier.L1_LEAN
+    assert classify_turn_tier("thanks!") == TurnTier.L1_LEAN
+    assert classify_turn_tier("hi") == TurnTier.L1_LEAN
+
+
+def test_decision_tier_recorded_only_on_change():
+    d = get_decision_tracker("test_meta_sess")
+    assert d.record_tier_if_changed("L1_lean") is not None
+    n = d.decision_units
+    assert d.record_tier_if_changed("L1_lean") is None
+    assert d.decision_units == n
+    assert d.record_tier_if_changed("L2_agency") is not None
+    assert d.decision_units == n + 1
+    assert d.waste_batch_rate() == 0.0
+
+
+def test_l0_preclassified_skips_reclassify():
+    from remedy.core.metabolism.l0 import try_l0_system_reply
+
+    class _R:
+        _llm_provider = "openai"
+        _llm_model = "gpt-test"
+        config = None
+        _session_id = "test_meta_sess"
+        skills = None
+
+    # Non-L0 text with preclassified=True still answers only if patterns match;
+    # garbage should return None without needing re-classify success.
+    assert try_l0_system_reply(_R(), "totally unrelated", preclassified=True) is None
+    # Version pattern with preclassified (caller already gated)
+    out = try_l0_system_reply(_R(), "what is your version", preclassified=True)
+    assert out and "Remedy" in out
 
 
 def test_evidence_ledger_admits_paths_and_dedupes():

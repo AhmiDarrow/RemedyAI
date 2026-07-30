@@ -177,7 +177,9 @@ async def call_llm_stream(runtime, message: str,
                 from remedy.core.metabolism.tier import TurnTier, classify_turn_tier
 
                 if classify_turn_tier(message or "", tools_enabled=False) == TurnTier.L0_INSTANT:
-                    l0_early = try_l0_system_reply(runtime, message or "")
+                    l0_early = try_l0_system_reply(
+                        runtime, message or "", preclassified=True
+                    )
                     if l0_early:
                         with suppress(Exception):
                             from remedy.core.session_quality import get_session_quality
@@ -187,6 +189,31 @@ async def call_llm_stream(runtime, message: str,
                             ).record_metabolism(tier=0)
                         yield l0_early
                         return
+        # High-confidence browse / pure-action BEFORE harness lean snapshot so
+        # tier classification and full_snapshot gating see real agency intent.
+        browse_pre_url: str | None = None
+        clear_goals_only = False
+        pure_action_kick = False
+        open_only_browse = False
+        page_interaction = False
+        with suppress(Exception):
+            from remedy.core.computer.browse_intent import (
+                is_clear_goals_intent,
+                is_open_only_browse,
+                is_pure_action_kick,
+                parse_browse_navigate_url,
+                wants_page_interaction,
+            )
+
+            browse_pre_url = parse_browse_navigate_url(message or "")
+            clear_goals_only = is_clear_goals_intent(message or "")
+            pure_action_kick = is_pure_action_kick(message or "")
+            open_only_browse = is_open_only_browse(message or "")
+            page_interaction = wants_page_interaction(message or "")
+        # Stash for send_policy lean path (same turn, no second parse)
+        runtime._turn_browse = bool(browse_pre_url or page_interaction)
+        runtime._turn_pure_action = bool(pure_action_kick)
+        runtime._turn_has_attachments = bool(attachments)
         # Memory Harness L0: light prune of send-view (stored transcript untouched).
         # auto mode skips this pre-pass — apply_auto_harness_send_policy owns full
         # prune/offload/budget and would re-walk the same history (double work).
@@ -322,28 +349,6 @@ async def call_llm_stream(runtime, message: str,
                 else []
             )
 
-        # High-confidence browse kicks ("goto gmail", "goto google and search X"):
-        # force tools on + pre-run computer_navigate so the rail opens even if
-        # the model only narrates intent (session bug 2026-07-28).
-        browse_pre_url: str | None = None
-        clear_goals_only = False
-        pure_action_kick = False
-        open_only_browse = False
-        page_interaction = False
-        with suppress(Exception):
-            from remedy.core.computer.browse_intent import (
-                is_clear_goals_intent,
-                is_open_only_browse,
-                is_pure_action_kick,
-                parse_browse_navigate_url,
-                wants_page_interaction,
-            )
-
-            browse_pre_url = parse_browse_navigate_url(message or "")
-            clear_goals_only = is_clear_goals_intent(message or "")
-            pure_action_kick = is_pure_action_kick(message or "")
-            open_only_browse = is_open_only_browse(message or "")
-            page_interaction = wants_page_interaction(message or "")
         # Metabolism: turn cost tier + evidence/governor injects (silent)
         with suppress(Exception):
             from remedy.core.metabolism.turn import begin_turn_metabolism
@@ -487,7 +492,9 @@ async def call_llm_stream(runtime, message: str,
         elif pure_action_kick or clear_goals_only or open_only_browse:
             run_until_done = bool(open_only_browse or clear_goals_only)
 
-        # L1 lean: bias tools off (chat can still answer; agency was L2+)
+        # L1 lean: bias tools off for pure chat — but never strip mid-task
+        # continuity (open brief tasks / recent tool history). That was a
+        # correctness gap: "ok continue" after agency became tool-less.
         if (
             int(getattr(runtime, "_turn_tier", 1) or 1) == 1
             and not plan_mode
@@ -496,14 +503,25 @@ async def call_llm_stream(runtime, message: str,
             and not page_interaction
             and not clear_goals_only
         ):
-            tools = None  # type: ignore[assignment]
-            run_until_done = False
+            open_work = bool(open_tasks_for_wall)
+            if not open_work:
+                with suppress(Exception):
+                    from remedy.core.react_policy import history_suggests_open_work
+
+                    open_work = history_suggests_open_work(
+                        history, open_tasks=open_tasks_for_wall or None
+                    )
+            if not open_work:
+                tools = None  # type: ignore[assignment]
+                run_until_done = False
             # Keep all_tools for recovery if model later needs agency
 
         # Accumulated assistant text for critical verify at end
         assistant_text_acc: list[str] = []
 
         # L0 system fast path: model/skills/whoami/version — no frontier tokens.
+        # Early exit above usually handles this; keep as safety if tier was set
+        # by metabolism without early-return (e.g. harness path edge).
         if (
             not plan_mode
             and not attachments
@@ -515,7 +533,9 @@ async def call_llm_stream(runtime, message: str,
             with suppress(Exception):
                 from remedy.core.metabolism.l0 import try_l0_system_reply
 
-                l0 = try_l0_system_reply(runtime, message or "")
+                l0 = try_l0_system_reply(
+                    runtime, message or "", preclassified=True
+                )
                 if l0:
                     yield l0
                     return
