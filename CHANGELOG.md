@@ -16,6 +16,9 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 - Identity: HMAC required on import; export+import rate limits; export path jail under `home/exports`
 - Atomic writes: skill_genome, cua_macros, xAI auth store
 - Perf: precompiled hard/soft/self-kill security patterns; shell jail `_norm_roots` once per check
+- Hot path: L2 agency phrasing accuracy; browse/pure-action before lean snapshot; decision tier-on-change; L1 keeps tools when brief tasks open
+- Gateway: `gateway serve` installs local API token; Teams JWT `aud`/`exp` fail-closed; secret cache `mtime_ns`+size; generic webhook 503 without secret
+- Plan mode: exclude `computer_act`; CUA mutations go through Ask approvals; skill learning path jail; MCP env scrub; zip rejects symlinks
 - **Plan mode:** drop `computer_act` (and keep allowlist = research tools ∪ `COMPUTER_PLAN_MODE_TOOLS` only — no click/type/app)
 - **Approvals:** computer mutation tools (`click`/`type`/`key`/`drag`/`act`/`app`) require Ask approval like shell
 - **Learning loop:** skill dir names path-jailed (`is_safe_skill_name` + slug); reflection tool prefix slugified
