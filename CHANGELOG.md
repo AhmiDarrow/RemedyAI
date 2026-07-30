@@ -6,6 +6,8 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ### Gauntlet: continuous security + perf loop (feature/computer-use)
 
+- **Shell write jail + auth path:** mutations into `~/.remedy/auth/**` / `$REMEDY_HOME/auth/**` refused even when home write roots contain the profile (parity with `resolve_under_roots`); regression covers home-scope Set-Content + relative auth walks
+- **SSRF redirect re-validation regression:** `_pinned_fetch` 302 Location to loopback/metadata/userinfo fails closed (`SSRF_BLOCKED_REDIRECT` / `URL_USERINFO_BLOCKED`)
 - **Desktop stream abort UX:** cooperative `event:aborted` completes jobs as `aborted` (not done); Stop/interrupt commit job paint with `_[Stopped]_`; `uiCommitted` prevents double-bubble race; skip listMessages wipe after abort
 - **Session continuity rebound:** tab switch clears turn scratch (`_turn_tool_steps` / stream accum / mission nudge / evidence inject); session reset drops continuity brief/work-roots cache
 - **Assistant privacy re-accept:** `public_status` exposes `consent_ok` / `needs_reaccept` / `current_consent_version`; Settings PA banner + Review & accept when scopes/terms bump

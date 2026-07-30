@@ -247,6 +247,16 @@ def path_outside_write_roots(
         except OSError:
             cand = cand.absolute()
 
+    # Auth secrets are never shell-writable — even when home/full write roots
+    # contain ~/.remedy/auth (or $REMEDY_HOME/auth) as a subpath.
+    try:
+        from remedy.core.security import is_protected_secret_path
+
+        if is_protected_secret_path(cand):
+            return cand
+    except Exception:
+        pass
+
     if _under_any(cand, roots):
         return None
     return cand
@@ -356,6 +366,17 @@ def check_shell_write_jail(
         return None
 
     bad = offenders[0]
+    try:
+        from remedy.core.security import is_protected_secret_path
+
+        if any(is_protected_secret_path(o) for o in offenders):
+            return (
+                "shell write jail: mutation targets protected Remedy auth secrets "
+                f"({bad}). Never read/write ~/.remedy/auth or $REMEDY_HOME/auth "
+                "from the shell — keys and tokens stay out of tool paths."
+            )
+    except Exception:
+        pass
     return (
         f"shell write jail: mutation targets path outside project write roots: {bad}. "
         f"Allowed write roots: [{roots_s}]. "
