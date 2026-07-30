@@ -28,6 +28,82 @@ def test_scrub_job_result_redacts_secrets():
     assert "[redacted]" in (out.get("text") or "")
 
 
+def test_scrub_job_result_strips_password_element_values():
+    out = _scrub_job_result(
+        {
+            "ok": True,
+            "elements": [
+                {
+                    "ref": "e1",
+                    "tag": "input",
+                    "type": "password",
+                    "value": "SuperSecretPassw0rd!",
+                    "name": "passwd",
+                },
+                {"ref": "e2", "tag": "button", "name": "Submit"},
+            ],
+        }
+    )
+    assert out is not None
+    els = out.get("elements") or []
+    pw = next(e for e in els if e.get("ref") == "e1")
+    assert pw.get("value") == "[filled]"
+    assert "SuperSecretPassw0rd" not in json.dumps(out)
+
+
+def test_complete_scrubs_error_and_typed_payload(tmp_path: Path):
+    """Host complete must not leave typed secrets or sk- tokens on disk."""
+    from remedy.core.computer.host_bridge import ComputerHostBridge
+
+    b = ComputerHostBridge(home_dir=tmp_path)
+    job = b.enqueue(
+        "type",
+        {"text": "my-login-password-XYZ", "ui": {"open_browser": True}},
+    )
+    # Payload readable while pending (host needs plaintext)
+    pending = b._read(job.id)
+    assert pending is not None
+    assert pending.payload.get("text") == "my-login-password-XYZ"
+
+    done = b.complete(
+        job.id,
+        ok=False,
+        result={"ok": False, "message": "fail"},
+        error="provider said api_key=sk-abcdefghijklmnopqrstuvwxyz0123",
+    )
+    assert done is not None
+    assert done.status == "error"
+    assert "sk-abcdefghijklmnopqrstuvwxyz0123" not in (done.error or "")
+    assert "[redacted]" in (done.error or "")
+    assert "my-login-password-XYZ" not in json.dumps(done.payload)
+    assert "redacted" in str(done.payload.get("text") or "").lower()
+
+
+def test_a11y_push_scrubs_password_values(tmp_path: Path):
+    from remedy.core.computer.host_bridge import ComputerHostBridge
+
+    b = ComputerHostBridge(home_dir=tmp_path)
+    job = b.enqueue("snapshot", {})
+    done = b.complete_a11y_push(
+        job.id,
+        [
+            {
+                "ref": "e9",
+                "tag": "input",
+                "type": "password",
+                "value": "Hunter2-secret!",
+                "name": "password",
+            }
+        ],
+    )
+    assert done is not None
+    assert done.status == "done"
+    blob = json.dumps(done.result or {})
+    assert "Hunter2-secret" not in blob
+    els = (done.result or {}).get("elements") or []
+    assert els and els[0].get("value") == "[filled]"
+
+
 def test_resolve_target_url_prefers_browser():
     assert resolve_target("auto", url="https://example.com") is ComputerTarget.BROWSER
     assert resolve_target("auto", hint="open github.com docs") is ComputerTarget.BROWSER

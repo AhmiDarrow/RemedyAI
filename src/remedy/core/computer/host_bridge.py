@@ -24,35 +24,75 @@ def _now() -> str:
 # Max characters of page text / large strings kept in on-disk job JSON.
 _JOB_TEXT_MAX = 4_000
 
+# Free-text bodies that may hold page content or host messages.
+_RESULT_TEXT_KEYS = (
+    "text",
+    "page_text",
+    "content",
+    "html",
+    "message",
+    "stdout",
+    "stderr",
+    "body",
+    "error",
+)
+
+# Typed / secret-bearing payload keys that must not linger after the host finishes.
+_PAYLOAD_SECRET_KEYS = frozenset(
+    {
+        "text",
+        "type",
+        "type_text",
+        "content",
+        "password",
+        "value",
+        "secret",
+        "token",
+        "api_key",
+        "authorization",
+    }
+)
+
+
+def _scrub_elements(els: Any) -> list[Any]:
+    """Drop password / redacted input values from snapshot element lists."""
+    if not isinstance(els, list):
+        return []
+    cleaned: list[Any] = []
+    for el in els[:120]:
+        if not isinstance(el, dict):
+            cleaned.append(el)
+            continue
+        e = dict(el)
+        tag = str(e.get("tag") or "").lower()
+        itype = str(
+            e.get("type") or e.get("input_type") or e.get("itype") or ""
+        ).lower()
+        is_password = itype == "password" or "password" in str(e.get("name") or "").lower()
+        v = e.get("value")
+        if is_password or e.get("value_redacted"):
+            if isinstance(v, str) and v:
+                e["value"] = "[filled]"
+                e["value_redacted"] = True
+        elif tag == "input" and isinstance(v, str) and len(v) > 40:
+            e["value"] = v[:40] + "…"
+        cleaned.append(e)
+    return cleaned
+
 
 def _scrub_job_result(result: dict[str, Any] | None) -> dict[str, Any] | None:
     """Cap large text fields and redact secrets before writing to disk."""
     if result is None:
         return None
     out = dict(result)
-    for key in ("text", "page_text", "content", "html", "message"):
+    for key in _RESULT_TEXT_KEYS:
         val = out.get(key)
         if isinstance(val, str) and len(val) > _JOB_TEXT_MAX:
             out[key] = val[: _JOB_TEXT_MAX - 1] + "…"
             out[f"{key}_truncated"] = True
-    # Snapshot elements: drop any residual value fields that look like secrets.
-    els = out.get("elements")
-    if isinstance(els, list):
-        cleaned = []
-        for el in els[:120]:
-            if not isinstance(el, dict):
-                cleaned.append(el)
-                continue
-            e = dict(el)
-            if e.get("value_redacted") or str(e.get("tag") or "").lower() == "input":
-                # Prefer not retaining long values at rest
-                v = e.get("value")
-                if isinstance(v, str) and len(v) > 0 and e.get("value_redacted"):
-                    e["value"] = "[filled]"
-                elif isinstance(v, str) and len(v) > 40:
-                    e["value"] = v[:40] + "…"
-            cleaned.append(e)
-        out["elements"] = cleaned
+    # Snapshot elements: never retain password field values at rest.
+    if "elements" in out:
+        out["elements"] = _scrub_elements(out.get("elements"))
     # Secret-shaped substrings (API keys, bearer tokens) never land on disk.
     try:
         from remedy.core.metabolism.redact import redact_obj
@@ -62,9 +102,52 @@ def _scrub_job_result(result: dict[str, Any] | None) -> dict[str, Any] | None:
             out = red
     except Exception:
         # Fail closed for free-text bodies; keep structural ok/action only
-        for key in ("text", "page_text", "content", "html", "message"):
+        for key in _RESULT_TEXT_KEYS:
             if key in out and isinstance(out.get(key), str):
                 out[key] = "[redacted]"
+    return out
+
+
+def _scrub_job_error(error: str | None) -> str | None:
+    """Redact secret-shaped host error strings before persistence."""
+    if error is None:
+        return None
+    text = str(error)
+    if not text:
+        return ""
+    try:
+        from remedy.core.metabolism.redact import redact_text
+
+        return redact_text(text)[:2_000]
+    except Exception:
+        return "[redacted]"
+
+
+def _scrub_retained_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
+    """After a job finishes, strip typed secrets from the on-disk payload.
+
+    Host needs plaintext while pending/running; once terminal, only lengths remain.
+    """
+    if not payload or not isinstance(payload, dict):
+        return {}
+    out = dict(payload)
+    for key in list(out.keys()):
+        kl = str(key).lower().replace("-", "_")
+        val = out.get(key)
+        if kl in _PAYLOAD_SECRET_KEYS or kl.endswith("_password") or kl.endswith("_secret"):
+            if isinstance(val, str) and val:
+                out[key] = f"[redacted chars={len(val)}]"
+            elif val is not None and not isinstance(val, (int, float, bool)):
+                out[key] = "[redacted]"
+    # Nested ui dict may hold free text — keep structure, scrub strings that look secret
+    try:
+        from remedy.core.metabolism.redact import redact_obj
+
+        red = redact_obj(out)
+        if isinstance(red, dict):
+            return red
+    except Exception:
+        pass
     return out
 
 
@@ -425,6 +508,7 @@ class ComputerHostBridge:
             # Success always wins over a prior wait-timeout error so a late
             # host complete is recorded (agent may re-read after grace).
             safe_result = _scrub_job_result(result) if result is not None else None
+            safe_error = _scrub_job_error(error) if error is not None else None
             if ok:
                 job.status = "done"
                 job.result = safe_result
@@ -435,7 +519,10 @@ class ComputerHostBridge:
             else:
                 job.status = "error"
                 job.result = safe_result
-                job.error = error
+                job.error = safe_error
+            # Typed passwords / tokens must not linger in payload after terminal.
+            if job.status in ("done", "error", "cancelled"):
+                job.payload = _scrub_retained_payload(job.payload)
             self._write(job)
             # Opportunistic cleanup so page_text / snapshots do not linger on disk.
             if job.status in ("done", "error", "cancelled"):
@@ -488,6 +575,7 @@ class ComputerHostBridge:
                 return None
             job.status = "cancelled"
             job.error = "cancelled"
+            job.payload = _scrub_retained_payload(job.payload)
             self._write(job)
             return job
 
@@ -505,7 +593,8 @@ class ComputerHostBridge:
                 job = ComputerJob.from_dict(raw)
                 if job.status in ("pending", "running"):
                     job.status = "cancelled"
-                    job.error = reason
+                    job.error = _scrub_job_error(reason) or "aborted"
+                    job.payload = _scrub_retained_payload(job.payload)
                     self._write(job)
                     n += 1
         return n
@@ -525,15 +614,21 @@ class ComputerHostBridge:
             if job.status not in ("pending", "running"):
                 return None
             trimmed = elements[:120]
+            # Same scrub path as host complete — password values never hit disk.
+            safe_result = _scrub_job_result(
+                {
+                    "ok": True,
+                    "target": "browser",
+                    "action": "snapshot",
+                    "message": f"{len(trimmed)} interactive elements",
+                    "elements": trimmed,
+                }
+            )
             job.status = "done"
-            job.result = {
-                "ok": True,
-                "target": "browser",
-                "action": "snapshot",
-                "message": f"{len(trimmed)} interactive elements",
-                "elements": trimmed,
-            }
-            self.set_last_elements(trimmed, target="browser")
+            job.result = safe_result
+            job.payload = _scrub_retained_payload(job.payload)
+            # In-memory ref map still needs coordinates; drop password values only.
+            self.set_last_elements(_scrub_elements(trimmed), target="browser")
             self._write(job)
             return job
 
@@ -644,6 +739,7 @@ class ComputerHostBridge:
                         f"host did not claim job within {unclaimed_timeout_s:.0f}s "
                         "(Desktop poller offline or not authenticated)"
                     )
+                    job.payload = _scrub_retained_payload(job.payload)
                     with self._lock:
                         # Only write error if still open
                         cur = self._read(job_id)
@@ -691,11 +787,14 @@ class ComputerHostBridge:
             return job
         job.status = "error"
         job.error = f"timeout waiting for desktop host ({timeout_s:.1f}s)"
+        job.payload = _scrub_retained_payload(job.payload)
         with self._lock:
             cur = self._read(job_id)
             if cur and cur.status in ("done", "error", "cancelled"):
                 return cur
             if cur and cur.status in ("pending", "running"):
+                # Re-apply scrub from current (may hold typed secrets)
+                job.payload = _scrub_retained_payload(cur.payload)
                 self._write(job)
                 # Do NOT mark host dead for navigate — host often still alive
                 # and will complete a moment later; mark_host_dead caused
