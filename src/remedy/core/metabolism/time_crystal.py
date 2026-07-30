@@ -108,8 +108,19 @@ class TimeCrystal:
         return n
 
     def hot_block(self, *, max_chars: int = 1200) -> str:
-        """Always-hot life + project_week + session heads for injection."""
+        """Always-hot life + project_week + session heads for injection.
+
+        Cached until next admit (avoids re-sort every inject).
+        """
         with self._lock:
+            cache_key = (max_chars, len(self.facts), self.promotions)
+            cached = getattr(self, "_hot_cache", None)
+            if (
+                isinstance(cached, tuple)
+                and cached[0] == cache_key
+                and isinstance(cached[1], str)
+            ):
+                return cached[1]
             order = {"life": 0, "project_week": 1, "session": 2, "turn": 3}
             ordered = sorted(
                 self.facts,
@@ -126,8 +137,11 @@ class TimeCrystal:
                 lines.append(line)
                 used += len(line) + 1
             if not lines:
-                return ""
-            return "[Time Crystal]\n" + "\n".join(lines)
+                out = ""
+            else:
+                out = "[Time Crystal]\n" + "\n".join(lines)
+            self._hot_cache = (cache_key, out)
+            return out
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
