@@ -122,12 +122,33 @@ _L2_AGENCY = re.compile(
     r"make sure (the )?(build|tests?|ci|suite) (works|passes|succeeds)|"
     r"bump (the )?version\b|"
     # Review / audit — tools required (was L1 → model said "activating skill" with no tools)
+    # Target required so "review all options" (chat) stays L1; bare "review" is short-kick.
     r"review (the |this |my |our |a )?(project|codebase|code|repo|pr|pull request|"
-    r"module|package|security|architecture|changes|diff|app|desktop)?\b|"
-    r"\b(code )?review\b|"
+    r"module|package|security|architecture|changes|diff|app|desktop)\b|"
+    r"\bcode review\b|"
+    # Short kicks only (full-string end) — not "review all options" chat
+    r"(?:please\s+)?review\s*[.?!]?\s*$|"
     r"audit (the |this |my |our )?(project|code|security|repo|codebase)\b|"
+    # Noun-first: "security audit", "code audit" (was L1 strip → prose-only)
+    r"(security|code|project|repo|codebase)\s+audit\b|"
     r"walk (me |us )?(through )?(the )?(project|codebase|repo|code)\b|"
-    r"give me (a |an )?(overview|tour of|status of) (the )?(project|codebase|repo)\b"
+    r"give me (a |an )?(overview|tour of|status of) (the )?(project|codebase|repo)\b|"
+    # Explore / inspect phrasing that message_wants_tools already rescues
+    r"(inspect|analyze|analyse|explore|scan)\s+(the |this |my |our )?"
+    r"(project|codebase|repo|code|tree|structure)\b|"
+    r"look over (the |this |my |our )?(project|codebase|repo|code)\b|"
+    r"check (the |this )?(project|repo) (structure|layout|tree)\b|"
+    # Bare list/show files (was L1; tools only via message_wants_tools lag)
+    r"\b(list|show|display)\s+(me |us )?(the |all |my )?(files?|dirs?|directories|folders?)\b|"
+    r"\bwhat files\b|"
+    # Skill progressive disclosure — need skill_activate tool (not prose "activating…")
+    # "load …" alone is too broad (load balancer chat); require skill suffix.
+    r"skill_activate|skill_search|skill_run|"
+    r"\b(activate|enable)\s+(the |a |this )?[\w.-]{2,48}(\s+skill)?\b|"
+    r"\bload\s+(the |a |this )?[\w.-]{2,48}\s+skill\b|"
+    r"\b(use|follow|run)\s+(the |a |this )?[\w.-]{2,48}\s+skill\b|"
+    r"\b(use|load|enable)\s+(the |a )?skill\b|"
+    r"\bactivate\s+skill\b"
     r")\b"
 )
 # Paths + bare filenames that imply workspace tools

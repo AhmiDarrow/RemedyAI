@@ -362,3 +362,116 @@ async def test_react_loop_recovery_nudge_on_tool_error():
         if m.get("role") == "user" and RECOVERY_NUDGE in str(m.get("content") or "")
     ]
     assert len(nudge_msgs) == 1
+
+
+@pytest.mark.asyncio
+async def test_react_loop_agency_rearm_after_activating_skill_prose():
+    """Tools available + short 'Activating skill now' (no tool_calls) → re-arm continues.
+
+    Regression: content-path return used to accept the stub as the final answer
+    and never reach the agency re-arm block.
+    """
+    from remedy.core.react_policy import AGENCY_REARM_NUDGE
+
+    rt = BasicRuntime(
+        AgentConfig(
+            llm_api_key="sk-test",
+            llm_model="gpt-test",
+            llm_base_url="http://llm/v1",
+            llm_provider="openai",
+        )
+    )
+
+    async def skill_activate(**kwargs):
+        return {"ok": True, "skill": kwargs.get("name") or kwargs.get("skill") or "x"}
+
+    rt.tool_registry.register_builtin_handler(
+        "skill_activate",
+        "activate a skill",
+        skill_activate,
+        parameters={
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+        },
+    )
+
+    promise_sse = _sse_bytes(
+        [
+            {
+                "choices": [
+                    {
+                        "delta": {"content": "Activating skill now"},
+                        "finish_reason": "stop",
+                    }
+                ]
+            }
+        ]
+    )
+    tool_sse = _sse_bytes(
+        [
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "id": "call_skill",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "skill_activate",
+                                        "arguments": '{"name": "change-safety"}',
+                                    },
+                                }
+                            ]
+                        },
+                        "finish_reason": "tool_calls",
+                    }
+                ]
+            }
+        ]
+    )
+    final_sse = _sse_bytes(
+        [
+            {
+                "choices": [
+                    {
+                        "delta": {"content": "Review complete after real tools."},
+                        "finish_reason": "stop",
+                    }
+                ]
+            }
+        ]
+    )
+    session = _FakeSession(
+        [_FakeResp(promise_sse), _FakeResp(tool_sse), _FakeResp(final_sse)]
+    )
+
+    with (
+        patch("remedy.core.agent_react_loop.aiohttp.ClientSession", return_value=session),
+        patch("remedy.core.agent._message_wants_tools", return_value=True),
+        patch("remedy.core.react_policy.message_wants_tools", return_value=True),
+    ):
+        text = await rt._call_llm("review project")
+
+    assert "Review complete after real tools." in text
+    # Fail-open must issue another LLM call (promise → tools → final)
+    assert session.posts >= 2
+    assert len(session.bodies) >= 2
+    second_msgs = session.bodies[1].get("messages") or []
+    # Either dedicated agency re-arm or false-progress nudge (both re-enable tools)
+    continued = [
+        m
+        for m in second_msgs
+        if m.get("role") == "user"
+        and (
+            AGENCY_REARM_NUDGE in str(m.get("content") or "")
+            or "function-calling" in str(m.get("content") or "").lower()
+            or "native function-calling" in str(m.get("content") or "").lower()
+            or "Stop narrating" in str(m.get("content") or "")
+        )
+    ]
+    assert continued, "expected agency re-arm or false-progress continue nudge"
+    # Tools re-enabled on the continued step
+    second_tools = session.bodies[1].get("tools")
+    assert second_tools, "re-arm step must send tool schemas"

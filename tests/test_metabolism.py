@@ -65,6 +65,13 @@ def test_tier_l2_agency():
     assert pol.allow_tools and pol.record_ir and pol.shadow_high_blast
 
 
+def test_tier_review_project_l2_with_tools():
+    """Gauntlet: review project must be L2 agency with tools (not L1 strip)."""
+    t = classify_turn_tier("review project")
+    assert t == TurnTier.L2_AGENCY
+    assert tier_policy(t).allow_tools is True
+
+
 def test_tier_l2_common_agency_phrasing():
     """Everyday tool asks must not collapse to L1 (tools stripped on hot path)."""
     agency = [
@@ -110,11 +117,28 @@ def test_tier_l2_common_agency_phrasing():
         "review project and security",
         "code review",
         "audit the security",
+        "security audit",
         "walk me through the project",
+        # Explore / list / skill activate (L1 strip → prose "Activating skill now")
+        "list files",
+        "list the files",
+        "inspect the project",
+        "analyze the codebase",
+        "look over the project",
+        "scan the repo",
+        "explore the project",
+        "activate change-safety",
+        "activate the change-safety skill",
+        "skill_activate change-safety",
+        "use skill change-safety",
+        "load the project-etiquette skill",
+        "follow the change-safety skill",
+        "run the memory-backup skill",
     ]
     for msg in agency:
         t = classify_turn_tier(msg, tools_enabled=True)
         assert t >= TurnTier.L2_AGENCY, f"{msg!r} → {t!r}"
+        assert tier_policy(t).allow_tools, f"{msg!r} allow_tools"
     # Browse flag alone is enough even without keyword match
     assert (
         classify_turn_tier("please open that site", browse=True) == TurnTier.L2_AGENCY
@@ -126,6 +150,7 @@ def test_tier_l2_common_agency_phrasing():
         "how are you",
         "walk me through the architecture",
         "can you summarize this conversation",
+        "load balancer design tradeoffs",
     ):
         assert classify_turn_tier(chat) == TurnTier.L1_LEAN, chat
 
