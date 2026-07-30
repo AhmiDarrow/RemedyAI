@@ -81,7 +81,7 @@ _INTERPRETER_ONESHOT_RE = re.compile(
     r")"
 )
 
-# Encoded / archive / decode writers — path often hidden; fail closed when project-bound.
+# Encoded / archive / decode / download writers — path often hidden; fail closed when project-bound.
 _OPAQUE_MUTATION_RE = re.compile(
     r"(?ix)"
     r"(?:"
@@ -91,12 +91,17 @@ _OPAQUE_MUTATION_RE = re.compile(
     r"|(?:powershell|pwsh)(?:\.exe)?(?:\s+[/\-\w]+)*\s+-e(?:\s|$|=)"
     r"|\bexpand-archive\b|\bcompress-archive\b"
     r"|\btar\s+-[a-z]*x|\btar\s+--extract\b"
-    r"|\bcertutil\b[^\n]*-decode\b"
+    r"|\bcertutil\b[^\n]*-(?:decode|urlcache)\b"
     r"|\bbitsadmin\b|\bstart-bitstransfer\b"
     r"|\binvoke-webrequest\b[^\n]*-outfile\b"
+    r"|\binvoke-restmethod\b[^\n]*-outfile\b"
     r"|\binvoke-expression\b|\biex\b"
     r"|\bstart-process\b[^\n]*-argumentlist\b"
     r"|\badd-type\b[^\n]*-typedefinition\b"
+    # .NET download / write helpers that hide destinations
+    r"|\b(?:system\.)?net\.webclient\b|\bnew-object\b[^\n]*webclient\b"
+    r"|\bdownloadfile\b|\bdownloadstring\b|\bdownloaddata\b"
+    r"|\bfrombase64string\b"
     r")"
 )
 
@@ -273,9 +278,12 @@ def check_shell_write_jail(
     if not cmd.strip():
         return None
 
-    # Encoded / archive / decode writers hide destinations — fail closed when bound.
+    # Normalize roots once per check (hot path — bash_exec every mutation).
+    roots = _norm_roots(write_roots)
+    roots_s = ", ".join(str(r) for r in roots[:4])
+
+    # Encoded / archive / decode / download writers hide destinations — fail closed.
     if _OPAQUE_MUTATION_RE.search(cmd):
-        roots_s = ", ".join(str(r) for r in _norm_roots(write_roots)[:4])
         return (
             "shell write jail: encoded/archive/decode mutation cannot be proven "
             f"under write roots [{roots_s}]. Prefer file_write/file_edit with "
@@ -288,7 +296,6 @@ def check_shell_write_jail(
 
     # Set-Content -Path $dest  (bare PS var) — cannot prove destination
     if _BARE_PS_VAR_PATH_RE.search(cmd):
-        roots_s = ", ".join(str(r) for r in _norm_roots(write_roots)[:4])
         return (
             "shell write jail: mutation uses a PowerShell variable as the path "
             f"(cannot prove under write roots [{roots_s}]). Use a literal path "
@@ -299,7 +306,7 @@ def check_shell_write_jail(
     offenders: list[str] = []
     for token in candidates:
         outside = path_outside_write_roots(
-            token, write_roots=write_roots, cwd=cwd
+            token, write_roots=roots, cwd=cwd
         )
         if outside is not None:
             offenders.append(str(outside))
@@ -308,7 +315,6 @@ def check_shell_write_jail(
     # in-root (e.g. `copy C:\proj\a $env:USERPROFILE\Desktop\b`). Opaque dests
     # are not extractable as path tokens, so mixed forms must fail closed.
     if not offenders and _OPAQUE_PATH_HINT_RE.search(cmd):
-        roots_s = ", ".join(str(r) for r in _norm_roots(write_roots)[:4])
         return (
             "shell write jail: mutation uses opaque path construction "
             "($env:/%VAR%/Join-Path/process.env/curl -o/etc.) that cannot be "
@@ -322,7 +328,6 @@ def check_shell_write_jail(
     # When every candidate is under roots (no offenders), allow proven in-root
     # one-shots such as python -c "open(r'<project>\\x','w')…".
     if not offenders and not candidates and _INTERPRETER_ONESHOT_RE.search(cmd):
-        roots_s = ", ".join(str(r) for r in _norm_roots(write_roots)[:4])
         return (
             "shell write jail: interpreter -c/-e write cannot be proven under "
             f"write roots [{roots_s}]. Use file_write/file_edit, or pass a "
@@ -337,11 +342,10 @@ def check_shell_write_jail(
                 from pathlib import Path as _P
 
                 c = _P(cwd).expanduser().resolve()
-                if _under_any(c, write_roots):
+                if _under_any(c, roots):
                     return None
             except Exception:
                 pass
-        roots_s = ", ".join(str(r) for r in _norm_roots(write_roots)[:4])
         return (
             "shell write jail: mutation command has no proven path under write "
             f"roots [{roots_s}] and cwd is not inside a write root. "
@@ -351,7 +355,6 @@ def check_shell_write_jail(
     if not offenders:
         return None
 
-    roots_s = ", ".join(str(r) for r in _norm_roots(write_roots)[:4])
     bad = offenders[0]
     return (
         f"shell write jail: mutation targets path outside project write roots: {bad}. "

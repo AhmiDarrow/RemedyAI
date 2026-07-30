@@ -16,10 +16,20 @@ _SECRET_PATTERNS: list[re.Pattern[str]] = [
     # key=value style secrets (value may include spaces if quoted — take non-space)
     re.compile(
         r"(?i)(api[_-]?key|secret|password|passwd|pwd|token|"
-        r"client_secret|refresh_token|access_token|private_key)"
+        r"client_secret|refresh_token|access_token|private_key|"
+        r"session[_-]?token|id[_-]?token|auth[_-]?token)"
         r"\s*[:=]\s*\S+"
     ),
-    re.compile(r"(?i)\b(sk|xai|ghp|gho|ghu|ghs|ghr|xox[baprs]|AKIA)[-_][A-Za-z0-9+/=_\-]{8,}"),
+    # OpenAI / Anthropic / OpenRouter / xAI / GitHub / Slack / AWS-style
+    re.compile(
+        r"(?i)\b(sk-ant-|sk-or-|sk-proj-|sk-|xai-|ghp_|gho_|ghu_|ghs_|ghr_|"
+        r"xox[baprs]-|AKIA|ASIA)[A-Za-z0-9+/=_\-]{8,}"
+    ),
+    # Google API keys, HuggingFace, npm, Stripe
+    re.compile(r"(?i)\bAIza[0-9A-Za-z\-_]{20,}"),
+    re.compile(r"(?i)\bhf_[A-Za-z0-9]{20,}"),
+    re.compile(r"(?i)\bnpm_[A-Za-z0-9]{20,}"),
+    re.compile(r"(?i)\b(sk_live|sk_test|rk_live|rk_test)_[A-Za-z0-9]{16,}"),
     re.compile(r"(?i)\bya29\.[A-Za-z0-9._\-]{10,}"),
     re.compile(r"(?i)\b1//[A-Za-z0-9_\-]{10,}"),
     re.compile(r"(?i)\bxox[baprs]-[A-Za-z0-9\-]{10,}"),
@@ -47,6 +57,11 @@ _SECRET_KEY_NAMES = frozenset(
         "set-cookie",
         "bot_token",
         "app_password",
+        "session_token",
+        "id_token",
+        "auth_token",
+        "x_api_key",
+        "x-api-key",
     }
 )
 
