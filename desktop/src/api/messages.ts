@@ -225,6 +225,15 @@ export function streamMessage(
             }
             onDone(payload as { request_id: string; usage?: UsagePayload })
             break
+          case 'aborted':
+            // Cooperative Stop — not an error. Still finish cleanly so UI/job
+            // state clears if the client had not already called stopStreamJob.
+            finished = true
+            onDone({
+              request_id:
+                typeof payload.request_id === 'string' ? payload.request_id : '',
+            })
+            break
           case 'error':
             finished = true
             onError(String(payload.message || 'Unknown error'))
@@ -266,7 +275,9 @@ export function streamMessage(
         buffer += '\n'
         processEvents()
       }
-      // If stream closed without a done/error event, still complete cleanly.
+      // If stream closed without a done/error/aborted event, still complete cleanly.
+      // Cooperative abort (event:aborted) leaves finished=true without onDone —
+      // callers (stop / interrupt) own job + UI cleanup.
       if (!finished) {
         finished = true
         onDone({ request_id: '' })
