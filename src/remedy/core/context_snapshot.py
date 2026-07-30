@@ -139,10 +139,29 @@ def build_context_snapshot(
     # Two-phase metabolism: always run fill + intent + library + quality.
     # Heavy bots (pack / spread / scout warm) only when fill is elevated,
     # compress is active, or the turn already looks tool/plan-ish.
+    # Long histories with many tool results also force full phase so scout/pack
+    # still orient multi-step code chains even if the latest user text is short.
+    tool_msgs = sum(1 for m in msgs if m.get("role") == "tool")
+    long_tool_history = tool_msgs >= 4
     heavy_fill = fill >= max(0.40, float(min_use) - 0.20)
-    need_pack = bool(nudge) or fill >= max(0.55, float(min_use) - 0.15)
-    need_spread = bool(nudge) or heavy_fill or intent in ("tool", "plan")
-    need_scout = bool(nudge) or heavy_fill or intent in ("tool", "plan", "skill")
+    need_pack = (
+        bool(nudge)
+        or fill >= max(0.55, float(min_use) - 0.15)
+        or (long_tool_history and fill >= 0.45)
+    )
+    need_spread = (
+        bool(nudge)
+        or heavy_fill
+        or intent in ("tool", "plan")
+        or long_tool_history
+    )
+    need_scout = (
+        bool(nudge)
+        or heavy_fill
+        or intent in ("tool", "plan", "skill")
+        or long_tool_history
+    )
+    snap.signals["tool_messages"] = tool_msgs
     snap.signals["snapshot_phase"] = (
         "full" if (need_pack or need_spread or need_scout) else "light"
     )

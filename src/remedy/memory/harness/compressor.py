@@ -74,8 +74,29 @@ def should_nudge_compress(
         return None
 
 
-def compression_nudge_message(level: str) -> dict[str, str]:
-    if level == "strong":
+def compression_nudge_message(
+    level: str,
+    *,
+    tool_chain_active: bool = False,
+) -> dict[str, str]:
+    """System nudge for high context.
+
+    When a multi-step tool/code chain is in flight, do **not** tell the model to
+    stop and compress — that aborts long chains. Prefer finish-first language.
+    """
+    if tool_chain_active:
+        if level == "strong":
+            text = (
+                "[Memory Harness] Context is high but a tool/code chain is in progress. "
+                "Continue the current task using tools. Older tool output was slimmed; "
+                "re-read files if you need full detail. Do not stop mid-task to compress."
+            )
+        else:
+            text = (
+                "[Memory Harness] Context is growing during an active tool chain. "
+                "Keep working; compress only after this subtask finishes."
+            )
+    elif level == "strong":
         text = (
             "[Memory Harness] Context is high. Compress completed work now: "
             "call compress_context or summarize closed tool spans into the Session Brief "

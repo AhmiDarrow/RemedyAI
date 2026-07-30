@@ -211,6 +211,94 @@ def test_budget_trim_protects_recent_tools():
     assert recent in (last_tool.get("content") or "")
 
 
+def test_long_tool_chain_keeps_recent_full_bodies():
+    """Multi-step code chains must retain recent full tool results after collapse."""
+    from remedy.memory.harness.pruner import keep_recent_for_chain, tool_chain_active
+
+    msgs: list[dict] = [{"role": "system", "content": "sys"}]
+    for i in range(14):
+        msgs.append(
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": f"c{i}",
+                        "function": {"name": "file_read", "arguments": "{}"},
+                    }
+                ],
+            }
+        )
+        body = f"PATH=/proj/src/mod{i}.py\n" + ("line\n" * 100) + f"END_{i}"
+        msgs.append(
+            {
+                "role": "tool",
+                "tool_call_id": f"c{i}",
+                "name": "file_read",
+                "content": body,
+            }
+        )
+    assert tool_chain_active(msgs) is True
+    keep = keep_recent_for_chain(msgs, 6)
+    assert keep >= 10
+    out = prune_messages_for_send(
+        msgs,
+        dedupe_tools=False,
+        collapse_completed_tools=True,
+        keep_recent_tool_pairs=keep,
+        token_budget=50_000,
+        reserve_tokens=0,
+    )
+    recent_tools = [m for m in out if m.get("role") == "tool"][-keep:]
+    # Most recent tools stay full (not collapsed)
+    assert any("END_13" in (m.get("content") or "") for m in recent_tools)
+    assert any(len(m.get("content") or "") > 200 for m in recent_tools[-3:])
+
+
+def test_chain_nudge_does_not_demand_stop_and_compress():
+    from remedy.memory.harness.compressor import compression_nudge_message
+
+    mid = compression_nudge_message("strong", tool_chain_active=True)
+    assert "Do not stop mid-task" in mid["content"]
+    assert "Compress completed work now" not in mid["content"]
+    idle = compression_nudge_message("strong", tool_chain_active=False)
+    assert "Compress completed work now" in idle["content"]
+
+
+def test_middle_replace_keeps_tool_pair_tail():
+    from remedy.memory.harness.send_policy import _replace_middle_with_brief_pointer
+
+    brief = SessionBrief(
+        session_id="s",
+        intent="implement feature",
+        artifacts=["src/app.py"],
+        decisions=["use existing store"],
+    )
+    msgs: list[dict] = [{"role": "system", "content": "sys"}]
+    for i in range(10):
+        msgs.append({"role": "user" if i == 0 else "assistant", "content": f"step {i}"})
+        msgs.append(
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{"id": f"t{i}", "function": {"name": "bash_exec", "arguments": "{}"}}],
+            }
+        )
+        msgs.append(
+            {
+                "role": "tool",
+                "tool_call_id": f"t{i}",
+                "name": "bash_exec",
+                "content": f"stdout for step {i}\n" + ("x" * 50),
+            }
+        )
+    out = _replace_middle_with_brief_pointer(msgs, brief, keep_tool_pairs=6)
+    tool_bodies = [m.get("content") or "" for m in out if m.get("role") == "tool"]
+    assert len(tool_bodies) >= 6
+    assert any("step 9" in b for b in tool_bodies)
+    assert any("Session Brief" in (m.get("content") or "") for m in out if m.get("role") == "system")
+
+
 def _fake_runtime(**kwargs):
     base = {
         "_harness_mode": "auto",
