@@ -113,3 +113,27 @@ def test_needs_remedy_signals_quiet_vs_stuck():
     assert q.needs_remedy_signals() is False
     q.record_turn(user_text="I already told you the path")
     assert q.needs_remedy_signals() is True
+
+
+def test_begin_turn_reuses_session_quality_and_records_tier_metric():
+    """Single quality handle path + cheap tier counter for accuracy dashboards."""
+    from remedy.core.metabolism.turn import begin_turn_metabolism
+    from remedy.core.metrics import default_registry
+
+    reset_session_quality("sq_reuse_sess")
+    before = default_registry.counter(
+        "remedy_turn_tier_total", tier="L1_lean"
+    ).value
+    meta = begin_turn_metabolism(
+        session_id="sq_reuse_sess",
+        user_text="explain hashing briefly",
+        intent="chat",
+        tools_enabled=True,
+    )
+    assert int(meta["tier"]) == 1
+    after = default_registry.counter(
+        "remedy_turn_tier_total", tier="L1_lean"
+    ).value
+    assert after == before + 1
+    q = get_session_quality("sq_reuse_sess")
+    assert q.last_tier == 1

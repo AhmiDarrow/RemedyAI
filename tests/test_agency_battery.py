@@ -150,3 +150,21 @@ async def test_runtime_has_tool_registry() -> None:
     assert hasattr(rt, "tool_registry")
     # Tools may register lazily; registry itself must exist for agency surface.
     _ = rt._openai_tools()
+
+
+def test_openai_tools_payload_cached_until_register() -> None:
+    """L1/L2 turns share one schema build; register invalidates cache."""
+    from remedy.core.agent_llm import openai_tools_payload
+    from remedy.skills.tool_registry import ToolRegistry
+
+    reg = ToolRegistry()
+    reg.register_builtin("a", "A tool", {"type": "object", "properties": {}})
+    reg.register_builtin("b", "B tool", {"type": "object", "properties": {}})
+    p1 = openai_tools_payload(reg)
+    p2 = openai_tools_payload(reg)
+    assert p1 is p2
+    assert len(p1) == 2
+    reg.register_builtin("c", "C tool", {"type": "object", "properties": {}})
+    p3 = openai_tools_payload(reg)
+    assert p3 is not p1
+    assert len(p3) == 3

@@ -190,10 +190,18 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
             return result, content_str
 
         # Shadow rehearsal (L2/L3 high-blast only) — never replaces write jail.
+        # Resolve session quality once per tool (not per shadow/record path).
         shadow_outcome = "pass"
+        sq_handle = None
+        sid_tool = ""
+        with suppress(Exception):
+            from remedy.core.session_quality import get_session_quality
+            from remedy.core.turn_context import turn_session_id
+
+            sid_tool = str(turn_session_id(runtime) or "")
+            sq_handle = get_session_quality(sid_tool)
         with suppress(Exception):
             from remedy.core.metabolism.shadow import rehearse, should_shadow
-            from remedy.core.session_quality import get_session_quality
             from remedy.core.turn_context import turn_session_id
 
             tier = int(getattr(runtime, "_turn_tier", 2) or 2)
@@ -203,7 +211,7 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
                     from remedy.core.metabolism.governor import get_governor
 
                     strict = bool(
-                        get_governor(str(turn_session_id(runtime) or "")).shadow_strict
+                        get_governor(sid_tool or str(turn_session_id(runtime) or "")).shadow_strict
                     )
             if should_shadow(name, tier=tier, strict=strict):
                 roots = list(getattr(runtime, "_work_roots", None) or [])
@@ -215,7 +223,7 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
                 with suppress(Exception):
                     from remedy.core.metabolism.machine_map import get_machine_map
 
-                    sid_m = str(turn_session_id(runtime) or "")
+                    sid_m = sid_tool or str(turn_session_id(runtime) or "")
                     sl = get_machine_map(sid_m).get("browser", "rail")
                     if sl is not None:
                         map_hint["browser_settled"] = bool(
@@ -242,16 +250,15 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
                     )
                     result_cache[fp] = content_str
                     seen_fps.add(fp)
-                    with suppress(Exception):
-                        get_session_quality(
-                            str(turn_session_id(runtime) or "")
-                        ).record_shadow_catch()
+                    if sq_handle is not None:
+                        with suppress(Exception):
+                            sq_handle.record_shadow_catch()
                     # Still admit blocked attempt to evidence + IR (audit trail)
                     with suppress(Exception):
                         from remedy.core.metabolism.turn import after_tool_batch
 
                         after_tool_batch(
-                            session_id=str(turn_session_id(runtime) or ""),
+                            session_id=sid_tool or str(turn_session_id(runtime) or ""),
                             tool_name=name or "unknown",
                             arguments=args if isinstance(args, dict) else {},
                             content=content_str,
@@ -264,11 +271,9 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
                             shadow_outcome=shadow_outcome,
                         )
                     return content_str
-                if sh.outcome == "soft_warn":
+                if sh.outcome == "soft_warn" and sq_handle is not None:
                     with suppress(Exception):
-                        get_session_quality(
-                            str(turn_session_id(runtime) or "")
-                        ).record_shadow_catch()
+                        sq_handle.record_shadow_catch()
 
         lock_key = _write_path_key(name, args)
         if lock_key:
@@ -349,14 +354,19 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
             )
         # Background continuity: pattern observation + stuck signals
         with suppress(Exception):
-            from remedy.core.agent_post_turn import schedule_mid_turn_warm
-            from remedy.core.session_quality import get_session_quality
             from remedy.core.turn_context import turn_session_id
             from remedy.nanoswarm import get_swarm
             from remedy.nanoswarm.events import SwarmEvent
 
-            sid = str(turn_session_id(runtime) or "")
-            get_session_quality(sid).record_tool_result(success=bool(result.success))
+            sid = sid_tool or str(turn_session_id(runtime) or "")
+            if sq_handle is not None:
+                sq_handle.record_tool_result(success=bool(result.success))
+            else:
+                from remedy.core.session_quality import get_session_quality
+
+                get_session_quality(sid).record_tool_result(
+                    success=bool(result.success)
+                )
             get_swarm().dispatch(
                 SwarmEvent.tool_step(
                     name or "unknown",
