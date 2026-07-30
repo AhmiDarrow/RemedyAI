@@ -5,6 +5,8 @@ from __future__ import annotations
 import ipaddress
 from unittest.mock import patch
 
+import pytest
+
 from remedy.core.agent_web_tools import (
     _host_is_blocked,
     _ip_is_blocked,
@@ -80,8 +82,6 @@ def test_blocks_cgnat_and_non_global_ips():
 
 def test_pinned_fetch_blocks_url_userinfo():
     """user:pass@host must never be fetched (credential leak / SSRF)."""
-    import pytest
-
     from remedy.core.agent_web_tools import _pinned_fetch
 
     with pytest.raises(ValueError, match="USERINFO"):
@@ -125,3 +125,84 @@ def test_blocks_ipv6_ula_link_local_loopback_and_mapped():
     ]
     with patch("socket.getaddrinfo", return_value=fake):
         assert _resolve_public_ips("evil-dual.example") == []
+
+
+def test_parse_ddg_html_results():
+    from remedy.core.agent_web_tools import parse_ddg_html_results
+
+    html = """
+    <div class="result">
+      <a class="result__a" href="https://html.duckduckgo.com/l/?uddg=https%3A%2F%2Fdocs.python.org%2F3%2Flibrary%2Fasyncio.html">
+        asyncio — Asynchronous I&amp;O
+      </a>
+      <a class="result__snippet">Concurrent code with async/await.</a>
+    </div>
+    <div class="result">
+      <a class="result__a" href="https://example.com/guide">Example Guide</a>
+      <a class="result__snippet">A short guide.</a>
+    </div>
+    """
+    rows = parse_ddg_html_results(html, max_results=5)
+    assert len(rows) >= 2
+    assert rows[0]["url"] == "https://docs.python.org/3/library/asyncio.html"
+    assert "asyncio" in rows[0]["title"].lower()
+    assert rows[1]["url"] == "https://example.com/guide"
+    assert "guide" in rows[1]["title"].lower()
+
+
+@pytest.mark.asyncio
+async def test_web_search_disabled_soft_error(monkeypatch):
+    from unittest.mock import MagicMock
+
+    from remedy.core.agent_web_tools import register_web_tools
+    from remedy.core.react_policy import tool_content_is_error
+    from remedy.skills.tool_registry import ToolRegistry
+
+    monkeypatch.setattr(
+        "remedy.core.agent_web_tools._web_enabled", lambda runtime: False
+    )
+    runtime = MagicMock()
+    runtime.tool_registry = ToolRegistry()
+    register_web_tools(runtime)
+    assert runtime.tool_registry.get("web_search") is not None
+    out = await runtime.tool_registry.execute("web_search", query="asyncio gather")
+    assert tool_content_is_error(out) or "WEB_DISABLED" in out or "disabled" in out.lower()
+
+
+@pytest.mark.asyncio
+async def test_web_search_parses_pinned_html(monkeypatch):
+    """Enabled search uses pin-on-resolve fetch; parser formats results (no real net)."""
+    from unittest.mock import MagicMock
+
+    from remedy.core.agent_web_tools import register_web_tools
+    from remedy.skills.tool_registry import ToolRegistry
+
+    html = (
+        b'<a class="result__a" href="https://example.com/a">Alpha Title</a>'
+        b'<a class="result__snippet">Alpha snip</a>'
+        b'<a class="result__a" href="https://example.com/b">Beta Title</a>'
+        b'<a class="result__snippet">Beta snip</a>'
+    )
+
+    def fake_pinned(url, *, max_chars=50_000, timeout=25.0):
+        assert "duckduckgo.com" in url
+        assert "q=" in url
+        return url, html, "utf-8"
+
+    monkeypatch.setattr(
+        "remedy.core.agent_web_tools._pinned_fetch", fake_pinned
+    )
+    monkeypatch.setattr(
+        "remedy.core.agent_web_tools._web_enabled", lambda runtime: True
+    )
+
+    runtime = MagicMock()
+    runtime.tool_registry = ToolRegistry()
+    register_web_tools(runtime)
+    out = await runtime.tool_registry.execute(
+        "web_search", query="alpha beta", max_results=5
+    )
+    assert "Alpha Title" in out
+    assert "https://example.com/a" in out
+    assert "Beta Title" in out
+    assert "web_fetch" in out.lower()

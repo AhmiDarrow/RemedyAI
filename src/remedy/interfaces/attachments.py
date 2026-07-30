@@ -70,6 +70,10 @@ def is_path_under_attachments(
     Client-supplied ``AttachmentRef.path`` values must pass this before
     snippet inject / multimodal read — otherwise a local API caller can
     exfiltrate arbitrary files into LLM context via forged attachment paths.
+
+    When *session_id* is set, only **that session's** attachment directory is
+    allowed (not sibling session folders under the attachments root) so one
+    chat cannot inject another session's uploads by forging paths.
     """
     raw = str(path or "").strip()
     if not raw or "\x00" in raw:
@@ -79,20 +83,30 @@ def is_path_under_attachments(
     except (OSError, RuntimeError, ValueError):
         return False
     roots: list[Path] = []
-    if session_id:
+    seen: set[str] = set()
+
+    def _add(root: Path) -> None:
         try:
-            roots.append(session_attachments_dir(session_id, home_dir).resolve())
+            r = root.resolve()
         except OSError:
-            pass
-    try:
-        roots.append(attachments_root(home_dir).resolve())
-    except OSError:
-        pass
-    # Always allow default ~/.remedy/attachments even when home_dir is custom.
-    try:
-        roots.append((Path.home() / ".remedy" / "attachments").resolve())
-    except OSError:
-        pass
+            return
+        key = str(r)
+        if key not in seen:
+            seen.add(key)
+            roots.append(r)
+
+    if session_id:
+        # Strict session scope: configured home + default home session dirs only.
+        _add(session_attachments_dir(session_id, home_dir))
+        if home_dir is not None:
+            # Also accept files written under default ~/.remedy when home_dir is custom.
+            _add(session_attachments_dir(session_id, None))
+    else:
+        # No session context: any path under attachments trees (upload helpers).
+        if home_dir is not None:
+            _add(attachments_root(home_dir))
+        _add(attachments_root(None))
+        _add(Path.home() / ".remedy" / "attachments")
     for root in roots:
         try:
             candidate.relative_to(root)

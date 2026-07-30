@@ -63,6 +63,20 @@ async def run_spread(
             pass
 
         for wave_start in range(0, len(tasks), max_workers):
+            # Honor host/user abort between waves so Stop does not wait for
+            # remaining explore/verify workers (each can run up to ~180s).
+            if _turn_is_aborted():
+                for t in tasks[wave_start:]:
+                    results.append(
+                        WorkerResult(
+                            id=t.id,
+                            kind=t.kind,
+                            ok=False,
+                            summary="cancelled: turn aborted",
+                            model_used="none",
+                        )
+                    )
+                break
             wave = tasks[wave_start : wave_start + max_workers]
             wave_out = await asyncio.gather(
                 *[_run_one(runtime, t) for t in wave],
@@ -128,9 +142,27 @@ async def run_spread(
     )
 
 
+def _turn_is_aborted() -> bool:
+    try:
+        from remedy.core.turn_context import is_turn_aborted
+
+        return bool(is_turn_aborted())
+    except Exception:
+        return False
+
+
 async def _run_one(runtime: Any, task: SpreadTask) -> WorkerResult:
     t0 = time.perf_counter()
     kind = (task.kind or "explore").strip().lower()
+    if _turn_is_aborted():
+        return WorkerResult(
+            id=task.id,
+            kind=kind,
+            ok=False,
+            summary="cancelled: turn aborted",
+            elapsed_ms=0.0,
+            model_used="none",
+        )
     try:
         if kind in ("explore", "read_map"):
             summary, ok, details = await _job(

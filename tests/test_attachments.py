@@ -209,3 +209,47 @@ def test_svg_not_sent_as_vision_payload(tmp_path: Path):
     else:
         assert isinstance(content, str)
 
+
+def test_attachment_jail_is_session_scoped(tmp_path: Path):
+    """With session_id set, sibling session attachments must not inject."""
+    home = tmp_path / "home"
+    home.mkdir()
+    a = save_upload(
+        session_id="sess-A",
+        filename="a-secret.txt",
+        data=b"session-A-only-payload",
+        content_type="text/plain",
+        home_dir=home,
+    )
+    b = save_upload(
+        session_id="sess-B",
+        filename="b-ok.txt",
+        data=b"session-B-ok",
+        content_type="text/plain",
+        home_dir=home,
+    )
+    # Cross-session path is under attachments root but must fail session jail
+    assert is_path_under_attachments(a["path"], home_dir=home, session_id="sess-A")
+    assert not is_path_under_attachments(a["path"], home_dir=home, session_id="sess-B")
+    assert is_path_under_attachments(b["path"], home_dir=home, session_id="sess-B")
+
+    forged = {
+        "name": "a-secret.txt",
+        "path": a["path"],
+        "mime": "text/plain",
+        "is_text": True,
+        "is_image": False,
+        "size": a["size"],
+    }
+    filtered = filter_jailed_attachments(
+        [b, forged], home_dir=home, session_id="sess-B"
+    )
+    assert len(filtered) == 1
+    assert filtered[0]["name"] == "b-ok.txt"
+
+    snippets = inject_text_file_snippets(
+        [b, forged], home_dir=home, session_id="sess-B"
+    )
+    assert "session-B-ok" in snippets
+    assert "session-A-only-payload" not in snippets
+
