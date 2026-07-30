@@ -129,6 +129,24 @@ class SessionUndoLog:
             return []
         return out
 
+    def purge_session(self, session_id: str) -> bool:
+        """Delete the undo JSONL for *session_id* (session delete / reset).
+
+        Prior file bodies must not linger after the chat is gone.
+        """
+        sid = str(session_id or "").strip()
+        if not sid:
+            return False
+        p = self._path(sid)
+        if not p.is_file():
+            return False
+        try:
+            p.unlink()
+            return True
+        except OSError as exc:
+            logger.debug("undo purge failed for %s: %s", sid, exc)
+            return False
+
     def restore_after(
         self,
         session_id: str,

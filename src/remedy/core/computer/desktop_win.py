@@ -115,12 +115,55 @@ def _default_shot_path(prefix: str = "desk") -> Path:
     return out_dir / f"{prefix}_{int(time.time() * 1000)}.png"
 
 
+def purge_old_shots(*, max_age_s: float = 900.0, home_dir: Path | str | None = None) -> int:
+    """Delete aged screenshots under computer/shots (privacy + disk).
+
+    Lightweight FS sweep used after local OS captures. Host bridge
+    ``purge_old`` also sweeps shots when browser jobs complete.
+    """
+    roots: list[Path] = []
+    if home_dir is not None and str(home_dir).strip():
+        roots.append(Path(home_dir).expanduser() / "computer" / "shots")
+    roots.append(Path.home() / ".remedy" / "computer" / "shots")
+    cutoff = time.time() - float(max_age_s)
+    seen: set[str] = set()
+    n = 0
+    for root in roots:
+        try:
+            key = str(root.resolve())
+        except OSError:
+            key = str(root)
+        if key in seen:
+            continue
+        seen.add(key)
+        if not root.is_dir():
+            continue
+        for path in list(root.iterdir()):
+            try:
+                if (
+                    path.is_file()
+                    and path.suffix.lower()
+                    in (".png", ".jpg", ".jpeg", ".webp", ".bmp")
+                    and path.stat().st_mtime < cutoff
+                ):
+                    path.unlink(missing_ok=True)
+                    n += 1
+            except OSError:
+                continue
+    return n
+
+
 def screenshot_png(path: Path | None = None) -> dict[str, Any]:
     """Capture the virtual screen to a PNG file. Returns path + size."""
     raw, stride, width, height, left, top = _capture_virtual_screen()
     out = Path(path) if path is not None else _default_shot_path("desk")
     out.parent.mkdir(parents=True, exist_ok=True)
     _write_png_bgr(out, width, height, raw, stride)
+    # Opportunistic TTL so desktop captures do not accumulate forever.
+    try:
+        purge_old_shots(max_age_s=900.0)
+    except Exception:
+        pass
     return {
         "path": str(out),
         "width": width,
