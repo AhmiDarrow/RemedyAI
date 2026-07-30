@@ -326,3 +326,53 @@ async def test_verify_job_approval_gate(tmp_path: Path, monkeypatch):
         assert "APPROVAL_REQUIRED" in result.summary
     finally:
         APPROVALS.set_mode(prev)
+
+
+@pytest.mark.asyncio
+async def test_run_spread_honors_turn_abort_between_waves(tmp_path: Path):
+    """Stop must not wait for remaining waves after the turn abort event fires."""
+    import remedy.core.spread.runner as runner_mod
+    from remedy.core.turn_context import begin_turn, current_abort_event, end_turn
+
+    runtime = MagicMock()
+    runtime.effective_project_path.return_value = tmp_path
+    runtime.resolve_tool_path.side_effect = lambda p: tmp_path
+    runtime.allowed_roots.return_value = [tmp_path]
+    runtime.access_scope.return_value = "project"
+
+    tasks = [
+        SpreadTask(id="a", kind="explore", path="a", goal="a"),
+        SpreadTask(id="b", kind="explore", path="b", goal="b"),
+        SpreadTask(id="c", kind="explore", path="c", goal="c"),
+        SpreadTask(id="d", kind="explore", path="d", goal="d"),
+    ]
+    calls = {"n": 0}
+    original = runner_mod._job
+
+    async def patched(runtime, kind, **kwargs):
+        calls["n"] += 1
+        await asyncio.sleep(0.05)
+        return f"ok-{calls['n']}", True, {}
+
+    runner_mod._job = patched  # type: ignore[assignment]
+    sid = "spread-abort"
+    toks = begin_turn(sid)
+    try:
+        ev = current_abort_event()
+        assert ev is not None
+
+        async def abort_soon():
+            await asyncio.sleep(0.02)
+            ev.set()
+
+        asyncio.create_task(abort_soon())
+        result = await run_spread(runtime, tasks, max_workers=1, reason="abort-test")
+    finally:
+        end_turn(sid, *toks)
+        runner_mod._job = original  # type: ignore[assignment]
+
+    assert len(result.results) == 4
+    cancelled = [r for r in result.results if "cancelled" in (r.summary or "").lower()]
+    assert cancelled, "expected at least one cancelled worker after abort"
+    # Not all workers should have fully run if abort was timely
+    assert calls["n"] < 4

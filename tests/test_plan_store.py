@@ -262,3 +262,80 @@ def test_call_tool_blocks_in_plan_mode():
     res = asyncio.run(_run())
     assert res.success is False
     assert "Plan mode" in (res.error or "") or "PLAN_MODE" in (res.error or "")
+
+
+def test_plan_save_accepts_native_step_arrays(tmp_path: Path):
+    """Models pass steps/risks as JSON arrays via tool_calls — must not .strip() a list."""
+    import asyncio
+
+    from remedy.core.agent import BasicRuntime
+    from remedy.models import AgentConfig
+
+    home = tmp_path / "home"
+    home.mkdir()
+    rt = BasicRuntime(AgentConfig(name="t", llm_api_key="x", home_dir=str(home)))
+    rt._session_id = "sess-native-plan"
+
+    async def _run():
+        return await rt.call_tool(
+            ToolCall(
+                tool_name="plan_save",
+                arguments={
+                    "title": "Ship native steps",
+                    "goal": "Accept arrays",
+                    "steps": [
+                        {"title": "Parse arrays", "detail": "like spread_run"},
+                        "Write tests",
+                        {"id": "s3", "title": "Commit"},
+                    ],
+                    "risks": ["regression", {"title": "schema drift"}],
+                    "status": "draft",
+                },
+            )
+        )
+
+    res = asyncio.run(_run())
+    assert res.success is True, res.error or res.data
+    body = str(res.data or res.error or "")
+    assert "Plan saved" in body
+    assert "Parse arrays" in body
+    assert "Write tests" in body
+    assert "Commit" in body
+    assert "regression" in body
+    assert "schema drift" in body
+    # Must not crash / claim zero steps
+    assert "steps=3" in body or "3." in body
+
+
+def test_plan_show_blocks_cross_session_plan_id(tmp_path: Path):
+    """plan_show(plan_id=) must not leak another session's plan body."""
+    import asyncio
+
+    from remedy.core.agent import BasicRuntime
+    from remedy.core.plan_store import PlanStore
+    from remedy.models import AgentConfig
+
+    home = tmp_path / "home"
+    home.mkdir()
+    store = PlanStore(home)
+    other = store.create(
+        "Secret other plan",
+        goal="private",
+        steps=["Do not leak"],
+        session_id="sess-A",
+        status="draft",
+    )
+
+    rt = BasicRuntime(AgentConfig(name="t", llm_api_key="x", home_dir=str(home)))
+    rt._session_id = "sess-B"
+
+    async def _run():
+        return await rt.call_tool(
+            ToolCall(tool_name="plan_show", arguments={"plan_id": other.id})
+        )
+
+    res = asyncio.run(_run())
+    assert res.success is True
+    body = str(res.data or res.error or "")
+    assert "Do not leak" not in body
+    assert "another session" in body.lower() or "cross-session" in body.lower()

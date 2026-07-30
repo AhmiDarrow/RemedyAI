@@ -7,20 +7,33 @@ are followed only after re-validating each hop the same way.
 
 from __future__ import annotations
 
+import html as html_lib
 import http.client
 import ipaddress
+import re
 import socket
 import ssl
 from contextlib import suppress
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import urljoin, urlparse
+from urllib.parse import parse_qs, unquote, urljoin, urlparse, urlencode
 
 from remedy.core.errors import format_tool_error
 
 # Max redirect hops (owner still has full public-web fetch power when enabled).
 _MAX_REDIRECTS = 8
 _REDIRECT_STATUS = frozenset({301, 302, 303, 307, 308})
+
+# DuckDuckGo HTML result anchors (lite SERP — no JS).
+_DDG_RESULT_A = re.compile(
+    r'class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>(.*?)</a>',
+    re.I | re.S,
+)
+_DDG_RESULT_SNIP = re.compile(
+    r'class="[^"]*result__snippet[^"]*"[^>]*>(.*?)</(?:a|td|div)>',
+    re.I | re.S,
+)
+_TAG_RE = re.compile(r"<[^>]+>")
 
 
 def _web_enabled(runtime: Any) -> bool:
@@ -237,21 +250,110 @@ def _pinned_fetch(url: str, *, max_chars: int, timeout: float = 25.0) -> tuple[s
     raise ValueError("Too many redirects")
 
 
+def _strip_tags(fragment: str) -> str:
+    t = _TAG_RE.sub(" ", fragment or "")
+    t = html_lib.unescape(t)
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def _unwrap_ddg_href(href: str) -> str:
+    """DuckDuckGo lite wraps targets as /l/?uddg=<urlencoded> — unwrap when present."""
+    h = (href or "").strip()
+    if not h:
+        return ""
+    if h.startswith("//"):
+        h = "https:" + h
+    if h.startswith("/"):
+        h = urljoin("https://html.duckduckgo.com", h)
+    try:
+        parsed = urlparse(h)
+        qs = parse_qs(parsed.query or "")
+        if "uddg" in qs and qs["uddg"]:
+            return unquote(qs["uddg"][0])
+    except Exception:
+        pass
+    return h
+
+
+def parse_ddg_html_results(html: str, *, max_results: int = 5) -> list[dict[str, str]]:
+    """Parse DuckDuckGo HTML SERP into {title, url, snippet} rows (testable, no net)."""
+    body = html or ""
+    results: list[dict[str, str]] = []
+    seen: set[str] = set()
+    snips = [_strip_tags(m.group(1)) for m in _DDG_RESULT_SNIP.finditer(body)]
+    for i, m in enumerate(_DDG_RESULT_A.finditer(body)):
+        if len(results) >= max(1, min(10, int(max_results or 5))):
+            break
+        url = _unwrap_ddg_href(m.group(1))
+        title = _strip_tags(m.group(2))
+        if not url or not title:
+            continue
+        if not url.startswith(("http://", "https://")):
+            continue
+        # Skip DDG chrome / internal
+        low = url.lower()
+        if "duckduckgo.com" in low and "/l/?" not in low:
+            # still allow unwrapped; drop pure ddg help pages
+            if "/y.js" in low or "duckduckgo.com/html" in low:
+                continue
+        if url in seen:
+            continue
+        seen.add(url)
+        snippet = snips[i] if i < len(snips) else ""
+        results.append({"title": title[:200], "url": url[:500], "snippet": snippet[:400]})
+    return results
+
+
 def register_web_tools(runtime: Any) -> None:
-    """Register web_fetch when enabled (or always register with runtime gate)."""
+    """Register web_fetch + web_search (opt-in via runtime gate)."""
+
+    def _web_disabled_msg(tool_name: str) -> str:
+        return format_tool_error(
+            "Web tools are disabled. Enable with update_settings(web_tools_enabled=true) "
+            f'or update_settings(setup="web tools"), then retry {tool_name}.',
+            code="WEB_DISABLED",
+            tool_name=tool_name,
+            suggestion=(
+                "Call update_settings(web_tools_enabled=true) for the user, then retry."
+            ),
+        )
+
+    def _map_fetch_error(e: BaseException, *, tool_name: str) -> str:
+        if isinstance(e, ValueError):
+            msg = str(e)
+            if "USERINFO" in msg:
+                return format_tool_error(
+                    "Refused: URLs must not include user:password@ credentials.",
+                    code="URL_USERINFO_BLOCKED",
+                    tool_name=tool_name,
+                    suggestion="Pass a plain https URL without embedded credentials.",
+                )
+            if "SSRF" in msg:
+                return format_tool_error(
+                    "Refused: private/localhost/metadata URLs are blocked (SSRF protection).",
+                    code="SSRF_BLOCKED",
+                    tool_name=tool_name,
+                    suggestion="Use a public https URL, or read local files with file_read.",
+                )
+            return format_tool_error(msg, code="BAD_URL", tool_name=tool_name)
+        if isinstance(e, HTTPError):
+            return format_tool_error(
+                f"HTTP {e.code}: {e.reason}",
+                code="HTTP_ERROR",
+                tool_name=tool_name,
+            )
+        if isinstance(e, URLError):
+            return format_tool_error(
+                f"Network error: {getattr(e, 'reason', e)}",
+                code="NETWORK_ERROR",
+                tool_name=tool_name,
+            )
+        return format_tool_error(str(e), code="FETCH_ERROR", tool_name=tool_name)
 
     async def web_fetch(url: str = "", max_chars: int = 50_000) -> str:
         """Fetch a URL as text (opt-in web tools)."""
         if not _web_enabled(runtime):
-            return format_tool_error(
-                "Web tools are disabled. Enable with update_settings(web_tools_enabled=true) "
-                "or update_settings(setup=\"web tools\"), then retry web_fetch.",
-                code="WEB_DISABLED",
-                tool_name="web_fetch",
-                suggestion=(
-                    "Call update_settings(web_tools_enabled=true) for the user, then retry."
-                ),
-            )
+            return _web_disabled_msg("web_fetch")
         u = (url or "").strip()
         if not u.startswith(("http://", "https://")):
             return format_tool_error(
@@ -265,43 +367,65 @@ def register_web_tools(runtime: Any) -> None:
             cap = 50_000
         try:
             final_url, raw, charset = _pinned_fetch(u, max_chars=cap, timeout=25.0)
-        except ValueError as e:
-            msg = str(e)
-            if "USERINFO" in msg:
-                return format_tool_error(
-                    "Refused: URLs must not include user:password@ credentials.",
-                    code="URL_USERINFO_BLOCKED",
-                    tool_name="web_fetch",
-                    suggestion="Pass a plain https URL without embedded credentials.",
-                )
-            if "SSRF" in msg:
-                return format_tool_error(
-                    "Refused: private/localhost/metadata URLs are blocked (SSRF protection).",
-                    code="SSRF_BLOCKED",
-                    tool_name="web_fetch",
-                    suggestion="Use a public https URL, or read local files with file_read.",
-                )
-            return format_tool_error(msg, code="BAD_URL", tool_name="web_fetch")
-        except HTTPError as e:
-            return format_tool_error(
-                f"HTTP {e.code}: {e.reason}",
-                code="HTTP_ERROR",
-                tool_name="web_fetch",
-            )
-        except URLError as e:
-            return format_tool_error(
-                f"Network error: {getattr(e, 'reason', e)}",
-                code="NETWORK_ERROR",
-                tool_name="web_fetch",
-            )
         except Exception as e:
-            return format_tool_error(str(e), code="FETCH_ERROR", tool_name="web_fetch")
+            return _map_fetch_error(e, tool_name="web_fetch")
 
         text = raw.decode(charset or "utf-8", errors="replace")
         if len(raw) > cap:
             text = text[:cap] + f"\n…[truncated at {cap} chars]"
         shown = final_url if final_url != u else u
         return f"URL: {shown}\n\n{text}"
+
+    async def web_search(query: str = "", max_results: float = 5.0) -> str:
+        """Search the public web (DuckDuckGo HTML). Same opt-in + SSRF gates as web_fetch.
+
+        Residual: plan mode, skills, and UI labeled web_search while only web_fetch
+        was registered — models hit unknown-tool. Now a real SERP digester.
+        """
+        if not _web_enabled(runtime):
+            return _web_disabled_msg("web_search")
+        q = (query or "").strip()
+        if not q:
+            return format_tool_error(
+                "query is required",
+                code="MISSING_QUERY",
+                tool_name="web_search",
+                suggestion='web_search(query="site:docs.python.org asyncio gather")',
+            )
+        if len(q) > 400:
+            q = q[:400]
+        try:
+            n = int(max_results if max_results is not None else 5)
+        except (TypeError, ValueError):
+            n = 5
+        n = max(1, min(10, n))
+        # html.duckduckgo.com is public; pin-on-resolve still revalidates DNS.
+        search_url = "https://html.duckduckgo.com/html/?" + urlencode({"q": q})
+        try:
+            _final, raw, charset = _pinned_fetch(
+                search_url, max_chars=200_000, timeout=20.0
+            )
+        except Exception as e:
+            return _map_fetch_error(e, tool_name="web_search")
+        html = raw.decode(charset or "utf-8", errors="replace")
+        rows = parse_ddg_html_results(html, max_results=n)
+        if not rows:
+            return (
+                f"Search: {q}\n\nNo structured results parsed. "
+                "Try a simpler query, or web_fetch a known docs URL."
+            )
+        lines = [f"Search: {q}", f"Results: {len(rows)}", ""]
+        for i, r in enumerate(rows, 1):
+            lines.append(f"{i}. {r['title']}")
+            lines.append(f"   {r['url']}")
+            if r.get("snippet"):
+                lines.append(f"   {r['snippet']}")
+            lines.append("")
+        lines.append(
+            "Use web_fetch on promising URLs for full page text. "
+            "Private/localhost hosts remain blocked (SSRF)."
+        )
+        return "\n".join(lines).strip()
 
     runtime.tool_registry.register_builtin_handler(
         "web_fetch",
@@ -320,5 +444,27 @@ def register_web_tools(runtime: Any) -> None:
                 },
             },
             "required": ["url"],
+        },
+    )
+    runtime.tool_registry.register_builtin_handler(
+        "web_search",
+        "Search the public web (opt-in: web_tools_enabled=true). "
+        "Returns titles, URLs, and snippets; follow up with web_fetch for full pages. "
+        "Same SSRF protection as web_fetch (no private/localhost).",
+        web_search,
+        {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search query (keywords or site: filter)",
+                },
+                "max_results": {
+                    "type": "number",
+                    "description": "Max results to return (default 5, max 10)",
+                    "default": 5,
+                },
+            },
+            "required": ["query"],
         },
     )
