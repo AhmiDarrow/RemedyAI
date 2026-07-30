@@ -58,6 +58,22 @@ def test_secret_guard():
     assert extract_heuristic_facts("remember that password: hunter2 api_key=sk-abc1234567890") == []
 
 
+def test_force_cannot_bypass_secret_guard():
+    """force=True relaxes stability only — never stores credential-shaped text."""
+    profile = UserProfile()
+    fact, action = upsert_profile_fact(
+        profile,
+        "api_key=sk-abcdefghijklmnopqrstuvwxyz0123",
+        category="general",
+        confidence=0.99,
+        source="explicit",
+        force=True,
+    )
+    assert fact is None
+    assert action == "skipped"
+    assert profile.facts == []
+
+
 def test_inject_budget_cap():
     profile = UserProfile()
     for i in range(40):

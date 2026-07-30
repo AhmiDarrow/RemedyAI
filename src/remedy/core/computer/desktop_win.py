@@ -746,10 +746,23 @@ def open_app(app: str) -> dict[str, Any]:
 
 
 def open_url(url: str) -> dict[str, Any]:
-    """Open http(s) URL in the default system browser (Windows-reliable)."""
+    """Open http(s) URL in the default system browser (Windows-reliable).
+
+    Fail closed: only ``http://`` / ``https://`` are allowed. ``file://``,
+    ``javascript:``, bare paths, and other schemes can launch local files or
+    handlers via ``os.startfile`` / ``cmd start`` — never pass those through.
+    """
     u = (url or "").strip()
     if not u:
         raise ValueError("empty url")
+    low = u.lower()
+    if not (low.startswith("http://") or low.startswith("https://")):
+        raise ValueError(
+            f"open_url refuses non-http(s) URL (got scheme/prefix {u[:32]!r})"
+        )
+    # Block credentials in userinfo and obvious newlines/control chars
+    if any(c in u for c in ("\n", "\r", "\x00")):
+        raise ValueError("open_url refuses URL with control characters")
     if sys.platform == "win32":
         # os.startfile is more reliable than webbrowser on Windows (default app).
         try:

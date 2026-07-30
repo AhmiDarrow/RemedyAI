@@ -119,6 +119,15 @@ def register_partner_state_tools(runtime: Any) -> None:
         t = (text or "").strip()
         if not t:
             return "Provide text for the epistemic node."
+        # Never promote secrets into the epistemic graph / partner state.
+        with suppress(Exception):
+            from remedy.memory.partner_memory import looks_like_secret
+
+            if looks_like_secret(t):
+                return (
+                    "Refused: content looks like a secret (API key/password/token). "
+                    "Do not store credentials in partner state."
+                )
         k = (kind or "fact").strip().lower()
         if k not in (
             "fact",

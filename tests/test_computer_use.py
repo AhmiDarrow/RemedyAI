@@ -54,6 +54,24 @@ def test_normalize_url_rejects_task_text_leak():
     assert is_valid_navigate_url("https://user:pass@example.com/") is False
 
 
+def test_open_url_refuses_non_http_schemes():
+    """file:// and bare paths must never hit os.startfile / cmd start."""
+    import pytest
+
+    from remedy.core.computer import desktop_win as win
+
+    for bad in (
+        "file:///C:/Windows/System32/cmd.exe",
+        "file://localhost/etc/passwd",
+        "javascript:alert(1)",
+        "C:\\Windows\\System32\\calc.exe",
+        "\\\\evil\\share\\payload.exe",
+        "",
+    ):
+        with pytest.raises(ValueError):
+            win.open_url(bad)
+
+
 def test_computer_audit_redacts_secrets(tmp_path: Path):
     from remedy.core.computer.audit import audit_path, log_computer_action
 

@@ -643,11 +643,16 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         with contextlib.suppress(Exception):
             home = load_config().get("home_dir")
         directory = session_attachments_dir(session_id, home)
-        # Prevent path traversal
+        # Prevent path traversal (basename + relative_to — not startswith prefix)
         safe = Path(filename).name
-        path = (directory / safe).resolve()
-        if not str(path).startswith(str(directory.resolve())):
+        if not safe or safe in (".", ".."):
             raise HTTPException(400, "Invalid path")
+        try:
+            root = directory.resolve()
+            path = (directory / safe).resolve()
+            path.relative_to(root)
+        except (OSError, ValueError) as exc:
+            raise HTTPException(400, "Invalid path") from exc
         if not path.is_file():
             raise HTTPException(404, "Attachment not found")
         return FileResponse(path, filename=safe)
@@ -660,6 +665,17 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
 
         request_id = str(uuid4())
         att_dicts = [a.model_dump() for a in (req.attachments or [])]
+        # Path jail: drop client-forged paths outside attachments tree before
+        # any snippet inject / multimodal / vision decode.
+        home_att = None
+        with contextlib.suppress(Exception):
+            home_att = load_config().get("home_dir")
+        with contextlib.suppress(Exception):
+            from remedy.interfaces.attachments import filter_jailed_attachments
+
+            att_dicts = filter_jailed_attachments(
+                att_dicts, home_dir=home_att, session_id=session_id
+            )
         user_text = (req.message or "").strip()
         if not user_text and not att_dicts:
             raise HTTPException(400, "Message or attachment required")
@@ -679,7 +695,9 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             )
             # Keep history readable but not huge — skip full snippets for images-only.
             if any(a.get("is_text") for a in att_dicts):
-                display_content = display_content + inject_text_file_snippets(att_dicts)
+                display_content = display_content + inject_text_file_snippets(
+                    att_dicts, home_dir=home_att, session_id=session_id
+                )
 
         if memory:
             from remedy.models import ChatMessage, ChatSession

@@ -7,7 +7,10 @@ from pathlib import Path
 from remedy.interfaces.attachments import (
     build_attachment_prompt_block,
     build_multimodal_user_content,
+    filter_jailed_attachments,
+    inject_text_file_snippets,
     is_image,
+    is_path_under_attachments,
     is_probably_text,
     markdown_image_embed,
     sanitize_filename,
@@ -35,7 +38,9 @@ def test_save_upload_and_text_inject(tmp_path: Path, monkeypatch):
     assert Path(meta["path"]).is_file()
     assert Path(meta["path"]).read_bytes() == data
 
-    content = build_multimodal_user_content("look at this", [meta])
+    content = build_multimodal_user_content(
+        "look at this", [meta], home_dir=home, session_id="sess1"
+    )
     assert isinstance(content, str)
     assert "hello.py" in content
     assert "print('hello')" in content
@@ -58,7 +63,9 @@ def test_image_multimodal_parts(tmp_path: Path):
         home_dir=home,
     )
     assert meta["is_image"] is True
-    content = build_multimodal_user_content("what is this?", [meta])
+    content = build_multimodal_user_content(
+        "what is this?", [meta], home_dir=home, session_id="sess2"
+    )
     assert isinstance(content, list)
     assert content[0]["type"] == "text"
     assert any(p.get("type") == "image_url" for p in content)
@@ -124,4 +131,81 @@ def test_save_upload_keeps_original_name_on_reupload(tmp_path: Path):
     assert Path(m2["path"]).read_bytes() == b"second"
     assert "_3" not in m2["name"]
     assert "_1" not in m2["name"]
+
+
+def test_attachment_path_jail_blocks_forged_secret_path(tmp_path: Path):
+    """Client-forged AttachmentRef paths outside attachments tree must not inject."""
+    home = tmp_path / "home"
+    home.mkdir()
+    secret = tmp_path / "auth" / "provider_keys.json"
+    secret.parent.mkdir(parents=True)
+    secret.write_text('{"api_key":"sk-leaked-secret-value-12345"}', encoding="utf-8")
+
+    # Legitimate attachment
+    legit = save_upload(
+        session_id="sess-jail",
+        filename="ok.txt",
+        data=b"hello attach",
+        content_type="text/plain",
+        home_dir=home,
+    )
+    assert is_path_under_attachments(legit["path"], home_dir=home, session_id="sess-jail")
+    assert not is_path_under_attachments(secret, home_dir=home, session_id="sess-jail")
+
+    forged = {
+        "name": "provider_keys.json",
+        "path": str(secret),
+        "mime": "application/json",
+        "is_text": True,
+        "is_image": False,
+        "size": secret.stat().st_size,
+    }
+    filtered = filter_jailed_attachments(
+        [legit, forged], home_dir=home, session_id="sess-jail"
+    )
+    assert len(filtered) == 1
+    assert filtered[0]["name"] == "ok.txt"
+
+    snippets = inject_text_file_snippets(
+        [legit, forged], home_dir=home, session_id="sess-jail"
+    )
+    assert "hello attach" in snippets
+    assert "sk-leaked" not in snippets
+    assert "provider_keys" not in snippets
+
+    content = build_multimodal_user_content(
+        "see files",
+        [legit, forged],
+        home_dir=home,
+        session_id="sess-jail",
+    )
+    blob = content if isinstance(content, str) else str(content)
+    assert "sk-leaked" not in blob
+
+
+def test_svg_not_sent_as_vision_payload(tmp_path: Path):
+    """SVG (scriptable) must not become image_url multimodal parts."""
+    home = tmp_path / "home"
+    home.mkdir()
+    svg = b'<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'
+    meta = save_upload(
+        session_id="sess-svg",
+        filename="x.svg",
+        data=svg,
+        content_type="image/svg+xml",
+        home_dir=home,
+    )
+    # Marked image by mime prefix — still refused for vision bytes
+    meta["is_image"] = True
+    content = build_multimodal_user_content(
+        "what is this?",
+        [meta],
+        home_dir=home,
+        session_id="sess-svg",
+    )
+    # String only (no image_url parts) or list without image_url
+    if isinstance(content, list):
+        assert not any(p.get("type") == "image_url" for p in content)
+    else:
+        assert isinstance(content, str)
 

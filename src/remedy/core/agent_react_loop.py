@@ -264,11 +264,19 @@ async def call_llm_stream(runtime, message: str,
                     "enable in Settings for local image understanding\n"
                 )
 
+        home_att = None
+        with suppress(Exception):
+            home_att = getattr(getattr(runtime, "config", None), "home_dir", None)
+        sid_att = str(
+            session_id or getattr(runtime, "_session_id", None) or ""
+        ) or None
         user_content = build_multimodal_user_content(
             message,
             attachments,
             vision_mode=vision_mode,
             decode_brief=decode_brief,
+            home_dir=home_att,
+            session_id=sid_att,
         )
         messages: list[dict[str, Any]] = [
             {

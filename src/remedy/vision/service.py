@@ -481,10 +481,21 @@ def decode_for_turn(
         }
     """
     atts = list(attachments or [])
+    # Path jail: only decode images under the attachments tree (forged paths drop).
+    with contextlib.suppress(Exception):
+        from remedy.interfaces.attachments import filter_jailed_attachments
+
+        atts = filter_jailed_attachments(atts)
     images = []
     for a in atts:
-        if a.get("is_image") or str(a.get("mime") or "").startswith("image/"):
+        mime = str(a.get("mime") or "")
+        if a.get("is_image") or mime.startswith("image/"):
+            # Refuse SVG (scriptable) for decoder path
+            if "svg" in mime.lower():
+                continue
             p = Path(str(a.get("path") or ""))
+            if p.suffix.lower() == ".svg":
+                continue
             if p.is_file():
                 images.append(p)
 
