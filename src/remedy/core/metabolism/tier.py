@@ -26,7 +26,7 @@ _L0_WHOAMI = re.compile(
 )
 _L0_MODEL = re.compile(
     r"(?is)^\s*("
-    r"what (model|provider|llm) (am i|are we|is) (using|on|active)|"
+    r"what (model|provider|llm) (am i|are we|are you|is) (using|on|active)|"
     r"which (model|provider)|current (model|provider)|"
     r"what model is this"
     r")\s*[.?!]?\s*$"
@@ -46,7 +46,7 @@ _L0_STATUS = re.compile(
 )
 _L0_VERSION = re.compile(
     r"(?is)^\s*("
-    r"(what('?s| is) )?(your |remedy )?version|"
+    r"(what('?s| is) )?(your |remedy |the )?version|"
     r"/version"
     r")\s*[.?!]?\s*$"
 )

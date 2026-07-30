@@ -288,6 +288,11 @@ def ensure_tool_call_pairings(
 
     OpenAI-compatible APIs reject incomplete pairings with HTTP 400:
     \"An assistant message with 'tool_calls' must be followed by tool messages…\".
+
+    Multi-step robustness: when a system/user inject (epoch continue, re-arm
+    nudge, recovery) lands *between* tool results for the same assistant
+    turn, look ahead until the next assistant message so real results are
+    not orphaned and replaced by empty stubs.
     """
     if not messages:
         return messages
@@ -334,13 +339,52 @@ def ensure_tool_call_pairings(
             tc["id"]: tc for tc in normalized if tc.get("id")
         }
         found: set[str] = set()
+        collected_tools: list[dict[str, Any]] = []
         j = i + 1
+        # 1) Immediate consecutive tool results (happy path).
         while j < n and isinstance(messages[j], dict) and messages[j].get("role") == "tool":
             tid = (messages[j].get("tool_call_id") or "").strip()
             if tid and tid in needed and tid not in found:
-                out.append(messages[j])
+                collected_tools.append(messages[j])
                 found.add(tid)
             j += 1
+
+        # 2) Multi-step look-ahead: epoch / re-arm / recovery injects can sit
+        # between tool results. Pull matching tool msgs until next assistant
+        # tool_calls turn so API order stays: assistant → all tools → rest.
+        if len(found) < len(needed):
+            k = j
+            pulled: list[int] = []
+            while k < n:
+                mk = messages[k]
+                if not isinstance(mk, dict):
+                    k += 1
+                    continue
+                rk = mk.get("role")
+                if rk == "assistant" and mk.get("tool_calls"):
+                    break
+                if rk == "tool":
+                    tid = (mk.get("tool_call_id") or "").strip()
+                    if tid and tid in needed and tid not in found:
+                        collected_tools.append(mk)
+                        found.add(tid)
+                        pulled.append(k)
+                k += 1
+            if pulled:
+                # Skip pulled tool messages when replaying the intervening span.
+                pulled_set = set(pulled)
+                # j already points at first non-immediate-tool; keep that start.
+                # We will copy non-pulled messages after synthetic fill.
+                look_end = k
+            else:
+                pulled_set = set()
+                look_end = j
+        else:
+            pulled_set = set()
+            look_end = j
+
+        for tm in collected_tools:
+            out.append(tm)
 
         for cid, tc in needed.items():
             if cid in found:
@@ -356,7 +400,20 @@ def ensure_tool_call_pairings(
                     ),
                 }
             )
-        i = j
+
+        # Replay intervening non-tool messages (and non-matching tools dropped).
+        if look_end > j:
+            for p in range(j, look_end):
+                if p in pulled_set:
+                    continue
+                mp = messages[p]
+                if isinstance(mp, dict) and mp.get("role") == "tool":
+                    # Orphan / unmatched tool in the look-ahead span — drop.
+                    continue
+                out.append(mp)
+            i = look_end
+        else:
+            i = j
 
     return out
 

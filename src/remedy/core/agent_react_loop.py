@@ -511,6 +511,18 @@ async def call_llm_stream(runtime, message: str,
         elif pure_action_kick or clear_goals_only or open_only_browse:
             run_until_done = bool(open_only_browse or clear_goals_only)
 
+        def _rearm_agency_tools() -> None:
+            """Re-enable tool schemas *and* long-task epoch policy.
+
+            Footgun: re-arming ``tools = all_tools`` without flipping
+            ``run_until_done`` let soft epochs force-answer after L1 strip +
+            later agency recovery (review/implement stalls at epoch_size).
+            """
+            nonlocal tools, run_until_done
+            if all_tools:
+                tools = all_tools
+                run_until_done = True
+
         # L1 lean: bias tools off for pure chat — but never strip mid-task
         # continuity (open brief tasks / recent tool history). That was a
         # correctness gap: "ok continue" after agency became tool-less.
@@ -908,7 +920,7 @@ async def call_llm_stream(runtime, message: str,
                         elif never_used_tools:
                             # Model is chatting without function calls — re-arm.
                             epoch_index += 1
-                            tools = all_tools
+                            _rearm_agency_tools()
                             logger.info(
                                 "ReAct tools-now nudge → epoch %d at step %d "
                                 "(no tool_calls yet this turn)",
@@ -978,9 +990,8 @@ async def call_llm_stream(runtime, message: str,
                             )
                             productive_in_epoch = 0
                             tool_batches_in_epoch = 0
-                            # Keep tools; re-enable if a prior loop cleared them.
-                            if all_tools:
-                                tools = all_tools
+                            # Keep tools + run_until_done if a prior loop cleared them.
+                            _rearm_agency_tools()
                     elif step >= epoch_size and not run_until_done:
                         # Pure chat (tools never enabled) — wrap up.
                         force_answer_sticky = True
@@ -1540,7 +1551,7 @@ async def call_llm_stream(runtime, message: str,
                     recovered = _parse_pseudo_tool_calls(raw_round)
                     if recovered:
                         pseudo_recovery_done = True
-                        tools = all_tools  # ensure schemas stay available
+                        _rearm_agency_tools()  # schemas + long-task epoch policy
                         recovered = normalize_tool_calls(recovered)
                         yield "@@tool_calls"
                         messages.append(
@@ -1590,7 +1601,7 @@ async def call_llm_stream(runtime, message: str,
                     # nudge for real function-calling instead of hanging on junk.
                     if pseudo_nudge_count < 2:
                         pseudo_nudge_count += 1
-                        tools = all_tools
+                        _rearm_agency_tools()
                         messages.append(
                             {
                                 "role": "user",
@@ -1623,7 +1634,7 @@ async def call_llm_stream(runtime, message: str,
                         and not pseudo_recovery_done
                     ):
                         pseudo_nudge_count += 1
-                        tools = all_tools
+                        _rearm_agency_tools()
                         messages.append(
                             {
                                 "role": "user",
@@ -1647,7 +1658,7 @@ async def call_llm_stream(runtime, message: str,
                         and not is_final_step
                         and agency_tool_promise_claim(text_out, reasoning_out)
                     ):
-                        tools = all_tools
+                        _rearm_agency_tools()
                         force_answer_sticky = False
                         messages.append(agency_rearm_nudge_message())
                         logger.info(
@@ -1665,7 +1676,7 @@ async def call_llm_stream(runtime, message: str,
                         and false_progress_nudge_count < 4
                     ):
                         false_progress_nudge_count += 1
-                        tools = all_tools
+                        _rearm_agency_tools()
                         force_answer_sticky = False
                         messages.append(
                             {
@@ -1763,7 +1774,7 @@ async def call_llm_stream(runtime, message: str,
                     and not is_final_step
                     and agency_tool_promise_claim(text_out, reasoning_out)
                 ):
-                    tools = all_tools
+                    _rearm_agency_tools()
                     force_answer_sticky = False
                     messages.append(agency_rearm_nudge_message())
                     logger.info(
@@ -1879,7 +1890,14 @@ async def call_llm_stream(runtime, message: str,
                         tool_steps_this_turn=tool_batches_this_turn,
                         open_tasks=open_tasks_for_wall or None,
                     )
-                    if unfinished_loop and loop_hits < 3 and all_tools:
+                    # Long review/implement: allow more recovery loops before
+                    # force-answer (was 3 — multi-step builds hit the wall early).
+                    max_loop_hits = 8 if (run_until_done or unfinished_loop) else 3
+                    if (
+                        (unfinished_loop or run_until_done)
+                        and loop_hits < max_loop_hits
+                        and all_tools
+                    ):
                         messages.append(
                             {
                                 "role": "user",
@@ -1891,7 +1909,7 @@ async def call_llm_stream(runtime, message: str,
                                 ),
                             }
                         )
-                        tools = all_tools
+                        _rearm_agency_tools()
                         continue
                     # Jump toward final answer on next iteration.
                     tools = []

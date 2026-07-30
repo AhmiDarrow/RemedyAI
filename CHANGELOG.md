@@ -6,6 +6,10 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ### Gauntlet: continuous security + perf loop (feature/computer-use)
 
+- **L0 model/version phrasing:** `what model are you using?` / `what is the version` / `what's the version` classify as L0 instant (local reply, no frontier)
+- **metabolism_public_snapshot(lean=):** end-turn + partner status + `/harness` use counters-only (no recent lists / skill·CUA ranking sorts); full snapshot remains on `GET /api/partner/metabolism`
+- **Hot path re-arm:** `_rearm_agency_tools` always restores schemas **and** `run_until_done` (agency recovery no longer soft-epoch force-answers)
+- **Tool pairing look-ahead:** epoch/re-arm inject between tool results no longer orphans real results (OpenAI 400 guard)
 - **L0 SSE without key:** `/sessions/{id}/messages/stream` no longer hard-errors before `stream_response` — list skills / model / version / whoami work with zero provider key (agent L0 short-circuit)
 - **Stream abort:** cooperative `@@aborted` emits `event:aborted` (not error); client disconnect `CancelledError` calls `abort_session` (kills shell + CUA jobs); interrupt path uses `stopStreamJob`; terminal stream jobs are not revived by late `onDone`
 - **run_until_done epoch:** tools-armed but never-used turns get the "Use tools now" nudge (was dead code behind always-true `coding_in_flight`)

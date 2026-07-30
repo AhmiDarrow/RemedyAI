@@ -49,6 +49,14 @@ def test_tier_l0_model_and_skills():
     assert classify_turn_tier("what model am I using?") == TurnTier.L0_INSTANT
     assert classify_turn_tier("list my skills") == TurnTier.L0_INSTANT
     assert classify_turn_tier("what is your version") == TurnTier.L0_INSTANT
+    # Common phrasing gaps that used to fall through to L1 (frontier burn)
+    assert classify_turn_tier("what model are you using?") == TurnTier.L0_INSTANT
+    assert classify_turn_tier("what is the version") == TurnTier.L0_INSTANT
+    assert classify_turn_tier("what's the version") == TurnTier.L0_INSTANT
+    assert classify_turn_tier("what provider am I using?") == TurnTier.L0_INSTANT
+    assert classify_turn_tier("show skills") == TurnTier.L0_INSTANT
+    assert classify_turn_tier("/skills") == TurnTier.L0_INSTANT
+    assert classify_turn_tier("/version") == TurnTier.L0_INSTANT
 
 
 def test_tier_l3_autonomous_and_partition():
@@ -289,6 +297,13 @@ def test_l0_preclassified_skips_reclassify():
     # Version pattern with preclassified (caller already gated)
     out = try_l0_system_reply(_R(), "what is your version", preclassified=True)
     assert out and "Remedy" in out
+    # Model + "are you using" phrasing must answer locally
+    out_m = try_l0_system_reply(
+        _R(), "what model are you using?", preclassified=True
+    )
+    assert out_m and "Provider" in out_m and "gpt-test" in out_m
+    out_v = try_l0_system_reply(_R(), "what is the version", preclassified=True)
+    assert out_v and "Remedy" in out_v
 
 
 def test_evidence_ledger_admits_paths_and_dedupes():
@@ -758,8 +773,46 @@ def test_begin_and_after_tool_metabolism():
         status="done",
     )
     assert "metabolism" in end
+    # end_turn uses lean snapshot (no recent lists) on the hot path
+    lean_end = end["metabolism"]
+    assert lean_end.get("lean") is True
+    assert "recent" not in (lean_end.get("evidence") or {})
+    assert "recent" not in (lean_end.get("decisions") or {})
+    assert "slices" not in (lean_end.get("machine_map") or {})
     pub = metabolism_public_snapshot("test_meta_sess")
     assert "evidence" in pub and "governor" in pub
+    assert pub.get("lean") is False
+    assert "recent" in (pub.get("evidence") or {})
+
+
+def test_metabolism_public_snapshot_lean_skips_list_thrash():
+    """Lean path: counters only — no recent/slices/top ranking payloads."""
+    sid = "test_meta_sess"
+    get_evidence_ledger(sid).admit_tool_result(
+        tool_name="file_read",
+        content="path=a.py\nhello\n",
+        success=True,
+    )
+    get_decision_tracker(sid).record_tier_if_changed("L2_agency")
+    lean = metabolism_public_snapshot(sid, lean=True)
+    full = metabolism_public_snapshot(sid, lean=False)
+    assert lean.get("lean") is True
+    assert full.get("lean") is False
+    # Counters still present
+    assert int((lean.get("evidence") or {}).get("evidence_units") or 0) >= 1
+    assert (lean.get("decisions") or {}).get("last_tier_label") == "L2_agency"
+    assert "last_actions" in (lean.get("governor") or {})
+    # No list thrash on lean
+    assert "recent" not in (lean.get("evidence") or {})
+    assert "recent" not in (lean.get("decisions") or {})
+    assert "recent" not in (lean.get("governor") or {})
+    assert "slices" not in (lean.get("machine_map") or {})
+    assert "recent" not in (lean.get("time_crystal") or {})
+    assert "top" not in (lean.get("skill_genome") or {})
+    assert "top" not in (lean.get("cua_macros") or {})
+    # Full still carries recent + ranking
+    assert "recent" in (full.get("evidence") or {})
+    assert "recent" in (full.get("decisions") or {})
 
 
 def test_partner_metabolism_snapshot_api_top_level_fields(tmp_path: Path):

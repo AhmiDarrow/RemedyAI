@@ -112,15 +112,17 @@ class SkillGenome:
             )
             return [p.to_public() for p in items[:limit]]
 
-    def snapshot(self) -> dict[str, Any]:
+    def snapshot(self, *, lean: bool = False) -> dict[str, Any]:
         # Do not call rank() while holding _lock (Lock is not re-entrant).
         with self._lock:
+            count = len(self.phenotypes)
+            if lean:
+                return {"count": count}
             items = sorted(
                 self.phenotypes.values(),
                 key=lambda p: (-p.score, -p.uses),
             )
             top = [p.to_public() for p in items[:8]]
-            count = len(self.phenotypes)
         return {"count": count, "top": top}
 
     def persist(self, home: Path | str | None = None) -> Path | None:
