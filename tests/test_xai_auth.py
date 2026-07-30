@@ -117,6 +117,64 @@ class TestXaiCredentialsStore:
         assert creds.auth_method == "api_key"
 
 
+
+    def test_corrupt_expires_at_does_not_raise(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Malformed expires_at in on-disk store must not break connected/bearer."""
+        monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+        monkeypatch.delenv("XAI_API_KEY", raising=False)
+        monkeypatch.delenv("REMEDY_XAI_API_KEY", raising=False)
+        path = xai_auth.auth_path(home=tmp_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "auth_method": "oauth",
+                    "access_token": "access-bad-exp",
+                    "refresh_token": "refresh-ok",
+                    "expires_at": "not-a-timestamp",
+                    "token_type": "Bearer",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        loaded = xai_auth.load_credentials(home=tmp_path)
+        assert loaded.expires_at is None
+        assert loaded.connected is True  # token present, no usable expiry
+        assert loaded.bearer_token() == "access-bad-exp"
+        pub = loaded.to_public_dict()
+        assert pub["connected"] is True
+        assert pub["has_oauth"] is True
+
+    def test_save_leaves_no_tmp_and_roundtrips(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Atomic write must replace the final path and clean up .tmp."""
+        monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+        monkeypatch.delenv("XAI_API_KEY", raising=False)
+        monkeypatch.delenv("REMEDY_XAI_API_KEY", raising=False)
+        xai_auth.save_api_key("xai-atomic", home=tmp_path)
+        path = xai_auth.auth_path(home=tmp_path)
+        assert path.exists()
+        assert not path.with_suffix(path.suffix + ".tmp").exists()
+        assert xai_auth.load_credentials(home=tmp_path).api_key == "xai-atomic"
+
+    def test_clear_also_removes_stale_tmp(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+        path = xai_auth.auth_path(home=tmp_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('{"auth_method":"api_key","api_key":"x"}\n', encoding="utf-8")
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text("{partial", encoding="utf-8")
+        xai_auth.clear_credentials(home=tmp_path)
+        assert not path.exists()
+        assert not tmp.exists()
+
+
 class TestXaiCredentialsReady:
     def test_ready_via_store(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
