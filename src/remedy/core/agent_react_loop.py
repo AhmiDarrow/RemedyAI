@@ -1855,11 +1855,19 @@ async def call_llm_stream(runtime, message: str,
                         messages.append(tool_msg)
                         batch_tool_msgs.append(tool_msg)
 
-                logger.debug(
-                    "ReAct step %d executed %d tool call(s)",
-                    step + 1,
-                    len(fresh_calls),
-                )
+                # Hot path: skip per-step debug unless operator asked for DEBUG
+                # (debug.log ring alone must not tax every tool batch).
+                try:
+                    from remedy.core.logging import hot_debug_enabled
+
+                    if hot_debug_enabled():
+                        logger.debug(
+                            "ReAct step %d executed %d tool call(s)",
+                            step + 1,
+                            len(fresh_calls),
+                        )
+                except Exception:
+                    pass
                 tool_batches_this_turn += 1
                 tool_batches_in_epoch += 1
                 if is_productive_tool_batch(batch_tool_msgs):
@@ -1900,11 +1908,17 @@ async def call_llm_stream(runtime, message: str,
                 ):
                     speed_batch_nudge_done = True
                     messages.append(speed_batch_nudge_message())
-                    logger.info(
-                        "Speed batch nudge after %d serial explore steps (step %d)",
-                        serial_explore_streak,
-                        step + 1,
-                    )
+                    try:
+                        from remedy.core.logging import hot_debug_enabled
+
+                        if hot_debug_enabled():
+                            logger.debug(
+                                "Speed batch nudge after %d serial explore steps (step %d)",
+                                serial_explore_streak,
+                                step + 1,
+                            )
+                    except Exception:
+                        pass
 
                 # Soft recovery: if tools failed or search empty, nudge once.
                 if (
@@ -1918,13 +1932,19 @@ async def call_llm_stream(runtime, message: str,
                     messages.append(
                         recovery_nudge_message(empty_search=empty, approval=need_appr)
                     )
-                    logger.info(
-                        "Injected tool recovery nudge after step %d "
-                        "(empty_search=%s approval=%s)",
-                        step + 1,
-                        empty,
-                        need_appr,
-                    )
+                    try:
+                        from remedy.core.logging import hot_debug_enabled
+
+                        if hot_debug_enabled():
+                            logger.debug(
+                                "Injected tool recovery nudge after step %d "
+                                "(empty_search=%s approval=%s)",
+                                step + 1,
+                                empty,
+                                need_appr,
+                            )
+                    except Exception:
+                        pass
                     with suppress(Exception):
                         runtime._maybe_auto_checkpoint(
                             reason="recovery",

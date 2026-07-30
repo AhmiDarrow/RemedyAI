@@ -74,7 +74,9 @@ def begin_turn_metabolism(
             "remedy_turn_tier_total", tier=policy.label
         ).inc()
 
-    # L0: minimal metabolism — no governor/map/crystal/IR (instant path)
+    # L0: minimal metabolism — no governor/map/crystal/IR (instant path).
+    # Skip full organ snapshots (list copies) — Advanced UI uses
+    # metabolism_public_snapshot which rebuilds on demand.
     if int(tier) == 0:
         if sq is not None:
             with suppress(Exception):
@@ -92,8 +94,16 @@ def begin_turn_metabolism(
             "injects": [],
             "action_ir": None,
             "governor": {},
-            "evidence": ledger.snapshot(),
-            "decisions": decisions.snapshot(),
+            "evidence": {
+                "session_id": sid,
+                "evidence_units": ledger.evidence_units,
+                "unit_count": 0,
+                "waste_tokens": 0,
+            },
+            "decisions": {
+                "session_id": sid,
+                "decision_units": decisions.decision_units,
+            },
             "machine_map": {},
             "time_crystal": {},
         }
@@ -226,6 +236,8 @@ def after_tool_batch(
         tool_call_id=tool_call_id,
         offload_path=offload_path,
         success=success,
+        # L0/L1: tight unit/path caps so lean chats do not grow agency ledgers
+        lean=int(tier) <= 1,
     )
     decisions.record_tool_batch(new_eu=len(admitted))
 

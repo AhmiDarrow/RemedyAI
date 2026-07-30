@@ -11,6 +11,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+# Bound IR step list growth on long agency turns (memory + to_public cost).
+MAX_IR_STEPS = 96
+
+
 def _redact_obj(obj: Any) -> Any:
     from remedy.core.metabolism.redact import redact_obj
 
@@ -129,8 +133,8 @@ class ActionIR:
         )
         with self._lock:
             self.steps.append(step)
-            if len(self.steps) > 200:
-                self.steps = self.steps[-200:]
+            if len(self.steps) > MAX_IR_STEPS:
+                self.steps = self.steps[-MAX_IR_STEPS:]
         return step
 
     def finish(self, status: str = "done") -> None:
