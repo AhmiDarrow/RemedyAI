@@ -33,6 +33,7 @@ class DecisionTracker:
     units: list[DecisionUnit] = field(default_factory=list)
     waste_tool_batches: int = 0  # batches with 0 EU
     productive_tool_batches: int = 0
+    last_tier_label: str = ""  # avoid recording identical tier every turn
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def record(
@@ -52,12 +53,33 @@ class DecisionTracker:
                 self.units = self.units[-200:]
         return du
 
+    def record_tier_if_changed(self, label: str) -> DecisionUnit | None:
+        """Record a tier decision only when the session tier label changes.
+
+        Avoids DU thrash + unit list growth from identical ``tier=L1_lean``
+        every pure-chat turn.
+        """
+        lab = (label or "").strip()
+        if not lab:
+            return None
+        with self._lock:
+            if lab == self.last_tier_label:
+                return None
+            self.last_tier_label = lab
+        return self.record("tier", f"tier={lab}")
+
     def record_tool_batch(self, *, new_eu: int, tokens_est: int = 0) -> None:
         with self._lock:
             if new_eu > 0:
                 self.productive_tool_batches += 1
             else:
                 self.waste_tool_batches += 1
+
+    def waste_batch_rate(self) -> float:
+        """Cheap lock-scoped rate — no full snapshot / recent list copy."""
+        with self._lock:
+            total_b = self.productive_tool_batches + self.waste_tool_batches
+            return (self.waste_tool_batches / total_b) if total_b else 0.0
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
@@ -71,6 +93,7 @@ class DecisionTracker:
                 "productive_tool_batches": self.productive_tool_batches,
                 "waste_tool_batches": self.waste_tool_batches,
                 "waste_batch_rate": round(waste_rate, 4),
+                "last_tier_label": self.last_tier_label,
                 "recent": [u.to_public() for u in self.units[-8:]],
             }
 

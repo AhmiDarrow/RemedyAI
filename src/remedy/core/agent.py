@@ -763,7 +763,9 @@ class BasicRuntime(AgentRuntime):
                         classify_turn_tier(message or "", tools_enabled=False)
                         == TurnTier.L0_INSTANT
                     ):
-                        l0 = try_l0_system_reply(self, message or "")
+                        l0 = try_l0_system_reply(
+                            self, message or "", preclassified=True
+                        )
                         if l0:
                             yield l0
                             return

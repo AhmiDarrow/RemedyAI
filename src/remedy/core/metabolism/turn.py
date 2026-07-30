@@ -94,7 +94,8 @@ def begin_turn_metabolism(
     meta_snap = {
         "evidence_units": ledger.evidence_units,
         "decision_units": decisions.decision_units,
-        "waste_batch_rate": decisions.snapshot().get("waste_batch_rate", 0),
+        # Cheap rate — avoid full snapshot/list copy on every turn
+        "waste_batch_rate": decisions.waste_batch_rate(),
         "force_spread_signal": policy.force_spread,
     }
     gov.observe_and_decide(quality=quality, metabolism=meta_snap, tier=int(tier))
@@ -153,7 +154,8 @@ def begin_turn_metabolism(
                 brief_head=brief_head or user_text[:200],
             )
 
-    decisions.record("tier", f"tier={policy.label}")
+    # Only record when tier label changes — skip identical L1 every chat turn
+    decisions.record_tier_if_changed(policy.label)
 
     # Session quality metabolism counters
     with suppress(Exception):

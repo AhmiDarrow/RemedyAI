@@ -77,11 +77,29 @@ _L2_AGENCY = re.compile(
     r"bash|shell|pytest|npm run|cargo |"
     r"computer_|navigate|screenshot|click |"
     r"edit |open (the )?project|in (the )?repo|"
-    r"list_dir|repo_search|mission_|spread_run|job_run"
+    r"list_dir|repo_search|mission_|spread_run|job_run|"
+    # Common agency phrasing (missed by tool-id / path-only heuristics)
+    r"run (the |all |my )?(tests?|pytest|suite|ci|npm|build)|"
+    r"(check|show|open|look at|inspect|view|cat|type|print) "
+    r"(me |us )?(the |my |a |this )?(file|readme|package\.json|logs?|error|code|"
+    r"script|config|src|test|output)|"
+    r"(what|which|list|show) (files?|dirs?|directories|folders?) "
+    r"(are |is )?(in|under|at|inside)|"
+    r"\b(ls|dir)\b(\s|$)|"
+    r"search (the )?(codebase|repo|project|code|tree)|"
+    r"codebase search|grep (for |the )|"
+    r"(goto|go to|navigate to|browse|open) "
+    r"(https?://|www\.|\w+\.(com|org|net|io|dev)\b|gmail|google|"
+    r"youtube|github|outlook|slack)|"
+    r"create (a |the )?(new )?(skill|file|module|test|folder|directory)|"
+    r"help me (fix|debug|implement|write|edit|build|run)|"
+    r"look at the error|in the logs"
     r")\b"
 )
+# Paths + bare filenames that imply workspace tools
 _L2_PATH = re.compile(
     r"(?:[A-Za-z]:\\|~/|\.\.?/|src/|desktop/|tests?/)[^\s]{2,}"
+    r"|\b[\w.-]+\.(py|ts|tsx|js|jsx|md|json|toml|rs|go|css|html|yml|yaml|txt|log)\b"
 )
 _COMPLEX = re.compile(
     r"(?is)\b("
