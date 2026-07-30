@@ -239,10 +239,32 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
     async def delete_chat_session(session_id: str):
         if memory is None:
             raise HTTPException(503, "Memory store not available")
-        deleted = await memory.delete_chat_session(session_id)
+        sid = str(session_id or "").strip()
+        # Stop in-flight turn + shell children before dropping the row
+        with contextlib.suppress(Exception):
+            from remedy.core.turn_context import abort_session as _abort_turn
+
+            _abort_turn(sid)
+        if runtime is not None:
+            with contextlib.suppress(Exception):
+                ss = getattr(runtime, "_streaming_sessions", None)
+                if isinstance(ss, set):
+                    ss.discard(sid)
+        deleted = await memory.delete_chat_session(sid)
         if not deleted:
             raise HTTPException(404, "Session not found")
-        return {"status": "deleted", "session_id": session_id}
+        # Cascade session-scoped disk artifacts (attachments / plans / undo)
+        cascade: dict = {}
+        with contextlib.suppress(Exception):
+            from remedy.core.session_reset import purge_session_disk_artifacts
+
+            home = load_config().get("home_dir")
+            cascade = purge_session_disk_artifacts(sid, home)
+        return {
+            "status": "deleted",
+            "session_id": sid,
+            "cascade": cascade,
+        }
 
     @app.post("/api/sessions/{session_id}/abort")
     async def abort_session(session_id: str):

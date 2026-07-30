@@ -566,6 +566,61 @@ def test_purge_old_spares_open_jobs(tmp_path: Path):
     assert b._read(done_j.id) is None
 
 
+def test_purge_old_shots_ttl(tmp_path: Path):
+    """Screenshots under computer/shots age out with purge_old (S-COMP-02)."""
+    import os
+    import time
+
+    b = ComputerHostBridge(home_dir=tmp_path)
+    shots = tmp_path / "computer" / "shots"
+    shots.mkdir(parents=True)
+    keep = shots / "fresh.png"
+    drop = shots / "stale.png"
+    keep.write_bytes(b"\x89PNG_fresh")
+    drop.write_bytes(b"\x89PNG_stale")
+    old = time.time() - 10_000
+    os.utime(drop, (old, old))
+    n = b.purge_old_shots(max_age_s=60.0)
+    assert n >= 1
+    assert keep.is_file()
+    assert not drop.is_file()
+    # purge_old also sweeps shots
+    drop2 = shots / "stale2.png"
+    drop2.write_bytes(b"\x89PNG_stale2")
+    os.utime(drop2, (old, old))
+    n2 = b.purge_old(max_age_s=60.0)
+    assert n2 >= 1
+    assert not drop2.is_file()
+
+
+def test_cancel_pending_scoped_by_session(tmp_path: Path):
+    """Multi-tab abort must not cancel sibling session computer jobs."""
+    b = ComputerHostBridge(home_dir=tmp_path)
+    a = b.enqueue("navigate", {"url": "https://a.example"}, session_id="sess-a")
+    b_job = b.enqueue("snapshot", {}, session_id="sess-b")
+    bare = b.enqueue("click", {"text": "x"})  # untagged legacy
+    n = b.cancel_pending_and_running(reason="session_aborted", session_id="sess-a")
+    assert n == 1
+    assert b._read(a.id).status == "cancelled"
+    assert b._read(b_job.id).status == "pending"
+    assert b._read(bare.id).status == "pending"
+    # Global cancel (no session filter) still takes remaining open jobs
+    n2 = b.cancel_pending_and_running(reason="aborted")
+    assert n2 == 2
+    assert b._read(b_job.id).status == "cancelled"
+    assert b._read(bare.id).status == "cancelled"
+
+
+def test_enqueue_stamps_session_id(tmp_path: Path):
+    b = ComputerHostBridge(home_dir=tmp_path)
+    j = b.enqueue("snapshot", {"limit": 5}, session_id="tab-9")
+    assert j.session_id == "tab-9"
+    assert (j.payload or {}).get("session_id") == "tab-9"
+    raw = b._read(j.id)
+    assert raw is not None
+    assert raw.session_id == "tab-9"
+
+
 def test_find_recent_success(tmp_path: Path):
     b = ComputerHostBridge(home_dir=tmp_path)
     j = b.enqueue("navigate", {"url": "https://mail.google.com"})
@@ -875,11 +930,19 @@ def test_abort_session_cancels_computer_jobs(tmp_path: Path, monkeypatch):
     from remedy.core.computer.host_bridge import ComputerHostBridge
 
     b = ComputerHostBridge(home_dir=tmp_path)
-    b.enqueue("navigate", {"url": "https://example.com"})
-    b.enqueue("click", {"x": 1})
+    # Jobs stamped for this session are cancelled on abort
+    b.enqueue("navigate", {"url": "https://example.com"}, session_id="sess-test-cu")
+    b.enqueue("click", {"x": 1}, session_id="sess-test-cu")
+    # Sibling tab job must survive multi-tab abort
+    other = b.enqueue("snapshot", {}, session_id="sess-other-tab")
     monkeypatch.setattr(
         "remedy.core.computer.host_bridge.get_host_bridge",
         lambda home_dir=None: b,
     )
     tc.abort_session("sess-test-cu")
+    claimed = b.claim_next()
+    assert claimed is not None
+    assert claimed.id == other.id
+    assert claimed.session_id == "sess-other-tab"
+    # No more pending after claiming the sibling
     assert b.claim_next() is None

@@ -70,6 +70,43 @@ def _purge_attachments(session_id: str, home: Path) -> bool:
     return False
 
 
+def _purge_undo(session_id: str, home: Path) -> bool:
+    from remedy.core.time_travel import SessionUndoLog
+
+    return bool(SessionUndoLog(home).purge_session(str(session_id)))
+
+
+def purge_session_disk_artifacts(
+    session_id: str,
+    home: Path | str | None = None,
+) -> dict[str, Any]:
+    """Remove session-scoped files left outside memory.db.
+
+    Used by full reset **and** session delete so chat deletion cannot leave
+    attachments, plans, checkpoints, or undo bodies on disk.
+    """
+    sid = str(session_id or "").strip()
+    stats: dict[str, Any] = {
+        "session_id": sid,
+        "plans": 0,
+        "checkpoints": 0,
+        "attachments_purged": False,
+        "undo_purged": False,
+    }
+    if not sid:
+        return stats
+    root = Path(home).expanduser() if home else _home(None)
+    with contextlib.suppress(Exception):
+        stats["plans"] = _purge_session_plans(sid, root)
+    with contextlib.suppress(Exception):
+        stats["checkpoints"] = _purge_session_checkpoints(sid, root)
+    with contextlib.suppress(Exception):
+        stats["attachments_purged"] = _purge_attachments(sid, root)
+    with contextlib.suppress(Exception):
+        stats["undo_purged"] = _purge_undo(sid, root)
+    return stats
+
+
 def _purge_runtime_state(session_id: str, runtime: Any) -> None:
     """Clear process-local state for *this session only* (shared BasicRuntime)."""
     sid = str(session_id)
@@ -205,6 +242,7 @@ async def full_reset_session(
         "plans": 0,
         "checkpoints": 0,
         "attachments_purged": False,
+        "undo_purged": False,
         "title_reset": False,
     }
 
@@ -239,13 +277,12 @@ async def full_reset_session(
                         deleted += 1
             stats["memory_entries"] = deleted
 
-    # 4) Filesystem: plans, checkpoints, attachments
-    with contextlib.suppress(Exception):
-        stats["plans"] = _purge_session_plans(sid, home)
-    with contextlib.suppress(Exception):
-        stats["checkpoints"] = _purge_session_checkpoints(sid, home)
-    with contextlib.suppress(Exception):
-        stats["attachments_purged"] = _purge_attachments(sid, home)
+    # 4) Filesystem: plans, checkpoints, attachments, undo bodies
+    disk = purge_session_disk_artifacts(sid, home)
+    stats["plans"] = int(disk.get("plans") or 0)
+    stats["checkpoints"] = int(disk.get("checkpoints") or 0)
+    stats["attachments_purged"] = bool(disk.get("attachments_purged"))
+    stats["undo_purged"] = bool(disk.get("undo_purged"))
 
     # 5) Process-local caches
     with contextlib.suppress(Exception):
