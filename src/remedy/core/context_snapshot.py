@@ -168,39 +168,47 @@ def build_context_snapshot(
     snap.signals["snapshot_phase"] = (
         "full" if (need_pack or need_spread or need_scout) else "light"
     )
+    if lean:
+        snap.signals["lean_snapshot"] = True
 
-    # Library skill check — cache-only rank; never HTTP / never auto-install
-    try:
-        from remedy.skills.shared import get_shared_registry
+    # Library skill check — cache-only rank; never HTTP / never auto-install.
+    # Lean L0/L1 pure chat: skip registry/config walk (skill/tool/plan still check).
+    run_library = (not lean) or intent in ("skill", "tool", "plan")
+    if run_library:
+        try:
+            from remedy.skills.shared import get_shared_registry
 
-        home = None
-        cfg_lib: dict = {}
-        with suppress(Exception):
-            from remedy.interfaces.config import load_config
+            home = None
+            cfg_lib: dict = {}
+            with suppress(Exception):
+                from remedy.interfaces.config import load_config
 
-            cfg_lib = load_config() or {}
-            if isinstance(cfg_lib, dict) and cfg_lib.get("home_dir"):
-                home = cfg_lib.get("home_dir")
-        reg = None
-        with suppress(Exception):
-            reg = get_shared_registry()
-        lib = swarm.skill.suggest_library(
-            user_text or "",
-            intent=intent,
-            registry=reg,
-            home=home,
-            session_id=session_id or "",
-            cfg=cfg_lib if isinstance(cfg_lib, dict) else None,
-        )
-        if lib:
-            snap.signals["library_suggest"] = lib
-            hint = str(lib.get("system_hint") or "").strip()
-            if hint:
-                snap.policy_system = (
-                    (snap.policy_system + "\n" if snap.policy_system else "") + hint
-                )
-    except Exception as e:
-        snap.signals["library_suggest_error"] = str(e)
+                cfg_lib = load_config() or {}
+                if isinstance(cfg_lib, dict) and cfg_lib.get("home_dir"):
+                    home = cfg_lib.get("home_dir")
+            reg = None
+            with suppress(Exception):
+                reg = get_shared_registry()
+            lib = swarm.skill.suggest_library(
+                user_text or "",
+                intent=intent,
+                registry=reg,
+                home=home,
+                session_id=session_id or "",
+                cfg=cfg_lib if isinstance(cfg_lib, dict) else None,
+            )
+            if lib:
+                snap.signals["library_suggest"] = lib
+                hint = str(lib.get("system_hint") or "").strip()
+                if hint:
+                    snap.policy_system = (
+                        (snap.policy_system + "\n" if snap.policy_system else "")
+                        + hint
+                    )
+        except Exception as e:
+            snap.signals["library_suggest_error"] = str(e)
+    else:
+        snap.signals["library_suggest"] = {"skipped": True, "reason": "light_phase"}
 
     # Spread planner — HEURISTICS ONLY on the hot path (gated when light chat).
     # Never block chat on local VLM (use_local only when the model calls spread_run).
@@ -250,52 +258,66 @@ def build_context_snapshot(
     else:
         snap.signals["spread"] = {"skipped": True, "reason": "light_phase"}
 
-    # Pattern nanobot window (per-session) → stuck recovery when tools fail
+    # Pattern nanobot window (per-session) → stuck recovery when tools fail.
+    # Lean pure-chat with no tool history: skip (empty pattern, no stuck context).
     pat_rate: float | None = None
     pat_n = 0
     recent: list[str] = []
-    try:
-        pat_snap = swarm.pattern.for_session(session_id).snapshot()
-        pat_n = int(pat_snap.get("step_count") or 0)
-        pat_rate = pat_snap.get("success_rate")
-        recent = list(pat_snap.get("recent") or [])
-        if pat_n:
-            snap.signals["pattern"] = {
-                "step_count": pat_n,
-                "success_rate": pat_rate,
-                "recent": recent,
-                "session_id": session_id or "_default",
-            }
-    except Exception:
-        pass
-
-    # Quality control loop → silent system remedies
-    if apply_remedies:
+    run_pattern = (not lean) or tool_msgs > 0 or intent in ("tool", "plan")
+    if run_pattern:
         try:
-            q = get_session_quality(session_id).snapshot()
-            rem = remedies_from_quality(
-                q,
-                fill_pct=fill,
-                nudge=nudge,
-                pattern_success_rate=pat_rate,
-                pattern_step_count=pat_n,
-                pattern_recent=recent,
-            )
-            snap.remedy_system = str(rem.get("system") or "")
-            snap.signals["remedies"] = rem.get("actions") or []
+            pat_snap = swarm.pattern.for_session(session_id).snapshot()
+            pat_n = int(pat_snap.get("step_count") or 0)
+            pat_rate = pat_snap.get("success_rate")
+            recent = list(pat_snap.get("recent") or [])
+            if pat_n:
+                snap.signals["pattern"] = {
+                    "step_count": pat_n,
+                    "success_rate": pat_rate,
+                    "recent": recent,
+                    "session_id": session_id or "_default",
+                }
+        except Exception:
+            pass
+    else:
+        snap.signals["pattern"] = {"skipped": True, "reason": "light_phase"}
+
+    # Quality control loop → silent system remedies.
+    # Reuse one SessionQuality handle; lean quiet sessions skip remedy assembly.
+    sq = None
+    with suppress(Exception):
+        sq = get_session_quality(session_id)
+    if apply_remedies and sq is not None:
+        try:
+            # Lean: only assemble remedies when signals could fire (or high fill).
+            need_remedy = (not lean) or sq.needs_remedy_signals() or fill >= 0.70
+            if need_remedy:
+                q = sq.snapshot()
+                rem = remedies_from_quality(
+                    q,
+                    fill_pct=fill,
+                    nudge=nudge,
+                    pattern_success_rate=pat_rate,
+                    pattern_step_count=pat_n,
+                    pattern_recent=recent,
+                )
+                snap.remedy_system = str(rem.get("system") or "")
+                snap.signals["remedies"] = rem.get("actions") or []
+            else:
+                snap.signals["remedies"] = []
+                snap.signals["remedies_skipped"] = "lean_quiet"
         except Exception as e:
             snap.signals["remedy_error"] = str(e)
 
-    # Session quality turn record (once)
-    try:
-        get_session_quality(session_id).record_turn(
-            estimated_context=est,
-            user_text=user_text or "",
-        )
-        if nudge:
-            get_session_quality(session_id).record_nudge(nudge)
-    except Exception:
-        pass
+    # Session quality turn record (once — same handle as remedies)
+    if sq is not None:
+        with suppress(Exception):
+            sq.record_turn(
+                estimated_context=est,
+                user_text=user_text or "",
+            )
+            if nudge:
+                sq.record_nudge(nudge)
 
     def _append_remedy(text: str) -> None:
         t = (text or "").strip()

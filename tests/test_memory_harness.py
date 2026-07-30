@@ -155,6 +155,32 @@ def test_offload_fat_tool_body(tmp_path: Path):
     assert fat in (out[-1].get("content") or "")
 
 
+def test_offload_skips_already_offloaded_handles(tmp_path: Path):
+    """Second offload pass must not re-hash / rewrite existing handles."""
+    handle = (
+        "first line\n"
+        "…[tool output offloaded 99999 chars → C:/tmp/x.txt]\n"
+        "Re-read with file_read if needed."
+    )
+    # Pad so len >= min_chars (handle path used to re-enter offload_tool_body)
+    padded = handle + ("y" * 5000)
+    msgs = [
+        {"role": "tool", "tool_call_id": "1", "name": "bash", "content": padded},
+        {"role": "tool", "tool_call_id": "2", "name": "bash", "content": "short"},
+        {"role": "tool", "tool_call_id": "3", "name": "bash", "content": "short"},
+        {"role": "tool", "tool_call_id": "4", "name": "bash", "content": "recent"},
+    ]
+    out = maybe_offload_messages(
+        msgs, session_id="s2", home=tmp_path, min_chars=1000, keep_recent_tools=1
+    )
+    assert out[0]["content"] == padded
+    assert "tool output offloaded" in out[0]["content"]
+    # No new offload files for the already-handled body
+    offload_dir = tmp_path / "tool_offload"
+    if offload_dir.is_dir():
+        assert list(offload_dir.glob("*.txt")) == []
+
+
 def test_quality_fail_closed_without_extractable_facts():
     """Empty history must not authorize middle-history drop (score < 0.65)."""
     brief = SessionBrief(intent="maybe", artifacts=[], decisions=[])
