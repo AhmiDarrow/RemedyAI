@@ -460,8 +460,14 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
         from remedy.core.metabolism.identity_export import import_identity
         from remedy.core.metabolism.time_crystal import get_time_crystal
 
+        # Constrain import source: absolute path only; refuse huge/odd names
+        src_path = Path(req.source).expanduser()
+        if ".." in Path(req.source).parts:
+            raise HTTPException(400, "import path must not contain '..'")
+        if not src_path.is_file():
+            raise HTTPException(400, "identity package not found")
         try:
-            payload = import_identity(req.source, passphrase=req.passphrase)
+            payload = import_identity(str(src_path), passphrase=req.passphrase)
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
         # Merge Time Crystal + Partner Memory facts (safe, no credentials)
