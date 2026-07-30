@@ -40,8 +40,14 @@ export async function ensureApiToken(): Promise<string | null> {
       if (inTauriShell()) {
         const { invoke } = await import('@tauri-apps/api/core')
         const t = await invoke<string>('get_local_api_token')
-        if (t) {
-          _apiToken = t
+        // Reject sealed DPAPI envelopes if an older host returned the raw file
+        // instead of decrypting — fall through to loopback bootstrap.
+        const trimmed = (t || '').trim()
+        const looksSealed =
+          trimmed.startsWith('{')
+          && (trimmed.includes('"dpapi"') || trimmed.includes('"encoding"'))
+        if (trimmed.length >= 16 && !looksSealed) {
+          _apiToken = trimmed
           return _apiToken
         }
       }

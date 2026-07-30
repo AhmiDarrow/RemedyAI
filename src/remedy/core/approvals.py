@@ -115,6 +115,7 @@ class ApprovalQueue:
             "file_write",
             "file_edit",
             "skill_run",
+            "mail_send",
             "computer_click",
             "computer_type",
             "computer_key",
@@ -173,6 +174,8 @@ class ApprovalQueue:
                 reason = "File edit requires approval (file_edit)"
             elif tool == "skill_run":
                 reason = "Skill script execution requires approval (skill_run)"
+            elif tool == "mail_send":
+                reason = "Sending email requires approval (mail_send)"
             elif tool.startswith("computer_"):
                 reason = f"Computer control requires approval ({tool})"
         if not reason and c and _ASK_PATTERNS.search(c):

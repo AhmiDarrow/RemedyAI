@@ -1910,6 +1910,117 @@ fn desktop_update_result(current: String) -> DesktopUpdateInfo {
     }
 }
 
+/// Decode on-disk local API token bytes.
+///
+/// Supports:
+/// - Legacy plaintext token (single line)
+/// - DPAPI envelope JSON: `{"v": 2, "dpapi": "<base64>"}` (Windows user-scoped)
+fn decode_local_api_token_bytes(raw: &[u8]) -> Result<String, String> {
+    let text = String::from_utf8_lossy(raw).trim().to_string();
+    if text.is_empty() {
+        return Err("local API token is empty or invalid".into());
+    }
+    if text.starts_with('{') {
+        let v: serde_json::Value =
+            serde_json::from_str(&text).map_err(|e| format!("token envelope JSON: {e}"))?;
+        let is_v2 = v.get("v").and_then(|x| x.as_i64()) == Some(2)
+            || v.get("v").and_then(|x| x.as_u64()) == Some(2);
+        if is_v2 {
+            if let Some(b64) = v.get("dpapi").and_then(|x| x.as_str()) {
+                use base64::Engine;
+                let cipher = base64::engine::general_purpose::STANDARD
+                    .decode(b64.trim())
+                    .map_err(|e| format!("token dpapi base64: {e}"))?;
+                let plain = dpapi_unprotect_user(&cipher)?;
+                let tok = String::from_utf8(plain)
+                    .map_err(|e| format!("token utf-8: {e}"))?
+                    .trim()
+                    .to_string();
+                if tok.len() < 16 {
+                    return Err("local API token is empty or invalid".into());
+                }
+                return Ok(tok);
+            }
+        }
+        return Err("local API token envelope unrecognized".into());
+    }
+    // Legacy plaintext
+    if text.len() < 16 {
+        return Err("local API token is empty or invalid".into());
+    }
+    Ok(text)
+}
+
+/// User-scoped DPAPI unprotect (CryptUnprotectData, UI forbidden).
+#[cfg(target_os = "windows")]
+fn dpapi_unprotect_user(cipher: &[u8]) -> Result<Vec<u8>, String> {
+    use std::ptr;
+
+    #[repr(C)]
+    struct DataBlob {
+        cb_data: u32,
+        pb_data: *mut u8,
+    }
+
+    #[link(name = "crypt32")]
+    extern "system" {
+        fn CryptUnprotectData(
+            p_data_in: *const DataBlob,
+            ppsz_data_descr: *mut *mut u16,
+            p_optional_entropy: *const DataBlob,
+            pv_reserved: *mut core::ffi::c_void,
+            p_prompt_struct: *mut core::ffi::c_void,
+            dw_flags: u32,
+            p_data_out: *mut DataBlob,
+        ) -> i32;
+    }
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn LocalFree(h: *mut core::ffi::c_void) -> *mut core::ffi::c_void;
+    }
+
+    if cipher.is_empty() {
+        return Err("empty DPAPI ciphertext".into());
+    }
+    let mut in_blob = DataBlob {
+        cb_data: cipher.len() as u32,
+        // CryptUnprotectData does not mutate input; cast is for C ABI only.
+        pb_data: cipher.as_ptr() as *mut u8,
+    };
+    let mut out_blob = DataBlob {
+        cb_data: 0,
+        pb_data: ptr::null_mut(),
+    };
+    // CRYPTPROTECT_UI_FORBIDDEN = 0x1
+    let ok = unsafe {
+        CryptUnprotectData(
+            &in_blob,
+            ptr::null_mut(),
+            ptr::null(),
+            ptr::null_mut(),
+            ptr::null_mut(),
+            0x1,
+            &mut out_blob,
+        )
+    };
+    if ok == 0 {
+        return Err("CryptUnprotectData failed for local API token".into());
+    }
+    let result = unsafe {
+        let slice = std::slice::from_raw_parts(out_blob.pb_data, out_blob.cb_data as usize);
+        let v = slice.to_vec();
+        LocalFree(out_blob.pb_data as *mut core::ffi::c_void);
+        v
+    };
+    Ok(result)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn dpapi_unprotect_user(_cipher: &[u8]) -> Result<Vec<u8>, String> {
+    Err("DPAPI envelopes are only supported on Windows".into())
+}
+
 /// Read the local API bearer token written by the Python sidecar
 /// (`~/.remedy/auth/local_api_token`) so the webview can authenticate.
 #[tauri::command]
@@ -1926,12 +2037,8 @@ fn get_local_api_token() -> Result<String, String> {
     if !path.is_file() {
         return Err("local API token not found - is the sidecar running?".into());
     }
-    let raw = std::fs::read_to_string(&path).map_err(|e| format!("read token: {e}"))?;
-    let tok = raw.trim().to_string();
-    if tok.len() < 16 {
-        return Err("local API token is empty or invalid".into());
-    }
-    Ok(tok)
+    let raw = std::fs::read(&path).map_err(|e| format!("read token: {e}"))?;
+    decode_local_api_token_bytes(&raw)
 }
 
 /// Non-blocking update check (network I/O off the UI thread).

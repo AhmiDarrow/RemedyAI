@@ -27,6 +27,60 @@ def test_ensure_token_generates_and_persists(tmp_path, auth_on):
     assert t1 == t2
 
 
+def test_local_api_token_dpapi_or_plain_roundtrip(tmp_path, auth_on):
+    """Bearer must round-trip; on Windows prefer DPAPI envelope (opaque on disk)."""
+    import json
+    import sys
+
+    from remedy.interfaces.local_auth import (
+        load_local_api_token,
+        token_encoding,
+    )
+
+    home = tmp_path / "home_dpapi"
+    home.mkdir()
+    tok = ensure_local_api_token(home)
+    assert len(tok) >= 16
+    assert load_local_api_token(home) == tok
+    enc = token_encoding(home)
+    assert enc in ("dpapi", "plain")
+    raw = token_path(home).read_text(encoding="utf-8")
+    if enc == "dpapi":
+        # Sealed: raw file must not contain the bearer string.
+        assert tok not in raw
+        outer = json.loads(raw)
+        assert outer.get("v") == 2
+        assert outer.get("dpapi")
+    else:
+        # Non-Windows or DPAPI failed — still ACL-hardened plaintext.
+        assert tok in raw.strip() or raw.strip().startswith("{")
+    if sys.platform == "win32":
+        # On CI Windows DPAPI is available for the interactive user.
+        assert enc == "dpapi"
+
+
+def test_local_api_token_upgrades_legacy_plain(tmp_path, auth_on, monkeypatch):
+    """Legacy plaintext token files remain readable and upgrade when DPAPI works."""
+    import sys
+
+    from remedy.interfaces.local_auth import load_local_api_token, token_encoding
+
+    home = tmp_path / "home_legacy"
+    home.mkdir()
+    path = token_path(home)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    legacy = "legacy-plain-token-value-32chars!!"
+    path.write_text(legacy + "\n", encoding="utf-8")
+    assert load_local_api_token(home) == legacy
+    # ensure re-seals when DPAPI available
+    got = ensure_local_api_token(home)
+    assert got == legacy
+    if sys.platform == "win32":
+        assert token_encoding(home) == "dpapi"
+        assert legacy not in path.read_text(encoding="utf-8")
+        assert load_local_api_token(home) == legacy
+
+
 def test_auth_middleware_401_without_token(auth_on, tmp_path):
     tok = ensure_local_api_token(tmp_path)
     app = create_app(api_key=tok)
