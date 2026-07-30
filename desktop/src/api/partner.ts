@@ -29,12 +29,19 @@ export interface PartnerStatus {
   access_scope: string
   harness_mode: string
   brief_intent: string
+  /** Focused session used for quality/metabolism counters (multi-tab). */
+  session_id?: string | null
   approvals: PendingApproval[]
   provider_health?: ProviderHealthHint
+  /** Lean metabolism counters (tier/EU/DU) — never full organ lists. */
+  metabolism?: Record<string, unknown>
 }
 
-export async function getPartnerStatus(): Promise<PartnerStatus> {
-  return apiFetch<PartnerStatus>('/partner/status')
+export async function getPartnerStatus(
+  sessionId?: string | null,
+): Promise<PartnerStatus> {
+  const q = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ''
+  return apiFetch<PartnerStatus>(`/partner/status${q}`)
 }
 
 export async function listApprovals(sessionId?: string | null): Promise<PendingApproval[]> {

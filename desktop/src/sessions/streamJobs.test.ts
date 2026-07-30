@@ -5,11 +5,15 @@ vi.mock('../api/sessions', () => ({
 }))
 
 import {
+  appendJobToken,
+  appendJobThinking,
   completeStreamJob,
   countRunningJobs,
   detachStreamJob,
   getBusySessionIds,
+  getJobPaint,
   registerStreamJob,
+  setJobProcessSteps,
   stopStreamJob,
 } from './streamJobs'
 
@@ -52,5 +56,35 @@ describe('streamJobs', () => {
     // stop already set aborted — a late onDone must not flip to done
     completeStreamJob('s4', 'done')
     expect(countRunningJobs()).toBe(0)
+  })
+
+  it('per-job paint accumulates while detached (multi-tab isolation)', () => {
+    const a = new AbortController()
+    const b = new AbortController()
+    registerStreamJob('tab-a', a, 'grok')
+    registerStreamJob('tab-b', b, 'gpt')
+    detachStreamJob('tab-a')
+    appendJobToken('tab-a', 'Hello ')
+    appendJobToken('tab-a', 'from A')
+    appendJobThinking('tab-a', 'think-a')
+    appendJobToken('tab-b', 'Only B')
+    setJobProcessSteps('tab-a', [
+      {
+        id: '1',
+        name: 'file_read',
+        label: 'Reading file',
+        status: 'done',
+        startedAt: 1,
+      },
+    ])
+    const paintA = getJobPaint('tab-a')
+    const paintB = getJobPaint('tab-b')
+    expect(paintA?.partialText).toBe('Hello from A')
+    expect(paintA?.partialThinking).toBe('think-a')
+    expect(paintA?.processSteps).toHaveLength(1)
+    expect(paintB?.partialText).toBe('Only B')
+    expect(paintB?.processSteps).toHaveLength(0)
+    completeStreamJob('tab-a', 'done')
+    completeStreamJob('tab-b', 'done')
   })
 })

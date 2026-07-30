@@ -287,8 +287,14 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
         return result
 
     @app.get("/api/partner/status")
-    async def partner_status():
-        """Compact status for desktop status bar / harness chip."""
+    async def partner_status(session_id: str | None = None):
+        """Compact status for desktop status bar / harness chip.
+
+        *session_id* scopes quality/metabolism to the focused chat tab (multi-tab
+        desktop). When omitted, falls back to runtime's last session id.
+        Metabolism is always lean (counters only) — full organs on
+        ``GET /api/partner/metabolism``.
+        """
         from remedy.core.approvals import APPROVALS
 
         # Keep thumbs-up (auto) in sync with config.toml every poll.
@@ -298,6 +304,9 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
             APPROVALS.sync_from_config(load_config() or {})
         except Exception:
             pass
+        # Approvals stay global (missed approve on another tab still surfaces).
+        # session_id only scopes quality/metabolism to the focused chat.
+        sid_q = (session_id or "").strip() or None
         pending = APPROVALS.list_pending()
         goals_open = 0
         harness = "auto"
@@ -369,12 +378,18 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
             swarm = {"active": False}
             health_pub = {}
 
+        # Focused tab wins; else runtime last-touch session (gateway / single chat).
+        sid_meta = sid_q
+        if not sid_meta and runtime is not None:
+            raw = getattr(runtime, "_session_id", None)
+            sid_meta = str(raw).strip() if raw else None
+        sid_key = sid_meta or ""
+
         quality: dict = {}
         try:
             from remedy.core.session_quality import get_session_quality
 
-            sid = getattr(runtime, "_session_id", None) if runtime is not None else None
-            quality = get_session_quality(str(sid or "")).snapshot()
+            quality = get_session_quality(str(sid_key)).snapshot()
         except Exception:
             quality = {}
 
@@ -382,10 +397,9 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
         try:
             from remedy.core.metabolism.turn import metabolism_public_snapshot
 
-            sid_m = getattr(runtime, "_session_id", None) if runtime is not None else None
             # Partner status is polled — lean counters only (no recent lists / sorts).
             # Full Advanced detail lives on GET /api/partner/metabolism.
-            metabolism = metabolism_public_snapshot(str(sid_m or ""), lean=True)
+            metabolism = metabolism_public_snapshot(str(sid_key), lean=True)
         except Exception:
             metabolism = {}
 
@@ -396,6 +410,7 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
             "access_scope": scope,
             "harness_mode": harness,
             "brief_intent": brief_intent[:200],
+            "session_id": sid_key or None,
             "approvals": [APPROVALS.to_public(i) for i in pending[:5]],
             # Advanced: only meaningful when user opted into Full+ in the UI
             "nanoswarm": swarm,

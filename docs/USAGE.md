@@ -238,8 +238,13 @@ remedy skill discover ~/my-custom-skills
 
 ### `remedy skill list`
 
+List registered skills. **Auto-learned probation** (tool-chain noise) is hidden by
+default so coding workflows stay usable.
+
 ```bash
-remedy skill list
+remedy skill list              # curated + active skills
+remedy skill list --all        # include auto-learned probation
+remedy skill list --learned    # only auto-learned skills
 ```
 
 ### `remedy skill info <name>`

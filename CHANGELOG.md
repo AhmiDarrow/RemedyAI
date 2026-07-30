@@ -6,6 +6,10 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ### Gauntlet: continuous security + perf loop (feature/computer-use)
 
+- **L0 skill list names:** `list my skills` uses `manifest.name` (was UUID skill ids); hides auto-learned probation like CLI; sorted human list
+- **Desktop stream paint per-job:** tokens/tools accumulate on `streamJobs` paint even when detached; reattach restores partial text + process trail (multi-tab concurrent turns)
+- **Partner status session scope:** `GET /api/partner/status?session_id=` scopes lean metabolism + quality to the focused chat tab; StatusBar passes active session
+- **CLI skill list docs/tests:** `remedy skill list --all` / `--learned` documented; regression tests for hide/filter
 - **Agency re-arm coding verbs:** short stubs for implement/debug/fix/refactor/test re-arm tools (parity with review); false-progress also catches coding narration
 - **bash_exec hard blocks with tools on:** dangerous wipe/privilege/host-kill still SECURITY_BLOCK when tools registered (L2/L3); approvals off does not bypass
 - **L3 work alone:** bare `work alone` / finish-without-me peers stay L3 with tools + force_spread (not demoted by tools_enabled=False)
