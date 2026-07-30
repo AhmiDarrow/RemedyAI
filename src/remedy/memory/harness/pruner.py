@@ -173,6 +173,67 @@ def _collapse_old_tool_spans(
     return out
 
 
+def _body_char_total(messages: list[dict[str, Any]]) -> int:
+    total = 0
+    for m in messages:
+        c = m.get("content")
+        if isinstance(c, str):
+            total += len(c)
+    return total
+
+
+def count_tool_messages(messages: list[dict[str, Any]] | None) -> int:
+    return sum(1 for m in (messages or []) if m.get("role") == "tool")
+
+
+def tool_chain_active(
+    messages: list[dict[str, Any]] | None,
+    *,
+    lookback: int = 16,
+) -> bool:
+    """True when recent send-view looks like an in-progress multi-step tool chain.
+
+    Used to keep more recent full tool bodies and avoid middle-history drops /
+    "stop and compress" nudges mid code-chain.
+    """
+    msgs = list(messages or [])
+    if not msgs:
+        return False
+    tail = msgs[-max(4, int(lookback)) :]
+    tools = 0
+    tool_call_asst = 0
+    for m in tail:
+        role = m.get("role")
+        if role == "tool":
+            tools += 1
+        elif role == "assistant" and m.get("tool_calls"):
+            tool_call_asst += 1
+    if tools >= 2 or tool_call_asst >= 1:
+        return True
+    # Whole-history density: long coding turns accumulate many tools
+    return count_tool_messages(msgs) >= 6
+
+
+def keep_recent_for_chain(
+    messages: list[dict[str, Any]] | None,
+    base: int,
+    *,
+    ceiling: int = 14,
+) -> int:
+    """Raise keep-recent floor for long tool chains so multi-step work stays intact."""
+    n = count_tool_messages(messages)
+    floor = max(1, int(base))
+    if n >= 16:
+        floor = max(floor, 12)
+    elif n >= 10:
+        floor = max(floor, 10)
+    elif n >= 6:
+        floor = max(floor, 8)
+    elif tool_chain_active(messages):
+        floor = max(floor, 6)
+    return min(int(ceiling), floor)
+
+
 def _shrink_to_token_budget(
     messages: list[dict[str, Any]],
     *,
@@ -185,6 +246,12 @@ def _shrink_to_token_budget(
 
     Protects the last ``keep_recent_tools`` tool messages (and does not chop
     assistant prose until tools are already at the floor cap).
+
+    Token accounting: one full estimate up front, then incremental deltas
+    from char savings (tokens-per-char density). Avoids re-BPE of the full
+    list on every cap step. When the running estimate claims under budget,
+    re-measure once so optimistic deltas cannot leave context over-limit
+    (API failures abort long chains).
     """
     try:
         from remedy.memory.harness.compressor import estimate_tokens
@@ -196,35 +263,59 @@ def _shrink_to_token_budget(
     if est <= budget:
         return msgs
 
+    body_chars = max(1, _body_char_total(msgs))
+    # tokens per content char from the initial measure (includes msg overhead
+    # amortized into density — slightly conservative for body-only trims).
+    density = max(0.05, min(1.0, float(est) / float(body_chars)))
+    trim_suffix = "\n…[budget trim]"
+
+    def _remeasure() -> int:
+        nonlocal est, density
+        est = estimate_tokens(msgs, provider=provider, model=model)
+        bc = max(1, _body_char_total(msgs))
+        density = max(0.05, min(1.0, float(est) / float(bc)))
+        return est
+
+    def _apply_cap(role: str, protect: set[int], caps: tuple[int, ...]) -> bool:
+        """Trim matching roles; return True if verified under budget."""
+        nonlocal est
+        for cap in caps:
+            changed = False
+            for i, m in enumerate(msgs):
+                if m.get("role") != role or i in protect:
+                    continue
+                content = m.get("content")
+                if not isinstance(content, str) or len(content) <= cap:
+                    continue
+                new_c = content[:cap] + trim_suffix
+                saved = max(0, len(content) - len(new_c))
+                if saved <= 0:
+                    continue
+                msgs[i] = dict(m)
+                msgs[i]["content"] = new_c
+                est = max(0, est - int(saved * density + 0.5))
+                changed = True
+            if changed and est <= budget:
+                # Verify — do not stop early on optimistic density alone
+                if _remeasure() <= budget:
+                    return True
+        return False
+
+    # Protect more recent tools when the list is a long in-flight chain
+    keep_n = max(1, int(keep_recent_tools))
+    if tool_chain_active(msgs):
+        keep_n = max(keep_n, keep_recent_for_chain(msgs, keep_n))
     tool_idxs = [i for i, m in enumerate(msgs) if m.get("role") == "tool"]
-    protect_tools = set(tool_idxs[-max(1, int(keep_recent_tools)) :]) if tool_idxs else set()
+    protect_tools = set(tool_idxs[-keep_n:]) if tool_idxs else set()
 
     # Phase 1: trim unprotected tools only
-    caps = (8000, 4000, 2000, 800, 200)
-    for cap in caps:
-        for i, m in enumerate(msgs):
-            if m.get("role") != "tool" or i in protect_tools:
-                continue
-            content = m.get("content")
-            if isinstance(content, str) and len(content) > cap:
-                msgs[i] = dict(m)
-                msgs[i]["content"] = content[:cap] + "\n…[budget trim]"
-        est = estimate_tokens(msgs, provider=provider, model=model)
-        if est <= budget:
-            return msgs
+    if _apply_cap("tool", protect_tools, (8000, 4000, 2000, 800, 200)):
+        return msgs
 
     # Phase 2: if still over, lightly trim older assistants (never last 2)
     asst_idxs = [i for i, m in enumerate(msgs) if m.get("role") == "assistant"]
     protect_asst = set(asst_idxs[-2:]) if asst_idxs else set()
-    for cap in (4000, 1500, 400):
-        for i, m in enumerate(msgs):
-            if m.get("role") != "assistant" or i in protect_asst:
-                continue
-            content = m.get("content")
-            if isinstance(content, str) and len(content) > cap:
-                msgs[i] = dict(m)
-                msgs[i]["content"] = content[:cap] + "\n…[budget trim]"
-        est = estimate_tokens(msgs, provider=provider, model=model)
-        if est <= budget:
-            break
+    if _apply_cap("assistant", protect_asst, (4000, 1500, 400)):
+        return msgs
+    # Final truth for caller metrics path (messages already as lean as we allow)
     return msgs
