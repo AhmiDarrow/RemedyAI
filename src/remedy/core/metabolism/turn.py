@@ -1,0 +1,289 @@
+"""Turn metabolism bridge — wire organs into one silent pre/post pass."""
+
+from __future__ import annotations
+
+from contextlib import suppress
+from typing import Any
+
+from remedy.core.metabolism.decision import get_decision_tracker
+from remedy.core.metabolism.evidence import get_evidence_ledger
+from remedy.core.metabolism.governor import get_governor
+from remedy.core.metabolism.machine_map import get_machine_map
+from remedy.core.metabolism.tier import (
+    TurnTier,
+    classify_turn_tier,
+    tier_policy,
+    tier_system_block,
+)
+from remedy.core.metabolism.time_crystal import get_time_crystal
+
+
+def begin_turn_metabolism(
+    *,
+    session_id: str = "",
+    user_text: str = "",
+    intent: str = "chat",
+    plan_mode: bool = False,
+    has_attachments: bool = False,
+    tools_enabled: bool = True,
+    pure_action: bool = False,
+    browse: bool = False,
+    project_path: str = "",
+    work_roots: list[str] | None = None,
+    brief_head: str = "",
+) -> dict[str, Any]:
+    """Classify tier, warm map/ledger/governor, return policy + inject notes."""
+    sid = (session_id or "").strip() or "_default"
+    tier = classify_turn_tier(
+        user_text,
+        intent=intent,
+        plan_mode=plan_mode,
+        has_attachments=has_attachments,
+        tools_enabled=tools_enabled,
+        pure_action=pure_action,
+        browse=browse,
+    )
+    policy = tier_policy(tier)
+    ledger = get_evidence_ledger(sid)
+    decisions = get_decision_tracker(sid)
+    mmap = get_machine_map(sid)
+    crystal = get_time_crystal(sid, project_id=project_path or "")
+    gov = get_governor(sid)
+
+    if work_roots:
+        mmap.set_work_roots(list(work_roots))
+    elif project_path:
+        mmap.set_work_roots([project_path])
+
+    # Session horizon: admit short intent line (no secrets path)
+    if user_text and len(user_text) < 240:
+        crystal.admit(user_text[:200], horizon="session", source="user")
+
+    # Quality + metabolism for governor
+    quality: dict[str, Any] = {}
+    with suppress(Exception):
+        from remedy.core.session_quality import get_session_quality
+
+        quality = get_session_quality(sid).snapshot()
+
+    meta_snap = {
+        "evidence_units": ledger.evidence_units,
+        "decision_units": decisions.decision_units,
+        "waste_batch_rate": decisions.snapshot().get("waste_batch_rate", 0),
+        "force_spread_signal": policy.force_spread,
+    }
+    gov.observe_and_decide(quality=quality, metabolism=meta_snap, tier=int(tier))
+    if gov.force_spread:
+        # promote force_spread even if tier was L2
+        pass
+
+    injects: list[str] = []
+    note = tier_system_block(tier)
+    if note:
+        injects.append(note)
+    gnote = gov.system_notes()
+    if gnote:
+        injects.append(gnote)
+    map_hint = mmap.system_hint()
+    if map_hint and int(tier) >= 2:
+        injects.append(map_hint)
+    crystal_block = crystal.hot_block(max_chars=800)
+    if crystal_block and int(tier) >= 1:
+        injects.append(crystal_block)
+    # Evidence delta from prior tools (after first model call mark)
+    eblock = ledger.pointer_block(limit=12)
+    if eblock and int(tier) >= 2:
+        injects.append(eblock)
+
+    ir = None
+    if policy.record_ir:
+        with suppress(Exception):
+            from remedy.core.metabolism.action_ir import start_action_ir
+
+            ir = start_action_ir(
+                session_id=sid,
+                tier=int(tier),
+                brief_head=brief_head or user_text[:200],
+            )
+
+    decisions.record("tier", f"tier={policy.label}")
+
+    # Session quality metabolism counters
+    with suppress(Exception):
+        from remedy.core.session_quality import get_session_quality
+
+        sq = get_session_quality(sid)
+        sq.record_metabolism(
+            tier=int(tier),
+            evidence_units=ledger.evidence_units,
+            decision_units=decisions.decision_units,
+            waste_tokens=ledger.waste_tokens,
+            force_spread=bool(policy.force_spread or gov.force_spread),
+        )
+
+    return {
+        "session_id": sid,
+        "tier": int(tier),
+        "tier_label": policy.label,
+        "policy": policy.to_public(),
+        "force_spread": bool(policy.force_spread or gov.force_spread),
+        "full_snapshot": policy.full_snapshot or int(tier) >= 2,
+        "shadow_high_blast": policy.shadow_high_blast or gov.shadow_strict,
+        "record_ir": policy.record_ir,
+        "allow_critical_verify": policy.allow_critical_verify or gov.verify_next,
+        "injects": injects,
+        "action_ir": ir,
+        "governor": gov.snapshot(),
+        "evidence": ledger.snapshot(),
+        "decisions": decisions.snapshot(),
+        "machine_map": mmap.snapshot(),
+        "time_crystal": crystal.snapshot(),
+    }
+
+
+def after_tool_batch(
+    *,
+    session_id: str = "",
+    tool_name: str = "",
+    arguments: dict[str, Any] | None = None,
+    content: str = "",
+    tool_call_id: str = "",
+    success: bool = True,
+    tier: int = 2,
+    action_ir: Any = None,
+    shadow_outcome: str = "",
+    offload_path: str | None = None,
+) -> dict[str, Any]:
+    """Admit evidence, update map, record IR step, decision waste score."""
+    sid = (session_id or "").strip() or "_default"
+    ledger = get_evidence_ledger(sid)
+    decisions = get_decision_tracker(sid)
+    mmap = get_machine_map(sid)
+
+    admitted = ledger.admit_tool_result(
+        tool_name=tool_name,
+        content=content or "",
+        tool_call_id=tool_call_id,
+        offload_path=offload_path,
+        success=success,
+    )
+    decisions.record_tool_batch(new_eu=len(admitted))
+
+    # Map updates from tool names
+    name = tool_name or ""
+    if name in ("file_write", "file_edit", "file_read") and arguments:
+        p = str(arguments.get("path") or "")
+        if p:
+            mmap.note_file_touch(p)
+            if name != "file_read":
+                decisions.record("tool_write", f"{name}:{p[:120]}")
+    if name == "computer_navigate" and arguments:
+        url = str(arguments.get("url") or arguments.get("target") or "")
+        mmap.note_browser(url=url, settled=False)
+        mmap.invalidate("browser")  # will refresh on next snapshot
+        mmap.note_browser(url=url, settled=False)
+    if name in ("computer_snapshot", "computer_screenshot") and success:
+        mmap.note_browser(settled=True, ref_count=content.count("e") if content else 0)
+
+    if action_ir is not None:
+        with suppress(Exception):
+            action_ir.add_step(
+                tool=name,
+                arguments=arguments,
+                result=content or "",
+                eu_delta=len(admitted),
+                shadow_outcome=shadow_outcome,
+                ok=success,
+            )
+
+    with suppress(Exception):
+        from remedy.core.session_quality import get_session_quality
+
+        get_session_quality(sid).record_metabolism(
+            evidence_units=ledger.evidence_units,
+            decision_units=decisions.decision_units,
+            waste_tokens=ledger.waste_tokens,
+            ir_steps=1 if action_ir is not None else 0,
+        )
+
+    return {
+        "eu_new": len(admitted),
+        "evidence_units": ledger.evidence_units,
+        "waste_tokens": ledger.waste_tokens,
+    }
+
+
+def mark_model_call(session_id: str = "") -> None:
+    get_evidence_ledger(session_id).mark_model_call()
+
+
+def end_turn_metabolism(
+    *,
+    session_id: str = "",
+    action_ir: Any = None,
+    status: str = "done",
+    assistant_text: str = "",
+    recent_tool_texts: list[str] | None = None,
+    allow_verify: bool = False,
+    home: Any = None,
+) -> dict[str, Any]:
+    """Finish IR, optional critical verify, promote crystal, persist soft."""
+    sid = (session_id or "").strip() or "_default"
+    out: dict[str, Any] = {}
+    if action_ir is not None:
+        with suppress(Exception):
+            action_ir.finish(status)
+            action_ir.persist(home)
+            out["ir"] = action_ir.to_public()
+
+    crystal = get_time_crystal(sid)
+    crystal.promote_session_to_project(min_hits=2)
+    with suppress(Exception):
+        crystal.persist(home)
+
+    verify_result = None
+    if allow_verify and (assistant_text or recent_tool_texts):
+        with suppress(Exception):
+            from remedy.core.metabolism.verify import verify_critical
+
+            verify_result = verify_critical(
+                assistant_text=assistant_text or "",
+                recent_tool_texts=recent_tool_texts,
+            )
+            out["verify"] = verify_result.to_public()
+            if verify_result.silent_remedy:
+                out["verify_remedy"] = verify_result.silent_remedy
+            gov = get_governor(sid)
+            if not verify_result.ok:
+                with suppress(Exception):
+                    from remedy.core.session_quality import get_session_quality
+
+                    get_session_quality(sid).record_verify(caught=True)
+
+    ledger = get_evidence_ledger(sid)
+    with suppress(Exception):
+        ledger.persist_index(home)
+
+    out["metabolism"] = metabolism_public_snapshot(sid)
+    return out
+
+
+def metabolism_public_snapshot(session_id: str | None = None) -> dict[str, Any]:
+    """Aggregate Advanced/operator snapshot (calm fields only)."""
+    sid = (session_id or "").strip() or "_default"
+    from remedy.core.metabolism.action_ir import ir_coverage_count
+
+    skill_snap: dict = {}
+    with suppress(Exception):
+        from remedy.core.metabolism.skill_genome import get_skill_genome
+
+        skill_snap = get_skill_genome().snapshot()
+    return {
+        "evidence": get_evidence_ledger(sid).snapshot(),
+        "decisions": get_decision_tracker(sid).snapshot(),
+        "machine_map": get_machine_map(sid).snapshot(),
+        "governor": get_governor(sid).snapshot(),
+        "time_crystal": get_time_crystal(sid).snapshot(),
+        "skill_genome": skill_snap,
+        "ir_coverage_total": ir_coverage_count(),
+    }

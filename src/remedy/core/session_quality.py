@@ -71,6 +71,15 @@ class SessionQuality:
     max_tool_fail_streak: int = 0
     last_user_text: str = ""
     started_at: float = field(default_factory=time.time)
+    # Metabolism (silent partner OS) — Advanced / harness only
+    last_tier: int = 1
+    evidence_units: int = 0
+    decision_units: int = 0
+    waste_tokens: int = 0
+    force_spread_count: int = 0
+    shadow_catch_count: int = 0
+    verify_catch_count: int = 0
+    ir_step_count: int = 0
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def record_turn(
@@ -112,6 +121,40 @@ class SessionQuality:
                     self.max_tool_fail_streak = self.tool_fail_streak
                 if self.tool_fail_streak >= 3:
                     self.stuck_signal_count += 1
+
+    def record_metabolism(
+        self,
+        *,
+        tier: int | None = None,
+        evidence_units: int | None = None,
+        decision_units: int | None = None,
+        waste_tokens: int | None = None,
+        force_spread: bool = False,
+        ir_steps: int = 0,
+    ) -> None:
+        """Update silent metabolism counters (EU/DU/tier/IR)."""
+        with self._lock:
+            if tier is not None:
+                self.last_tier = int(tier)
+            if evidence_units is not None:
+                self.evidence_units = max(self.evidence_units, int(evidence_units))
+            if decision_units is not None:
+                self.decision_units = max(self.decision_units, int(decision_units))
+            if waste_tokens is not None:
+                self.waste_tokens = max(self.waste_tokens, int(waste_tokens))
+            if force_spread:
+                self.force_spread_count += 1
+            if ir_steps:
+                self.ir_step_count += int(ir_steps)
+
+    def record_shadow_catch(self) -> None:
+        with self._lock:
+            self.shadow_catch_count += 1
+
+    def record_verify(self, *, caught: bool = True) -> None:
+        with self._lock:
+            if caught:
+                self.verify_catch_count += 1
 
     def record_compress(
         self,
@@ -192,6 +235,17 @@ class SessionQuality:
                     else None
                 ),
                 "uptime_s": round(time.time() - self.started_at, 1),
+                # Metabolism (Advanced / harness — not Simple UI chrome)
+                "metabolism": {
+                    "last_tier": self.last_tier,
+                    "evidence_units": self.evidence_units,
+                    "decision_units": self.decision_units,
+                    "waste_tokens": self.waste_tokens,
+                    "force_spread_count": self.force_spread_count,
+                    "shadow_catch_count": self.shadow_catch_count,
+                    "verify_catch_count": self.verify_catch_count,
+                    "ir_step_count": self.ir_step_count,
+                },
             }
 
 

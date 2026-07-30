@@ -365,6 +365,15 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
         except Exception:
             quality = {}
 
+        metabolism: dict = {}
+        try:
+            from remedy.core.metabolism.turn import metabolism_public_snapshot
+
+            sid_m = getattr(runtime, "_session_id", None) if runtime is not None else None
+            metabolism = metabolism_public_snapshot(str(sid_m or ""))
+        except Exception:
+            metabolism = {}
+
         return {
             "pending_approvals": len(pending),
             "approval_mode": APPROVALS.mode,
@@ -377,4 +386,97 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
             "nanoswarm": swarm,
             "session_quality": quality,
             "provider_health": health_pub,
+            "metabolism": metabolism,
+        }
+
+    class IdentityExportRequest(BaseModel):
+        passphrase: str = Field(..., min_length=8, description="User passphrase (never stored)")
+        dest: str = Field(
+            default="",
+            description="Optional path; default ~/.remedy/exports/partner-identity.remedy",
+        )
+
+    class IdentityImportRequest(BaseModel):
+        passphrase: str = Field(..., min_length=8)
+        source: str = Field(..., description="Path to .remedy identity package")
+
+    @app.get("/api/partner/metabolism")
+    async def partner_metabolism(session_id: str | None = None):
+        """Advanced: silent metabolism snapshot (tier, EU/DU, governor, map)."""
+        from remedy.core.metabolism.turn import metabolism_public_snapshot
+        from remedy.core.session_quality import get_session_quality
+
+        sid = session_id
+        if not sid and runtime is not None:
+            sid = str(getattr(runtime, "_session_id", "") or "")
+        return {
+            "session_id": sid or "_default",
+            "session_quality": get_session_quality(sid).snapshot(),
+            "metabolism": metabolism_public_snapshot(sid),
+        }
+
+    @app.post("/api/partner/identity/export")
+    async def partner_identity_export(req: IdentityExportRequest):
+        """Encrypted portable partner identity — excludes keys/tokens/IR/evidence raw."""
+        from pathlib import Path
+
+        from remedy.core.metabolism.identity_export import (
+            collect_default_payload,
+            export_identity,
+        )
+
+        home = None
+        if runtime is not None:
+            home = getattr(getattr(runtime, "config", None), "home_dir", None)
+        payload = collect_default_payload(home)
+        dest = (req.dest or "").strip()
+        if not dest:
+            root = Path(home).expanduser() if home else Path.home() / ".remedy"
+            dest_path = root / "exports" / "partner-identity.remedy"
+        else:
+            dest_path = Path(dest).expanduser()
+        path = export_identity(payload, dest_path, passphrase=req.passphrase)
+        return {
+            "ok": True,
+            "path": str(path),
+            "excludes": payload.get("excludes") or [],
+            "counts": {
+                "partner_memory": len(payload.get("partner_memory") or []),
+                "project_profiles": len(payload.get("project_profiles") or []),
+                "time_crystal": len(payload.get("time_crystal") or []),
+            },
+            "hint": "Store the passphrase separately. Keys and OAuth tokens are never exported.",
+        }
+
+    @app.post("/api/partner/identity/import")
+    async def partner_identity_import(req: IdentityImportRequest):
+        """Decrypt identity package (preview counts). Full merge is opt-in later."""
+        from pathlib import Path
+
+        from remedy.core.metabolism.identity_export import import_identity
+        from remedy.core.metabolism.time_crystal import get_time_crystal
+
+        try:
+            payload = import_identity(req.source, passphrase=req.passphrase)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        # Merge Time Crystal life facts only (safe, no credentials)
+        merged = 0
+        tc = get_time_crystal("_import")
+        for fact in payload.get("time_crystal") or []:
+            if isinstance(fact, dict) and fact.get("text"):
+                if tc.admit(
+                    str(fact["text"]),
+                    horizon=str(fact.get("horizon") or "life"),
+                    source="import",
+                ):
+                    merged += 1
+        return {
+            "ok": True,
+            "display_name": payload.get("display_name") or "",
+            "partner_memory_count": len(payload.get("partner_memory") or []),
+            "project_profiles_count": len(payload.get("project_profiles") or []),
+            "time_crystal_merged": merged,
+            "excludes": payload.get("excludes") or [],
+            "hint": "Crystal life facts merged into process. Review /whoami; secrets were never in the package.",
         }

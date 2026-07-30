@@ -327,6 +327,48 @@ async def call_llm_stream(runtime, message: str,
             pure_action_kick = is_pure_action_kick(message or "")
             open_only_browse = is_open_only_browse(message or "")
             page_interaction = wants_page_interaction(message or "")
+        # Metabolism: turn cost tier + evidence/governor injects (silent)
+        with suppress(Exception):
+            from remedy.core.metabolism.turn import begin_turn_metabolism
+
+            sid_m = str(getattr(runtime, "_session_id", "") or session_id or "")
+            intent_m = "chat"
+            with suppress(Exception):
+                snap = getattr(runtime, "_last_context_snapshot", None)
+                if snap is not None:
+                    intent_m = str(getattr(snap, "intent", None) or "chat")
+            roots_m: list[str] = []
+            with suppress(Exception):
+                roots_m = list(getattr(runtime, "_work_roots", None) or [])
+            meta = begin_turn_metabolism(
+                session_id=sid_m,
+                user_text=message or "",
+                intent=intent_m,
+                plan_mode=bool(plan_mode),
+                has_attachments=bool(attachments),
+                tools_enabled=bool(all_tools),
+                pure_action=bool(pure_action_kick),
+                browse=bool(browse_pre_url or page_interaction),
+                project_path=str(getattr(runtime, "_project_path", "") or ""),
+                work_roots=roots_m or None,
+                brief_head=(message or "")[:200],
+            )
+            runtime._turn_tier = int(meta.get("tier") or 1)
+            runtime._turn_tier_label = str(meta.get("tier_label") or "")
+            runtime._force_spread = bool(meta.get("force_spread"))
+            runtime._action_ir = meta.get("action_ir")
+            runtime._metabolism_allow_verify = bool(
+                meta.get("allow_critical_verify")
+            )
+            injects = meta.get("injects") or []
+            if injects:
+                messages.insert(
+                    -1,
+                    {
+                        "role": "system",
+                        "content": "\n\n".join(str(x) for x in injects if x),
+                    },
+                )
         if (browse_pre_url or page_interaction) and all_tools and not plan_mode:
             tools = all_tools
 
@@ -412,6 +454,23 @@ async def call_llm_stream(runtime, message: str,
                 tools = all_tools
         elif pure_action_kick or clear_goals_only or open_only_browse:
             run_until_done = bool(open_only_browse or clear_goals_only)
+
+        # L0 system fast path: model/skills/whoami/version — no frontier tokens.
+        if (
+            not plan_mode
+            and not attachments
+            and not browse_pre_url
+            and not page_interaction
+            and not clear_goals_only
+            and int(getattr(runtime, "_turn_tier", 1) or 1) == 0
+        ):
+            with suppress(Exception):
+                from remedy.core.metabolism.l0 import try_l0_system_reply
+
+                l0 = try_l0_system_reply(runtime, message or "")
+                if l0:
+                    yield l0
+                    return
 
         # Personal-assistant fast path: high-confidence tool-only asks skip the
         # provider model (calendar list, budget status, brief, simple log, …).

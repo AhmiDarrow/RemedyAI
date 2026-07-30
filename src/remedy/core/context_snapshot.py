@@ -205,11 +205,23 @@ def build_context_snapshot(
         try:
             from remedy.core.spread.planner import plan_spread
 
+            force_spread = False
+            with suppress(Exception):
+                from remedy.core.metabolism.tier import TurnTier, classify_turn_tier
+
+                t = classify_turn_tier(
+                    user_text or "",
+                    intent=intent,
+                    tools_enabled=True,
+                )
+                force_spread = t >= TurnTier.L3_DEEP
+                snap.signals["turn_tier"] = int(t)
             spread_plan = plan_spread(
                 user_text or "",
                 intent=intent,
                 project_path=project_path,
                 use_local=False,
+                force=force_spread,
             )
             snap.signals["spread"] = spread_plan.to_public()
             if spread_plan.spread:
