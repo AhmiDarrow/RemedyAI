@@ -469,6 +469,45 @@ def test_cua_macro_no_typed_secrets():
     assert "[omitted]" in blob
 
 
+def test_cua_macro_strips_url_userinfo_and_query():
+    from remedy.core.metabolism.cua_macros import get_cua_macros, reset_cua_macros
+
+    reset_cua_macros()
+    store = get_cua_macros()
+    m = store.observe_chain(
+        [
+            {
+                "tool": "computer_navigate",
+                "args": {
+                    "url": "https://user:hunter2@example.com/login?token=abc123secret"
+                },
+            },
+            {"tool": "computer_click", "args": {"ref": "submit"}},
+        ],
+        success=True,
+    )
+    assert m is not None
+    blob = json.dumps(m.to_public())
+    assert "hunter2" not in blob
+    assert "token=abc123secret" not in blob
+    assert "example.com" in blob
+
+
+def test_skill_genome_atomic_persist(tmp_path: Path):
+    from remedy.core.metabolism.skill_genome import get_skill_genome, reset_skill_genome
+
+    reset_skill_genome()
+    g = get_skill_genome()
+    g.record("demo-skill", ok=True, latency_ms=12.0)
+    path = g.persist(home=tmp_path)
+    assert path is not None and path.is_file()
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert "demo-skill" in data.get("skills", {})
+    # No leftover temp files
+    leftovers = list((tmp_path / "skill_genome").glob(".phenotypes.*.tmp"))
+    assert leftovers == []
+
+
 def test_governor_compress_earlier_flag():
     from remedy.core.metabolism.governor import get_governor, reset_governor
 
