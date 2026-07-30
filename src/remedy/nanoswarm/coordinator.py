@@ -95,12 +95,38 @@ class NanoSwarm:
             )
 
         elif event.name == "skill_result":
+            # Prefer payload session_id, then dispatch ctx / coordinator session.
+            skill_sid = (
+                str(event.payload.get("session_id") or "").strip()
+                or str(session_id or "").strip()
+                or str(ctx.get("session_id") or "").strip()
+                or None
+            )
+            # Default True; skill_run sets False after it already recorded feedback.
+            record_fb = True
+            if "record_feedback" in event.payload:
+                record_fb = bool(event.payload.get("record_feedback"))
+            elif "record_feedback" in ctx:
+                record_fb = bool(ctx.get("record_feedback"))
+            auto_ref = True
+            if "auto_refine" in event.payload:
+                auto_ref = bool(event.payload.get("auto_refine"))
+            elif "auto_refine" in ctx:
+                auto_ref = bool(ctx.get("auto_refine"))
             results["signals"]["skill"] = self.skill.on_skill_result(
                 str(event.payload.get("skill_name") or ""),
                 success=bool(event.payload.get("success", True)),
                 learning_loop=ctx.get("learning_loop"),
                 duration_ms=float(event.payload.get("duration_ms") or 0),
                 skill=ctx.get("skill"),
+                session_id=skill_sid,
+                error=(
+                    str(event.payload.get("error"))
+                    if event.payload.get("error") is not None
+                    else None
+                ),
+                record_feedback=record_fb,
+                auto_refine=auto_ref,
             )
 
         elif event.name == "session_end":

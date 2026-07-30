@@ -252,10 +252,62 @@ async def run_verify_job(
             ),
             details={"error": str(e)},
         )
+    # Write roots only — never fall back to read roots (Desktop/Docs/Downloads).
+    # Same project write jail as bash_exec so job_run/mission_verify cannot
+    # bypass shell mutation controls via the silent job path.
     try:
-        roots = runtime.write_roots()
+        roots = list(runtime.write_roots() or [])
+    except Exception as exc:
+        return JobResult(
+            kind="verify",
+            ok=False,
+            summary=(
+                f"WRITE_JAIL: cannot resolve write roots for shell jail: {exc}\n"
+                "Shell verify was not run (fail closed). Ensure a project folder is set."
+            ),
+            details={"error": str(exc)},
+        )
+    if not roots:
+        roots = [root]
+    try:
+        bound = not bool(runtime.project_path_is_unset())
     except Exception:
-        roots = runtime.allowed_roots()
+        bound = True  # fail closed: treat as bound if unknown
+    try:
+        scope = str(runtime.access_scope() or "project")
+    except Exception:
+        scope = "project"
+    try:
+        from remedy.core.shell_write_jail import check_shell_write_jail
+
+        jail_hit = check_shell_write_jail(
+            cmd,
+            write_roots=list(roots),
+            cwd=workdir,
+            project_bound=bound,
+            access_scope=scope,
+        )
+    except Exception as exc:
+        return JobResult(
+            kind="verify",
+            ok=False,
+            summary=(
+                f"WRITE_JAIL: shell write jail check failed (refused): {exc}\n"
+                "Shell verify was not run (fail closed)."
+            ),
+            details={"error": str(exc)},
+        )
+    if jail_hit:
+        return JobResult(
+            kind="verify",
+            ok=False,
+            summary=(
+                f"WRITE_JAIL: {jail_hit}\n"
+                "job_run/mission_verify uses the same shell write jail as bash_exec. "
+                "Stay inside the focus project with file_write/file_edit."
+            ),
+            details={"write_jail": jail_hit},
+        )
     sandbox = SubprocessSandbox(allowed_paths=roots or [root, workdir])
     argv = [*win_shell_prefix(), cmd]
     env = path_env_with_local_bins(workdir)

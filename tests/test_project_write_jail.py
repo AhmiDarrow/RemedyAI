@@ -661,6 +661,50 @@ async def test_bash_exec_write_roots_fail_closed(tmp_path: Path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_job_run_verify_write_jail_parity(tmp_path: Path, monkeypatch):
+    """job_run/mission_verify must share bash_exec shell write jail (no silent bypass)."""
+    from remedy.core.approvals import APPROVALS
+    from remedy.core.jobs import run_verify_job
+
+    monkeypatch.setattr(APPROVALS, "needs_ask", lambda *a, **k: None)
+
+    sticky = tmp_path / "SecretSticky"
+    folder = tmp_path / "SecretFolder"
+    sticky.mkdir()
+    folder.mkdir()
+    rt = _make_runtime(sticky, scope="project", home=tmp_path / "home")
+
+    bad = f'Set-Content -Path "{folder / "pwn.txt"}" -Value "nope" -Encoding utf8'
+    result = await run_verify_job(rt, command=bad, path=str(sticky))
+    assert result.ok is False
+    assert "WRITE_JAIL" in result.summary or "jail" in result.summary.lower()
+    assert not (folder / "pwn.txt").exists()
+    assert (result.details or {}).get("write_jail") or "WRITE_JAIL" in result.summary
+
+
+@pytest.mark.asyncio
+async def test_job_run_verify_write_roots_fail_closed(tmp_path: Path, monkeypatch):
+    """write_roots() failure on verify job must fail closed (no shell run)."""
+    from remedy.core.approvals import APPROVALS
+    from remedy.core.jobs import run_verify_job
+
+    monkeypatch.setattr(APPROVALS, "needs_ask", lambda *a, **k: None)
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    rt = _make_runtime(proj, scope="project", home=tmp_path / "home")
+
+    def _boom():
+        raise RuntimeError("roots unavailable")
+
+    rt.write_roots = _boom  # type: ignore[method-assign]
+    result = await run_verify_job(rt, command="echo hi")
+    assert result.ok is False
+    assert "WRITE_JAIL" in result.summary
+    assert "roots" in result.summary.lower()
+
+
+@pytest.mark.asyncio
 async def test_update_settings_refuses_project_switch_without_force(tmp_path: Path):
     """Regression: agent must not silently retarget SecretSticky → SecretFolder."""
     from remedy.core.agent_settings_tools import register_settings_tools
