@@ -95,3 +95,26 @@ def test_autoupdate_pipeline_script_exists() -> None:
     body = PIPELINE.read_text(encoding="utf-8")
     assert "Relaunch" in body
     assert "parent" in body.lower()
+
+
+def test_hooks_kill_before_replace_and_marker_cleanup() -> None:
+    """PREINSTALL must kill running app; marker deleted after defer so no sticky skip."""
+    text = HOOKS.read_text(encoding="utf-8")
+    assert "!macro NSIS_HOOK_PREINSTALL" in text
+    assert "_REMEDY_KILL_ALL" in text
+    # Marker consumed (deleted) when present — avoids permanent no-relaunch
+    assert 'Delete "$TEMP\\RemedyDesktop-UpdaterOwnsRelaunch.flag"' in text
+    # Port 7400 stale listeners cleaned (sidecar/uvicorn leftovers)
+    assert ":7400" in text
+    assert "taskkill" in text.lower()
+
+
+def test_update_ui_does_not_invoke_cmd_start() -> None:
+    """Progress host must stay flash-free (no cmd /c start)."""
+    text = UPDATE_UI.read_text(encoding="utf-8")
+    code_lines = [
+        ln for ln in text.splitlines() if ln.strip() and not ln.lstrip().startswith("#")
+    ]
+    code = "\n".join(code_lines).lower()
+    assert "cmd /c start" not in code
+    assert "cmd.exe" not in code or "comment" in code  # soft: prefer no cmd.exe

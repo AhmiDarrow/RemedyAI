@@ -205,6 +205,129 @@ def validate_uuid(value: str, context: str = "id") -> str:
     return value
 
 
+# Mission ids are UUIDs or short hex/alnum prefixes (never path segments).
+VALID_MISSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{3,63}$")
+# Session ids used only as filename suffixes under missions/.
+VALID_MISSION_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+
+
+def validate_mission_id(value: str, *, context: str = "mission_id") -> str:
+    """Validate a mission id / short prefix for safe filesystem use.
+
+    Rejects path separators, ``..``, and empty/too-short tokens so
+    ``MissionStore`` cannot escape ``~/.remedy/missions/``.
+    """
+    mid = (value or "").strip()
+    if not mid or not VALID_MISSION_ID_RE.match(mid):
+        raise SecurityError(
+            f"Invalid {context}: {mid[:40]!r}",
+            rule="mission_id",
+            detail={"context": context},
+        )
+    if ".." in mid or "/" in mid or "\\" in mid:
+        raise SecurityError(
+            f"Invalid {context} (path characters)",
+            rule="mission_id_path",
+            detail={"context": context},
+        )
+    return mid
+
+
+def sanitize_mission_session_id(value: str | None) -> str | None:
+    """Return a filesystem-safe session id fragment, or None if unusable."""
+    sid = (value or "").strip()
+    if not sid:
+        return None
+    if not VALID_MISSION_SESSION_ID_RE.match(sid):
+        return None
+    if ".." in sid or "/" in sid or "\\" in sid:
+        return None
+    return sid
+
+
+def is_loopback_service_url(url: str) -> bool:
+    """True when *url* is http(s) to a **loopback-only** host (local service).
+
+    Used by ComfyUI / local_discover so env, config, skill frontmatter, and tool
+    ``base_url`` cannot SSRF cloud metadata, LAN, or the public internet.
+
+    Rules (fail closed):
+    - scheme http or https only (no file:, gopher:, etc.)
+    - no URL userinfo (user:pass@host)
+    - hostname is loopback literal, ``localhost``, or DNS where **every**
+      resolved A/AAAA is loopback
+    """
+    import ipaddress
+    import socket
+    from urllib.parse import urlparse
+
+    raw = (url or "").strip()
+    if not raw:
+        return False
+    if "://" not in raw:
+        raw = f"http://{raw}"
+    try:
+        parsed = urlparse(raw)
+    except Exception:
+        return False
+    if parsed.scheme not in ("http", "https"):
+        return False
+    # username/password set even if empty string for user@host forms
+    if parsed.username is not None or parsed.password is not None:
+        return False
+    host = (parsed.hostname or "").strip().lower().rstrip(".")
+    if not host:
+        return False
+
+    def _ip_loopback(addr: str) -> bool:
+        try:
+            return bool(ipaddress.ip_address(addr).is_loopback)
+        except ValueError:
+            return False
+
+    if _ip_loopback(host):
+        return True
+    if host in ("localhost",):
+        # Still resolve — rebinding / misconfigured hosts file must not open LAN.
+        pass
+    else:
+        # Non-localhost names only allowed if every answer is loopback.
+        pass
+
+    try:
+        infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    except OSError:
+        return False
+    if not infos:
+        return False
+    saw = False
+    for info in infos:
+        addr = info[4][0]
+        if not _ip_loopback(addr):
+            return False
+        saw = True
+    return saw
+
+
+def require_loopback_service_url(url: str, *, context: str = "url") -> str:
+    """Return stripped base URL if loopback-safe; raise SecurityError otherwise."""
+    cleaned = (url or "").strip().rstrip("/")
+    if not cleaned:
+        raise SecurityError(
+            f"Empty {context}",
+            rule="loopback_url_empty",
+            detail={"context": context},
+        )
+    check = cleaned if "://" in cleaned else f"http://{cleaned}"
+    if not is_loopback_service_url(check):
+        raise SecurityError(
+            f"{context} must be a loopback http(s) URL (got {cleaned[:80]!r})",
+            rule="loopback_url",
+            detail={"context": context, "url": cleaned[:200]},
+        )
+    return cleaned
+
+
 def sanitize_sql_identifier(name: str, max_len: int = 64) -> str:
     """Sanitize a string for use as a SQL identifier (table/column name)."""
     sanitized = re.sub(r"[^a-zA-Z0-9_]", "", name)

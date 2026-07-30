@@ -75,22 +75,35 @@ def _load_comfy_config() -> dict[str, str]:
 
 
 def resolve_base_url(override: str | None = None) -> str:
+    """Resolve ComfyUI base URL — **loopback only** (SSRF guard).
+
+    Non-loopback env/config/override values are ignored so a poisoned
+    ``COMFYUI_URL`` or agent ``base_url`` cannot reach cloud metadata,
+    LAN, or the public internet via the ComfyUI tool HTTP client.
+    """
+    from remedy.core.security import is_loopback_service_url
+
     cfg = _load_comfy_config()
     port = (
         (cfg.get("comfyui_port") or cfg.get("side_port") or "").strip()
         or os.environ.get("COMFYUI_PORT", "").strip()
     )
-    explicit = (
-        (override or "").strip()
-        or os.environ.get("COMFYUI_URL", "").strip()
-        or os.environ.get("REMEDY_COMFYUI_URL", "").strip()
-        or cfg.get("comfyui_url")
-        or cfg.get("side_url")
-        or cfg.get("side_base_url")
-        or ""
-    )
-    if explicit:
-        return explicit.rstrip("/")
+    candidates = [
+        (override or "").strip(),
+        os.environ.get("COMFYUI_URL", "").strip(),
+        os.environ.get("REMEDY_COMFYUI_URL", "").strip(),
+        (cfg.get("comfyui_url") or "").strip(),
+        (cfg.get("side_url") or "").strip(),
+        (cfg.get("side_base_url") or "").strip(),
+    ]
+    for explicit in candidates:
+        if not explicit:
+            continue
+        base = explicit.rstrip("/")
+        check = base if "://" in base else f"http://{base}"
+        if is_loopback_service_url(check):
+            return base
+        # Reject non-loopback; try next source (then safe defaults).
     if port and port.isdigit():
         return f"http://127.0.0.1:{port}"
     return DEFAULT_BASE
@@ -125,7 +138,15 @@ def _request(
     data: bytes | None = None,
     timeout: float = 30.0,
 ) -> Any:
-    url = f"{base.rstrip('/')}{path}"
+    from remedy.core.security import require_loopback_service_url
+
+    # Fail closed: never open non-loopback bases (env poison / tool param SSRF).
+    safe_base = require_loopback_service_url(base, context="comfyui base_url")
+    # path must be relative (leading /); reject absolute/scheme injection
+    rel = path if path.startswith("/") else f"/{path}"
+    if "://" in rel or rel.startswith("//"):
+        raise RuntimeError(f"Invalid ComfyUI path: {path!r}")
+    url = f"{safe_base}{rel}"
     headers = {"Accept": "application/json", "User-Agent": "Remedy-ComfyUI-Tool/1.0"}
     if data is not None:
         headers["Content-Type"] = "application/json"
@@ -164,10 +185,12 @@ def _port_open(host: str, port: int, timeout: float = 0.35) -> bool:
 
 def discover_api_endpoints() -> list[dict[str, Any]]:
     """Find live ComfyUI HTTP APIs on this machine (any user, any port habit)."""
+    from remedy.core.security import is_loopback_service_url
+
     found: list[dict[str, Any]] = []
     seen: set[str] = set()
 
-    # 1) Configured / default URL first
+    # 1) Configured / default URL first (already loopback-filtered)
     bases: list[str] = [resolve_base_url()]
     # 2) Common loopback hosts × ports
     for host in ("127.0.0.1", "localhost"):
@@ -179,6 +202,8 @@ def discover_api_endpoints() -> list[dict[str, Any]]:
         if key in seen:
             continue
         seen.add(key)
+        if not is_loopback_service_url(base):
+            continue
         # Skip TCP probe if not open (faster on closed ports)
         try:
             from urllib.parse import urlparse
