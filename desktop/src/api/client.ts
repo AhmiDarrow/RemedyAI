@@ -144,7 +144,10 @@ export function formatApiErrorBody(body: unknown, fallback = 'Request failed'): 
   }
   if (typeof o.error === 'string' && o.error.trim()) return o.error
   try {
-    return JSON.stringify(o)
+    const s = JSON.stringify(o)
+    // Empty {} / [] from res.json().catch(() => ({})) — use status text instead.
+    if (s === '{}' || s === '[]') return fallback
+    return s
   } catch {
     return fallback
   }
