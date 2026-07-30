@@ -220,6 +220,28 @@ def test_auth_length_mismatch_is_401_not_500(auth_on, tmp_path):
     assert r.status_code == 401
 
 
+def test_api_docs_disabled_by_env(auth_on, tmp_path, monkeypatch):
+    """S-AUTH-05: REMEDY_DISABLE_API_DOCS hides Swagger + OpenAPI export routes."""
+    monkeypatch.setenv("REMEDY_DISABLE_API_DOCS", "1")
+    tok = ensure_local_api_token(tmp_path)
+    app = create_app(api_key=tok)
+    client = TestClient(app)
+    assert app.state.disable_api_docs is True
+    # Built-in docs absent (404); not public when auth on.
+    assert client.get("/docs").status_code == 404
+    assert client.get("/redoc").status_code == 404
+    assert client.get("/openapi.json").status_code == 404
+    # Custom export routes not registered (auth middleware may 401 first).
+    r_export = client.get(
+        "/api/openapi.json", headers={"Authorization": f"Bearer {tok}"}
+    )
+    assert r_export.status_code == 404
+    r_yaml = client.get(
+        "/api/openapi.yaml", headers={"Authorization": f"Bearer {tok}"}
+    )
+    assert r_yaml.status_code == 404
+
+
 def test_generic_webhook_fail_closed_without_secret(auth_on, tmp_path, monkeypatch):
     """With API auth on and no shared secret, unauthenticated webhook is rejected."""
     monkeypatch.delenv("REMEDY_WEBHOOK_SECRET", raising=False)

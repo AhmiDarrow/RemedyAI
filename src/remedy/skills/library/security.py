@@ -52,6 +52,18 @@ def verify_catalog_signature(
         raise ValueError("Catalog signature verification failed") from e
 
 
+def skills_dev_mode() -> bool:
+    """True when REMEDY_SKILLS_DEV opts into non-default catalog URL/key (dogfood)."""
+    import os
+
+    return str(os.environ.get("REMEDY_SKILLS_DEV", "")).strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
 def is_allowed_download_url(url: str, *, allow_cdn_redirect: bool = False) -> bool:
     """True if URL is local dogfood or an allowed GitHub release asset for remedy-skills.
 
@@ -105,4 +117,41 @@ def is_allowed_download_url(url: str, *, allow_cdn_redirect: bool = False) -> bo
             return False
         return bool(cleaned) and len(cleaned) <= 500
 
+    return False
+
+
+def is_allowed_catalog_url(url: str) -> bool:
+    """True if *url* is a safe Skills Library catalog or catalog.sig location.
+
+    Same host policy as skill zips (GitHub release assets for this repo), plus
+    the explicit raw.githubusercontent.com fallback path for this library repo.
+    Off-list URLs require ``REMEDY_SKILLS_DEV=1`` (checked by callers).
+    """
+    u = (url or "").strip()
+    if not u:
+        return False
+    # Release assets (catalog.json / catalog.json.sig / zips share the shape).
+    if is_allowed_download_url(u):
+        return True
+    if not u.lower().startswith("https://"):
+        return False
+    parsed = urlparse(u)
+    host = (parsed.hostname or "").lower()
+    path = parsed.path or ""
+    # Official raw main catalog (keys.RAW_CATALOG_URL) — still this repo only.
+    if host == "raw.githubusercontent.com":
+        # /AhmiDarrow/remedy-skills/<ref>/catalog.json[.sig]
+        prefix = f"/{LIBRARY_REPO}/"
+        if not path.startswith(prefix):
+            return False
+        rest = path[len(prefix) :]
+        parts = [p for p in rest.split("/") if p]
+        if len(parts) != 2:
+            return False
+        ref, filename = parts
+        if ".." in ref or ".." in filename:
+            return False
+        if not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", ref):
+            return False
+        return filename in ("catalog.json", "catalog.json.sig")
     return False
