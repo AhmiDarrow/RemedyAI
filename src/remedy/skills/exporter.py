@@ -299,6 +299,10 @@ def _safe_extract_zip(
         if not name or name.endswith("/"):
             # Directory entry — create later via parents
             continue
+        # Symlink members (Unix mode in external_attr) — never materialize
+        mode = (info.external_attr >> 16) & 0o170000
+        if mode == 0o120000:
+            raise ValueError(f"Zip symlink blocked: {name}")
         # Normalize and reject absolute / traversal
         # zip uses forward slashes; strip drive and leading slashes
         cleaned = name.replace("\\", "/").lstrip("/")
@@ -311,6 +315,21 @@ def _safe_extract_zip(
             target.relative_to(dest)
         except ValueError as exc:
             raise ValueError(f"Zip Slip blocked: {name}") from exc
+        # Reject if any existing path component is a symlink escaping dest
+        try:
+            cur = dest
+            for part in Path(cleaned).parts:
+                cur = cur / part
+                if cur.is_symlink():
+                    link_target = cur.resolve()
+                    try:
+                        link_target.relative_to(dest)
+                    except ValueError as exc:
+                        raise ValueError(f"Zip Slip blocked (symlink): {name}") from exc
+        except ValueError:
+            raise
+        except OSError:
+            pass
         # Metadata size is advisory only (can lie); stream counter is authoritative.
         if max_member_bytes > 0 and info.file_size > max_member_bytes:
             raise ValueError(f"Zip member too large: {name}")

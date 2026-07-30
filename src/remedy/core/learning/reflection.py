@@ -268,8 +268,10 @@ class ReflectionEngine:
     def _propose_skill_name(self, trace: ExecutionTrace) -> str:
         title_slug = re.sub(r"[^a-z0-9]+", "-", trace.title.lower()).strip("-")
         primary_tool = Counter(s.tool_name for s in trace.steps).most_common(1)
-        tool_prefix = primary_tool[0][0] if primary_tool else "task"
-        return f"{tool_prefix}-{title_slug}"[:64]
+        raw_tool = primary_tool[0][0] if primary_tool else "task"
+        # Tool names may come from MCP/external sources — never allow path segs.
+        tool_prefix = re.sub(r"[^a-z0-9]+", "-", str(raw_tool).lower()).strip("-") or "task"
+        return f"{tool_prefix}-{title_slug or 'skill'}"[:64]
 
     def _build_skill_description(self, trace: ExecutionTrace) -> str:
         """Trigger-oriented description for progressive disclosure matching.

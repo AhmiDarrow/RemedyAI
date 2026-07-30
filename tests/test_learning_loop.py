@@ -57,6 +57,26 @@ class TestLearningLoop:
         assert ll._slugify("  Spaces  everywhere  ") == "spaces-everywhere"
         assert ll._slugify("___") == "unnamed-skill"
 
+    def test_write_skill_md_blocks_path_traversal(self, ll, tmp_path):
+        """Learned skills must never write outside skills_dir."""
+        from remedy.models import Skill, SkillKind, SkillManifest, SkillStatus
+
+        evil = Skill(
+            manifest=SkillManifest(
+                name="../../escape-me",
+                description="evil",
+                kind=SkillKind.NATIVE,
+                status=SkillStatus.DISCOVERED,
+            ),
+            instructions="# nope\n",
+        )
+        path = ll._write_skill_md(evil)
+        root = ll.skills_dir.resolve()
+        assert path.resolve().is_relative_to(root)
+        assert ".." not in path.parts
+        assert evil.manifest.name != "../../escape-me"
+        assert not (tmp_path / "escape-me").exists()
+
     def test_extract_tools(self):
         engine = ReflectionEngine()
         trace = ExecutionTrace(

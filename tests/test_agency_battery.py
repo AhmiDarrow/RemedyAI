@@ -71,7 +71,17 @@ def test_mission_short_id_prefix(tmp_path: Path) -> None:
 
 
 def test_plan_mode_tool_names_exclude_destructive() -> None:
-    blocked = {"bash_exec", "file_write", "file_edit", "job_run"}
+    blocked = {
+        "bash_exec",
+        "file_write",
+        "file_edit",
+        "job_run",
+        "computer_act",
+        "computer_click",
+        "computer_type",
+        "computer_app",
+        "skill_run",
+    }
     assert not (blocked & set(PLAN_MODE_TOOL_NAMES))
     assert "plan_save" in PLAN_MODE_TOOL_NAMES
     assert "file_read" in PLAN_MODE_TOOL_NAMES

@@ -409,8 +409,13 @@ class LearningLoop:
         return f"---\n{fm_yaml}\n---\n\n{gs.instructions}\n"
 
     def save_candidate(self, skill_md_content: str, task_title: str) -> Path:
-        name = self._slugify(task_title)
-        skill_dir = self.skills_dir / name
+        name = self._safe_skill_dir_name(self._slugify(task_title))
+        root = self.skills_dir.resolve()
+        skill_dir = (root / name).resolve()
+        try:
+            skill_dir.relative_to(root)
+        except ValueError as exc:
+            raise ValueError(f"Skill path escapes skills dir: {name!r}") from exc
         skill_dir.mkdir(parents=True, exist_ok=True)
         skill_path = skill_dir / "SKILL.md"
         skill_path.write_text(skill_md_content, encoding="utf-8")
@@ -472,12 +477,13 @@ class LearningLoop:
         return self.learn_from_trace(trace)
 
     def _find_existing_skill(self, name: str) -> Skill | None:
+        safe = self._safe_skill_dir_name(name)
         if self.registry is not None:
-            found = self.registry.get(name)
+            found = self.registry.get(safe) or self.registry.get(name)
             if found is not None:
                 return found
-        # Disk fallback
-        path = self.skills_dir / name / "SKILL.md"
+        # Disk fallback (safe name only — never follow traversal segments)
+        path = self.skills_dir / safe / "SKILL.md"
         if path.is_file():
             try:
                 from remedy.skills.loader import load_skill_from_dir
@@ -640,10 +646,29 @@ class LearningLoop:
         )
         return Skill(manifest=manifest, instructions=gs.instructions)
 
+    def _safe_skill_dir_name(self, name: str) -> str:
+        """Single path segment under skills_dir (no traversal / separators)."""
+        from remedy.skills.library.security import is_safe_skill_name
+
+        raw = (name or "").strip() or "unnamed-skill"
+        if is_safe_skill_name(raw):
+            return raw
+        slug = self._slugify(raw)
+        if is_safe_skill_name(slug):
+            return slug
+        return "unnamed-skill"
+
     def _write_skill_md(self, skill: Skill) -> Path:
         """Write SKILL.md for a skill under skills_dir / name."""
-        name = skill.manifest.name or "unnamed-skill"
-        skill_dir = self.skills_dir / name
+        name = self._safe_skill_dir_name(skill.manifest.name or "unnamed-skill")
+        if skill.manifest.name != name:
+            skill.manifest.name = name
+        root = self.skills_dir.resolve()
+        skill_dir = (root / name).resolve()
+        try:
+            skill_dir.relative_to(root)
+        except ValueError as exc:
+            raise ValueError(f"Skill path escapes skills dir: {name!r}") from exc
         skill_dir.mkdir(parents=True, exist_ok=True)
         frontmatter = {
             "name": skill.manifest.name,

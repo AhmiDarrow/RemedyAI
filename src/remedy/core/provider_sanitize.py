@@ -28,6 +28,8 @@ TEXT_CONTENT_MAX = 100_000
 # (full bodies mislead the model after 8k value caps).
 _WRITE_BODY_TOOLS = frozenset({"file_write", "write"})
 _EDIT_BODY_TOOLS = frozenset({"file_edit", "file_edit_batch", "apply_patch"})
+# Computer type/act often carry passwords or tokens — redact typed payloads in history.
+_COMPUTER_TYPE_TOOLS = frozenset({"computer_type", "computer_act"})
 
 _SECRET_KEY_RE = re.compile(
     r"(?i)(access_token|refresh_token|id_token|client_secret|authorization|"
@@ -145,7 +147,37 @@ def _rewrite_write_tool_args(parsed: Any, tool_name: str) -> Any:
             out["edits"] = slim
         return out
 
+    if name in _COMPUTER_TYPE_TOOLS:
+        # Typed payloads (login passwords, tokens) must not re-enter provider history.
+        for key in ("type", "type_text", "text", "password", "passwd"):
+            val = out.get(key)
+            if not isinstance(val, str) or not val:
+                continue
+            # computer_act uses "click" for labels — only redact type-like fields.
+            # computer_type uses "text" as the payload.
+            if name == "computer_act" and key == "text":
+                continue
+            scrubbed = _SECRET_VALUE_RE.sub("[redacted]", val)
+            secretish = scrubbed != val or _looks_like_secret_payload(val)
+            # password/passwd keys always redacted; type/text only when secret-like
+            if key in ("password", "passwd") or secretish:
+                out[key] = f"<<redacted typed input chars={len(val)}>>"
+                out["_history_summarized"] = True
+        return out
+
     return out
+
+
+def _looks_like_secret_payload(value: str) -> bool:
+    """Heuristic: password-like single tokens without spaces."""
+    t = (value or "").strip()
+    if len(t) < 8 or " " in t or "\n" in t:
+        return False
+    # Mixed class or long opaque token
+    has_alpha = any(c.isalpha() for c in t)
+    has_digit = any(c.isdigit() for c in t)
+    has_special = any(not c.isalnum() for c in t)
+    return (has_alpha and has_digit) or has_special or len(t) >= 20
 
 
 def _scrub_tool_args_obj(obj: Any, *, depth: int = 0) -> Any:

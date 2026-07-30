@@ -108,7 +108,21 @@ class ApprovalQueue:
 
     # Tools that always require approval in ``ask`` mode (not only pattern match).
     # ``auto`` mode skips these on trusted scopes so "work until done" has full power.
-    HIGH_IMPACT_TOOLS = frozenset({"bash_exec", "file_write", "file_edit", "skill_run"})
+    # Computer mutation tools are high-impact (OS click/type/launch) — same bar as shell.
+    HIGH_IMPACT_TOOLS = frozenset(
+        {
+            "bash_exec",
+            "file_write",
+            "file_edit",
+            "skill_run",
+            "computer_click",
+            "computer_type",
+            "computer_key",
+            "computer_drag",
+            "computer_act",
+            "computer_app",
+        }
+    )
 
     def needs_ask(self, command: str, *, tool_name: str = "") -> str | None:
         """Return reason string if action should require approval.
@@ -159,6 +173,8 @@ class ApprovalQueue:
                 reason = "File edit requires approval (file_edit)"
             elif tool == "skill_run":
                 reason = "Skill script execution requires approval (skill_run)"
+            elif tool.startswith("computer_"):
+                reason = f"Computer control requires approval ({tool})"
         if not reason and c and _ASK_PATTERNS.search(c):
             reason = "High-impact / destructive command pattern"
         if reason and soft:
