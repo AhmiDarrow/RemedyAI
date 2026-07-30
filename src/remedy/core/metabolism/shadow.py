@@ -113,36 +113,42 @@ def rehearse(
         return ShadowResult("pass", "shell_ok_pending_jail", "medium", name)
 
     if name in ("file_write", "file_edit", "file_edit_batch"):
+        paths: list[str] = []
         path = str(args.get("path") or "")
+        if path:
+            paths.append(path)
         if name == "file_edit_batch":
             edits = args.get("edits") or args.get("files") or []
-            paths = []
             if isinstance(edits, list):
                 for e in edits:
                     if isinstance(e, dict) and e.get("path"):
                         paths.append(str(e["path"]))
-            path = paths[0] if paths else path
-        if path and work_roots:
+        if paths and work_roots:
             try:
                 from pathlib import Path
 
-                p = Path(path).expanduser().resolve()
-                ok = False
-                for r in work_roots:
+                for path in paths:
+                    p = Path(path).expanduser()
                     try:
-                        rp = Path(r).expanduser().resolve()
-                        p.relative_to(rp)
-                        ok = True
-                        break
+                        p = p.resolve()
                     except Exception:
-                        continue
-                if not ok:
-                    return ShadowResult(
-                        "hard_block",
-                        "path_outside_work_roots",
-                        "high",
-                        name,
-                    )
+                        p = p.absolute()
+                    ok = False
+                    for r in work_roots:
+                        try:
+                            rp = Path(r).expanduser().resolve()
+                            p.relative_to(rp)
+                            ok = True
+                            break
+                        except Exception:
+                            continue
+                    if not ok:
+                        return ShadowResult(
+                            "hard_block",
+                            "path_outside_work_roots",
+                            "high",
+                            name,
+                        )
             except Exception:
                 return ShadowResult(
                     "soft_warn",

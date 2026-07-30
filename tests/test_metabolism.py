@@ -141,6 +141,25 @@ def test_shadow_blocks_path_outside_roots(tmp_path: Path):
     assert r.blocked
 
 
+def test_shadow_blocks_all_batch_paths(tmp_path: Path):
+    root = tmp_path / "proj"
+    root.mkdir()
+    good = root / "a.txt"
+    bad = tmp_path / "outside" / "b.txt"
+    r = rehearse(
+        "file_edit_batch",
+        {
+            "edits": [
+                {"path": str(good), "old_string": "a", "new_string": "b"},
+                {"path": str(bad), "old_string": "a", "new_string": "b"},
+            ]
+        },
+        tier=2,
+        work_roots=[str(root)],
+    )
+    assert r.blocked
+
+
 def test_action_ir_redacts_and_persists(tmp_path: Path):
     ir = start_action_ir(session_id="test_meta_sess", tier=2, brief_head="fix bug")
     ir.add_step(
