@@ -63,6 +63,10 @@ def register_skill_tools(runtime: Any) -> None:
             # fuzzy match
             hits = reg.match_skills(nm, limit=5)
             hint = ", ".join(s.manifest.name for s, _ in hits) or "none"
+            with suppress(Exception):
+                from remedy.core.metabolism.skill_genome import get_skill_genome
+
+                get_skill_genome().record(nm, ok=False)
             return format_tool_error(
                 f"Skill not found: {nm}",
                 code="SKILL_NOT_FOUND",

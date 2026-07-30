@@ -197,7 +197,15 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
             from remedy.core.turn_context import turn_session_id
 
             tier = int(getattr(runtime, "_turn_tier", 2) or 2)
-            if should_shadow(name, tier=tier):
+            strict = bool(getattr(runtime, "_shadow_strict", False))
+            if not strict:
+                with suppress(Exception):
+                    from remedy.core.metabolism.governor import get_governor
+
+                    strict = bool(
+                        get_governor(str(turn_session_id(runtime) or "")).shadow_strict
+                    )
+            if should_shadow(name, tier=tier, strict=strict):
                 roots = list(getattr(runtime, "_work_roots", None) or [])
                 if not roots:
                     pp = getattr(runtime, "_project_path", None)
@@ -237,6 +245,23 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
                         get_session_quality(
                             str(turn_session_id(runtime) or "")
                         ).record_shadow_catch()
+                    # Still admit blocked attempt to evidence + IR (audit trail)
+                    with suppress(Exception):
+                        from remedy.core.metabolism.turn import after_tool_batch
+
+                        after_tool_batch(
+                            session_id=str(turn_session_id(runtime) or ""),
+                            tool_name=name or "unknown",
+                            arguments=args if isinstance(args, dict) else {},
+                            content=content_str,
+                            tool_call_id=str(
+                                tc.get("id") or tc.get("tool_call_id") or ""
+                            ),
+                            success=False,
+                            tier=tier,
+                            action_ir=getattr(runtime, "_action_ir", None),
+                            shadow_outcome=shadow_outcome,
+                        )
                     return content_str
                 if sh.outcome == "soft_warn":
                     with suppress(Exception):
@@ -253,7 +278,14 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
             result, content_str = await _call()
 
         # Full tool results for the model (cap only if TOOL_RESULT_CHAR_CAP > 0).
+        # Tier policy may further tighten (L0/L1 lean).
         cap = _TOOL_RESULT_CHAR_CAP if _TOOL_RESULT_CHAR_CAP > 0 else _HARD_SAFETY_CHARS
+        with suppress(Exception):
+            from remedy.core.metabolism.tier import tier_policy
+
+            tpol = tier_policy(int(getattr(runtime, "_turn_tier", 2) or 2))
+            if tpol.max_tool_result_chars and tpol.max_tool_result_chars < cap:
+                cap = int(tpol.max_tool_result_chars)
         if len(content_str) > cap:
             content_str = (
                 content_str[:cap]

@@ -54,10 +54,26 @@ class ShadowResult:
         return self.outcome == "hard_block"
 
 
-def should_shadow(tool_name: str, *, tier: int = 2) -> bool:
+def should_shadow(
+    tool_name: str,
+    *,
+    tier: int = 2,
+    strict: bool = False,
+) -> bool:
     if tier < 2:
         return False
-    return (tool_name or "") in _HIGH_BLAST_TOOLS
+    name = tool_name or ""
+    if name in _HIGH_BLAST_TOOLS:
+        return True
+    # Strict mode (governor): also shadow navigate / skill_run / job_run
+    if strict and name in (
+        "computer_navigate",
+        "skill_run",
+        "job_run",
+        "bash_exec",
+    ):
+        return True
+    return False
 
 
 def rehearse(

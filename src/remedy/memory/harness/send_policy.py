@@ -487,13 +487,26 @@ def slim_messages_mid_turn(
     )
     window = resolve_context_window_for_runtime(runtime)
     min_pct = float(getattr(runtime, "_harness_min_pct", 0.75) or 0.75)
+    sid = session_id or str(getattr(runtime, "_session_id", "") or "")
+    # Governor compress_earlier also applies mid-turn (not only next turn)
+    with suppress(Exception):
+        from remedy.core.metabolism.governor import get_governor
+
+        if get_governor(sid).compress_earlier:
+            min_pct = max(0.45, float(min_pct) - 0.12)
     est = estimate_tokens(messages, provider=provider or None, model=model or None)
     fill = est / max(1, window)
     # Mid-turn: wait longer before slim so short tool bursts stay full fidelity
     if fill < max(0.60, min_pct - 0.12):
+        # Still inject evidence delta when agency so model sees new EU without full slim
+        with suppress(Exception):
+            from remedy.core.metabolism.evidence import get_evidence_ledger
+
+            eblock = get_evidence_ledger(sid).pointer_block(limit=8)
+            if eblock and int(getattr(runtime, "_turn_tier", 1) or 1) >= 2:
+                messages.append({"role": "system", "content": eblock})
         return messages
 
-    sid = session_id or str(getattr(runtime, "_session_id", "") or "")
     home = None
     with suppress(Exception):
         home = getattr(getattr(runtime, "config", None), "home_dir", None)
@@ -525,6 +538,13 @@ def slim_messages_mid_turn(
             min_chars=4000 if strong else 8000,
             keep_recent_tools=keep,
         )
+    # Evidence delta after slim — model sees new EU without full tool dumps
+    with suppress(Exception):
+        from remedy.core.metabolism.evidence import get_evidence_ledger
+
+        eblock = get_evidence_ledger(sid).pointer_block(limit=10)
+        if eblock and int(getattr(runtime, "_turn_tier", 1) or 1) >= 2:
+            out = list(out) + [{"role": "system", "content": eblock}]
     runtime._last_send_messages = list(out)
     return out
 
