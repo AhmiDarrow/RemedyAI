@@ -114,7 +114,9 @@ def test_build_multimodal_native_still_list(tmp_path: Path):
         content_type="image/png",
         home_dir=home,
     )
-    content = build_multimodal_user_content("see", [meta], vision_mode="native")
+    content = build_multimodal_user_content(
+        "see", [meta], vision_mode="native", home_dir=home
+    )
     assert isinstance(content, list)
     assert any(p.get("type") == "image_url" for p in content)
 
@@ -147,7 +149,7 @@ def test_decode_for_turn_native_skips_decoder(tmp_path: Path):
         [meta],
         provider="openai",
         model="gpt-4o-mini",
-        cfg={"home_dir": str(tmp_path / "r"), "vision": {"enabled": True}},
+        cfg={"home_dir": str(home), "vision": {"enabled": True}},
     )
     assert res["mode"] == "native"
 
@@ -173,7 +175,7 @@ def test_force_decode_falls_back_to_native_when_not_ready(tmp_path: Path):
         provider="openai",
         model="gpt-4o-mini",
         cfg={
-            "home_dir": str(tmp_path / "remedy-home-force"),
+            "home_dir": str(home),
             "vision": {"enabled": True, "force_decode": True},
         },
     )
@@ -201,7 +203,7 @@ def test_decode_for_turn_unavailable_when_not_installed(tmp_path: Path):
         provider="deepseek",
         model="deepseek-chat",
         cfg={
-            "home_dir": str(tmp_path / "remedy-home"),
+            "home_dir": str(home),
             "vision": {"enabled": True, "model_id": DEFAULT_MODEL_ID},
         },
     )
@@ -281,8 +283,6 @@ def test_decode_for_turn_force_decode_uses_mock_when_ready(tmp_path: Path):
     """When force_decode + ready, prefer decode path over native gpt-4o."""
     home = tmp_path / "remedy-home"
     home.mkdir()
-    att_home = tmp_path / "att"
-    att_home.mkdir()
     png = (
         b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
         b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00"
@@ -293,7 +293,7 @@ def test_decode_for_turn_force_decode_uses_mock_when_ready(tmp_path: Path):
         filename="dot.png",
         data=png,
         content_type="image/png",
-        home_dir=att_home,
+        home_dir=home,
     )
     cfg = {
         "home_dir": str(home),
@@ -354,6 +354,64 @@ def test_system_health_has_warnings_structure():
     assert isinstance(h["warnings"], list)
     assert h.get("cpu_runtime") is True
     assert h.get("install_need_bytes", 0) > 0
+
+
+def test_vision_health_refuses_non_loopback_and_redirect():
+    """_health must not probe metadata/LAN or follow Location off-loopback."""
+    import http.server
+    import threading
+
+    from remedy.vision.runtime import _health
+
+    with patch("remedy.core.security.urlopen_no_redirect") as mock_open:
+        assert _health("http://169.254.169.254/v1") is False
+        assert _health("http://8.8.8.8:8080/v1") is False
+        mock_open.assert_not_called()
+
+    class _H(http.server.BaseHTTPRequestHandler):
+        follow_hits = 0
+
+        def do_GET(self) -> None:  # noqa: N802
+            if self.path.endswith("/models"):
+                self.send_response(302)
+                self.send_header("Location", "http://169.254.169.254/latest/meta-data")
+                self.end_headers()
+                return
+            type(self).follow_hits += 1
+            self.send_response(200)
+            self.end_headers()
+
+        def log_message(self, *_args: object) -> None:
+            return
+
+    httpd = http.server.HTTPServer(("127.0.0.1", 0), _H)
+    port = httpd.server_address[1]
+    thr = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thr.start()
+    try:
+        assert _health(f"http://127.0.0.1:{port}/v1", timeout=1.0) is False
+        assert _H.follow_hits == 0
+    finally:
+        httpd.shutdown()
+
+
+def test_decode_image_refuses_non_loopback_base(tmp_path: Path):
+    """decode_image must not POST to off-loopback base_url."""
+    from remedy.vision.decoder import decode_image
+
+    img = tmp_path / "t.png"
+    # Minimal 1x1 PNG
+    img.write_bytes(
+        bytes.fromhex(
+            "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4"
+            "890000000a49444154789c63000100000500010d0a2db40000000049454e44ae426082"
+        )
+    )
+    with patch("remedy.core.security.urlopen_no_redirect") as mock_open:
+        out = decode_image(img, base_url="http://169.254.169.254/v1")
+        assert out["ok"] is False
+        assert "loopback" in (out.get("error") or "").lower()
+        mock_open.assert_not_called()
 
 
 def test_cancel_install_when_idle():

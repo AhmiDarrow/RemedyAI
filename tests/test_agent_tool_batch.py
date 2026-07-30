@@ -154,6 +154,84 @@ async def test_tool_result_ui_preview_char_cap() -> None:
     assert "UI safety cap" in payload["preview"]
     # Model path keeps the larger tier/safety body — not the tiny UI preview
     assert len(tool_msgs[0]["content"]) > UI_TOOL_RESULT_PREVIEW_CHARS
+    # SSE JSON envelope itself stays bounded (DOM blow-up guard)
+    assert len(ui_events[0]) < UI_TOOL_RESULT_PREVIEW_CHARS + 400
+
+
+@pytest.mark.asyncio
+async def test_tool_result_ui_preview_exact_boundary_no_cap_note() -> None:
+    """At exactly UI_TOOL_RESULT_PREVIEW_CHARS, preview is not truncated."""
+    from remedy.core.agent_tool_batch import UI_TOOL_RESULT_PREVIEW_CHARS
+
+    rt = BasicRuntime(AgentConfig(llm_api_key=""))
+    rt._turn_tier = 2
+    exact = "e" * UI_TOOL_RESULT_PREVIEW_CHARS
+
+    async def exact_body(**_kwargs):
+        return exact
+
+    rt.tool_registry.register_builtin_handler(
+        "file_read",
+        "read",
+        exact_body,
+        parameters={"type": "object", "properties": {"path": {"type": "string"}}},
+    )
+    ui_events: list[str] = []
+    async for event, _msg in execute_tool_calls(
+        rt,
+        [
+            {
+                "id": "exact1",
+                "type": "function",
+                "function": {"name": "file_read", "arguments": '{"path":"e"}'},
+            }
+        ],
+        seen_fps=set(),
+        result_cache={},
+    ):
+        if event.startswith("@@tool_result:"):
+            ui_events.append(event)
+    payload = json.loads(ui_events[0].split(":", 1)[1])
+    assert payload["preview"] == exact
+    assert "UI safety cap" not in payload["preview"]
+
+
+@pytest.mark.asyncio
+async def test_tool_result_ui_preview_cap_applies_per_tool() -> None:
+    """Each tool_result in a multi-call wave is independently UI-capped."""
+    from remedy.core.agent_tool_batch import UI_TOOL_RESULT_PREVIEW_CHARS
+
+    rt = BasicRuntime(AgentConfig(llm_api_key=""))
+    rt._turn_tier = 2
+    fat = "y" * 25_000
+
+    async def huge(**_kwargs):
+        return fat
+
+    rt.tool_registry.register_builtin_handler(
+        "file_read",
+        "read",
+        huge,
+        parameters={"type": "object", "properties": {"path": {"type": "string"}}},
+    )
+    calls = [
+        {
+            "id": f"m{i}",
+            "type": "function",
+            "function": {"name": "file_read", "arguments": f'{{"path":"p{i}"}}'},
+        }
+        for i in range(3)
+    ]
+    previews: list[str] = []
+    async for event, _msg in execute_tool_calls(
+        rt, calls, seen_fps=set(), result_cache={}
+    ):
+        if event.startswith("@@tool_result:"):
+            previews.append(json.loads(event.split(":", 1)[1])["preview"])
+    assert len(previews) == 3
+    for p in previews:
+        assert len(p) <= UI_TOOL_RESULT_PREVIEW_CHARS + 80
+        assert "UI safety cap" in p
 
 
 @pytest.mark.asyncio

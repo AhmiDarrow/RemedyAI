@@ -223,3 +223,77 @@ def test_probe_health_path_injection_clamped() -> None:
         # Health path collapsed to "/" so URL is loopback base + /
         assert url.endswith("/")
         assert is_loopback_service_url(url.rstrip("/") or url)
+
+
+def test_urlopen_no_redirect_rejects_3xx_family() -> None:
+    """301/302/303/307/308 must not be followed (absolute or relative Location)."""
+    import http.server
+    import threading
+    from urllib.error import HTTPError
+    from urllib.request import Request
+
+    from remedy.core.security import urlopen_no_redirect
+
+    class _H(http.server.BaseHTTPRequestHandler):
+        follow_hits = 0
+
+        def do_GET(self) -> None:  # noqa: N802
+            codes = {
+                "/r301": 301,
+                "/r302": 302,
+                "/r303": 303,
+                "/r307": 307,
+                "/r308": 308,
+            }
+            if self.path in codes:
+                self.send_response(codes[self.path])
+                # Mix absolute metadata + relative paths (urllib would resolve)
+                if self.path == "/r301":
+                    self.send_header("Location", "http://169.254.169.254/latest/meta-data")
+                elif self.path == "/r308":
+                    self.send_header("Location", "http://10.0.0.9/lan")
+                else:
+                    self.send_header("Location", "/followed")
+                self.end_headers()
+                return
+            if self.path == "/followed":
+                type(self).follow_hits += 1
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b'{"stolen":true}')
+                return
+            if self.path == "/ok":
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"ok":true}')
+                return
+            self.send_response(404)
+            self.end_headers()
+
+        def log_message(self, *_args: object) -> None:
+            return
+
+    httpd = http.server.HTTPServer(("127.0.0.1", 0), _H)
+    port = httpd.server_address[1]
+    thr = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thr.start()
+    try:
+        base = f"http://127.0.0.1:{port}"
+        # Happy path still works
+        with urlopen_no_redirect(Request(f"{base}/ok"), timeout=2.0) as resp:
+            body = resp.read()  # type: ignore[union-attr]
+        assert b'"ok"' in body
+        for path, code in (
+            ("/r301", 301),
+            ("/r302", 302),
+            ("/r303", 303),
+            ("/r307", 307),
+            ("/r308", 308),
+        ):
+            with pytest.raises(HTTPError) as ei:
+                urlopen_no_redirect(Request(f"{base}{path}"), timeout=2.0)
+            assert ei.value.code == code
+        assert _H.follow_hits == 0
+    finally:
+        httpd.shutdown()
