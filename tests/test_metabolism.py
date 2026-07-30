@@ -642,6 +642,22 @@ def test_governor_compress_earlier_flag():
     assert g.compress_earlier
 
 
+def test_governor_skips_decision_append_when_unchanged():
+    """Quiet L1 chat must not grow decisions list every turn."""
+    from remedy.core.metabolism.governor import get_governor, reset_governor
+
+    reset_governor("gov_thrash")
+    g = get_governor("gov_thrash")
+    quiet = {"stuck_rate": 0, "re_explain_rate": 0, "max_tool_fail_streak": 0, "turns": 2}
+    meta = {"waste_batch_rate": 0, "evidence_units": 1, "decision_units": 1}
+    g.observe_and_decide(quality=quiet, metabolism=meta, tier=1)
+    n1 = len(g.decisions)
+    g.observe_and_decide(quality=quiet, metabolism=meta, tier=1)
+    g.observe_and_decide(quality=quiet, metabolism=meta, tier=1)
+    assert len(g.decisions) == n1
+    assert g.loop_count >= 3
+
+
 def test_begin_force_spread_inject():
     meta = begin_turn_metabolism(
         session_id="test_meta_sess",

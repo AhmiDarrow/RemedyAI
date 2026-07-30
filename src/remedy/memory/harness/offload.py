@@ -83,6 +83,10 @@ def maybe_offload_messages(
         if not isinstance(content, str) or len(content) < min_chars:
             out.append(msg)
             continue
+        # Already a handle from a prior offload — do not re-hash / re-write.
+        if "tool output offloaded" in content:
+            out.append(msg)
+            continue
         handle, path = offload_tool_body(
             content,
             session_id=session_id,

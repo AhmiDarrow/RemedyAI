@@ -164,6 +164,7 @@ def apply_auto_harness_send_policy(
     # Honor browse / pure-action / attachments stashed by the react loop so
     # L2 agency does not get a light pack/scout-less snapshot.
     full_snap: bool | None = None
+    pre_tier: int | None = None
     with suppress(Exception):
         from remedy.core.metabolism.tier import TurnTier, classify_turn_tier
 
@@ -175,8 +176,10 @@ def apply_auto_harness_send_policy(
             has_attachments=bool(getattr(runtime, "_turn_has_attachments", False)),
             plan_mode=bool(getattr(runtime, "_plan_mode", False)),
         )
+        pre_tier = int(t0)
         full_snap = t0 >= TurnTier.L2_AGENCY
-        runtime._turn_tier = int(getattr(runtime, "_turn_tier", None) or int(t0))
+        runtime._turn_tier = int(getattr(runtime, "_turn_tier", None) or pre_tier)
+        runtime._turn_tier_preclassified = pre_tier
     snap = build_context_snapshot(
         messages=messages,
         user_text=user_text or "",
@@ -197,6 +200,9 @@ def apply_auto_harness_send_policy(
     meta["token_estimate"] = est
     meta["fill_pct"] = snap.fill_pct
     meta["context_window"] = window
+    meta["lean_snapshot"] = bool(full_snap is False)
+    if pre_tier is not None:
+        meta["pre_tier"] = pre_tier
 
     # Ground-truth history for compress quality — only when soft/strong runs
     # (skip expensive shallow copy on the common no-compress path).
@@ -225,7 +231,7 @@ def apply_auto_harness_send_policy(
         )
 
     if not level:
-        # Common path: no compress — skip pre_prune work entirely
+        # Common path: no compress — skip pre_prune / prune / offload entirely
         runtime._last_send_messages = list(messages)
         with suppress(Exception):
             from remedy.core.metrics import default_registry

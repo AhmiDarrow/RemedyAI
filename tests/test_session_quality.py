@@ -87,3 +87,29 @@ def test_tool_fail_streak_counts_stuck():
     q.record_tool_result(success=False)
     assert q.max_tool_fail_streak >= 3
     assert q.stuck_signal_count >= 1
+
+
+def test_snapshot_running_aggregates_o1():
+    """Compress savings/avg stay correct after many events (no full rewalk needed)."""
+    q = SessionQuality(session_id="agg")
+    for i in range(5):
+        q.record_compress(
+            tokens_before=1000 * (i + 2),
+            tokens_after=500,
+            quality={"score": 0.8},
+        )
+    snap = q.snapshot()
+    assert snap["compress_count"] == 5
+    # (2000-500)+(3000-500)+... = 1500+2500+3500+4500+5500 = 17500
+    assert snap["tokens_saved_by_compress"] == 17_500
+    assert snap["avg_compress_quality"] == 0.8
+    assert snap["last_compress"]["tokens_before"] == 6000
+
+
+def test_needs_remedy_signals_quiet_vs_stuck():
+    q = SessionQuality(session_id="nr")
+    assert q.needs_remedy_signals() is False
+    q.record_turn(user_text="hello")
+    assert q.needs_remedy_signals() is False
+    q.record_turn(user_text="I already told you the path")
+    assert q.needs_remedy_signals() is True

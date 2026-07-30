@@ -76,6 +76,28 @@ def test_context_snapshot_single_pass(tmp_path, monkeypatch):
     assert "token_estimate" in pub
 
 
+def test_lean_snapshot_skips_nanoswarm_bots(tmp_path, monkeypatch):
+    """L0/L1 lean path must not pay library/pattern/goal/health on pure chat."""
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    reset_session_quality("lean1")
+    snap = build_context_snapshot(
+        messages=[{"role": "user", "content": "hi there how are you"}],
+        user_text="hi there how are you",
+        session_id="lean1",
+        context_window=100_000,
+        full_snapshot=False,
+    )
+    assert snap.signals.get("lean_snapshot") is True
+    assert (snap.signals.get("library_suggest") or {}).get("skipped") is True
+    assert (snap.signals.get("pattern") or {}).get("skipped") is True
+    assert (snap.signals.get("goal") or {}).get("skipped") is True
+    assert (snap.signals.get("health") or {}).get("skipped") is True
+    assert (snap.signals.get("pack") or {}).get("skipped") is True
+    # Quiet session → remedies assembly skipped (still records turn)
+    assert snap.signals.get("remedies_skipped") == "lean_quiet"
+    assert snap.signals.get("remedies") == []
+
+
 def test_structural_collapse_old_tools():
     messages = []
     for i in range(8):

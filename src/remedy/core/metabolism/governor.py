@@ -87,6 +87,10 @@ class QualityGovernor:
         dec = GovernorDecision(ts=time.time(), actions=actions, reasons=reasons)
         with self._lock:
             self.loop_count += 1
+            # Skip list append + flag rewrites when control actions are unchanged
+            # (common on quiet L1 chat — avoids thrash every turn).
+            if actions == self.last_actions and self.decisions:
+                return self.decisions[-1]
             self.decisions.append(dec)
             if len(self.decisions) > 40:
                 self.decisions = self.decisions[-40:]
