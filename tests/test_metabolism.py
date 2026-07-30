@@ -103,6 +103,14 @@ def test_tier_l2_common_agency_phrasing():
         "update the changelog",
         "make sure the build works",
         "bump the version",
+        # Review/audit — regressed to L1 lean (tools stripped; model prose-only)
+        "review project",
+        "review the project",
+        "review the codebase",
+        "review project and security",
+        "code review",
+        "audit the security",
+        "walk me through the project",
     ]
     for msg in agency:
         t = classify_turn_tier(msg, tools_enabled=True)
