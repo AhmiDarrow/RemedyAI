@@ -55,6 +55,23 @@ def test_ask_mode_requires_computer_mutation(monkeypatch):
         assert "computer" in reason.lower(), reason
 
 
+def test_ask_mode_requires_mail_send(monkeypatch):
+    """Gmail send is high-impact — Ask mode must prompt (no silent send)."""
+    q = ApprovalQueue()
+    q.set_mode("ask")
+    monkeypatch.setattr(
+        "remedy.interfaces.api_support.load_config",
+        lambda: {"access_scope": "project"},
+    )
+    reason = q.needs_ask(
+        "mail_send to=a@b.com subject=hi", tool_name="mail_send"
+    )
+    assert reason is not None
+    assert "mail" in reason.lower() or "email" in reason.lower()
+    q.set_mode("auto")
+    assert q.needs_ask("mail_send to=a@b.com subject=hi", tool_name="mail_send") is None
+
+
 def test_untrusted_scope_asks_even_in_auto(monkeypatch):
     q = ApprovalQueue()
     q.set_mode("auto")

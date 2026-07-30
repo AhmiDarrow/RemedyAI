@@ -150,7 +150,7 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                 from remedy.interfaces.xai_auth import load_credentials
 
                 creds = load_credentials(home_path)
-                xai_auth = creds.to_public_dict()
+                xai_auth = creds.to_public_dict(home=home_path)
                 if creds.connected:
                     key_set = True
             except Exception:
@@ -164,6 +164,7 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             # Booleans only — never raw keys.
             "provider_keys_set": secret_status.get("provider_keys_set") or {},
             "secrets_encoding": secret_status.get("encoding"),
+            "secrets_encoding_warning": secret_status.get("encoding_warning"),
             "llm_ready": provider_credentials_ready(cfg) or bool(runtime_key) or bool(
                 xai_auth and xai_auth.get("connected")
             ),

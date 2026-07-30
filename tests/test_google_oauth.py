@@ -60,6 +60,31 @@ def test_app_config_save_load(tmp_path):
     assert pub["redirect_uri"].endswith("/api/assistant/google/callback")
 
 
+def test_tokens_atomic_write_no_tmp_left(tmp_path):
+    """Google token seal must use temp+replace (no half-written final file / leftover .tmp)."""
+    go.save_tokens(
+        go.GoogleTokens(
+            access_token="ya29.atomic",
+            refresh_token="1//rt",
+            expires_at=9e12,
+            email="a@b.com",
+        ),
+        home=tmp_path,
+    )
+    path = go.tokens_path(tmp_path)
+    assert path.is_file()
+    assert not path.with_suffix(path.suffix + ".tmp").exists()
+    loaded = go.load_tokens(tmp_path)
+    assert loaded.access_token == "ya29.atomic"
+    assert loaded.refresh_token == "1//rt"
+    enc = go.tokens_encoding(tmp_path)
+    assert enc in ("dpapi", "plain")
+    raw = path.read_text(encoding="utf-8")
+    if enc == "dpapi":
+        assert "ya29.atomic" not in raw
+
+
+
 def test_start_oauth_requires_client(tmp_path, monkeypatch):
     from remedy.assistant.store import get_assistant_store, reset_assistant_store
 

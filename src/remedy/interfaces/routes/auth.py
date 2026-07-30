@@ -235,8 +235,9 @@ def register_auth_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
     async def xai_auth_status():
         from remedy.interfaces.xai_auth import load_credentials
 
-        creds = load_credentials(_home_from_config())
-        return creds.to_public_dict()
+        home = _home_from_config()
+        creds = load_credentials(home)
+        return creds.to_public_dict(home=home)
 
     @app.get("/api/auth/xai/oauth-meta")
     async def xai_oauth_meta():
@@ -327,7 +328,10 @@ def register_auth_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
                 base_url=base_url,
                 api_key=req.api_key.strip(),
             )
-        return {"status": "saved", **creds.to_public_dict()}
+        return {
+            "status": "saved",
+            **creds.to_public_dict(home=_home_from_config()),
+        }
 
     @app.delete("/api/auth/xai")
     async def xai_auth_logout():
