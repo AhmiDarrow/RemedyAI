@@ -11,7 +11,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Any
-from urllib.request import Request, urlopen
+from urllib.request import Request
 
 from remedy.vision.catalog import DEFAULT_HOST, DEFAULT_PORT
 from remedy.vision.config import load_vision_json, save_vision_json
@@ -41,21 +41,27 @@ def _port_open(host: str, port: int, timeout: float = 0.15) -> bool:
 
 def _health(base_url: str, timeout: float = _HEALTH_TIMEOUT_S) -> bool:
     """HTTP probe of llama-server. Keep timeouts tiny — callers poll often."""
-    url = base_url.rstrip("/") + "/models"
+    from remedy.core.security import is_loopback_service_url, urlopen_no_redirect
+
+    base = (base_url or "").rstrip("/")
+    # Fail closed on poisoned vision.json / side config (metadata, LAN).
+    if not base or not is_loopback_service_url(base):
+        return False
+    url = base + "/models"
     try:
         req = Request(url, headers={"User-Agent": "RemedyAI-vision/1.0"})
-        with urlopen(req, timeout=timeout) as resp:
+        with urlopen_no_redirect(req, timeout=timeout) as resp:  # type: ignore[union-attr]
             return 200 <= getattr(resp, "status", 200) < 300
     except Exception:
         # Some builds only expose /v1/models
         try:
             alt = (
-                base_url.rstrip("/") + "/v1/models"
-                if not base_url.rstrip("/").endswith("/v1")
-                else base_url.rstrip("/") + "/models"
+                base + "/v1/models"
+                if not base.endswith("/v1")
+                else base + "/models"
             )
             req = Request(alt, headers={"User-Agent": "RemedyAI-vision/1.0"})
-            with urlopen(req, timeout=timeout) as resp:
+            with urlopen_no_redirect(req, timeout=timeout) as resp:  # type: ignore[union-attr]
                 return 200 <= getattr(resp, "status", 200) < 300
         except Exception:
             return False
