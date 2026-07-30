@@ -80,6 +80,136 @@ def test_ensure_tool_call_pairings_drops_orphan_tool_messages():
     assert [m["role"] for m in fixed] == ["user", "assistant"]
 
 
+def test_ensure_tool_call_pairings_multistep_looks_ahead_past_injects():
+    """Epoch / re-arm user injects must not orphan later tool results (HTTP 400).
+
+    Multi-step layout that broke when pairing only scanned consecutive tools:
+      assistant [a,b] → tool a → user(epoch) → tool b → assistant [c] → tool c
+    """
+    messages = [
+        {"role": "user", "content": "implement the login fix"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "call_a",
+                    "type": "function",
+                    "function": {"name": "list_dir", "arguments": "{}"},
+                },
+                {
+                    "id": "call_b",
+                    "type": "function",
+                    "function": {
+                        "name": "file_read",
+                        "arguments": '{"path":"app.py"}',
+                    },
+                },
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_a", "content": "files…"},
+        # Soft epoch / re-arm inject lands before the second tool result.
+        {
+            "role": "user",
+            "content": (
+                "[Epoch 1 complete at step 256] Context was compacted — "
+                "this is not a stop. Run until the task is finished."
+            ),
+        },
+        {"role": "tool", "tool_call_id": "call_b", "content": "def login():…"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "call_c",
+                    "type": "function",
+                    "function": {
+                        "name": "file_edit",
+                        "arguments": '{"path":"app.py"}',
+                    },
+                },
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_c", "content": "ok edited"},
+        {"role": "user", "content": "continue"},
+    ]
+    fixed = ensure_tool_call_pairings(messages)
+    # All three real tool results preserved (no empty missing stub for call_b).
+    tool_by_id = {
+        m["tool_call_id"]: m["content"]
+        for m in fixed
+        if m.get("role") == "tool"
+    }
+    assert tool_by_id["call_a"] == "files…"
+    assert tool_by_id["call_b"] == "def login():…"
+    assert tool_by_id["call_c"] == "ok edited"
+    assert "missing tool result" not in tool_by_id["call_b"]
+    # API order: assistant tool_calls immediately followed by its tool results.
+    roles = [m.get("role") for m in fixed]
+    # First assistant tools block: assistant, tool, tool, then user epoch, …
+    a0 = next(i for i, m in enumerate(fixed) if m.get("tool_calls") and
+              any(tc.get("id") == "call_a" for tc in (m.get("tool_calls") or [])))
+    assert fixed[a0 + 1]["role"] == "tool"
+    assert fixed[a0 + 2]["role"] == "tool"
+    assert {fixed[a0 + 1]["tool_call_id"], fixed[a0 + 2]["tool_call_id"]} == {
+        "call_a",
+        "call_b",
+    }
+    # Epoch user message still present after the paired tools.
+    assert any(
+        m.get("role") == "user" and "Epoch 1" in (m.get("content") or "")
+        for m in fixed
+    )
+    assert roles[-1] == "user"
+
+
+def test_ensure_tool_call_pairings_multistep_two_rounds_intact():
+    """Two complete tool rounds with a user mid-message stay valid."""
+    messages = [
+        {"role": "user", "content": "review project"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "r1",
+                    "type": "function",
+                    "function": {"name": "list_dir", "arguments": "{}"},
+                },
+            ],
+        },
+        {"role": "tool", "tool_call_id": "r1", "content": "src/"},
+        {"role": "user", "content": "keep going"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "r2a",
+                    "type": "function",
+                    "function": {"name": "file_read", "arguments": '{"path":"a"}'},
+                },
+                {
+                    "id": "r2b",
+                    "type": "function",
+                    "function": {"name": "file_read", "arguments": '{"path":"b"}'},
+                },
+            ],
+        },
+        {"role": "tool", "tool_call_id": "r2a", "content": "A"},
+        # Missing r2b — synthetic fill still required.
+        {"role": "assistant", "content": "partial review"},
+    ]
+    fixed = ensure_tool_call_pairings(messages)
+    tool_ids = [m["tool_call_id"] for m in fixed if m.get("role") == "tool"]
+    assert tool_ids == ["r1", "r2a", "r2b"]
+    assert any(
+        m.get("tool_call_id") == "r2b" and "missing tool result" in (m.get("content") or "")
+        for m in fixed
+    )
+
+
 def test_ensure_tool_call_pairings_lookahead_across_epoch_inject():
     """Epoch/re-arm user inject between tool results must not orphan a result."""
     messages = [
