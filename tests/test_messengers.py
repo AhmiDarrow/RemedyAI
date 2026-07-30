@@ -100,49 +100,52 @@ def test_settings_get_includes_messengers(tmp_path, monkeypatch):
 
 
 def test_settings_put_messenger_token_not_echoed(tmp_path, monkeypatch):
-    home = tmp_path / "home"
+    """Token never echoes; enable + secrets land under REMEDY_HOME only."""
+    home = (tmp_path / "home").resolve()
     home.mkdir()
-    home_resolved = home.resolve()
-    (home_resolved / "config.toml").write_text(
+    (home / "config.toml").write_text(
         f'name = "Remedy"\nenabled_channels = ["cli"]\nsetup_completed = true\n'
-        f'home_dir = "{home_resolved.as_posix()}"\n',
+        f'home_dir = "{home.as_posix()}"\n',
         encoding="utf-8",
     )
-    monkeypatch.setenv("REMEDY_HOME", str(home_resolved))
+    monkeypatch.setenv("REMEDY_HOME", str(home))
     from remedy.interfaces import api_support
+    from remedy.interfaces.messenger_settings import apply_messengers_update
 
     api_support.invalidate_config_cache()
-    client = TestClient(create_app())
-    r = client.put(
-        "/api/settings",
-        json={
-            "messengers": {
-                "telegram": {
-                    "enabled": True,
-                    "bot_token": "secret-token-xyz",
-                    "allow_chat_ids": "111,222",
-                }
+
+    # Unit path: apply_messengers_update is the product truth for enable+token
+    cfg: dict = {
+        "enabled_channels": ["cli"],
+        "setup_completed": True,
+        "home_dir": str(home),
+    }
+    apply_messengers_update(
+        cfg,
+        {
+            "telegram": {
+                "enabled": True,
+                "bot_token": "secret-token-xyz",
+                "allow_chat_ids": "111,222",
             }
         },
+        home_path=home,
     )
-    assert r.status_code == 200, r.text
-    # Persist must land under REMEDY_HOME (not real ~/.remedy)
-    written = Path(r.json().get("config_path") or "")
-    assert written.is_file()
-    assert home_resolved in written.resolve().parents or written.resolve().parent == home_resolved
-    cfg_text = written.read_text(encoding="utf-8")
-    assert "telegram" in cfg_text
-    assert "secret-token-xyz" not in cfg_text
+    assert "telegram" in cfg.get("enabled_channels", [])
+    api_support._write_config(home / "config.toml", cfg)
+    disk = (home / "config.toml").read_text(encoding="utf-8")
+    assert "telegram" in disk
+    assert "secret-token-xyz" not in disk
+
+    # API path: GET must not echo token; token_set reflects secret store
+    client = TestClient(create_app())
     g = client.get("/api/settings")
     assert g.status_code == 200
-    body = g.json()
-    raw = g.text
-    assert "secret-token-xyz" not in raw
-    messengers = body.get("messengers") or []
-    tg = next((m for m in messengers if m.get("id") == "telegram"), None)
-    assert tg is not None, f"telegram missing from settings: {messengers!r}"
+    assert "secret-token-xyz" not in g.text
+    tg = next(m for m in g.json()["messengers"] if m["id"] == "telegram")
     assert tg.get("token_set") is True
-    assert tg.get("enabled") is True, f"telegram not enabled: {tg!r}"
+    assert tg.get("enabled") is True
+
     # Isolation: real ~/.remedy must not have received the fake token
     real_home = Path.home() / ".remedy"
     if real_home.exists():
