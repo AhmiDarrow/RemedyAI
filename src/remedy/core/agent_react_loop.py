@@ -50,7 +50,9 @@ from remedy.core.react_stream import (
     normalize_tool_calls,
     parse_sse_data_line,
     repair_reasoning_content_in_messages,
+    repair_tool_arguments_in_messages,
     should_enable_tools,
+    strip_broken_tool_call_turns,
 )
 
 logger = logging.getLogger(__name__)
@@ -111,6 +113,30 @@ async def call_llm_stream(runtime, message: str,
         # For Partner Memory ranking + quiet distillation hooks
         with suppress(Exception):
             runtime._last_user_text = (message or "")[:4000]
+        # Explicit “remember …” → distill BEFORE tools/LLM so same-turn recall works
+        with suppress(Exception):
+            from remedy.core.agent_post_turn import distill_user_message_now
+            from remedy.memory.partner_memory import distill_user_text, is_explicit_remember_intent
+
+            msg0 = message or ""
+            if is_explicit_remember_intent(msg0) and getattr(runtime, "memory", None) is not None:
+                # Prefer native await (no nested-loop races)
+                project_path = str(
+                    getattr(getattr(runtime, "config", None), "project_path", None)
+                    or getattr(runtime, "_project_path", None)
+                    or ""
+                ) or None
+                await distill_user_text(
+                    runtime.memory,
+                    msg0,
+                    brief=getattr(runtime, "_session_brief", None),
+                    session_id=session_id,
+                    project_path=project_path,
+                )
+                # Belt-and-suspenders sync force path
+                distill_user_message_now(runtime, msg0, session_id=session_id)
+            else:
+                distill_user_message_now(runtime, msg0, session_id=session_id)
         context = await runtime._build_context()
         # Surface active plan + plan-mode instructions
         with suppress(Exception):
@@ -131,6 +157,12 @@ async def call_llm_stream(runtime, message: str,
                 from remedy.core.plan_store import PLAN_MODE_SYSTEM_ADDENDUM
 
                 context = (context or "") + "\n\n" + PLAN_MODE_SYSTEM_ADDENDUM
+            else:
+                # Build mode: surgical edits, real plan step status, no junk files.
+                with suppress(Exception):
+                    from remedy.core.plan_store import BUILD_MODE_SYSTEM_ADDENDUM
+
+                    context = (context or "") + "\n\n" + BUILD_MODE_SYSTEM_ADDENDUM
             # In-house computer use (provider-agnostic) — always available in Build;
             # Plan mode still only expose read/navigate tools via allowlist.
             with suppress(Exception):
@@ -326,6 +358,9 @@ async def call_llm_stream(runtime, message: str,
         length_continuations = 0
         # Retry once after repairing DeepSeek reasoning_content on tool turns.
         reasoning_repair_done = False
+        # Truncated tool-call JSON (stream cut / old sanitizer) → repair then strip.
+        tool_args_repair_done = False
+        tool_args_strip_done = False
         # Soft API errors: keep going when we already have tool context.
         # Low cap — fatal model errors hard-stop (see _is_fatal_llm_api_error).
         api_soft_failures = 0
@@ -819,6 +854,9 @@ async def call_llm_stream(runtime, message: str,
                         )
 
                 # Never send incomplete tool_calls/tool pairings (HTTP 400).
+                # Also force valid JSON on every tool-call arguments blob before
+                # POST (guards length-truncated streams + legacy history).
+                repair_tool_arguments_in_messages(messages)
                 messages[:] = ensure_tool_call_pairings(messages)
                 # OpenAI-compatible providers (openai, deepseek, ollama, …) stream SSE.
                 # Anthropic currently uses a single JSON response (stream=False).
@@ -945,6 +983,56 @@ async def call_llm_stream(runtime, message: str,
                                     "reasoning for tool turns; continuing…\n"
                                 )
                                 continue
+                        # Truncated / invalid tool-call JSON in history (often after
+                        # a long plan_save or max_tokens mid-arguments stream).
+                        _tool_arg_err = resp.status == 400 and (
+                            "tool argument" in text.lower()
+                            or "eof while parsing" in text.lower()
+                            or "invalid-argument" in text.lower()
+                            or "unmodified tool arguments" in text.lower()
+                        )
+                        if _tool_arg_err and not tool_args_repair_done:
+                            tool_args_repair_done = True
+                            try:
+                                repaired_n = repair_tool_arguments_in_messages(messages)
+                                messages[:] = ensure_tool_call_pairings(messages)
+                                logger.warning(
+                                    "Repaired tool-call arguments on %d assistant "
+                                    "turn(s) after provider 400; retrying",
+                                    repaired_n,
+                                )
+                                yield (
+                                    "\n[provider fix] Repaired incomplete tool "
+                                    "arguments; continuing…\n"
+                                )
+                                continue
+                            except Exception as repair_exc:
+                                logger.debug(
+                                    "tool-args repair failed: %s", repair_exc
+                                )
+                        if _tool_arg_err and tool_args_repair_done and not tool_args_strip_done:
+                            tool_args_strip_done = True
+                            try:
+                                stripped = strip_broken_tool_call_turns(messages)
+                                messages[:] = ensure_tool_call_pairings(messages)
+                                logger.warning(
+                                    "Stripped %d broken tool-call turn(s) after "
+                                    "provider 400; retrying without replaying them",
+                                    stripped,
+                                )
+                                yield (
+                                    "\n[provider fix] Dropped truncated tool calls "
+                                    "from context; continuing…\n"
+                                )
+                                # Prefer finishing from context rather than more tools
+                                # that re-inflate huge argument payloads.
+                                tools = []
+                                force_answer_sticky = True
+                                continue
+                            except Exception as strip_exc:
+                                logger.debug(
+                                    "tool-args strip failed: %s", strip_exc
+                                )
                         # Fatal: wrong/missing model — do not soft-retry 16× (looks stuck).
                         if _is_fatal_llm_api_error(resp.status, text):
                             model_name = str(_bind.model or "unknown")
@@ -1076,7 +1164,8 @@ async def call_llm_stream(runtime, message: str,
                             chunk = parse_sse_data_line(line_text)
                             if chunk is None:
                                 continue
-                            # Provider usage (often only on final SSE chunk)
+                            # Provider usage — keep *last* snapshot per HTTP stream.
+                            # (Do not ledger on every intermediate SSE chunk.)
                             try:
                                 from remedy.core.usage import usage_from_provider_payload
 
@@ -1086,67 +1175,14 @@ async def call_llm_stream(runtime, message: str,
                                     provider=_bind.provider,
                                 )
                                 if u:
-                                    try:
-                                        from remedy.core.usage import observe_provider_usage
-                                        from remedy.core.usage_ledger import (
-                                            record_usage_event,
-                                        )
-                                        from remedy.nanoswarm.token_nanobot import (
-                                            get_token_nanobot,
-                                        )
+                                    # Prefer later snapshot if multiple chunks carry usage.
+                                    prev = round_state.last_usage
+                                    if prev and prev.get("source") == "provider":
+                                        from remedy.core.usage import merge_usage
 
-                                        pt = int(u.get("prompt_tokens") or 0)
-                                        ct = int(u.get("completion_tokens") or 0)
-                                        est = int(get_token_nanobot().last_estimate or 0)
-                                        prov = _bind.provider
-                                        mod = _bind.model
-                                        if pt > 0 and est > 0:
-                                            observe_provider_usage(
-                                                est,
-                                                pt,
-                                                provider=prov,
-                                                model=mod,
-                                            )
-                                        if pt or ct:
-                                            with suppress(Exception):
-                                                from remedy.core.session_quality import (
-                                                    get_session_quality,
-                                                )
-
-                                                get_session_quality(
-                                                    str(
-                                                        getattr(runtime, "_session_id", "")
-                                                        or ""
-                                                    )
-                                                ).record_turn(
-                                                    prompt_tokens=pt,
-                                                    completion_tokens=ct,
-                                                )
-                                            with suppress(Exception):
-                                                record_usage_event(
-                                                    session_id=str(
-                                                        getattr(runtime, "_session_id", "")
-                                                        or ""
-                                                    )
-                                                    or None,
-                                                    provider=prov,
-                                                    model=mod,
-                                                    prompt_tokens=pt,
-                                                    completion_tokens=ct,
-                                                    total_tokens=int(
-                                                        u.get("total_tokens") or (pt + ct)
-                                                    ),
-                                                    estimated_cost_usd=float(
-                                                        u.get("estimated_cost_usd") or 0
-                                                    ),
-                                                    source=str(u.get("source") or "provider"),
-                                                )
-                                    except Exception:
-                                        pass
-                                    yield (
-                                        "@@usage:"
-                                        + json.dumps(u, separators=(",", ":"))
-                                    )
+                                        round_state.last_usage = merge_usage(prev, u)
+                                    else:
+                                        round_state.last_usage = u
                             except Exception:
                                 pass
                             r_before = len(''.join(round_state.reasoning_parts))
@@ -1170,10 +1206,7 @@ async def call_llm_stream(runtime, message: str,
                                 provider=_bind.provider,
                             )
                             if u:
-                                yield (
-                                    "@@usage:"
-                                    + json.dumps(u, separators=(",", ":"))
-                                )
+                                round_state.last_usage = u
                         except Exception:
                             pass
                         parsed = _adapter.extract_response(data)
@@ -1195,6 +1228,65 @@ async def call_llm_stream(runtime, message: str,
 
                     content_parts = round_state.content_parts
                     reasoning_parts = round_state.reasoning_parts
+
+                # Ledger + stream usage once per LLM HTTP call (not per SSE chunk).
+                _u_final = getattr(round_state, "last_usage", None)
+                if isinstance(_u_final, dict) and (
+                    int(_u_final.get("prompt_tokens") or 0)
+                    or int(_u_final.get("completion_tokens") or 0)
+                ):
+                    try:
+                        from remedy.core.usage import observe_provider_usage
+                        from remedy.core.usage_ledger import record_usage_event
+                        from remedy.nanoswarm.token_nanobot import get_token_nanobot
+
+                        pt = int(_u_final.get("prompt_tokens") or 0)
+                        ct = int(_u_final.get("completion_tokens") or 0)
+                        est = int(get_token_nanobot().last_estimate or 0)
+                        prov = _bind.provider
+                        mod = _bind.model
+                        if pt > 0 and est > 0:
+                            observe_provider_usage(
+                                est, pt, provider=prov, model=mod
+                            )
+                        with suppress(Exception):
+                            from remedy.core.session_quality import get_session_quality
+
+                            get_session_quality(
+                                str(getattr(runtime, "_session_id", "") or "")
+                            ).record_turn(prompt_tokens=pt, completion_tokens=ct)
+                        with suppress(Exception):
+                            record_usage_event(
+                                session_id=str(
+                                    getattr(runtime, "_session_id", "") or ""
+                                )
+                                or None,
+                                provider=prov,
+                                model=mod,
+                                prompt_tokens=pt,
+                                completion_tokens=ct,
+                                total_tokens=int(
+                                    _u_final.get("total_tokens") or (pt + ct)
+                                ),
+                                estimated_cost_usd=float(
+                                    _u_final.get("estimated_cost_usd") or 0
+                                ),
+                                source=str(_u_final.get("source") or "provider"),
+                                meta={
+                                    "cache_hit_tokens": int(
+                                        _u_final.get("cache_hit_tokens") or 0
+                                    ),
+                                    "cache_miss_tokens": _u_final.get(
+                                        "cache_miss_tokens"
+                                    ),
+                                },
+                            )
+                        yield (
+                            "@@usage:"
+                            + json.dumps(_u_final, separators=(",", ":"))
+                        )
+                    except Exception:
+                        pass
 
                 tool_calls_list = round_state.tool_calls_list(collected)
                 reasoning_out = round_state.reasoning_out

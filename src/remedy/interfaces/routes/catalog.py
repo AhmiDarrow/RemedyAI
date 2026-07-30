@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+from contextlib import suppress
 from pathlib import Path
 
 import aiohttp
@@ -28,6 +29,64 @@ from remedy.interfaces.config import (
 
 logger = logging.getLogger(__name__)
 
+# Gateway noise that must never appear under Demo even if discovery leaks.
+_DEMO_BLOCK_SUBSTR = (
+    "image",
+    "flux",
+    "dall",
+    "sdxl",
+    "kling",
+    "seedance",
+    "veo",
+    "video",
+    "tts",
+    "whisper",
+    "embed",
+    "moderation",
+    "omni",  # multimodal/non-chat demo ids on llm7
+)
+
+
+def _demo_model_allowed(mid: str, catalog: list[dict]) -> bool:
+    """Only curated demo catalog ids; block image/video and foreign brands."""
+    m = (mid or "").strip()
+    if not m:
+        return False
+    allow = {str(c.get("id") or "") for c in catalog if c.get("id")}
+    if allow and m not in allow:
+        return False
+    low = m.lower()
+    if any(s in low for s in _DEMO_BLOCK_SUBSTR):
+        return False
+    return True
+
+
+def _looks_like_media_model(mid: str) -> bool:
+    """True for image/video/audio-only bot ids (keep chat pickers clean)."""
+    low = (mid or "").lower()
+    return any(
+        s in low
+        for s in (
+            "imagine-image",
+            "imagine-video",
+            "gpt-image",
+            "flux",
+            "dall-e",
+            "dalle",
+            "stable-diffusion",
+            "sdxl",
+            "kling",
+            "seedance",
+            "veo",
+            "sora",
+            "runway",
+            "tts",
+            "whisper",
+            "embedding",
+            "moderation",
+        )
+    )
+
 
 def register_catalog_routes(app: FastAPI, *, runtime=None, gateway=None, memory=None) -> None:
     """Register routes (closes over runtime/gateway/memory)."""
@@ -45,40 +104,75 @@ def register_catalog_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
 
     # -- models & agents -----------------------------------------------------
     @app.get("/api/models")
-    async def list_models():
-        """List models for the *configured* provider only.
+    async def list_models(provider: str | None = None):
+        """List models for a provider (default: currently configured).
 
-        Built-in catalogs are filtered by provider. Live discovery hits the
-        configured base_url so DeepSeek never lists Claude, etc.
+        Query ``?provider=deepseek`` (etc.) discovers against that provider's
+        base_url + stored key without changing the active runtime selection.
+        Live GET {base}/models is preferred; curated catalog is fallback only.
         """
+        from remedy.interfaces.config import (
+            PROVIDER_CATALOG,
+            resolve_provider_api_key,
+        )
+
         cfg = load_config()
-        configured_provider = (
+        active_provider = (
             (runtime._llm_provider if runtime is not None else None)
             or cfg.get("llm_provider")
             or os.environ.get("REMEDY_LLM_PROVIDER")
             or "openai"
         )
-        configured_id = (
+        active_id = (
             (runtime._llm_model if runtime is not None else None)
             or cfg.get("llm_model")
             or os.environ.get("REMEDY_LLM_MODEL")
             or ""
         )
-        base_url = (
+        active_url = (
             (runtime._llm_base_url if runtime is not None else None)
             or cfg.get("llm_base_url")
             or os.environ.get("REMEDY_LLM_BASE_URL")
             or ""
         )
 
-        # Prefer live runtime / disk. Normalize is response-only (no GET writes).
-        configured_provider = str(configured_provider or "openai").lower()
-        configured_id = str(configured_id or "")
-        base_url = str(base_url or "")
+        # Optional: discover for a different connected provider (status-bar switch).
+        req_provider = (provider or "").strip().lower()
+        if req_provider and req_provider in PROVIDER_CATALOG:
+            configured_provider = req_provider
+            meta = PROVIDER_CATALOG.get(req_provider) or {}
+            base_url = str(meta.get("base_url") or "")
+            last_by = cfg.get("last_model_by_provider") or {}
+            if isinstance(last_by, dict) and last_by.get(req_provider):
+                configured_id = str(last_by.get(req_provider) or "")
+            else:
+                models_meta = list(meta.get("models") or [])
+                configured_id = str(models_meta[0]["id"]) if models_meta else ""
+            # Prefer stored key for that provider (not whatever runtime is using).
+            api_key = ""
+            with suppress(Exception):
+                api_key = str(resolve_provider_api_key(cfg, req_provider) or "")
+        else:
+            configured_provider = str(active_provider or "openai").lower()
+            configured_id = str(active_id or "")
+            base_url = str(active_url or "")
+            api_key = ""
+            if runtime is not None:
+                api_key = getattr(runtime, "_llm_api_key", "") or ""
+            if not api_key:
+                api_key = str(
+                    cfg.get("llm_api_key") or os.environ.get("REMEDY_LLM_API_KEY") or ""
+                )
+            with suppress(Exception):
+                if not api_key:
+                    api_key = str(
+                        resolve_provider_api_key(cfg, configured_provider) or ""
+                    )
+
         # Soft-normalize for closed providers only when shaping default id display
         # — never persist from GET.
         _np, _nm, _nu = normalize_llm_settings(configured_provider, configured_id, base_url)
-        if configured_provider not in ("openrouter", "custom", "ollama"):
+        if configured_provider not in ("openrouter", "custom", "ollama", "poe"):
             configured_provider, configured_id, base_url = _np, _nm, _nu
         elif not base_url:
             base_url = _nu
@@ -86,52 +180,113 @@ def register_catalog_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
             configured_id = _nm
 
         catalog = catalog_models_for_provider(configured_provider)
-        api_key = ""
-        if runtime is not None:
-            api_key = getattr(runtime, "_llm_api_key", "") or ""
-        if not api_key:
-            api_key = str(cfg.get("llm_api_key") or os.environ.get("REMEDY_LLM_API_KEY") or "")
 
-        # Discovery cache (process-local). Longer TTL — model lists rarely change mid-session.
+        # Discovery cache (process-local).
+        # Success TTL is long (lists rarely change). Empty/failed probes use a short
+        # TTL so a boot-time timeout does not lock every provider to curated stubs.
         cache_key = f"{configured_provider}|{base_url}|{bool(api_key)}"
         cache = getattr(app.state, "_model_discovery_cache", None)
         if cache is None:
             app.state._model_discovery_cache = {}
             cache = app.state._model_discovery_cache
+        inflight = getattr(app.state, "_model_discovery_inflight", None)
+        if inflight is None:
+            app.state._model_discovery_inflight = {}
+            inflight = app.state._model_discovery_inflight
         now = time.time()
         cached = cache.get(cache_key)
-        from_cache = bool(cached and (now - cached[0]) < 180)
-        discovered = list(cached[1]) if from_cache else []
+        discovered: list[dict] = []
+        from_cache = False
+        if cached:
+            cached_at, cached_list, cached_ok = cached[0], cached[1], (
+                cached[2] if len(cached) > 2 else bool(cached[1])
+            )
+            ttl = 180.0 if cached_ok else 12.0
+            if (now - cached_at) < ttl:
+                from_cache = True
+                discovered = list(cached_list)
 
         verify_ssl = not _is_local_url(base_url)
 
         # Live GET {base_url}/models is the source of truth for OpenAI-compatible
-        # providers (DeepSeek, xAI, OpenAI, Groq, …). Curated catalogs are fallback
-        # only when discovery fails or returns empty.
+        # providers (DeepSeek, xAI, OpenAI, Groq, Poe, …). Curated catalogs are
+        # fallback only when discovery fails or returns empty.
         #
-        # 0.10.44 briefly skipped cloud discovery for latency; that left users on
-        # stale ids (e.g. deepseek-chat after V4 rename). Restored by default.
         # Opt out: REMEDY_LIVE_MODELS=0. Force on: REMEDY_LIVE_MODELS=1.
         live_env = str(os.environ.get("REMEDY_LIVE_MODELS", "")).strip().lower()
         live_off = live_env in ("0", "false", "no", "off")
         live_force = live_env in ("1", "true", "yes", "on")
         # Anthropic Messages API is not OpenAI /models compatible.
         openai_compat = configured_provider != "anthropic"
-        want_live = (not live_off) and (
-            live_force
-            or openai_compat
-            or _is_local_url(base_url)
-            or configured_provider in ("ollama", "openrouter", "custom")
+        # Demo uses a public gateway whose /models lists image/video, promo, and
+        # paid-key models that fail with the guest dummy key — never auto-merge.
+        demo_live_blocked = configured_provider == "demo" and not live_force
+        want_live = (
+            (not live_off)
+            and (not demo_live_blocked)
+            and (
+                live_force
+                or openai_compat
+                or _is_local_url(base_url)
+                or configured_provider in ("ollama", "openrouter", "custom", "poe")
+            )
         )
         # Skip remote discovery without a key (would 401 and burn the timeout).
-        can_live = bool(base_url) and (
+        # Demo: dummy "unused" key would otherwise enable full gateway dump.
+        can_live = bool(base_url) and (not demo_live_blocked) and (
             configured_provider == "ollama"
             or _is_local_url(base_url)
-            or (api_key and api_key != "local")
+            or (api_key and api_key != "local" and api_key != "unused")
             or live_force
         )
 
-        # OpenAI-compatible /models (DeepSeek, xAI, OpenAI, Ollama /v1, OpenRouter, …)
+        async def _discover_openai_compat() -> list[dict]:
+            """GET {base}/models once; empty list means soft-fail (use catalog)."""
+            found: list[dict] = []
+            models_url = base_url.rstrip("/") + "/models"
+            headers: dict[str, str] = {}
+            if api_key and api_key != "local":
+                headers["Authorization"] = f"Bearer {api_key}"
+            # 4.5s: boot piles several discoveries; 1.8s timed out under load and
+            # then cached empty results → "stuck on curated DeepSeek stubs".
+            timeout = aiohttp.ClientTimeout(total=4.5, connect=2.5)
+            try:
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    async with session.get(
+                        models_url, headers=headers, ssl=verify_ssl
+                    ) as resp:
+                        if not resp.ok:
+                            logger.info(
+                                "Model discovery HTTP %s for %s",
+                                resp.status,
+                                models_url,
+                            )
+                            return found
+                        body = await resp.json()
+                        for m in body.get("data", []) or []:
+                            mid = m.get("id", m.get("name", ""))
+                            if not mid:
+                                continue
+                            found.append(
+                                {
+                                    "id": mid,
+                                    "name": mid,
+                                    "provider": configured_provider,
+                                    "default": False,
+                                    "source": "endpoint",
+                                }
+                            )
+            except Exception as exc:
+                logger.info(
+                    "Model discovery failed for %s (%s): %s: %s",
+                    configured_provider,
+                    models_url,
+                    type(exc).__name__,
+                    exc or repr(exc),
+                )
+            return found
+
+        # OpenAI-compatible /models (DeepSeek, xAI, OpenAI, Ollama /v1, OpenRouter, Poe, …)
         if (
             not from_cache
             and want_live
@@ -139,40 +294,36 @@ def register_catalog_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
             and openai_compat
             and base_url
         ):
-            try:
-                # 1.8s: enough for cloud; 90s cache keeps Settings/status bar snappy.
-                # Was 3.5s and stacked with parallel UI fetches (felt like multi-second lag).
-                async with aiohttp.ClientSession(
-                    timeout=aiohttp.ClientTimeout(total=1.8)
-                ) as session:
-                    models_url = base_url.rstrip("/") + "/models"
-                    headers: dict[str, str] = {}
-                    if api_key and api_key != "local":
-                        headers["Authorization"] = f"Bearer {api_key}"
-                    async with session.get(models_url, headers=headers, ssl=verify_ssl) as resp:
-                        if resp.ok:
-                            body = await resp.json()
-                            for m in body.get("data", []):
-                                mid = m.get("id", m.get("name", ""))
-                                if not mid:
-                                    continue
-                                discovered.append(
-                                    {
-                                        "id": mid,
-                                        "name": mid,
-                                        "provider": configured_provider,
-                                        "default": False,
-                                        "source": "endpoint",
-                                    }
-                                )
-                        else:
-                            logger.info(
-                                "Model discovery HTTP %s for %s",
-                                resp.status,
-                                models_url,
-                            )
-            except Exception as exc:
-                logger.info("Model discovery failed for %s: %s", base_url, exc)
+            # Single-flight: parallel status-bar/boot fetches share one probe.
+            import asyncio
+
+            existing = inflight.get(cache_key)
+            if existing is not None:
+                try:
+                    discovered = list(await existing)
+                except Exception:
+                    discovered = []
+            else:
+                loop = asyncio.get_event_loop()
+                fut: asyncio.Future = loop.create_future()
+                inflight[cache_key] = fut
+                try:
+                    result = await _discover_openai_compat()
+                    if not fut.done():
+                        fut.set_result(result)
+                    discovered = list(result)
+                except Exception as exc:
+                    if not fut.done():
+                        fut.set_result([])
+                    discovered = []
+                    logger.info(
+                        "Model discovery inflight error for %s: %s: %s",
+                        configured_provider,
+                        type(exc).__name__,
+                        exc or repr(exc),
+                    )
+                finally:
+                    inflight.pop(cache_key, None)
 
         # Ollama native tags API
         if not from_cache and (configured_provider == "ollama" or "11434" in (base_url or "")):
@@ -196,37 +347,65 @@ def register_catalog_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
                                             "name": name,
                                             "provider": "ollama",
                                             "default": False,
+                                            "source": "endpoint",
                                         }
                                     )
             except Exception as exc:
                 logger.debug("Ollama discovery failed: %s", exc)
 
         if not from_cache:
-            cache[cache_key] = (now, list(discovered))
+            # Cache successes long; empty probes short so we retry soon.
+            ok = bool(discovered)
+            cache[cache_key] = (now, list(discovered), ok)
 
-        # Merge: discovered first, then provider catalog only (never other providers).
-        # For openrouter/custom keep full discovered set; for closed catalogs prefer
-        # catalog + discovered but never inject foreign builtins.
+        # Merge: **live endpoint first**, then curated catalog as fallback/enrichment.
+        # Demo: catalog-only allowlist (ignore gateway dump).
+        if configured_provider == "demo":
+            discovered = []
         seen: set[str] = set()
         merged: list[dict] = []
+        # Prefer friendly catalog names when id matches a live discovery.
+        catalog_names = {
+            str(c.get("id")): str(c.get("name") or c.get("id"))
+            for c in catalog
+            if c.get("id")
+        }
         for m in discovered + catalog:
-            mid = m["id"]
-            if mid in seen:
+            mid = str(m.get("id") or "")
+            if not mid or mid in seen:
                 continue
             # On closed providers, drop discovered ids that clearly belong elsewhere
-            if configured_provider not in ("openrouter", "custom", "ollama"):
-                from remedy.interfaces.config import infer_provider_from_model
+            # (e.g. Claude id on DeepSeek). Trust ids that start with native prefixes.
+            if configured_provider not in ("openrouter", "custom", "ollama", "demo", "poe"):
+                from remedy.interfaces.config import (
+                    _native_model_id_for_provider,
+                    infer_provider_from_model,
+                )
 
                 owner = infer_provider_from_model(mid)
-                if owner and owner != configured_provider:
+                if (
+                    owner
+                    and owner != configured_provider
+                    and not _native_model_id_for_provider(configured_provider, mid)
+                ):
                     continue
+            # Demo: never list image/video/embedding or non-allowlisted gateway junk
+            if configured_provider == "demo" and not _demo_model_allowed(mid, catalog):
+                continue
+            # Soft-hide pure media bots on multi-model gateways (Poe/xAI imagine)
+            if configured_provider in ("poe", "xai", "openrouter") and _looks_like_media_model(
+                mid
+            ):
+                continue
             seen.add(mid)
+            display = catalog_names.get(mid) or m.get("name") or mid
             merged.append(
                 {
                     "id": mid,
-                    "name": m.get("name", mid),
+                    "name": display,
                     "provider": configured_provider,
                     "default": False,
+                    "source": m.get("source") or ("catalog" if mid in catalog_names else "endpoint"),
                 }
             )
 
@@ -241,17 +420,23 @@ def register_catalog_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
             ]
 
         if configured_id and not any(m["id"] == configured_id for m in merged):
-            merged.insert(
-                0,
-                {
-                    "id": configured_id,
-                    "name": configured_id,
-                    "provider": configured_provider,
-                    "default": True,
-                },
-            )
+            # Demo: do not surface a leftover foreign id (e.g. deepseek-*) as the selection.
+            if configured_provider != "demo" or _demo_model_allowed(
+                configured_id, catalog
+            ):
+                merged.insert(
+                    0,
+                    {
+                        "id": configured_id,
+                        "name": configured_id,
+                        "provider": configured_provider,
+                        "default": True,
+                    },
+                )
+            else:
+                configured_id = (merged[0]["id"] if merged else "codestral-latest")
 
-        default_id = configured_id or merged[0]["id"]
+        default_id = configured_id or (merged[0]["id"] if merged else "default")
         for m in merged:
             m["default"] = m["id"] == default_id
 

@@ -21,6 +21,7 @@ import {
 } from '../api/vision'
 import type { MessengerInfo } from '../api/settings'
 import { MessengersWizardStep } from './setup/MessengersWizardStep'
+import { demoModelOptions } from '../utils/demoModels'
 
 const PERSONAS = [
   { id: 'balanced', name: 'Balanced', description: 'Helpful and adaptable to the task' },
@@ -91,7 +92,11 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
   )
   const activeMeta = catalog.find((p) => p.id === provider) || FALLBACK_PROVIDERS[0]
   const showBaseUrl = Boolean(activeMeta?.show_base_url || provider === 'custom')
-  const modelOptions = (activeMeta?.models || []).map((m) => m.id)
+  // Demo: full curated set; other providers use catalog models.
+  const modelOptions =
+    provider === 'demo'
+      ? demoModelOptions(activeMeta?.models).map((m) => m.id)
+      : (activeMeta?.models || []).map((m) => m.id)
 
   const stopXaiPoll = useCallback(() => {
     if (xaiPollRef.current) {

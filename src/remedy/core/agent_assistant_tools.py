@@ -422,6 +422,57 @@ def register_assistant_tools(runtime: Any) -> None:
         }
         return json.dumps(redact_secrets(safe), indent=2)
 
+    async def mail_send(
+        to: str = "",
+        subject: str = "",
+        body: str = "",
+    ) -> str:
+        """Send a Gmail message now (needs Connect Google + gmail.compose)."""
+        from remedy.assistant.privacy import consent_ok, redact_secrets
+        from remedy.assistant.providers.google_gmail import get_google_gmail
+
+        ok, reason = consent_ok(home)
+        if not ok:
+            return json.dumps({"ok": False, "message": reason}, indent=2)
+        mail = get_google_gmail(home)
+        if mail is None:
+            return json.dumps(
+                {
+                    "ok": False,
+                    "message": "Gmail not connected. Settings → Personal assistant → Connect.",
+                },
+                indent=2,
+            )
+        if not (to or "").strip():
+            return json.dumps({"ok": False, "message": "to address required"}, indent=2)
+        send_fn = getattr(mail, "send_message", None)
+        if send_fn is None:
+            return json.dumps(
+                {
+                    "ok": False,
+                    "message": "This mail provider does not support send; use mail_create_draft.",
+                },
+                indent=2,
+            )
+        try:
+            result = send_fn(
+                to=to.strip(),
+                subject=(subject or "").strip(),
+                body=body or "",
+            )
+        except Exception as exc:
+            return json.dumps({"ok": False, "message": str(exc)}, indent=2)
+        safe = {
+            "ok": True,
+            "message_id": result.get("message_id"),
+            "thread_id": result.get("thread_id"),
+            "to": result.get("to"),
+            "subject": result.get("subject"),
+            "message": result.get("message"),
+            "privacy": "Message sent via Gmail API; body not re-sent to the model.",
+        }
+        return json.dumps(redact_secrets(safe), indent=2)
+
     async def budget_get() -> str:
         st = store.budget_status()
         return json.dumps(st, indent=2)
@@ -777,6 +828,21 @@ def register_assistant_tools(runtime: Any) -> None:
         "mail_create_draft",
         "Create a Gmail draft (does not send). Needs Connect Google (Gmail).",
         mail_create_draft,
+        {
+            "type": "object",
+            "properties": {
+                "to": {"type": "string"},
+                "subject": {"type": "string"},
+                "body": {"type": "string"},
+            },
+            "required": ["to"],
+        },
+    )
+    reg.register_builtin_handler(
+        "mail_send",
+        "Send a Gmail message now (not a draft). Needs Connect Google. "
+        "Use only when the user explicitly asks to send.",
+        mail_send,
         {
             "type": "object",
             "properties": {

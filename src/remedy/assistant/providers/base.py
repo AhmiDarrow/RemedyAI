@@ -52,6 +52,9 @@ class MailProvider(Protocol):
     def create_draft(
         self, *, to: str, subject: str, body: str
     ) -> dict[str, Any]: ...
+    def send_message(
+        self, *, to: str, subject: str, body: str
+    ) -> dict[str, Any]: ...
 
 
 class ProviderRegistry:

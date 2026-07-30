@@ -129,6 +129,24 @@ async def build_turn_context(runtime: Any) -> str:
         names = ", ".join(t.name for t in tools)
         parts.append(f"Built-in tools (executable): {names}.")
 
+    # Self-setup: user can ask Remedy to configure itself in chat
+    parts.append(
+        "Self-configuration: when the user asks you to set up, enable, disable, "
+        "change, or configure Remedy (web tools, approval mode, model/provider, "
+        "vision, persona, their name, project folder, access scope, messengers, "
+        "assistant prefs, etc.), call update_settings (or get_settings first). "
+        "Apply the change yourself — do not only point them at Settings UI. "
+        "Examples: update_settings(setup=\"web tools\"), "
+        "update_settings(approval_mode=\"auto\"), "
+        "update_settings(user_name=\"…\", thinking_level=\"medium\")."
+    )
+    parts.append(
+        "Durable memory: when the user says remember / note that / don't forget / "
+        "store in memory, ALWAYS call memory_save(content=…) with the fact "
+        "(in addition to any automatic silent save). Confirm briefly what was stored. "
+        "Never store secrets or API keys."
+    )
+
     # Skills catalog (progressive disclosure stage 1) — ranked, not full bodies.
     with suppress(Exception):
         reg = getattr(runtime, "skills", None)

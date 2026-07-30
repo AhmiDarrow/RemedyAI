@@ -7,13 +7,27 @@ Secrets (tokens, keys) must never be forwarded. Bodies are size-capped.
 from __future__ import annotations
 
 import copy
+import json
 import re
 from typing import Any
 
 # Max characters for a single tool/function message content when sending upstream.
 TOOL_CONTENT_MAX = 6_000
+# Tool *call* arguments must stay valid JSON — never mid-string clip (providers
+# return HTTP 400 "EOF while parsing a string at column ~6000" if we truncate).
+TOOL_ARGS_MAX = 48_000
+# Nested string values inside tool-call JSON (after parse).
+TOOL_ARGS_VALUE_MAX = 8_000
+# file_write content may be large; keep more for *in-turn* fidelity when small,
+# but summarize past full-body dumps so history does not look half-written.
+FILE_WRITE_CONTENT_HISTORY_MAX = 1_200
 # Max for normal user/assistant text (already bounded in practice).
 TEXT_CONTENT_MAX = 100_000
+
+# Tools whose large string args should be summarized in provider history
+# (full bodies mislead the model after 8k value caps).
+_WRITE_BODY_TOOLS = frozenset({"file_write", "write"})
+_EDIT_BODY_TOOLS = frozenset({"file_edit", "file_edit_batch", "apply_patch"})
 
 _SECRET_KEY_RE = re.compile(
     r"(?i)(access_token|refresh_token|id_token|client_secret|authorization|"
@@ -61,6 +75,155 @@ def _scrub_obj(obj: Any, *, depth: int = 0) -> Any:
     if isinstance(obj, str):
         return _scrub_text(obj, max_len=TOOL_CONTENT_MAX)
     return obj
+
+
+def _summarize_large_string(value: str, *, kind: str = "body") -> str:
+    """Replace a huge string with a short, non-misleading history stub.
+
+    Wording is intentionally *not* valid source code so the model cannot
+    echo this stub back into ``file_write`` (that corrupted App.tsx once).
+    """
+    t = _SECRET_VALUE_RE.sub("[redacted]", value or "")
+    n = len(t)
+    lines = t.count("\n") + (1 if t else 0)
+    first = ""
+    for line in t.splitlines():
+        if line.strip():
+            first = line.strip()[:80]
+            break
+    return (
+        f"<<NOT_SOURCE_CODE history_stub kind={kind} chars={n} lines~{lines} "
+        f"first_line={first!r} "
+        f"DO_NOT_file_write_this_string file_read_the_path_instead>>"
+    )
+
+
+def _rewrite_write_tool_args(parsed: Any, tool_name: str) -> Any:
+    """For file_write/file_edit history: never ship truncated half-files upstream.
+
+    Mid-value clipping made the model re-emit whole files / chunk scripts.
+    Summarize large bodies instead; keep path and small metadata intact.
+    """
+    if not isinstance(parsed, dict):
+        return parsed
+    name = (tool_name or "").strip().lower()
+    out = dict(parsed)
+
+    if name in _WRITE_BODY_TOOLS:
+        content = out.get("content")
+        if isinstance(content, str) and len(content) > FILE_WRITE_CONTENT_HISTORY_MAX:
+            out["content"] = _summarize_large_string(content, kind="file_write content")
+            out["_content_chars"] = len(content)
+            out["_history_summarized"] = True
+        return out
+
+    if name in _EDIT_BODY_TOOLS:
+        # Single-hunk fields
+        for key in ("old_string", "new_string", "old", "new", "patch"):
+            val = out.get(key)
+            if isinstance(val, str) and len(val) > TOOL_ARGS_VALUE_MAX:
+                out[key] = _summarize_large_string(val, kind=key)
+                out["_history_summarized"] = True
+        # Multi-hunk / batch: edits may be a JSON string or list
+        edits = out.get("edits")
+        if isinstance(edits, str) and len(edits) > TOOL_ARGS_VALUE_MAX:
+            out["edits"] = _summarize_large_string(edits, kind="edits")
+            out["_history_summarized"] = True
+        elif isinstance(edits, list):
+            slim: list[Any] = []
+            for item in edits[:40]:
+                if not isinstance(item, dict):
+                    slim.append(item)
+                    continue
+                row = dict(item)
+                for key in ("old_string", "new_string", "old", "new"):
+                    val = row.get(key)
+                    if isinstance(val, str) and len(val) > 400:
+                        row[key] = _summarize_large_string(val, kind=key)
+                        out["_history_summarized"] = True
+                slim.append(row)
+            out["edits"] = slim
+        return out
+
+    return out
+
+
+def _scrub_tool_args_obj(obj: Any, *, depth: int = 0) -> Any:
+    """Scrub secrets and cap nested string values without breaking JSON shape."""
+    if depth > 14:
+        return "[truncated]"
+    if isinstance(obj, dict):
+        out: dict[str, Any] = {}
+        for k, v in obj.items():
+            ks = str(k)
+            if _SECRET_KEY_RE.search(ks):
+                out[ks] = "[redacted]"
+            else:
+                out[ks] = _scrub_tool_args_obj(v, depth=depth + 1)
+        return out
+    if isinstance(obj, list):
+        return [_scrub_tool_args_obj(x, depth=depth + 1) for x in obj[:200]]
+    if isinstance(obj, str):
+        t = _SECRET_VALUE_RE.sub("[redacted]", obj)
+        if len(t) > TOOL_ARGS_VALUE_MAX:
+            t = t[: TOOL_ARGS_VALUE_MAX - 1] + "…"
+        return t
+    return obj
+
+
+def sanitize_tool_arguments(args: Any, *, tool_name: str = "") -> str:
+    """Return valid JSON string for tool-call ``function.arguments``.
+
+    Never mid-string-clips the raw arguments blob — that produces
+    ``EOF while parsing a string`` HTTP 400s from providers (xAI/DeepSeek).
+
+    For *file_write* / large edit tools, large bodies are **summarized** for
+    history (not half-clipped) so the model does not think files were truncated.
+    """
+    if args is None:
+        return "{}"
+    if isinstance(args, (dict, list)):
+        try:
+            rewritten = _rewrite_write_tool_args(args, tool_name) if tool_name else args
+            cleaned = _scrub_tool_args_obj(rewritten)
+            return json.dumps(cleaned, default=str, ensure_ascii=False)
+        except Exception:
+            return "{}"
+    s = str(args)
+    if not s.strip():
+        return "{}"
+    # Prefer parse → scrub nested values → re-dump (always valid JSON).
+    try:
+        parsed = json.loads(s)
+        if tool_name:
+            parsed = _rewrite_write_tool_args(parsed, tool_name)
+        cleaned = _scrub_tool_args_obj(parsed)
+        out = json.dumps(cleaned, default=str, ensure_ascii=False)
+        if len(out) > TOOL_ARGS_MAX:
+            # Drop large nested strings harder, then hard-cap with still-valid JSON.
+            cleaned = _scrub_tool_args_obj(parsed)  # already value-capped
+            out = json.dumps(cleaned, default=str, ensure_ascii=False)
+            if len(out) > TOOL_ARGS_MAX:
+                return json.dumps(
+                    {
+                        "_truncated": True,
+                        "note": "tool arguments exceeded size cap; summarized",
+                        "preview": _scrub_text(s, max_len=800),
+                    },
+                    ensure_ascii=False,
+                )
+        return out
+    except json.JSONDecodeError:
+        # Incomplete/truncated stream args — never forward broken JSON upstream.
+        preview = _scrub_text(s, max_len=400)
+        return json.dumps(
+            {
+                "_invalid_json": True,
+                "note": "tool arguments were truncated or invalid; use tool results instead",
+                "preview": preview,
+            },
+            ensure_ascii=False,
+        )
 
 
 def sanitize_message(msg: dict[str, Any]) -> dict[str, Any]:
@@ -115,6 +278,7 @@ def sanitize_message(msg: dict[str, Any]) -> dict[str, Any]:
             "tool_calls",
             "name",
             "tool_call_id",
+            "reasoning_content",
         ):
             m[k] = "[redacted]"
 
@@ -125,10 +289,11 @@ def sanitize_message(msg: dict[str, Any]) -> dict[str, Any]:
                 continue
             tcc = tc if nested else copy.deepcopy(tc)
             fn = tcc.get("function")
-            if isinstance(fn, dict) and isinstance(fn.get("arguments"), str):
-                args = fn["arguments"]
-                if _SECRET_VALUE_RE.search(args) or len(args) > TOOL_CONTENT_MAX:
-                    fn["arguments"] = _scrub_text(args, max_len=TOOL_CONTENT_MAX)
+            if isinstance(fn, dict):
+                tname = str(fn.get("name") or tcc.get("name") or "")
+                fn["arguments"] = sanitize_tool_arguments(
+                    fn.get("arguments"), tool_name=tname
+                )
             cleaned.append(tcc)
         m["tool_calls"] = cleaned
 

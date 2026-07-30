@@ -1,4 +1,4 @@
-"""Gmail API adapter (list / get / create draft)."""
+"""Gmail API adapter (list / get / create draft / send)."""
 
 from __future__ import annotations
 
@@ -143,11 +143,14 @@ class GoogleGmailProvider:
             raw=data,
         )
 
-    def create_draft(self, *, to: str, subject: str, body: str) -> dict[str, Any]:
+    def _raw_message(self, *, to: str, subject: str, body: str) -> str:
         msg = MIMEText(body or "", "plain", "utf-8")
         msg["To"] = to
         msg["Subject"] = subject or ""
-        raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
+        return base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
+
+    def create_draft(self, *, to: str, subject: str, body: str) -> dict[str, Any]:
+        raw = self._raw_message(to=to, subject=subject, body=body)
         data = self._request(
             "POST",
             "/users/me/drafts",
@@ -161,6 +164,24 @@ class GoogleGmailProvider:
             "to": to,
             "subject": subject,
             "message": f"Draft created to {to}: {subject or '(no subject)'}",
+        }
+
+    def send_message(self, *, to: str, subject: str, body: str) -> dict[str, Any]:
+        """Send mail immediately (gmail.compose / gmail.send scope)."""
+        raw = self._raw_message(to=to, subject=subject, body=body)
+        data = self._request(
+            "POST",
+            "/users/me/messages/send",
+            body={"raw": raw},
+        )
+        mid = str(data.get("id") or "")
+        return {
+            "ok": True,
+            "message_id": mid,
+            "thread_id": str(data.get("threadId") or ""),
+            "to": to,
+            "subject": subject,
+            "message": f"Sent to {to}: {subject or '(no subject)'}",
         }
 
 

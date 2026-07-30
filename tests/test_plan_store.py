@@ -119,6 +119,7 @@ def test_latest_actionable_skips_terminal(tmp_path: Path):
 
 def test_plan_mode_tool_names_exclude_shell():
     assert "plan_save" in PLAN_MODE_TOOL_NAMES
+    assert "plan_step_status" in PLAN_MODE_TOOL_NAMES
     assert "bash_exec" not in PLAN_MODE_TOOL_NAMES
     assert "file_write" not in PLAN_MODE_TOOL_NAMES
     assert "file_edit" not in PLAN_MODE_TOOL_NAMES
@@ -139,6 +140,43 @@ def test_plan_mode_tool_names_exclude_shell():
     ):
         assert blocked not in PLAN_MODE_TOOL_NAMES
     assert "Approve" in PLAN_MODE_SYSTEM_ADDENDUM or "plan_save" in PLAN_MODE_SYSTEM_ADDENDUM
+
+
+def test_update_step_status_by_id_and_index(tmp_path: Path):
+    from remedy.core.plan_store import BUILD_MODE_SYSTEM_ADDENDUM
+
+    store = PlanStore(tmp_path)
+    plan = store.create(
+        "Build app",
+        steps=["Scaffold", "Crypto", "UI"],
+        session_id="s-steps",
+        status="approved",
+    )
+    u = store.update_step_status(plan.id, "s1", "done")
+    assert u is not None
+    assert u.steps[0].status == "done"
+    assert u.status == "active"  # auto-promote from approved
+    u2 = store.update_step_status(plan.id, "2", "active")
+    assert u2 is not None
+    assert u2.steps[1].status == "active"
+    # Cosmetic [done] title match + strip
+    plan2 = store.create(
+        "Hack titles",
+        steps=[{"id": "s1", "title": "[done] Already", "status": "pending"}],
+        session_id="s-hack",
+        status="active",
+    )
+    u3 = store.update_step_status(plan2.id, "Already", "done")
+    assert u3 is not None
+    assert u3.steps[0].status == "done"
+    assert not u3.steps[0].title.lower().startswith("[done]")
+    # All done → plan done
+    store.update_step_status(plan.id, "s2", "done")
+    u4 = store.update_step_status(plan.id, "s3", "done")
+    assert u4 is not None
+    assert u4.status == "done"
+    assert "file_edit" in BUILD_MODE_SYSTEM_ADDENDUM
+    assert "plan_step_status" in BUILD_MODE_SYSTEM_ADDENDUM
 
 
 def test_plans_api(tmp_path: Path, monkeypatch):
@@ -177,6 +215,15 @@ def test_plans_api(tmp_path: Path, monkeypatch):
     r3 = client.post(f"/api/plans/{pid}/status", json={"status": "approved"})
     assert r3.status_code == 200
     assert r3.json()["plan"]["status"] == "approved"
+
+    r4 = client.post(
+        f"/api/plans/{pid}/steps/status",
+        json={"step_id": "s1", "status": "done"},
+    )
+    assert r4.status_code == 200
+    body = r4.json()["plan"]
+    assert body["steps"][0]["status"] == "done"
+    assert body["status"] == "active"
 
     r4 = client.get("/api/plans/latest")
     assert r4.status_code == 200

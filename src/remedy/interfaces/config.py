@@ -39,6 +39,7 @@ _PROVIDER_ENV_KEYS: dict[str, tuple[str, ...]] = {
     "groq": ("GROQ_API_KEY",),
     "mistral": ("MISTRAL_API_KEY",),
     "openrouter": ("OPENROUTER_API_KEY",),
+    "poe": ("POE_API_KEY", "REMEDY_POE_API_KEY"),
 }
 
 
@@ -329,19 +330,39 @@ DEMO_BASE_URL = "https://api.llm7.io/v1"
 
 PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
     "demo": {
-        "label": "Demo (free, no signup)",
+        "label": "Demo (Free)",
         "base_url": DEMO_BASE_URL,
         "auth": ["none"],
         "env_keys": [],
         "show_base_url": False,
         "free_tier": "instant",
         "badge": "No signup",
-        "limits_blurb": "Rate-limited guest gateway (third-party). Fine to try Remedy; add a real provider for serious work.",
+        "limits_blurb": (
+            "Rate-limited guest chat only (third-party). Curated stable models — "
+            "not the full gateway catalog. Add a real provider for agents / vision."
+        ),
         "privacy_note": "Chat is sent to a free third-party API (not Remedy cloud). Prefer Ollama for private local use.",
         "key_docs_url": "https://llm7.io/",
+        # Curated guest-chat allowlist only. Never merge live /models (that dumps
+        # image/video ids, promo names, and paid-key models like deepseek-*).
+        # live_models: False → catalog.py skips endpoint discovery for demo.
+        "live_models": False,
         "models": [
-            {"id": "codestral-latest", "name": "Codestral (demo)", "vision": False},
-            {"id": "gpt-oss:20b", "name": "GPT-OSS 20B (demo)", "vision": False},
+            {
+                "id": "codestral-latest",
+                "name": "Codestral demo",
+                "vision": False,
+            },
+            {
+                "id": "gemini-3.1-flash-lite",
+                "name": "Gemini Flash Lite demo",
+                "vision": False,
+            },
+            {
+                "id": "gpt-oss:20b",
+                "name": "GPT-OSS 20B demo",
+                "vision": False,
+            },
         ],
     },
     "openai": {
@@ -401,6 +422,8 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
         "key_docs_url": "https://platform.deepseek.com/api_keys",
         # Fallback only — live GET /models is preferred when a key is present.
         # deepseek-chat / deepseek-reasoner retired 2026-07-24 → V4 ids.
+        # Fallback only — live GET /models is the source of truth with a key.
+        # V4 API currently exposes flash + pro (chat/reasoner ids map → flash).
         "models": [
             {"id": "deepseek-v4-flash", "name": "DeepSeek V4 Flash", "vision": False},
             {"id": "deepseek-v4-pro", "name": "DeepSeek V4 Pro", "vision": False},
@@ -461,14 +484,44 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
         "show_base_url": False,
         "free_tier": "free_key",
         "badge": "Free key",
-        "limits_blurb": "Many free models (ids ending in :free). One key, many backends.",
+        "limits_blurb": (
+            "Free-tier models (ids ending in :free) come and go; live /models "
+            "lists what your key can use. Curated fallbacks below are long-running free chat."
+        ),
         "key_docs_url": "https://openrouter.ai/keys",
         "models": [
+            # Stable free chat fallbacks only (not promo/image). Live discovery adds more.
             {"id": "openrouter/auto", "name": "OpenRouter Auto"},
             {"id": "openai/gpt-oss-20b:free", "name": "GPT-OSS 20B (free)"},
-            {"id": "meta-llama/llama-3.3-70b-instruct:free", "name": "Llama 3.3 70B (free)"},
-            {"id": "google/gemma-3-27b-it:free", "name": "Gemma 3 27B (free)"},
-            {"id": "openai/gpt-4o-mini", "name": "GPT-4o Mini (via OpenRouter)"},
+            {
+                "id": "meta-llama/llama-3.3-70b-instruct:free",
+                "name": "Llama 3.3 70B (free)",
+            },
+        ],
+    },
+    "poe": {
+        "label": "Poe",
+        "base_url": "https://api.poe.com/v1",
+        "auth": ["api_key"],
+        "env_keys": ["POE_API_KEY", "REMEDY_POE_API_KEY"],
+        "show_base_url": False,
+        "free_tier": "none",
+        "badge": "Multi-model",
+        "limits_blurb": (
+            "One Poe API key → many frontier bots (Claude, GPT, Gemini, Grok, …). "
+            "Uses your Poe subscription points / add-on balance. "
+            "Live GET /models lists bots your account can call."
+        ),
+        "privacy_note": "Chat is sent to Poe (Quora) and routed to the selected bot/provider.",
+        "key_docs_url": "https://poe.com/api_key",
+        # Bot names as used by Poe OpenAI-compatible API (case-sensitive).
+        # Live discovery expands this when a key is present.
+        "models": [
+            {"id": "Claude-Sonnet-4.6", "name": "Claude Sonnet 4.6", "vision": True},
+            {"id": "Claude-Opus-4.7", "name": "Claude Opus 4.7", "vision": True},
+            {"id": "GPT-5.4", "name": "GPT-5.4", "vision": True},
+            {"id": "Gemini-3.1-Pro", "name": "Gemini 3.1 Pro", "vision": True},
+            {"id": "Grok-4", "name": "Grok 4", "vision": True},
         ],
     },
     "ollama": {
@@ -642,6 +695,8 @@ def infer_provider_from_base_url(base_url: str) -> str | None:
         return "mistral"
     if "openrouter.ai" in u:
         return "openrouter"
+    if "api.poe.com" in u or "poe.com" in u:
+        return "poe"
     if "generativelanguage.googleapis.com" in u or "googleapis.com" in u:
         return "google"
     if "11434" in u or "ollama" in u:
@@ -706,11 +761,12 @@ def normalize_llm_settings(
     if url_owner and url_owner != prov and prov in PROVIDER_CATALOG:
         # OpenRouter intentionally hosts many vendors — only snap when *this*
         # provider is not openrouter/custom.
-        if prov not in ("openrouter", "custom", "ollama"):
+        if prov not in ("openrouter", "custom", "ollama", "poe"):
             url = default_url
 
     # Flexible providers can host any model id (Ollama pulls deepseek-*, etc.).
-    _FLEXIBLE = frozenset({"openrouter", "custom", "ollama", "demo"})
+    # Poe hosts many labs' bots under Poe bot names (not closed native catalogs).
+    _FLEXIBLE = frozenset({"openrouter", "custom", "ollama", "demo", "poe"})
 
     model_owner = infer_provider_from_model(mid)
     if model_owner and model_owner != prov and prov not in _FLEXIBLE:
@@ -769,7 +825,7 @@ def validate_provider_model(provider: str | None, model: str | None) -> str:
     mid = (model or "").strip()
     if not mid:
         raise ValueError("Model id is required")
-    _FLEXIBLE = frozenset({"openrouter", "custom", "ollama", "demo"})
+    _FLEXIBLE = frozenset({"openrouter", "custom", "ollama", "demo", "poe"})
     if prov in _FLEXIBLE or prov not in PROVIDER_CATALOG:
         return mid
     # Apply legacy aliases first
@@ -1408,6 +1464,8 @@ def apply_env_provider_bootstrap(config: dict[str, Any] | None = None) -> dict[s
             ("MISTRAL_API_KEY", "mistral"),
             ("DEEPSEEK_API_KEY", "deepseek"),
             ("OPENROUTER_API_KEY", "openrouter"),
+            ("POE_API_KEY", "poe"),
+            ("REMEDY_POE_API_KEY", "poe"),
             ("ANTHROPIC_API_KEY", "anthropic"),
             ("OPENAI_API_KEY", "openai"),
             ("GOOGLE_API_KEY", "google"),

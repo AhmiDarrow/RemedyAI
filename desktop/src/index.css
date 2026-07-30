@@ -4,8 +4,62 @@
 @import "@fontsource/inter/600.css";
 @import "@fontsource/inter/700.css";
 
-/* ---- base fallback (dark) — keep in sync with themes.ts ---- */
+/* ---- base fallback = Dark Forest (DEFAULT_THEME_ID) — keep in sync with themes.ts ---- */
 :root {
+  --bg-primary: #0a0e0b;
+  --bg-secondary: #121812;
+  --bg-tertiary: #1a221c;
+  --border: #2a352c;
+  --accent: #4d7a5a;
+  --accent-hover: #3d6349;
+  --text-primary: #e6ebe7;
+  --text-secondary: #9aa89e;
+  --text-muted: #6b7870;
+  --success: #5a8f6a;
+  --error: #b87a7a;
+  --warning: #a89058;
+  /* Chat bubbles (user right / assistant left) */
+  --chat-user-bg: #4d7a5a;
+  --chat-user-fg: #ffffff;
+  --chat-user-border: #4d7a5a;
+  --chat-assistant-bg: #121812;
+  --chat-assistant-fg: #e6ebe7;
+  --chat-assistant-border: #2a352c;
+  --chat-system-bg: #1a221c;
+  --chat-system-fg: #b87a7a;
+  --chat-system-border: #2a352c;
+  --chat-bubble-radius: 0.65rem;
+  /* Wider so long answers / thinking aren't cramped in narrow bubbles */
+  --chat-max-width: 88%;
+}
+
+/* ---- theme variants ---- */
+
+:root[data-theme="forest"] {
+  --bg-primary: #0a0e0b;
+  --bg-secondary: #121812;
+  --bg-tertiary: #1a221c;
+  --border: #2a352c;
+  --accent: #4d7a5a;
+  --accent-hover: #3d6349;
+  --text-primary: #e6ebe7;
+  --text-secondary: #9aa89e;
+  --text-muted: #6b7870;
+  --success: #5a8f6a;
+  --error: #b87a7a;
+  --warning: #a89058;
+  --chat-user-bg: #4d7a5a;
+  --chat-user-fg: #ffffff;
+  --chat-user-border: #4d7a5a;
+  --chat-assistant-bg: #121812;
+  --chat-assistant-fg: #e6ebe7;
+  --chat-assistant-border: #2a352c;
+  --chat-system-bg: #1a221c;
+  --chat-system-fg: #b87a7a;
+  --chat-system-border: #2a352c;
+}
+
+:root[data-theme="dark"] {
   --bg-primary: #0c0c14;
   --bg-secondary: #14141f;
   --bg-tertiary: #1c1c2a;
@@ -18,7 +72,6 @@
   --success: #34d399;
   --error: #f87171;
   --warning: #fbbf24;
-  /* Chat bubbles (user right / assistant left) */
   --chat-user-bg: #8b5cf6;
   --chat-user-fg: #ffffff;
   --chat-user-border: #8b5cf6;
@@ -28,12 +81,31 @@
   --chat-system-bg: #1c1c2a;
   --chat-system-fg: #f87171;
   --chat-system-border: #2a2a3d;
-  --chat-bubble-radius: 0.65rem;
-  /* Wider so long answers / thinking aren't cramped in narrow bubbles */
-  --chat-max-width: 88%;
 }
 
-/* ---- theme variants ---- */
+:root[data-theme="alien"] {
+  --bg-primary: #07040f;
+  --bg-secondary: #0f081a;
+  --bg-tertiary: #1a0f2e;
+  --border: #3b1d66;
+  --accent: #b026ff;
+  --accent-hover: #9d00ff;
+  --text-primary: #f2e8ff;
+  --text-secondary: #c4a0e8;
+  --text-muted: #8a6aad;
+  --success: #5eead4;
+  --error: #ff6b9d;
+  --warning: #f0abfc;
+  --chat-user-bg: #b026ff;
+  --chat-user-fg: #ffffff;
+  --chat-user-border: #b026ff;
+  --chat-assistant-bg: #0f081a;
+  --chat-assistant-fg: #f2e8ff;
+  --chat-assistant-border: #3b1d66;
+  --chat-system-bg: #1a0f2e;
+  --chat-system-fg: #ff6b9d;
+  --chat-system-border: #3b1d66;
+}
 
 :root[data-theme="light"] {
   --bg-primary: #f4f4f8;

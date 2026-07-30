@@ -278,8 +278,9 @@ export function SettingsFormSections(p: SettingsFormProps): ReactNode {
                   className="text-[10px] rounded px-2 py-1.5 mb-2 leading-snug"
                   style={{ color: 'var(--text-muted)', border: '1px solid var(--border)' }}
                 >
-                  Demo mode is rate-limited and sends chat to a free third-party gateway.
-                  Add Gemini/Groq or run Ollama for better free use.
+                  Demo is guest chat only (Codestral, Gemini Flash Lite, GPT-OSS). Image/video
+                  and other gateway models are hidden — they need a real key or are not chat.
+                  Add Gemini/Groq free key or Ollama for serious free use.
                 </div>
               )}
               {activeMeta?.key_docs_url && provider !== 'demo' && (

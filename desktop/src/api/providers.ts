@@ -50,11 +50,13 @@ export interface OllamaDetect {
 export const FALLBACK_PROVIDERS: ProviderInfo[] = [
   {
     id: 'demo',
-    name: 'Demo (free, no signup)',
+    name: 'Demo (Free)',
     base_url: 'https://api.llm7.io/v1',
+    // Curated guest chat only — never mirror the full llm7 /models dump.
     models: [
-      { id: 'codestral-latest', name: 'Codestral (demo)' },
-      { id: 'gpt-oss:20b', name: 'GPT-OSS 20B (demo)' },
+      { id: 'codestral-latest', name: 'Codestral demo' },
+      { id: 'gemini-3.1-flash-lite', name: 'Gemini Flash Lite demo' },
+      { id: 'gpt-oss:20b', name: 'GPT-OSS 20B demo' },
     ],
     default_model: 'codestral-latest',
     auth: ['none'],
@@ -64,7 +66,8 @@ export const FALLBACK_PROVIDERS: ProviderInfo[] = [
     advanced: false,
     free_tier: 'instant',
     badge: 'No signup',
-    limits_blurb: 'Rate-limited guest gateway. Add a real provider for serious work.',
+    limits_blurb:
+      'Rate-limited guest chat (curated models only). Add a real provider for agents / vision.',
     privacy_note: 'Chat goes to a third-party free API (not Remedy cloud).',
   },
   {
@@ -188,6 +191,29 @@ export const FALLBACK_PROVIDERS: ProviderInfo[] = [
     free_tier: 'free_key',
     badge: 'Free key',
     key_docs_url: 'https://openrouter.ai/keys',
+  },
+  {
+    id: 'poe',
+    name: 'Poe',
+    base_url: 'https://api.poe.com/v1',
+    models: [
+      { id: 'Claude-Sonnet-4.6', name: 'Claude Sonnet 4.6' },
+      { id: 'Claude-Opus-4.7', name: 'Claude Opus 4.7' },
+      { id: 'GPT-5.4', name: 'GPT-5.4' },
+      { id: 'Gemini-3.1-Pro', name: 'Gemini 3.1 Pro' },
+      { id: 'Grok-4', name: 'Grok 4' },
+    ],
+    default_model: 'Claude-Sonnet-4.6',
+    auth: ['api_key'],
+    oauth: false,
+    env_keys: ['POE_API_KEY'],
+    show_base_url: false,
+    advanced: false,
+    free_tier: 'none',
+    badge: 'Multi-model',
+    limits_blurb:
+      'One key for many frontier bots via Poe. Uses subscription points / add-on balance.',
+    key_docs_url: 'https://poe.com/api_key',
   },
   {
     id: 'ollama',
