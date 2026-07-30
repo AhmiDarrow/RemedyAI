@@ -251,12 +251,14 @@ def after_tool_batch(
                 ok=success,
             )
 
-    # Throttle session_quality metabolism writes (every 3rd tool or on write)
+    # Throttle session_quality metabolism writes (every 3rd tool or on write).
+    # Counter is per-session on the ledger — never a process-global attr.
     with suppress(Exception):
         from remedy.core.session_quality import get_session_quality
 
-        n = int(getattr(after_tool_batch, "_n", 0) or 0) + 1
-        after_tool_batch._n = n  # type: ignore[attr-defined]
+        with ledger._lock:
+            ledger._tool_batch_n = int(getattr(ledger, "_tool_batch_n", 0) or 0) + 1
+            n = ledger._tool_batch_n
         if n % 3 == 0 or name in ("file_write", "file_edit", "bash_exec"):
             get_session_quality(sid).record_metabolism(
                 evidence_units=ledger.evidence_units,
