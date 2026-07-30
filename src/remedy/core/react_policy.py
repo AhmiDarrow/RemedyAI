@@ -434,6 +434,46 @@ _COMFY_HUNT_RE = re.compile(
 )
 
 
+# Ultra-short social set — frozenset before multi-regex (hot path).
+# Intentionally excludes action-kick soft affirms like "sounds good" (keep tools on).
+_CHAT_SHORT_SET = frozenset(
+    {
+        "hi",
+        "hey",
+        "hello",
+        "yo",
+        "sup",
+        "hi!",
+        "hey!",
+        "hello!",
+        "thanks",
+        "thank you",
+        "thanks!",
+        "thx",
+        "ty",
+        "ok",
+        "okay",
+        "k",
+        "yes",
+        "no",
+        "yep",
+        "nope",
+        "sure",
+        "cool",
+        "nice",
+        "bye",
+        "goodbye",
+        "lol",
+        "lmao",
+        "np",
+        "got it",
+        "perfect",
+        "great",
+        "awesome",
+    }
+)
+
+
 def message_wants_tools(message: str) -> bool:
     """Return False for chit-chat / simple Qs so models answer in one shot.
 
@@ -445,6 +485,11 @@ def message_wants_tools(message: str) -> bool:
     msg = (message or "").strip()
     if not msg:
         return False
+    # Cheap social early-out (skip 4 compiled regexes on greets/acks)
+    if len(msg) <= 24 and "\n" not in msg:
+        low = msg.lower().rstrip("!.?")
+        if low in _CHAT_SHORT_SET or msg.lower() in _CHAT_SHORT_SET:
+            return False
     if _META_NO_TOOLS_RE.search(msg):
         return False
     if _CHAT_ONLY_RE.match(msg):
@@ -505,6 +550,23 @@ def looks_like_pseudo_tools(text: str) -> bool:
     """True when the model faked tool calls in natural language or DSML markup."""
     if not text:
         return False
+    # Cheap reject: ordinary prose has no tool markup / call shape
+    if (
+        "(" not in text
+        and "<" not in text
+        and "&&" not in text
+        and "｜" not in text
+        and "DSML" not in text
+    ):
+        low = text.lower()
+        if (
+            "tool_call" not in low
+            and "function_call" not in low
+            and "tool calls" not in low
+            and "function calls" not in low
+            and "invoke" not in low
+        ):
+            return False
     if _PSEUDO_TOOL_RE.search(text):
         return True
     if _DSML_NOISE_RE.search(text) and re.search(

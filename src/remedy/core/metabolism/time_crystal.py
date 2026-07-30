@@ -193,13 +193,18 @@ def get_time_crystal(
     *,
     project_id: str = "",
 ) -> TimeCrystal:
+    from remedy.core.metabolism.session_registry import registry_get
+
     key = (session_id or "").strip() or "_default"
     with _lock:
-        if key not in _crystals:
-            _crystals[key] = TimeCrystal(session_id=key, project_id=project_id)
-        elif project_id:
-            _crystals[key].project_id = project_id
-        return _crystals[key]
+        crystal = registry_get(
+            _crystals,
+            key,
+            lambda: TimeCrystal(session_id=key, project_id=project_id),
+        )
+        if project_id:
+            crystal.project_id = project_id
+        return crystal
 
 
 def reset_time_crystal(session_id: str | None = None) -> None:

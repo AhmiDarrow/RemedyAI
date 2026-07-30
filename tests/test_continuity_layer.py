@@ -175,3 +175,40 @@ def test_project_profile_load_cached_per_turn(tmp_path, monkeypatch):
     assert stats2["hits"] > stats1["hits"]
     # Pins from re_explain land and snapshot can stash them
     assert any("constraint" in str(p).lower() or "Session" in str(p) for p in (a.get("pinned_constraints") or [])) or a.get("sessions", 0) >= 1
+
+
+def test_project_profile_load_skips_mkdir_and_caps_projects(tmp_path, monkeypatch):
+    """Hot load does not mkdir; store caps project count; save keeps cache coherent."""
+    from pathlib import Path
+
+    from remedy.core.project_learning import load_all, save_all
+
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    clear_project_profile_cache()
+    # Missing profiles.json: load must not create project_learning/ on disk
+    data = load_all()
+    assert data["projects"] == {}
+    pl_dir = Path(tmp_path) / "project_learning"
+    assert not pl_dir.exists() or not (pl_dir / "profiles.json").exists()
+    # Second load of empty still hits cache (no re-miss thrash)
+    stats_before = profile_cache_stats()
+    load_all()
+    stats_after = profile_cache_stats()
+    assert stats_after["hits"] > stats_before["hits"]
+
+    # Cap: writing >80 projects drops oldest (via record_session_end)
+    clear_project_profile_cache()
+    from remedy.core.project_learning import record_session_end
+
+    for i in range(85):
+        record_session_end(
+            f"/tmp/cap_proj_{i}", {"turns": 1, "tokens_estimated_peak": 100}
+        )
+    all_data = load_all()
+    assert len(all_data.get("projects") or {}) <= 80
+    # Save updates cache without forcing re-read
+    save_all(all_data)
+    s1 = profile_cache_stats()
+    load_all()
+    s2 = profile_cache_stats()
+    assert s2["hits"] > s1["hits"]

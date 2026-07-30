@@ -103,11 +103,13 @@ _lock = threading.Lock()
 
 
 def get_decision_tracker(session_id: str | None = None) -> DecisionTracker:
+    from remedy.core.metabolism.session_registry import registry_get
+
     key = (session_id or "").strip() or "_default"
     with _lock:
-        if key not in _trackers:
-            _trackers[key] = DecisionTracker(session_id=key)
-        return _trackers[key]
+        return registry_get(
+            _trackers, key, lambda: DecisionTracker(session_id=key)
+        )
 
 
 def reset_decision_tracker(session_id: str | None = None) -> None:
