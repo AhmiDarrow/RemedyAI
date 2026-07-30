@@ -47,6 +47,12 @@ def test_public_status_has_no_secrets(tmp_path: Path, monkeypatch: pytest.Monkey
     assert "deepseek" in status["providers_with_keys"]
     # Fingerprints are opt-in (skip hash work on every Settings GET).
     assert "fingerprints" not in status
+    assert status.get("encoding") in ("dpapi", "plain")
+    if status.get("encoding") == "plain":
+        assert "encoding_warning" in status
+        assert "plaintext" in status["encoding_warning"].lower()
+    else:
+        assert "encoding_warning" not in status
     status_fp = secret_store.public_secret_status(tmp_path, include_fingerprints=True)
     assert status_fp["fingerprints"]["deepseek"]
     assert "sk-super-secret" not in json.dumps(status_fp)

@@ -4,14 +4,21 @@ Generates and persists a per-user token under ``~/.remedy/auth/local_api_token``
 so the HTTP API is not open to every process by accident. The desktop shell
 loads this token and sends ``Authorization: Bearer …`` on all mutating routes.
 
+On Windows the file is **DPAPI-sealed** (same envelope as xAI/Google auth) so a
+casual disk copy or other local account cannot read the Bearer. Legacy plaintext
+files are still accepted and upgraded on the next write.
+
 Disable with ``REMEDY_API_AUTH=0`` (tests / advanced local debugging).
 """
 
 from __future__ import annotations
 
+import base64
+import json
 import logging
 import os
 import secrets
+import time
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -74,6 +81,69 @@ def token_path(home: Path | str | None = None) -> Path:
     return auth_dir(home) / TOKEN_FILENAME
 
 
+def token_encoding(home: Path | str | None = None) -> str:
+    """How the local API token is stored: ``dpapi``, ``plain``, or ``missing``."""
+    path = token_path(home)
+    if not path.is_file():
+        return "missing"
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return "missing"
+    text = raw.decode("utf-8", errors="replace").strip()
+    if not text:
+        return "missing"
+    if text.startswith("{"):
+        try:
+            outer = json.loads(text)
+        except json.JSONDecodeError:
+            return "plain"
+        if isinstance(outer, dict) and outer.get("v") == 2 and outer.get("dpapi"):
+            return "dpapi"
+        if isinstance(outer, dict) and str(outer.get("encoding") or "") == "dpapi":
+            return "dpapi"
+    return "plain"
+
+
+def _decode_token_bytes(raw: bytes) -> str:
+    """Decode on-disk bytes → bearer token string (empty if unusable)."""
+    if not raw:
+        return ""
+    text = raw.decode("utf-8", errors="replace").strip()
+    if not text:
+        return ""
+    # DPAPI envelope (v2) — same shape as xAI/Google auth files.
+    if text.startswith("{"):
+        try:
+            outer = json.loads(text)
+        except json.JSONDecodeError:
+            outer = None
+        if isinstance(outer, dict) and outer.get("v") == 2 and outer.get("dpapi"):
+            try:
+                from remedy.interfaces.secret_store import _dpapi_unprotect
+
+                plain = _dpapi_unprotect(base64.b64decode(str(outer["dpapi"])))
+                return plain.decode("utf-8").strip()
+            except Exception as exc:
+                logger.warning("local API token DPAPI decrypt failed: %s", exc)
+                return ""
+        if isinstance(outer, dict) and str(outer.get("encoding") or "") == "dpapi":
+            try:
+                from remedy.interfaces.secret_store import _dpapi_unprotect
+
+                blob = outer.get("payload") or outer.get("token") or ""
+                plain = _dpapi_unprotect(base64.b64decode(str(blob)))
+                return plain.decode("utf-8").strip()
+            except Exception as exc:
+                logger.warning("local API token DPAPI decrypt failed: %s", exc)
+                return ""
+        # Unknown JSON — not a valid bearer
+        logger.warning("local API token file: unrecognized JSON envelope")
+        return ""
+    # Legacy plaintext token
+    return text
+
+
 def ensure_local_api_token(
     home: Path | str | None = None,
     *,
@@ -104,8 +174,17 @@ def ensure_local_api_token(
     path = token_path(home)
     if path.is_file():
         try:
-            existing = path.read_text(encoding="utf-8").strip()
+            existing = _decode_token_bytes(path.read_bytes())
             if len(existing) >= MIN_TOKEN_LEN:
+                # Upgrade legacy plain → DPAPI when available (best-effort).
+                if token_encoding(home) == "plain":
+                    try:
+                        from remedy.interfaces.secret_store import _dpapi_available
+
+                        if _dpapi_available():
+                            _persist(existing, home)
+                    except Exception:
+                        pass
                 return existing
         except OSError as exc:
             logger.warning("Could not read local API token: %s", exc)
@@ -123,7 +202,7 @@ def _persist(token: str, home: Path | str | None) -> None:
     try:
         # Atomic-ish write so a crash cannot leave an empty/half token file.
         tmp = path.with_suffix(path.suffix + ".tmp")
-        data = (token.strip() + "\n").encode("utf-8")
+        data = _encode_token_bytes(token.strip())
         tmp.write_bytes(data)
         tmp.replace(path)
         from remedy.interfaces.secret_store import _harden_path
@@ -139,6 +218,28 @@ def _persist(token: str, home: Path | str | None) -> None:
             pass
 
 
+def _encode_token_bytes(token: str) -> bytes:
+    """Encode bearer for disk: DPAPI envelope when available, else plaintext."""
+    plain = token.strip().encode("utf-8")
+    try:
+        from remedy.interfaces.secret_store import _dpapi_available, _dpapi_protect
+
+        if _dpapi_available():
+            sealed = _dpapi_protect(plain)
+            envelope = {
+                "v": 2,
+                "dpapi": base64.b64encode(sealed).decode("ascii"),
+                "updated_at": time.time(),
+            }
+            return (json.dumps(envelope, indent=2) + "\n").encode("utf-8")
+    except Exception as exc:
+        logger.warning(
+            "local API token DPAPI protect failed; storing ACL-only plain: %s",
+            exc,
+        )
+    return plain + b"\n"
+
+
 def load_local_api_token(home: Path | str | None = None) -> str:
     """Read token without generating (empty if missing)."""
     if not auth_enabled():
@@ -146,7 +247,7 @@ def load_local_api_token(home: Path | str | None = None) -> str:
     path = token_path(home)
     try:
         if path.is_file():
-            return path.read_text(encoding="utf-8").strip()
+            return _decode_token_bytes(path.read_bytes())
     except OSError:
         return ""
     return ""

@@ -108,6 +108,26 @@ class TestXaiCredentialsStore:
         assert not xai_auth.auth_path(home=tmp_path).exists()
         assert xai_auth.load_credentials(home=tmp_path).connected is False
 
+    def test_credentials_encoding_public(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """Public status surfaces encoding; plaintext warns when connected."""
+        import sys
+
+        monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+        monkeypatch.delenv("XAI_API_KEY", raising=False)
+        monkeypatch.delenv("REMEDY_XAI_API_KEY", raising=False)
+        xai_auth.save_api_key("xai-enc-test-key", home=tmp_path)
+        enc = xai_auth.credentials_encoding(home=tmp_path)
+        assert enc in ("dpapi", "plain")
+        pub = xai_auth.load_credentials(home=tmp_path).to_public_dict(home=tmp_path)
+        assert pub["credentials_encoding"] == enc
+        assert "xai-enc-test-key" not in json.dumps(pub)
+        if enc == "plain":
+            assert "credentials_encoding_warning" in pub
+        else:
+            assert "credentials_encoding_warning" not in pub
+        if sys.platform == "win32":
+            assert enc == "dpapi"
+
     def test_env_bootstrap(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
         monkeypatch.setenv("XAI_API_KEY", "xai-from-env")

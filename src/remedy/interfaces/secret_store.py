@@ -466,6 +466,12 @@ def public_secret_status(
         "store_path": str(path),
         "encoding": encoding,
     }
+    if encoding == "plain" and keys:
+        out["encoding_warning"] = (
+            "Provider API keys are stored as plaintext (DPAPI seal unavailable). "
+            "Anyone with access to your user profile can read them. "
+            "On Windows, fix DPAPI / re-save keys if this was unexpected."
+        )
     if include_fingerprints:
         out["fingerprints"] = {k: fingerprint_key(v) for k, v in keys.items()}
     return out

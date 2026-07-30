@@ -427,9 +427,14 @@ def register_assistant_tools(runtime: Any) -> None:
         subject: str = "",
         body: str = "",
     ) -> str:
-        """Send a Gmail message now (needs Connect Google + gmail.compose)."""
+        """Send a Gmail message now (needs Connect Google + gmail.compose).
+
+        High-impact: in Ask approval mode the user must confirm before send.
+        Auto mode (owner power) skips the prompt on trusted scopes.
+        """
         from remedy.assistant.privacy import consent_ok, redact_secrets
         from remedy.assistant.providers.google_gmail import get_google_gmail
+        from remedy.core.approvals import APPROVALS
 
         ok, reason = consent_ok(home)
         if not ok:
@@ -445,6 +450,32 @@ def register_assistant_tools(runtime: Any) -> None:
             )
         if not (to or "").strip():
             return json.dumps({"ok": False, "message": "to address required"}, indent=2)
+        to_addr = to.strip()
+        subj = (subject or "").strip()
+        # Partner trust: never silent-send in Ask mode.
+        summary = f"mail_send to={to_addr} subject={subj[:80]}"
+        ask_reason = APPROVALS.needs_ask(summary, tool_name="mail_send")
+        from remedy.core.turn_context import turn_session_id
+
+        sid = turn_session_id(runtime)
+        if ask_reason and not APPROVALS.is_approved(
+            "mail_send", summary, session_id=sid
+        ):
+            item = APPROVALS.create(
+                tool_name="mail_send",
+                command=summary,
+                reason=ask_reason,
+                session_id=sid,
+            )
+            return (
+                f"APPROVAL_REQUIRED id={item.id}\n"
+                f"reason={ask_reason}\n"
+                f"to={to_addr}\n"
+                f"subject={subj[:120]}\n"
+                "Do not invent success. Tell the user this needs approval in the UI "
+                f"(or /approve {item.id}). After they approve, retry mail_send with "
+                "the same arguments."
+            )
         send_fn = getattr(mail, "send_message", None)
         if send_fn is None:
             return json.dumps(
@@ -456,8 +487,8 @@ def register_assistant_tools(runtime: Any) -> None:
             )
         try:
             result = send_fn(
-                to=to.strip(),
-                subject=(subject or "").strip(),
+                to=to_addr,
+                subject=subj,
                 body=body or "",
             )
         except Exception as exc:

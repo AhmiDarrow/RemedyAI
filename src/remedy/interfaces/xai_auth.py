@@ -74,6 +74,20 @@ def auth_path(home: Path | None = None) -> Path:
     return auth_dir(home) / "xai.json"
 
 
+def credentials_encoding(home: Path | None = None) -> str:
+    """How xAI credentials are stored: ``dpapi``, ``plain``, or ``missing``."""
+    path = auth_path(home)
+    if not path.is_file():
+        return "missing"
+    try:
+        outer = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return "plain"
+    if isinstance(outer, dict) and outer.get("v") == 2 and outer.get("dpapi"):
+        return "dpapi"
+    return "plain"
+
+
 def _coerce_expires_at(value: Any) -> float | None:
     """Best-effort unix-seconds expiry. Corrupt store values must not raise."""
     if value is None or value is False or value == "":
@@ -126,8 +140,13 @@ class XaiCredentials:
             return self.access_token
         return None
 
-    def to_public_dict(self) -> dict[str, Any]:
-        return {
+    def to_public_dict(self, home: Path | None = None) -> dict[str, Any]:
+        """Safe status for Settings / API (no raw tokens).
+
+        When *home* is provided, includes ``credentials_encoding`` and a plain-store
+        warning (parity with Google OAuth tokens_encoding).
+        """
+        out: dict[str, Any] = {
             "provider": "xai",
             "auth_method": self.auth_method,
             "connected": self.connected,
@@ -135,6 +154,19 @@ class XaiCredentials:
             "has_oauth": bool(self.access_token or self.refresh_token),
             "expires_at": self.expires_at,
         }
+        # Encoding is path-level metadata — always useful when connected or file exists.
+        try:
+            enc = credentials_encoding(home)
+            out["credentials_encoding"] = enc
+            if enc == "plain" and self.connected:
+                out["credentials_encoding_warning"] = (
+                    "xAI credentials are stored as plaintext (DPAPI seal unavailable). "
+                    "Anyone with access to your Windows user profile can read them. "
+                    "Fix DPAPI / re-connect if this was unexpected."
+                )
+        except Exception:
+            pass
+        return out
 
 
 def load_credentials(home: Path | None = None) -> XaiCredentials:
@@ -461,7 +493,7 @@ def _poll_until_done(session_id: str) -> None:
 
 def login_status(session_id: str | None = None, home: Path | None = None) -> dict[str, Any]:
     creds = load_credentials(home)
-    out: dict[str, Any] = {"credentials": creds.to_public_dict()}
+    out: dict[str, Any] = {"credentials": creds.to_public_dict(home=home)}
     if session_id:
         with _poll_lock:
             sess = _poll_sessions.get(session_id)
@@ -472,7 +504,7 @@ def login_status(session_id: str | None = None, home: Path | None = None) -> dic
                 "error": sess.get("error"),
             }
             if sess.get("status") == "connected":
-                out["credentials"] = load_credentials(home).to_public_dict()
+                out["credentials"] = load_credentials(home).to_public_dict(home=home)
         else:
             out["session"] = {
                 "session_id": session_id,

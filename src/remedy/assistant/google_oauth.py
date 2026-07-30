@@ -202,6 +202,19 @@ class GoogleTokens:
         }
 
 
+def _atomic_write_bytes(path: Path, data: bytes) -> None:
+    """Write via temp + replace so a crash cannot leave a half-written auth file."""
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    try:
+        tmp.write_bytes(data)
+        tmp.replace(path)
+    except Exception:
+        with contextlib.suppress(OSError):
+            if tmp.exists():
+                tmp.unlink()
+        raise
+
+
 def _write_sealed(path: Path, plain: bytes) -> str:
     """Write sealed or plain bytes. Returns encoding: ``dpapi`` or ``plain``."""
     written = False
@@ -216,7 +229,9 @@ def _write_sealed(path: Path, plain: bytes) -> str:
                 "dpapi": base64.b64encode(sealed).decode("ascii"),
                 "updated_at": time.time(),
             }
-            path.write_text(json.dumps(envelope, indent=2) + "\n", encoding="utf-8")
+            _atomic_write_bytes(
+                path, (json.dumps(envelope, indent=2) + "\n").encode("utf-8")
+            )
             written = True
             encoding = "dpapi"
             with contextlib.suppress(Exception):
@@ -224,7 +239,9 @@ def _write_sealed(path: Path, plain: bytes) -> str:
     except Exception as exc:
         logger.warning("Google token DPAPI protect failed: %s", exc)
     if not written:
-        path.write_text(plain.decode("utf-8") + "\n", encoding="utf-8")
+        # plain is already UTF-8 JSON (or similar); write raw + newline
+        payload = plain if plain.endswith(b"\n") else plain + b"\n"
+        _atomic_write_bytes(path, payload)
         encoding = "plain"
         logger.warning(
             "Google tokens stored as plaintext at %s (DPAPI unavailable or failed)",
@@ -232,6 +249,13 @@ def _write_sealed(path: Path, plain: bytes) -> str:
         )
     with contextlib.suppress(OSError):
         path.chmod(0o600)
+    try:
+        from remedy.interfaces.secret_store import _harden_path
+
+        _harden_path(path, is_dir=False)
+        _harden_path(path.parent, is_dir=True)
+    except Exception:
+        pass
     return encoding
 
 
