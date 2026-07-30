@@ -198,6 +198,11 @@ _HARD_DANGEROUS_PATTERNS = [
     (r"(^|[\s;&|])(rm|del|erase)\s+(-[a-zA-Z]*[rf][a-zA-Z]*\s+)+", "Forced file deletion"),
     # Encoded payloads hide intent (complement shell write jail)
     (r"(?:^|[\s;&|])-(?:encodedcommand|enc|ec)\b", "PowerShell EncodedCommand"),
+    # Short -e after powershell/pwsh only (bare -e matches grep -e / set -e — too noisy)
+    (
+        r"(?:powershell|pwsh)(?:\.exe)?(?:\s+[/\-\w]+)*\s+-e(?:\s|$|=)",
+        "PowerShell EncodedCommand (-e)",
+    ),
     (r"\badd-type\b[^\n]*-typedefinition\b", "PowerShell Add-Type injection"),
 ]
 

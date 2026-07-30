@@ -381,6 +381,40 @@ def test_shell_write_jail_blocks_encoded_and_archive(tmp_path: Path):
     assert block2 is not None
 
 
+def test_shell_write_jail_blocks_powershell_short_e(tmp_path: Path):
+    """powershell -e <base64> is EncodedCommand short form — fail closed."""
+    from remedy.core.shell_write_jail import check_shell_write_jail
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    for cmd in (
+        "powershell -e JABzAGU=",
+        "powershell -E JABzAGU=",
+        "pwsh -NoP -e SQBFAFgA",
+        "powershell.exe -NonInteractive -e XX",
+    ):
+        hit = check_shell_write_jail(
+            cmd, write_roots=[proj], cwd=proj, project_bound=True
+        )
+        assert hit is not None, f"expected block for: {cmd}"
+        assert "encoded" in hit.lower() or "cannot be proven" in hit.lower()
+
+
+def test_shell_write_jail_blocks_fsutil_createnew(tmp_path: Path):
+    """fsutil file createnew outside roots must not slip past mutation hints."""
+    from remedy.core.shell_write_jail import check_shell_write_jail, looks_like_mutation
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    cmd = r"fsutil file createnew C:\Users\Public\pwn.txt 1"
+    assert looks_like_mutation(cmd)
+    hit = check_shell_write_jail(
+        cmd, write_roots=[proj], cwd=proj, project_bound=True
+    )
+    assert hit is not None
+    assert "outside" in hit.lower() or "write root" in hit.lower()
+
+
 def test_shell_write_jail_blocks_bare_ps_var_path(tmp_path: Path):
     from remedy.core.shell_write_jail import check_shell_write_jail
 

@@ -40,6 +40,8 @@ _MUTATION_HINT_RE = re.compile(
     # Interpreter one-shot writes
     r"|\b(?:python|python3|py)\s+(?:-\w+\s+)*-c\b"
     r"|\bnode\s+(?:-\w+\s+)*-e\b"
+    # Windows FS utilities that create/mutate without cmdlets above
+    r"|\bfsutil\b|\bmklink\b"
     r")"
 )
 
@@ -83,8 +85,10 @@ _INTERPRETER_ONESHOT_RE = re.compile(
 _OPAQUE_MUTATION_RE = re.compile(
     r"(?ix)"
     r"(?:"
-    # -EncodedCommand / -enc (no \b before '-' — space and '-' are both non-word)
+    # -EncodedCommand / -enc / -ec (no \b before '-' — space and '-' are both non-word)
     r"(?:^|[\s;|&])-(?:encodedcommand|enc|ec)\b"
+    # Short -e after powershell/pwsh (classic bypass; bare -e alone is too noisy)
+    r"|(?:powershell|pwsh)(?:\.exe)?(?:\s+[/\-\w]+)*\s+-e(?:\s|$|=)"
     r"|\bexpand-archive\b|\bcompress-archive\b"
     r"|\btar\s+-[a-z]*x|\btar\s+--extract\b"
     r"|\bcertutil\b[^\n]*-decode\b"
