@@ -47,6 +47,31 @@ def clear_log_context() -> None:
 # -- structured formatter -----------------------------------------------------
 
 
+def _redact_log_text(text: str) -> str:
+    """Best-effort secret scrub for log lines (fail soft — never raise)."""
+    if not text:
+        return ""
+    try:
+        from remedy.core.metabolism.redact import redact_text
+
+        return redact_text(text)
+    except Exception:
+        return text
+
+
+def _redact_log_obj(obj: Any, *, depth: int = 0) -> Any:
+    if depth > 6:
+        return "[redacted-depth]"
+    try:
+        from remedy.core.metabolism.redact import redact_obj
+
+        return redact_obj(obj, depth=depth)
+    except Exception:
+        if isinstance(obj, str):
+            return _redact_log_text(obj)
+        return obj
+
+
 class StructuredFormatter(logging.Formatter):
     """JSON formatter for structured logging with context propagation."""
 
@@ -67,7 +92,7 @@ class StructuredFormatter(logging.Formatter):
             "ts": ts,
             "level": record.levelname,
             "logger": record.name,
-            "msg": record.getMessage(),
+            "msg": _redact_log_text(record.getMessage()),
         }
 
         sid = _session_id.get()
@@ -81,11 +106,13 @@ class StructuredFormatter(logging.Formatter):
             data["request_id"] = rid
 
         if record.exc_info and record.exc_info[1]:
-            data["error"] = str(record.exc_info[1])
+            data["error"] = _redact_log_text(str(record.exc_info[1]))
             data["error_type"] = type(record.exc_info[1]).__name__
 
         if hasattr(record, "extra") and record.extra:
-            data.update(record.extra)
+            scrubbed = _redact_log_obj(record.extra)
+            if isinstance(scrubbed, dict):
+                data.update(scrubbed)
 
         return json.dumps(data, default=str)
 
@@ -97,9 +124,10 @@ class StructuredFormatter(logging.Formatter):
         }
         reset = "\033[0m"
         color = colors.get(record.levelno, "")
-        base = f"{ts} [{color}{record.levelname}{reset}] {record.name}: {record.getMessage()}"
+        msg = _redact_log_text(record.getMessage())
+        base = f"{ts} [{color}{record.levelname}{reset}] {record.name}: {msg}"
         if record.exc_info and record.exc_info[1]:
-            base += f" | {color}{record.exc_info[1]}{reset}"
+            base += f" | {color}{_redact_log_text(str(record.exc_info[1]))}{reset}"
         return base
 
 
@@ -110,7 +138,8 @@ class TextFormatter(logging.Formatter):
         ts = datetime.now(UTC).strftime("%H:%M:%S")
         sid = _session_id.get()
         extra = f" [{sid[:8]}]" if sid else ""
-        return f"{ts} {record.levelname:5s}{extra} {record.name}: {record.getMessage()}"
+        msg = _redact_log_text(record.getMessage())
+        return f"{ts} {record.levelname:5s}{extra} {record.name}: {msg}"
 
 
 # -- setup --------------------------------------------------------------------

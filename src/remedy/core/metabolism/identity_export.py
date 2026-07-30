@@ -193,16 +193,18 @@ def import_identity(
     material = _derive_key(passphrase, salt)
     enc_key, mac_key = material[:32], material[32:]
     sha = str(package.get("sha256") or "")
-    # Authenticate before decrypt (HMAC over salt||cipher||sha)
+    # Authenticate before decrypt (HMAC over salt||cipher||sha). Fail closed:
+    # missing/empty hmac_hex is refused (legacy packages must re-export).
+    provided = str(package.get("hmac_hex") or "").strip()
+    if not provided:
+        raise ValueError("identity package missing HMAC (fail closed)")
     expected = hmac_mod.new(
         mac_key,
         salt + cipher + sha.encode("ascii"),
         hashlib.sha256,
     ).hexdigest()
-    provided = str(package.get("hmac_hex") or "")
-    if provided:
-        if not hmac_mod.compare_digest(expected, provided):
-            raise ValueError("passphrase incorrect or package corrupted")
+    if not hmac_mod.compare_digest(expected, provided):
+        raise ValueError("passphrase incorrect or package corrupted")
     raw = _xor_stream(cipher, enc_key)
     if hashlib.sha256(raw).hexdigest() != sha:
         raise ValueError("passphrase incorrect or package corrupted")
