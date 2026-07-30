@@ -26,6 +26,7 @@ import {
   touchStreamJob,
   withStoppedMarker,
 } from '../sessions/streamJobs'
+import { promoteQueuedOptions, retrySendOptions } from '../sessions/retryPrompt'
 import type { ChatMessage } from '../types'
 import { toolLabel, type ProcessStep } from '../utils/toolLabels'
 import { emptyUsage, type UsageSnapshot } from '../utils/tokenCost'
@@ -81,6 +82,8 @@ export function useMessages(sessionId: string | null) {
   const lastSentPromptRef = useRef<{
     text: string
     model?: string
+    /** Per-session provider (multi-tab multi-provider must survive retry). */
+    provider?: string
     sid?: string
     attachments?: QueuedSend['attachments']
     planMode?: boolean
@@ -445,6 +448,7 @@ export function useMessages(sessionId: string | null) {
       lastSentPromptRef.current = {
         text: text.trim() || '(see attached files)',
         model,
+        provider,
         sid: targetId,
         attachments,
         planMode,
@@ -1004,7 +1008,8 @@ export function useMessages(sessionId: string | null) {
         pending.sid,
         pending.attachments,
         pending.planMode,
-        { mode: 'after' },
+        // Preserve session LLM bind — without provider, multi-tab retry hits global.
+        retrySendOptions(pending),
       )
     }, 80)
   }, [stop, send])
@@ -1028,10 +1033,15 @@ export function useMessages(sessionId: string | null) {
     (id: string) => {
       const item = queueRef.current.find((x) => x.id === id)
       if (!item) return
-      // Interrupt with this message
-      void send(item.text, item.model, item.sid, item.attachments, item.planMode, {
-        mode: 'interrupt',
-      })
+      // Interrupt with this message (keep queued provider for multi-tab LLM binds)
+      void send(
+        item.text,
+        item.model,
+        item.sid,
+        item.attachments,
+        item.planMode,
+        promoteQueuedOptions(item),
+      )
       setQueue((q) => q.filter((x) => x.id !== id))
     },
     [send],

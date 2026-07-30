@@ -1,4 +1,40 @@
 
+def test_cli_bare_subcommands_require_action():
+    """Bare group commands must not silently no-op — argparse requires a subcommand.
+
+    settings/computer intentionally default (show/status); other groups print usage.
+    """
+    import pytest
+
+    from remedy.interfaces.cli import build_parser
+
+    parser = build_parser()
+    # These used to exit 0 with empty output — unusable for discovery.
+    for cmd in (
+        "session",
+        "skill",
+        "memory",
+        "config",
+        "gateway",
+        "tool",
+        "user",
+        "learn",
+        "handoff",
+        "auth",
+        "mcp",
+        "desktop",
+    ):
+        with pytest.raises(SystemExit) as ei:
+            parser.parse_args([cmd])
+        assert ei.value.code == 2
+
+    # Sensible defaults still work without a subcommand.
+    settings = parser.parse_args(["settings"])
+    assert getattr(settings, "settings_cmd", None) in (None, "show")
+    computer = parser.parse_args(["computer"])
+    assert getattr(computer, "computer_cmd", None) in (None, "status")
+
+
 def test_cli_skill_list_hides_learned_probation(tmp_path, capsys):
     """remedy skill list default hides auto-learned non-active skills."""
     import asyncio

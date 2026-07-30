@@ -1,5 +1,23 @@
-import { apiFetch, authHeaders, ensureApiToken, getApiBase } from './client'
+import {
+  apiFetch,
+  authHeaders,
+  ensureApiToken,
+  formatApiErrorBody,
+  getApiBase,
+} from './client'
 import type { ChatMessage, ModelDefinition, AgentDefinition, CommandDefinition } from '../types'
+
+/**
+ * User-facing message for a failed stream HTTP response.
+ * Uses the same FastAPI-aware flattener as apiFetch (validation arrays, detail, …).
+ */
+export function streamHttpErrorMessage(
+  body: unknown,
+  status: number,
+  statusText = '',
+): string {
+  return formatApiErrorBody(body, statusText || `HTTP ${status}`)
+}
 
 export async function listMessages(
   sessionId: string,
@@ -137,13 +155,7 @@ export function streamMessage(
 
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))
-        onError(
-          (body as { detail?: string; message?: string; error?: string })?.detail
-            || (body as { message?: string })?.message
-            || (body as { error?: string })?.error
-            || res.statusText
-            || `HTTP ${res.status}`,
-        )
+        onError(streamHttpErrorMessage(body, res.status, res.statusText))
         return
       }
 
