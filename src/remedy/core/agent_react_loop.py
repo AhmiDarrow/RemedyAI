@@ -1075,8 +1075,15 @@ async def call_llm_stream(runtime, message: str,
                     _llm_ms = (time.perf_counter() - _llm_t0) * 1000.0
                     if resp.status != 200:
                         text = await resp.text()
+                        # Provider bodies can echo auth headers / key fragments.
+                        try:
+                            from remedy.core.metabolism.redact import redact_text
+
+                            safe_err = redact_text(text or "")
+                        except Exception:
+                            safe_err = "[redacted provider error]"
                         logger.error(
-                            "LLM API error %d: %s", resp.status, text[:500]
+                            "LLM API error %d: %s", resp.status, safe_err[:500]
                         )
                         with suppress(Exception):
                             from remedy.nanoswarm import get_swarm
@@ -1088,7 +1095,7 @@ async def call_llm_stream(runtime, message: str,
                                     model=_bind.model,
                                     ok=False,
                                     latency_ms=_llm_ms,
-                                    error=text[:200],
+                                    error=safe_err[:200],
                                     status_code=int(resp.status),
                                 )
                             )
@@ -1146,7 +1153,7 @@ async def call_llm_stream(runtime, message: str,
                         # DeepSeek thinking mode: tool turns require reasoning_content.
                         if (
                             resp.status == 400
-                            and "reasoning_content" in text.lower()
+                            and "reasoning_content" in (text or "").lower()
                             and not reasoning_repair_done
                         ):
                             reasoning_repair_done = True
@@ -1163,10 +1170,10 @@ async def call_llm_stream(runtime, message: str,
                         # Truncated / invalid tool-call JSON in history (often after
                         # a long plan_save or max_tokens mid-arguments stream).
                         _tool_arg_err = resp.status == 400 and (
-                            "tool argument" in text.lower()
-                            or "eof while parsing" in text.lower()
-                            or "invalid-argument" in text.lower()
-                            or "unmodified tool arguments" in text.lower()
+                            "tool argument" in (text or "").lower()
+                            or "eof while parsing" in (text or "").lower()
+                            or "invalid-argument" in (text or "").lower()
+                            or "unmodified tool arguments" in (text or "").lower()
                         )
                         if _tool_arg_err and not tool_args_repair_done:
                             tool_args_repair_done = True
@@ -1216,7 +1223,7 @@ async def call_llm_stream(runtime, message: str,
                             prov = str(_bind.provider or "unknown")
                             yield (
                                 f"\n[LLM ERROR — HTTP {resp.status}]\n"
-                                f"{text[:500]}\n[END LLM ERROR]\n\n"
+                                f"{safe_err[:500]}\n[END LLM ERROR]\n\n"
                                 f"**Cannot continue:** model `{model_name}` "
                                 f"(provider `{prov}`) is not available or this "
                                 f"account cannot use it.\n\n"
@@ -1229,7 +1236,7 @@ async def call_llm_stream(runtime, message: str,
                         if force_answer_sticky or force_answer_api_fail_once:
                             yield (
                                 f"\n[LLM ERROR — HTTP {resp.status}]\n"
-                                f"{text[:500]}\n[END LLM ERROR]\n\n"
+                                f"{safe_err[:500]}\n[END LLM ERROR]\n\n"
                                 "Stopped after repeated provider errors. "
                                 "Check model/API key in Settings and try again "
                                 "(or say **continue** after switching models).\n"
@@ -1242,7 +1249,7 @@ async def call_llm_stream(runtime, message: str,
                                 f"\n[LLM notice — HTTP {resp.status}; "
                                 f"trying to finish from context "
                                 f"({api_soft_failures}/{max_api_soft_failures})]\n"
-                                f"{text[:200]}\n"
+                                f"{safe_err[:200]}\n"
                             )
                             tools = []
                             force_answer_sticky = True
@@ -1261,7 +1268,7 @@ async def call_llm_stream(runtime, message: str,
                             continue
                         yield (
                             f"\n[LLM ERROR — HTTP {resp.status}]\n"
-                            f"{text[:500]}\n[END LLM ERROR]\n"
+                            f"{safe_err[:500]}\n[END LLM ERROR]\n"
                             "Stopped after repeated API errors. "
                             "Switch model or check the provider, then resend.\n"
                         )

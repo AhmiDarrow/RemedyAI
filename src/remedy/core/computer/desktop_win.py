@@ -763,6 +763,22 @@ def open_url(url: str) -> dict[str, Any]:
     # Block credentials in userinfo and obvious newlines/control chars
     if any(c in u for c in ("\n", "\r", "\x00")):
         raise ValueError("open_url refuses URL with control characters")
+    try:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(u)
+        if parsed.username is not None or parsed.password is not None:
+            raise ValueError(
+                "open_url refuses URL with user:password@ credentials (userinfo)"
+            )
+    except ValueError:
+        raise
+    except Exception:
+        # Fail closed on unparseable credentials forms
+        if "@" in u.split("://", 1)[-1].split("/", 1)[0]:
+            raise ValueError(
+                "open_url refuses URL with userinfo credentials"
+            ) from None
     if sys.platform == "win32":
         # os.startfile is more reliable than webbrowser on Windows (default app).
         try:

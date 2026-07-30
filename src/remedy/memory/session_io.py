@@ -93,6 +93,19 @@ def _export_content(
 ) -> str:
     if not content:
         return ""
+    # Never write secret-shaped substrings into portable exports (API keys,
+    # bearer tokens, PEM, connection strings). Prefer over-redact.
+    try:
+        from remedy.core.metabolism.redact import redact_text
+
+        content = redact_text(content)
+    except Exception:
+        # Fail closed: if redactor is unavailable, strip common key prefixes.
+        content = re.sub(
+            r"(?i)\b(sk-[A-Za-z0-9_\-]{8,}|Bearer\s+\S+|api[_-]?key\s*[:=]\s*\S+)",
+            "[redacted]",
+            content,
+        )
     role_l = (role or "").lower()
     if role_l == "tool":
         cap = min(cap, _EXPORT_TOOL_CAP)

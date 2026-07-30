@@ -18,6 +18,7 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 - Perf: precompiled hard/soft/self-kill security patterns; shell jail `_norm_roots` once per check
 - Hot path: L2 agency phrasing accuracy; browse/pure-action before lean snapshot; decision tier-on-change; L1 keeps tools when brief tasks open
 - Hot path: lean snapshot skips library/pattern/goal on L0/L1 chat; O(1) quality snapshot; governor decision thrash; skip re-offload of handles; precompiled CUA ref regex
+- Hot path: project profile mtime cache; tier greeting/path early exits; warm skills catalog; cached OpenAI tool schemas; single SessionQuality handle + `remedy_turn_tier_total`
 - Gateway: `gateway serve` installs local API token; Teams JWT `aud`/`exp` fail-closed; secret cache `mtime_ns`+size; generic webhook 503 without secret
 - Plan mode: exclude `computer_act`; CUA mutations go through Ask approvals; skill learning path jail; MCP env scrub; zip rejects symlinks
 - **Plan mode:** drop `computer_act` (and keep allowlist = research tools ∪ `COMPUTER_PLAN_MODE_TOOLS` only — no click/type/app)
@@ -29,6 +30,10 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 - **Partner memory:** `force=True` never bypasses secret guard; `memory_fact` refuses credentials
 - **open_url:** http(s)-only (blocks `file://` / bare paths); CLI host UI navigate re-validates URL
 - **Uninstall wipe:** refuse non-`.remedy` / drive-root / system-path wipe roots; GET attachment uses `relative_to` not `startswith`
+- **Auth path jail:** `~/.remedy/auth/**` (and `$REMEDY_HOME/auth/**`) blocked in `resolve_under_roots` even under `access_scope=full`, including symlink/junction resolve into auth
+- **Stream/API errors:** SSE `event: error` and LLM provider error bodies redacted before client yield / logs
+- **Session export:** portable `.txt`/`.md` export redacts secret-shaped content; import caps size/messages and refuses auth paths
+- **open_url userinfo:** refuse `https://user:pass@host` (comment was incomplete)
 - Docs: README pytest count ~1174
 
 ### Security/perf: metabolism hardening pass

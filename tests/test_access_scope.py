@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from remedy.core.errors import SecurityError
+from remedy.core.security import is_protected_secret_path, refuse_protected_secret_path
 from remedy.core.workspace import (
     allowed_roots_for_scope,
     effective_access_scope,
@@ -157,3 +158,65 @@ def test_full_scope_allows_absolute_under_user(tmp_path: Path):
     f.write_text("ok", encoding="utf-8")
     p = resolve_under_roots(str(f), [tmp_path], access_scope="full")
     assert p == f.resolve()
+
+
+def test_protected_secret_path_detects_auth_tree(tmp_path: Path, monkeypatch):
+    """.../.remedy/auth and $REMEDY_HOME/auth are always protected."""
+    # Path-part form (works even when Path.home is unrelated)
+    remedy = tmp_path / "uhome" / ".remedy"
+    auth = remedy / "auth"
+    auth.mkdir(parents=True)
+    secret = auth / "provider_keys.json"
+    secret.write_text('{"x":1}', encoding="utf-8")
+
+    assert is_protected_secret_path(secret) is True
+    assert is_protected_secret_path(auth) is True
+    assert is_protected_secret_path(remedy / "config.toml") is False
+    with pytest.raises(SecurityError) as ei:
+        refuse_protected_secret_path(secret)
+    assert ei.value.details.get("rule") == "protected_secret_path"
+
+    # REMEDY_HOME form (custom home name, no ".remedy" segment)
+    custom = tmp_path / "custom_remedy_home"
+    c_auth = custom / "auth"
+    c_auth.mkdir(parents=True)
+    c_secret = c_auth / "xai.json"
+    c_secret.write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("REMEDY_HOME", str(custom))
+    assert is_protected_secret_path(c_secret) is True
+
+
+def test_resolve_under_roots_blocks_auth_even_on_full_scope(tmp_path: Path):
+    """access_scope=full must still refuse reading/writing auth secrets."""
+    auth = tmp_path / "uhome" / ".remedy" / "auth"
+    auth.mkdir(parents=True)
+    secret = auth / "local_api_token"
+    secret.write_text("tokensecretvalue123456", encoding="utf-8")
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    with pytest.raises(SecurityError) as ei:
+        resolve_under_roots(str(secret), [proj], access_scope="full")
+    assert ei.value.details.get("rule") == "protected_secret_path"
+    assert "protected" in str(ei.value).lower() or "auth" in str(ei.value).lower()
+
+
+def test_resolve_under_roots_blocks_auth_junction(tmp_path: Path):
+    """Symlink/junction into auth must not open secrets via project-relative path."""
+    auth = tmp_path / "uhome" / ".remedy" / "auth"
+    auth.mkdir(parents=True)
+    secret = auth / "provider_keys.json"
+    secret.write_text('{"api_key":"sk-leaked"}', encoding="utf-8")
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    link = proj / "leak"
+    try:
+        link.symlink_to(secret, target_is_directory=False)
+    except OSError:
+        pytest.skip("symlinks not available on this host")
+
+    with pytest.raises(SecurityError) as ei:
+        resolve_under_roots("leak", [proj], access_scope="project")
+    rule = ei.value.details.get("rule")
+    assert rule in ("protected_secret_path", "path_traversal", "path_chars")
