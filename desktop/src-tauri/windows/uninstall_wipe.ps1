@@ -90,13 +90,35 @@ if ($full -eq 1) {
   # Tauri / app leftovers (user data dirs — safe)
   Remove-PathSafe (Join-Path $env:APPDATA 'com.remedy.desktop')
   Remove-PathSafe (Join-Path $env:LOCALAPPDATA 'com.remedy.desktop')
-  # Startup shortcut
+  # Startup shortcut (user + common)
   Remove-PathSafe (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\Remedy Desktop.lnk')
-  # Start Menu / Desktop shortcuts (best-effort)
+  try {
+    Remove-PathSafe (Join-Path ([Environment]::GetFolderPath('CommonStartup')) 'Remedy Desktop.lnk')
+  } catch {}
+  # Start Menu / Desktop shortcuts (user + common/public — full wipe must leave no ghosts)
   Remove-PathSafe (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Remedy Desktop')
   Remove-PathSafe (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Remedy Desktop.lnk')
   try {
+    $commonPrograms = [Environment]::GetFolderPath('CommonPrograms')
+    if ($commonPrograms) {
+      Remove-PathSafe (Join-Path $commonPrograms 'Remedy Desktop')
+      Remove-PathSafe (Join-Path $commonPrograms 'Remedy Desktop.lnk')
+    }
+  } catch {}
+  try {
     Remove-PathSafe (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Remedy Desktop.lnk')
+  } catch {}
+  # Public Desktop + CSIDL_COMMON_DESKTOPDIRECTORY (all-users shortcuts)
+  try {
+    $commonDesktop = [Environment]::GetFolderPath('CommonDesktopDirectory')
+    if ($commonDesktop) {
+      Remove-PathSafe (Join-Path $commonDesktop 'Remedy Desktop.lnk')
+    }
+  } catch {}
+  try {
+    if ($env:PUBLIC) {
+      Remove-PathSafe (Join-Path $env:PUBLIC 'Desktop\Remedy Desktop.lnk')
+    }
   } catch {}
   # Temp update artifacts (not the active UninstallChoices / this script folder mid-run)
   Remove-PathSafe (Join-Path $env:TEMP 'RemedyDesktop-Update.log')

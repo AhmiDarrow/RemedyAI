@@ -6,6 +6,10 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ### Gauntlet: continuous security + perf loop (feature/computer-use)
 
+- **CLI updater package identity:** `remedy update` checks PyPI **`remedy-ai`** (not unrelated occupied `remedy`); dist metadata + project-root detection prefer `remedy-ai`; failure hint clones `AhmiDarrow/RemedyAI`; git behind uses upstream/master/main
+- **Full wipe shortcuts:** uninstall wipe removes user **and** Common/Public Desktop + Start Menu + Startup `Remedy Desktop.lnk` ghosts
+- **Browser URL userinfo:** normalize/open/bookmarks reject `https://user:pass@host` (no credential persistence in localStorage)
+- **build_desktop version sync:** stamps `package-lock.json` root version with pyproject (was left stale vs package.json/tauri)
 - **ComfyUI download path residual:** image filenames must be plain basenames (no `..`/separators/drive letters); writes resolve under `out_dir` only; default `comfy_out` honors `REMEDY_HOME`
 - **Plugin load trust:** safe plugin identifiers only; path-bound `spec_from_file_location` (no bare stdlib import); deny `os`/`subprocess`/… even if present on disk
 - **Tool registry trust order:** unscoped `get()` prefers builtin over MCP/skill shadow; no residual `_by_source` dupes; `purge_mcp_server`; builtin handlers cannot be clobbered

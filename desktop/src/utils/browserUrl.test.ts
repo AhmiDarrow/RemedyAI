@@ -27,6 +27,15 @@ describe('browserUrl', () => {
     expect(normalizeBrowserUrl('')).toBe('')
   })
 
+  it('rejects URLs with embedded credentials (userinfo)', () => {
+    expect(normalizeBrowserUrl('https://user:token@example.com/path')).toBe('')
+    expect(normalizeBrowserUrl('https://user@example.com')).toBe('')
+    expect(normalizeBrowserUrl('http://:pass@localhost:8080')).toBe('')
+    // Empty userinfo still blocked (parity with SSRF policy)
+    expect(normalizeBrowserUrl('https://@evil.example')).toBe('')
+    expect(isOpenableBrowserUrl('https://user:pass@x.com')).toBe(false)
+  })
+
   it('rejects task-text leaks (spaces / emails / prose)', () => {
     expect(
       normalizeBrowserUrl(
