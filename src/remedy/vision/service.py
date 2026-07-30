@@ -29,8 +29,10 @@ from remedy.vision.runtime import is_running, start_server, stop_server
 
 logger = logging.getLogger(__name__)
 
-# Session-level cache: sha256 or path+mtime → brief text
+# Session-level cache: path+mtime_ns+size → brief text
 _decode_cache: dict[str, str] = {}
+# Bound process memory if many unique images are decoded in one session.
+_DECODE_CACHE_MAX = 64
 # Host resource snapshot changes rarely; cache so Settings GETs stay snappy.
 _health_cache: dict[str, Any] = {"ts": 0.0, "key": "", "value": None}
 _HEALTH_CACHE_TTL_S = 30.0
@@ -606,7 +608,14 @@ def decode_for_turn(
             elapsed = time.time() - t0
             if r.get("ok") and r.get("text"):
                 text = str(r["text"])
-                _decode_cache[_cache_key(p)] = text
+                ck = _cache_key(p)
+                # FIFO eviction when full (dict preserves insertion order).
+                while len(_decode_cache) >= _DECODE_CACHE_MAX and ck not in _decode_cache:
+                    try:
+                        _decode_cache.pop(next(iter(_decode_cache)))
+                    except StopIteration:
+                        break
+                _decode_cache[ck] = text
                 briefs.append(text)
                 events.append(f"Visual decode: {p.name} ({elapsed:.1f}s)")
             else:

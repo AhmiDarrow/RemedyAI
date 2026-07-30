@@ -313,15 +313,20 @@ def invalidate_provider_keys_cache() -> None:
 def load_provider_keys(home: Path | str | None = None) -> dict[str, str]:
     """Return {provider: api_key} from the secure store (empty if missing).
 
-    Cached by path mtime/size so Settings / chat key resolution stays cheap.
+    Cached by path mtime_ns + size so Settings / chat key resolution stays cheap
+    and rapid rewrites (Windows 1s st_mtime resolution) still invalidate.
     Returns a shallow copy so callers cannot mutate the cache entry.
     """
     path = store_path(home)
     if not path.exists():
+        # File gone — drop stale cache so clear-all cannot resurrect secrets.
+        if _keys_cache.get("path") == str(path):
+            invalidate_provider_keys_cache()
         return {}
     try:
         st = path.stat()
-        mtime, size = st.st_mtime, st.st_size
+        mtime = float(getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9)))
+        size = int(st.st_size)
         if (
             _keys_cache["path"] == str(path)
             and _keys_cache["mtime"] == mtime
@@ -359,11 +364,12 @@ def save_provider_keys(keys: dict[str, str], home: Path | str | None = None) -> 
     # Seed cache with what we just wrote (avoids immediate re-decrypt).
     try:
         st = path.stat()
+        mtime = float(getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9)))
         _keys_cache.update(
             {
                 "path": str(path),
-                "mtime": st.st_mtime,
-                "size": st.st_size,
+                "mtime": mtime,
+                "size": int(st.st_size),
                 "data": dict(cleaned),
             }
         )
@@ -405,11 +411,16 @@ def clear_provider_secret(
     provider: str | None = None,
     home: Path | str | None = None,
 ) -> None:
-    """Clear one provider or all provider secrets."""
+    """Clear one provider or all provider secrets.
+
+    Always invalidates the process-local cache so deleted secrets cannot be
+    served from memory after unlink.
+    """
     if provider is None or str(provider).strip() == "":
         path = store_path(home)
         if path.exists():
             path.unlink()
+        invalidate_provider_keys_cache()
         return
     set_provider_secret(str(provider).strip().lower(), None, home=home)
 

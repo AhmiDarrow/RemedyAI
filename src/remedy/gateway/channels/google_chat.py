@@ -102,7 +102,12 @@ class GoogleChatChannel(HttpSessionMixin, ChannelAdapter):
             logger.warning("Google Chat webhook missing Bearer Authorization")
             return False
         presented = auth[7:].strip()
-        return _hmac.compare_digest(presented, self.access_token)
+        # Constant-time; unequal lengths → False (never raise → never 500).
+        pe, ee = presented.encode("utf-8"), self.access_token.encode("utf-8")
+        if len(pe) != len(ee):
+            _hmac.compare_digest(pe, pe)
+            return False
+        return _hmac.compare_digest(pe, ee)
 
     async def handle_event(self, data: dict[str, Any]) -> bool:
         """Handle Chat app event (MESSAGE).

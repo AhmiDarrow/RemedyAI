@@ -762,8 +762,11 @@ def register_memory_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
     async def receive_webhook(source: str, payload: WebhookPayload, request: Request):
         if gateway is None:
             raise HTTPException(503, "Gateway not available")
-        # Require API key or shared secret when agent auth is enabled
+        # Fail closed when local API auth is on: require Bearer or webhook secret.
+        # Empty expected must not accept unauthenticated injects (S-MSG-03).
         import os as _os
+
+        from remedy.interfaces.local_auth import auth_enabled as _auth_enabled
 
         expected = (
             getattr(getattr(request.app, "state", None), "api_key", None)
@@ -771,24 +774,31 @@ def register_memory_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
             or _os.environ.get("REMEDY_WEBHOOK_SECRET")
             or ""
         )
-        if expected:
+        expected = str(expected or "").strip()
+        webhook_secret = (_os.environ.get("REMEDY_WEBHOOK_SECRET") or "").strip()
+
+        def _ct_eq(a: str, b: str) -> bool:
             import hmac
 
+            ae, be = a.encode("utf-8"), b.encode("utf-8")
+            if len(ae) != len(be):
+                hmac.compare_digest(ae, ae)
+                return False
+            return hmac.compare_digest(ae, be)
+
+        if _auth_enabled():
+            if not expected and not webhook_secret:
+                raise HTTPException(
+                    503,
+                    "Webhook auth not configured (set REMEDY_WEBHOOK_SECRET "
+                    "or enable local API token)",
+                )
             auth = request.headers.get("Authorization", "")
             secret = request.headers.get("X-Remedy-Webhook-Secret", "")
-            expected_bearer = f"Bearer {expected}"
-            bearer_ok = hmac.compare_digest(
-                auth.encode("utf-8"), expected_bearer.encode("utf-8")
-            )
-            webhook_secret = (_os.environ.get("REMEDY_WEBHOOK_SECRET") or "").strip()
+            bearer_ok = bool(expected) and _ct_eq(auth, f"Bearer {expected}")
             secret_ok = bool(secret) and (
-                hmac.compare_digest(secret.encode("utf-8"), expected.encode("utf-8"))
-                or (
-                    bool(webhook_secret)
-                    and hmac.compare_digest(
-                        secret.encode("utf-8"), webhook_secret.encode("utf-8")
-                    )
-                )
+                (bool(expected) and _ct_eq(secret, expected))
+                or (bool(webhook_secret) and _ct_eq(secret, webhook_secret))
             )
             if not (bearer_ok or secret_ok):
                 raise HTTPException(401, "Webhook auth required")

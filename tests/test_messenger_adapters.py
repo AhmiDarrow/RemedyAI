@@ -174,3 +174,105 @@ def test_whatsapp_verify_token_rejects_length_mismatch():
     assert wa.verify_webhook_challenge("subscribe", "", "42") is None
     assert wa.verify_webhook_challenge("subscribe", "secret", "42") == "42"
 
+
+def _fake_jwt(payload: dict) -> str:
+    import base64
+    import json
+
+    def _b64(obj: bytes) -> str:
+        return base64.urlsafe_b64encode(obj).rstrip(b"=").decode("ascii")
+
+    header = _b64(b'{"alg":"none","typ":"JWT"}')
+    body = _b64(json.dumps(payload).encode("utf-8"))
+    return f"{header}.{body}.sig"
+
+
+def test_teams_jwt_fail_closed_requires_aud_and_exp(monkeypatch):
+    import time
+
+    from remedy.gateway.channels import teams as teams_mod
+
+    monkeypatch.delenv("REMEDY_TEAMS_SKIP_JWT", raising=False)
+    ch = TeamsChannel(_GW(), app_id="my-app-id", app_password="pw")
+
+    # Missing aud → reject
+    tok = _fake_jwt(
+        {
+            "exp": time.time() + 3600,
+            "iss": "https://api.botframework.com",
+        }
+    )
+    assert ch.verify_inbound_auth(f"Bearer {tok}") is False
+
+    # Wrong aud → reject
+    tok = _fake_jwt(
+        {
+            "aud": "other-app",
+            "exp": time.time() + 3600,
+            "iss": "https://api.botframework.com",
+        }
+    )
+    assert ch.verify_inbound_auth(f"Bearer {tok}") is False
+
+    # Expired → reject
+    tok = _fake_jwt(
+        {
+            "aud": "my-app-id",
+            "exp": time.time() - 120,
+            "iss": "https://api.botframework.com",
+        }
+    )
+    assert ch.verify_inbound_auth(f"Bearer {tok}") is False
+
+    # Missing exp → reject
+    tok = _fake_jwt(
+        {
+            "aud": "my-app-id",
+            "iss": "https://api.botframework.com",
+        }
+    )
+    assert ch.verify_inbound_auth(f"Bearer {tok}") is False
+
+    # Valid structure (still no signature verify — residual risk)
+    tok = _fake_jwt(
+        {
+            "aud": "my-app-id",
+            "exp": time.time() + 3600,
+            "iss": "https://api.botframework.com",
+        }
+    )
+    assert ch.verify_inbound_auth(f"Bearer {tok}") is True
+
+    # api:// prefix form of aud
+    tok = _fake_jwt(
+        {
+            "aud": "api://my-app-id",
+            "exp": time.time() + 3600,
+            "iss": "https://login.microsoftonline.com/tid/v2.0",
+        }
+    )
+    assert ch.verify_inbound_auth(f"Bearer {tok}") is True
+
+    # Bad issuer host
+    tok = _fake_jwt(
+        {
+            "aud": "my-app-id",
+            "exp": time.time() + 3600,
+            "iss": "https://evil.example.com/",
+        }
+    )
+    assert ch.verify_inbound_auth(f"Bearer {tok}") is False
+
+    # Helper unit
+    assert teams_mod._jwt_claims_structurally_valid(  # noqa: SLF001
+        {"aud": "x", "exp": time.time() + 10, "iss": "https://sts.windows.net/t/"},
+        app_id="x",
+    )
+
+
+def test_google_chat_auth_length_mismatch_false_not_raise():
+    ch = GoogleChatChannel(_GW(), access_token="long-token-value")
+    assert ch.verify_inbound_auth("Bearer short") is False
+    assert ch.verify_inbound_auth("Bearer long-token-value") is True
+    assert ch.verify_inbound_auth(None) is False
+
