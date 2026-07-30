@@ -87,5 +87,48 @@ async def test_build_turn_context_uses_warm_skills_cache():
         ctx = await build_turn_context(runtime)
         assert "change-safety" in ctx
         assert "Skills catalog" in ctx
+        # Greets must not auto-inject full procedure bodies
+        assert "[Skill auto-suggest]" not in ctx
     finally:
         swarm.skill._rank_cache = prev
+
+
+@pytest.mark.asyncio
+async def test_review_project_auto_suggests_procedure():
+    """'review project' re-ranks and injects change-safety procedure into context."""
+    from pathlib import Path
+
+    from remedy.skills.registry import SkillRegistry
+
+    profile = UserProfile(display_name="Sam")
+    mem = MagicMock()
+    mem.get_or_create_profile = AsyncMock(return_value=profile)
+    mem.save_user_profile = AsyncMock()
+    mem.list_recent = AsyncMock(return_value=[])
+
+    reg = SkillRegistry()
+    n = reg.discover(Path("skills"))
+    assert n >= 1
+    assert reg.get("change-safety") is not None
+
+    runtime = SimpleNamespace(
+        memory=mem,
+        config=SimpleNamespace(project_path=None),
+        _project_path=None,
+        _last_user_text="review project",
+        _turn_user_text="review project",
+        _session_brief=None,
+        tool_registry=_FakeTools(),
+        skills=reg,
+        effective_project_path=lambda: ".",
+        access_scope=lambda: "project",
+        allowed_roots=lambda: [],
+        project_path_is_unset=lambda: False,
+    )
+    ctx = await build_turn_context(runtime)
+    assert "Skills catalog" in ctx
+    assert "change-safety" in ctx
+    assert "[Skill auto-suggest]" in ctx
+    # Procedure body (blast-radius checklist), not catalog-only
+    assert "blast radius" in ctx.lower() or "Blast-radius" in ctx
+    assert "skill_activate" in ctx
