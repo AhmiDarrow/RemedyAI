@@ -39,9 +39,17 @@ describe('plan banner policy', () => {
     expect(shouldShowPlanBanner(null, false)).toBe(false)
   })
 
-  it('shows actionable plans in build mode (plan ready / in progress)', () => {
+  it('shows draft plans in build mode (still need Approve)', () => {
     expect(shouldShowPlanBanner(plan('draft'), false)).toBe(true)
-    expect(shouldShowPlanBanner(plan('approved'), false)).toBe(true)
-    expect(shouldShowPlanBanner(plan('active'), false)).toBe(true)
+  })
+
+  it('hides approved/active plans in build mode (plan already in motion)', () => {
+    expect(shouldShowPlanBanner(plan('approved'), false)).toBe(false)
+    expect(shouldShowPlanBanner(plan('active'), false)).toBe(false)
+  })
+
+  it('still shows approved/active when back in plan mode (revise/cancel)', () => {
+    expect(shouldShowPlanBanner(plan('approved'), true)).toBe(true)
+    expect(shouldShowPlanBanner(plan('active'), true)).toBe(true)
   })
 })

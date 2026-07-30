@@ -175,11 +175,52 @@ def register_vision_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
         if not started.get("ok"):
             return started
         path = body.path
-        if not path:
-            return {"ok": False, "error": "path required"}
-        p = Path(path)
+        p: Path | None = Path(path) if path else None
+        if p is None or not p.is_file():
+            # Default self-test image under ~/.remedy (create a tiny PNG if missing)
+            try:
+                from remedy.interfaces.config import load_config as _lc
+
+                home = Path(
+                    str((_lc() or {}).get("home_dir") or (Path.home() / ".remedy"))
+                ).expanduser()
+            except Exception:
+                home = Path.home() / ".remedy"
+            p = home / "tmp_e2e_vision.png"
+            if not p.is_file():
+                try:
+                    import struct
+                    import zlib
+
+                    # Minimal 8x8 solid red PNG (no external deps)
+                    def _png(w: int, h: int, rgb: tuple[int, int, int]) -> bytes:
+                        def chunk(tag: bytes, data: bytes) -> bytes:
+                            return (
+                                struct.pack(">I", len(data))
+                                + tag
+                                + data
+                                + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+                            )
+
+                        raw = b"".join(
+                            b"\x00" + bytes(rgb) * w for _ in range(h)
+                        )
+                        return (
+                            b"\x89PNG\r\n\x1a\n"
+                            + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
+                            + chunk(b"IDAT", zlib.compress(raw, 9))
+                            + chunk(b"IEND", b"")
+                        )
+
+                    p.parent.mkdir(parents=True, exist_ok=True)
+                    p.write_bytes(_png(8, 8, (220, 40, 40)))
+                except Exception as exc:
+                    return {
+                        "ok": False,
+                        "error": f"path required (and could not create test image: {exc})",
+                    }
         if not p.is_file():
-            return {"ok": False, "error": f"File not found: {path}"}
+            return {"ok": False, "error": f"File not found: {path or p}"}
         base = status.get("base_url") or started.get("base_url")
         if not base:
             return {"ok": False, "error": "No base_url"}

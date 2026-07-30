@@ -28,7 +28,7 @@ def test_local_resources_readme_documents_first_run_download():
     text = readme.read_text(encoding="utf-8").lower()
     assert "first-run" in text or "first run" in text
     assert "does not" in text or "not package" in text or "not" in text
-    assert "qwen" in text
+    assert "smolvlm2" in text or "smolvlm" in text
 
 
 def test_no_gguf_committed_under_resources_local():

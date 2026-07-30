@@ -171,20 +171,55 @@ fn current_exe_dir() -> Option<std::path::PathBuf> {
     env::current_exe().ok()?.parent().map(|p| p.to_path_buf())
 }
 
+/// Reject tiny stub EXEs (e.g. 46KB wrappers that only print CLI help and exit).
+fn is_plausible_sidecar(p: &Path) -> bool {
+    match std::fs::metadata(p) {
+        Ok(m) => m.is_file() && m.len() > 1_000_000,
+        Err(_) => false,
+    }
+}
+
 fn find_remedy() -> (String, String) {
     let searched = |label: &str, p: &std::path::Path| -> Option<String> {
-        if p.exists() {
-            log::info!("Found sidecar at: {} ({})", p.display(), label);
+        if is_plausible_sidecar(p) {
+            log::info!(
+                "Found sidecar at: {} ({}, {} bytes)",
+                p.display(),
+                label,
+                std::fs::metadata(p).map(|m| m.len()).unwrap_or(0)
+            );
             Some(p.to_string_lossy().to_string())
+        } else if p.exists() {
+            log::warn!(
+                "Skipping stub/too-small sidecar candidate: {} ({})",
+                p.display(),
+                label
+            );
+            None
         } else {
             None
         }
     };
 
+    // Dev builds: prefer PATH `remedy` (current 0.19 source install) over a
+    // stale packaged sidecar sitting next to target/debug/app.exe (often 0.14.x).
+    if cfg!(debug_assertions) {
+        if let Ok(path) = which_remedy_on_path() {
+            log::info!("Dev build: using PATH remedy for sidecar: {}", path);
+            return (path, String::new());
+        }
+    }
+
     if let Some(dir) = current_exe_dir() {
         if let Some(path) = searched(
             "triple",
             &dir.join("remedy-desktop-x86_64-pc-windows-msvc.exe"),
+        ) {
+            return (path, String::new());
+        }
+        if let Some(path) = searched(
+            "triple-amd64",
+            &dir.join("remedy-desktop-amd64-pc-windows-msvc.exe"),
         ) {
             return (path, String::new());
         }
@@ -194,23 +229,121 @@ fn find_remedy() -> (String, String) {
     }
 
     if let Ok(cwd) = env::current_dir() {
-        let dev_path = cwd.join("bin").join("remedy-desktop.exe");
-        if let Some(path) = searched("dev", &dev_path) {
-            return (path, String::new());
-        }
-        // From desktop/ when running tauri dev (cwd may be desktop/)
-        let alt = cwd.join("desktop").join("bin").join("remedy-desktop.exe");
-        if let Some(path) = searched("dev-desktop", &alt) {
-            return (path, String::new());
+        for (label, p) in [
+            (
+                "dev-bin-triple",
+                cwd.join("bin")
+                    .join("remedy-desktop-x86_64-pc-windows-msvc.exe"),
+            ),
+            ("dev-bin", cwd.join("bin").join("remedy-desktop.exe")),
+            (
+                "dev-desktop-triple",
+                cwd.join("desktop")
+                    .join("bin")
+                    .join("remedy-desktop-x86_64-pc-windows-msvc.exe"),
+            ),
+            (
+                "dev-desktop",
+                cwd.join("desktop").join("bin").join("remedy-desktop.exe"),
+            ),
+        ] {
+            if let Some(path) = searched(label, &p) {
+                return (path, String::new());
+            }
         }
     }
 
+    // Prefer PATH `remedy` (current install / source entry) over missing stubs.
+    if let Ok(path) = which_remedy_on_path() {
+        log::info!("Found remedy on PATH: {}", path);
+        return (path, String::new());
+    }
+
     let msg = format!(
-        "Sidecar not found - checked exe dir {:?}, cwd/bin/",
+        "Sidecar not found - checked exe dir {:?}, cwd/bin/, and PATH (remedy). \
+         Tiny stub EXEs (<1MB) are ignored.",
         current_exe_dir()
     );
     log::error!("{}", msg);
     ("remedy-desktop.exe".to_string(), msg)
+}
+
+/// Resolve `remedy` / `remedy.exe` from PATH when present.
+fn which_remedy_on_path() -> Result<String, ()> {
+    let path_var = env::var_os("PATH").ok_or(())?;
+    for dir in env::split_paths(&path_var) {
+        for name in ["remedy.exe", "remedy"] {
+            let cand = dir.join(name);
+            if is_plausible_sidecar(&cand) || (cand.is_file() && name == "remedy.exe") {
+                // Scripts/remedy.exe can be a small launcher — allow if it exists
+                // and is executable; size check relaxed for PATH entry points.
+                if cand.is_file() {
+                    return Ok(cand.to_string_lossy().to_string());
+                }
+            }
+        }
+    }
+    Err(())
+}
+
+/// True when something is already accepting connections on 127.0.0.1:7400.
+fn port_7400_in_use() -> bool {
+    TcpStream::connect_timeout(&status_addr(), Duration::from_millis(250)).is_ok()
+}
+
+/// User choice when a foreign process already owns the Remedy API port.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ForeignServeChoice {
+    /// Keep CLI/background server; Desktop UI talks to it (no kill, no re-spawn).
+    UseExisting,
+    /// Stop the background server and start Desktop's managed sidecar.
+    TakeOver,
+    /// Leave the background server alone and abort Desktop launch.
+    Cancel,
+}
+
+/// Blocking native dialog when :7400 is already healthy.
+fn ask_foreign_serve_dialog() -> ForeignServeChoice {
+    use rfd::{MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
+
+    // Three clear actions (TaskDialog custom buttons on Windows).
+    let result = MessageDialog::new()
+        .set_level(MessageLevel::Warning)
+        .set_title("Remedy server already running")
+        .set_description(
+            "Another Remedy server is already using port 7400 \
+             (for example `remedy serve` in a terminal).\n\n\
+             Choose how to continue:\n\n\
+             • Use existing server — open Desktop UI without stopping CLI serve\n\
+             • Stop CLI & start Desktop server — end the background process, Desktop owns :7400\n\
+             • Exit Desktop — leave CLI serve running; do not open Desktop",
+        )
+        .set_buttons(MessageButtons::YesNoCancelCustom(
+            "Use existing server".into(),
+            "Stop CLI & start Desktop server".into(),
+            "Exit Desktop".into(),
+        ))
+        .show();
+
+    log::info!("Foreign-serve dialog result: {:?}", result);
+
+    match result {
+        MessageDialogResult::Yes => ForeignServeChoice::UseExisting,
+        MessageDialogResult::No | MessageDialogResult::Ok => ForeignServeChoice::TakeOver,
+        MessageDialogResult::Custom(ref s) => {
+            let low = s.to_ascii_lowercase();
+            if low.contains("use existing") || low.contains("existing") {
+                ForeignServeChoice::UseExisting
+            } else if low.contains("stop") || low.contains("take") || low.contains("start desktop")
+            {
+                ForeignServeChoice::TakeOver
+            } else {
+                ForeignServeChoice::Cancel
+            }
+        }
+        // X / Cancel → exit Desktop, keep CLI
+        _ => ForeignServeChoice::Cancel,
+    }
 }
 
 /// Locate built SPA assets so the Python sidecar can mount browser WebUI at /.
@@ -530,6 +663,9 @@ fn force_stop_vision_processes() {
 
 /// Force-stop every process that can lock install-dir files (sidecar + stray copies).
 /// Used before launching the NSIS updater so "Can't write remedy-desktop.exe" is rare.
+///
+/// Also kills CLI ``remedy serve`` / python serve holding :7400 (not only
+/// ``remedy-desktop*.exe`` images — that miss was why Take over left CLI serve running).
 #[cfg(target_os = "windows")]
 fn force_stop_remedy_processes() {
     let images = [
@@ -545,11 +681,32 @@ fn force_stop_remedy_processes() {
             .stderr(Stdio::null())
             .status();
     }
-    // Kill whatever still owns the sidecar port.
+    // Kill whatever still owns the sidecar port (netstat + PowerShell fallback).
+    kill_port_7400_windows();
+    // Kill CLI `remedy serve` / python -m remedy serve by command line.
+    kill_cli_serve_windows();
+}
+
+/// Kill LISTENING owners of TCP 7400 (tree-kill each PID).
+#[cfg(target_os = "windows")]
+fn kill_port_7400_windows() {
+    // netstat path (fast; works offline)
     let _ = Command::new("cmd")
         .args([
             "/C",
-            r#"for /f "tokens=5" %a in ('netstat -ano ^| findstr :7400 ^| findstr LISTENING') do taskkill /F /PID %a"#,
+            r#"for /f "tokens=5" %a in ('netstat -ano ^| findstr :7400 ^| findstr LISTENING') do taskkill /F /T /PID %a"#,
+        ])
+        .creation_flags(CREATE_NO_WINDOW)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    // PowerShell is more reliable when netstat column layout differs
+    let _ = Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "Get-NetTCPConnection -LocalPort 7400 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }",
         ])
         .creation_flags(CREATE_NO_WINDOW)
         .stdout(Stdio::null())
@@ -557,15 +714,146 @@ fn force_stop_remedy_processes() {
         .status();
 }
 
-#[cfg(not(target_os = "windows"))]
-fn force_stop_remedy_processes() {}
+/// Kill ``remedy.exe serve`` and ``python … remedy … serve`` process trees.
+#[cfg(target_os = "windows")]
+fn kill_cli_serve_windows() {
+    // WMI query: CommandLine contains serve + remedy (covers Scripts\remedy.exe and -c serve)
+    let ps = r#"
+Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='remedy.exe' OR Name='pythonw.exe'" -ErrorAction SilentlyContinue |
+  Where-Object {
+    $_.CommandLine -and (
+      $_.CommandLine -match 'remedy(\.exe)?["\s].*serve' -or
+      $_.CommandLine -match 'Scripts\\remedy\.exe' -or
+      $_.CommandLine -match '_start_serve\.py' -or
+      $_.CommandLine -match 'remedy\.interfaces\.cli'
+    )
+  } |
+  ForEach-Object {
+    taskkill /F /T /PID $_.ProcessId 2>$null | Out-Null
+  }
+"#;
+    let _ = Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", ps])
+        .creation_flags(CREATE_NO_WINDOW)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
 
-fn start_sidecar(process: &Arc<Mutex<Option<Child>>>, cmd: &str) -> Result<(), String> {
+#[cfg(not(target_os = "windows"))]
+fn force_stop_remedy_processes() {
+    // Best-effort: free :7400 and kill remedy serve
+    let _ = Command::new("pkill")
+        .args(["-f", "remedy serve"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    let _ = Command::new("pkill")
+        .args(["-f", "_start_serve"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
+/// How to treat an existing listener on :7400 before starting the sidecar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SidecarStartMode {
+    /// App launch: if a foreign serve is healthy, ask the user first.
+    InteractiveLaunch,
+    /// Explicit Restart from UI / menus: always take over the port.
+    ForceRestart,
+}
+
+fn start_sidecar(
+    process: &Arc<Mutex<Option<Child>>>,
+    cmd: &str,
+    mode: SidecarStartMode,
+) -> Result<(), String> {
     let mut guard = process
         .lock()
         .map_err(|_| "server state lock poisoned".to_string())?;
+
+    // Already managed by this Desktop process and healthy — nothing to do.
+    if guard.is_some() && check_health(Duration::from_millis(400)) {
+        log::info!("Managed sidecar already healthy; skipping re-spawn");
+        return Ok(());
+    }
+
+    let busy = port_7400_in_use();
+    let healthy = busy && check_health(Duration::from_millis(600));
+
+    if busy {
+        let we_own = guard
+            .as_ref()
+            .map(|c| {
+                // Child still running?
+                // try_wait Ok(None) = still alive
+                // We can't mutably borrow easily; use health + presence as signal.
+                let _ = c;
+                true
+            })
+            .unwrap_or(false);
+
+        if !we_own || healthy {
+            match mode {
+                SidecarStartMode::InteractiveLaunch if healthy => {
+                    log::info!("Port 7400 already in use by a healthy foreign server");
+                    // Release lock before blocking UI dialog so other threads can progress.
+                    drop(guard);
+                    match ask_foreign_serve_dialog() {
+                        ForeignServeChoice::Cancel => {
+                            log::info!("User cancelled Desktop launch (kept background server)");
+                            return Err("cancelled".into());
+                        }
+                        ForeignServeChoice::UseExisting => {
+                            // Attach to CLI/external serve — do not kill, do not spawn.
+                            log::info!(
+                                "User chose Use existing server — Desktop will use :7400 as-is"
+                            );
+                            return Ok(());
+                        }
+                        ForeignServeChoice::TakeOver => {
+                            log::info!("User chose Take over — stopping foreign server");
+                            // Kill immediately (before re-locking) so CLI serve stops
+                            // even if spawn later fails.
+                            force_stop_remedy_processes();
+                            // Wait until :7400 is free (up to ~5s)
+                            for _ in 0..25 {
+                                if !port_7400_in_use() {
+                                    break;
+                                }
+                                thread::sleep(Duration::from_millis(200));
+                                force_stop_remedy_processes();
+                            }
+                            if port_7400_in_use() {
+                                log::error!("Port 7400 still busy after Take over kill");
+                                return Err(
+                                    "Could not stop the background Remedy server on port 7400. \
+                                     Close the terminal running `remedy serve` (Ctrl+C), then try again."
+                                        .into(),
+                                );
+                            }
+                            log::info!("Foreign server stopped; port 7400 free");
+                            // Re-acquire and continue spawn below.
+                            guard = process
+                                .lock()
+                                .map_err(|_| "server state lock poisoned".to_string())?;
+                        }
+                    }
+                }
+                SidecarStartMode::InteractiveLaunch => {
+                    // Port held but not healthy (zombie) — take over without a dialog.
+                    log::warn!("Port 7400 busy but unhealthy; taking over without prompt");
+                }
+                SidecarStartMode::ForceRestart => {
+                    log::info!("Force restart — taking over port 7400");
+                }
+            }
+        }
+    }
+
     kill_child(&mut guard);
-    // Prevent dual sidecars (old process keeps :7400 and serves stale OAuth).
+    // Free :7400 for our managed process (after user consent when interactive).
     force_stop_remedy_processes();
     #[cfg(target_os = "windows")]
     {
@@ -2892,7 +3180,7 @@ fn restart_server(app: AppHandle, state: State<'_, ServerState>) -> Result<Strin
     log::info!("Restarting remedy sidecar: {}", cmd);
     let _ = app.emit("server-starting", ());
 
-    start_sidecar(&state.process, &cmd)?;
+    start_sidecar(&state.process, &cmd, SidecarStartMode::ForceRestart)?;
 
     if wait_for_health(Duration::from_secs(30)) {
         log::info!("Remedy server ready after restart");
@@ -2954,10 +3242,34 @@ fn acquire_desktop_single_instance() -> bool {
                 if IsIconic(hwnd) != 0 {
                     ShowWindow(hwnd, SW_RESTORE);
                 }
+                let _ = ShowWindow(hwnd, SW_RESTORE);
                 SetForegroundWindow(hwnd);
+                CloseHandle(handle);
+                return false;
             }
+            // Mutex held but no window — zombie / crashed instance. Steal: kill
+            // other app.exe processes and continue so the user is not stuck.
+            log::warn!(
+                "Single-instance mutex held but no Remedy Desktop window; \
+                 reclaiming (killing orphan app.exe)"
+            );
             CloseHandle(handle);
-            return false;
+            let _ = Command::new("taskkill")
+                .args(["/F", "/IM", "app.exe"])
+                .creation_flags(CREATE_NO_WINDOW)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+            thread::sleep(Duration::from_millis(400));
+            // Re-create mutex for this process.
+            let handle2 = CreateMutexW(core::ptr::null(), 1, name.as_ptr());
+            if handle2 == 0 {
+                return true;
+            }
+            use std::sync::atomic::{AtomicIsize, Ordering};
+            static DESKTOP_MUTEX: AtomicIsize = AtomicIsize::new(0);
+            DESKTOP_MUTEX.store(handle2, Ordering::SeqCst);
+            return true;
         }
         // Keep mutex handle for process lifetime (must not CloseHandle).
         use std::sync::atomic::{AtomicIsize, Ordering};
@@ -3199,9 +3511,6 @@ pub fn run() {
             log::info!("Starting remedy: {}", remedy_cmd);
             let _ = app_handle.emit("server-starting", ());
 
-            // Rust computer-host: open Browser rail + navigate without SPA JS poller.
-            browser_host::start_computer_host_poller(app_handle.clone());
-
             // Point the sidecar at packaged SPA + local model bundle (resources/).
             if let Ok(resource) = app.path().resource_dir() {
                 env::set_var("REMEDY_RESOURCES", &resource);
@@ -3229,17 +3538,41 @@ pub fn run() {
             {
                 let state = app.state::<ServerState>();
                 *state.sidecar_cmd.lock().unwrap() = Some(remedy_cmd.clone());
-                match start_sidecar(&state.process, &remedy_cmd) {
+                match start_sidecar(
+                    &state.process,
+                    &remedy_cmd,
+                    SidecarStartMode::InteractiveLaunch,
+                ) {
                     Ok(()) => {
                         // First run seeds skills into ~/.remedy - allow extra time.
                         if wait_for_health(Duration::from_secs(90)) {
                             log::info!("Remedy server ready");
                             let _ = app_handle.emit("server-ready", ());
+                            // Start computer-host poller only after API is healthy
+                            // (avoids 401/refused spam and races during startup).
+                            browser_host::start_computer_host_poller(app_handle.clone());
                         } else {
                             log::error!("Server failed to start within 90s");
                             let _ = app_handle
                                 .emit("server-error", "Server failed to start after 90s");
                         }
+                    }
+                    Err(e) if e == "cancelled" => {
+                        // User chose Exit Desktop — leave CLI serve running.
+                        log::info!("Desktop launch cancelled; leaving foreign server on :7400");
+                        // Hard exit — tauri exit during setup is unreliable.
+                        std::process::exit(0);
+                    }
+                    Err(e) if e.contains("Could not stop the background") => {
+                        log::error!("{}", e);
+                        let _ = app_handle.emit("server-error", &e);
+                        let _ = rfd::MessageDialog::new()
+                            .set_level(rfd::MessageLevel::Error)
+                            .set_title("Could not stop CLI server")
+                            .set_description(&e)
+                            .set_buttons(rfd::MessageButtons::Ok)
+                            .show();
+                        // Keep window open so user can Retry / use Restart server.
                     }
                     Err(e) => {
                         log::error!("{}", e);

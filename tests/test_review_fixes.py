@@ -145,6 +145,47 @@ class TestSecurity:
             ["powershell", "-Command", "Start-Process notepad"]
         ) is None
 
+    def test_blocks_indiscriminate_tauri_app_kill(self):
+        from remedy.core.security import check_host_self_kill
+
+        cases = [
+            "Get-Process app | Stop-Process -Force",
+            "Stop-Process -Name app -Force",
+            "taskkill /F /IM app.exe",
+            "taskkill /IM app.exe /F",
+        ]
+        for cmd in cases:
+            blocked = check_dangerous_command(["bash", "-c", cmd])
+            assert blocked is not None, cmd
+            assert "app" in blocked.lower() or "Tauri" in blocked or "Desktop" in blocked
+
+        # Path-scoped project kill is allowed (does not suicide host by name alone)
+        ok = check_host_self_kill(
+            [
+                "bash",
+                "-c",
+                r'Get-Process app -EA SilentlyContinue | '
+                r'Where-Object { $_.Path -match "SecretFolder" } | Stop-Process -Force',
+            ]
+        )
+        assert ok is None
+
+        # remedy.exe / port 7400 always blocked even with project mention
+        assert check_host_self_kill(
+            ["bash", "-c", "taskkill /F /IM remedy.exe"]
+        ) is not None
+        assert (
+            check_dangerous_command(
+                [
+                    "bash",
+                    "-c",
+                    "Get-NetTCPConnection -LocalPort 7400 | "
+                    "ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }",
+                ]
+            )
+            is not None
+        )
+
     def test_safe_path_blocks_traversal(self, tmp_path):
         with pytest.raises(SecurityError):
             safe_path("..", base_dir=tmp_path)

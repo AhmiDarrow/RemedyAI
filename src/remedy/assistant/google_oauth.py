@@ -670,8 +670,11 @@ def probe_google_apis(home: Path | str | None = None) -> dict[str, Any]:
     gmail = _probe(
         "https://gmail.googleapis.com/gmail/v1/users/me/profile"
     )
+    # Use primary/events — matches SCOPES (calendar.events).
+    # calendarList requires calendar.readonly / calendar and falsely reports forbidden.
     cal = _probe(
-        "https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=1"
+        "https://www.googleapis.com/calendar/v3/calendars/primary/events"
+        "?maxResults=1&singleEvents=true"
     )
     result["gmail"] = gmail
     result["calendar"] = cal

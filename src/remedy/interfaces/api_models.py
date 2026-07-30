@@ -189,15 +189,16 @@ class SettingsUpdateRequest(BaseModel):
     http_bootstrap: bool | None = None
     # Learning / advanced (safe defaults; never strips owner power)
     allow_skill_creation: bool | None = None
-    auto_approve_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
+    # Bounds clamped in PUT handler (0..1) so partial/bulk saves never 422
+    auto_approve_threshold: float | None = None
     log_level: str | None = None  # DEBUG | INFO | WARNING | ERROR
     sarcasm_mode: bool | None = None
     # Provider picker catalog
     enabled_providers: list[str] | None = None
     enabled_models: dict[str, list[str]] | None = None
     last_model_by_provider: dict[str, str] | None = None
-    # Soft budget for active skills eligible for hot-catalog injection
-    skills_active_budget: int | None = Field(default=None, ge=10, le=500)
+    # Soft budget for active skills; clamped in PUT handler (10..500)
+    skills_active_budget: int | None = None
     # In-app Browser slide homepage (http/https); empty → Remedy GitHub default
     browser_home_url: str | None = None
     # Messenger connectors (desktop Settings → Messengers)

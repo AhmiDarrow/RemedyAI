@@ -348,7 +348,8 @@ def create_app(
             "yes",
             "on",
         )
-        # Desktop: read-heavy polls at DEBUG so no console flood. Mutations/errors stay INFO.
+        # High-frequency polls at DEBUG so CLI `remedy serve` terminals stay readable
+        # (Desktop computer-host + status bars used to flood INFO every few ms).
         quiet = method == "OPTIONS" or path in (
             "/api/status",
             "/api/ping",
@@ -356,7 +357,17 @@ def create_app(
             "/api/checkpoints/latest",
             "/api/plans/latest",
             "/api/events/sessions",
+            "/api/computer/jobs/next",
+            "/api/computer/ui/command",
+            "/api/computer/host/status",
+            "/api/computer/host/hello",
         )
+        if path.startswith("/api/computer/") and method in ("GET", "HEAD", "POST"):
+            # hello / jobs complete are also high-frequency; keep failures loud.
+            if response.status_code < 400 and method in ("GET", "HEAD"):
+                quiet = True
+            if path.endswith("/hello") and response.status_code < 400:
+                quiet = True
         if desktop and method in ("GET", "HEAD") and response.status_code < 400:
             quiet = True
         if duration >= 500:

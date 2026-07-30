@@ -37,6 +37,8 @@ class StreamRoundState:
     finish_reason: str | None = None
     # True when we buffered content that looked like DSML / text tool-calls.
     suppressed_tool_markup: bool = False
+    # Last provider usage snapshot for this HTTP stream (record once after done).
+    last_usage: dict[str, Any] | None = None
 
     @property
     def text_out(self) -> str:
@@ -246,8 +248,13 @@ def normalize_tool_calls(tool_calls_list: list[dict[str, Any]]) -> list[dict[str
 
     Streaming providers sometimes omit ``id`` on early deltas; empty ids break
     tool-result pairing on the next request (HTTP 400).
+
+    Arguments are coerced to **valid JSON strings** — never leave truncated
+    stream blobs that providers reject with ``EOF while parsing a string``.
     """
     from uuid import uuid4
+
+    from remedy.core.provider_sanitize import sanitize_tool_arguments
 
     out: list[dict[str, Any]] = []
     for tc in tool_calls_list or []:
@@ -257,16 +264,7 @@ def normalize_tool_calls(tool_calls_list: list[dict[str, Any]]) -> list[dict[str
         name = (fn.get("name") or "").strip()
         if not name:
             continue
-        args = fn.get("arguments")
-        if args is None:
-            args_s = "{}"
-        elif isinstance(args, str):
-            args_s = args
-        else:
-            try:
-                args_s = json.dumps(args, default=str)
-            except Exception:
-                args_s = "{}"
+        args_s = sanitize_tool_arguments(fn.get("arguments"))
         call_id = (tc.get("id") or "").strip() or f"call_{uuid4().hex[:24]}"
         out.append(
             {
@@ -414,6 +412,99 @@ def repair_reasoning_content_in_messages(
     return changed
 
 
+def repair_tool_arguments_in_messages(messages: list[dict[str, Any]]) -> int:
+    """Rewrite every assistant tool_calls[].arguments to valid JSON.
+
+    Returns number of assistant turns touched. Prevents provider HTTP 400
+    ``EOF while parsing a string at column ~6000`` from truncated stream args
+    or mid-string sanitizer clips.
+    """
+    n = 0
+    for msg in messages:
+        if not isinstance(msg, dict) or msg.get("role") != "assistant":
+            continue
+        tcs = msg.get("tool_calls")
+        if not tcs:
+            continue
+        before = json.dumps(tcs, default=str) if not isinstance(tcs, list) else None
+        fixed = normalize_tool_calls(list(tcs) if isinstance(tcs, list) else [])
+        after = json.dumps(fixed, default=str)
+        # Always assign normalized (stable ids + valid JSON args)
+        if before is None or after != json.dumps(tcs, default=str):
+            msg["tool_calls"] = fixed
+            n += 1
+        else:
+            # Still assign to force valid shape
+            msg["tool_calls"] = fixed
+            n += 1
+    return n
+
+
+def strip_broken_tool_call_turns(messages: list[dict[str, Any]]) -> int:
+    """Drop assistant+tool spans whose arguments still fail JSON after repair.
+
+    Last-resort recovery when the provider rejects even repaired history.
+    Returns number of assistant turns removed.
+    """
+    if not messages:
+        return 0
+    out: list[dict[str, Any]] = []
+    removed = 0
+    i = 0
+    n = len(messages)
+    while i < n:
+        msg = messages[i]
+        if (
+            not isinstance(msg, dict)
+            or msg.get("role") != "assistant"
+            or not msg.get("tool_calls")
+        ):
+            out.append(msg)
+            i += 1
+            continue
+        tcs = normalize_tool_calls(list(msg.get("tool_calls") or []))
+        broken = False
+        for tc in tcs:
+            raw = (tc.get("function") or {}).get("arguments") or ""
+            try:
+                parsed = json.loads(raw) if isinstance(raw, str) else raw
+                if isinstance(parsed, dict) and (
+                    parsed.get("_invalid_json") or parsed.get("_truncated")
+                ):
+                    broken = True
+                    break
+            except (json.JSONDecodeError, TypeError):
+                broken = True
+                break
+        j = i + 1
+        while (
+            j < n
+            and isinstance(messages[j], dict)
+            and messages[j].get("role") == "tool"
+        ):
+            j += 1
+        if broken:
+            removed += 1
+            out.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "(System: a prior tool call was truncated mid-JSON and "
+                        "cannot be replayed to the model. Continue from tool "
+                        "results already shown; do not repeat that call.)"
+                    ),
+                }
+            )
+            i = j
+            continue
+        out.append({**msg, "tool_calls": tcs})
+        for k in range(i + 1, j):
+            out.append(messages[k])
+        i = j
+    messages[:] = out
+    return removed
+
+
 # Re-export policy helpers used by stream loop call sites.
 __all__ = [
     "StreamRoundState",
@@ -427,6 +518,8 @@ __all__ = [
     "iter_openai_sse_content",
     "looks_like_pseudo_tools",
     "message_wants_tools",
+    "repair_tool_arguments_in_messages",
+    "strip_broken_tool_call_turns",
     "normalize_tool_calls",
     "parse_pseudo_tool_calls",
     "parse_sse_data_line",

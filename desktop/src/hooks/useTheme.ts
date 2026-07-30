@@ -7,6 +7,7 @@ import {
   applyTheme,
   getResolvedTheme,
   resolveThemeId,
+  isThemeId,
 } from '../themes'
 import {
   type Density,
@@ -22,12 +23,17 @@ const STORAGE_KEY = 'remedy-theme'
 function loadTheme(): ThemeId {
   try {
     const stored = localStorage.getItem(STORAGE_KEY)
-    if (stored === 'system') return 'system'
-    if (stored && stored in THEMES) return stored as ThemeId
+    // Honor a previous explicit choice only when it is a known id.
+    if (isThemeId(stored)) return stored
   } catch {
     // localStorage unavailable
   }
-  // First run / no preference: Dark Forest
+  // First install / first run / corrupt key: always Dark Forest.
+  try {
+    localStorage.setItem(STORAGE_KEY, DEFAULT_THEME_ID)
+  } catch {
+    // ignore
+  }
   return DEFAULT_THEME_ID
 }
 

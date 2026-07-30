@@ -6,11 +6,11 @@ import logoSrc from '/logo.png'
 const MIN_SPLASH_MS = 350
 const FADE_MS = 180
 
-/** Always-dark splash palette (never follow light system theme). */
-const SPLASH_BG = '#0a0a1a'
-const SPLASH_FG = '#e8e8f0'
-const SPLASH_MUTED = '#9a9ab0'
-const SPLASH_ACCENT = '#6c8cff'
+/** Dark Forest splash palette (matches DEFAULT_THEME_ID — never flash purple Dark). */
+const SPLASH_BG = '#0a0e0b'
+const SPLASH_FG = '#e6ebe7'
+const SPLASH_MUTED = '#9aa89e'
+const SPLASH_ACCENT = '#4d7a5a'
 
 interface SplashScreenProps {
   onReady: () => void

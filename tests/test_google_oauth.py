@@ -29,8 +29,18 @@ def _clean(tmp_path, monkeypatch):
 
 
 def test_event_time_all_day_vs_datetime():
+    from remedy.assistant.providers.google_calendar import _has_tz
+
     assert _event_time("2026-08-01") == {"date": "2026-08-01"}
     assert _event_time("2026-08-01T10:00:00Z") == {"dateTime": "2026-08-01T10:00:00Z"}
+    assert _event_time("2026-08-01T10:00:00-07:00") == {
+        "dateTime": "2026-08-01T10:00:00-07:00"
+    }
+    # Naive local wall time → offset attached (no Google "Missing time zone" 400)
+    naive = _event_time("2026-08-01T10:00:00")
+    assert "dateTime" in naive
+    assert _has_tz(naive["dateTime"])
+    assert naive["dateTime"].startswith("2026-08-01T10:00:00")
 
 
 def test_app_config_save_load(tmp_path):

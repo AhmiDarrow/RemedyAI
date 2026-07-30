@@ -275,18 +275,86 @@ class PlanStore:
         return self.save(plan)
 
     def update_step_status(
-        self, plan_id: str, step_id: str, status: str
+        self,
+        plan_id: str,
+        step_id: str,
+        status: str,
+        *,
+        auto_plan_status: bool = True,
     ) -> TaskPlan | None:
+        """Flip one step's status. *step_id* may be id, 1-based index, or title.
+
+        When *auto_plan_status* is True:
+          - any non-pending step on an approved/draft plan → plan becomes ``active``
+          - all steps done/skipped → plan becomes ``done``
+        """
         plan = self.get(plan_id)
         if plan is None:
             return None
-        for step in plan.steps:
-            if step.id == step_id or step.title.lower() == step_id.lower():
-                step.status = status
-                break
-        else:
+        st = (status or "").strip().lower()
+        if st not in ("pending", "active", "done", "skipped"):
             return None
+        needle = (step_id or "").strip()
+        if not needle:
+            return None
+        target = self._find_step(plan, needle)
+        if target is None:
+            return None
+        target.status = st
+        # Drop cosmetic "[done]" title hacks once real status is set.
+        target.title = _strip_step_title_status_prefix(target.title)
+        if auto_plan_status:
+            if st in ("active", "done", "skipped") and plan.status in (
+                "draft",
+                "approved",
+            ):
+                plan.status = "active"
+            if plan.steps and all(s.status in ("done", "skipped") for s in plan.steps):
+                plan.status = "done"
+            elif st == "active" and plan.status == "done":
+                plan.status = "active"
         return self.save(plan)
+
+    @staticmethod
+    def _find_step(plan: TaskPlan, needle: str) -> PlanStep | None:
+        """Match step by id, 1-based index (``1`` / ``s1``), or title (fuzzy)."""
+        n = (needle or "").strip()
+        if not n:
+            return None
+        n_lower = n.lower()
+        # Exact id
+        for step in plan.steps:
+            if step.id == n or step.id.lower() == n_lower:
+                return step
+        # 1-based index: "1", "s1", "step 1"
+        m = re.match(r"^(?:s(?:tep)?\s*)?(\d+)$", n_lower)
+        if m:
+            idx = int(m.group(1)) - 1
+            if 0 <= idx < len(plan.steps):
+                return plan.steps[idx]
+        # Exact title
+        for step in plan.steps:
+            if step.title.lower() == n_lower:
+                return step
+        # Title without cosmetic [done]/[x] prefix
+        bare_needle = _strip_step_title_status_prefix(n).lower()
+        for step in plan.steps:
+            bare = _strip_step_title_status_prefix(step.title).lower()
+            if bare == bare_needle or bare_needle in bare or bare in bare_needle:
+                return step
+        return None
+
+
+def _strip_step_title_status_prefix(title: str) -> str:
+    """Remove agent hacks like ``[done]`` / ``[x]`` from step titles."""
+    t = (title or "").strip()
+    t = re.sub(
+        r"^\s*\[(?:done|x|complete|completed|ok|skip(?:ped)?|active|>)\]\s*",
+        "",
+        t,
+        flags=re.IGNORECASE,
+    )
+    return t.strip() or (title or "").strip()
 
 
 def parse_steps_from_text(text: str) -> list[str]:
@@ -310,6 +378,7 @@ PLAN_MODE_TOOL_NAMES = frozenset(
         "plan_save",
         "plan_show",
         "plan_list",
+        "plan_step_status",
         "goal_add",
         "goal_list",
         "memory_search",
@@ -361,4 +430,34 @@ Steps:
   2. …
 Risks: …
 ```
+""".strip()
+
+
+BUILD_MODE_SYSTEM_ADDENDUM = """
+## Build mode — code efficiently
+
+You are implementing (not only planning). Work like a senior IDE agent:
+
+### Edits
+1. **Prefer `file_edit` / `file_edit_batch`** for any change to an existing file. Use multi-hunk `edits=` when several spots in one file change.
+2. **`file_write` is for new files** (or rare full rewrites with `force_full_write=true`). Do **not** dump whole large files for +few-line fixes.
+3. **Never** leave scaffold junk in the project: no `_ref_*`, `_ex_*`, `_write_*.py`, `_patch_*.py` helper dumps. Read reference code from its real path (e.g. sibling repo) with `file_read` / `repo_search`.
+4. Do **not** work around size limits by writing Python that writes the target file. Use surgical edits or one honest `file_write` of the real path.
+
+### Plan progress
+5. After finishing a step (and a quick verify when possible), call **`plan_step_status`** with `status=done` (or `active` when starting). Do **not** fake progress by prefixing titles with `[done]`.
+6. Follow the active plan order; skip only with `status=skipped` and a reason in chat.
+
+### Verify
+7. Batch related edits, then run a focused check (`tsc`, tests, or `cargo check`) — not a full release build unless asked.
+8. Prefer `repo_search` over shell `Select-String`/`findstr` for code search.
+
+### Stop conditions
+9. When all plan steps are done or the user goal is met, summarize what changed and stop — do not thrash rewrites.
+
+### Process safety (host is alive)
+10. **Never** `Get-Process app | Stop-Process`, `taskkill /IM app.exe`, or kill port **7400** / `remedy serve`. Remedy Desktop and many Tauri apps share the binary name `app.exe` — a bare kill suicides the agent. To restart a project app, filter by **Path/CommandLine** containing that project folder only (e.g. `SecretFolder`).
+
+### Large files
+11. History may show `<<NOT_SOURCE_CODE history_stub…>>` for prior writes — that is **not** the file. Always `file_read` the path before editing. Never `file_write` that stub text. Prefer `file_edit` for existing files; use `force_full_write=true` only for intentional full rewrites of real source.
 """.strip()

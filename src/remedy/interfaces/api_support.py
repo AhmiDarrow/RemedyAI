@@ -81,6 +81,7 @@ _BUILTIN_COMMANDS: list[dict] = [
         "arguments": "topic | error <text>",
     },
     {"name": "/handoff", "description": "List handoff notes", "aliases": [], "arguments": None},
+    {"name": "/security-status", "description": "Show partner control settings (approval mode, web tools, timeouts)", "aliases": ["/security", "/secstatus"], "arguments": None},
     {"name": "/init", "description": "Scan the project and generate AGENTS.md", "aliases": [], "arguments": "path"},
 ]
 
@@ -689,6 +690,71 @@ async def handle_slash_command(
         parts = stripped.split(" ", 1)
         path = parts[1] if len(parts) > 1 else "."
         return {"text": f"Project scan requested for: {path}\nUse the API endpoint POST /api/projects/scan?path=... for detailed results.", "action": "init_scan"}
+
+    if stripped in ("/security-status", "/security", "/secstatus"):
+        """Report partner control / security settings from config and live runtime."""
+        cfg = load_config()
+        lines = ["## 🔐 Security Status\n"]
+
+        # -- Approval mode
+        am = str(cfg.get("approval_mode") or "ask").strip().lower()
+        if am not in ("ask", "auto"):
+            am = "ask"
+        # Check live runtime override if available
+        if runtime is not None and hasattr(runtime, "_approval_mode"):
+            am = str(runtime._approval_mode).strip().lower()
+        emoji = "✅" if am == "auto" else "⛔"
+        lines.append(f"{emoji} **Approval Mode:** `{am}` — {'Full owner power (auto-approve)' if am == 'auto' else 'Ask before high-impact actions'}")
+
+        # -- Web tools
+        web = bool(cfg.get("web_tools_enabled", False))
+        emoji = "🌐" if web else "🚫"
+        lines.append(f"{emoji} **Web Tools:** `{'enabled' if web else 'disabled'}`")
+
+        # -- Access scope
+        scope = str(cfg.get("access_scope") or "home")
+        lines.append(f"📁 **Access Scope:** `{scope}`")
+
+        # -- HTTP bootstrap
+        http = cfg.get("http_bootstrap")
+        if http is not None:
+            hb = "enabled" if bool(http) else "disabled (IPC-only)"
+            lines.append(f"🔌 **HTTP Bootstrap:** `{hb}`")
+
+        # -- Auto-approve threshold
+        aat = cfg.get("auto_approve_threshold")
+        if aat is not None:
+            lines.append(f"⚖️ **Auto-Approve Threshold:** `{aat}`")
+
+        # -- Thinking level
+        tl = str(cfg.get("thinking_level") or "high").strip().lower()
+        lines.append(f"🧠 **Thinking Level:** `{tl}`")
+
+        # -- Tool process visibility
+        tp = cfg.get("tool_process")
+        if tp is not None:
+            lines.append(f"🔧 **Tool Process:** `{tp}`")
+
+        # -- Harness mode
+        hm = str(cfg.get("harness_mode") or "auto").strip().lower()
+        lines.append(f"⚙️ **Harness Mode:** `{hm}`")
+
+        # -- Execution timeout (if available in config or runtime)
+        timeout = cfg.get("execution_timeout") or cfg.get("tool_timeout")
+        if timeout is not None:
+            lines.append(f"⏱️ **Execution Timeout:** `{timeout}s`")
+
+        # -- Vision
+        ve = bool(cfg.get("vision_enabled", True))
+        lines.append(f"👁️ **Vision Decoder:** `{'enabled' if ve else 'disabled'}`")
+
+        # -- Skills budget
+        sb = cfg.get("skills_active_budget")
+        if sb is not None:
+            lines.append(f"📦 **Skills Active Budget:** `{sb}`")
+
+        lines.append(f"\nRun `/help` for all commands.")
+        return {"text": "\n".join(lines)}
 
     return {"text": f"Unknown command: {command}\nType /help for available commands."}
 

@@ -29,6 +29,7 @@ Type `/` in the composer for autocomplete. Commands also work via
 | `/import-session` | `path?` | Import session from `.txt`/`.md` |
 | `/skills` | | List available skills |
 | `/handoff` | | List handoff notes |
+| `/security-status` | | Show partner control settings |
 | `/init` | `path?` | Project scan helpers / AGENTS.md |
 
 ## Tips

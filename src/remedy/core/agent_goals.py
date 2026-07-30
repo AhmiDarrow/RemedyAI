@@ -251,6 +251,80 @@ def register_goal_and_plan_tools(runtime: Any) -> None:
         lines = [f"- [{p.status}] {p.title} (id={p.id}, steps={len(p.steps)})" for p in plans]
         return "Plans:\n" + "\n".join(lines)
 
+    async def plan_step_status(
+        step_id: str = "",
+        status: str = "done",
+        plan_id: str = "",
+        plan_status: str = "",
+        note: str = "",
+    ) -> str:
+        """Mark a plan step pending|active|done|skipped. Prefer this over [done] in titles."""
+        store = _plan_store()
+        sid = getattr(runtime, "_session_id", None)
+        pid = (plan_id or "").strip()
+        plan = store.get(pid) if pid else None
+        if plan is None:
+            plan = store.latest_for_session(
+                str(sid) if sid else None,
+                actionable_only=True,
+            )
+        if plan is None and sid:
+            plan = store.latest_for_session(str(sid), actionable_only=False)
+        if plan is None:
+            return (
+                "No plan found for this session. Use plan_save first, or pass plan_id=."
+            )
+        st = (status or "done").strip().lower()
+        if st not in ("pending", "active", "done", "skipped"):
+            return (
+                f"Invalid step status {st!r}. Use pending | active | done | skipped."
+            )
+        sid_key = (step_id or "").strip()
+        if not sid_key:
+            # Convenience: mark first pending as active / first active as done
+            if st == "active":
+                for s in plan.steps:
+                    if s.status == "pending":
+                        sid_key = s.id
+                        break
+            elif st == "done":
+                for s in plan.steps:
+                    if s.status == "active":
+                        sid_key = s.id
+                        break
+                if not sid_key:
+                    for s in plan.steps:
+                        if s.status == "pending":
+                            sid_key = s.id
+                            break
+            if not sid_key:
+                return (
+                    "step_id required (or ensure there is a pending/active step). "
+                    f"Plan {plan.id} steps: "
+                    + ", ".join(f"{s.id}:{s.status}" for s in plan.steps)
+                )
+        updated = store.update_step_status(plan.id, sid_key, st)
+        if updated is None:
+            return (
+                f"Step not found: {sid_key!r} on plan {plan.id}. "
+                "Pass step id (s1), 1-based index, or title. "
+                + "Steps: "
+                + ", ".join(f"{s.id}={s.title!r}[{s.status}]" for s in plan.steps)
+            )
+        pst = (plan_status or "").strip().lower()
+        if pst in ("draft", "approved", "active", "done", "cancelled"):
+            bumped = store.set_status(updated.id, pst)
+            if bumped is not None:
+                updated = bumped
+        note_s = (note or "").strip()
+        extra = f" note={note_s}" if note_s else ""
+        done_n = sum(1 for s in updated.steps if s.status in ("done", "skipped"))
+        return (
+            f"Plan {updated.id} step → {st}{extra}. "
+            f"plan_status={updated.status} progress={done_n}/{len(updated.steps)}.\n\n"
+            + updated.summary_markdown()
+        )
+
     reg = runtime.tool_registry
     reg.register_builtin_handler(
         "goal_add",
@@ -360,5 +434,40 @@ def register_goal_and_plan_tools(runtime: Any) -> None:
             "properties": {
                 "limit": {"type": "integer"},
             },
+        },
+    )
+    reg.register_builtin_handler(
+        "plan_step_status",
+        "Update one plan step status (pending|active|done|skipped). "
+        "Use after finishing a step — never fake progress with '[done]' in titles. "
+        "step_id may be s1, 1-based index, or title. Omit plan_id for latest session plan.",
+        plan_step_status,
+        {
+            "type": "object",
+            "properties": {
+                "step_id": {
+                    "type": "string",
+                    "description": "Step id (s1), 1-based index, or title. "
+                    "Omit to auto-pick first pending→active or active→done.",
+                },
+                "status": {
+                    "type": "string",
+                    "description": "pending | active | done | skipped",
+                },
+                "plan_id": {
+                    "type": "string",
+                    "description": "Optional plan id (default: latest for session)",
+                },
+                "plan_status": {
+                    "type": "string",
+                    "description": "Optional plan-level status override "
+                    "(draft|approved|active|done|cancelled)",
+                },
+                "note": {
+                    "type": "string",
+                    "description": "Optional short note (shown in tool result only)",
+                },
+            },
+            "required": ["status"],
         },
     )

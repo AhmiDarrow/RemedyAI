@@ -97,12 +97,19 @@ def record_usage_event(
     ct = max(0, int(completion_tokens or 0))
     tt = max(0, int(total_tokens or 0)) or (pt + ct)
     cost = float(estimated_cost_usd or 0.0)
+    meta = meta or {}
     if cost <= 0 and (pt or ct):
         cost = estimate_cost_usd(
             prompt_tokens=pt,
             completion_tokens=ct,
             model=model,
             provider=provider,
+            cache_hit_tokens=int(meta.get("cache_hit_tokens") or 0),
+            cache_miss_tokens=(
+                int(meta["cache_miss_tokens"])
+                if meta.get("cache_miss_tokens") is not None
+                else None
+            ),
         )
     row = {
         "id": str(uuid4()),
@@ -117,7 +124,7 @@ def record_usage_event(
         "source": source or "estimate",
         "run_id": run_id,
         "turn_index": turn_index,
-        "meta": meta or {},
+        "meta": meta,
     }
     conn = _get_conn(home)
     with _lock:

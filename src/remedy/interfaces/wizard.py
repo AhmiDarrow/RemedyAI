@@ -365,6 +365,11 @@ LLM_PROVIDERS: dict[str, dict[str, str]] = {
         "model": "mistral-small-latest",
         "base_url": "https://api.mistral.ai/v1",
     },
+    "poe": {
+        "label": "Poe (multi-model API)",
+        "model": "Claude-Sonnet-4.6",
+        "base_url": "https://api.poe.com/v1",
+    },
     "openrouter": {
         "label": "OpenRouter",
         "model": "openrouter/auto",

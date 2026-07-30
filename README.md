@@ -213,7 +213,7 @@ No Remedy cloud account for core use. Chat goes to **your** provider (or local O
 | `/compact` · `/harness` | Harness |
 | `/approve` · `/deny` | Approvals |
 | `/export` · `/import` · `/import-session` | I/O |
-| `/skills` · `/handoff` · `/init` · `/helper` · `/tip` | Skills & tips |
+| `/skills` · `/handoff` · `/security-status` · `/init` · `/helper` · `/tip` | Skills & tips |
 
 Full list: [Commands](docs/manual/11-reference-commands.md)
 

@@ -136,11 +136,38 @@ class GoogleCalendarProvider:
 
 
 def _event_time(iso_or_date: str) -> dict[str, str]:
+    """Build Google Calendar start/end body.
+
+    All-day: ``YYYY-MM-DD`` → ``{"date": ...}``.
+    Timed: ISO datetime. If the value has no offset/Z, append the local
+    UTC offset so Google does not 400 with "Missing time zone definition".
+    """
     s = (iso_or_date or "").strip()
     # All-day: YYYY-MM-DD
     if len(s) == 10 and s[4] == "-" and s[7] == "-":
         return {"date": s}
+    if s and not _has_tz(s):
+        from datetime import datetime
+
+        off = datetime.now().astimezone().strftime("%z")  # e.g. -0500
+        if len(off) == 5:
+            s = f"{s}{off[:3]}:{off[3:]}"  # -05:00
     return {"dateTime": s}
+
+
+def _has_tz(iso_dt: str) -> bool:
+    """True if ISO datetime already includes Z or ±HH:MM / ±HHMM offset."""
+    s = (iso_dt or "").strip()
+    if not s:
+        return False
+    if s.endswith("Z") or s.endswith("z"):
+        return True
+    # ...±HH:MM or ±HHMM at end (avoid matching date separators)
+    if len(s) >= 5 and s[-3] == ":" and s[-6] in "+-" and s[-5:-3].isdigit() and s[-2:].isdigit():
+        return True
+    if len(s) >= 5 and s[-5] in "+-" and s[-4:].isdigit():
+        return True
+    return False
 
 
 def get_google_calendar(home: Path | str | None = None) -> CalendarProvider | None:

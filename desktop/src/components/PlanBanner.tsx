@@ -106,11 +106,13 @@ export function PlanBanner({
     }
   }
 
+  // Build-mode + approved/active is hidden by shouldShowPlanBanner; remaining
+  // Build-mode cases are drafts still waiting for Approve ("Plan ready").
   const headerLabel = planMode
-    ? 'Plan mode'
-    : midBuild
-      ? 'Plan in progress'
-      : 'Plan ready'
+    ? midBuild
+      ? 'Plan mode · in progress'
+      : 'Plan mode'
+    : 'Plan ready'
 
   return (
     <div

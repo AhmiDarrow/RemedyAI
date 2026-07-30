@@ -231,10 +231,13 @@ def register_web_tools(runtime: Any) -> None:
         """Fetch a URL as text (opt-in web tools)."""
         if not _web_enabled(runtime):
             return format_tool_error(
-                "Web tools are disabled. Enable web_tools_enabled in Settings/config.",
+                "Web tools are disabled. Enable with update_settings(web_tools_enabled=true) "
+                "or update_settings(setup=\"web tools\"), then retry web_fetch.",
                 code="WEB_DISABLED",
                 tool_name="web_fetch",
-                suggestion="Set web_tools_enabled: true in config, then retry.",
+                suggestion=(
+                    "Call update_settings(web_tools_enabled=true) for the user, then retry."
+                ),
             )
         u = (url or "").strip()
         if not u.startswith(("http://", "https://")):

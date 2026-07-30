@@ -11,7 +11,9 @@ import asyncio
 import contextlib
 import json
 import os
+import time
 from pathlib import Path
+from typing import Any
 
 from rich.console import Console
 from rich.panel import Panel
@@ -213,6 +215,58 @@ def build_parser() -> argparse.ArgumentParser:
     config_sub.add_parser("show", help="Show current configuration")
     config_sub.add_parser("path", help="Show config file path")
 
+    # remedy settings show|get|set|keys  (parity with Desktop Settings / agent tools)
+    settings_cmd = sub.add_parser(
+        "settings",
+        help="View and update agent settings (same keys as Desktop Settings)",
+    )
+    settings_sub = settings_cmd.add_subparsers(dest="settings_cmd")
+    settings_sub.add_parser("show", help="Show public settings snapshot (no secrets)")
+    settings_sub.add_parser("keys", help="List settable settings keys")
+    settings_get = settings_sub.add_parser("get", help="Get one setting value")
+    settings_get.add_argument("key", help="Setting key (e.g. llm_model, thinking_level)")
+    settings_set = settings_sub.add_parser("set", help="Set one or more settings")
+    settings_set.add_argument(
+        "pairs",
+        nargs="*",
+        default=[],
+        help="KEY=VALUE pairs (bool/int/float/json auto-parsed). "
+        "Example: thinking_level=high tool_process=full",
+    )
+    settings_set.add_argument(
+        "--json",
+        dest="json_patch",
+        default=None,
+        help="JSON object patch instead of KEY=VALUE pairs",
+    )
+
+    # remedy computer status|host
+    computer_cmd = sub.add_parser(
+        "computer",
+        help="Computer-use host status and CLI host control",
+    )
+    computer_sub = computer_cmd.add_subparsers(dest="computer_cmd")
+    computer_sub.add_parser(
+        "status",
+        help="Show host_connected, pending jobs, CLI host state",
+    )
+    computer_host = computer_sub.add_parser(
+        "host",
+        help="Start/stop the in-process CLI computer host (system browser + desktop)",
+    )
+    computer_host.add_argument(
+        "action",
+        nargs="?",
+        default="start",
+        choices=["start", "stop", "run"],
+        help="start (background), stop, or run (foreground until Ctrl+C)",
+    )
+    computer_host.add_argument(
+        "--api",
+        action="store_true",
+        help="Also start the HTTP stub poller against remedy serve (REMEDY_API)",
+    )
+
     # remedy auth login|logout|status xai
     auth_cmd = sub.add_parser("auth", help="Provider authentication (OAuth / API keys)")
     auth_sub = auth_cmd.add_subparsers(dest="auth_cmd")
@@ -263,6 +317,16 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Force the setup wizard even if setup was completed",
     )
+    chat_cmd.add_argument(
+        "--no-computer-host",
+        action="store_true",
+        help="Do not start the in-process CLI computer host (desktop tools still work)",
+    )
+    chat_cmd.add_argument(
+        "--computer-host",
+        action="store_true",
+        help="Force-start CLI computer host (default: on)",
+    )
 
     # remedy serve
     serve_cmd = sub.add_parser("serve", help="Start the full API server (with config)")
@@ -278,6 +342,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--force-setup",
         action="store_true",
         help="Force the setup wizard even if setup was completed",
+    )
+    serve_cmd.add_argument(
+        "--computer-host",
+        action="store_true",
+        help="Start in-process CLI computer host so browser navigate works without Desktop",
+    )
+    serve_cmd.add_argument(
+        "--no-computer-host",
+        action="store_true",
+        help="Never start CLI computer host (Desktop owns the rail)",
     )
 
     # remedy mcp serve — expose skills to external MCP clients (stdio)
@@ -1027,6 +1101,237 @@ async def _cmd_config(args) -> None:
             console.print("Run 'remedy config init' to create one.")
 
 
+def _parse_setting_value(raw: str) -> Any:
+    """Parse CLI setting values: bool/int/float/JSON, else plain string."""
+    s = raw.strip()
+    low = s.lower()
+    if low in ("true", "yes", "on"):
+        return True
+    if low in ("false", "no", "off"):
+        return False
+    if low in ("null", "none"):
+        return None
+    if (s.startswith("{") and s.endswith("}")) or (
+        s.startswith("[") and s.endswith("]")
+    ):
+        try:
+            return json.loads(s)
+        except json.JSONDecodeError:
+            pass
+    try:
+        if s.startswith("0") and len(s) > 1 and "." not in s:
+            raise ValueError("leading zero")
+        return int(s)
+    except ValueError:
+        pass
+    try:
+        return float(s)
+    except ValueError:
+        pass
+    return s
+
+
+def _cmd_settings(args) -> None:
+    """``remedy settings show|get|set|keys`` — same apply path as Desktop/API."""
+    from remedy.interfaces.settings_apply import (
+        SETTABLE_KEYS,
+        apply_settings_update,
+        public_settings_snapshot,
+    )
+
+    home = Path(args.home).expanduser()
+    home.mkdir(parents=True, exist_ok=True)
+    # Ensure resolve_config/home is consistent for load_config paths
+    os.environ.setdefault("REMEDY_HOME", str(home))
+
+    sub = getattr(args, "settings_cmd", None)
+    if sub is None or sub == "show":
+        snap = public_settings_snapshot()
+        console.print(Panel("[bold]Remedy settings[/bold] (secrets redacted)", border_style="cyan"))
+        console.print_json(data=snap)
+        return
+
+    if sub == "keys":
+        table = Table(title="Settable settings keys")
+        table.add_column("Key")
+        for k in sorted(SETTABLE_KEYS):
+            table.add_row(k)
+        console.print(table)
+        console.print(
+            "[dim]Usage: remedy settings set thinking_level=high tool_process=full[/dim]"
+        )
+        return
+
+    if sub == "get":
+        key = str(args.key or "").strip()
+        snap = public_settings_snapshot()
+        if key in snap:
+            console.print_json(data={key: snap[key]})
+            return
+        # Allow querying keys not in public snapshot (still settable)
+        if key in SETTABLE_KEYS:
+            console.print(f"[dim]{key}[/dim] is settable but not in public snapshot "
+                          f"(secret or nested). Use [bold]settings show[/bold].")
+            return
+        console.print(f"[red]Unknown key:[/red] {key}")
+        console.print("[dim]Run: remedy settings keys[/dim]")
+        raise SystemExit(1)
+
+    if sub == "set":
+        patch: dict[str, Any] = {}
+        raw_json = getattr(args, "json_patch", None)
+        if raw_json:
+            try:
+                loaded = json.loads(raw_json)
+            except json.JSONDecodeError as exc:
+                console.print(f"[red]Invalid --json:[/red] {exc}")
+                raise SystemExit(1) from exc
+            if not isinstance(loaded, dict):
+                console.print("[red]--json must be an object[/red]")
+                raise SystemExit(1)
+            patch.update(loaded)
+        for pair in getattr(args, "pairs", None) or []:
+            if "=" not in pair:
+                console.print(f"[red]Expected KEY=VALUE, got:[/red] {pair}")
+                raise SystemExit(1)
+            k, _, v = pair.partition("=")
+            k = k.strip()
+            if not k:
+                console.print(f"[red]Empty key in:[/red] {pair}")
+                raise SystemExit(1)
+            patch[k] = _parse_setting_value(v)
+        if not patch:
+            console.print("[red]No settings to apply. Use KEY=VALUE or --json '{...}'[/red]")
+            raise SystemExit(1)
+        try:
+            result = asyncio.run(apply_settings_update(patch))
+        except ValueError as exc:
+            console.print(f"[red]Settings rejected:[/red] {exc}")
+            raise SystemExit(1) from exc
+        except OSError as exc:
+            console.print(f"[red]Write failed:[/red] {exc}")
+            raise SystemExit(1) from exc
+        console.print(f"[green]{result.get('message', 'saved')}[/green]")
+        changes = result.get("changes") or []
+        if changes:
+            console.print(f"[dim]Changed:[/dim] {', '.join(str(c) for c in changes)}")
+        # Echo key fields that were in the patch
+        show = {k: result[k] for k in patch if k in result}
+        if show:
+            console.print_json(data=show)
+        return
+
+    console.print("[dim]Usage: remedy settings show|get|set|keys[/dim]")
+
+
+def _cmd_computer(args) -> None:
+    """``remedy computer status|host`` — computer-use host control for CLI."""
+    home = Path(args.home).expanduser()
+    home.mkdir(parents=True, exist_ok=True)
+    os.environ.setdefault("REMEDY_HOME", str(home))
+
+    sub = getattr(args, "computer_cmd", None) or "status"
+
+    if sub == "status":
+        from remedy.core.computer.cli_host import get_local_computer_host
+        from remedy.core.computer.host_bridge import get_host_bridge
+
+        bridge = get_host_bridge(home)
+        local = get_local_computer_host(home)
+        st = local.status()
+        console.print(Panel("[bold]Computer use[/bold]", border_style="green"))
+        console.print(
+            f"  host_connected:  "
+            f"{'[green]True[/green]' if bridge.host_connected() else '[yellow]False[/yellow]'}"
+        )
+        console.print(f"  pending_jobs:    {bridge.pending_count()}")
+        console.print(
+            f"  CLI host:        "
+            f"{'[green]running[/green]' if local.running else '[dim]stopped[/dim]'}"
+        )
+        console.print(f"  jobs_completed:  {st.get('jobs_completed', 0)}")
+        if st.get("last_action"):
+            console.print(f"  last_action:     {st['last_action']}")
+        if st.get("last_error"):
+            console.print(f"  last_error:      [red]{st['last_error']}[/red]")
+        console.print(f"  home:            {st.get('home')}")
+        console.print(
+            "\n[dim]Desktop tools (app/windows/click) work in-process.\n"
+            "Browser rail needs Remedy Desktop, or start: remedy computer host start\n"
+            "Chat starts the CLI host automatically unless --no-computer-host.[/dim]"
+        )
+        return
+
+    if sub == "host":
+        from remedy.core.computer.cli_host import (
+            get_local_computer_host,
+            start_cli_computer_host,
+            stop_cli_computer_host,
+        )
+
+        action = str(getattr(args, "action", "start") or "start").lower()
+        if action == "stop":
+            stop_cli_computer_host()
+            console.print("[green]CLI computer host stopped.[/green]")
+            return
+
+        host = start_cli_computer_host(home)
+        st = host.status()
+        connected = st.get("host_connected")
+        console.print(
+            f"[green]CLI computer host started.[/green] "
+            f"host_connected={connected}"
+        )
+
+        if getattr(args, "api", False):
+            # Optional HTTP poller against remedy serve (separate process bridge)
+            try:
+                import sys
+                from pathlib import Path as _P
+
+                repo = _P(__file__).resolve().parents[3]
+                poller = repo / "scripts" / "computer_host_poller.py"
+                if poller.is_file():
+                    import subprocess
+
+                    env = os.environ.copy()
+                    env.setdefault("REMEDY_API", "http://127.0.0.1:7400")
+                    env.setdefault("REMEDY_HOME", str(home))
+                    creationflags = 0
+                    if sys.platform == "win32":
+                        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                    subprocess.Popen(
+                        [sys.executable, str(poller)],
+                        cwd=str(repo),
+                        env=env,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        creationflags=creationflags,
+                    )
+                    console.print(
+                        "[dim]Also started HTTP host poller → "
+                        f"{env.get('REMEDY_API')}[/dim]"
+                    )
+                else:
+                    console.print(f"[yellow]HTTP poller script missing:[/yellow] {poller}")
+            except Exception as exc:
+                console.print(f"[yellow]HTTP poller not started:[/yellow] {exc}")
+
+        if action == "run":
+            console.print("[dim]Foreground host running — Ctrl+C to stop[/dim]")
+            try:
+                while host.running:
+                    time.sleep(0.5)
+            except KeyboardInterrupt:
+                console.print("\n[dim]Stopping…[/dim]")
+            finally:
+                stop_cli_computer_host()
+            return
+        return
+
+    console.print("[dim]Usage: remedy computer status|host [start|stop|run][/dim]")
+
+
 def _cmd_serve(args) -> None:
     import sys
     import threading
@@ -1209,6 +1514,27 @@ def _cmd_serve(args) -> None:
     console.print("[dim]OpenAPI:[/dim]   /api/openapi.json  /api/openapi.yaml")
     console.print("[dim]Docs:[/dim]       /docs  /redoc")
 
+    # Optional in-process computer host so API sessions can navigate without Desktop.
+    # Default OFF so Desktop Tauri poller is not racing claims; opt-in via flag/env.
+    want_host = bool(getattr(args, "computer_host", False)) or str(
+        os.environ.get("REMEDY_CLI_COMPUTER_HOST", "")
+    ).strip().lower() in ("1", "true", "yes", "on")
+    if bool(getattr(args, "no_computer_host", False)):
+        want_host = False
+    if want_host:
+        try:
+            from remedy.core.computer.cli_host import start_cli_computer_host
+
+            ch = start_cli_computer_host(home)
+            ok_h = ch.status().get("host_connected")
+            console.print(
+                f"[dim]Computer:[/dim]  CLI host "
+                f"{'[green]connected[/green]' if ok_h else '[yellow]starting[/yellow]'} "
+                f"(system browser + desktop; Desktop app still preferred for rail DOM)"
+            )
+        except Exception as exc:
+            console.print(f"[yellow]Computer host failed:[/yellow] {exc}")
+
     log_level = config.get("log_level", "INFO").upper()
     # Access logs spam the desktop console (status polls every few seconds).
     # Opt in with access_log=true in config or REMEDY_ACCESS_LOG=1.
@@ -1298,6 +1624,18 @@ def _cmd_chat(args) -> None:
         await runtime.start()
         n_skills = runtime.skills.discover_defaults(home_dir=home)
 
+        # Computer-use: in-process CLI host so navigate/open works without Desktop.
+        computer_host_on = False
+        skip_host = bool(getattr(args, "no_computer_host", False))
+        if not skip_host:
+            try:
+                from remedy.core.computer.cli_host import start_cli_computer_host
+
+                host = start_cli_computer_host(home)
+                computer_host_on = bool(host.running and host.status().get("host_connected"))
+            except Exception as exc:
+                console.print(f"[yellow]CLI computer host failed:[/yellow] {exc}")
+
         gateway = Gateway(runtime=runtime, memory_store=memory)
         gateway.register_handler(runtime.handle_event)
         await gateway.start()
@@ -1306,14 +1644,24 @@ def _cmd_chat(args) -> None:
 
         llm_ready = bool(agent_config.llm_api_key)
         model = agent_config.llm_model or "none"
+        computer_line = (
+            f"[green]CLI host on[/green] (system browser + desktop)"
+            if computer_host_on
+            else (
+                "[dim]off[/dim] (desktop tools only; use --computer-host or Desktop app)"
+                if skip_host
+                else "[yellow]starting…[/yellow]"
+            )
+        )
 
         console.print()
         console.print(Panel(
             f"[bold green]{agent_config.name}[/bold green] is ready.\n\n"
-            f"Session: [dim]{sid}[/dim]\n"
-            f"LLM:     [{'green' if llm_ready else 'red'}]{model}[/{'green' if llm_ready else 'red'}]\n"
-            f"Skills:  {n_skills} loaded\n"
-            f"Memory:  {'enabled' if not args.no_memory else 'disabled'}\n\n"
+            f"Session:  [dim]{sid}[/dim]\n"
+            f"LLM:      [{'green' if llm_ready else 'red'}]{model}[/{'green' if llm_ready else 'red'}]\n"
+            f"Skills:   {n_skills} loaded\n"
+            f"Memory:   {'enabled' if not args.no_memory else 'disabled'}\n"
+            f"Computer: {computer_line}\n\n"
             f"[dim]Type /help for commands, /exit to quit[/dim]",
             title="Remedy Chat",
             border_style="green",
@@ -1342,12 +1690,27 @@ def _cmd_chat(args) -> None:
   /help             — Show this help
   /session          — Show current session ID
   /skills           — List loaded skills
+  /computer         — Computer-use host status
   /clear            — Clear the screen
   Any other input   — Send a message to Remedy
 """)
                         continue
                     elif cmd == "session":
                         console.print(f"[dim]Session: {sid}[/dim]")
+                        continue
+                    elif cmd == "computer":
+                        try:
+                            from remedy.core.computer.cli_host import get_local_computer_host
+                            from remedy.core.computer.host_bridge import get_host_bridge
+
+                            b = get_host_bridge(home)
+                            h = get_local_computer_host(home)
+                            console.print(
+                                f"  host_connected={b.host_connected()}  "
+                                f"cli_host={h.running}  pending={b.pending_count()}"
+                            )
+                        except Exception as exc:
+                            console.print(f"[red]{exc}[/red]")
                         continue
                     elif cmd == "skills":
                         if runtime.skills.skills:
@@ -1385,6 +1748,12 @@ def _cmd_chat(args) -> None:
                         break
 
         finally:
+            try:
+                from remedy.core.computer.cli_host import stop_cli_computer_host
+
+                stop_cli_computer_host()
+            except Exception:
+                pass
             await runtime.stop()
             await gateway.stop()
 
@@ -1591,6 +1960,10 @@ def main(args: list[str] | None = None) -> None:
         asyncio.run(_cmd_exec(parsed))
     elif parsed.command == "config":
         asyncio.run(_cmd_config(parsed))
+    elif parsed.command == "settings":
+        _cmd_settings(parsed)
+    elif parsed.command == "computer":
+        _cmd_computer(parsed)
     elif parsed.command == "auth":
         _cmd_auth(parsed)
     elif parsed.command == "chat":

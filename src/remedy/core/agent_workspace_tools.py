@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,43 @@ from remedy.core.react_policy import (
     HARD_SAFETY_CHARS as _HARD_SAFETY_CHARS,
 )
 from remedy.core.security import check_dangerous_command
+
+# Agent scaffold dumps that should never land in product trees.
+_JUNK_WRITE_NAME_RE = re.compile(
+    r"(?i)"
+    r"(?:^|[/\\])_ref_[^/\\]+$"
+    r"|(?:^|[/\\])_ex_[a-z0-9]+(?:\.[^/\\]+)?$"
+    r"|(?:^|[/\\])_write_[^/\\]+\.py$"
+    r"|(?:^|[/\\])_patch_[^/\\]+\.py$"
+    r"|(?:^|[/\\])_vault_tail\.txt$"
+)
+
+# Existing files this large should use file_edit unless force_full_write.
+_FULL_WRITE_PREFER_EDIT_BYTES = 4_000
+# Tiny absolute/relative size change via full rewrite → refuse (use file_edit).
+_TINY_REWRITE_ABS = 120
+_TINY_REWRITE_RATIO = 0.02
+
+# Provider-history stubs must never be written back to disk (agent echo bug).
+_HISTORY_STUB_MARKERS = (
+    "[file_write content omitted",
+    "omitted from provider history",
+    "_history_summarized",
+    "<<NOT_SOURCE_CODE",
+    "DO_NOT_file_write_this_string",
+    "history_stub kind=",
+)
+
+
+def _normalize_edits_arg(edits: Any) -> str:
+    """Accept JSON string or already-parsed list/dict for edits= parameters."""
+    import json as _json
+
+    if edits is None:
+        return ""
+    if isinstance(edits, (list, dict)):
+        return _json.dumps(edits, ensure_ascii=False)
+    return str(edits)
 
 
 def register_workspace_tools(runtime: Any) -> None:
@@ -30,6 +68,19 @@ def register_workspace_tools(runtime: Any) -> None:
         from remedy.core.win_paths import check_tool_path_safe
 
         return check_tool_path_safe(path)
+
+    def _junk_write_guard(path: str) -> str | None:
+        p = (path or "").strip().replace("\\", "/")
+        if not p:
+            return None
+        if _JUNK_WRITE_NAME_RE.search(p):
+            return (
+                f"refusing junk scaffold path {path!r}: do not write _ref_*, "
+                "_ex_*, _write_*.py, or _patch_*.py into the project. "
+                "Read reference sources from their real location; edit the "
+                "real target with file_edit / file_write."
+            )
+        return None
 
     def _note_path(target: Path) -> None:
         with suppress(Exception):
@@ -140,7 +191,11 @@ def register_workspace_tools(runtime: Any) -> None:
         _track_read(target)
         return data
 
-    async def file_write(path: str, content: str = "") -> str:
+    async def file_write(
+        path: str,
+        content: str = "",
+        force_full_write: bool = False,
+    ) -> str:
         from remedy.core.approvals import APPROVALS
         from remedy.core.turn_context import turn_session_id
 
@@ -170,6 +225,35 @@ def register_workspace_tools(runtime: Any) -> None:
                 tool_name="file_write",
                 suggestion="Choose a normal filename; never write Windows device names (nul, con, …).",
             )
+        junk = _junk_write_guard(path)
+        if junk:
+            return format_tool_error(
+                junk,
+                code="JUNK_PATH",
+                tool_name="file_write",
+                suggestion=(
+                    "file_read the real source (e.g. sibling project path) and "
+                    "file_edit the real target file."
+                ),
+            )
+        new_body = content if content is not None else ""
+        # Refuse writing provider-history summaries as file bodies (corrupts tree).
+        head = (new_body or "")[:240]
+        if any(m in head for m in _HISTORY_STUB_MARKERS) or (
+            new_body.strip().startswith("[")
+            and "omitted from provider history" in new_body
+        ):
+            return format_tool_error(
+                "refusing to write provider-history summary stub as file content "
+                f"({path}). That text is not source code — it was redacted for the LLM.",
+                code="HISTORY_STUB",
+                tool_name="file_write",
+                suggestion=(
+                    "file_read the real path first; then file_edit surgical hunks, "
+                    "or file_write with the full real source (force_full_write=true "
+                    "if replacing a large existing file)."
+                ),
+            )
         target = runtime.resolve_tool_path(path)
         _note_path(target)
         # Capture prior content for time-travel undo (best-effort).
@@ -181,9 +265,39 @@ def register_workspace_tools(runtime: Any) -> None:
                 previous = target.read_text(encoding="utf-8", errors="replace")
         except OSError:
             previous = None
+        # Prefer surgical edits for existing large files (unless forced).
+        if (
+            existed
+            and previous is not None
+            and not force_full_write
+            and len(previous) >= _FULL_WRITE_PREFER_EDIT_BYTES
+        ):
+            old_len = len(previous)
+            new_len = len(new_body)
+            delta = abs(new_len - old_len)
+            tiny = delta <= max(
+                _TINY_REWRITE_ABS, int(old_len * _TINY_REWRITE_RATIO)
+            )
+            if tiny and new_body != previous:
+                return format_tool_error(
+                    (
+                        f"file_write refused: {path} already exists ({old_len} chars) and "
+                        f"new content is only ±{delta} chars different. "
+                        "Use file_edit / file_edit_batch for small changes."
+                    ),
+                    code="PREFER_FILE_EDIT",
+                    tool_name="file_write",
+                    suggestion=(
+                        'file_edit(path=..., old_string="…", new_string="…") or '
+                        "file_write(..., force_full_write=true) only for intentional full rewrites."
+                    ),
+                )
+            if not tiny and new_body == previous:
+                return f"No change: {path} already has identical content ({old_len} chars)."
+
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(content, encoding="utf-8")
+            target.write_text(new_body, encoding="utf-8")
         except OSError as e:
             parent = _parent_hint(path)
             return format_tool_error(
@@ -206,19 +320,25 @@ def register_workspace_tools(runtime: Any) -> None:
                 path=target,
                 previous_content=previous,
                 existed=existed,
-                new_size=len(content or ""),
+                new_size=len(new_body or ""),
                 message_id=getattr(runtime, "_active_message_id", None),
             )
         except Exception:
             pass
-        return f"Wrote {len(content)} bytes to {path}"
+        note = ""
+        if existed and previous is not None and not force_full_write:
+            if len(previous) >= _FULL_WRITE_PREFER_EDIT_BYTES:
+                note = (
+                    " (tip: prefer file_edit for future small deltas on this file)"
+                )
+        return f"Wrote {len(new_body)} bytes to {path}{note}"
 
     async def file_edit(
         path: str = "",
         old_string: str = "",
         new_string: str = "",
         replace_all: bool = False,
-        edits: str = "",
+        edits: Any = "",
     ) -> str:
         """Precise search/replace edit (prefer over rewriting whole files).
 
@@ -277,7 +397,7 @@ def register_workspace_tools(runtime: Any) -> None:
                 tool_name="file_edit",
                 suggestion="Use list_dir/repo_search to find the path, then file_read before edit.",
             )
-        edits_raw = (edits or "").strip()
+        edits_raw = _normalize_edits_arg(edits).strip()
         has_single = bool((old_string or "").strip())
         if not edits_raw and not has_single:
             return format_tool_error(
@@ -368,36 +488,45 @@ def register_workspace_tools(runtime: Any) -> None:
         _track_read(target)
         return f"{result.message} path={path}{read_warn}"
 
-    async def file_edit_batch(edits: str = "") -> str:
+    async def file_edit_batch(edits: Any = "") -> str:
         """Apply search/replace hunks across one or more files (JSON array).
 
         Each item: {path, old_string, new_string, replace_all?}
         Files are processed in order; same path serialized by tool batch locks.
+        Accepts *edits* as a JSON string **or** an already-parsed list (models
+        sometimes pass arrays directly — previously crashed on ``.strip()``).
         """
         import json as _json
 
         from remedy.core.approvals import APPROVALS
         from remedy.core.file_edit import apply_search_replace
 
-        raw = (edits or "").strip()
-        if not raw:
-            return format_tool_error(
-                "edits JSON array is required",
-                code="MISSING_EDITS",
-                tool_name="file_edit_batch",
-                suggestion=(
-                    'file_edit_batch(edits=\'[{"path":"a.py","old_string":"x",'
-                    '"new_string":"y"}]\')'
-                ),
-            )
-        try:
-            items = _json.loads(raw)
-        except _json.JSONDecodeError as e:
-            return format_tool_error(
-                f"invalid JSON: {e}",
-                code="INVALID_EDITS",
-                tool_name="file_edit_batch",
-            )
+        # Accept list/dict directly (common LLM/tool-arg path) or JSON string.
+        if isinstance(edits, list):
+            items: Any = edits
+        elif isinstance(edits, dict):
+            # Single object → one-item batch
+            items = [edits]
+        else:
+            raw = _normalize_edits_arg(edits).strip()
+            if not raw:
+                return format_tool_error(
+                    "edits JSON array is required",
+                    code="MISSING_EDITS",
+                    tool_name="file_edit_batch",
+                    suggestion=(
+                        'file_edit_batch(edits=\'[{"path":"a.py","old_string":"x",'
+                        '"new_string":"y"}]\')'
+                    ),
+                )
+            try:
+                items = _json.loads(raw)
+            except _json.JSONDecodeError as e:
+                return format_tool_error(
+                    f"invalid JSON: {e}",
+                    code="INVALID_EDITS",
+                    tool_name="file_edit_batch",
+                )
         if not isinstance(items, list) or not items:
             return format_tool_error(
                 "edits must be a non-empty JSON array",
@@ -408,11 +537,11 @@ def register_workspace_tools(runtime: Any) -> None:
 
         reports: list[str] = []
         sid = turn_session_id(runtime)
-        for i, item in enumerate(items[:40]):
-            if not isinstance(item, dict):
+        for i, edit_item in enumerate(items[:40]):
+            if not isinstance(edit_item, dict):
                 reports.append(f"[{i}] skip: not an object")
                 continue
-            p = str(item.get("path") or "").strip()
+            p = str(edit_item.get("path") or "").strip()
             if not p:
                 reports.append(f"[{i}] skip: missing path")
                 continue
@@ -420,18 +549,22 @@ def register_workspace_tools(runtime: Any) -> None:
             if bad:
                 reports.append(f"[{i}] {p}: reserved name")
                 continue
+            junk = _junk_write_guard(p)
+            if junk:
+                reports.append(f"[{i}] {p}: junk path blocked")
+                continue
             ask_reason = APPROVALS.needs_ask(f"edit {p}", tool_name="file_edit")
             if ask_reason and not APPROVALS.is_approved(
                 "file_edit", f"edit {p}", session_id=sid
             ):
-                item = APPROVALS.create(
+                approval = APPROVALS.create(
                     tool_name="file_edit",
                     command=f"edit {p}",
                     reason=ask_reason,
                     session_id=sid,
                 )
                 reports.append(
-                    f"[{i}] {p}: APPROVAL_REQUIRED id={item.id} reason={ask_reason}"
+                    f"[{i}] {p}: APPROVAL_REQUIRED id={approval.id} reason={ask_reason}"
                 )
                 continue
             try:
@@ -450,9 +583,13 @@ def register_workspace_tools(runtime: Any) -> None:
                 continue
             r = apply_search_replace(
                 previous,
-                str(item.get("old_string") or ""),
-                str(item.get("new_string") if "new_string" in item else ""),
-                replace_all=bool(item.get("replace_all")),
+                str(edit_item.get("old_string") or ""),
+                str(
+                    edit_item.get("new_string")
+                    if "new_string" in edit_item
+                    else ""
+                ),
+                replace_all=bool(edit_item.get("replace_all")),
             )
             if not r.ok or r.new_content is None:
                 reports.append(f"[{i}] {p}: FAIL {r.message}")
@@ -463,6 +600,21 @@ def register_workspace_tools(runtime: Any) -> None:
                 reports.append(f"[{i}] {p}: write error {e}")
                 continue
             runtime._track_artifact(str(target))
+            # Undo trail (parity with file_edit / file_write)
+            try:
+                from remedy.core.time_travel import SessionUndoLog
+
+                home = getattr(getattr(runtime, "config", None), "home_dir", None)
+                SessionUndoLog(home).record_file_write(
+                    session_id=str(sid or getattr(runtime, "_session_id", "") or ""),
+                    path=target,
+                    previous_content=previous,
+                    existed=True,
+                    new_size=len(r.new_content or ""),
+                    message_id=getattr(runtime, "_active_message_id", None),
+                )
+            except Exception:
+                pass
             reports.append(f"[{i}] {p}: OK {r.message}")
         return "file_edit_batch:\n" + "\n".join(reports)
 
@@ -664,14 +816,35 @@ def register_workspace_tools(runtime: Any) -> None:
             )
         danger = check_dangerous_command(["bash", "-c", command])
         if danger:
+            suggestion = (
+                "Use a safer equivalent (read files with file_read/list_dir; "
+                "avoid destructive or network-restricted commands)."
+            )
+            low = danger.lower()
+            if any(
+                k in low
+                for k in (
+                    "app.exe",
+                    "named app",
+                    "tauri",
+                    "remedy desktop",
+                    "port 7400",
+                    "remedy.exe",
+                    "remedy serve",
+                    "host agent",
+                    "host api",
+                )
+            ):
+                suggestion = (
+                    "Self-preservation: do not kill bare app.exe / remedy / port 7400. "
+                    "Restart a project UI only with a Path/CommandLine filter for that "
+                    r'folder (e.g. Where-Object { $_.Path -match "SecretFolder" }).'
+                )
             return format_tool_error(
                 f"blocked by security policy: {danger}",
                 code="SECURITY_BLOCK",
                 tool_name="bash_exec",
-                suggestion=(
-                    "Use a safer equivalent (read files with file_read/list_dir; "
-                    "avoid destructive or network-restricted commands)."
-                ),
+                suggestion=suggestion,
             )
         # Partner trust: bash_exec always asks in ask-mode (high-impact tool)
         from remedy.core.turn_context import turn_session_id
@@ -797,9 +970,10 @@ def register_workspace_tools(runtime: Any) -> None:
     runtime.tool_registry.register_builtin_handler(
         "file_write",
         "Create or overwrite a text file (UTF-8). Prefer file_edit for small "
-        "changes to existing files. Do NOT use bash/powershell Set-Content. "
-        "Allowed: project, Desktop, Documents, Downloads (plus home when access "
-        "scope is home/full). Absolute Desktop paths are fine.",
+        "changes to existing files. Existing large files with tiny deltas are "
+        "refused unless force_full_write=true. Do NOT write _ref_*/_ex_* junk "
+        "or bash Set-Content. Allowed: project, Desktop, Documents, Downloads "
+        "(plus home when access scope is home/full).",
         file_write,
         {
             "type": "object",
@@ -811,6 +985,14 @@ def register_workspace_tools(runtime: Any) -> None:
                 "content": {
                     "type": "string",
                     "description": "Full file contents to write",
+                },
+                "force_full_write": {
+                    "type": "boolean",
+                    "description": (
+                        "Set true only for intentional full rewrites of existing "
+                        "large files. Default false prefers file_edit for tiny deltas."
+                    ),
+                    "default": False,
                 },
             },
             "required": ["path", "content"],
@@ -998,6 +1180,12 @@ def register_workspace_tools(runtime: Any) -> None:
         from remedy.core.agent_assistant_tools import register_assistant_tools
 
         register_assistant_tools(runtime)
+    except Exception:
+        pass
+    try:
+        from remedy.core.agent_settings_tools import register_settings_tools
+
+        register_settings_tools(runtime)
     except Exception:
         pass
     # Per-turn tool trace for auto-learn (reset each stream_response)

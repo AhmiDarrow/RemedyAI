@@ -7,22 +7,38 @@
     <title>Remedy Desktop</title>
     <script>
       (function () {
-        // Theme for post-splash UI (system/light/dark). Boot splash is always dark.
-        var t = 'system';
+        // First install / first run default: Dark Forest (themes.ts DEFAULT_THEME_ID).
+        // Never default to System or classic purple Dark.
+        var KNOWN = {
+          system: 1, dark: 1, neutral: 1, light: 1, forest: 1,
+          green: 1, purple: 1, alien: 1, orange: 1, cyan: 1,
+        };
+        var DEFAULT = 'forest';
+        var t = DEFAULT;
         try {
           var s = localStorage.getItem('remedy-theme');
-          if (s) t = s;
-        } catch (e) {}
+          if (s && KNOWN[s]) {
+            t = s;
+          } else {
+            // Missing or corrupt preference → persist Dark Forest for next boot.
+            localStorage.setItem('remedy-theme', DEFAULT);
+            t = DEFAULT;
+          }
+        } catch (e) {
+          t = DEFAULT;
+        }
         var resolved = t;
-        if (t === 'system' || !t) {
+        if (t === 'system') {
           try {
             resolved = window.matchMedia('(prefers-color-scheme: light)').matches
               ? 'light'
               : 'dark';
           } catch (e2) {
+            // System resolution failed → still prefer forest-like dark, not purple.
             resolved = 'dark';
           }
         }
+        if (!resolved || !KNOWN[resolved] || resolved === 'system') resolved = DEFAULT;
         document.documentElement.setAttribute('data-theme', resolved);
         document.documentElement.setAttribute(
           'data-theme-kind',
@@ -30,8 +46,14 @@
         );
         document.documentElement.style.colorScheme =
           resolved === 'light' ? 'light' : 'dark';
-        // Always dark first paint — never flash white during boot/splash.
-        document.documentElement.style.background = '#0a0a1a';
+        // First paint: Dark Forest canvas when default (never flash white / purple).
+        var bootBg =
+          resolved === 'light'
+            ? '#f4f4f8'
+            : resolved === 'forest'
+              ? '#0a0e0b'
+              : '#0a0a1a';
+        document.documentElement.style.background = bootBg;
       })();
     </script>
     <style>
@@ -41,8 +63,8 @@
         margin: 0;
         padding: 0;
         overflow: hidden;
-        background: #0a0a1a;
-        color: #e8e8f0;
+        background: #0a0e0b;
+        color: #e6ebe7;
         font-family: system-ui, -apple-system, sans-serif;
       }
       /* After app leaves splash, light theme can take over via CSS vars */
@@ -52,7 +74,7 @@
         background: #f4f4f8;
         color: #1a1a2e;
       }
-      /* Static splash until React mounts — always dark */
+      /* Static splash until React mounts — Dark Forest */
       #boot-splash {
         position: fixed;
         inset: 0;
@@ -61,8 +83,8 @@
         align-items: center;
         justify-content: center;
         gap: 1.25rem;
-        background: #0a0a1a;
-        color: #e8e8f0;
+        background: #0a0e0b;
+        color: #e6ebe7;
         z-index: 9999;
       }
       #boot-splash img {

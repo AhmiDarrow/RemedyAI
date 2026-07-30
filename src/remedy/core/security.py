@@ -207,6 +207,114 @@ _SOFT_DANGEROUS_PATTERNS = [
     (r"(^|[\s;&|])(rm|del|erase|rmdir|rd)(\s|$)", "File deletion detected"),
 ]
 
+# Host self-preservation — Tauri projects often share the binary name ``app.exe``
+# with Remedy Desktop. Indiscriminate kills take out the agent mid-turn.
+# Path-scoped kills (command mentions SecretFolder / project filter) are allowed.
+_SELF_KILL_ALWAYS_BLOCK = [
+    # Never kill the API brain
+    (
+        r"taskkill\s+[^\n]*/im\s+remedy(\.exe)?",
+        "Killing remedy.exe (host API)",
+    ),
+    (
+        r"stop-process[^\n]*-name\s+['\"]?remedy(\.exe)?['\"]?",
+        "Stopping process named remedy (host API)",
+    ),
+    (
+        r"get-process\s+[^\n]*remedy[^\n]*stop-process|stop-process[^\n]*get-process[^\n]*remedy",
+        "Pipeline stop of remedy process",
+    ),
+    # Freeing Remedy's API port
+    (
+        r"(localport|local.?port)\s*[:=]?\s*7400[^\n]{0,200}(stop-process|taskkill|kill)",
+        "Killing process on port 7400 (Remedy API)",
+    ),
+    (
+        r"(stop-process|taskkill|kill)[^\n]{0,200}(localport|local.?port)\s*[:=]?\s*7400",
+        "Killing process on port 7400 (Remedy API)",
+    ),
+    (
+        r"remedy_serve\.lock|remedy serve.*stop|stop[^\n]*remedy serve",
+        "Stopping remedy serve",
+    ),
+]
+
+# Indiscriminate Tauri / app.exe kills — blocked unless command scopes to a
+# project path (e.g. SecretFolder in CommandLine/Path filter).
+_SELF_KILL_APP_PATTERNS = [
+    (
+        r"taskkill\s+[^\n]*/im\s+app(\.exe)?",
+        "taskkill /IM app.exe kills ALL Tauri apps including Remedy Desktop",
+    ),
+    (
+        r"stop-process\s+[^\n]*-name\s+['\"]?app(\.exe)?['\"]?",
+        "Stop-Process -Name app kills Remedy Desktop (same default Tauri name)",
+    ),
+    (
+        r"get-process\s+['\"]?app(\.exe)?['\"]?[^\n]{0,80}stop-process",
+        "Get-Process app | Stop-Process kills Remedy Desktop",
+    ),
+    (
+        r"get-process\s+[^\n]*\|\s*[^\n]*stop-process[^\n]*\bapp\b",
+        "Filtered Stop-Process still targeting bare app name",
+    ),
+    (
+        r"stop-process\s+[^\n]*\(?(get-process\s+app)",
+        "Stop-Process (Get-Process app) kills Remedy Desktop",
+    ),
+    # "kill every tauri/app without path scope"
+    (
+        r"(stop-process|taskkill)[^\n]{0,120}(processname\s*-eq\s*['\"]app['\"]|\.name\s*-eq\s*['\"]app['\"])",
+        "Stopping all processes named app (includes Remedy Desktop)",
+    ),
+]
+
+# If any of these appear, path-scoped project kill is likely intentional.
+_SELF_KILL_PROJECT_SCOPE_RE = re.compile(
+    r"(?i)("
+    r"secretfolder|secretsticky|remedyai[/\\]desktop"
+    r"|commandline\s*-match|path\s*-match|\.path\s*-match"
+    r"|where-object[^\n]{0,80}(secretfolder|secretsticky|project)"
+    r"|filter\s+[^\n]{0,40}(secretfolder|secretsticky)"
+    r")"
+)
+
+
+def check_host_self_kill(command: list[str] | str) -> str | None:
+    """Block shell that would kill Remedy Desktop / API (shared ``app.exe`` footgun).
+
+    Returns a reason string if blocked, else None.
+    Path-scoped kills that mention another project (e.g. SecretFolder) are allowed
+    for ``app.exe`` — but never for remedy.exe / port 7400.
+    """
+    if isinstance(command, list):
+        if not command:
+            return None
+        full = " ".join(str(a) for a in command)
+    else:
+        full = str(command or "")
+    if not full.strip():
+        return None
+
+    for pattern, reason in _SELF_KILL_ALWAYS_BLOCK:
+        if re.search(pattern, full, flags=re.IGNORECASE):
+            return (
+                f"{reason}. Do not stop the host agent. "
+                "Target only the project app by full Path/CommandLine filter "
+                "(e.g. SecretFolder), never bare app.exe or port 7400."
+            )
+
+    scoped = bool(_SELF_KILL_PROJECT_SCOPE_RE.search(full))
+    if not scoped:
+        for pattern, reason in _SELF_KILL_APP_PATTERNS:
+            if re.search(pattern, full, flags=re.IGNORECASE):
+                return (
+                    f"{reason}. Use a Path/CommandLine filter for the project "
+                    r'(e.g. Where-Object { $_.Path -match "SecretFolder" }) '
+                    "— never Get-Process app | Stop-Process."
+                )
+    return None
+
 
 def check_dangerous_command(command: list[str]) -> str | None:
     """Hard security gate for destructive / privilege operations.
@@ -229,6 +337,11 @@ def check_dangerous_command(command: list[str]) -> str | None:
     for pattern, reason in _HARD_DANGEROUS_PATTERNS:
         if re.search(pattern, full, flags=re.IGNORECASE):
             return f"{reason}: {full[:100]}"
+
+    # Self-preservation (Tauri app.exe / remedy serve) — hard block
+    host_kill = check_host_self_kill(command)
+    if host_kill:
+        return host_kill
 
     return None
 

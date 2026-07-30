@@ -215,6 +215,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState('')
   const [attachNotice, setAttachNotice] = useState('')
+  /** When set, Enter/send updates this queue item instead of enqueueing a new one. */
+  const [editingQueueId, setEditingQueueId] = useState<string | null>(null)
   const hasImageAttachments = attachments.some((a) => a.is_image)
   const modelHasVision = chatModelSupportsVision(llmProvider, llmModel)
 
@@ -236,11 +238,33 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const attachRailRef = useRef<HTMLDivElement>(null)
+  const composerRootRef = useRef<HTMLDivElement>(null)
   const suggestTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const submittingRef = useRef(false)
   const dragDepth = useRef(0)
+  const dragClearTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const attachmentsRef = useRef<AttachmentMeta[]>([])
   attachmentsRef.current = attachments
+
+  const clearDragOver = useCallback(() => {
+    dragDepth.current = 0
+    setDragOver(false)
+    if (dragClearTimer.current) {
+      clearTimeout(dragClearTimer.current)
+      dragClearTimer.current = null
+    }
+  }, [])
+
+  const armDragOver = useCallback(() => {
+    setDragOver(true)
+    // Safety: OS/WebView often skip dragleave → overlay stuck after drop/cancel.
+    if (dragClearTimer.current) clearTimeout(dragClearTimer.current)
+    dragClearTimer.current = setTimeout(() => {
+      dragDepth.current = 0
+      setDragOver(false)
+      dragClearTimer.current = null
+    }, 2500)
+  }, [])
   /**
    * In-flight keys only (name|size) while a drop/pick is uploading.
    * Prevents poll + ready event double-fire from creating 2 chips — NOT a permanent
@@ -392,7 +416,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         setUploading(false)
       }
     },
-    [disabled, resolveSession, flashAttached],
+    [disabled, resolveSession, flashAttached, clearDragOver],
   )
 
   useImperativeHandle(
@@ -441,7 +465,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
       setUploadError('')
       setAttachNotice('')
-      setDragOver(false)
+      clearDragOver()
 
       const room = MAX_FILES - attachmentsRef.current.length
       if (room <= 0) {
@@ -517,7 +541,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   )
 
   // Primary: poll Rust pending queue. Secondary: events only for drag highlight.
-  // (Previously poll + ready event + path fallback all added the same file → 3 chips.)
+  // (Previously poll + event + path fallback all added the same file → 3 chips.)
   useEffect(() => {
     let cancelled = false
     let unlisten: (() => void) | undefined
@@ -530,7 +554,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       try {
         const pending = await takePendingFileDrops()
         if (!cancelled && pending.length > 0) {
-          setDragOver(false)
+          clearDragOver()
           await addNativePayloads(pending)
         }
       } catch (e: unknown) {
@@ -549,7 +573,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     // Ready event carries payloads (deduped in addNativePayloads). Also drain poll queue.
     void listenNativeFileDrop(
       (payloads) => {
-        setDragOver(false)
+        clearDragOver()
         if (payloads?.length) {
           void addNativePayloads(payloads)
         } else {
@@ -557,12 +581,12 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         }
       },
       (phase) => {
-        if (phase === 'enter' || phase === 'over') setDragOver(true)
-        if (phase === 'leave') setDragOver(false)
+        if (phase === 'enter' || phase === 'over') armDragOver()
+        if (phase === 'leave') clearDragOver()
       },
       (msg) => {
         setUploadError(msg)
-        setDragOver(false)
+        clearDragOver()
       },
       // Path fallback: read via Rust if only paths were emitted (older path).
       (paths) => {
@@ -588,8 +612,42 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       cancelled = true
       window.clearInterval(pollId)
       unlisten?.()
+      clearDragOver()
     }
-  }, [addNativePayloads, disabled])
+  }, [addNativePayloads, disabled, clearDragOver, armDragOver])
+
+  // Global drag/drop end — WebView often never fires dragleave on the composer.
+  useEffect(() => {
+    const end = () => clearDragOver()
+    window.addEventListener('dragend', end, true)
+    window.addEventListener('drop', end, true)
+    window.addEventListener('blur', end)
+    document.addEventListener('visibilitychange', end)
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') clearDragOver()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('dragend', end, true)
+      window.removeEventListener('drop', end, true)
+      window.removeEventListener('blur', end)
+      document.removeEventListener('visibilitychange', end)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [clearDragOver])
+
+  // Turn finished: never leave the drop chrome stuck over the idle composer.
+  useEffect(() => {
+    if (!streaming) clearDragOver()
+  }, [streaming, clearDragOver])
+
+  // If the queued item being edited was cancelled externally, drop edit mode.
+  useEffect(() => {
+    if (!editingQueueId) return
+    if (!queue.some((q) => q.id === editingQueueId)) {
+      setEditingQueueId(null)
+    }
+  }, [queue, editingQueueId])
 
   const removeAttachment = useCallback((idx: number) => {
     setAttachments((prev) => {
@@ -642,6 +700,19 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       if (submittingRef.current) return
       submittingRef.current = true
       try {
+        // Mid-turn queue edit: save text back onto the existing queued item.
+        if (editingQueueId && onUpdateQueued) {
+          if (!text) return
+          pushPromptHistory(text)
+          onUpdateQueued(editingQueueId, { text })
+          setEditingQueueId(null)
+          setInput('')
+          historyIndexRef.current = -1
+          draftBeforeHistoryRef.current = ''
+          setUploadError('')
+          setAttachNotice('')
+          return
+        }
         if (text) pushPromptHistory(text)
         if (text.startsWith('/') && attachments.length === 0) {
           onCommand(text)
@@ -658,6 +729,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           onSend(text, payload.length ? payload : undefined, streaming ? { mode } : undefined)
         }
         setInput('')
+        setEditingQueueId(null)
         historyIndexRef.current = -1
         draftBeforeHistoryRef.current = ''
         for (const a of attachments) {
@@ -673,7 +745,18 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         })
       }
     },
-    [input, attachments, onSend, onCommand, streaming, disabled, uploading, pushPromptHistory],
+    [
+      input,
+      attachments,
+      onSend,
+      onCommand,
+      streaming,
+      disabled,
+      uploading,
+      pushPromptHistory,
+      editingQueueId,
+      onUpdateQueued,
+    ],
   )
 
   const handleKeyDown = useCallback(
@@ -861,34 +944,50 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     [agents, detectAtQuery, detectSlashQuery, slashCommands],
   )
 
-  const onDragEnter = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    dragDepth.current += 1
-    if (e.dataTransfer.types.includes('Files')) setDragOver(true)
-  }, [])
+  const onDragEnter = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      dragDepth.current += 1
+      if (e.dataTransfer.types.includes('Files')) armDragOver()
+    },
+    [armDragOver],
+  )
 
-  const onDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    dragDepth.current = Math.max(0, dragDepth.current - 1)
-    if (dragDepth.current === 0) setDragOver(false)
-  }, [])
+  const onDragLeave = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      // relatedTarget null or outside root → full clear (depth counter often desyncs).
+      const root = composerRootRef.current
+      const related = e.relatedTarget as Node | null
+      if (!root || !related || !root.contains(related)) {
+        clearDragOver()
+        return
+      }
+      dragDepth.current = Math.max(0, dragDepth.current - 1)
+      if (dragDepth.current === 0) clearDragOver()
+    },
+    [clearDragOver],
+  )
 
-  const onDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    if (e.dataTransfer.types.includes('Files')) {
-      e.dataTransfer.dropEffect = 'copy'
-    }
-  }, [])
+  const onDragOver = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      if (e.dataTransfer.types.includes('Files')) {
+        e.dataTransfer.dropEffect = 'copy'
+        armDragOver()
+      }
+    },
+    [armDragOver],
+  )
 
   const onDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault()
       e.stopPropagation()
-      dragDepth.current = 0
-      setDragOver(false)
+      clearDragOver()
       // HTML5 FileList — works in browser; often empty in Tauri/WebView2 for OS drops.
       if (e.dataTransfer.files?.length) {
         void addFiles(e.dataTransfer.files)
@@ -896,7 +995,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       }
       // Some WebViews put path-like items in items / types only — native handler covers OS.
     },
-    [addFiles],
+    [addFiles, clearDragOver],
   )
 
   const onPaste = useCallback(
@@ -931,6 +1030,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
   return (
     <div
+      ref={composerRootRef}
       className="p-3 border-t flex flex-col relative"
       style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border)' }}
       onDragEnter={onDragEnter}
@@ -983,6 +1083,30 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                     className="px-1.5 py-0.5 rounded text-[10px]"
                     style={{
                       background:
+                        editingQueueId === q.id ? 'var(--accent)' : 'var(--bg-tertiary)',
+                      color: editingQueueId === q.id ? '#fff' : 'var(--text-secondary)',
+                    }}
+                    title="Edit this queued message in the composer"
+                    onClick={() => {
+                      setInput(q.text || '')
+                      setEditingQueueId(q.id)
+                      requestAnimationFrame(() => {
+                        const el = textareaRef.current
+                        if (!el) return
+                        el.focus()
+                        resizeComposerTextarea(el)
+                        const len = el.value.length
+                        el.selectionStart = el.selectionEnd = len
+                      })
+                    }}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    className="px-1.5 py-0.5 rounded text-[10px]"
+                    style={{
+                      background:
                         q.mode === 'after' ? 'var(--accent)' : 'var(--bg-tertiary)',
                       color: q.mode === 'after' ? '#fff' : 'var(--text-secondary)',
                     }}
@@ -1008,7 +1132,10 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                     type="button"
                     className="px-1.5 py-0.5 rounded text-[10px]"
                     style={{ color: 'var(--error)' }}
-                    onClick={() => onCancelQueued?.(q.id)}
+                    onClick={() => {
+                      if (editingQueueId === q.id) setEditingQueueId(null)
+                      onCancelQueued?.(q.id)
+                    }}
                   >
                     Cancel
                   </button>
@@ -1021,14 +1148,43 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
       {dragOver && (
         <div
-          className="absolute inset-2 z-20 rounded-lg flex items-center justify-center pointer-events-none"
+          className="absolute inset-2 z-20 rounded-lg flex flex-col items-center justify-center gap-2"
           style={{
             border: '2px dashed var(--accent)',
             background: 'color-mix(in srgb, var(--accent) 12%, transparent)',
             color: 'var(--accent)',
+            pointerEvents: 'auto',
           }}
+          onDragEnter={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            armDragOver()
+          }}
+          onDragOver={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            armDragOver()
+          }}
+          onDragLeave={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            clearDragOver()
+          }}
+          onDrop={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            clearDragOver()
+            if (e.dataTransfer.files?.length) void addFiles(e.dataTransfer.files)
+          }}
+          onClick={() => clearDragOver()}
+          title="Click or press Esc to dismiss"
         >
-          <div className="text-sm font-medium">Drop files or images to attach</div>
+          <div className="text-sm font-medium pointer-events-none">
+            Drop files or images to attach
+          </div>
+          <div className="text-[10px] pointer-events-none" style={{ color: 'var(--text-muted)' }}>
+            Esc or click to cancel
+          </div>
         </div>
       )}
 
@@ -1138,7 +1294,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                 ? 'Attaching…'
                 : `Attached to this message (${attachments.length})`}
             </div>
-            {attachments.length > 0 && !streaming && (
+            {attachments.length > 0 && (
               <button
                 type="button"
                 className="text-[0.65rem] px-1.5 py-0.5 rounded"
@@ -1210,17 +1366,15 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                     {a.mime ? ` · ${a.mime.split('/').pop()}` : ''}
                   </div>
                 </div>
-                {!streaming && (
-                  <button
-                    type="button"
-                    className="ml-0.5 px-1.5 py-0.5 rounded text-sm font-bold"
-                    style={{ color: 'var(--error)' }}
-                    title="Remove attachment"
-                    onClick={() => removeAttachment(i)}
-                  >
-                    ×
-                  </button>
-                )}
+                <button
+                  type="button"
+                  className="ml-0.5 px-1.5 py-0.5 rounded text-sm font-bold"
+                  style={{ color: 'var(--error)' }}
+                  title="Remove attachment"
+                  onClick={() => removeAttachment(i)}
+                >
+                  ×
+                </button>
               </div>
             ))}
           </div>
@@ -1237,6 +1391,33 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           }}
         >
           {uploadError}
+        </div>
+      )}
+
+      {editingQueueId && (
+        <div
+          className="mb-2 flex items-center justify-between gap-2 px-2 py-1 rounded-md text-[11px]"
+          style={{
+            background: 'color-mix(in srgb, var(--accent) 12%, var(--bg-primary))',
+            border: '1px solid var(--border)',
+            color: 'var(--text-secondary)',
+          }}
+        >
+          <span>
+            <strong style={{ color: 'var(--accent)' }}>Editing queue</strong>
+            {' · '}Enter saves changes to the queued message
+          </span>
+          <button
+            type="button"
+            className="px-1.5 py-0.5 rounded text-[10px]"
+            style={{ color: 'var(--error)' }}
+            onClick={() => {
+              setEditingQueueId(null)
+              setInput('')
+            }}
+          >
+            Discard edit
+          </button>
         </div>
       )}
 
@@ -1316,13 +1497,15 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           onKeyDown={handleKeyDown}
           onPaste={onPaste}
           placeholder={
-            planMode
-              ? 'Plan mode — explore & plan (Shift+Tab → Build)'
-              : streaming
-                ? 'Send to queue (Enter) · Ctrl+Enter interrupt…'
-                : attachments.length
-                  ? 'Message (optional)…'
-                  : 'Message, /command, @file… (Shift+Tab Plan/Build)'
+            editingQueueId
+              ? 'Edit queued message — Enter saves to queue'
+              : planMode
+                ? 'Plan mode — explore & plan (Shift+Tab → Build)'
+                : streaming
+                  ? 'Send to queue (Enter) · Ctrl+Enter interrupt…'
+                  : attachments.length
+                    ? 'Message (optional)…'
+                    : 'Message, /command, @file… (Shift+Tab Plan/Build)'
           }
           disabled={disabled}
           title={
@@ -1359,9 +1542,11 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           title={
             uploading
               ? 'Uploading…'
-              : streaming
-                ? 'Queue after current turn (right-click or Ctrl+Enter to interrupt)'
-                : 'Send'
+              : editingQueueId
+                ? 'Save edited text to the queue'
+                : streaming
+                  ? 'Queue after current turn (right-click or Ctrl+Enter to interrupt)'
+                  : 'Send'
           }
           aria-label="Send"
           className="flex items-center justify-center rounded-xl flex-shrink-0 transition-colors"

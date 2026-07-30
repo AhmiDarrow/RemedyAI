@@ -686,6 +686,7 @@ _PROVIDERS: dict[str, type[ProviderAdapter]] = {
     "groq": GroqProvider,
     "mistral": MistralProvider,
     "openrouter": OpenAIProvider,     # OpenRouter is OpenAI-compatible
+    "poe": OpenAIProvider,            # Poe OpenAI-compatible (api.poe.com/v1)
     "ollama": OpenAIProvider,         # Ollama is OpenAI-compatible
     "custom": OpenAIProvider,         # Unknown custom endpoints default to OpenAI-compatible
 }
@@ -715,6 +716,8 @@ def get_provider_for_base_url(base_url: str) -> ProviderAdapter:
         return get_provider("mistral")
     if "openrouter" in url_lower:
         return get_provider("openrouter")
+    if "api.poe.com" in url_lower or "poe.com" in url_lower:
+        return get_provider("poe")
     if "generativelanguage.googleapis.com" in url_lower or "googleapis.com" in url_lower:
         return get_provider("google")
     if "11434" in url_lower or "ollama" in url_lower:

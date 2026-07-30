@@ -35,6 +35,20 @@ class PlanStatusRequest(BaseModel):
     status: str = Field(..., description="draft | approved | active | done | cancelled")
 
 
+class PlanStepStatusRequest(BaseModel):
+    status: str = Field(
+        ..., description="pending | active | done | skipped"
+    )
+    step_id: str = Field(
+        default="",
+        description="Step id (s1), 1-based index, or title; optional if only plan_status",
+    )
+    plan_status: str = Field(
+        default="",
+        description="Optional plan-level status: draft|approved|active|done|cancelled",
+    )
+
+
 def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=None) -> None:
     _ = gateway
 
@@ -175,6 +189,31 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
         if plan is None:
             raise HTTPException(404, "Plan not found or invalid status")
         return {"plan": plan.to_dict(), "markdown": plan.summary_markdown()}
+
+    @app.post("/api/plans/{plan_id}/steps/status")
+    async def set_plan_step_status(plan_id: str, req: PlanStepStatusRequest):
+        """Update one plan step (and optionally plan-level status)."""
+        store = _plan_store()
+        plan = store.get(plan_id)
+        if plan is None:
+            raise HTTPException(404, "Plan not found")
+        step_id = (req.step_id or "").strip()
+        st = (req.status or "").strip().lower()
+        if not step_id:
+            raise HTTPException(400, "step_id is required")
+        if st not in ("pending", "active", "done", "skipped"):
+            raise HTTPException(
+                400, "status must be pending | active | done | skipped"
+            )
+        updated = store.update_step_status(plan_id, step_id, st)
+        if updated is None:
+            raise HTTPException(404, "Step not found or invalid status")
+        pst = (req.plan_status or "").strip().lower()
+        if pst in ("draft", "approved", "active", "done", "cancelled"):
+            bumped = store.set_status(updated.id, pst)
+            if bumped is not None:
+                updated = bumped
+        return {"plan": updated.to_dict(), "markdown": updated.summary_markdown()}
 
     @app.get("/api/checkpoints")
     async def list_checkpoints(session_id: str | None = None, limit: int = 20):
