@@ -72,6 +72,19 @@ def test_free_options_public_includes_demo_and_free_keys():
     assert demo["default_model"]
 
 
+def test_free_options_hides_demo_when_disabled(monkeypatch):
+    """Air-gapped / enterprise: REMEDY_DEMO_DISABLED must not offer guest demo."""
+    monkeypatch.setenv("REMEDY_DEMO_DISABLED", "1")
+    opts = free_options_public()
+    ids = {o["id"] for o in opts}
+    assert "demo" not in ids
+    assert "ollama" in ids
+    assert "google" in ids
+    monkeypatch.delenv("REMEDY_DEMO_DISABLED", raising=False)
+    opts2 = free_options_public()
+    assert "demo" in {o["id"] for o in opts2}
+
+
 def test_public_catalog_exposes_free_tier():
     items = public_provider_catalog()
     by_id = {i["id"]: i for i in items}
