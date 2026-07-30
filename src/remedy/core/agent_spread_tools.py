@@ -231,6 +231,16 @@ def register_spread_tools(runtime: Any) -> None:
         except Exception:
             pass
 
+        force_spread = bool(getattr(runtime, "_force_spread", False))
+        if not force_spread:
+            try:
+                from remedy.core.metabolism.governor import get_governor
+                from remedy.core.turn_context import turn_session_id
+
+                sid = str(turn_session_id(runtime) or getattr(runtime, "_session_id", "") or "")
+                force_spread = bool(get_governor(sid).force_spread)
+            except Exception:
+                pass
         plan = plan_spread(
             g,
             intent=intent,
@@ -238,6 +248,7 @@ def register_spread_tools(runtime: Any) -> None:
             # Local refine only here (opt-in tool path), never on every chat turn
             use_local=use_local,
             max_tasks=max_tasks,
+            force=force_spread,
         )
         if not plan.spread or len(plan.tasks) < 2:
             # Cheap single explore — do NOT fake 2-worker same-path fan-out
