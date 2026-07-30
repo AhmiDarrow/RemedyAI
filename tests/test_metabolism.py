@@ -557,6 +557,22 @@ def test_shadow_blocks_opaque_payload_shell():
     assert r2.blocked
 
 
+def test_machine_map_scrubs_url_userinfo():
+    reset_machine_map("map_scrub")
+    mm = get_machine_map("map_scrub")
+    mm.put(
+        "browser",
+        "tab1",
+        {"url": "https://bob:hunter2@example.com/app?session=xyz", "title": "App"},
+    )
+    pub = mm.get("browser", "tab1")
+    assert pub is not None
+    blob = json.dumps(pub.to_public())
+    assert "hunter2" not in blob
+    assert "session=xyz" not in blob
+    assert "example.com" in blob
+
+
 def test_governor_compress_earlier_flag():
     from remedy.core.metabolism.governor import get_governor, reset_governor
 

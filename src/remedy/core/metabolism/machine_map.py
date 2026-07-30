@@ -34,7 +34,24 @@ class MapSlice:
             and k.lower() not in ("password", "token", "cookie", "authorization")
         }
         if "url" in (self.data or {}):
-            safe["url"] = str(self.data.get("url") or "")[:500]
+            url = str(self.data.get("url") or "")[:500]
+            # Never expose userinfo credentials in map public views
+            try:
+                from remedy.core.metabolism.cua_macros import _sanitize_url
+
+                url = _sanitize_url(url)
+            except Exception:
+                if "?" in url:
+                    url = url.split("?", 1)[0]
+                if "@" in url and "://" in url:
+                    try:
+                        pre, rest = url.split("://", 1)
+                        if "@" in rest:
+                            rest = rest.split("@", 1)[1]
+                            url = f"{pre}://{rest}"
+                    except Exception:
+                        pass
+            safe["url"] = url[:500]
         if "title" in (self.data or {}):
             safe["title"] = str(self.data.get("title") or "")[:200]
         if "refs" in (self.data or {}) and isinstance(self.data["refs"], list):
@@ -70,7 +87,18 @@ class MachineMap:
         *,
         ttl_s: float = 30.0,
     ) -> MapSlice:
-        sl = MapSlice(kind=kind, key=key, data=dict(data or {}), ttl_s=ttl_s)
+        clean = dict(data or {})
+        # Scrub secrets at admit time so TTL cache never holds credentials
+        if "url" in clean and clean["url"]:
+            try:
+                from remedy.core.metabolism.cua_macros import _sanitize_url
+
+                clean["url"] = _sanitize_url(str(clean["url"]))
+            except Exception:
+                pass
+        for secret_k in ("password", "token", "cookie", "authorization", "api_key"):
+            clean.pop(secret_k, None)
+        sl = MapSlice(kind=kind, key=key, data=clean, ttl_s=ttl_s)
         with self._lock:
             self.slices[self._k(kind, key)] = sl
             # Cap
