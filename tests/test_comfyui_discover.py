@@ -66,6 +66,58 @@ def test_request_blocks_path_scheme_injection() -> None:
             "http://evil.example/",
             base="http://127.0.0.1:8188",
         )  # noqa: SLF001
+    with pytest.raises(RuntimeError, match="Invalid ComfyUI path"):
+        comfy._request(
+            "GET",
+            "/../secret",
+            base="http://127.0.0.1:8188",
+        )  # noqa: SLF001
+    with pytest.raises(RuntimeError, match="Invalid ComfyUI path"):
+        comfy._request(
+            "GET",
+            "/api/../admin",
+            base="http://127.0.0.1:8188",
+        )  # noqa: SLF001
+
+
+def test_request_does_not_follow_off_loopback_redirect() -> None:
+    """ComfyUI client must not chase Location to metadata/LAN."""
+    import http.server
+    import threading
+
+    class _H(http.server.BaseHTTPRequestHandler):
+        hits_meta = 0
+
+        def do_GET(self) -> None:  # noqa: N802
+            if self.path == "/system_stats":
+                self.send_response(302)
+                self.send_header("Location", "http://169.254.169.254/latest/meta-data")
+                self.end_headers()
+            else:
+                type(self).hits_meta += 1
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b"stolen")
+
+        def log_message(self, *_args: object) -> None:
+            return
+
+    httpd = http.server.HTTPServer(("127.0.0.1", 0), _H)
+    port = httpd.server_address[1]
+    thr = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thr.start()
+    try:
+        with pytest.raises(RuntimeError, match="HTTP 302"):
+            comfy._request(
+                "GET",
+                "/system_stats",
+                base=f"http://127.0.0.1:{port}",
+                timeout=2.0,
+            )  # noqa: SLF001
+        # Never reached a second request path (redirect body / follow)
+        assert _H.hits_meta == 0
+    finally:
+        httpd.shutdown()
 
 
 def test_discover_api_skips_non_loopback_resolved_base(

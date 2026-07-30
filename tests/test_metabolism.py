@@ -486,6 +486,38 @@ def test_time_crystal_facts_capped_and_hot_cache_rev():
     assert getattr(tc, "_rev", 0) >= 2
 
 
+def test_time_crystal_trim_prefers_durable_and_newest_session():
+    """Trim keeps life/project_week over old session; newest session admits survive."""
+    from remedy.core.metabolism.time_crystal import MAX_CRYSTAL_FACTS
+
+    reset_time_crystal("crystal_trim")
+    tc = get_time_crystal("crystal_trim")
+    # Seed durable facts first
+    durable_n = 20
+    for i in range(durable_n):
+        assert tc.admit(f"life durable preference {i} kept", horizon="life")
+    # Flood with session facts past the cap
+    for i in range(MAX_CRYSTAL_FACTS + 10):
+        assert tc.admit(f"ephemeral session note {i} churn", horizon="session")
+    assert len(tc.facts) <= MAX_CRYSTAL_FACTS
+    life_texts = {f.text for f in tc.facts if f.horizon == "life"}
+    # All durable seeds that fit policy must remain (20 << 128)
+    assert len(life_texts) == durable_n
+    # Newest session facts (tail of flood) should still be present
+    newest = f"ephemeral session note {MAX_CRYSTAL_FACTS + 9} churn"
+    assert any(f.text == newest for f in tc.facts)
+    # Oldest session flood head should have been dropped
+    oldest = "ephemeral session note 0 churn"
+    assert not any(f.text == oldest for f in tc.facts)
+    # Overflow of durable alone still caps
+    reset_time_crystal("crystal_life_overflow")
+    tc2 = get_time_crystal("crystal_life_overflow")
+    for i in range(MAX_CRYSTAL_FACTS + 25):
+        assert tc2.admit(f"life overflow pin {i} unique text", horizon="life")
+    assert len(tc2.facts) <= MAX_CRYSTAL_FACTS
+    assert all(f.horizon == "life" for f in tc2.facts)
+
+
 def test_skill_genome_phenotypes_capped():
     from remedy.core.metabolism.skill_genome import (
         MAX_PHENOTYPES,
@@ -506,6 +538,31 @@ def test_skill_genome_phenotypes_capped():
     assert "protected-skill" in g.phenotypes
     top = g.rank(5)
     assert isinstance(top, list)
+
+
+def test_skill_genome_prune_evicts_low_score_unprotected():
+    """Low-score churn drops first; multi-success protected stays under pressure."""
+    from remedy.core.metabolism.skill_genome import (
+        MAX_PHENOTYPES,
+        get_skill_genome,
+        reset_skill_genome,
+    )
+
+    reset_skill_genome()
+    g = get_skill_genome()
+    for _ in range(3):
+        g.record("keeper-skill", ok=True)
+    assert g.phenotypes["keeper-skill"].protected
+    # Fill to cap with failures (low score)
+    for i in range(MAX_PHENOTYPES):
+        g.record(f"fail-skill-{i}", ok=False)
+    assert len(g.phenotypes) <= MAX_PHENOTYPES
+    assert "keeper-skill" in g.phenotypes
+    # One more success skill should evict a fail-skill, not keeper
+    g.record("new-ok-skill", ok=True)
+    assert len(g.phenotypes) <= MAX_PHENOTYPES
+    assert "keeper-skill" in g.phenotypes
+    assert "new-ok-skill" in g.phenotypes
 
 
 def test_governor_decisions_capped():
