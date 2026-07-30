@@ -27,10 +27,7 @@ _PLAN_DONE = re.compile(
     r"mission (complete|done|verified)"
     r")\b"
 )
-_SECRET_LEAK = re.compile(
-    r"(?i)(api[_-]?key\s*[:=]\s*\S|password\s*[:=]\s*\S|"
-    r"sk-[a-z0-9]{10,}|xai-[a-z0-9]{10,}|bearer\s+[a-z0-9._-]{16,})"
-)
+
 
 
 @dataclass(frozen=True)
@@ -51,13 +48,15 @@ class VerifyResult:
 
 def should_verify_text(text: str) -> list[str]:
     """Return trigger kinds present in assistant or tool text."""
+    from remedy.core.metabolism.redact import looks_like_secret_text
+
     t = text or ""
     kinds: list[str] = []
     if _TESTS_GREEN.search(t) or _TESTS_FAIL.search(t):
         kinds.append("tests")
     if _PLAN_DONE.search(t):
         kinds.append("plan_done")
-    if _SECRET_LEAK.search(t):
+    if looks_like_secret_text(t):
         kinds.append("secret_risk")
     return kinds
 
@@ -69,11 +68,13 @@ def verify_critical(
     triggers: list[str] | None = None,
 ) -> VerifyResult:
     """Heuristic critical verify — no network, one voice remedies."""
+    from remedy.core.metabolism.redact import looks_like_secret_text
+
     tools = "\n".join(recent_tool_texts or [])
     blob = f"{assistant_text}\n{tools}"
     kinds = list(triggers or []) or should_verify_text(blob)
 
-    if "secret_risk" in kinds or _SECRET_LEAK.search(blob):
+    if "secret_risk" in kinds or looks_like_secret_text(blob):
         return VerifyResult(
             ok=False,
             kind="secret_risk",

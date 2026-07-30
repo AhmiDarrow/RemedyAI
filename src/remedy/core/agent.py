@@ -753,6 +753,21 @@ class BasicRuntime(AgentRuntime):
         self._turn_tool_steps = current_turn_tool_steps(self)
         self._streaming_sessions.add(sid_key)
         try:
+            # L0 local replies work without a provider key (version/whoami/skills/status)
+            if not plan_mode and not attachments:
+                with suppress(Exception):
+                    from remedy.core.metabolism.l0 import try_l0_system_reply
+                    from remedy.core.metabolism.tier import TurnTier, classify_turn_tier
+
+                    if (
+                        classify_turn_tier(message or "", tools_enabled=False)
+                        == TurnTier.L0_INSTANT
+                    ):
+                        l0 = try_l0_system_reply(self, message or "")
+                        if l0:
+                            yield l0
+                            return
+
             if not get_llm_binding(self).api_key:
                 yield (
                     "[LLM not connected — no API key. "

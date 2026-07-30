@@ -381,6 +381,21 @@ def test_shell_write_jail_blocks_encoded_and_archive(tmp_path: Path):
     assert block2 is not None
 
 
+def test_shell_write_jail_blocks_bare_ps_var_path(tmp_path: Path):
+    from remedy.core.shell_write_jail import check_shell_write_jail
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    block = check_shell_write_jail(
+        'Set-Content -Path $dest -Value "pwned"',
+        write_roots=[proj],
+        cwd=proj,
+        project_bound=True,
+    )
+    assert block is not None
+    assert "variable" in block.lower() or "cannot prove" in block.lower()
+
+
 def test_shell_write_jail_blocks_mutation_without_paths(tmp_path: Path):
     from remedy.core.shell_write_jail import check_shell_write_jail
 
