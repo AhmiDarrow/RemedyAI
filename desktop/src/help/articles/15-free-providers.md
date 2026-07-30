@@ -19,8 +19,6 @@ Paid providers (OpenAI, Anthropic, xAI, DeepSeek, …) sit in the main **Provide
 - Provider id: `demo`
 - Uses a free third-party OpenAI-compatible gateway (LLM7).
 - **No real API key** — Remedy sends a dummy bearer.
-- **Curated chat models only** (Codestral, Gemini Flash Lite, GPT-OSS 20B).  
-  The gateway’s full `/models` list (image/video, promo names, DeepSeek, …) is **not** shown — most of those need a real key or do not support chat.
 - Rate limits and quality vary; not for production agent work.
 - **Privacy:** prompts leave your PC. Prefer Ollama for private use.
 - Disable guest fallback: set env `REMEDY_DEMO_DISABLED=1`.
