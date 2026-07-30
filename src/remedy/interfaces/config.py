@@ -777,11 +777,17 @@ def normalize_llm_settings(
 
     # Flexible providers can host any model id (Ollama pulls deepseek-*, etc.).
     # Poe hosts many labs' bots under Poe bot names (not closed native catalogs).
-    _FLEXIBLE = frozenset({"openrouter", "custom", "ollama", "demo", "poe"})
+    # Demo is *not* flexible — guest gateway junk (image/video/foreign) is clamped
+    # to the curated allowlist so free-setup never silently hits blocked models.
+    _FLEXIBLE = frozenset({"openrouter", "custom", "ollama", "poe"})
 
     model_owner = infer_provider_from_model(mid)
-    if model_owner and model_owner != prov and prov not in _FLEXIBLE:
+    if model_owner and model_owner != prov and prov not in _FLEXIBLE and prov != "demo":
         mid = default_model
+    elif prov == "demo" and default_models:
+        known = {m["id"] for m in default_models}
+        if mid not in known:
+            mid = default_model
     elif prov in PROVIDER_CATALOG and default_models and prov not in _FLEXIBLE:
         known = {m["id"] for m in default_models}
         if not mid:
@@ -836,7 +842,17 @@ def validate_provider_model(provider: str | None, model: str | None) -> str:
     mid = (model or "").strip()
     if not mid:
         raise ValueError("Model id is required")
-    _FLEXIBLE = frozenset({"openrouter", "custom", "ollama", "demo", "poe"})
+    # Demo uses a hard curated allowlist (same as catalog route filter).
+    if prov == "demo":
+        catalog = PROVIDER_CATALOG.get("demo") or {}
+        known = {m["id"] for m in (catalog.get("models") or [])}
+        if mid in known:
+            return mid
+        sample = ", ".join(sorted(known)[:8]) or "(none)"
+        raise ValueError(
+            f"Unknown demo model {mid!r}. Guest free chat allows: {sample}."
+        )
+    _FLEXIBLE = frozenset({"openrouter", "custom", "ollama", "poe"})
     if prov in _FLEXIBLE or prov not in PROVIDER_CATALOG:
         return mid
     # Apply legacy aliases first

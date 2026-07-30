@@ -12,9 +12,13 @@ import {
   detachStreamJob,
   getBusySessionIds,
   getJobPaint,
+  getStreamJob,
+  isJobUiCommitted,
+  markJobUiCommitted,
   registerStreamJob,
   setJobProcessSteps,
   stopStreamJob,
+  withStoppedMarker,
 } from './streamJobs'
 
 describe('streamJobs', () => {
@@ -86,5 +90,22 @@ describe('streamJobs', () => {
     expect(paintB?.processSteps).toHaveLength(0)
     completeStreamJob('tab-a', 'done')
     completeStreamJob('tab-b', 'done')
+  })
+
+  it('abort UX: Stopped marker + uiCommitted double-commit guard', async () => {
+    expect(withStoppedMarker('Hello world')).toContain('_[Stopped]_')
+    expect(withStoppedMarker('done\n\n_[Stopped]_')).toBe('done\n\n_[Stopped]_')
+    expect(withStoppedMarker('')).toBe('_[Stopped]_')
+
+    const c = new AbortController()
+    registerStreamJob('abort-ux', c)
+    appendJobToken('abort-ux', 'Partial answer')
+    markJobUiCommitted('abort-ux')
+    expect(isJobUiCommitted('abort-ux')).toBe(true)
+    await stopStreamJob('abort-ux')
+    expect(getStreamJob('abort-ux')?.status).toBe('aborted')
+    // Late finishOk as done must not revive
+    completeStreamJob('abort-ux', 'done')
+    expect(getStreamJob('abort-ux')?.status).toBe('aborted')
   })
 })
