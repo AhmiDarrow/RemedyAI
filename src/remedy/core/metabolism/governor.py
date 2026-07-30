@@ -139,9 +139,10 @@ class QualityGovernor:
             )
         return "\n".join(notes)
 
-    def snapshot(self) -> dict[str, Any]:
+    def snapshot(self, *, lean: bool = False) -> dict[str, Any]:
+        """Public flags + last actions. *lean* skips recent decision list."""
         with self._lock:
-            return {
+            out: dict[str, Any] = {
                 "session_id": self.session_id,
                 "loop_count": self.loop_count,
                 "last_actions": list(self.last_actions),
@@ -149,8 +150,10 @@ class QualityGovernor:
                 "force_spread": self.force_spread,
                 "shadow_strict": self.shadow_strict,
                 "verify_next": self.verify_next,
-                "recent": [d.to_public() for d in self.decisions[-6:]],
             }
+            if not lean:
+                out["recent"] = [d.to_public() for d in self.decisions[-6:]]
+            return out
 
 
 _govs: dict[str, QualityGovernor] = {}

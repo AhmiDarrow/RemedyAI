@@ -176,19 +176,22 @@ class TimeCrystal:
             self._hot_cache = (cache_key, out)
             return out
 
-    def snapshot(self) -> dict[str, Any]:
+    def snapshot(self, *, lean: bool = False) -> dict[str, Any]:
+        """Horizon counts. *lean* skips recent fact list copy."""
         with self._lock:
             by_h = {h: 0 for h in HORIZONS}
             for f in self.facts:
                 by_h[f.horizon] = by_h.get(f.horizon, 0) + 1
-            return {
+            out: dict[str, Any] = {
                 "session_id": self.session_id,
                 "project_id": self.project_id,
                 "counts": by_h,
                 "promotions": self.promotions,
                 "blocked_secret": self.blocked_secret,
-                "recent": [f.to_public() for f in self.facts[-10:]],
             }
+            if not lean:
+                out["recent"] = [f.to_public() for f in self.facts[-10:]]
+            return out
 
     def export_durable(self) -> list[dict[str, Any]]:
         """Life + project_week only for portable identity."""

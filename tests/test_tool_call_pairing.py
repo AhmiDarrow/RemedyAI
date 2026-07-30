@@ -80,6 +80,71 @@ def test_ensure_tool_call_pairings_drops_orphan_tool_messages():
     assert [m["role"] for m in fixed] == ["user", "assistant"]
 
 
+def test_ensure_tool_call_pairings_lookahead_across_epoch_inject():
+    """Epoch/re-arm user inject between tool results must not orphan a result."""
+    messages = [
+        {"role": "user", "content": "review project"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "call_a",
+                    "type": "function",
+                    "function": {"name": "list_dir", "arguments": "{}"},
+                },
+                {
+                    "id": "call_b",
+                    "type": "function",
+                    "function": {"name": "file_read", "arguments": '{"path":"x"}'},
+                },
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_a", "content": "dir ok"},
+        # Soft-epoch inject landed between results (multi-step thrash).
+        {
+            "role": "user",
+            "content": "Keep going until the user request is finished.",
+        },
+        {"role": "tool", "tool_call_id": "call_b", "content": "file ok"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "call_c",
+                    "type": "function",
+                    "function": {"name": "file_edit", "arguments": "{}"},
+                },
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_c", "content": "edited"},
+    ]
+    fixed = ensure_tool_call_pairings(messages)
+    # call_a + call_b must sit immediately after the first assistant tool_calls
+    # (before the epoch inject), so OpenAI pairing stays valid.
+    roles = [m.get("role") for m in fixed]
+    first_asst = next(
+        i for i, m in enumerate(fixed) if m.get("role") == "assistant" and m.get("tool_calls")
+    )
+    assert fixed[first_asst + 1]["role"] == "tool"
+    assert fixed[first_asst + 1]["tool_call_id"] == "call_a"
+    assert fixed[first_asst + 2]["role"] == "tool"
+    assert fixed[first_asst + 2]["tool_call_id"] == "call_b"
+    # Epoch inject preserved after the pair, not between tools
+    assert fixed[first_asst + 3]["role"] == "user"
+    assert "Keep going" in (fixed[first_asst + 3].get("content") or "")
+    # Second assistant turn still pairs
+    assert "call_c" in {
+        m["tool_call_id"] for m in fixed if m.get("role") == "tool"
+    }
+    assert roles.count("tool") == 3
+    # No synthetic missing-result stubs for call_b
+    for m in fixed:
+        if m.get("tool_call_id") == "call_b":
+            assert "missing tool result" not in (m.get("content") or "")
+
+
 @pytest.mark.asyncio
 async def test_execute_tool_calls_emits_result_for_every_id_beyond_parallel_cap():
     """Cap must limit concurrency, not drop tool results (HTTP 400 root cause)."""

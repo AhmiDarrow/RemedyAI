@@ -367,7 +367,8 @@ async def handle_slash_command(
                 with contextlib.suppress(Exception):
                     from remedy.core.metabolism.turn import metabolism_public_snapshot
 
-                    msnap = metabolism_public_snapshot(str(sid or ""))
+                    # Lean: last_actions are still present; skip recent/list thrash
+                    msnap = metabolism_public_snapshot(str(sid or ""), lean=True)
                     gov = (msnap.get("governor") or {}).get("last_actions") or []
                     if gov:
                         quality_line += f"\nGovernor last: {', '.join(gov[:8])}"
