@@ -27,11 +27,20 @@ class ComputerExecutor:
     def __init__(self, home_dir: Path | str | None = None) -> None:
         self.home_dir = home_dir
         self.bridge = get_host_bridge(home_dir)
+        # Bound for the current run() so browser enqueue/cancel are session-scoped.
+        self._active_session_id: str | None = None
 
     def _session_id(self, runtime: Any | None) -> str | None:
-        if runtime is None:
+        if runtime is not None:
+            raw = str(getattr(runtime, "_session_id", None) or "").strip()
+            if raw:
+                return raw
+        try:
+            from remedy.core.turn_context import current_session_id
+
+            return current_session_id()
+        except Exception:
             return None
-        return str(getattr(runtime, "_session_id", None) or "") or None
 
     def _abort_check(self) -> bool:
         try:
@@ -40,6 +49,21 @@ class ComputerExecutor:
             return bool(is_turn_aborted())
         except Exception:
             return False
+
+    def _cancel_open_jobs(self, reason: str = "aborted") -> int:
+        """Cancel open host jobs for this turn's session only (multi-tab safe)."""
+        return self.bridge.cancel_pending_and_running(
+            reason=reason,
+            session_id=self._active_session_id,
+        )
+
+    def _enqueue(self, action: str, payload: dict[str, Any] | None = None) -> Any:
+        """Enqueue a host job stamped with the active session id."""
+        pl = dict(payload or {})
+        sid = self._active_session_id
+        if sid:
+            pl.setdefault("session_id", sid)
+        return self.bridge.enqueue(action, pl, session_id=sid)
 
     def run(
         self,
@@ -54,6 +78,7 @@ class ComputerExecutor:
             if isinstance(action, ComputerAction)
             else ComputerAction(str(action).lower())
         )
+        self._active_session_id = self._session_id(runtime)
         url = kwargs.get("url")
         hint = kwargs.get("hint") or kwargs.get("reason") or ""
         # Ref-based click is browser a11y — force browser unless user set desktop
@@ -115,7 +140,7 @@ class ComputerExecutor:
         )
         try:
             if self._abort_check():
-                self.bridge.cancel_pending_and_running(reason="aborted")
+                self._cancel_open_jobs(reason="aborted")
                 return json.dumps(
                     public_result(
                         ok=False,
@@ -132,7 +157,7 @@ class ComputerExecutor:
 
             # If Stop fired mid-action, surface abort even if partial work finished
             if self._abort_check():
-                self.bridge.cancel_pending_and_running(reason="aborted")
+                self._cancel_open_jobs(reason="aborted")
                 result = public_result(
                     ok=False,
                     target=host_label(tgt),
@@ -551,7 +576,7 @@ class ComputerExecutor:
             slept = self.bridge.settle_after_navigate(min_s=0.6, max_s=1.2)
             # Best-effort ready probe via host job (ignore failures).
             try:
-                ready_job = self.bridge.enqueue("ready", {"action": "ready"})
+                ready_job = self._enqueue("ready", {"action": "ready"})
                 ready_fin = self.bridge.wait(
                     ready_job.id,
                     timeout_s=0.45,
@@ -711,7 +736,7 @@ class ComputerExecutor:
             query = str(kwargs.get("hint") or kwargs.get("query") or "").strip()
             unclaimed = 2.0
             total_wait = float(kwargs.get("timeout_s") or 4.0)
-            job = self.bridge.enqueue(act.value, payload)
+            job = self._enqueue(act.value, payload)
             finished = self.bridge.wait(
                 job.id,
                 timeout_s=total_wait,
@@ -764,7 +789,7 @@ class ComputerExecutor:
 
         unclaimed = 3.0
         total_wait = float(kwargs.get("timeout_s") or 12.0)
-        job = self.bridge.enqueue(act.value, payload)
+        job = self._enqueue(act.value, payload)
         finished = self.bridge.wait(
             job.id,
             timeout_s=total_wait,
@@ -795,7 +820,7 @@ class ComputerExecutor:
     def _browser_snapshot_now(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         self.bridge.settle_after_navigate(min_s=0.35, max_s=0.9)
         payload: dict[str, Any] = {"ui": {"open_browser": True}}
-        job = self.bridge.enqueue("snapshot", payload)
+        job = self._enqueue("snapshot", payload)
         finished = self.bridge.wait(
             job.id,
             timeout_s=4.0,
@@ -833,7 +858,7 @@ class ComputerExecutor:
                 "text": text_q,
                 "click_text": True,
             }
-            job = self.bridge.enqueue("click", payload)
+            job = self._enqueue("click", payload)
             finished = self.bridge.wait(
                 job.id,
                 timeout_s=5.0,
@@ -858,7 +883,7 @@ class ComputerExecutor:
                 last_err = finished.error or finished.status or "timeout"
             # Retry: scroll down then try again
             if attempt == 0:
-                self.bridge.enqueue(
+                self._enqueue(
                     "scroll",
                     {"ui": {"open_browser": True}, "x": 200, "y": 300, "dy": -4},
                 )
@@ -876,7 +901,7 @@ class ComputerExecutor:
                     "x": el.get("x"),
                     "y": el.get("y"),
                 }
-                job2 = self.bridge.enqueue("click", payload2)
+                job2 = self._enqueue("click", payload2)
                 fin2 = self.bridge.wait(
                     job2.id,
                     timeout_s=4.0,
@@ -966,7 +991,7 @@ class ComputerExecutor:
                     if pre.get("ok"):
                         log.append(f"focus:{label}")
                         break
-            job = self.bridge.enqueue(
+            job = self._enqueue(
                 "type",
                 {"ui": {"open_browser": True}, "text": type_text},
             )
@@ -990,7 +1015,7 @@ class ComputerExecutor:
                 )
 
         if key:
-            job = self.bridge.enqueue(
+            job = self._enqueue(
                 "key",
                 {"ui": {"open_browser": True}, "key": key},
             )
@@ -1014,7 +1039,7 @@ class ComputerExecutor:
 
     def _browser_page_text(self) -> dict[str, Any]:
         self.bridge.settle_after_navigate(min_s=0.3, max_s=0.8)
-        job = self.bridge.enqueue(
+        job = self._enqueue(
             "click",
             {"ui": {"open_browser": True}, "browser_action": "page_text"},
         )
@@ -1073,7 +1098,7 @@ class ComputerExecutor:
             r["target"] = "desktop"
             return r
 
-        job = self.bridge.enqueue("navigate", payload)
+        job = self._enqueue("navigate", payload)
         # Host usually completes in <200ms once poller is hot
         finished = self.bridge.wait(
             job.id,

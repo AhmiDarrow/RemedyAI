@@ -247,21 +247,26 @@ class ComputerJob:
     error: str | None = None
     created_at: str = field(default_factory=_now)
     updated_at: str = field(default_factory=_now)
+    # Owning chat session (multi-tab abort must not cancel sibling tabs' jobs).
+    session_id: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> ComputerJob:
+        pl = dict(raw.get("payload") or {})
+        sid = str(raw.get("session_id") or pl.get("session_id") or "").strip()
         return cls(
             id=str(raw.get("id") or ""),
             action=str(raw.get("action") or ""),
-            payload=dict(raw.get("payload") or {}),
+            payload=pl,
             status=str(raw.get("status") or "pending"),
             result=raw.get("result") if isinstance(raw.get("result"), dict) else None,
             error=raw.get("error"),
             created_at=str(raw.get("created_at") or _now()),
             updated_at=str(raw.get("updated_at") or _now()),
+            session_id=sid,
         )
 
 
@@ -500,18 +505,28 @@ class ComputerHostBridge:
                 pass
             return cmd
 
-    def enqueue(self, action: str, payload: dict[str, Any] | None = None) -> ComputerJob:
+    def enqueue(
+        self,
+        action: str,
+        payload: dict[str, Any] | None = None,
+        *,
+        session_id: str | None = None,
+    ) -> ComputerJob:
+        pl = dict(payload or {})
+        sid = str(session_id or pl.get("session_id") or "").strip()
+        if sid:
+            pl.setdefault("session_id", sid)
         job = ComputerJob(
             # Full uuid hex (128-bit) — do not truncate (a11y/job spoof surface).
             id=uuid.uuid4().hex,
             action=action,
-            payload=dict(payload or {}),
+            payload=pl,
             status="pending",
+            session_id=sid,
         )
         with self._lock:
             self._write(job)
         # Always request rail open for browser actions (Desktop pops panel like Settings)
-        pl = dict(payload or {})
         ui = pl.get("ui") if isinstance(pl.get("ui"), dict) else {}
         if action in ("navigate", "snapshot", "click", "type", "screenshot") or ui.get(
             "open_browser"
@@ -660,8 +675,20 @@ class ComputerHostBridge:
             self._write(job)
             return job
 
-    def cancel_pending_and_running(self, *, reason: str = "aborted") -> int:
-        """Cancel all open jobs (Stop generation). Returns count cancelled."""
+    def cancel_pending_and_running(
+        self,
+        *,
+        reason: str = "aborted",
+        session_id: str | None = None,
+    ) -> int:
+        """Cancel open jobs (Stop generation). Returns count cancelled.
+
+        When *session_id* is set, only jobs stamped with that session are
+        cancelled so multi-tab concurrent streams do not clobber each other.
+        Untagged legacy jobs (empty session_id) are cancelled only when
+        *session_id* is omitted (global abort).
+        """
+        want = str(session_id or "").strip()
         n = 0
         with self._lock:
             for path in list(self.root.glob("*.json")):
@@ -672,12 +699,19 @@ class ComputerHostBridge:
                 if not isinstance(raw, dict):
                     continue
                 job = ComputerJob.from_dict(raw)
-                if job.status in ("pending", "running"):
-                    job.status = "cancelled"
-                    job.error = _scrub_job_error(reason) or "aborted"
-                    job.payload = _scrub_retained_payload(job.payload)
-                    self._write(job)
-                    n += 1
+                if job.status not in ("pending", "running"):
+                    continue
+                if want:
+                    job_sid = str(
+                        job.session_id or (job.payload or {}).get("session_id") or ""
+                    ).strip()
+                    if job_sid != want:
+                        continue
+                job.status = "cancelled"
+                job.error = _scrub_job_error(reason) or "aborted"
+                job.payload = _scrub_retained_payload(job.payload)
+                self._write(job)
+                n += 1
         return n
 
     def complete_a11y_push(
@@ -888,7 +922,8 @@ class ComputerHostBridge:
         """Delete finished job files older than *max_age_s* (default 15 minutes).
 
         Open work (pending/running) is never deleted — only terminal jobs and
-        unreadable/corrupt JSON files past the age cutoff.
+        unreadable/corrupt JSON files past the age cutoff. Also purges aged
+        desktop/browser screenshots under ``computer/shots/`` (S-COMP-02).
         """
         cutoff = time.time() - max_age_s
         n = 0
@@ -912,6 +947,48 @@ class ComputerHostBridge:
                 n += 1
             except OSError:
                 continue
+        n += self.purge_old_shots(max_age_s=max_age_s)
+        return n
+
+    def purge_old_shots(self, *, max_age_s: float = 900.0) -> int:
+        """Delete PNG/JPEG screenshots under computer/shots older than *max_age_s*.
+
+        Screenshots are high-sensitivity (full desktop/page). Jobs already TTL
+        via purge_old; shots used to accumulate indefinitely.
+        """
+        home = canonical_home(self.home_dir)
+        shots = home / "computer" / "shots"
+        # Also clean default ~/.remedy/computer/shots when home_dir is custom
+        roots = [shots]
+        default_shots = (Path.home() / ".remedy" / "computer" / "shots").resolve()
+        try:
+            if default_shots != shots.resolve():
+                roots.append(default_shots)
+        except OSError:
+            roots.append(default_shots)
+        cutoff = time.time() - float(max_age_s)
+        n = 0
+        for root in roots:
+            if not root.is_dir():
+                continue
+            for path in list(root.iterdir()):
+                try:
+                    if not path.is_file():
+                        continue
+                    if path.suffix.lower() not in (
+                        ".png",
+                        ".jpg",
+                        ".jpeg",
+                        ".webp",
+                        ".bmp",
+                    ):
+                        continue
+                    if path.stat().st_mtime >= cutoff:
+                        continue
+                    path.unlink(missing_ok=True)
+                    n += 1
+                except OSError:
+                    continue
         return n
 
 

@@ -162,6 +162,146 @@ async def test_full_reset_wipes_context_keeps_session(store: MemoryStore, tmp_pa
 
 
 @pytest.mark.asyncio
+async def test_purge_session_disk_artifacts_cascade(tmp_path: Path):
+    """Session delete/reset must wipe attachments, plans, checkpoints, undo."""
+    from remedy.core.session_reset import purge_session_disk_artifacts
+    from remedy.core.time_travel import SessionUndoLog
+
+    sid = str(uuid4())
+    home = tmp_path / "home"
+    home.mkdir()
+    # Attachment
+    att = home / "attachments" / sid.replace(":", "_")[:80]
+    att.mkdir(parents=True)
+    (att / "secret.png").write_bytes(b"\x89PNG")
+    # Plan
+    plans = home / "plans"
+    plans.mkdir(parents=True)
+    plans.joinpath("plandrop1.json").write_text(
+        json.dumps(
+            {
+                "id": "plandrop1",
+                "title": "T",
+                "goal": "G",
+                "session_id": sid,
+                "status": "draft",
+                "steps": [],
+                "risks": [],
+                "created_at": datetime.now(UTC).isoformat(),
+                "updated_at": datetime.now(UTC).isoformat(),
+            }
+        ),
+        encoding="utf-8",
+    )
+    # Undo body (prior file content)
+    undo = SessionUndoLog(home)
+    undo.record_file_write(
+        session_id=sid,
+        path=str(tmp_path / "work" / "f.py"),
+        previous_content="SECRET_PREV=1\n",
+        existed=True,
+        new_size=10,
+    )
+    assert undo._path(sid).is_file()
+
+    stats = purge_session_disk_artifacts(sid, home)
+    assert stats["attachments_purged"] is True
+    assert stats["plans"] >= 1
+    assert stats["undo_purged"] is True
+    assert not att.is_dir() or not any(att.iterdir())
+    assert not (plans / "plandrop1.json").is_file()
+    assert not undo._path(sid).is_file()
+
+
+@pytest.mark.asyncio
+async def test_full_reset_also_purges_undo(store: MemoryStore, tmp_path: Path):
+    from remedy.core.time_travel import SessionUndoLog
+
+    sid = str(uuid4())
+    home = tmp_path / "home"
+    home.mkdir()
+    await store.create_chat_session(
+        ChatSession(
+            id=sid,
+            title="Undo me",
+            message_count=0,
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+    )
+    SessionUndoLog(home).record_file_write(
+        session_id=sid,
+        path=str(tmp_path / "x.py"),
+        previous_content="before",
+        existed=True,
+        new_size=4,
+    )
+    stats = await full_reset_session(sid, store, home_dir=home)
+    assert stats["ok"] is True
+    assert stats.get("undo_purged") is True
+    assert not SessionUndoLog(home)._path(sid).is_file()
+
+
+@pytest.mark.asyncio
+async def test_delete_session_api_cascades_disk(
+    store: MemoryStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """DELETE /api/sessions/{id} removes attachments + undo, not only DB rows."""
+    from fastapi.testclient import TestClient
+
+    from remedy.core.time_travel import SessionUndoLog
+    from remedy.interfaces.api import create_app
+    from remedy.interfaces.attachments import save_upload
+
+    sid = str(uuid4())
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("REMEDY_API_AUTH", "0")
+    # Point config home at tmp so cascade uses our tree
+    monkeypatch.setattr(
+        "remedy.interfaces.routes.sessions.load_config",
+        lambda: {"home_dir": str(home)},
+    )
+    await store.create_chat_session(
+        ChatSession(
+            id=sid,
+            title="Delete me",
+            message_count=0,
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+    )
+    meta = save_upload(
+        session_id=sid,
+        filename="leaked.txt",
+        data=b"sensitive-upload",
+        content_type="text/plain",
+        home_dir=home,
+    )
+    assert Path(meta["path"]).is_file()
+    SessionUndoLog(home).record_file_write(
+        session_id=sid,
+        path=str(tmp_path / "y.py"),
+        previous_content="undo-body",
+        existed=True,
+        new_size=4,
+    )
+
+    app = create_app(runtime=None, memory=store, api_key="")
+    with TestClient(app) as client:
+        r = client.delete(f"/api/sessions/{sid}")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "deleted"
+    cascade = body.get("cascade") or {}
+    assert cascade.get("attachments_purged") is True
+    assert cascade.get("undo_purged") is True
+    assert not Path(meta["path"]).is_file()
+    assert not SessionUndoLog(home)._path(sid).is_file()
+    assert await store.get_chat_session(sid) is None
+
+
+@pytest.mark.asyncio
 async def test_slash_reset_stays_on_session(store: MemoryStore):
     sid = str(uuid4())
     await store.create_chat_session(
