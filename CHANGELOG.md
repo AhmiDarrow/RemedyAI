@@ -6,6 +6,10 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ### Gauntlet: continuous security + perf loop (feature/computer-use)
 
+- **Skill auto-suggest:** `review project` (and review/coding/ship phrasing) re-ranks the catalog and injects preferred procedure (`change-safety` / `project-etiquette` / `refactor-safe`) into context without waiting for `skill_activate`
+- **send_policy dual work:** `begin_turn_metabolism(pre_tier=)` reuses send_policy tier (no second classify walk); autonomous still re-classifies to L3
+- **Desktop ErrorBoundary:** Continue (re-mount), Reload, Copy error, component stack — not a dead blank window
+- **Agency re-arm:** content-path "Activating skill now" re-arms tools; L2 covers security audit, list files, skill activate phrasing
 - **open_app hardening:** refuse URL/protocol handlers (`file:`, `javascript:`, `ms-msdt:`, `http(s):`, …), UNC shares, and shell metacharacters before `cmd start`; only existing files / PATH / simple names; `ms-settings:` only via the `settings` alias; `looks_like_url` no longer treats `file:`/`javascript:` as navigate URLs
 - **L2 agency accuracy:** git/VCS verbs, package install/sync, start/stop server, `what files are here`, `find where … defined`, `tail`/`head` logs, CUA scroll/type-into, add unit test / update changelog / bump version — no longer collapse to L1 (tools stripped)
 - **Project scan jail:** `/api/projects/scan` resolves under access-scope roots and refuses `auth/**` (was unrestricted absolute-path recon)
