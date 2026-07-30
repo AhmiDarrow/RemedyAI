@@ -140,6 +140,32 @@ async def test_run_spread_blocks_nesting():
         runner_mod._spread_depth.reset(token)
 
 
+@pytest.mark.asyncio
+async def test_run_spread_redacts_secrets_in_worker_summary():
+    """Worker digests must not pass API keys through to the parent model."""
+    import remedy.core.spread.runner as runner_mod
+
+    runtime = MagicMock()
+    secret = "sk-abcdefghijklmnopqrstuvwxyz0123"
+    tasks = [SpreadTask(id="a", kind="explore", path=".", goal="x")]
+
+    original = runner_mod._job
+
+    async def leaky(runtime, kind, **kwargs):
+        return f"found api_key={secret} in config", True, {"note": f"token={secret}"}
+
+    runner_mod._job = leaky  # type: ignore[assignment]
+    try:
+        result = await run_spread(runtime, tasks, max_workers=1, reason="redact")
+    finally:
+        runner_mod._job = original  # type: ignore[assignment]
+
+    assert result.ok
+    blob = result.merged_summary + str(result.results[0].summary)
+    assert secret not in blob
+    assert "[redacted]" in blob
+
+
 def test_parse_tasks_arg_accepts_native_list():
     """Models pass tasks as a JSON array via tool_calls — must not .strip() a list."""
     from remedy.core.agent_spread_tools import _parse_tasks_arg

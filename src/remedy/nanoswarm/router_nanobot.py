@@ -64,7 +64,13 @@ class RouterNanobot:
             r"run|execute|bash|shell|npm|pip|uv |cargo |git |"
             r"implement|refactor|debug|fix (the |this )?(bug|error|build)|"
             r"create (a )?file|edit (the )?file|write (a )?(test|script)|"
-            r"open (the )?pr|commit |push |pull request"
+            r"open (the )?pr|commit |push |pull request|"
+            # Computer-use / browse — must not stay "chat" (tools stripped on L1)
+            r"computer_|navigate to|browse |goto |go to |"
+            r"open (https?://|gmail|google|github|youtube|outlook|slack)|"
+            r"screenshot|click (the |on )|type into|"
+            r"list_dir|repo_search|file_read|file_edit|spread_run|"
+            r"search (the )?(codebase|repo|project)"
             r")\b",
             text,
         ):

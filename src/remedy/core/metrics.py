@@ -88,24 +88,27 @@ class MetricsRegistry:
         self._lock = threading.Lock()
 
     def counter(self, name: str, **labels: str) -> Counter:
-        key = _key(name, labels)
+        safe = _sanitize_labels(labels)
+        key = _key(name, safe)
         with self._lock:
             if key not in self._counters:
-                self._counters[key] = Counter(name=name, labels=labels)
+                self._counters[key] = Counter(name=name, labels=safe)
             return self._counters[key]
 
     def gauge(self, name: str, **labels: str) -> Gauge:
-        key = _key(name, labels)
+        safe = _sanitize_labels(labels)
+        key = _key(name, safe)
         with self._lock:
             if key not in self._gauges:
-                self._gauges[key] = Gauge(name=name, labels=labels)
+                self._gauges[key] = Gauge(name=name, labels=safe)
             return self._gauges[key]
 
     def histogram(self, name: str, **labels: str) -> Histogram:
-        key = _key(name, labels)
+        safe = _sanitize_labels(labels)
+        key = _key(name, safe)
         with self._lock:
             if key not in self._histograms:
-                self._histograms[key] = Histogram(name=name, labels=labels)
+                self._histograms[key] = Histogram(name=name, labels=safe)
             return self._histograms[key]
 
     def snapshot(self) -> dict:
@@ -213,6 +216,34 @@ def _prom_escape(value: str) -> str:
     )
 
 
+_LABEL_MAX = 64
+
+
+def _sanitize_label_value(value: Any) -> str:
+    """Cap length and redact secret-shaped label values (metrics must not leak keys)."""
+    s = str(value if value is not None else "")
+    if not s:
+        return ""
+    if len(s) > _LABEL_MAX:
+        s = s[: _LABEL_MAX - 1] + "…"
+    try:
+        from remedy.core.metabolism.redact import looks_like_secret_text, redact_text
+
+        if looks_like_secret_text(s):
+            return "[redacted]"
+        red = redact_text(s)
+        return red if red else s
+    except Exception:
+        # Fail closed for long opaque tokens
+        if len(s) >= 24 and any(c.isdigit() for c in s) and any(c.isalpha() for c in s):
+            return "[redacted]"
+        return s[:_LABEL_MAX]
+
+
+def _sanitize_labels(labels: dict[str, str]) -> dict[str, str]:
+    return {str(k)[:32]: _sanitize_label_value(v) for k, v in labels.items()}
+
+
 def _key(name: str, labels: dict[str, str]) -> str:
     if not labels:
         return name
@@ -242,9 +273,15 @@ class HealthChecker:
                 import asyncio as aio
                 if aio.iscoroutine(result):
                     result = await result
-                results[name] = {"status": "ok", "detail": result}
+                results[name] = {
+                    "status": "ok",
+                    "detail": _sanitize_health_detail(result),
+                }
             except Exception as e:
-                results[name] = {"status": "unhealthy", "error": str(e)}
+                results[name] = {
+                    "status": "unhealthy",
+                    "error": _sanitize_label_value(str(e))[:500],
+                }
                 healthy = False
 
         uptime = (datetime.now(UTC) - self._started_at).total_seconds()
@@ -255,6 +292,24 @@ class HealthChecker:
             "checks": results,
             "checked_at": datetime.now(UTC).isoformat(),
         }
+
+
+def _sanitize_health_detail(detail: Any) -> Any:
+    """Redact secrets from health-check payloads before /api/metrics exposure."""
+    try:
+        from remedy.core.metabolism.redact import redact_obj, redact_text
+
+        if isinstance(detail, str):
+            return redact_text(detail)[:800]
+        if isinstance(detail, (dict, list)):
+            return redact_obj(detail)
+        if isinstance(detail, (int, float, bool)) or detail is None:
+            return detail
+        return redact_text(str(detail))[:800]
+    except Exception:
+        if isinstance(detail, (int, float, bool)) or detail is None:
+            return detail
+        return "[redacted]"
 
 
 # Process-wide registry for agent / API instrumentation.

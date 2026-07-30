@@ -596,10 +596,21 @@ FREE_PROVIDER_OPTIONS: list[dict[str, Any]] = [
 
 
 def free_options_public() -> list[dict[str, Any]]:
-    """Public free-options list for desktop Setup/Settings."""
+    """Public free-options list for desktop Setup/Settings.
+
+    Hides the guest demo entry when ``REMEDY_DEMO_DISABLED`` is set so air-gapped
+    / enterprise builds never offer a third-party gateway path that cannot run.
+    """
+    demo_disabled = os.environ.get("REMEDY_DEMO_DISABLED", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
     out: list[dict[str, Any]] = []
     for item in FREE_PROVIDER_OPTIONS:
         pid = str(item["id"])
+        if pid == "demo" and demo_disabled:
+            continue
         meta = PROVIDER_CATALOG.get(pid) or {}
         models = list(meta.get("models") or [])
         out.append(

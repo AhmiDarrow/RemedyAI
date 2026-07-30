@@ -165,6 +165,22 @@ async def _run_one(runtime: Any, task: SpreadTask) -> WorkerResult:
         details = {}
         model = "none"
 
+    # Never return secret-shaped tool dumps (keys in search hits / env files) unredacted.
+    try:
+        from remedy.core.metabolism.redact import redact_obj, redact_text
+
+        summary = redact_text(str(summary or ""))
+        if isinstance(details, dict):
+            red_d = redact_obj(details)
+            details = red_d if isinstance(red_d, dict) else {}
+    except Exception:
+        if any(
+            tok in str(summary or "").lower()
+            for tok in ("api_key", "sk-", "bearer ", "password=")
+        ):
+            summary = "[redacted worker summary]"
+            details = {}
+
     cap = task.max_chars or 6_000
     if len(summary) > cap:
         summary = summary[:cap] + f"\n…[truncated {len(summary)}→{cap} chars]"

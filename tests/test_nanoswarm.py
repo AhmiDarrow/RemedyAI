@@ -202,6 +202,22 @@ def test_router_heuristic_still_works():
     assert out["method"] == "heuristic"
 
 
+def test_router_classifies_browse_and_file_as_tool():
+    """Browse/file phrases must be tool intent (L2 agency path), not chat."""
+    from remedy.nanoswarm.router_nanobot import RouterNanobot
+
+    r = RouterNanobot()
+    for msg in (
+        "open gmail and check inbox",
+        "navigate to https://example.com",
+        "search the codebase for begin_turn",
+        "file_read src/remedy/core/agent.py",
+        "take a screenshot of the desktop",
+    ):
+        out = r.classify_intent(msg)
+        assert out["label"] == "tool", f"{msg!r} → {out['label']!r}"
+
+
 def test_swarm_dispatch_router_is_fast_heuristic():
     """Agent hot path must not block on local llama classify."""
     from remedy.nanoswarm import get_swarm

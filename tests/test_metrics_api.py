@@ -65,3 +65,36 @@ def test_chat_path_labels_recorded() -> None:
     assert 'path="session_stream"' in text
     assert 'path="session_message"' in text
     assert "remedy_chat_duration_seconds_bucket" in text
+
+
+def test_metric_labels_redact_secret_shaped_values() -> None:
+    """Label values must never echo API keys into Prometheus / JSON snapshots."""
+    secret = "sk-abcdefghijklmnopqrstuvwxyz0123"
+    reg = MetricsRegistry()
+    reg.counter("remedy_leak_probe_total", tool=secret).inc()
+    text = reg.prometheus_text()
+    assert secret not in text
+    assert "[redacted]" in text
+    snap = reg.snapshot()
+    dumped = str(snap)
+    assert secret not in dumped
+
+
+def test_health_check_detail_redacts_secrets() -> None:
+    import asyncio
+
+    from remedy.core.metrics import HealthChecker
+
+    hc = HealthChecker()
+    hc.register(
+        "probe",
+        lambda: {"msg": "Authorization: Bearer sk-abcdefghijklmnopqrstuvwxyz0123"},
+    )
+
+    async def _run():
+        return await hc.check()
+
+    out = asyncio.run(_run())
+    blob = str(out)
+    assert "sk-abcdefghijklmnopqrstuvwxyz0123" not in blob
+    assert out["checks"]["probe"]["status"] == "ok"
