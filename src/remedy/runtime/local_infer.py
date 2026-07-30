@@ -9,7 +9,7 @@ import json
 import logging
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import Request
 
 logger = logging.getLogger(__name__)
 
@@ -24,9 +24,14 @@ def local_text_complete(
     system: str | None = None,
 ) -> dict[str, Any]:
     """OpenAI-compat chat completion; returns {ok, text, error}."""
+    from remedy.core.security import is_loopback_service_url, urlopen_no_redirect
+
     base = (base_url or "").rstrip("/")
     if not base:
         return {"ok": False, "text": "", "error": "no base_url"}
+    # Local nano/helper only — refuse off-loopback base (poisoned vision.json / jobs).
+    if not is_loopback_service_url(base):
+        return {"ok": False, "text": "", "error": "local base_url must be loopback"}
     url = base if base.endswith("/chat/completions") else f"{base}/chat/completions"
     messages: list[dict[str, str]] = []
     if system:
@@ -48,8 +53,9 @@ def local_text_complete(
         method="POST",
     )
     try:
-        with urlopen(req, timeout=timeout_s) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
+        # Never follow Location (loopback 302 → metadata/LAN SSRF).
+        with urlopen_no_redirect(req, timeout=timeout_s) as resp:  # type: ignore[union-attr]
+            payload = json.loads(resp.read().decode("utf-8"))  # type: ignore[union-attr]
     except HTTPError as e:
         err = ""
         try:

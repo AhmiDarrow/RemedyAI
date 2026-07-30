@@ -482,10 +482,13 @@ def decode_for_turn(
     """
     atts = list(attachments or [])
     # Path jail: only decode images under the attachments tree (forged paths drop).
-    with contextlib.suppress(Exception):
+    with suppress(Exception):
         from remedy.interfaces.attachments import filter_jailed_attachments
 
-        atts = filter_jailed_attachments(atts)
+        home = None
+        if isinstance(cfg, dict):
+            home = cfg.get("home_dir")
+        atts = filter_jailed_attachments(atts, home_dir=home)
     images = []
     for a in atts:
         mime = str(a.get("mime") or "")

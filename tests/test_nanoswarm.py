@@ -193,6 +193,63 @@ def test_job_queue_handlers_register():
     assert "nano_classify" in st["handlers"]
 
 
+def test_local_text_complete_refuses_non_loopback():
+    """Poisoned base_url must not open metadata/LAN (no network)."""
+    from unittest.mock import patch
+
+    from remedy.runtime.local_infer import local_text_complete
+
+    with patch("remedy.core.security.urlopen_no_redirect") as mock_open:
+        out = local_text_complete("hi", base_url="http://169.254.169.254/v1")
+        assert out["ok"] is False
+        assert "loopback" in (out.get("error") or "").lower()
+        mock_open.assert_not_called()
+        out2 = local_text_complete("hi", base_url="http://10.0.0.5:8080/v1")
+        assert out2["ok"] is False
+        mock_open.assert_not_called()
+
+
+def test_local_text_complete_does_not_follow_redirect():
+    """Loopback 302 → off-host must fail closed (no SSRF follow)."""
+    import http.server
+    import threading
+
+    from remedy.runtime.local_infer import local_text_complete
+
+    class _H(http.server.BaseHTTPRequestHandler):
+        hits_meta = 0
+
+        def do_POST(self) -> None:  # noqa: N802
+            if self.path.endswith("/chat/completions"):
+                self.send_response(302)
+                self.send_header("Location", "http://169.254.169.254/latest/meta-data")
+                self.end_headers()
+                return
+            type(self).hits_meta += 1
+            self.send_response(200)
+            self.end_headers()
+
+        def log_message(self, *_args: object) -> None:
+            return
+
+    httpd = http.server.HTTPServer(("127.0.0.1", 0), _H)
+    port = httpd.server_address[1]
+    thr = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thr.start()
+    try:
+        out = local_text_complete(
+            "label",
+            base_url=f"http://127.0.0.1:{port}/v1",
+            timeout_s=2.0,
+        )
+        # Fail closed: HTTPError 302, URLError, or OS-level abort on 3xx no-follow.
+        assert out["ok"] is False
+        assert out.get("text") == ""
+        assert _H.hits_meta == 0
+    finally:
+        httpd.shutdown()
+
+
 def test_router_heuristic_still_works():
     from remedy.nanoswarm.router_nanobot import RouterNanobot
 

@@ -10,7 +10,7 @@ import mimetypes
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import Request
 
 from remedy.vision.prompts import DECODE_SYSTEM, decode_user_prompt
 from remedy.vision.runtime import mark_used
@@ -48,6 +48,8 @@ def decode_image(
     model: str = "vision-decoder",
 ) -> dict[str, Any]:
     """Decode one image file to a text brief via OpenAI-compat chat completions."""
+    from remedy.core.security import is_loopback_service_url, urlopen_no_redirect
+
     p = Path(path)
     data_url = _image_data_url(p, max_image_bytes)
     if not data_url:
@@ -55,6 +57,15 @@ def decode_image(
             "ok": False,
             "path": str(p),
             "error": "Image missing or too large for decode payload",
+            "text": "",
+        }
+
+    base = (base_url or "").rstrip("/")
+    if not base or not is_loopback_service_url(base):
+        return {
+            "ok": False,
+            "path": str(p),
+            "error": "vision base_url must be loopback",
             "text": "",
         }
 
@@ -73,7 +84,7 @@ def decode_image(
             },
         ],
     }
-    url = base_url.rstrip("/") + "/chat/completions"
+    url = base + "/chat/completions"
     if not url.endswith("/chat/completions"):
         # base_url already ends with /v1
         pass
@@ -90,8 +101,9 @@ def decode_image(
 
     t0 = _time.perf_counter()
     try:
-        with urlopen(req, timeout=timeout_s) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
+        # Never follow Location off-loopback (SSRF via poisoned base or 3xx).
+        with urlopen_no_redirect(req, timeout=timeout_s) as resp:  # type: ignore[union-attr]
+            payload = json.loads(resp.read().decode("utf-8"))  # type: ignore[union-attr]
     except HTTPError as e:
         err_body = ""
         with contextlib.suppress(Exception):
