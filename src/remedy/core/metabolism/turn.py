@@ -48,23 +48,6 @@ def begin_turn_metabolism(
         browse=browse,
     )
     policy = tier_policy(tier)
-    ledger = get_evidence_ledger(sid)
-    decisions = get_decision_tracker(sid)
-    mmap = get_machine_map(sid)
-    crystal = get_time_crystal(sid, project_id=project_path or "")
-    gov = get_governor(sid)
-
-    if work_roots:
-        mmap.set_work_roots(list(work_roots))
-    elif project_path:
-        mmap.set_work_roots([project_path])
-
-    # One SessionQuality handle for the whole begin_turn (no double registry lookup)
-    sq = None
-    with suppress(Exception):
-        from remedy.core.session_quality import get_session_quality
-
-        sq = get_session_quality(sid)
 
     # Cheap accuracy metric — tier distribution (no labels overhead beyond key)
     with suppress(Exception):
@@ -74,13 +57,15 @@ def begin_turn_metabolism(
             "remedy_turn_tier_total", tier=policy.label
         ).inc()
 
-    # L0: minimal metabolism — no governor/map/crystal/IR (instant path).
-    # Skip full organ snapshots (list copies) — Advanced UI uses
-    # metabolism_public_snapshot which rebuilds on demand.
+    # L0: skip map/crystal/governor warm entirely (instant path).
+    # Only touch ledger/decision counters for Advanced UI stubs.
     if int(tier) == 0:
-        if sq is not None:
-            with suppress(Exception):
-                sq.record_metabolism(tier=0)
+        ledger = get_evidence_ledger(sid)
+        decisions = get_decision_tracker(sid)
+        with suppress(Exception):
+            from remedy.core.session_quality import get_session_quality
+
+            get_session_quality(sid).record_metabolism(tier=0)
         return {
             "session_id": sid,
             "tier": 0,
@@ -107,6 +92,25 @@ def begin_turn_metabolism(
             "machine_map": {},
             "time_crystal": {},
         }
+
+    # L1+: warm organs used for injects / control
+    ledger = get_evidence_ledger(sid)
+    decisions = get_decision_tracker(sid)
+    mmap = get_machine_map(sid)
+    crystal = get_time_crystal(sid, project_id=project_path or "")
+    gov = get_governor(sid)
+
+    if work_roots:
+        mmap.set_work_roots(list(work_roots))
+    elif project_path:
+        mmap.set_work_roots([project_path])
+
+    # One SessionQuality handle for the whole begin_turn (no double registry lookup)
+    sq = None
+    with suppress(Exception):
+        from remedy.core.session_quality import get_session_quality
+
+        sq = get_session_quality(sid)
 
     # Session horizon: admit short intent line (no secrets path)
     if user_text and len(user_text) < 240:

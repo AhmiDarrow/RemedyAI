@@ -25,6 +25,7 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 - Hot path: lean snapshot skips library/pattern/goal on L0/L1 chat; O(1) quality snapshot; governor decision thrash; skip re-offload of handles; precompiled CUA ref regex
 - Hot path: project profile mtime cache; tier greeting/path early exits; warm skills catalog; cached OpenAI tool schemas; single SessionQuality handle + `remedy_turn_tier_total`
 - Hot path: Action IR steps cap 96; CUA macros `MAX_CUA_MACROS=64` verified; evidence units 240/lean 64 + seen_fps bound; L0 skips full organ snapshots; intent router cache; hot-path debug gated on operator DEBUG
+- Hot path: time crystal `MAX_CRYSTAL_FACTS=128` + hot_block rev on hit; skill genome `MAX_PHENOTYPES=128` prune; governor `MAX_GOVERNOR_DECISIONS=40` named; L0 begin_turn skips map/crystal/gov warm; L3 false-positive fixes (`go over` / `step away from` / `review all options` / conceptual compare)
 - Gateway: `gateway serve` installs local API token; Teams JWT `aud`/`exp` fail-closed; secret cache `mtime_ns`+size; generic webhook 503 without secret
 - Plan mode: exclude `computer_act`; CUA mutations go through Ask approvals; skill learning path jail; MCP env scrub; zip rejects symlinks
 - **Plan mode:** drop `computer_act` (and keep allowlist = research tools ∪ `COMPUTER_PLAN_MODE_TOOLS` only — no click/type/app)

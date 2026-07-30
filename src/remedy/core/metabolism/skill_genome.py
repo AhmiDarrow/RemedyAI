@@ -13,6 +13,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+# Bound phenotype map growth across long-lived processes / skill churn.
+MAX_PHENOTYPES = 128
+
 
 @dataclass
 class SkillPhenotype:
@@ -65,6 +68,22 @@ class SkillGenome:
     phenotypes: dict[str, SkillPhenotype] = field(default_factory=dict)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
+    def _prune_locked(self) -> None:
+        """Drop lowest-score unprotected phenotypes when over MAX_PHENOTYPES."""
+        if len(self.phenotypes) <= MAX_PHENOTYPES:
+            return
+        items = list(self.phenotypes.values())
+        # Evict unprotected first, then lowest score / oldest last_ts.
+        items.sort(
+            key=lambda p: (
+                1 if p.protected else 0,
+                p.score,
+                p.last_ts,
+            )
+        )
+        keep = items[-MAX_PHENOTYPES:]
+        self.phenotypes = {p.skill_id: p for p in keep}
+
     def record(
         self,
         skill_id: str,
@@ -81,6 +100,8 @@ class SkillGenome:
                 ph = SkillPhenotype(skill_id=sid)
                 self.phenotypes[sid] = ph
             ph.record(ok=ok, latency_ms=latency_ms)
+            if len(self.phenotypes) > MAX_PHENOTYPES:
+                self._prune_locked()
             return ph
 
     def rank(self, limit: int = 12) -> list[dict[str, Any]]:

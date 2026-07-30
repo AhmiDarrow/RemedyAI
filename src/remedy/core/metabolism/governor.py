@@ -10,6 +10,9 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+# Bound decision history (quiet sessions re-hit thrash skip; still cap RAM).
+MAX_GOVERNOR_DECISIONS = 40
+
 
 @dataclass
 class GovernorDecision:
@@ -92,8 +95,8 @@ class QualityGovernor:
             if actions == self.last_actions and self.decisions:
                 return self.decisions[-1]
             self.decisions.append(dec)
-            if len(self.decisions) > 40:
-                self.decisions = self.decisions[-40:]
+            if len(self.decisions) > MAX_GOVERNOR_DECISIONS:
+                self.decisions = self.decisions[-MAX_GOVERNOR_DECISIONS:]
             self.last_actions = list(actions)
             self.compress_earlier = "compress_earlier" in actions
             self.force_spread = "force_spread" in actions

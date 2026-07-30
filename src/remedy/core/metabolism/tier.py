@@ -56,16 +56,25 @@ _L3_AUTONOMOUS = re.compile(
     r"work alone|on your own|handle this on your own|"
     r"don'?t wait for me|do not wait for me|unattended|"
     r"fully autonomous|finish without me|take it from here|"
-    r"i need to go|step away|be with my kids"
+    # Departure intent — not "go over/through" prose or "step away from X" rhetoric
+    r"i need to go(?!\s+(over|through|into|back|ahead|around|with)\b)|"
+    r"step away(?!\s+from\b)|"
+    r"be with my kids"
     r")\b"
 )
 _L3_PARTITION = re.compile(
-    r"(?is)\b("
-    r"in parallel|fan.?out|spread out|across (the )?(modules?|codebase|packages?)|"
-    r"multiple (areas?|modules?|trees?|packages?|urls?|sites?)|"
-    r"review all|whole (repo|codebase|project)|entire (repo|codebase)|"
+    r"(?is)\b(?:"
+    r"in parallel|fan.?out|spread out|across (?:the )?(?:modules?|codebase|packages?)|"
+    r"multiple (?:areas?|modules?|trees?|packages?|urls?|sites?)|"
+    # "review all options" is chat — require code/test targets
+    r"review all (?:the )?(?:code|files?|modules?|packages?|tests?|src)|"
+    r"whole (?:repo|codebase|project)|entire (?:repo|codebase)|"
     r"all tests|full suite|codebase.?wide|repo.?wide|"
-    r"compare .+ (and|vs|versus) "
+    # Conceptual "compare X and Y" stays L1; multi-module compare is L3
+    r"compare .+\b(?:and|vs|versus)\b.+\b(?:"
+    r"modules?|packages?|services?|trees?|codebases?|dirs?|directories|"
+    r"files?|repos?|implementations?"
+    r")\b"
     r")\b"
 )
 _L2_AGENCY = re.compile(
