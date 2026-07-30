@@ -1,6 +1,12 @@
 /** Skills panel API helpers. */
 
-import { apiFetch, authHeaders, ensureApiToken, getApiBase } from './client'
+import {
+  apiFetch,
+  authHeaders,
+  ensureApiToken,
+  formatApiErrorBody,
+  getApiBase,
+} from './client'
 
 export type SkillRow = {
   name: string
@@ -133,7 +139,7 @@ export async function exportSkillsPack(names?: string[]): Promise<void> {
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
     throw new Error(
-      (err as { detail?: string }).detail || res.statusText || 'Export failed',
+      formatApiErrorBody(err, res.statusText || 'Export failed'),
     )
   }
   const blob = await res.blob()
@@ -164,7 +170,7 @@ export async function importSkillsPack(file: File): Promise<{
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
     throw new Error(
-      (err as { detail?: string }).detail || res.statusText || 'Import failed',
+      formatApiErrorBody(err, res.statusText || 'Import failed'),
     )
   }
   return res.json()
