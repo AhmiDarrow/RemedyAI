@@ -120,7 +120,14 @@ _L2_AGENCY = re.compile(
     r"type (into|in) (the |this |a )|"
     r"update (the )?(changelog|readme)\b|"
     r"make sure (the )?(build|tests?|ci|suite) (works|passes|succeeds)|"
-    r"bump (the )?version\b"
+    r"bump (the )?version\b|"
+    # Review / audit — tools required (was L1 → model said "activating skill" with no tools)
+    r"review (the |this |my |our |a )?(project|codebase|code|repo|pr|pull request|"
+    r"module|package|security|architecture|changes|diff|app|desktop)?\b|"
+    r"\b(code )?review\b|"
+    r"audit (the |this |my |our )?(project|code|security|repo|codebase)\b|"
+    r"walk (me |us )?(through )?(the )?(project|codebase|repo|code)\b|"
+    r"give me (a |an )?(overview|tour of|status of) (the )?(project|codebase|repo)\b"
     r")\b"
 )
 # Paths + bare filenames that imply workspace tools

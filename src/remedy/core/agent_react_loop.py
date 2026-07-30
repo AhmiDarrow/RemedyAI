@@ -503,6 +503,8 @@ async def call_llm_stream(runtime, message: str,
         # L1 lean: bias tools off for pure chat — but never strip mid-task
         # continuity (open brief tasks / recent tool history). That was a
         # correctness gap: "ok continue" after agency became tool-less.
+        # Also keep tools when the *message itself* wants tools (e.g. "review
+        # project") even if tier heuristic lag behind — fail-open for agency.
         if (
             int(getattr(runtime, "_turn_tier", 1) or 1) == 1
             and not plan_mode
@@ -514,11 +516,16 @@ async def call_llm_stream(runtime, message: str,
             open_work = bool(open_tasks_for_wall)
             if not open_work:
                 with suppress(Exception):
-                    from remedy.core.react_policy import history_suggests_open_work
+                    from remedy.core.react_policy import (
+                        history_suggests_open_work,
+                        message_wants_tools,
+                    )
 
                     open_work = history_suggests_open_work(
                         history, open_tasks=open_tasks_for_wall or None
                     )
+                    if not open_work and message_wants_tools(message or ""):
+                        open_work = True
             if not open_work:
                 tools = None  # type: ignore[assignment]
                 run_until_done = False
