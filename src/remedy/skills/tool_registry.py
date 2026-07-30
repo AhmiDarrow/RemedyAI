@@ -14,6 +14,15 @@ from typing import Any
 
 from remedy.models import ToolCall, ToolDefinition, ToolResult, ToolSource
 
+# Unscoped lookup prefers first-party tools so MCP/skill same-name registrations
+# cannot shadow builtins (policy, approvals, jail rely on the real definition).
+_SOURCE_TRUST_ORDER: tuple[ToolSource, ...] = (
+    ToolSource.BUILTIN,
+    ToolSource.PLUGIN,
+    ToolSource.SKILL,
+    ToolSource.MCP,
+)
+
 
 class ToolRegistry:
     """Catalog of all available tools across sources (MCP, skills, builtins)."""
@@ -24,6 +33,8 @@ class ToolRegistry:
         self._invocation_history: list[dict[str, Any]] = []
         self._mcp_servers: dict[str, dict[str, Any]] = {}
         self._handlers: dict[str, Callable] = {}
+        # Names whose handlers are owned by builtins — MCP must not clobber.
+        self._builtin_handlers: set[str] = set()
         # OpenAI tools payload cache — rebuild only when registry mutates
         self._schema_gen: int = 0
         self._openai_payload_cache: list[dict[str, Any]] | None = None
@@ -44,8 +55,11 @@ class ToolRegistry:
 
     def register(self, tool: ToolDefinition) -> ToolDefinition:
         key = f"{tool.source.value}:{tool.name}"
+        # Avoid residual duplicate names in _by_source on re-register
+        names = self._by_source[tool.source]
+        if tool.name not in names:
+            names.append(tool.name)
         self._tools[key] = tool
-        self._by_source[tool.source].append(tool.name)
         self._schema_gen += 1
         self._openai_payload_cache = None
         return tool
@@ -64,7 +78,12 @@ class ToolRegistry:
         ))
 
     def register_handler(self, name: str, handler: Callable) -> None:
-        """Register an async callable handler for a tool."""
+        """Register an async callable handler for a tool.
+
+        Builtin-owned handler names cannot be overwritten (MCP residual trust).
+        """
+        if name in self._builtin_handlers and self._handlers.get(name) is not handler:
+            return
         self._handlers[name] = handler
 
     def register_builtin_handler(
@@ -76,6 +95,7 @@ class ToolRegistry:
     ) -> ToolDefinition:
         """Register a tool definition + handler in one call."""
         self._handlers[name] = handler
+        self._builtin_handlers.add(name)
         return self.register_builtin(name, description, parameters)
 
     async def execute(self, tool_name: str, **arguments: Any) -> Any:
@@ -102,12 +122,15 @@ class ToolRegistry:
         server_name: str,
         tool_def: dict[str, Any],
     ) -> ToolDefinition:
+        raw_name = str(tool_def.get("name", "unknown") or "unknown")
+        # Namespace colliding names so MCP cannot replace builtin catalog identity
+        # when both appear; unscoped get() still prefers builtin via trust order.
         tool = ToolDefinition(
-            name=tool_def.get("name", "unknown"),
+            name=raw_name,
             description=tool_def.get("description", ""),
             source=ToolSource.MCP,
             parameters=tool_def.get("parameters", tool_def.get("inputSchema", {})),
-            uri=f"mcp://{server_name}/{tool_def.get('name', 'unknown')}",
+            uri=f"mcp://{server_name}/{raw_name}",
         )
         self._mcp_servers[server_name] = self._mcp_servers.get(server_name, {})
         return self.register(tool)
@@ -126,10 +149,33 @@ class ToolRegistry:
             uri=f"skill://{skill_name}/{tool_name}",
         ))
 
+    def purge_mcp_server(self, server_name: str) -> int:
+        """Drop residual MCP tool definitions for a disconnected server."""
+        uri_prefix = f"mcp://{server_name}/"
+        drop = [
+            k
+            for k, t in self._tools.items()
+            if t.source == ToolSource.MCP
+            and (getattr(t, "uri", None) or "").startswith(uri_prefix)
+        ]
+        for k in drop:
+            self._tools.pop(k, None)
+        # Rebuild residual name list from tools that remain (other MCP servers)
+        self._by_source[ToolSource.MCP] = [
+            t.name for t in self._tools.values() if t.source == ToolSource.MCP
+        ]
+        if server_name in self._mcp_servers:
+            del self._mcp_servers[server_name]
+        if drop:
+            self._schema_gen += 1
+            self._openai_payload_cache = None
+        return len(drop)
+
     def get_definition(self, name: str, source: ToolSource | None = None) -> ToolDefinition | None:
         if source:
             return self._tools.get(f"{source.value}:{name}")
-        for src in ToolSource:
+        # Trust order: builtin wins over MCP/skill same-name residual registrations.
+        for src in _SOURCE_TRUST_ORDER:
             key = f"{src.value}:{name}"
             if key in self._tools:
                 return self._tools[key]
@@ -139,11 +185,17 @@ class ToolRegistry:
         return self.get_definition(name, source=source)
 
     def list_by_source(self, source: ToolSource) -> list[ToolDefinition]:
-        return [
-            self._tools[f"{source.value}:{n}"]
-            for n in self._by_source.get(source, [])
-            if f"{source.value}:{n}" in self._tools
-        ]
+        # Dedup residual name list while preserving first-seen order
+        seen: set[str] = set()
+        out: list[ToolDefinition] = []
+        for n in self._by_source.get(source, []):
+            if n in seen:
+                continue
+            seen.add(n)
+            t = self._tools.get(f"{source.value}:{n}")
+            if t is not None:
+                out.append(t)
+        return out
 
     def search(self, query: str) -> list[ToolDefinition]:
         q = query.lower()

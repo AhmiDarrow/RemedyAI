@@ -657,6 +657,28 @@ def _iter_images(history_entry: dict[str, Any]) -> list[dict[str, str]]:
     return images
 
 
+def _safe_image_filename(raw: str) -> str | None:
+    """Accept only a plain image basename for ComfyUI downloads.
+
+    Residual risk: Windows ``Path(out) / 'C:\\\\Windows\\\\x.png'`` replaces the
+    base (absolute segment). Refuse any separators, ``..``, drive letters, or
+    absolute forms — do not basename-salvage (that would still hit the API with
+    a traversal query and confuse operators).
+    """
+    name = (raw or "").strip()
+    if not name or name in {".", ".."}:
+        return None
+    # Any path structure → reject (subfolder belongs in Comfy query field only)
+    if any(sep in name for sep in ("/", "\\", "\x00")):
+        return None
+    if ".." in name or name.startswith("~") or ":" in name:
+        return None
+    # Keep a conservative character set (images + common Comfy names)
+    if not re.match(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,200}$", name):
+        return None
+    return name
+
+
 def download_images(
     prompt_id: str,
     out_dir: Path,
@@ -670,16 +692,34 @@ def download_images(
         if not isinstance(hist, dict) or prompt_id not in hist:
             raise RuntimeError(f"No history for prompt_id={prompt_id}")
         history_entry = hist[prompt_id]
-    out_dir.mkdir(parents=True, exist_ok=True)
+    dest_root = Path(out_dir).expanduser().resolve()
+    dest_root.mkdir(parents=True, exist_ok=True)
     saved: list[Path] = []
     for img in _iter_images(history_entry):
-        qs = urllib.parse.urlencode(img)
+        safe_name = _safe_image_filename(str(img.get("filename") or ""))
+        if not safe_name:
+            continue
+        # Query uses original type/subfolder (loopback-only); write uses safe basename.
+        qs = urllib.parse.urlencode(
+            {
+                "filename": str(img.get("filename") or safe_name),
+                "subfolder": str(img.get("subfolder") or ""),
+                "type": str(img.get("type") or "output"),
+            }
+        )
+        # Block path traversal tokens before request (also checked in _request)
+        if ".." in qs:
+            continue
         data = _request("GET", f"/view?{qs}", base=base, timeout=120.0)
         if not isinstance(data, (bytes, bytearray)):
             continue
-        dest = out_dir / img["filename"]
+        dest = (dest_root / safe_name).resolve()
+        try:
+            dest.relative_to(dest_root)
+        except ValueError:
+            continue
         dest.write_bytes(data)
-        saved.append(dest.resolve())
+        saved.append(dest)
     return saved
 
 
@@ -711,7 +751,8 @@ def generate_image(
     )
     prompt_id = queue_prompt(wf, base_url=base)
     entry = wait_prompt(prompt_id, base_url=base, timeout=timeout)
-    dest = out_dir or (Path.home() / ".remedy" / "comfy_out")
+    # Honor REMEDY_HOME (tests + portable homes) — not only Path.home()/.remedy
+    dest = Path(out_dir) if out_dir is not None else (_remedy_home() / "comfy_out")
     paths = download_images(prompt_id, dest, base_url=base, history_entry=entry)
     return {
         "ok": True,

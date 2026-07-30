@@ -6,6 +6,9 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ### Gauntlet: continuous security + perf loop (feature/computer-use)
 
+- **ComfyUI download path residual:** image filenames must be plain basenames (no `..`/separators/drive letters); writes resolve under `out_dir` only; default `comfy_out` honors `REMEDY_HOME`
+- **Plugin load trust:** safe plugin identifiers only; path-bound `spec_from_file_location` (no bare stdlib import); deny `os`/`subprocess`/… even if present on disk
+- **Tool registry trust order:** unscoped `get()` prefers builtin over MCP/skill shadow; no residual `_by_source` dupes; `purge_mcp_server`; builtin handlers cannot be clobbered
 - **job_run verify write jail:** silent `job_run`/`mission_verify` share `bash_exec` shell write jail + write-roots fail-closed (no bypass via jobs path)
 - **Usage ledger session cascade:** `delete_session_events` + purge on session delete/reset so chat wipe drops token/cost rows from `usage.db`
 - **Learning loop session_id:** skill nanobot/coordinator pass `session_id` for multi-session ACTIVE promotion; `skill_run` skips double feedback record

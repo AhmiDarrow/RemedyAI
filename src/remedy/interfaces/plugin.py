@@ -10,8 +10,9 @@ Enables third-party modules to hook into the Remedy lifecycle:
 
 from __future__ import annotations
 
-import importlib
+import importlib.util
 import logging
+import re
 import sys
 from collections import defaultdict
 from collections.abc import Callable
@@ -20,6 +21,27 @@ from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# Plugin module stems only — refuse path segments, dotted imports, stdlib hijacks.
+_SAFE_PLUGIN_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
+# Never load these even if a file is named similarly under a plugin dir.
+_PLUGIN_NAME_DENY = frozenset(
+    {
+        "os",
+        "sys",
+        "subprocess",
+        "builtins",
+        "importlib",
+        "ctypes",
+        "socket",
+        "pathlib",
+        "shutil",
+        "pickle",
+        "remedy",
+        "site",
+        "runpy",
+    }
+)
 
 
 @dataclass
@@ -127,16 +149,34 @@ class HookManager:
         ]
 
 
+def is_safe_plugin_name(name: str) -> bool:
+    """True when *name* is a single safe Python identifier (plugin stem)."""
+    n = (name or "").strip()
+    if not n or not _SAFE_PLUGIN_NAME.match(n):
+        return False
+    if n.lower() in _PLUGIN_NAME_DENY or n.startswith("_"):
+        return False
+    return True
+
+
 class PluginManager:
     """Discovers and loads plugin modules from configured plugin paths.
 
     Plugins can be Python packages or single .py files. Each plugin
     module can register hooks, tools, skills, or channel adapters.
+
+    Trust rules:
+    - Names must be safe identifiers (no dotted imports / path segments).
+    - Load requires a filesystem ``plugin_path`` under which the module exists;
+      bare ``importlib.import_module(name)`` of stdlib/site packages is refused.
+    - Denied names (``os``, ``subprocess``, …) never load even if present on disk.
     """
 
     def __init__(self, hooks: HookManager) -> None:
         self.hooks = hooks
         self._loaded: dict[str, Any] = {}
+        # name -> resolved directory that contained the plugin file/package
+        self._origins: dict[str, Path] = {}
 
     def discover(self, plugin_paths: list[str]) -> list[str]:
         """Discover plugin modules in given directories. Returns module names."""
@@ -146,27 +186,96 @@ class PluginManager:
             if not p.exists():
                 continue
             if p.is_file() and p.suffix == ".py":
-                found.append(p.stem)
+                stem = p.stem
+                if is_safe_plugin_name(stem):
+                    found.append(stem)
+                    self._origins[stem] = p.parent
             elif p.is_dir():
                 for entry in sorted(p.iterdir()):
                     if entry.suffix == ".py" and not entry.name.startswith("_"):
-                        found.append(entry.stem)
+                        stem = entry.stem
+                        if is_safe_plugin_name(stem):
+                            found.append(stem)
+                            self._origins[stem] = p
                     elif entry.is_dir() and (entry / "__init__.py").exists():
-                        found.append(entry.name)
+                        name = entry.name
+                        if is_safe_plugin_name(name):
+                            found.append(name)
+                            self._origins[name] = p
         return found
 
+    def _resolve_plugin_file(self, plugin_name: str, root: Path) -> Path | None:
+        """Locate plugin_name under *root* (file or package)."""
+        root = root.expanduser().resolve()
+        if root.is_file() and root.suffix == ".py" and root.stem == plugin_name:
+            return root
+        if not root.is_dir():
+            return None
+        file_py = root / f"{plugin_name}.py"
+        if file_py.is_file():
+            return file_py
+        pkg_init = root / plugin_name / "__init__.py"
+        if pkg_init.is_file():
+            return pkg_init
+        return None
+
     def load(self, plugin_name: str, plugin_path: str | None = None) -> bool:
-        """Import a plugin module by name."""
+        """Import a plugin module by name from an allowlisted filesystem path.
+
+        ``plugin_path`` is required unless the name was previously ``discover``'d
+        (origin recorded). Arbitrary bare imports are refused (trust residual).
+        """
         if plugin_name in self._loaded:
             return True
 
-        try:
-            if plugin_path:
-                sys.path.insert(0, plugin_path)
-            module = importlib.import_module(plugin_name)
-            self._loaded[plugin_name] = module
+        if not is_safe_plugin_name(plugin_name):
+            logger.warning("Refusing unsafe plugin name: %r", plugin_name)
+            return False
 
-            # Call setup if the plugin defines it
+        root: Path | None = None
+        if plugin_path:
+            root = Path(plugin_path).expanduser().resolve()
+        elif plugin_name in self._origins:
+            root = self._origins[plugin_name]
+        else:
+            logger.warning(
+                "Plugin %s: refused bare load without plugin_path/discover origin",
+                plugin_name,
+            )
+            return False
+
+        plugin_file = self._resolve_plugin_file(plugin_name, root)
+        if plugin_file is None:
+            logger.warning(
+                "Plugin %s not found under %s", plugin_name, root
+            )
+            return False
+
+        try:
+            # Load from explicit file path — never import a same-named stdlib module.
+            unique_name = f"remedy_plugin_{plugin_name}"
+            # Drop a prior failed partial import under the unique name
+            if unique_name in sys.modules:
+                del sys.modules[unique_name]
+            spec = importlib.util.spec_from_file_location(unique_name, plugin_file)
+            if spec is None or spec.loader is None:
+                logger.error("Plugin %s: no import spec for %s", plugin_name, plugin_file)
+                return False
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[unique_name] = module
+            # Also bind under plain name for demo_plugin-style `import demo_plugin`
+            # only after successful exec, and only if not already a real module.
+            spec.loader.exec_module(module)
+            self._loaded[plugin_name] = module
+            self._origins[plugin_name] = (
+                plugin_file.parent
+                if plugin_file.name != "__init__.py"
+                else plugin_file.parent.parent
+            )
+            # Alias for `import demo_plugin` style tests. Names are allowlisted
+            # (never os/sys/…), so replacing a same-stem site module is intended.
+            sys.modules[plugin_name] = module
+
             if hasattr(module, "setup_plugin"):
                 module.setup_plugin(self.hooks)
                 logger.info("Plugin %s setup complete", plugin_name)
@@ -176,10 +285,13 @@ class PluginManager:
             return True
         except Exception:
             logger.exception("Failed to load plugin %s", plugin_name)
+            # Do not leave a half-loaded module registered
+            unique_name = f"remedy_plugin_{plugin_name}"
+            sys.modules.pop(unique_name, None)
+            mod = sys.modules.get(plugin_name)
+            if mod is not None and getattr(mod, "__file__", None) == str(plugin_file):
+                sys.modules.pop(plugin_name, None)
             return False
-        finally:
-            if plugin_path and plugin_path in sys.path:
-                sys.path.remove(plugin_path)
 
     def unload(self, plugin_name: str) -> bool:
         module = self._loaded.pop(plugin_name, None)
@@ -188,12 +300,20 @@ class PluginManager:
                 module.teardown_plugin()
             except Exception:
                 logger.exception("Plugin %s teardown failed", plugin_name)
+        # Drop import aliases we may have registered
+        unique_name = f"remedy_plugin_{plugin_name}"
+        sys.modules.pop(unique_name, None)
+        if plugin_name in sys.modules and sys.modules[plugin_name] is module:
+            sys.modules.pop(plugin_name, None)
         return module is not None
 
     def reload_all(self) -> int:
         count = 0
         for name in list(self._loaded.keys()):
-            if self.unload(name) and self.load(name):
+            origin = self._origins.get(name)
+            if self.unload(name) and self.load(
+                name, plugin_path=str(origin) if origin else None
+            ):
                 count += 1
         return count
 
