@@ -75,6 +75,7 @@ export function Panel({ open, onClose, title, children, toolbar }: PanelProps) {
       ref={rootRef}
       role="complementary"
       aria-label={title}
+      data-keep-focus
       className="flex flex-col border-l overflow-hidden fixed right-0 z-[80]"
       style={{
         top: TITLEBAR_H,
@@ -909,10 +910,22 @@ export function SkillsPanel({
         <>
           <div className="mb-2 flex gap-1 items-center">
             <input
+              type="search"
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && load()}
+              onKeyDown={(e) => {
+                e.stopPropagation()
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  load()
+                }
+              }}
+              onMouseDown={(e) => e.stopPropagation()}
               placeholder="Filter…"
+              autoComplete="off"
+              spellCheck={false}
+              data-keep-focus
+              aria-label="Filter installed skills"
               className="flex-1 text-xs px-2 py-1.5 rounded"
               style={{
                 background: 'var(--bg-primary)',

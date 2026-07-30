@@ -19,10 +19,20 @@ class JobResult:
     details: dict[str, Any] = field(default_factory=dict)
 
 
-def _resolve_job_path(runtime: Any, path: str = ".") -> Path:
-    """Resolve path under runtime access scope. Fail closed (no raw absolute escape)."""
+def _resolve_job_path(
+    runtime: Any, path: str = ".", *, for_write: bool = False
+) -> Path:
+    """Resolve path under runtime access scope. Fail closed (no raw absolute escape).
+
+    Pass ``for_write=True`` for shell/mutation job workdirs so project scope
+    cannot escape via Desktop/Documents/Downloads read roots.
+    """
     raw = (path or ".").strip() or "."
-    return runtime.resolve_tool_path(raw)
+    try:
+        return runtime.resolve_tool_path(raw, for_write=for_write)
+    except TypeError:
+        # Older mock runtimes without for_write kwarg.
+        return runtime.resolve_tool_path(raw)
 
 
 async def run_explore_job(
@@ -168,7 +178,8 @@ async def run_verify_job(
     workdir = root
     if (path or "").strip():
         try:
-            workdir = _resolve_job_path(runtime, path)
+            # Shell verify workdir is a mutation surface — write roots only.
+            workdir = _resolve_job_path(runtime, path, for_write=True)
             if workdir.is_file():
                 workdir = workdir.parent
         except Exception as e:
@@ -241,7 +252,10 @@ async def run_verify_job(
             ),
             details={"error": str(e)},
         )
-    roots = runtime.allowed_roots()
+    try:
+        roots = runtime.write_roots()
+    except Exception:
+        roots = runtime.allowed_roots()
     sandbox = SubprocessSandbox(allowed_paths=roots or [root, workdir])
     argv = [*win_shell_prefix(), cmd]
     env = path_env_with_local_bins(workdir)

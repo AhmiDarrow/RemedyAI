@@ -44,6 +44,8 @@ export async function createSession(params: {
   model?: string
   agent?: string
   project_path?: string
+  /** Stamp at create so multi-session tabs keep independent providers. */
+  llm_provider?: string
 }): Promise<ChatSession> {
   return apiFetch<ChatSession>('/sessions', {
     method: 'POST',

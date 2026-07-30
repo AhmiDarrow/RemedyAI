@@ -1,52 +1,78 @@
 import { useCallback, useEffect, useState } from 'react'
-import { isLocalMediaPath, resolveChatMediaUrl } from '../utils/chatMedia'
+import {
+  isAuthenticatedApiUrl,
+  isLocalMediaPath,
+  isRemoteOrDataUrl,
+  resolveChatMediaUrl,
+} from '../utils/chatMedia'
 
 interface ChatImageProps {
   src?: string
   alt?: string
-  /** Open full viewer/editor */
   onOpen?: (src: string, alt?: string) => void
-  /** Attach a File (e.g. after markup) — optional parent wiring */
   onAttachMarkup?: (file: File) => void | Promise<void>
 }
 
+const IMG_MAX_H = 360
+
+function needsAuthResolve(src: string): boolean {
+  const s = (src || '').trim().replace(/^<|>$/g, '')
+  if (!s) return false
+  if (isAuthenticatedApiUrl(s)) return true
+  if (isLocalMediaPath(s)) return true
+  return false
+}
+
 /**
- * Chat markdown image — rewrites local filesystem / project-relative paths
- * through the local API so previews work for every provider (not only data: URIs).
- * Hover: Edit · Copy · Save (same pattern as chat bubble actions).
+ * Chat markdown image. Local paths + loopback /api/* attachments are fetched
+ * with Bearer into blob: URLs (bare img src would 401). Public https/data pass through.
+ * No post-decode setState (avoids flicker).
  */
 export function ChatImage({ src, alt, onOpen }: ChatImageProps) {
-  const [resolved, setResolved] = useState<string | null>(null)
+  const raw = (src || '').trim().replace(/^<|>$/g, '')
+  const [resolved, setResolved] = useState<string | null>(() => {
+    if (!raw) return null
+    if (needsAuthResolve(raw)) return null
+    if (isRemoteOrDataUrl(raw) && !isAuthenticatedApiUrl(raw)) return raw
+    return null
+  })
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
 
   useEffect(() => {
     let cancelled = false
     setError(null)
-    if (!src) {
+    if (!raw) {
       setResolved(null)
       return
     }
-    if (!isLocalMediaPath(src)) {
-      setResolved(src)
+
+    // Public http(s)/data/blob (not loopback API) — direct paint
+    if (!needsAuthResolve(raw) && isRemoteOrDataUrl(raw)) {
+      setResolved(raw)
       return
     }
-    // Keep prior blob while re-resolving same/new path — avoids flicker on chat reflow
-    void resolveChatMediaUrl(src)
+
+    if (!needsAuthResolve(raw)) {
+      setResolved(null)
+      setError('Unsupported image URL')
+      return
+    }
+
+    void resolveChatMediaUrl(raw)
       .then((url) => {
-        if (!cancelled) setResolved(url)
+        if (!cancelled && url) setResolved(url)
+        else if (!cancelled && !url) setError('Could not resolve image')
       })
       .catch((e: unknown) => {
         if (!cancelled) {
           setError(e instanceof Error ? e.message : String(e))
-          // only clear if we never had a good frame
-          setResolved((prev) => prev)
         }
       })
     return () => {
       cancelled = true
     }
-  }, [src])
+  }, [raw])
 
   const handleCopy = useCallback(async () => {
     if (!resolved) return
@@ -94,12 +120,11 @@ export function ChatImage({ src, alt, onOpen }: ChatImageProps) {
       a.click()
       window.setTimeout(() => URL.revokeObjectURL(url), 2000)
     } catch {
-      // Fallback: open in new tab
       window.open(resolved, '_blank', 'noopener,noreferrer')
     }
   }, [resolved, alt])
 
-  if (error) {
+  if (error && !resolved) {
     return (
       <span
         className="chat-img-error text-xs block my-1 px-2 py-1 rounded"
@@ -110,7 +135,7 @@ export function ChatImage({ src, alt, onOpen }: ChatImageProps) {
         }}
         title={error}
       >
-        Image unavailable: {alt || src || 'file'}
+        Image unavailable: {alt || raw || 'file'}
       </span>
     )
   }
@@ -127,7 +152,10 @@ export function ChatImage({ src, alt, onOpen }: ChatImageProps) {
   }
 
   return (
-    <div className="chat-img-wrap group/img relative inline-block max-w-full my-1">
+    <div
+      className="chat-img-wrap group/img relative inline-block max-w-full my-1"
+      style={{ overflowAnchor: 'none' }}
+    >
       <button
         type="button"
         className="chat-img-btn block p-0 m-0 border-0 bg-transparent cursor-zoom-in w-full text-left"
@@ -138,15 +166,19 @@ export function ChatImage({ src, alt, onOpen }: ChatImageProps) {
           src={resolved}
           alt={alt || 'image'}
           className="chat-img"
-          loading="lazy"
+          // Eager: lazy-load while scrolling past images causes height jumps + sticky fight
+          loading="eager"
           decoding="async"
+          draggable={false}
           style={{
             maxWidth: '100%',
-            maxHeight: 360,
-            minHeight: 48,
+            maxHeight: IMG_MAX_H,
+            width: 'auto',
+            height: 'auto',
             objectFit: 'contain',
             borderRadius: 8,
             display: 'block',
+            overflowAnchor: 'none',
           }}
         />
       </button>

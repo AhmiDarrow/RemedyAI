@@ -1003,6 +1003,39 @@ class MemoryStore:
             db.commit()
             return cursor.rowcount > 0
 
+    async def clear_chat_messages(self, session_id: str) -> int:
+        """Delete all messages in a session but keep the session row (in-place reset).
+
+        Resets message_count to 0 and bumps updated_at. Does not change project,
+        model, or provider. Returns number of messages removed.
+        """
+        now = datetime.now(UTC).isoformat()
+        with self._locked():
+            db = self._ensure_db()
+            row = db.execute(
+                "SELECT id FROM chat_sessions WHERE id = ?", (session_id,)
+            ).fetchone()
+            if row is None:
+                return 0
+            cursor = db.execute(
+                "DELETE FROM chat_messages WHERE session_id = ?", (session_id,)
+            )
+            deleted = int(cursor.rowcount or 0)
+            # Drop Memory Harness session summary for this chat (fresh slate).
+            try:
+                db.execute(
+                    "DELETE FROM session_summaries WHERE session_id = ?",
+                    (session_id,),
+                )
+            except sqlite3.Error:
+                pass
+            db.execute(
+                "UPDATE chat_sessions SET message_count = 0, updated_at = ? WHERE id = ?",
+                (now, session_id),
+            )
+            db.commit()
+            return deleted
+
     async def list_chat_sessions(
         self, limit: int = 50, offset: int = 0
     ) -> list[ChatSession]:

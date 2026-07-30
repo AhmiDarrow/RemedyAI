@@ -102,6 +102,12 @@ type SuggestionItem = {
 const FALLBACK_COMMANDS: CommandDefinition[] = [
   { name: '/help', description: 'List commands', aliases: [], arguments: null },
   { name: '/new', description: 'New session', aliases: [], arguments: null },
+  {
+    name: '/reset',
+    description: 'Full reset this session (stay here — like new chat)',
+    aliases: ['/clear'],
+    arguments: null,
+  },
   { name: '/compact', description: 'Compact conversation', aliases: [], arguments: null },
   { name: '/remember', description: 'Save a memory', aliases: [], arguments: null },
   { name: '/thinking', description: 'Toggle thinking visibility', aliases: [], arguments: null },
@@ -1017,8 +1023,31 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     [addFiles],
   )
 
+  // When a turn starts/ends, return focus to the composer — but never steal it
+  // from Skills library search, settings fields, or other panel inputs.
   useEffect(() => {
-    textareaRef.current?.focus()
+    const el = textareaRef.current
+    if (!el) return
+    const active = document.activeElement as HTMLElement | null
+    if (active && active !== el) {
+      const tag = (active.tagName || '').toUpperCase()
+      if (
+        tag === 'INPUT'
+        || tag === 'TEXTAREA'
+        || tag === 'SELECT'
+        || active.isContentEditable
+      ) {
+        return
+      }
+      if (
+        active.closest(
+          '[role="complementary"], [role="dialog"], [data-keep-focus], .cm-editor',
+        )
+      ) {
+        return
+      }
+    }
+    el.focus({ preventScroll: true })
   }, [streaming])
 
   const canSend =

@@ -171,8 +171,49 @@ def _scrub_tool_args_obj(obj: Any, *, depth: int = 0) -> Any:
     return obj
 
 
+def coerce_tool_arguments_json(args: Any) -> str:
+    """Return valid JSON for tool **execution** — full fidelity, no clipping.
+
+    Used by :func:`normalize_tool_calls` before ``file_write`` / ``file_edit``
+    run. Must **not** summarize, mid-clip nested strings, or redact body text:
+    those corrupt source files on disk (history-stub / 8k ellipsis bug).
+
+    Incomplete stream blobs become ``{_invalid_json: true, ...}`` so callers
+    can refuse instead of writing garbage.
+    """
+    if args is None:
+        return "{}"
+    if isinstance(args, (dict, list)):
+        try:
+            return json.dumps(args, default=str, ensure_ascii=False)
+        except Exception:
+            return "{}"
+    s = str(args)
+    if not s.strip():
+        return "{}"
+    try:
+        # Round-trip only to confirm validity; keep original string when possible
+        # so we do not re-order keys or re-escape unnecessarily.
+        json.loads(s)
+        return s
+    except json.JSONDecodeError:
+        preview = s[:400]
+        return json.dumps(
+            {
+                "_invalid_json": True,
+                "note": "tool arguments were truncated or invalid; use tool results instead",
+                "preview": preview,
+            },
+            ensure_ascii=False,
+        )
+
+
 def sanitize_tool_arguments(args: Any, *, tool_name: str = "") -> str:
-    """Return valid JSON string for tool-call ``function.arguments``.
+    """Return valid JSON string for tool-call ``function.arguments`` (provider history).
+
+    **Outbound / history only.** Never use this on the execute path — it
+    summarizes large ``file_write`` bodies into history stubs and caps nested
+    strings. Use :func:`coerce_tool_arguments_json` before running tools.
 
     Never mid-string-clips the raw arguments blob — that produces
     ``EOF while parsing a string`` HTTP 400s from providers (xAI/DeepSeek).

@@ -1,4 +1,4 @@
-"""Access scope + multi-root path resolution."""
+"""Access scope + multi-root path resolution (read vs write jail)."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from remedy.core.workspace import (
     effective_access_scope,
     normalize_access_scope,
     resolve_under_roots,
+    write_roots_for_scope,
 )
 
 
@@ -31,7 +32,7 @@ def test_empty_project_forces_full_access():
 
 
 def test_allowed_roots_project_includes_project_and_profile_folders(tmp_path: Path):
-    """project scope always includes project + Desktop/Documents/Downloads when present."""
+    """project *read* roots include project + Desktop/Documents/Downloads when present."""
     home = tmp_path / "homeuser"
     home.mkdir()
     desk = home / "Desktop"
@@ -42,6 +43,63 @@ def test_allowed_roots_project_includes_project_and_profile_folders(tmp_path: Pa
     assert desk.resolve() in resolved
     # Full home is NOT required on project scope
     assert home.resolve() not in resolved
+
+
+def test_write_roots_project_are_project_only(tmp_path: Path):
+    """project *write* roots exclude Desktop/Documents/Downloads."""
+    home = tmp_path / "homeuser"
+    home.mkdir()
+    desk = home / "Desktop"
+    desk.mkdir()
+    docs = home / "Documents"
+    docs.mkdir()
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    wroots = write_roots_for_scope("project", proj, home=home)
+    resolved = [r.resolve() for r in wroots]
+    assert proj.resolve() in resolved
+    assert desk.resolve() not in resolved
+    assert docs.resolve() not in resolved
+    assert home.resolve() not in resolved
+    assert len(resolved) == 1
+
+
+def test_write_roots_full_with_project_still_project_only(tmp_path: Path):
+    """full scope must not open Desktop writes when a project is bound."""
+    home = tmp_path / "homeuser"
+    home.mkdir()
+    desk = home / "Desktop"
+    desk.mkdir()
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    wroots = write_roots_for_scope("full", proj, home=home)
+    assert [r.resolve() for r in wroots] == [proj.resolve()]
+    with pytest.raises(SecurityError):
+        resolve_under_roots(
+            str(desk / "escape.txt"), wroots, access_scope="project"
+        )
+
+
+def test_write_roots_untrusted_project_only(tmp_path: Path):
+    home = tmp_path / "homeuser"
+    home.mkdir()
+    (home / "Desktop").mkdir()
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    wroots = write_roots_for_scope("untrusted", proj, home=home)
+    assert [r.resolve() for r in wroots] == [proj.resolve()]
+
+
+def test_write_roots_home_includes_home(tmp_path: Path):
+    home = tmp_path / "homeuser"
+    home.mkdir()
+    (home / "Desktop").mkdir()
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    wroots = write_roots_for_scope("home", proj, home=home)
+    resolved = [r.resolve() for r in wroots]
+    assert proj.resolve() in resolved
+    assert home.resolve() in resolved
 
 
 def test_allowed_roots_home_includes_home(tmp_path: Path):
@@ -55,7 +113,8 @@ def test_allowed_roots_home_includes_home(tmp_path: Path):
     assert home.resolve() in [r.resolve() for r in roots]
 
 
-def test_resolve_desktop_path_under_project_scope(tmp_path: Path):
+def test_resolve_desktop_path_under_project_scope_read_ok(tmp_path: Path):
+    """Reading Desktop under project scope is allowed via read roots."""
     home = tmp_path / "homeuser"
     desk = home / "Desktop"
     desk.mkdir(parents=True)
@@ -65,6 +124,19 @@ def test_resolve_desktop_path_under_project_scope(tmp_path: Path):
     roots = allowed_roots_for_scope("project", proj, home=home)
     p = resolve_under_roots(str(f), roots, access_scope="project")
     assert p == f.resolve()
+
+
+def test_resolve_desktop_blocked_on_write_roots(tmp_path: Path):
+    """Writing Desktop under project scope is denied via write roots."""
+    home = tmp_path / "homeuser"
+    desk = home / "Desktop"
+    desk.mkdir(parents=True)
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    f = desk / "escape.txt"
+    wroots = write_roots_for_scope("project", proj, home=home)
+    with pytest.raises(SecurityError):
+        resolve_under_roots(str(f), wroots, access_scope="project")
 
 
 def test_resolve_relative_under_project(tmp_path: Path):

@@ -74,6 +74,8 @@ class CreateSessionRequest(BaseModel):
     model: str | None = None
     agent: str | None = None
     project_path: str | None = None
+    # Per-session LLM bind at create (multi-tab providers stay independent).
+    llm_provider: str | None = None
 
 
 class UpdateSessionRequest(BaseModel):

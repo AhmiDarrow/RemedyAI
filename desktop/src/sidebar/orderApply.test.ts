@@ -36,7 +36,22 @@ describe('mergeProjectOrder', () => {
 })
 
 describe('applyProjectOrder', () => {
-  it('keeps No project first and reorders the rest', () => {
+  it('puts locked folders first, then No project, then unlocked order', () => {
+    const groups: ProjectGroup[] = [
+      { key: '', path: '', label: 'No project', sessions: [] },
+      { key: 'C:\\A', path: 'C:\\A', label: 'A', sessions: [] },
+      { key: 'C:\\B', path: 'C:\\B', label: 'B', sessions: [] },
+      { key: 'C:\\L', path: 'C:\\L', label: 'L', sessions: [] },
+    ]
+    const out = applyProjectOrder(
+      groups,
+      ['C:\\B', 'C:\\A', 'C:\\L'],
+      new Set(['C:\\L']),
+    )
+    expect(out.map((g) => g.key)).toEqual(['C:\\L', '', 'C:\\B', 'C:\\A'])
+  })
+
+  it('without locks: No project then saved project order', () => {
     const groups: ProjectGroup[] = [
       { key: '', path: '', label: 'No project', sessions: [] },
       { key: 'C:\\A', path: 'C:\\A', label: 'A', sessions: [] },
@@ -92,6 +107,45 @@ describe('applySidebarOrder', () => {
     )
     expect(out[1]!.sessions.map((s) => s.id)).toEqual(['s2', 's1'])
   })
+
+  it('puts pinned strip and locked folders at the top', () => {
+    const groups: ProjectGroup[] = [
+      {
+        key: '',
+        path: '',
+        label: 'No project',
+        sessions: [
+          sess('pin', { updated_at: '2026-01-05T00:00:00Z' }),
+          sess('n1', { updated_at: '2026-01-02T00:00:00Z' }),
+        ],
+      },
+      {
+        key: 'C:\\A',
+        path: 'C:\\A',
+        label: 'A',
+        sessions: [sess('a1', { project_path: 'C:\\A' })],
+      },
+      {
+        key: 'C:\\L',
+        path: 'C:\\L',
+        label: 'L',
+        sessions: [sess('l1', { project_path: 'C:\\L' })],
+      },
+    ]
+    const out = applySidebarOrder(
+      groups,
+      ['C:\\A', 'C:\\L'],
+      {},
+      new Set(['pin']),
+      { lockedKeys: new Set(['C:\\L']), pinStrip: true },
+    )
+    expect(out.map((g) => g.key)).toEqual(['__pinned__', 'C:\\L', '', 'C:\\A'])
+    expect(out[0]!.sessions.map((s) => s.id)).toEqual(['pin'])
+    // Pinned not duplicated under No project
+    expect(out.find((g) => g.key === '')!.sessions.map((s) => s.id)).toEqual([
+      'n1',
+    ])
+  })
 })
 
 // moveProject/moveSession need localStorage — use a minimal mock
@@ -117,5 +171,18 @@ describe('moveProject / moveSession with storage', () => {
 
     const ids = ['x', 'y', 'z']
     expect(moveSession('y', 'C:\\A', 'down', ids)).toEqual(['x', 'z', 'y'])
+  })
+
+  it('does not move locked project folders', () => {
+    // @ts-expect-error test stub
+    globalThis.localStorage = ls
+    store.clear()
+    const keys = ['C:\\A', 'C:\\B', 'C:\\C']
+    store.set(
+      'remedy.projectLocked.v1',
+      JSON.stringify(['C:\\B']),
+    )
+    expect(moveProject('C:\\B', 'up', keys)).toEqual(['C:\\A', 'C:\\B', 'C:\\C'])
+    expect(moveProject('C:\\A', 'down', keys)).toEqual(['C:\\A', 'C:\\B', 'C:\\C'])
   })
 })

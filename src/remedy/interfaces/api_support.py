@@ -44,6 +44,15 @@ def sse_headers() -> dict[str, str]:
 _BUILTIN_COMMANDS: list[dict] = [
     {"name": "/help", "description": "Show available commands", "aliases": [], "arguments": None},
     {"name": "/new", "description": "Create a new chat session", "aliases": [], "arguments": None},
+    {
+        "name": "/reset",
+        "description": (
+            "Full reset of this session (history, plans, brief, attachments) "
+            "— stay in the same tab; like a new chat without switching"
+        ),
+        "aliases": ["/clear"],
+        "arguments": None,
+    },
     {"name": "/sessions", "description": "List recent sessions", "aliases": [], "arguments": None},
     {"name": "/compact", "description": "Memory Harness: compress session into Session Brief", "aliases": [], "arguments": "focus"},
     {"name": "/harness", "description": "Show Memory Harness Session Brief / stats", "aliases": [], "arguments": None},
@@ -149,6 +158,49 @@ async def handle_slash_command(
 
     if stripped in ("/new", "/n"):
         return {"text": "Session marked for creation.", "action": "new_session"}
+
+    if stripped in ("/reset", "/clear"):
+        # Full in-place clean slate — same session id, no jump to another tab.
+        if not session_id:
+            return {
+                "text": "No active session to reset. Open a chat first, or use `/new`.",
+            }
+        if memory is None:
+            return {"text": "Memory store not available; cannot reset session."}
+        try:
+            from remedy.core.session_reset import full_reset_session
+
+            stats = await full_reset_session(
+                str(session_id), memory, runtime=runtime
+            )
+        except Exception as exc:
+            return {"text": f"Could not reset session: {exc}"}
+        if not stats.get("ok", True):
+            return {
+                "text": f"Could not reset session: {stats.get('error') or 'unknown error'}",
+            }
+        n = int(stats.get("messages") or 0)
+        bits = [f"{n} message{'s' if n != 1 else ''}"]
+        if stats.get("plans"):
+            bits.append(f"{stats['plans']} plan(s)")
+        if stats.get("checkpoints"):
+            bits.append(f"{stats['checkpoints']} checkpoint(s)")
+        if stats.get("attachments_purged"):
+            bits.append("attachments")
+        if stats.get("memory_entries"):
+            bits.append(f"{stats['memory_entries']} session note(s)")
+        detail = ", ".join(bits)
+        return {
+            "text": (
+                f"Session fully reset ({detail}). "
+                "Same session tab — history, plans, brief, goals buffer, and "
+                "attachments cleared. Durable memory (/remember) kept. "
+                "Send a message to start as if new."
+            ),
+            "action": "reset_session",
+            "cleared": n,
+            "stats": stats,
+        }
 
     if stripped in ("/sessions", "/s"):
         if memory is None:

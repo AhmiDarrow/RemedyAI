@@ -49,6 +49,7 @@ from remedy.core.workspace import (
     normalize_access_scope,
     resolve_project_path,
     resolve_under_roots,
+    write_roots_for_scope,
 )
 from remedy.memory.store import MemoryStore
 from remedy.models import (
@@ -142,7 +143,19 @@ class BasicRuntime(AgentRuntime):
         self._register_memory_tools()
 
     def project_path_is_unset(self) -> bool:
-        """True when no real project folder is configured (→ full access)."""
+        """True when no real project folder is configured (→ full access).
+
+        Prefers per-turn ContextVar so concurrent streams do not steal each
+        other's project binding when checking the write jail.
+        """
+        try:
+            from remedy.core.turn_context import current_turn_workspace
+
+            ws = current_turn_workspace()
+            if ws is not None:
+                return is_unset_project_path(ws.project_raw)
+        except Exception:
+            pass
         return is_unset_project_path(getattr(self, "_project_path_raw", None))
 
     def effective_project_path(self) -> Path:
@@ -180,12 +193,39 @@ class BasicRuntime(AgentRuntime):
         )
 
     def allowed_roots(self) -> list[Path]:
+        """Read/research roots (may include Desktop/Documents/Downloads)."""
         return allowed_roots_for_scope(
             self.access_scope(), self.effective_project_path()
         )
 
-    def resolve_tool_path(self, path: str) -> Path:
-        """Resolve a tool path under the current access scope roots."""
+    def write_roots(self) -> list[Path]:
+        """Mutation roots — project-only under project/untrusted scope."""
+        return write_roots_for_scope(
+            self.access_scope(), self.effective_project_path()
+        )
+
+    def resolve_tool_path(self, path: str, *, for_write: bool = False) -> Path:
+        """Resolve a tool path under read roots, or write roots when *for_write*.
+
+        Reads/research may use broader roots (e.g. Desktop under project scope).
+        Writes/edits/shell cwd must pass ``for_write=True`` so a bound project
+        cannot be escaped via profile folders or a lingering ``full`` scope
+        absolute-path bypass.
+        """
+        if for_write:
+            roots = self.write_roots()
+            scope = self.access_scope()
+            # With a real project bound, never apply the full absolute bypass
+            # for mutations — enforce write_roots membership strictly.
+            if not self.project_path_is_unset():
+                enforce = "home" if scope == "home" else "project"
+                return resolve_under_roots(
+                    path or ".", roots, access_scope=enforce
+                )
+            # No project → full machine writes (owner PC mode).
+            return resolve_under_roots(
+                path or ".", roots, access_scope="full"
+            )
         return resolve_under_roots(
             path or ".",
             self.allowed_roots(),
@@ -635,8 +675,6 @@ class BasicRuntime(AgentRuntime):
         *plan_mode*: restrict tools to planning helpers (plan_save, goals, memory search).
         *provider* / *model*: per-session bind via ContextVar (parallel multi-provider).
         """
-        await self._apply_session_workspace(session_id)
-
         from remedy.core.llm_binding import (
             LlmBinding,
             get_llm_binding,
@@ -650,13 +688,19 @@ class BasicRuntime(AgentRuntime):
             is_turn_aborted,
         )
 
-        # Short lock only while resolving credentials into a frozen LlmBinding.
-        # The turn itself runs unlocked so Grok + DeepSeek can stream in parallel.
+        # Short lock: session project jail + LLM credentials must snapshot
+        # atomically so concurrent DeepSeek/Grok streams cannot thrash
+        # ``_project_path_raw`` before ``begin_turn`` freezes ContextVars.
         if self._llm_turn_lock is None:
             self._llm_turn_lock = asyncio.Lock()
         lock = self._llm_turn_lock
 
         async with lock:
+            await self._apply_session_workspace(session_id)
+            # Capture under lock — concurrent set_project_path cannot race us.
+            turn_project_raw = getattr(self, "_project_path_raw", None)
+            turn_active_path = getattr(self, "_active_project_path", None) or ""
+
             prov = (provider or "").strip() or None
             mod = (model or "").strip() or None
             if not prov and not mod and session_id and self.memory is not None:
@@ -700,8 +744,8 @@ class BasicRuntime(AgentRuntime):
 
         tok_s, tok_a, tok_w, tok_p, tok_t = begin_turn(
             session_id,
-            project_raw=getattr(self, "_project_path_raw", None),
-            active_path=getattr(self, "_active_project_path", None) or "",
+            project_raw=turn_project_raw,
+            active_path=turn_active_path,
             plan_mode=bool(plan_mode),
         )
         # Legacy mirrors for code that still reads runtime attrs (prefer ContextVar).

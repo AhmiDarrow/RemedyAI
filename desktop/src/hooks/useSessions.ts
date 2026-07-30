@@ -70,27 +70,41 @@ export function useSessions() {
     loadingMore,
     refresh,
     loadMore,
-    create: useCallback(async (title?: string) => {
-      try {
-        // New Session = root (no project). Explicit "" so API does not inherit
-        // global settings.project_path. Use createInProject to attach a folder.
-        const s = await createSession({ title, project_path: '' })
-        setSessions((prev) => [s, ...prev])
-        setActiveId(s.id)
-        return s
-      } catch (e: unknown) {
-        console.warn(
-          '[remedy] createSession failed',
-          e instanceof Error ? e.message : e,
-        )
-        return null
-      }
-    }, []),
+    create: useCallback(
+      async (
+        title?: string,
+        llm?: { provider?: string; model?: string },
+      ) => {
+        try {
+          // New Session = root (no project). Explicit "" so API does not inherit
+          // global settings.project_path. Use createInProject to attach a folder.
+          const s = await createSession({
+            title,
+            project_path: '',
+            model: llm?.model,
+            llm_provider: llm?.provider,
+          })
+          setSessions((prev) => [s, ...prev])
+          setActiveId(s.id)
+          return s
+        } catch (e: unknown) {
+          console.warn(
+            '[remedy] createSession failed',
+            e instanceof Error ? e.message : e,
+          )
+          return null
+        }
+      },
+      [],
+    ),
     createInProject: useCallback(
       async (
         projectPath: string | null,
         title?: string,
-        opts?: { setAsDefault?: boolean },
+        opts?: {
+          setAsDefault?: boolean
+          llm?: { provider?: string; model?: string }
+        },
       ) => {
         try {
           const project_path =
@@ -108,7 +122,12 @@ export function useSessions() {
               }
             }
           }
-          const s = await createSession({ title, project_path })
+          const s = await createSession({
+            title,
+            project_path,
+            model: opts?.llm?.model,
+            llm_provider: opts?.llm?.provider,
+          })
           setSessions((prev) => [s, ...prev])
           setActiveId(s.id)
           return s
