@@ -6,6 +6,7 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ### Gauntlet: continuous security + perf loop (feature/computer-use)
 
+- **Security sweep regression:** IPv6 ULA/link-local/loopback/mapped-loopback SSRF pin-on-resolve coverage; open_app protocol-detector drive-letter vs `shell:`/`ms-*`/`data:` handlers
 - **Skill auto-suggest:** `review project` (and review/coding/ship phrasing) re-ranks the catalog and injects preferred procedure (`change-safety` / `project-etiquette` / `refactor-safe`) into context without waiting for `skill_activate`
 - **send_policy dual work:** `begin_turn_metabolism(pre_tier=)` reuses send_policy tier (no second classify walk); autonomous still re-classifies to L3
 - **Desktop ErrorBoundary:** Continue (re-mount), Reload, Copy error, component stack — not a dead blank window
@@ -33,7 +34,7 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 - Hot path: Action IR steps cap 96; CUA macros `MAX_CUA_MACROS=64` verified; evidence units 240/lean 64 + seen_fps bound; L0 skips full organ snapshots; intent router cache; hot-path debug gated on operator DEBUG
 - Hot path: time crystal `MAX_CRYSTAL_FACTS=128` + hot_block rev on hit; skill genome `MAX_PHENOTYPES=128` prune; governor `MAX_GOVERNOR_DECISIONS=40` named; L0 begin_turn skips map/crystal/gov warm; L3 false-positive fixes (`go over` / `step away from` / `review all options` / conceptual compare)
 - Hot path: partner memory `MAX_HOT_FACTS=12` / `MAX_HOT_TRAITS=8`; UI `@@tool_result` preview `UI_TOOL_RESULT_PREVIEW_CHARS=8k` (was 500k); drop epoch-roll double `slim_messages_mid_turn`; snapshot reuses send_policy `turn_tier` (no second classify for force_spread)
-- Docs: README pytest count ~1263
+- Docs: README pytest count ~1273
 - Gateway: `gateway serve` installs local API token; Teams JWT `aud`/`exp` fail-closed; secret cache `mtime_ns`+size; generic webhook 503 without secret
 - Plan mode: exclude `computer_act`; CUA mutations go through Ask approvals; skill learning path jail; MCP env scrub; zip rejects symlinks
 - **Plan mode:** drop `computer_act` (and keep allowlist = research tools ∪ `COMPUTER_PLAN_MODE_TOOLS` only — no click/type/app)
