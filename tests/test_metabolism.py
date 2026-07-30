@@ -312,6 +312,87 @@ def test_redact_shared_patterns():
     assert "[redacted]" in s
 
 
+def test_identity_import_requires_hmac(tmp_path: Path):
+    """Missing hmac_hex must fail closed (no decrypt without MAC)."""
+    import base64
+    import json as _json
+
+    payload = build_identity_payload(
+        partner_memory=[{"text": "Likes coffee"}],
+        display_name="T",
+    )
+    path = export_identity(payload, tmp_path / "nohmac.remedy", passphrase="test-pass-12")
+    pkg = _json.loads(path.read_text(encoding="utf-8"))
+    pkg.pop("hmac_hex", None)
+    path.write_text(_json.dumps(pkg), encoding="utf-8")
+    with pytest.raises(ValueError, match="HMAC|hmac|fail closed"):
+        import_identity(path, passphrase="test-pass-12")
+    # Empty hmac also refused
+    pkg["hmac_hex"] = ""
+    path.write_text(_json.dumps(pkg), encoding="utf-8")
+    with pytest.raises(ValueError):
+        import_identity(path, passphrase="test-pass-12")
+    # Tampered hmac refused
+    path = export_identity(payload, tmp_path / "badhmac.remedy", passphrase="test-pass-12")
+    pkg = _json.loads(path.read_text(encoding="utf-8"))
+    pkg["hmac_hex"] = "0" * 64
+    path.write_text(_json.dumps(pkg), encoding="utf-8")
+    with pytest.raises(ValueError):
+        import_identity(path, passphrase="test-pass-12")
+
+
+def test_evidence_persist_index_delta_only(tmp_path: Path):
+    """persist_index must not re-append the same units every call (thrash)."""
+    reset_evidence_ledger("persist_delta")
+    led = get_evidence_ledger("persist_delta")
+    led.admit_tool_result(
+        tool_name="file_read",
+        content="read C:\\proj\\a.py ok",
+        success=True,
+    )
+    p1 = led.persist_index(tmp_path)
+    assert p1 is not None and p1.is_file()
+    lines1 = p1.read_text(encoding="utf-8").strip().splitlines()
+    n1 = len(lines1)
+    assert n1 >= 1
+    # Second persist with no new EU — no growth
+    p2 = led.persist_index(tmp_path)
+    assert p2 == p1
+    lines2 = p1.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines2) == n1
+    # New EU then grows
+    led.admit_tool_result(
+        tool_name="file_read",
+        content="read C:\\proj\\b.py ok",
+        success=True,
+    )
+    led.persist_index(tmp_path)
+    lines3 = p1.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines3) > n1
+
+
+def test_log_formatter_redacts_secrets():
+    """Structured and text log formatters must not emit raw secret material."""
+    import logging
+
+    from remedy.core.logging import StructuredFormatter, TextFormatter
+
+    rec = logging.LogRecord(
+        name="remedy.test",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg="login api_key=sk-abcdefghijklmnopqrstuvwxyz0123 token=x",
+        args=(),
+        exc_info=None,
+    )
+    js = StructuredFormatter(color=False).format(rec)
+    assert "sk-abcdefghijklmnopqrstuvwxyz0123" not in js
+    assert "[redacted]" in js or "api_key" in js
+    txt = TextFormatter().format(rec)
+    assert "sk-abcdefghijklmnopqrstuvwxyz0123" not in txt
+
+
 def test_evidence_delta_before_mark_model_call():
     """pointer_block must be non-empty before mark; empty after (order matters)."""
     from remedy.core.metabolism.evidence import get_evidence_ledger, reset_evidence_ledger
