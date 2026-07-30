@@ -158,6 +158,37 @@ def test_computer_type_normal_phrase_kept():
     assert parsed.get("text") == "hello world search query"
 
 
+@pytest.mark.parametrize(
+    "secret",
+    [
+        "sk-ant-api03-abcdefghijklmnopqrstuvwxyz012345",
+        "sk-or-v1-abcdefghijklmnopqrstuvwxyz0123456789",
+        "hf_abcdefghijklmnopqrstuvwxyz0123456789",
+        "npm_abcdefghijklmnopqrstuvwxyz0123456789",
+        "AIzaSyA-abcdefghijklmnopqrstuvwx0123456",
+        "sk_live_abcdefghijklmnopqrstuvwxyz0123",
+        "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U",
+    ],
+)
+def test_scrub_redacts_provider_key_shapes(secret: str):
+    """Outbound sanitize must catch Anthropic/OpenRouter/HF/npm/Stripe/Google/JWT."""
+    m = sanitize_message({"role": "tool", "content": f"leaked {secret} trailing"})
+    assert secret not in m["content"]
+    assert "[redacted]" in m["content"]
+    assert "trailing" in m["content"]
+
+
+def test_scrub_redacts_pem_private_key_block():
+    pem = (
+        "-----BEGIN PRIVATE KEY-----\n"
+        "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7\n"
+        "-----END PRIVATE KEY-----"
+    )
+    m = sanitize_message({"role": "assistant", "content": f"key material:\n{pem}\nok"})
+    assert "BEGIN PRIVATE KEY" not in m["content"] or "[redacted]" in m["content"]
+    assert "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7" not in m["content"]
+
+
 def test_file_write_large_content_summarized_not_half_clipped():
     """History must not look like a truncated file body (causes rewrite thrash)."""
     body = "line\n" * 5000  # >> 8k

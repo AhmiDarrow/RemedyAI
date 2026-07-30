@@ -92,6 +92,27 @@ def test_swarm_dispatch_message_and_tool():
     assert st["bots"]["token"]["bot"] == "token"
 
 
+def test_nanoswarm_clear_session_purges_pattern_and_goal():
+    """Session delete/reset must drop residual pattern windows + open goals."""
+    from remedy.core.session_reset import purge_session_disk_artifacts
+
+    swarm = get_swarm()
+    sid = "gauntlet-clear-sess-xyz"
+    swarm.pattern.on_tool_step("bash_exec", success=True, session_id=sid)
+    swarm.goal.sync_from_brief(None, session_id=sid)
+    # Manually plant an open goal
+    s = swarm.goal._sess(sid)
+    s["open"] = ["ship release"]
+    assert swarm.pattern.for_session(sid).steps
+    assert swarm.goal.snapshot(sid)["open"]
+
+    stats = purge_session_disk_artifacts(sid, home=None)
+    assert stats.get("nanoswarm_cleared") is True
+    # After clear, for_session recreates empty buffer; steps list is empty
+    assert swarm.pattern.for_session(sid).steps == []
+    assert swarm.goal.snapshot(sid)["open"] == []
+
+
 def test_compressor_uses_token_nanobot():
     from remedy.memory.harness.compressor import estimate_tokens, should_nudge_compress
 

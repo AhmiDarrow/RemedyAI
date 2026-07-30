@@ -102,3 +102,58 @@ async def test_discover_tools_registers() -> None:
     assert len(tools) == 1
     assert tools[0].name == "search"
     assert client.get_tool("search", server="srv") is not None
+
+
+@pytest.mark.asyncio
+async def test_disconnect_purges_residual_tools() -> None:
+    """Disconnected servers must not leave tools resolvable/listable."""
+    client = MCPClient()
+    client._servers["srv"] = {"connected": True}
+    client._tools["mcp:srv:echo"] = ToolDefinition(
+        name="echo",
+        description="echo",
+        source=ToolSource.MCP,
+        uri="mcp://srv/echo",
+    )
+    client._tools["mcp:other:keep"] = ToolDefinition(
+        name="keep",
+        description="other server",
+        source=ToolSource.MCP,
+        uri="mcp://other/keep",
+    )
+    await client.disconnect("srv")
+    assert client.get_tool("echo", server="srv") is None
+    assert all(t.name != "echo" for t in client.list_tools())
+    # Other servers' tools remain
+    assert client.get_tool("keep", server="other") is not None
+    # Residual resolve must fail closed
+    result = await client.call_tool(ToolCall(tool_name="echo", arguments={}))
+    assert not result.success
+
+
+@pytest.mark.asyncio
+async def test_rediscover_drops_removed_server_tools() -> None:
+    """tools/list that no longer includes a tool must purge the residual reg."""
+    client = MCPClient()
+    client._servers["srv"] = {"connected": True}
+    client._tools["mcp:srv:old"] = ToolDefinition(
+        name="old",
+        description="gone",
+        source=ToolSource.MCP,
+        uri="mcp://srv/old",
+    )
+    client._send_request = AsyncMock(  # type: ignore[method-assign]
+        return_value={
+            "tools": [
+                {
+                    "name": "new",
+                    "description": "still there",
+                    "inputSchema": {"type": "object", "properties": {}},
+                }
+            ]
+        }
+    )
+    tools = await client.discover_tools("srv")
+    assert [t.name for t in tools] == ["new"]
+    assert client.get_tool("old", server="srv") is None
+    assert client.get_tool("new", server="srv") is not None
