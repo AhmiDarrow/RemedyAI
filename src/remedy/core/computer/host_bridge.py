@@ -333,7 +333,8 @@ class ComputerHostBridge:
 
     def enqueue(self, action: str, payload: dict[str, Any] | None = None) -> ComputerJob:
         job = ComputerJob(
-            id=uuid.uuid4().hex[:16],
+            # Full uuid hex (128-bit) — do not truncate (a11y/job spoof surface).
+            id=uuid.uuid4().hex,
             action=action,
             payload=dict(payload or {}),
             status="pending",

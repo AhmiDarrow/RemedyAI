@@ -305,6 +305,35 @@ def test_shell_write_jail_blocks_sibling_set_content(tmp_path: Path):
     )
 
 
+def test_shell_write_jail_blocks_sc_copy_python_and_opaque(tmp_path: Path):
+    """Review P0: sc/copy/python -c/env path mutation must not slip past jail."""
+    sticky = tmp_path / "SecretSticky"
+    folder = tmp_path / "SecretFolder"
+    sticky.mkdir()
+    folder.mkdir()
+    roots = [sticky.resolve()]
+    target = folder / "pwn.txt"
+
+    cases = [
+        f'sc "{target}" "hi"',
+        f'copy a.txt "{target}"',
+        f'xcopy a.txt "{target}"',
+        f'python -c "open(r\'{target}\', \'w\').write(\'x\')"',
+        r'Set-Content -Path $env:USERPROFILE\Desktop\leak.txt -Value z',
+        r'Set-Content -Path (Join-Path $env:USERPROFILE "SecretFolder\x") -Value z',
+    ]
+    for cmd in cases:
+        assert looks_like_mutation(cmd), cmd
+        hit = check_shell_write_jail(
+            cmd,
+            write_roots=roots,
+            cwd=sticky,
+            project_bound=True,
+            access_scope="project",
+        )
+        assert hit is not None, f"expected jail for: {cmd}"
+
+
 def test_shell_write_jail_blocks_relative_escape(tmp_path: Path):
     proj = tmp_path / "SecretSticky"
     sibling = tmp_path / "SecretFolder"
@@ -356,6 +385,35 @@ async def test_bash_exec_enforces_shell_write_jail(tmp_path: Path, monkeypatch):
     result = await reg.execute("bash_exec", command=bad)
     assert "WRITE_JAIL" in result or "jail" in result.lower() or "outside" in result.lower()
     assert not (folder / "pwn.txt").exists()
+
+
+@pytest.mark.asyncio
+async def test_bash_exec_write_roots_fail_closed(tmp_path: Path, monkeypatch):
+    """write_roots() failure must not fall back to Desktop/Docs read roots."""
+    from remedy.core.agent_workspace_tools import register_workspace_tools
+    from remedy.core.approvals import APPROVALS
+    from remedy.skills.tool_registry import ToolRegistry
+
+    monkeypatch.setattr(APPROVALS, "needs_ask", lambda *a, **k: None)
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+    rt = _make_runtime(proj, scope="project", home=home)
+    reg = ToolRegistry()
+    rt.tool_registry = reg  # type: ignore[attr-defined]
+    rt.config = SimpleNamespace(home_dir=str(tmp_path / "remedy_home"))  # type: ignore[attr-defined]
+    rt._session_id = "jail-session"  # type: ignore[attr-defined]
+
+    def _boom():
+        raise RuntimeError("roots unavailable")
+
+    rt.write_roots = _boom  # type: ignore[method-assign]
+    register_workspace_tools(rt)
+    out = await reg.execute("bash_exec", command="echo hi")
+    assert "WRITE_JAIL" in out
+    assert "roots" in out.lower()
 
 
 @pytest.mark.asyncio
