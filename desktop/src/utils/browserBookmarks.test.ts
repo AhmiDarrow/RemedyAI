@@ -10,7 +10,6 @@ import {
 
 beforeEach(() => {
   const store = new Map<string, string>()
-  // @ts-expect-error test mock
   globalThis.localStorage = {
     getItem: (k: string) => store.get(k) ?? null,
     setItem: (k: string, v: string) => {
