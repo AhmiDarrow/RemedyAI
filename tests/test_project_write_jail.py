@@ -535,6 +535,72 @@ def test_shell_write_jail_extracts_windows_paths():
     assert any("SecretFolder" in p for p in paths)
 
 
+def test_shell_write_jail_blocks_auth_under_home_write_roots(tmp_path: Path, monkeypatch):
+    """Home-scope write roots include user home; auth/** must still be refused.
+
+    Gap: shell jail only checked path-under-roots, so Set-Content into
+    ``~/.remedy/auth`` under access_scope=home was allowed. File tools already
+    refuse via ``resolve_under_roots``; shell must match.
+    """
+    from remedy.core.security import clear_protected_auth_roots_cache
+
+    home = tmp_path / "home"
+    proj = tmp_path / "proj"
+    home.mkdir()
+    proj.mkdir()
+    auth = home / ".remedy" / "auth"
+    auth.mkdir(parents=True)
+    secret = auth / "local_api_token"
+    secret.write_text("tokensecretvalue", encoding="utf-8")
+
+    # Path-part (.remedy/auth) detection works without REMEDY_HOME; also pin env.
+    monkeypatch.setenv("REMEDY_HOME", str(home / ".remedy"))
+    clear_protected_auth_roots_cache()
+
+    roots = write_roots_for_scope("home", proj, home=home)
+    assert any(r.resolve() == home.resolve() for r in roots)
+
+    # File-tool path: home scope still protected
+    rt = _make_runtime(proj, scope="home", home=home)
+    with pytest.raises(SecurityError) as ei:
+        rt.resolve_tool_path(str(secret), for_write=True)
+    assert ei.value.details.get("rule") == "protected_secret_path"
+
+    cmd = f'Set-Content -Path "{secret}" -Value "pwned" -Encoding utf8'
+    assert looks_like_mutation(cmd)
+    hit = check_shell_write_jail(
+        cmd,
+        write_roots=roots,
+        cwd=proj,
+        project_bound=True,
+        access_scope="home",
+    )
+    assert hit is not None, "shell must refuse auth write under home roots"
+    assert "auth" in hit.lower() or "protected" in hit.lower() or "secret" in hit.lower()
+
+    # Same for provider_keys (absolute) under home write roots
+    keys = auth / "provider_keys.json"
+    hit_keys = check_shell_write_jail(
+        f'Set-Content -Path "{keys}" -Value "{{}}"',
+        write_roots=roots,
+        cwd=home,
+        project_bound=True,
+        access_scope="home",
+    )
+    assert hit_keys is not None
+
+    # Non-auth sibling under home remains allowed by the jail (path under roots)
+    ok = check_shell_write_jail(
+        f'Set-Content -Path "{home / "notes.txt"}" -Value "ok"',
+        write_roots=roots,
+        cwd=proj,
+        project_bound=True,
+        access_scope="home",
+    )
+    assert ok is None
+    clear_protected_auth_roots_cache()
+
+
 @pytest.mark.asyncio
 async def test_bash_exec_enforces_shell_write_jail(tmp_path: Path, monkeypatch):
     from remedy.core.agent_workspace_tools import register_workspace_tools
