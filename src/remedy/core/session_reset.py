@@ -92,6 +92,7 @@ def purge_session_disk_artifacts(
         "checkpoints": 0,
         "attachments_purged": False,
         "undo_purged": False,
+        "nanoswarm_cleared": False,
     }
     if not sid:
         return stats
@@ -104,6 +105,16 @@ def purge_session_disk_artifacts(
         stats["attachments_purged"] = _purge_attachments(sid, root)
     with contextlib.suppress(Exception):
         stats["undo_purged"] = _purge_undo(sid, root)
+    # Process-local nanoswarm residual (even when no runtime is wired on delete)
+    with contextlib.suppress(Exception):
+        from remedy.nanoswarm import get_swarm
+
+        swarm = get_swarm()
+        if hasattr(swarm.pattern, "clear_session"):
+            swarm.pattern.clear_session(sid)
+        if hasattr(swarm.goal, "clear_session"):
+            swarm.goal.clear_session(sid)
+        stats["nanoswarm_cleared"] = True
     return stats
 
 
@@ -210,13 +221,25 @@ def _purge_runtime_state(session_id: str, runtime: Any) -> None:
                                 if k not in drop_keys:
                                     tasks.pop(k, None)
 
-    # Nanoswarm pattern buffer for this session
+    # Nanoswarm pattern buffer for this session (runtime attr — rare)
     with contextlib.suppress(Exception):
         pattern = getattr(runtime, "_pattern_nanobot", None) or getattr(
             runtime, "pattern_nanobot", None
         )
         if pattern is not None and hasattr(pattern, "clear_session"):
             pattern.clear_session(sid)
+
+    # Global nanoswarm (get_swarm) — pattern + goal session residual.
+    # Session delete/reset must not leave tool windows or open goals that
+    # contaminate a reused session id or Continuity hints for other tabs.
+    with contextlib.suppress(Exception):
+        from remedy.nanoswarm import get_swarm
+
+        swarm = get_swarm()
+        if hasattr(swarm.pattern, "clear_session"):
+            swarm.pattern.clear_session(sid)
+        if hasattr(swarm.goal, "clear_session"):
+            swarm.goal.clear_session(sid)
 
 
 async def full_reset_session(

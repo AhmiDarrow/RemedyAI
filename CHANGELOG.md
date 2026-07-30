@@ -6,6 +6,10 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ### Gauntlet: continuous security + perf loop (feature/computer-use)
 
+- **MCP residual tools:** disconnect / reader EOF / rediscover purge `mcp:{server}:*` registrations so dead servers cannot still resolve `call_tool`; pending JSON-RPC futures fail closed
+- **Provider sanitize:** outbound scrub uses shared metabolism redaction (Anthropic/OpenRouter/HF/npm/Stripe/Google/JWT/PEM/DB URLs) so tool results match ledger fail-closed policy
+- **Time travel restore:** refuse auth/undo paths; skip incomplete (oversized) prior bodies so truncation stubs never rewrite source; API passes `message_id` + timestamp fallback
+- **Nanoswarm session residual:** `goal.clear_session` + purge pattern/goal on session delete/reset via `get_swarm` (not only rare runtime attrs)
 - **Shell write jail + auth path:** mutations into `~/.remedy/auth/**` / `$REMEDY_HOME/auth/**` refused even when home write roots contain the profile (parity with `resolve_under_roots`); regression covers home-scope Set-Content + relative auth walks
 - **SSRF redirect re-validation regression:** `_pinned_fetch` 302 Location to loopback/metadata/userinfo fails closed (`SSRF_BLOCKED_REDIRECT` / `URL_USERINFO_BLOCKED`)
 - **Desktop stream abort UX:** cooperative `event:aborted` completes jobs as `aborted` (not done); Stop/interrupt commit job paint with `_[Stopped]_`; `uiCommitted` prevents double-bubble race; skip listMessages wipe after abort

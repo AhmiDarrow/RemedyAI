@@ -34,17 +34,29 @@ _COMPUTER_TYPE_TOOLS = frozenset({"computer_type", "computer_act"})
 _SECRET_KEY_RE = re.compile(
     r"(?i)(access_token|refresh_token|id_token|client_secret|authorization|"
     r"api_key|apikey|password|passwd|bearer|private_key|bot_token|app_secret|"
-    r"signing_secret|session_token|x-api-key)"
+    r"signing_secret|session_token|x-api-key|auth_token|app_password|"
+    r"cookie|set-cookie)"
 )
 
+# Fallback patterns when metabolism.redact is unavailable; keep in sync with
+# remedy.core.metabolism.redact (Anthropic/OpenRouter/HF/npm/Stripe/Google/…).
 _SECRET_VALUE_RE = re.compile(
     r"(?i)\b("
-    r"sk-[a-zA-Z0-9]{20,}"
+    r"sk-ant-[A-Za-z0-9_\-]{16,}"
+    r"|sk-or-[A-Za-z0-9_\-]{16,}"
+    r"|sk-proj-[A-Za-z0-9_\-]{16,}"
+    r"|sk-[a-zA-Z0-9]{20,}"
     r"|xai-[a-zA-Z0-9]{20,}"
     r"|ya29\.[a-zA-Z0-9._-]+"
     r"|1//[a-zA-Z0-9_-]+"
     r"|ghp_[a-zA-Z0-9]{20,}"
+    r"|gho_[a-zA-Z0-9]{20,}"
     r"|xox[baprs]-[a-zA-Z0-9-]{10,}"
+    r"|hf_[A-Za-z0-9]{20,}"
+    r"|npm_[A-Za-z0-9]{20,}"
+    r"|AIza[0-9A-Za-z\-_]{20,}"
+    r"|(?:sk_live|sk_test|rk_live|rk_test)_[A-Za-z0-9]{16,}"
+    r"|eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}"
     r")\b"
 )
 
@@ -56,7 +68,18 @@ def _clip(s: str, max_len: int) -> str:
 
 
 def _scrub_text(text: str, *, max_len: int) -> str:
-    t = _SECRET_VALUE_RE.sub("[redacted]", text or "")
+    """Redact secret-shaped substrings then size-cap for provider HTTP.
+
+    Prefer shared metabolism redaction (broader patterns: PEM, DB URLs,
+    Discord webhooks, …) so outbound chat matches ledger/IR fail-closed policy.
+    """
+    raw = text or ""
+    try:
+        from remedy.core.metabolism.redact import redact_text
+
+        t = redact_text(raw)
+    except Exception:
+        t = _SECRET_VALUE_RE.sub("[redacted]", raw)
     return _clip(t, max_len)
 
 
@@ -157,7 +180,7 @@ def _rewrite_write_tool_args(parsed: Any, tool_name: str) -> Any:
             # computer_type uses "text" as the payload.
             if name == "computer_act" and key == "text":
                 continue
-            scrubbed = _SECRET_VALUE_RE.sub("[redacted]", val)
+            scrubbed = _scrub_text(val, max_len=len(val) + 32)
             secretish = scrubbed != val or _looks_like_secret_payload(val)
             # password/passwd keys always redacted; type/text only when secret-like
             if key in ("password", "passwd") or secretish:
@@ -196,9 +219,8 @@ def _scrub_tool_args_obj(obj: Any, *, depth: int = 0) -> Any:
     if isinstance(obj, list):
         return [_scrub_tool_args_obj(x, depth=depth + 1) for x in obj[:200]]
     if isinstance(obj, str):
-        t = _SECRET_VALUE_RE.sub("[redacted]", obj)
-        if len(t) > TOOL_ARGS_VALUE_MAX:
-            t = t[: TOOL_ARGS_VALUE_MAX - 1] + "…"
+        # Reuse full scrub (metabolism patterns + fallback) then value cap.
+        t = _scrub_text(obj, max_len=TOOL_ARGS_VALUE_MAX)
         return t
     return obj
 
