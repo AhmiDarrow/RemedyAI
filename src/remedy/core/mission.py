@@ -65,28 +65,60 @@ class MissionStore:
         self.root.mkdir(parents=True, exist_ok=True)
 
     def _path(self, mission_id: str) -> Path:
-        return self.root / f"{mission_id}.json"
+        """Resolve mission JSON path — never leave ``missions/`` (path jail)."""
+        from remedy.core.security import validate_mission_id
+
+        mid = validate_mission_id(mission_id)
+        candidate = (self.root / f"{mid}.json").resolve()
+        root = self.root.resolve()
+        try:
+            candidate.relative_to(root)
+        except ValueError as err:
+            from remedy.core.errors import SecurityError
+
+            raise SecurityError(
+                "Mission path escaped missions root",
+                rule="mission_path_jail",
+                detail={"mission_id": mid},
+            ) from err
+        return candidate
 
     def save(self, mission: Mission) -> Mission:
+        from remedy.core.security import sanitize_mission_session_id, validate_mission_id
+
         now = datetime.now(UTC).isoformat()
         if not mission.created_at:
             mission.created_at = now
         mission.updated_at = now
+        # Validate id before write (UUIDs always pass; blocks forged objects)
+        mission.id = validate_mission_id(mission.id)
         self._path(mission.id).write_text(
             json.dumps(mission.to_dict(), indent=2), encoding="utf-8"
         )
-        # Latest pointer per session
-        if mission.session_id:
-            ptr = self.root / f"latest-{mission.session_id}.txt"
+        # Latest pointer per session (sanitize so session_id cannot path-escape)
+        sid = sanitize_mission_session_id(mission.session_id)
+        if sid:
+            mission.session_id = sid
+            ptr = self.root / f"latest-{sid}.txt"
             ptr.write_text(mission.id, encoding="utf-8")
         (self.root / "latest.txt").write_text(mission.id, encoding="utf-8")
         return mission
 
     def get(self, mission_id: str) -> Mission | None:
+        from remedy.core.errors import SecurityError
+        from remedy.core.security import validate_mission_id
+
         mid = (mission_id or "").strip()
         if not mid:
             return None
-        p = self._path(mid)
+        try:
+            mid = validate_mission_id(mid)
+        except SecurityError:
+            return None
+        try:
+            p = self._path(mid)
+        except SecurityError:
+            return None
         if p.is_file():
             try:
                 return Mission.from_dict(json.loads(p.read_text(encoding="utf-8")))
@@ -98,6 +130,7 @@ class MissionStore:
         needle = mid.replace("-", "").lower()
         matches: list[Mission] = []
         for fp in self.root.glob("*.json"):
+            # Only basenames under root (glob already scoped)
             stem = fp.stem
             if not (
                 stem.startswith(mid)
@@ -116,8 +149,11 @@ class MissionStore:
         return None
 
     def latest(self, session_id: str | None = None) -> Mission | None:
-        if session_id:
-            ptr = self.root / f"latest-{session_id}.txt"
+        from remedy.core.security import sanitize_mission_session_id
+
+        sid = sanitize_mission_session_id(session_id)
+        if sid:
+            ptr = self.root / f"latest-{sid}.txt"
             if ptr.is_file():
                 mid = ptr.read_text(encoding="utf-8").strip()
                 m = self.get(mid)
