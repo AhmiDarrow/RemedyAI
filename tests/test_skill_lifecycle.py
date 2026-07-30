@@ -98,6 +98,30 @@ def test_reject_easy_messy_trace():
     assert dec.action == "reject"
 
 
+def test_reject_trivial_low_diversity_tool_chain():
+    """Short clean explore loops must not become skills (catalog flood)."""
+    policy = SkillLifecyclePolicy()
+    steps = _steps(
+        ("file_read", True),
+        ("file_read", True),
+        ("list_dir", True),
+        ("file_read", True),
+    )
+    e = compute_effort_score(steps=steps)
+    assert e.band == "trivial"
+    dec = policy.should_accept_trace(
+        step_count=4,
+        successful_steps=4,
+        overall_success=True,
+        step_success_rate=1.0,
+        has_reusable_pattern=True,
+        title="file_read-list_dir",
+        effort=e,
+    )
+    assert dec.action == "reject"
+    assert "trivial" in dec.reason.lower() or "diversity" in dec.reason.lower()
+
+
 def test_hard_won_resists_prune():
     policy = SkillLifecyclePolicy()
     skill = Skill(

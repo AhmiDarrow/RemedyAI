@@ -233,10 +233,14 @@ class LearningLoop:
 
         # Compat: auto_approve may elevate DISCOVERED → VALIDATED only
         # Hard-won high-effort skills elevate more readily (still not ACTIVE).
+        # Trivial tool-chain luck must stay DISCOVERED so ranking demotes them.
         elevate = (
             auto_approve
-            or conf >= self.auto_approve_threshold
             or effort.is_hard_won
+            or (
+                conf >= self.auto_approve_threshold
+                and float(effort.score or 0.0) >= 0.45
+            )
         )
         if elevate and skill.manifest.status == SkillStatus.DISCOVERED:
             skill.manifest.status = SkillStatus.VALIDATED
