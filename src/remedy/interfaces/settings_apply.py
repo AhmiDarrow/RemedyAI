@@ -198,21 +198,17 @@ async def apply_settings_update(
             f"Known keys include: {', '.join(sorted(SETTABLE_KEYS)[:20])}…"
         )
 
-    # Always re-resolve config path (honors REMEDY_HOME; avoid stale path cache
-    # across tests or alternate homes).
-    try:
-        from remedy.interfaces.api_support import invalidate_config_cache
+    # Always re-resolve via module attributes so REMEDY_HOME / monkeypatches apply
+    # (import-time bindings of _find_config_path would ignore them).
+    from remedy.interfaces import api_support as _api_support
 
-        invalidate_config_cache()
-    except Exception:
-        pass
-
-    config_path = _find_config_path()
+    _api_support.invalidate_config_cache()
+    config_path = _api_support._find_config_path()
     if config_path is None:
-        config_path = _default_config_path()
+        config_path = _api_support._default_config_path()
         config_path.parent.mkdir(parents=True, exist_ok=True)
 
-    raw_cfg = load_config()
+    raw_cfg = _api_support.load_config()
     cfg = migrate_provider_keys(raw_cfg if isinstance(raw_cfg, dict) else {})
     prev_provider = str(cfg.get("llm_provider") or "").strip().lower()
     patch = dict(clean_in)
