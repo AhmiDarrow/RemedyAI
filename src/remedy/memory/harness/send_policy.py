@@ -198,21 +198,8 @@ def apply_auto_harness_send_policy(
         pin = pinned_constraints_block(project_path)
         if pin:
             injects.append(pin)
-    with suppress(Exception):
-        from remedy.core.metabolism.evidence import get_evidence_ledger
-        from remedy.core.metabolism.time_crystal import get_time_crystal
-        from remedy.core.metabolism.cua_macros import get_cua_macros
-
-        eblock = get_evidence_ledger(sid).pointer_block(limit=10)
-        if eblock:
-            injects.append(eblock)
-            meta["evidence_delta"] = True
-        cblock = get_time_crystal(sid).hot_block(max_chars=600)
-        if cblock:
-            injects.append(cblock)
-        mhint = get_cua_macros().top_hints(3)
-        if mhint:
-            injects.append(mhint)
+    # Metabolism injects (evidence/crystal/CUA) owned by begin_turn_metabolism —
+    # do not double-inject here (token waste + lock churn).
     if injects:
         messages.insert(
             -1,
@@ -470,6 +457,9 @@ def slim_messages_mid_turn(
         return messages
     if len(messages) < 6:
         return messages
+    # L0/L1 lean: skip mid-turn slim entirely
+    if int(getattr(runtime, "_turn_tier", 2) or 2) < 2:
+        return messages
 
     from remedy.memory.harness.compressor import estimate_tokens
     from remedy.memory.harness.offload import maybe_offload_messages
@@ -494,17 +484,32 @@ def slim_messages_mid_turn(
 
         if get_governor(sid).compress_earlier:
             min_pct = max(0.45, float(min_pct) - 0.12)
+    # Cheap char-sum gate before BPE/token measure
+    rough_chars = 0
+    for m in messages:
+        c = m.get("content")
+        if isinstance(c, str):
+            rough_chars += len(c)
+        elif isinstance(c, list):
+            rough_chars += 500 * len(c)
+    if rough_chars < int(window * 0.45 * 3.5):
+        return messages
     est = estimate_tokens(messages, provider=provider or None, model=model or None)
     fill = est / max(1, window)
     # Mid-turn: wait longer before slim so short tool bursts stay full fidelity
     if fill < max(0.60, min_pct - 0.12):
-        # Still inject evidence delta when agency so model sees new EU without full slim
+        # Inject evidence delta only when new EUs since last inject (no spam)
         with suppress(Exception):
             from remedy.core.metabolism.evidence import get_evidence_ledger
 
-            eblock = get_evidence_ledger(sid).pointer_block(limit=8)
-            if eblock and int(getattr(runtime, "_turn_tier", 1) or 1) >= 2:
-                messages.append({"role": "system", "content": eblock})
+            if int(getattr(runtime, "_turn_tier", 1) or 1) >= 2:
+                led = get_evidence_ledger(sid)
+                last_eu = int(getattr(runtime, "_evidence_inject_eu", -1) or -1)
+                if led.evidence_units > last_eu:
+                    eblock = led.pointer_block(limit=8)
+                    if eblock:
+                        messages.append({"role": "system", "content": eblock})
+                        runtime._evidence_inject_eu = led.evidence_units
         return messages
 
     home = None
@@ -538,13 +543,18 @@ def slim_messages_mid_turn(
             min_chars=4000 if strong else 8000,
             keep_recent_tools=keep,
         )
-    # Evidence delta after slim — model sees new EU without full tool dumps
+    # Evidence delta after slim — only if new EUs (deduped)
     with suppress(Exception):
         from remedy.core.metabolism.evidence import get_evidence_ledger
 
-        eblock = get_evidence_ledger(sid).pointer_block(limit=10)
-        if eblock and int(getattr(runtime, "_turn_tier", 1) or 1) >= 2:
-            out = list(out) + [{"role": "system", "content": eblock}]
+        if int(getattr(runtime, "_turn_tier", 1) or 1) >= 2:
+            led = get_evidence_ledger(sid)
+            last_eu = int(getattr(runtime, "_evidence_inject_eu", -1) or -1)
+            if led.evidence_units > last_eu:
+                eblock = led.pointer_block(limit=10)
+                if eblock:
+                    out = list(out) + [{"role": "system", "content": eblock}]
+                    runtime._evidence_inject_eu = led.evidence_units
     runtime._last_send_messages = list(out)
     return out
 

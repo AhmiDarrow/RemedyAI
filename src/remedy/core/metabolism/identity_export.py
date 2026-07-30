@@ -18,21 +18,18 @@ EXPORT_VERSION = 1
 
 
 def _derive_key(passphrase: str, salt: bytes) -> bytes:
-    """PBKDF2-HMAC-SHA256 — stdlib only."""
+    """PBKDF2-HMAC-SHA256 — stdlib only (enc + mac material)."""
     return hashlib.pbkdf2_hmac(
         "sha256",
         (passphrase or "").encode("utf-8"),
         salt,
         200_000,
-        dklen=32,
+        dklen=64,  # 32 enc + 32 mac
     )
 
 
 def _xor_stream(data: bytes, key: bytes) -> bytes:
-    """Simple stream XOR with SHA256 keystream (not AES; fine for local portable).
-
-    For stronger crypto, upgrade later; passphrase + salt still required.
-    """
+    """SHA256 keystream XOR (stdlib). Authenticated via HMAC on package."""
     out = bytearray()
     block = b""
     counter = 0
@@ -42,6 +39,29 @@ def _xor_stream(data: bytes, key: bytes) -> bytes:
             counter += 1
         out.append(b ^ block[i % 32])
     return bytes(out)
+
+
+def _safe_export_path(dest: Path | str, *, home: Path | str | None = None) -> Path:
+    """Resolve dest; refuse path escape outside home/exports when home set."""
+    path = Path(dest).expanduser()
+    # Disallow null bytes / wild junk
+    if "\x00" in str(path):
+        raise ValueError("invalid export path")
+    if home is not None:
+        root = (Path(home).expanduser().resolve() / "exports").resolve()
+        root.mkdir(parents=True, exist_ok=True)
+        # If dest is bare filename, force under exports
+        if not path.is_absolute() and path.parent == Path("."):
+            path = root / path.name
+        try:
+            resolved = path.resolve()
+            resolved.relative_to(root)
+        except Exception as exc:
+            raise ValueError(
+                f"export path must stay under {root}"
+            ) from exc
+        return resolved
+    return path.expanduser()
 
 
 def build_identity_payload(
@@ -74,11 +94,10 @@ def build_identity_payload(
                 )
             }
             # Drop values that look like secrets
+            from remedy.core.metabolism.redact import looks_like_secret_text
+
             text = json.dumps(clean, default=str)
-            if any(
-                x in text.lower()
-                for x in ("sk-", "xai-", "bearer ", "api_key=", "password=")
-            ):
+            if looks_like_secret_text(text):
                 continue
             out.append(clean)
         return out
@@ -106,25 +125,42 @@ def export_identity(
     dest: Path | str,
     *,
     passphrase: str,
+    home: Path | str | None = None,
 ) -> Path:
-    """Write encrypted package to dest. Raises on empty passphrase."""
+    """Write authenticated encrypted package to dest. Raises on empty passphrase."""
+    import hmac as hmac_mod
+
     if not (passphrase or "").strip():
         raise ValueError("passphrase required for identity export")
+    if len((passphrase or "").strip()) < 8:
+        raise ValueError("passphrase must be at least 8 characters")
     salt = secrets.token_bytes(16)
-    key = _derive_key(passphrase, salt)
+    material = _derive_key(passphrase, salt)
+    enc_key, mac_key = material[:32], material[32:]
     raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    cipher = _xor_stream(raw, key)
+    cipher = _xor_stream(raw, enc_key)
+    sha = hashlib.sha256(raw).hexdigest()
+    mac = hmac_mod.new(
+        mac_key,
+        salt + cipher + sha.encode("ascii"),
+        hashlib.sha256,
+    ).hexdigest()
     package = {
         "format": "remedy-partner-identity",
         "version": EXPORT_VERSION,
         "kdf": "pbkdf2-sha256-200k",
         "cipher": "sha256-xor-stream",
+        "mac": "hmac-sha256",
         "salt_b64": base64.b64encode(salt).decode("ascii"),
         "ciphertext_b64": base64.b64encode(cipher).decode("ascii"),
-        "sha256": hashlib.sha256(raw).hexdigest(),
+        "sha256": sha,
+        "hmac_hex": mac,
     }
-    path = Path(dest).expanduser()
-    path.parent.mkdir(parents=True, exist_ok=True)
+    if home is not None:
+        path = _safe_export_path(dest, home=home)
+    else:
+        path = Path(dest).expanduser()
+        path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(package, indent=2), encoding="utf-8")
     try:
         os.chmod(path, 0o600)
@@ -138,18 +174,37 @@ def import_identity(
     *,
     passphrase: str,
 ) -> dict[str, Any]:
-    """Decrypt and return payload. Validates sha256."""
+    """Decrypt and return payload. Validates HMAC + sha256."""
+    import hmac as hmac_mod
+
     if not (passphrase or "").strip():
         raise ValueError("passphrase required for identity import")
     path = Path(source).expanduser()
+    if not path.is_file():
+        raise ValueError("identity package not found")
+    # Size cap — refuse multi-MB dump
+    if path.stat().st_size > 8_000_000:
+        raise ValueError("identity package too large")
     package = json.loads(path.read_text(encoding="utf-8"))
     if package.get("format") != "remedy-partner-identity":
         raise ValueError("not a remedy partner identity package")
     salt = base64.b64decode(package["salt_b64"])
     cipher = base64.b64decode(package["ciphertext_b64"])
-    key = _derive_key(passphrase, salt)
-    raw = _xor_stream(cipher, key)
-    if hashlib.sha256(raw).hexdigest() != package.get("sha256"):
+    material = _derive_key(passphrase, salt)
+    enc_key, mac_key = material[:32], material[32:]
+    sha = str(package.get("sha256") or "")
+    # Authenticate before decrypt (HMAC over salt||cipher||sha)
+    expected = hmac_mod.new(
+        mac_key,
+        salt + cipher + sha.encode("ascii"),
+        hashlib.sha256,
+    ).hexdigest()
+    provided = str(package.get("hmac_hex") or "")
+    if provided:
+        if not hmac_mod.compare_digest(expected, provided):
+            raise ValueError("passphrase incorrect or package corrupted")
+    raw = _xor_stream(cipher, enc_key)
+    if hashlib.sha256(raw).hexdigest() != sha:
         raise ValueError("passphrase incorrect or package corrupted")
     payload = json.loads(raw.decode("utf-8"))
     if not isinstance(payload, dict):

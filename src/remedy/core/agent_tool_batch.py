@@ -227,6 +227,7 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
                     tier=tier,
                     work_roots=roots,
                     map_hint=map_hint or None,
+                    strict=strict,
                 )
                 shadow_outcome = sh.outcome
                 if sh.blocked:
@@ -400,14 +401,25 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
                 args_obj = {"_raw": str(raw_args)[:2000]}
             if not isinstance(args_obj, dict):
                 args_obj = {"value": args_obj}
-            # Structured tool_call for UI process trace (args for full mode).
+            # Structured tool_call for UI process trace — scrub secrets / large bodies
             call_id_ui = str(tc.get("id") or fp or name or "tool")
+            ui_args = args_obj
+            with suppress(Exception):
+                from remedy.core.metabolism.redact import redact_obj
+
+                ui_args = redact_obj(args_obj)
+                if isinstance(ui_args, dict):
+                    for heavy in ("content", "new_string", "old_string", "command", "text"):
+                        if heavy in ui_args and isinstance(ui_args[heavy], str):
+                            s = ui_args[heavy]
+                            if len(s) > 200:
+                                ui_args[heavy] = f"[omitted {len(s)} chars]"
             yield (
                 "@@tool_call:"
                 + json.dumps(
                     {
                         "name": name or "tool",
-                        "args": args_obj,
+                        "args": ui_args,
                         "id": call_id_ui,
                         "call_id": call_id_ui,
                     },

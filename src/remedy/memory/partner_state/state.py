@@ -49,6 +49,18 @@ _registry: dict[str, "PartnerState"] = {}
 _registry_lock = threading.Lock()
 
 
+def _scrub_preview(result: str | None, *, limit: int = 240) -> str:
+    """Redact secrets before partner-state preview hits disk."""
+    text = (result or "")[: max(limit * 2, 480)]
+    try:
+        from remedy.core.metabolism.redact import redact_text
+
+        text = redact_text(text)
+    except Exception:
+        pass
+    return text[:limit]
+
+
 def _digest(text: str, *, n: int = 16) -> str:
     return hashlib.sha256((text or "").encode("utf-8", errors="replace")).hexdigest()[:n]
 
@@ -276,7 +288,7 @@ class PartnerState:
                 artifacts=paths,
                 outcome="ok" if success else "err",
                 claim=(claim or "")[:400],
-                result_preview=(result or "")[:240],
+                result_preview=_scrub_preview(result),
                 offload_path=offload_path,
                 subgoal_id=sg.id if sg else None,
                 chars=len(result or ""),

@@ -359,6 +359,28 @@ def test_shell_write_jail_blocks_mixed_opaque_dest(tmp_path: Path):
         assert hit is not None, f"expected jail for mixed/opaque: {cmd}"
 
 
+def test_shell_write_jail_blocks_encoded_and_archive(tmp_path: Path):
+    from remedy.core.shell_write_jail import check_shell_write_jail
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    block = check_shell_write_jail(
+        "powershell -EncodedCommand SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQAKQA=",
+        write_roots=[proj],
+        cwd=proj,
+        project_bound=True,
+    )
+    assert block is not None
+    assert "encoded" in block.lower() or "archive" in block.lower() or "cannot be proven" in block.lower()
+    block2 = check_shell_write_jail(
+        "Expand-Archive -Path a.zip -DestinationPath C:\\Users\\Public\\out",
+        write_roots=[proj],
+        cwd=proj,
+        project_bound=True,
+    )
+    assert block2 is not None
+
+
 def test_shell_write_jail_blocks_interpreter_oneshot_without_paths(tmp_path: Path):
     """Issue 10: python -c / node -e without extractable paths fail closed."""
     sticky = tmp_path / "SecretSticky"

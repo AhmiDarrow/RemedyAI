@@ -437,7 +437,9 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
             dest_path = root / "exports" / "partner-identity.remedy"
         else:
             dest_path = Path(dest).expanduser()
-        path = export_identity(payload, dest_path, passphrase=req.passphrase)
+        path = export_identity(
+            payload, dest_path, passphrase=req.passphrase, home=home
+        )
         return {
             "ok": True,
             "path": str(path),

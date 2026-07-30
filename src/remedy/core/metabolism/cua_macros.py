@@ -13,9 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-_SECRETISH = re.compile(
-    r"(?i)(api[_-]?key|secret|password|token|bearer\s|sk-[a-z0-9]{10,})"
-)
+
 
 
 @dataclass
@@ -61,8 +59,16 @@ class CuaMacroStore:
             for k in ("url", "ref", "monitor", "button", "key"):
                 if k in args and args[k] is not None:
                     val = str(args[k])[:200]
-                    if _SECRETISH.search(val):
-                        continue
+                    try:
+                        from remedy.core.metabolism.redact import looks_like_secret_text
+
+                        if looks_like_secret_text(val):
+                            continue
+                        # Strip query-string tokens from URLs
+                        if k == "url" and "?" in val:
+                            val = val.split("?", 1)[0]
+                    except Exception:
+                        pass
                     safe_args[k] = val
             if tool == "computer_type":
                 safe_args = {"text": "[omitted]"}
