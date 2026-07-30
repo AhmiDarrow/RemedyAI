@@ -340,6 +340,67 @@ def test_l0_preclassified_skips_reclassify():
     assert out_v and "Remedy" in out_v
 
 
+def test_l0_skill_list_uses_manifest_names_hides_learned_probation():
+    """'list my skills' must show human names — never Skill UUID ids."""
+    from remedy.core.metabolism.l0 import try_l0_system_reply
+    from remedy.models import Skill, SkillManifest, SkillStatus
+    from remedy.skills.registry import SkillRegistry
+
+    reg = SkillRegistry()
+    reg.register(
+        Skill(
+            manifest=SkillManifest(
+                name="change-safety",
+                description="Blast-radius checklist",
+                status=SkillStatus.ACTIVE,
+            ),
+            instructions="# change-safety\n",
+        )
+    )
+    reg.register(
+        Skill(
+            manifest=SkillManifest(
+                name="noisy-tool-chain",
+                description="auto learned junk",
+                status=SkillStatus.DISCOVERED,
+                metadata={"auto_generated": True},
+            ),
+            instructions="# noise\n",
+        )
+    )
+    reg.register(
+        Skill(
+            manifest=SkillManifest(
+                name="proven-learn",
+                description="promoted learned skill",
+                status=SkillStatus.ACTIVE,
+                metadata={"auto_generated": True},
+            ),
+            instructions="# proven\n",
+        )
+    )
+
+    class _R:
+        skills = reg
+        _session_id = "l0_skills"
+
+    out = try_l0_system_reply(_R(), "list my skills", preclassified=True)
+    assert out and "Installed skills" in out
+    assert "change-safety" in out
+    assert "proven-learn" in out
+    # Probation learned hidden + note
+    assert "noisy-tool-chain" not in out
+    assert "probation" in out.lower() or "hidden" in out.lower()
+    # Must not dump UUID skill ids
+    assert "6ffafc2c-" not in out
+    for line in out.splitlines():
+        if line.strip().startswith("- `"):
+            name = line.strip()[3:].rstrip("`")
+            assert "-" not in name or not (
+                len(name) >= 32 and name.count("-") >= 4
+            ), f"UUID-like skill name leaked: {name}"
+
+
 def test_evidence_ledger_admits_paths_and_dedupes():
     led = get_evidence_ledger("test_meta_sess")
     a = led.admit_tool_result(

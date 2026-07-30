@@ -115,41 +115,107 @@ def try_l0_system_reply(
         return "**What I know about you**\n\n" + "\n".join(lines)
 
     if _L0_SKILLS.match(msg):
+        # Prefer human skill names (manifest.name). Never surface UUIDs.
+        # Align with CLI `remedy skill list`: hide auto-learned probation by default.
         names: list[str] = []
+        hidden_learned = 0
+
+        def _skill_name(s: Any) -> str:
+            if s is None:
+                return ""
+            if isinstance(s, str):
+                return s.strip()
+            if isinstance(s, dict):
+                return str(s.get("name") or s.get("id") or "").strip()
+            m = getattr(s, "manifest", None)
+            if m is not None:
+                n = getattr(m, "name", None)
+                if n:
+                    return str(n).strip()
+            n = getattr(s, "name", None)
+            if n:
+                return str(n).strip()
+            return ""
+
+        def _is_learned_probation(s: Any) -> bool:
+            meta = None
+            st_v = ""
+            if isinstance(s, dict):
+                meta = s.get("metadata") or {}
+                st_v = str(s.get("status") or "")
+            else:
+                m = getattr(s, "manifest", None)
+                if m is not None:
+                    meta = getattr(m, "metadata", None) or {}
+                    st = getattr(m, "status", None)
+                    st_v = st.value if hasattr(st, "value") else str(st or "")
+                else:
+                    meta = getattr(s, "metadata", None) or {}
+                    st_v = str(getattr(s, "status", "") or "")
+            if not isinstance(meta, dict):
+                meta = {}
+            auto = bool(meta.get("auto_generated"))
+            if not auto:
+                return False
+            return st_v not in ("active",)
+
+        def _collect_from_reg(reg: Any) -> None:
+            nonlocal hidden_learned
+            if reg is None or names:
+                return
+            # Prefer iterable skills property, then list_skills()/list() helpers.
+            skills_iter = None
+            prop = getattr(reg, "skills", None)
+            if prop is not None and not callable(prop):
+                skills_iter = prop
+            elif callable(prop):
+                with suppress(Exception):
+                    skills_iter = prop()
+            if skills_iter is None:
+                listing = getattr(reg, "list_skills", None) or getattr(reg, "list", None)
+                if callable(listing):
+                    with suppress(Exception):
+                        skills_iter = listing()
+            if not skills_iter:
+                return
+            for s in skills_iter or []:
+                if _is_learned_probation(s):
+                    hidden_learned += 1
+                    continue
+                n = _skill_name(s)
+                # Drop UUID-like ids and empty labels
+                if not n or (
+                    len(n) >= 32
+                    and n.count("-") >= 4
+                    and all(c in "0123456789abcdef-" for c in n.lower())
+                ):
+                    continue
+                names.append(n)
+
         with suppress(Exception):
             reg = getattr(runtime, "skills", None) or getattr(
                 runtime, "skill_registry", None
             )
-            if reg is not None:
-                listing = getattr(reg, "list_skills", None) or getattr(
-                    reg, "list", None
-                )
-                if callable(listing):
-                    for s in listing() or []:
-                        if isinstance(s, str):
-                            names.append(s)
-                        elif isinstance(s, dict) and s.get("name"):
-                            names.append(str(s["name"]))
-                        elif hasattr(s, "name"):
-                            names.append(str(s.name))
+            _collect_from_reg(reg)
         with suppress(Exception):
-            from remedy.skills.shared import get_shared_registry
+            if not names:
+                from remedy.skills.shared import get_shared_registry
 
-            reg = get_shared_registry()
-            if reg is not None and not names:
-                for s in getattr(reg, "skills", None) or []:
-                    n = getattr(s, "name", None) or getattr(s, "id", None)
-                    if n:
-                        names.append(str(n))
-                if hasattr(reg, "list_ids"):
-                    names = list(reg.list_ids())[:40]
-        names = list(dict.fromkeys(names))[:40]
+                _collect_from_reg(get_shared_registry())
+        # Stable, readable order; cap for chat density
+        names = sorted(dict.fromkeys(names), key=str.lower)[:40]
         if not names:
             return (
                 "No installed skills listed yet. Open **Skills** in the app "
                 "to browse Library packs, or ask me to use a procedure once you install one."
             )
         body = "\n".join(f"- `{n}`" for n in names)
-        return f"**Installed skills** ({len(names)}):\n\n{body}"
+        tail = ""
+        if hidden_learned:
+            tail = (
+                f"\n\n_{hidden_learned} auto-learned probation skill(s) hidden "
+                f"(CLI: `remedy skill list --all`)._"
+            )
+        return f"**Installed skills** ({len(names)}):\n\n{body}{tail}"
 
     return None

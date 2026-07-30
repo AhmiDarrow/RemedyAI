@@ -1,11 +1,36 @@
 /**
  * Per-session stream job registry (Phase A).
  * Focused UI paints from useMessages; background jobs keep running after detach.
+ *
+ * Each job owns its own paint buffer so concurrent multi-tab turns never share
+ * a single partialText/processSteps accumulator (reattach restores live paint).
  */
 
 import { abortSession } from '../api/sessions'
+import type { StreamProgress, UsagePayload } from '../api/messages'
+import type { ProcessStep } from '../utils/toolLabels'
 
 export type StreamJobStatus = 'running' | 'done' | 'error' | 'aborted'
+
+export type StreamJobActiveTool = { name: string; status: 'running' | 'done' | 'error' }
+
+/** Live stream paint owned by the job (survives session switch / reattach). */
+export type StreamJobPaint = {
+  partialText: string
+  partialThinking: string
+  processSteps: ProcessStep[]
+  activeTools: StreamJobActiveTool[]
+  taskProgress: StreamProgress | null
+  runUsage: {
+    prompt_tokens: number
+    completion_tokens: number
+    total_tokens: number
+    estimated_cost_usd: number
+    source?: UsagePayload['source']
+    model?: string | null
+    provider?: string | null
+  } | null
+}
 
 export type StreamJob = {
   sessionId: string
@@ -17,6 +42,19 @@ export type StreamJob = {
   error?: string
   /** Detached from focused UI — still running on server. */
   detached: boolean
+  /** Accumulated stream paint (tokens/tools) — always updated, even when detached. */
+  paint: StreamJobPaint
+}
+
+export function emptyStreamPaint(): StreamJobPaint {
+  return {
+    partialText: '',
+    partialThinking: '',
+    processSteps: [],
+    activeTools: [],
+    taskProgress: null,
+    runUsage: null,
+  }
 }
 
 export type StreamJobEvent =
@@ -89,6 +127,7 @@ export function registerStreamJob(
     startedAt: Date.now(),
     lastActivityAt: Date.now(),
     detached: false,
+    paint: emptyStreamPaint(),
   }
   jobs.set(sessionId, job)
   emit({ type: 'update', job: { ...job } })
@@ -100,6 +139,70 @@ export function touchStreamJob(sessionId: string) {
   if (!j || j.status !== 'running') return
   j.lastActivityAt = Date.now()
   emit({ type: 'update', job: { ...j } })
+}
+
+/** Append assistant token into the job paint buffer (focus-agnostic). */
+export function appendJobToken(sessionId: string, token: string) {
+  if (!token) return
+  const j = jobs.get(sessionId)
+  if (!j || j.status !== 'running') return
+  j.paint.partialText += token
+  j.lastActivityAt = Date.now()
+}
+
+/** Append thinking token into the job paint buffer. */
+export function appendJobThinking(sessionId: string, thought: string) {
+  if (!thought) return
+  const j = jobs.get(sessionId)
+  if (!j || j.status !== 'running') return
+  j.paint.partialThinking += thought
+  j.lastActivityAt = Date.now()
+}
+
+export function setJobProcessSteps(sessionId: string, steps: ProcessStep[]) {
+  const j = jobs.get(sessionId)
+  if (!j || j.status !== 'running') return
+  j.paint.processSteps = steps
+  j.lastActivityAt = Date.now()
+}
+
+export function setJobActiveTools(sessionId: string, tools: StreamJobActiveTool[]) {
+  const j = jobs.get(sessionId)
+  if (!j || j.status !== 'running') return
+  j.paint.activeTools = tools
+  j.lastActivityAt = Date.now()
+}
+
+export function setJobTaskProgress(sessionId: string, progress: StreamProgress | null) {
+  const j = jobs.get(sessionId)
+  if (!j || j.status !== 'running') return
+  j.paint.taskProgress = progress
+  j.lastActivityAt = Date.now()
+}
+
+export function setJobRunUsage(
+  sessionId: string,
+  usage: StreamJobPaint['runUsage'],
+) {
+  const j = jobs.get(sessionId)
+  if (!j || j.status !== 'running') return
+  j.paint.runUsage = usage
+  j.lastActivityAt = Date.now()
+}
+
+/** Snapshot paint for reattach / finish (shallow copy of arrays). */
+export function getJobPaint(sessionId: string): StreamJobPaint | null {
+  const j = jobs.get(sessionId)
+  if (!j) return null
+  const p = j.paint
+  return {
+    partialText: p.partialText,
+    partialThinking: p.partialThinking,
+    processSteps: [...p.processSteps],
+    activeTools: [...p.activeTools],
+    taskProgress: p.taskProgress,
+    runUsage: p.runUsage ? { ...p.runUsage } : null,
+  }
 }
 
 /** Stop painting this job as the focused stream; leave server turn running. */
