@@ -361,7 +361,8 @@ def ensure_tool_call_pairings(
                     k += 1
                     continue
                 rk = mk.get("role")
-                if rk == "assistant" and mk.get("tool_calls"):
+                # Stop before the next assistant turn (tool or content).
+                if rk == "assistant":
                     break
                 if rk == "tool":
                     tid = (mk.get("tool_call_id") or "").strip()
@@ -369,12 +370,13 @@ def ensure_tool_call_pairings(
                         collected_tools.append(mk)
                         found.add(tid)
                         pulled.append(k)
+                        if len(found) >= len(needed):
+                            k += 1
+                            break
                 k += 1
             if pulled:
                 # Skip pulled tool messages when replaying the intervening span.
                 pulled_set = set(pulled)
-                # j already points at first non-immediate-tool; keep that start.
-                # We will copy non-pulled messages after synthetic fill.
                 look_end = k
             else:
                 pulled_set = set()

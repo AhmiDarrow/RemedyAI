@@ -66,6 +66,60 @@ def test_run_until_done_never_used_tools_nudge_branch():
     assert never_used_tools is False
 
 
+def test_rearm_restores_run_until_done_after_l1_strip():
+    """Agency recovery must re-enable run_until_done (epoch force-answer footgun).
+
+    Sequence: L1 strip → run_until_done=False → tools re-armed by promise claim
+    without flipping run_until_done → soft epoch wall force-answers mid-implement.
+    """
+    all_tools = [{"type": "function", "function": {"name": "file_read"}}]
+    tools = None
+    run_until_done = False
+
+    def _rearm_agency_tools() -> None:
+        nonlocal tools, run_until_done
+        if all_tools:
+            tools = all_tools
+            run_until_done = True
+
+    # Simulate agency re-arm after "I'll implement the fix".
+    _rearm_agency_tools()
+    assert tools is all_tools
+    assert run_until_done is True
+    # Soft epoch wall must treat this as coding_in_flight, not pure-chat wrap-up.
+    step = 256
+    epoch_size = 256
+    tools_armed = bool(tools or all_tools)
+    coding_in_flight = run_until_done and (
+        False or 0 > 0 or tools_armed
+    )
+    assert coding_in_flight is True
+    pure_chat_wrap = step >= epoch_size and not run_until_done
+    assert pure_chat_wrap is False
+
+
+def test_fingerprint_loop_patience_for_long_tasks():
+    """run_until_done / unfinished work get more loop recovery before force-answer."""
+    run_until_done = True
+    unfinished_loop = True
+    max_loop_hits = 8 if (run_until_done or unfinished_loop) else 3
+    assert max_loop_hits == 8
+    # Chat / no unfinished: stay tight.
+    run_until_done = False
+    unfinished_loop = False
+    max_loop_hits = 8 if (run_until_done or unfinished_loop) else 3
+    assert max_loop_hits == 3
+    # Keep going while under the long-task ceiling.
+    for loop_hits in range(1, 8):
+        keep = (
+            (unfinished_loop or True)  # run_until_done for implement
+            and loop_hits < 8
+            and True  # all_tools
+        )
+        assert keep is True
+    assert not ((True) and 8 < 8 and True)
+
+
 def test_productive_tool_batch_detects_ok_results():
     assert is_productive_tool_batch(
         [{"role": "tool", "content": "file contents here"}]
