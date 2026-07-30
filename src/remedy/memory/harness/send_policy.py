@@ -59,6 +59,18 @@ def _brief_has_substance(brief: Any) -> bool:
     )
 
 
+def _chain_keep(messages: list[dict[str, Any]], base: int) -> int:
+    from remedy.memory.harness.pruner import keep_recent_for_chain
+
+    return keep_recent_for_chain(messages, base)
+
+
+def _is_tool_chain(messages: list[dict[str, Any]]) -> bool:
+    from remedy.memory.harness.pruner import tool_chain_active
+
+    return tool_chain_active(messages)
+
+
 def apply_auto_harness_send_policy(
     runtime: Any,
     messages: list[dict[str, Any]],
@@ -181,14 +193,20 @@ def apply_auto_harness_send_policy(
     with suppress(Exception):
         home = getattr(getattr(runtime, "config", None), "home_dir", None)
 
+    chain = _is_tool_chain(messages)
+    meta["tool_chain_active"] = chain
+
     if level == "soft":
+        # Soft: collapse older sludge but keep a long recent tool window for
+        # multi-step code chains (base 8, higher when many tools).
+        keep = _chain_keep(messages, 8)
         budget = max(2048, int(window * max(0.55, min_pct - 0.05)))
         messages[:] = prune_messages_for_send(
             messages,
             max_tool_chars=0,
             dedupe_tools=True,
             collapse_completed_tools=True,
-            keep_recent_tool_pairs=6,
+            keep_recent_tool_pairs=keep,
             token_budget=budget,
             reserve_tokens=max(512, int(window * 0.08)),
             provider=provider or None,
@@ -200,9 +218,12 @@ def apply_auto_harness_send_policy(
                 session_id=sid,
                 home=home,
                 min_chars=8000,
-                keep_recent_tools=6,
+                keep_recent_tools=keep,
             )
-        messages.insert(-1, compression_nudge_message("soft"))
+        messages.insert(
+            -1,
+            compression_nudge_message("soft", tool_chain_active=chain),
+        )
         with suppress(Exception):
             from remedy.memory.harness.local_brief import schedule_background_brief_update
 
@@ -221,6 +242,8 @@ def apply_auto_harness_send_policy(
 
     # --- strong ---
     tokens_before = est
+    # Strong still protects a real recent window (was 3 — too thin for code chains).
+    keep = _chain_keep(messages, 6 if chain else 5)
     hard_cap = max(4_000, (tool_result_char_cap or 64_000) // 4)
     budget = max(2048, int(window * max(0.45, min_pct - 0.15)))
     messages[:] = prune_messages_for_send(
@@ -228,7 +251,7 @@ def apply_auto_harness_send_policy(
         max_tool_chars=hard_cap,
         dedupe_tools=True,
         collapse_completed_tools=True,
-        keep_recent_tool_pairs=3,
+        keep_recent_tool_pairs=keep,
         token_budget=budget,
         reserve_tokens=max(768, int(window * 0.1)),
         provider=provider or None,
@@ -240,7 +263,7 @@ def apply_auto_harness_send_policy(
             session_id=sid,
             home=home,
             min_chars=4000,
-            keep_recent_tools=3,
+            keep_recent_tools=keep,
         )
 
     quality: dict[str, Any] = {}
@@ -281,18 +304,24 @@ def apply_auto_harness_send_policy(
         )
         meta["quality"] = quality
 
-    # Quality gate: only replace middle when brief is solid (fail-closed)
+    # Quality gate: only replace middle when brief is solid (fail-closed).
+    # During an active tool/code chain, require excellent continuity so we do
+    # not drop the working tool history mid-implementation.
     score = float((quality or {}).get("score") or 0.0)
     quality_ok = bool((quality or {}).get("ok"))
+    chain_now = _is_tool_chain(messages)
+    replace_floor = 0.85 if chain_now else 0.65
     can_replace = (
         quality_ok
-        and score >= 0.65
+        and score >= replace_floor
         and _brief_has_substance(getattr(runtime, "_session_brief", None))
     )
     if can_replace:
         with suppress(Exception):
             messages[:] = _replace_middle_with_brief_pointer(
-                messages, runtime._session_brief
+                messages,
+                runtime._session_brief,
+                keep_tool_pairs=max(8, keep),
             )
             meta["middle_replaced"] = True
             # Re-measure after middle replace for accurate metrics
@@ -306,6 +335,8 @@ def apply_auto_harness_send_policy(
                         meta["quality"]["token_reduction_pct"] = round(
                             max(0.0, 1.0 - tokens_final / tokens_before) * 100, 1
                         )
+    elif chain_now and quality_ok and score >= 0.65:
+        meta["middle_replace_deferred_chain"] = True
     elif score < 0.5 or not quality_ok:
         with suppress(Exception):
             messages.insert(
@@ -320,7 +351,10 @@ def apply_auto_harness_send_policy(
                 },
             )
 
-    messages.insert(-1, compression_nudge_message("strong"))
+    messages.insert(
+        -1,
+        compression_nudge_message("strong", tool_chain_active=chain_now),
+    )
 
     local_ok = False
     with suppress(Exception):
@@ -360,7 +394,8 @@ def slim_messages_mid_turn(
     """Re-slim send-view between ReAct steps when fill is high.
 
     Lighter than full auto policy: prune + offload only (no middle replace,
-    no history_thread spam). Safe to call every provider round.
+    no history_thread spam, no compress nudge). Safe to call every provider
+    round without derailing long tool/code chains.
     """
     if str(getattr(runtime, "_harness_mode", "auto") or "auto").lower() == "off":
         return messages
@@ -385,7 +420,8 @@ def slim_messages_mid_turn(
     min_pct = float(getattr(runtime, "_harness_min_pct", 0.75) or 0.75)
     est = estimate_tokens(messages, provider=provider or None, model=model or None)
     fill = est / max(1, window)
-    if fill < max(0.55, min_pct - 0.15):
+    # Mid-turn: wait longer before slim so short tool bursts stay full fidelity
+    if fill < max(0.60, min_pct - 0.12):
         return messages
 
     sid = session_id or str(getattr(runtime, "_session_id", "") or "")
@@ -393,11 +429,12 @@ def slim_messages_mid_turn(
     with suppress(Exception):
         home = getattr(getattr(runtime, "config", None), "home_dir", None)
 
-    # Stronger when above soft threshold
+    # Stronger when above soft threshold — but keep a wide recent tool window
     strong = fill >= min_pct
-    keep = 3 if strong else 6
+    keep = _chain_keep(messages, 6 if strong else 8)
     hard_cap = max(4_000, (tool_result_char_cap or 64_000) // 4) if strong else 0
-    budget = max(2048, int(window * (0.45 if strong else 0.55)))
+    # Mid-turn budget slightly looser than turn-start strong so chains can finish
+    budget = max(2048, int(window * (0.50 if strong else 0.58)))
     out = prune_messages_for_send(
         messages,
         max_tool_chars=hard_cap,
@@ -424,8 +461,14 @@ def slim_messages_mid_turn(
 def _replace_middle_with_brief_pointer(
     messages: list[dict[str, Any]],
     brief: Any,
+    *,
+    keep_tool_pairs: int = 8,
 ) -> list[dict[str, Any]]:
-    """Keep system head + brief pointer + recent user/assistant tail + last user."""
+    """Keep system head + brief pointer + recent *tool-pair* tail (not fixed N msgs).
+
+    Preserves complete assistant/tool spans so providers stay happy and the
+    model retains the last N tool results of an in-flight code chain.
+    """
     if len(messages) < 8:
         return messages
     head: list[dict[str, Any]] = []
@@ -434,7 +477,28 @@ def _replace_middle_with_brief_pointer(
             head.append(m)
         else:
             break
-    tail = messages[-6:]
+
+    keep_n = max(4, int(keep_tool_pairs))
+    tool_idxs = [i for i, m in enumerate(messages) if m.get("role") == "tool"]
+    if tool_idxs:
+        start_tool = (
+            tool_idxs[-keep_n] if len(tool_idxs) >= keep_n else tool_idxs[0]
+        )
+        start = start_tool
+        # Include the assistant that issued the tool_calls for that tool result
+        if start > 0 and messages[start - 1].get("role") == "assistant":
+            start -= 1
+        # Never drop the final user turn if it sits before a short tail
+        for j in range(start, -1, -1):
+            if messages[j].get("role") == "user":
+                # Keep at most one user message immediately before the tool block
+                if j >= start - 2:
+                    start = j
+                break
+        tail = messages[start:]
+    else:
+        tail = messages[-8:]
+
     from remedy.memory.harness.brief import brief_to_context_block
 
     block = brief_to_context_block(brief, max_chars=1600)
@@ -446,7 +510,10 @@ def _replace_middle_with_brief_pointer(
             + (block or "(brief empty)")
         ),
     }
-    return head + [mid] + [m for m in tail if m not in head]
+    # Avoid duplicating head messages that also appear in tail
+    head_ids = {id(m) for m in head}
+    tail_clean = [m for m in tail if id(m) not in head_ids]
+    return head + [mid] + tail_clean
 
 
 def _try_heuristic_brief_fallback(
