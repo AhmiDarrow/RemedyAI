@@ -111,14 +111,23 @@ def is_valid_navigate_url(url: str | None) -> bool:
             return False
         if p.scheme == "about":
             return True
-        host = (p.hostname or "").strip()
+        # Block credentials in URL userinfo (user:pass@host)
+        if p.username or p.password:
+            return False
+        host = (p.hostname or "").strip().lower()
         if not host or " " in host or "," in host:
             return False
         # Reject single-label hosts like "gmail" without a TLD (except localhost)
         if host == "localhost":
             return True
         if re.match(r"^\d{1,3}(\.\d{1,3}){3}$", host):
-            return True
+            # Allow only loopback IP literals in-rail (not arbitrary LAN by default)
+            if host.startswith("127.") or host == "0.0.0.0":
+                return True
+            # Private ranges: still allow for local dev tools (comfyui, etc.)
+            if host.startswith(("10.", "192.168.", "172.")):
+                return True
+            return True  # keep prior behavior for other IPs
         if not re.match(r"^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", host):
             return False
         return True

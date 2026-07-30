@@ -160,6 +160,19 @@ def test_shadow_blocks_all_batch_paths(tmp_path: Path):
     assert r.blocked
 
 
+def test_shadow_allows_relative_path_under_work_root(tmp_path: Path):
+    root = tmp_path / "proj"
+    root.mkdir()
+    r = rehearse(
+        "file_write",
+        {"path": "notes.txt", "content": "hello"},
+        tier=2,
+        work_roots=[str(root)],
+    )
+    assert not r.blocked
+    assert r.outcome == "pass"
+
+
 def test_action_ir_redacts_and_persists(tmp_path: Path):
     ir = start_action_ir(session_id="test_meta_sess", tier=2, brief_head="fix bug")
     ir.add_step(
