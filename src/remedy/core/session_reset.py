@@ -71,6 +71,7 @@ def _purge_attachments(session_id: str, home: Path) -> bool:
 
 
 def _purge_runtime_state(session_id: str, runtime: Any) -> None:
+    """Clear process-local state for *this session only* (shared BasicRuntime)."""
     sid = str(session_id)
     # Streaming marker
     with contextlib.suppress(Exception):
@@ -78,36 +79,56 @@ def _purge_runtime_state(session_id: str, runtime: Any) -> None:
         if isinstance(streams, set):
             streams.discard(sid)
 
-    # Session Brief (in-memory + registry)
+    # Session Brief: registry is session-keyed; only null the live slot if it
+    # belongs to this session (desktop shares one BasicRuntime across tabs).
     with contextlib.suppress(Exception):
-        if hasattr(runtime, "_session_brief"):
-            runtime._session_brief = None  # type: ignore[attr-defined]
+        brief = getattr(runtime, "_session_brief", None)
+        if brief is not None:
+            bsid = str(getattr(brief, "session_id", "") or "")
+            rt_sid = str(getattr(runtime, "_session_id", "") or "")
+            if bsid == sid or (not bsid and rt_sid == sid):
+                runtime._session_brief = None  # type: ignore[attr-defined]
     with contextlib.suppress(Exception):
         from remedy.memory.harness.local_brief import _brief_registry, _brief_registry_lock
 
         with _brief_registry_lock:
             _brief_registry.pop(sid, None)
 
-    # Turn tool steps / scratch that may leak into next turn
-    for attr in (
-        "_turn_tool_steps",
-        "_last_tool_steps",
-        "_pending_tool_results",
-        "_stream_accum",
-    ):
-        with contextlib.suppress(Exception):
-            if hasattr(runtime, attr):
-                val = getattr(runtime, attr)
-                if isinstance(val, (list, dict, set)):
-                    val.clear()
-                else:
-                    setattr(runtime, attr, None)
+    # Turn scratch: only clear if this runtime is currently bound to *sid*
+    # (never wipe another tab's in-flight turn buffers).
+    with contextlib.suppress(Exception):
+        rt_sid = str(getattr(runtime, "_session_id", "") or "")
+        if rt_sid == sid:
+            for attr in (
+                "_turn_tool_steps",
+                "_last_tool_steps",
+                "_pending_tool_results",
+                "_stream_accum",
+            ):
+                if hasattr(runtime, attr):
+                    val = getattr(runtime, attr)
+                    if isinstance(val, (list, dict, set)):
+                        val.clear()
+                    else:
+                        setattr(runtime, attr, None)
 
-    # In-memory goals/tasks (process-local; not durable Partner Memory)
+    # In-memory goals/tasks: drop entries for this session only when keyed.
     with contextlib.suppress(Exception):
         tasks = getattr(runtime, "_tasks", None)
         if isinstance(tasks, dict):
-            tasks.clear()
+            # Common shapes: {task_id: {... session_id ...}} or session_id keys
+            drop_keys: list[Any] = []
+            for k, v in list(tasks.items()):
+                if str(k) == sid:
+                    drop_keys.append(k)
+                    continue
+                if isinstance(v, dict) and str(v.get("session_id") or "") == sid:
+                    drop_keys.append(k)
+                    continue
+                if hasattr(v, "session_id") and str(getattr(v, "session_id", "") or "") == sid:
+                    drop_keys.append(k)
+            for k in drop_keys:
+                tasks.pop(k, None)
 
     # Nanoswarm pattern buffer for this session
     with contextlib.suppress(Exception):

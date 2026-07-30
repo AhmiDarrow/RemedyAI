@@ -4,8 +4,9 @@ File tools already use :meth:`resolve_tool_path(for_write=True)`. The shell only
 had a *cwd* jail; agents could still ``Set-Content C:\\…\\OtherProject\\…`` and
 cross-contaminate sibling trees (SecretFolder vs SecretSticky).
 
-When a project is bound and scope is not owner-``home`` with multi-root writes,
-mutation-class shell commands that target paths outside write roots are refused.
+When a project is bound, mutation-class shell commands that target paths outside
+write roots — or that hide the target path (env expansion / Join-Path / python
+-c) while still looking like a write — are refused.
 """
 
 from __future__ import annotations
@@ -25,39 +26,59 @@ _MUTATION_HINT_RE = re.compile(
     r"|\bwritealltext\b|\bwriteallbytes\b|\bappendalltext\b"
     r"|\bstreamwriter\b|\bfile\.write|\bfile\.create|\bfile\.delete"
     r"|\bfile\.move|\bfile\.copy|\bio\.file\b"
-    # Short aliases only as whole shell tokens (not inside .md / names)
-    r"|(?:^|[\s;&|(])(?:ni|cp|mv|rm|rd|ren|del|erase|md|tee)(?=[\s]|$)"
+    r"|\b\[(?:system\.)?io\.file\]::"
+    r"|\b(?:xcopy|robocopy)\b"
+    # Short aliases as whole tokens (not inside .md): include sc (Set-Content)
+    r"|(?:^|[\s;&|(])(?:sc|ni|cp|copy|mv|rm|rd|ren|del|erase|md|tee|xcopy|robocopy)"
+    r"(?=[\s]|$)"
     r"|\becho\b(?=[^\n]*>)|\bprintf\b(?=[^\n]*>)|\bcat\b(?=[^\n]*>)"
     r"|\bgit\s+checkout\b|\bgit\s+restore\b|\bgit\s+clean\b|\bgit\s+reset\b"
     r"|\bnpm\s+install\b|\bpip\s+install\b|\bcargo\s+install\b"
+    # Interpreter one-shot writes
+    r"|\b(?:python|python3|py)\s+(?:-\w+\s+)*-c\b"
+    r"|\bnode\s+(?:-\w+\s+)*-e\b"
     r")"
 )
 
 # Redirection that writes a file (not just pipe).
 _REDIRECT_WRITE_RE = re.compile(r"(?<![0-9])>{1,2}\s*")
 
+# Path-like tokens that cannot be proven under write roots (obfuscation).
+_OPAQUE_PATH_HINT_RE = re.compile(
+    r"(?ix)"
+    r"(?:"
+    r"\$env:[A-Za-z_][\w]*"
+    r"|\$\{env:[A-Za-z_][\w]*\}"
+    r"|\bjoin-path\b"
+    r"|\benviron\["
+    r"|\bos\.environ"
+    r"|\bexpanduser\b"
+    r"|\bpath\.home\b"
+    r"|\bgetfolderpath\b"
+    r")"
+)
+
 # Absolute Windows / Unix path tokens in a command line.
 _ABS_PATH_RE = re.compile(
     r"(?:"
     r'(?:[A-Za-z]:\\|\\\\)[^\s\'"<>|;,&]+'  # C:\… or UNC
-    r"|/(?:Users|home|tmp|var|etc|opt|mnt|media)/[^\s'\"<>|;,&]+"  # unix abs common
+    r"|/(?:Users|home|tmp|var|etc|opt|mnt|media)/[^\s'\"<>|;,&]+"
     r")"
 )
 
 # Relative escapes that leave cwd.
 _REL_ESCAPE_RE = re.compile(
     r"(?:"
-    r'(?:\.\.[/\\])+[^\s\'"<>|;,&]*'  # ../ or ..\
-    r"|~[/\\][^\s'\"<>|;,&]*"  # ~/
+    r'(?:\.\.[/\\])+[^\s\'"<>|;,&]*'
+    r"|~[/\\][^\s'\"<>|;,&]*"
     r")"
 )
 
-# Quoted path groups (prefer these when present).
 _QUOTED_PATH_RE = re.compile(
     r"""(?x)
     (?:
-        "((?:[A-Za-z]:\\|\\\\|//|\.\.|~/)[^"]+)"
-      | '((?:[A-Za-z]:\\|\\\\|//|\.\.|~/)[^']+)'
+        "((?:[A-Za-z]:\\|\\\\|//|\.\.|~/|\$)[^"]+)"
+      | '((?:[A-Za-z]:\\|\\\\|//|\.\.|~/|\$)[^']+)'
     )
     """
 )
@@ -93,7 +114,6 @@ def _under_any(path: Path, roots: list[Path]) -> bool:
 
 def _clean_token(raw: str) -> str:
     t = (raw or "").strip().strip("`'\"")
-    # PowerShell often ends paths with ) ] , ;
     t = t.rstrip(")],;:")
     return t
 
@@ -146,9 +166,11 @@ def path_outside_write_roots(
     raw = _clean_token(path_str)
     if not raw:
         return None
-    # Bare drive / incomplete
     if re.fullmatch(r"[A-Za-z]:\\?", raw):
         return None
+    # Unexpanded variables — cannot prove under roots
+    if "$" in raw or "%" in raw:
+        return Path(raw)
 
     cand = Path(raw).expanduser()
     if not cand.is_absolute():
@@ -182,17 +204,17 @@ def check_shell_write_jail(
 ) -> str | None:
     """Return a block reason if *command* would mutate outside write roots.
 
-    Returns ``None`` when the command is allowed (read-only, no external paths,
-    or paths stay inside write roots).
+    Returns ``None`` when allowed. ``access_scope`` is reserved for callers that
+    already folded scope into *write_roots* (home expands roots to project+home).
     """
+    _ = access_scope  # roots are authoritative; keep param for API stability
     if not project_bound:
-        # No focus folder → owner-machine mode (documented full access).
         return None
-    scope = (access_scope or "project").strip().lower()
-    # home scope intentionally allows project + home writes.
-    # project / untrusted / full-with-bound-project all use project-only write roots.
     if not write_roots:
-        return None
+        return (
+            "shell write jail: no write roots available while project is bound "
+            "(fail closed). Retry after project path is set."
+        )
 
     cmd = command or ""
     if not cmd.strip():
@@ -201,13 +223,36 @@ def check_shell_write_jail(
     if not looks_like_mutation(cmd):
         return None
 
+    candidates = extract_path_candidates(cmd)
     offenders: list[str] = []
-    for token in extract_path_candidates(cmd):
+    for token in candidates:
         outside = path_outside_write_roots(
             token, write_roots=write_roots, cwd=cwd
         )
         if outside is not None:
             offenders.append(str(outside))
+
+    # Mutation with opaque path construction (env / Join-Path) and no proven
+    # in-root target → deny (cannot prove safety).
+    if not offenders and _OPAQUE_PATH_HINT_RE.search(cmd):
+        roots_s = ", ".join(str(r) for r in _norm_roots(write_roots)[:4])
+        return (
+            "shell write jail: mutation uses opaque path construction "
+            "($env:/Join-Path/etc.) that cannot be proven under write roots. "
+            f"Allowed write roots: [{roots_s}]. Prefer file_write/file_edit with "
+            "paths under the focus folder."
+        )
+
+    # python/node -c open(...) without extractable path still risky
+    if not offenders and re.search(
+        r"(?ix)\b(?:python|python3|py)\s+(?:-\w+\s+)*-c\b.*\bopen\s*\(",
+        cmd,
+    ):
+        roots_s = ", ".join(str(r) for r in _norm_roots(write_roots)[:4])
+        return (
+            "shell write jail: interpreter -c open(...) write cannot be proven "
+            f"under write roots [{roots_s}]. Use file_write/file_edit instead."
+        )
 
     if not offenders:
         return None
