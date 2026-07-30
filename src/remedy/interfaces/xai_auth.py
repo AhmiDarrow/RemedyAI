@@ -74,6 +74,29 @@ def auth_path(home: Path | None = None) -> Path:
     return auth_dir(home) / "xai.json"
 
 
+def _coerce_expires_at(value: Any) -> float | None:
+    """Best-effort unix-seconds expiry. Corrupt store values must not raise."""
+    if value is None or value is False or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _atomic_write_bytes(path: Path, data: bytes) -> None:
+    """Write *data* via temp file + replace so a crash cannot leave a half-written auth file."""
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    try:
+        tmp.write_bytes(data)
+        tmp.replace(path)
+    except Exception:
+        with contextlib.suppress(OSError):
+            if tmp.exists():
+                tmp.unlink()
+        raise
+
+
 @dataclass
 class XaiCredentials:
     auth_method: str = "none"  # none | api_key | oauth
@@ -89,7 +112,8 @@ class XaiCredentials:
         if self.auth_method == "api_key" and self.api_key:
             return True
         if self.auth_method == "oauth" and self.access_token:
-            if self.expires_at and time.time() >= float(self.expires_at) - 60:
+            exp = _coerce_expires_at(self.expires_at)
+            if exp is not None and time.time() >= exp - 60:
                 return bool(self.refresh_token)
             return True
         return False
@@ -154,7 +178,7 @@ def load_credentials(home: Path | None = None) -> XaiCredentials:
         api_key=data.get("api_key"),
         access_token=data.get("access_token"),
         refresh_token=data.get("refresh_token"),
-        expires_at=data.get("expires_at"),
+        expires_at=_coerce_expires_at(data.get("expires_at")),
         token_type=str(data.get("token_type") or "Bearer"),
         raw=data,
     )
@@ -167,7 +191,7 @@ def save_credentials(creds: XaiCredentials, home: Path | None = None) -> None:
         "api_key": creds.api_key,
         "access_token": creds.access_token,
         "refresh_token": creds.refresh_token,
-        "expires_at": creds.expires_at,
+        "expires_at": _coerce_expires_at(creds.expires_at),
         "token_type": creds.token_type,
         "updated_at": time.time(),
     }
@@ -186,12 +210,14 @@ def save_credentials(creds: XaiCredentials, home: Path | None = None) -> None:
                 "dpapi": base64.b64encode(sealed).decode("ascii"),
                 "updated_at": time.time(),
             }
-            path.write_text(json.dumps(envelope, indent=2) + "\n", encoding="utf-8")
+            _atomic_write_bytes(
+                path, (json.dumps(envelope, indent=2) + "\n").encode("utf-8")
+            )
             written = True
     except Exception as exc:
         logger.warning("xAI DPAPI protect failed, falling back to ACL-only: %s", exc)
     if not written:
-        path.write_text(plain.decode("utf-8") + "\n", encoding="utf-8")
+        _atomic_write_bytes(path, plain + b"\n")
     with contextlib.suppress(OSError):
         path.chmod(0o600)
     try:
@@ -205,8 +231,14 @@ def save_credentials(creds: XaiCredentials, home: Path | None = None) -> None:
 
 def clear_credentials(home: Path | None = None) -> None:
     path = auth_path(home)
-    if path.exists():
-        path.unlink()
+    with contextlib.suppress(OSError):
+        if path.exists():
+            path.unlink()
+    # Drop any half-written temp from a crashed save.
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with contextlib.suppress(OSError):
+        if tmp.exists():
+            tmp.unlink()
 
 
 def save_api_key(api_key: str, home: Path | None = None) -> XaiCredentials:
@@ -456,7 +488,8 @@ def refresh_if_needed(home: Path | None = None) -> XaiCredentials:
         creds = load_credentials(home)
         if creds.auth_method != "oauth" or not creds.refresh_token:
             return creds
-        if creds.expires_at and time.time() < float(creds.expires_at) - 120:
+        exp = _coerce_expires_at(creds.expires_at)
+        if exp is not None and time.time() < exp - 120:
             return creds
         try:
             data = _http_form(
