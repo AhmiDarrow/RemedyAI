@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from contextlib import suppress
 from typing import Any
 
@@ -16,6 +17,9 @@ from remedy.core.metabolism.tier import (
     tier_system_block,
 )
 from remedy.core.metabolism.time_crystal import get_time_crystal
+
+# CUA element refs in snapshot dumps (e1, w1, c1) — precompiled for tool hot path
+_CUA_REF_RE = re.compile(r"\b[ewc]\d+\b", re.I)
 
 
 def begin_turn_metabolism(
@@ -227,9 +231,7 @@ def after_tool_batch(
         mmap.note_browser(url=url, settled=False)
     if name in ("computer_snapshot", "computer_screenshot", "computer_act") and success:
         # Parse light ref counts from element dump (e1, w1, c1)
-        import re
-
-        refs = len(re.findall(r"\b[ewc]\d+\b", content or "", flags=re.I))
+        refs = len(_CUA_REF_RE.findall(content or ""))
         url = ""
         if arguments:
             url = str(arguments.get("url") or "")

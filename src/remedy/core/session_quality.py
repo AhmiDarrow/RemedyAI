@@ -80,7 +80,25 @@ class SessionQuality:
     shadow_catch_count: int = 0
     verify_catch_count: int = 0
     ir_step_count: int = 0
+    # Running compress aggregates — snapshot() is O(1), not O(events)
+    _tokens_saved_by_compress: int = field(default=0, repr=False)
+    _quality_score_sum: float = field(default=0.0, repr=False)
+    _quality_score_n: int = field(default=0, repr=False)
+    _last_compress_pub: dict[str, Any] | None = field(default=None, repr=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+
+    def needs_remedy_signals(self) -> bool:
+        """Cheap hot-path check: any rates that could fire quality remedies?"""
+        with self._lock:
+            if self.re_explain_count >= 1 or self.stuck_signal_count >= 1:
+                return True
+            if self.max_tool_fail_streak >= 2:
+                return True
+            if self._last_compress_pub is not None:
+                qs = self._last_compress_pub.get("quality_score")
+                if qs is not None and float(qs) < 0.55:
+                    return True
+            return False
 
     def record_turn(
         self,
@@ -165,41 +183,69 @@ class SessionQuality:
         source: str = "compress",
     ) -> None:
         q = quality or {}
+        tb = max(0, int(tokens_before))
+        ta = max(0, int(tokens_after))
+        score = float(q.get("score") or 0.0)
+        ev = CompressEvent(
+            ts=time.time(),
+            tokens_before=tb,
+            tokens_after=ta,
+            quality_score=score,
+            paths_kept=int(q.get("paths_kept") or 0),
+            paths_lost=int(q.get("paths_lost") or 0),
+            decisions_kept=int(q.get("decisions_kept") or 0),
+            decisions_lost=int(q.get("decisions_lost") or 0),
+            source=source,
+        )
         with self._lock:
-            self.compress_events.append(
-                CompressEvent(
-                    ts=time.time(),
-                    tokens_before=max(0, int(tokens_before)),
-                    tokens_after=max(0, int(tokens_after)),
-                    quality_score=float(q.get("score") or 0.0),
-                    paths_kept=int(q.get("paths_kept") or 0),
-                    paths_lost=int(q.get("paths_lost") or 0),
-                    decisions_kept=int(q.get("decisions_kept") or 0),
-                    decisions_lost=int(q.get("decisions_lost") or 0),
-                    source=source,
-                )
-            )
-            # Keep last 40 compress events
+            self.compress_events.append(ev)
+            if tb > ta:
+                self._tokens_saved_by_compress += tb - ta
+            self._quality_score_sum += score
+            self._quality_score_n += 1
+            # Keep last 40 compress events; recompute running totals if trimmed
             if len(self.compress_events) > 40:
+                dropped = self.compress_events[:-40]
                 self.compress_events = self.compress_events[-40:]
+                for d in dropped:
+                    if d.tokens_before > d.tokens_after:
+                        self._tokens_saved_by_compress -= (
+                            d.tokens_before - d.tokens_after
+                        )
+                    self._quality_score_sum -= d.quality_score
+                    self._quality_score_n -= 1
+                if self._tokens_saved_by_compress < 0:
+                    self._tokens_saved_by_compress = 0
+                if self._quality_score_n < 0:
+                    self._quality_score_n = 0
+                    self._quality_score_sum = 0.0
+            self._last_compress_pub = {
+                "tokens_before": ev.tokens_before,
+                "tokens_after": ev.tokens_after,
+                "delta": ev.tokens_before - ev.tokens_after,
+                "quality_score": ev.quality_score,
+                "paths_kept": ev.paths_kept,
+                "paths_lost": ev.paths_lost,
+                "decisions_kept": ev.decisions_kept,
+                "decisions_lost": ev.decisions_lost,
+                "source": ev.source,
+            }
 
     def snapshot(self) -> dict[str, Any]:
+        """O(1) public snapshot (running compress aggregates; no event walk)."""
         with self._lock:
-            saved = 0
-            q_scores: list[float] = []
-            for e in self.compress_events:
-                if e.tokens_before > e.tokens_after:
-                    saved += e.tokens_before - e.tokens_after
-                q_scores.append(e.quality_score)
-            avg_q = sum(q_scores) / len(q_scores) if q_scores else None
-            last = self.compress_events[-1] if self.compress_events else None
-            # Stuck rate: signals per turn (capped display)
             stuck_rate = (
                 self.stuck_signal_count / self.turns if self.turns > 0 else 0.0
             )
             re_rate = (
                 self.re_explain_count / self.turns if self.turns > 0 else 0.0
             )
+            avg_q = (
+                self._quality_score_sum / self._quality_score_n
+                if self._quality_score_n > 0
+                else None
+            )
+            last = self._last_compress_pub
             return {
                 "session_id": self.session_id,
                 "turns": self.turns,
@@ -207,7 +253,7 @@ class SessionQuality:
                 "tokens_out": self.tokens_out,
                 "tokens_total": self.tokens_in + self.tokens_out,
                 "tokens_estimated_peak": self.tokens_estimated_peak,
-                "tokens_saved_by_compress": saved,
+                "tokens_saved_by_compress": self._tokens_saved_by_compress,
                 "compress_count": len(self.compress_events),
                 "soft_nudge_count": self.soft_nudge_count,
                 "strong_nudge_count": self.strong_nudge_count,
@@ -219,21 +265,7 @@ class SessionQuality:
                 "avg_compress_quality": (
                     round(avg_q, 3) if avg_q is not None else None
                 ),
-                "last_compress": (
-                    {
-                        "tokens_before": last.tokens_before,
-                        "tokens_after": last.tokens_after,
-                        "delta": last.tokens_before - last.tokens_after,
-                        "quality_score": last.quality_score,
-                        "paths_kept": last.paths_kept,
-                        "paths_lost": last.paths_lost,
-                        "decisions_kept": last.decisions_kept,
-                        "decisions_lost": last.decisions_lost,
-                        "source": last.source,
-                    }
-                    if last
-                    else None
-                ),
+                "last_compress": dict(last) if last else None,
                 "uptime_s": round(time.time() - self.started_at, 1),
                 # Metabolism (Advanced / harness — not Simple UI chrome)
                 "metabolism": {
