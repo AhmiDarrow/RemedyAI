@@ -160,6 +160,14 @@ def apply_auto_harness_send_policy(
             max_pct = max(min_pct + 0.05, float(max_pct) - 0.05)
             meta["governor_compress_earlier"] = True
 
+    # Pre-classify tier for lean snapshot (cheap heuristics)
+    full_snap: bool | None = None
+    with suppress(Exception):
+        from remedy.core.metabolism.tier import TurnTier, classify_turn_tier
+
+        t0 = classify_turn_tier(user_text or "", tools_enabled=True)
+        full_snap = t0 >= TurnTier.L2_AGENCY
+        runtime._turn_tier = int(getattr(runtime, "_turn_tier", None) or int(t0))
     snap = build_context_snapshot(
         messages=messages,
         user_text=user_text or "",
@@ -171,6 +179,7 @@ def apply_auto_harness_send_policy(
         min_pct=min_pct,
         max_pct=max_pct,
         project_path=project_path,
+        full_snapshot=full_snap,
     )
     runtime._last_context_snapshot = snap
     est = snap.token_estimate
