@@ -939,28 +939,14 @@ async def call_llm_stream(runtime, message: str,
                 )
                 step_tools = None if force_answer else tools
 
-                # Metabolism: inject evidence delta FIRST, then mark model boundary
-                # (mark_model_call advances last_model_eu_index — inject after = empty)
+                # Session id: prefer ContextVar (concurrent tabs)
+                sid_mm = str(
+                    getattr(runtime, "_session_id", "") or session_id or ""
+                )
                 with suppress(Exception):
-                    from remedy.core.metabolism.turn import mark_model_call
-                    from remedy.core.metabolism.evidence import get_evidence_ledger
+                    from remedy.core.turn_context import turn_session_id
 
-                    sid_mm = str(
-                        getattr(runtime, "_session_id", "") or session_id or ""
-                    )
-                    if (
-                        int(getattr(runtime, "_turn_tier", 1) or 1) >= 2
-                        and tool_batches_this_turn > 0
-                    ):
-                        led = get_evidence_ledger(sid_mm)
-                        eblock = led.pointer_block(limit=8)
-                        last_eu = int(getattr(runtime, "_evidence_inject_eu", -1) or -1)
-                        if eblock and led.evidence_units > last_eu:
-                            messages.append(
-                                {"role": "system", "content": eblock}
-                            )
-                            runtime._evidence_inject_eu = led.evidence_units
-                    mark_model_call(sid_mm)
+                    sid_mm = str(turn_session_id(runtime, session_id) or sid_mm or "")
 
                 if (
                     force_answer
@@ -982,7 +968,7 @@ async def call_llm_stream(runtime, message: str,
                         }
                     )
 
-                # Mid-turn Memory Harness: re-slim after tool accumulation
+                # 1) Mid-turn slim first (can drop system notes)
                 if step > 0 and getattr(runtime, "_harness_mode", "auto") != "off":
                     with suppress(Exception):
                         from remedy.memory.harness.send_policy import (
@@ -992,11 +978,29 @@ async def call_llm_stream(runtime, message: str,
                         messages[:] = slim_messages_mid_turn(
                             runtime,
                             messages,
-                            session_id=str(
-                                getattr(runtime, "_session_id", "") or session_id or ""
-                            ),
+                            session_id=sid_mm,
                             tool_result_char_cap=int(_TOOL_RESULT_CHAR_CAP or 0),
                         )
+
+                # 2) Evidence inject AFTER slim, then mark (mark clears delta)
+                with suppress(Exception):
+                    from remedy.core.metabolism.turn import mark_model_call
+                    from remedy.core.metabolism.evidence import get_evidence_ledger
+
+                    if (
+                        int(getattr(runtime, "_turn_tier", 1) or 1) >= 2
+                        and tool_batches_this_turn > 0
+                    ):
+                        led = get_evidence_ledger(sid_mm)
+                        eblock = led.pointer_block(limit=8)
+                        last_eu = getattr(runtime, "_evidence_inject_eu", None)
+                        last_eu_i = -1 if last_eu is None else int(last_eu)
+                        if eblock and led.evidence_units > last_eu_i:
+                            messages.append(
+                                {"role": "system", "content": eblock}
+                            )
+                            runtime._evidence_inject_eu = led.evidence_units
+                    mark_model_call(sid_mm)
 
                 # Never send incomplete tool_calls/tool pairings (HTTP 400).
                 # Also force valid JSON on every tool-call arguments blob before

@@ -90,6 +90,20 @@ _OPAQUE_MUTATION_RE = re.compile(
     r"|\bcertutil\b[^\n]*-decode\b"
     r"|\bbitsadmin\b|\bstart-bitstransfer\b"
     r"|\binvoke-webrequest\b[^\n]*-outfile\b"
+    r"|\binvoke-expression\b|\biex\b"
+    r"|\bstart-process\b[^\n]*-argumentlist\b"
+    r"|\badd-type\b[^\n]*-typedefinition\b"
+    r")"
+)
+
+# Bare PowerShell variables used as path targets (not $env: which is covered above)
+_BARE_PS_VAR_PATH_RE = re.compile(
+    r"(?ix)"
+    r"(?:"
+    r"(?:-path|-literalpath|-destination|-destinationpath|-outfile|-file)\s+"
+    r"\$[A-Za-z_][\w]*"
+    r"|\b(?:set-content|out-file|add-content|copy-item|move-item|remove-item|"
+    r"new-item|rename-item)\b[^\n]*\$[A-Za-z_][\w]*"
     r")"
 )
 
@@ -267,6 +281,15 @@ def check_shell_write_jail(
 
     if not looks_like_mutation(cmd):
         return None
+
+    # Set-Content -Path $dest  (bare PS var) — cannot prove destination
+    if _BARE_PS_VAR_PATH_RE.search(cmd):
+        roots_s = ", ".join(str(r) for r in _norm_roots(write_roots)[:4])
+        return (
+            "shell write jail: mutation uses a PowerShell variable as the path "
+            f"(cannot prove under write roots [{roots_s}]). Use a literal path "
+            "under the focus folder with file_write/file_edit."
+        )
 
     candidates = extract_path_candidates(cmd)
     offenders: list[str] = []

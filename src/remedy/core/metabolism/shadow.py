@@ -127,16 +127,40 @@ def rehearse(
             try:
                 from pathlib import Path
 
+                bases = []
+                for r in work_roots:
+                    try:
+                        bases.append(Path(r).expanduser().resolve())
+                    except Exception:
+                        continue
                 for path in paths:
                     p = Path(path).expanduser()
-                    try:
-                        p = p.resolve()
-                    except Exception:
-                        p = p.absolute()
-                    ok = False
-                    for r in work_roots:
+                    # Relative paths: resolve against first work root, NOT process CWD
+                    if not p.is_absolute():
+                        if not bases:
+                            return ShadowResult(
+                                "soft_warn",
+                                "relative_path_no_work_root",
+                                "medium",
+                                name,
+                            )
                         try:
-                            rp = Path(r).expanduser().resolve()
+                            p = (bases[0] / p).resolve()
+                        except Exception:
+                            return ShadowResult(
+                                "soft_warn",
+                                "path_resolve_uncertain",
+                                "medium",
+                                name,
+                            )
+                    else:
+                        try:
+                            p = p.resolve()
+                        except Exception:
+                            p = p.absolute()
+                    ok = False
+                    for rp in bases:
+                        try:
                             p.relative_to(rp)
                             ok = True
                             break
