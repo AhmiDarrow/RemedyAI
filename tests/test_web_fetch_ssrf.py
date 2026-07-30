@@ -69,3 +69,22 @@ def test_prefer_ipv4():
 def test_host_blocked_when_dns_empty():
     with patch("socket.getaddrinfo", side_effect=OSError("nxdomain")):
         assert _host_is_blocked("no-such-host.invalid") is True
+
+
+def test_blocks_cgnat_and_non_global_ips():
+    """CGNAT 100.64/10 is not is_private on some Pythons — still blocked."""
+    assert _ip_is_blocked(ipaddress.ip_address("100.64.0.1"))
+    assert _host_is_blocked("100.64.1.1")
+    assert _resolve_public_ips("100.64.0.1") == []
+
+
+def test_pinned_fetch_blocks_url_userinfo():
+    """user:pass@host must never be fetched (credential leak / SSRF)."""
+    import pytest
+
+    from remedy.core.agent_web_tools import _pinned_fetch
+
+    with pytest.raises(ValueError, match="USERINFO"):
+        _pinned_fetch("https://user:secret@example.com/path", max_chars=1000)
+    with pytest.raises(ValueError, match="USERINFO"):
+        _pinned_fetch("http://alice@8.8.8.8/", max_chars=1000)
