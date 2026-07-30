@@ -66,6 +66,40 @@ def test_tier_l3_autonomous_and_partition():
     ) == TurnTier.L3_DEEP
 
 
+def test_tier_l3_work_alone_stays_l3_with_tools():
+    """Gauntlet: bare 'work alone' (and peers) must stay L3 with tools on.
+
+    Regression risk: L2 agency / L1 lean heuristics must not demote work-alone
+    or strip tools — force_spread + allow_tools are L3 contracts.
+    """
+    work_alone_msgs = (
+        "work alone",
+        "work alone and finish",
+        "please work alone on this",
+        "finish without me",
+        "don't wait for me — ship it",
+        "fully autonomous until green",
+        "take it from here",
+        "I need to go",
+        "step away for a bit, work alone",
+        "handle this on your own",
+    )
+    for msg in work_alone_msgs:
+        t = classify_turn_tier(msg, tools_enabled=True)
+        assert t == TurnTier.L3_DEEP, f"{msg!r} → {t!r}"
+        pol = tier_policy(t)
+        assert pol.allow_tools is True, msg
+        assert pol.force_spread is True, msg
+        assert pol.record_ir is True, msg
+    # tools_enabled=False must not demote work-alone language
+    assert (
+        classify_turn_tier("work alone and finish the suite", tools_enabled=False)
+        == TurnTier.L3_DEEP
+    )
+    # Intent flag still L3 even on chat text
+    assert classify_turn_tier("hello", intent="autonomous") == TurnTier.L3_DEEP
+
+
 def test_tier_l2_agency():
     t = classify_turn_tier("implement file_edit for the bug in src/remedy/core/agent.py")
     assert t == TurnTier.L2_AGENCY
