@@ -379,7 +379,11 @@ class AgentConfig(BaseModel):
     )
     access_scope: str = Field(
         default="project",
-        description="Filesystem access: project | home | full (user-granted)",
+        description=(
+            "Filesystem access: project | home | full | untrusted. "
+            "Under project: reads may include Desktop/Documents/Downloads; "
+            "writes/edits stay in the project folder only."
+        ),
     )
     launch_at_login: bool = Field(
         default=False,

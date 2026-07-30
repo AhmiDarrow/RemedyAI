@@ -124,6 +124,53 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
         if not isinstance(args, dict):
             args = {}
 
+        # Refuse corrupted / history-summarized args before they hit the disk.
+        # (Provider history stubs and stream-truncated JSON must never execute.)
+        if isinstance(args, dict) and (
+            args.get("_invalid_json")
+            or args.get("_truncated")
+            or args.get("_history_summarized")
+        ):
+            content_str = format_tool_error(
+                "tool arguments were summarized or truncated for history — not real source",
+                code="HISTORY_STUB",
+                tool_name=name or "unknown",
+                suggestion=(
+                    "file_read the real path, then file_edit surgical hunks or "
+                    "file_write with the full real source (not history stub text)."
+                ),
+            )
+            result_cache[fp] = content_str
+            seen_fps.add(fp)
+            return content_str
+        if name in _WRITE_TOOLS:
+            blob = " ".join(
+                str(args.get(k) or "")
+                for k in ("content", "old_string", "new_string", "edits", "patch")
+            )
+            if any(
+                m in blob
+                for m in (
+                    "history_stub kind=",
+                    "DO_NOT_file_write_this_string",
+                    "<<NOT_SOURCE_CODE",
+                    "[file_write content omitted",
+                    "omitted from provider history",
+                )
+            ):
+                content_str = format_tool_error(
+                    "refusing write: arguments look like a provider-history stub",
+                    code="HISTORY_STUB",
+                    tool_name=name or "unknown",
+                    suggestion=(
+                        "file_read the real path first; never re-write history stub text. "
+                        "Use file_edit or a full real file_write body."
+                    ),
+                )
+                result_cache[fp] = content_str
+                seen_fps.add(fp)
+                return content_str
+
         async def _call() -> tuple[Any, str]:
             result = await runtime.call_tool(ToolCall(tool_name=name, arguments=args))
             if result.success:

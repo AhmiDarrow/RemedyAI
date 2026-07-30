@@ -207,7 +207,7 @@ No Remedy cloud account for core use. Chat goes to **your** provider (or local O
 
 | | |
 |--|--|
-| `/help` · `/new` · `/sessions` · `/models` · `/thinking` | Session & UI |
+| `/help` · `/new` · `/reset` · `/clear` · `/sessions` · `/models` · `/thinking` | Session & UI |
 | `/memory` · `/remember` · `/forget` · `/pin` · `/whoami` | Memory |
 | `/goals` · `/goal` · `/plans` · `/plan` … | Plans |
 | `/compact` · `/harness` | Harness |

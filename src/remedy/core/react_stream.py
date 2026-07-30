@@ -249,12 +249,17 @@ def normalize_tool_calls(tool_calls_list: list[dict[str, Any]]) -> list[dict[str
     Streaming providers sometimes omit ``id`` on early deltas; empty ids break
     tool-result pairing on the next request (HTTP 400).
 
-    Arguments are coerced to **valid JSON strings** — never leave truncated
-    stream blobs that providers reject with ``EOF while parsing a string``.
+    Arguments are coerced to **valid JSON strings** with **full fidelity**
+    (see :func:`coerce_tool_arguments_json`). This runs on the **execute**
+    path — do **not** call :func:`sanitize_tool_arguments` here: that path
+    mid-clips nested strings at 8k and turns large ``file_write`` bodies into
+    history stubs, which then get written to disk as corrupted source.
+    Provider history sanitization belongs only in
+    :func:`sanitize_message` / :func:`sanitize_chat_body`.
     """
     from uuid import uuid4
 
-    from remedy.core.provider_sanitize import sanitize_tool_arguments
+    from remedy.core.provider_sanitize import coerce_tool_arguments_json
 
     out: list[dict[str, Any]] = []
     for tc in tool_calls_list or []:
@@ -264,7 +269,7 @@ def normalize_tool_calls(tool_calls_list: list[dict[str, Any]]) -> list[dict[str
         name = (fn.get("name") or "").strip()
         if not name:
             continue
-        args_s = sanitize_tool_arguments(fn.get("arguments"))
+        args_s = coerce_tool_arguments_json(fn.get("arguments"))
         call_id = (tc.get("id") or "").strip() or f"call_{uuid4().hex[:24]}"
         out.append(
             {

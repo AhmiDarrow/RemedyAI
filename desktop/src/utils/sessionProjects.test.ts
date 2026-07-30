@@ -1,11 +1,34 @@
 import { describe, expect, it } from 'vitest'
 import {
+  getLockedProjects,
   groupSessionsByProject,
   isNoProjectPath,
+  isProjectLocked,
   projectDisplayName,
   projectKey,
+  removeKnownProject,
+  setProjectLocked,
+  toggleProjectLocked,
+  addKnownProject,
 } from './sessionProjects'
 import type { ChatSession } from '../types'
+
+function installMemoryLocalStorage() {
+  const store = new Map<string, string>()
+  const ls = {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => {
+      store.set(k, v)
+    },
+    removeItem: (k: string) => {
+      store.delete(k)
+    },
+    clear: () => store.clear(),
+  }
+  // @ts-expect-error test stub
+  globalThis.localStorage = ls
+  return store
+}
 
 function sess(
   id: string,
@@ -76,5 +99,26 @@ describe('sessionProjects', () => {
       { label: 'Other', kids: ['4'] },
       { label: 'RemedyAI', kids: ['2', '3'] },
     ])
+  })
+
+  it('locks project folders and blocks remove while locked', () => {
+    installMemoryLocalStorage()
+    const path = 'C:\\Work\\LockedApp'
+    addKnownProject(path)
+    expect(isProjectLocked(path)).toBe(false)
+
+    setProjectLocked(path, true)
+    expect(isProjectLocked(path)).toBe(true)
+    expect(getLockedProjects().has(projectKey(path))).toBe(true)
+
+    // removeKnownProject must no-op while locked
+    const still = removeKnownProject(path)
+    expect(still).toContain(projectKey(path))
+    expect(isProjectLocked(path)).toBe(true)
+
+    toggleProjectLocked(path)
+    expect(isProjectLocked(path)).toBe(false)
+    const gone = removeKnownProject(path)
+    expect(gone).not.toContain(projectKey(path))
   })
 })

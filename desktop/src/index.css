@@ -446,6 +446,9 @@ pre code {
 .message-feed {
   scroll-behavior: auto;
   position: relative;
+  /* Idle + live: feed owns vertical scroll; stick-to-bottom must not fight wheel */
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
 }
 .message-feed .chat-row {
   animation: remedy-fade-up 0.18s ease-out;
@@ -518,6 +521,7 @@ pre code {
   overflow-wrap: anywhere;
   max-height: min(60vh, 32rem);
   overflow-y: auto;
+  overscroll-behavior-y: contain;
   color: var(--text-secondary);
   line-height: 1.55;
   font-style: italic;
@@ -591,6 +595,9 @@ pre code {
   background: rgba(255, 255, 255, 0.16);
   border-color: rgba(255, 255, 255, 0.14);
 }
+.message-feed .chat-img-wrap {
+  overflow-anchor: none;
+}
 .message-feed .chat-img {
   max-width: min(100%, 520px);
   max-height: min(48vh, 420px);
@@ -604,6 +611,7 @@ pre code {
   display: block;
   background: color-mix(in srgb, var(--bg-tertiary) 70%, transparent);
   transition: box-shadow 0.15s ease, border-color 0.15s ease;
+  overflow-anchor: none;
 }
 .message-feed .chat-img-btn:hover .chat-img,
 .message-feed .chat-img-btn:focus-visible .chat-img {

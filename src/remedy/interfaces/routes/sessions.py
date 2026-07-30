@@ -94,11 +94,26 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             except Exception:
                 project_path = str(resolve_project_path(str(raw_project)))
 
+        # Stamp provider+model at create so a second project session does not
+        # inherit a null bind and thrash the status bar against the first tab.
+        sess_provider = (req.llm_provider or "").strip().lower() or None
+        sess_model = (req.model or "").strip() or None
+        if sess_model or sess_provider:
+            with contextlib.suppress(Exception):
+                from remedy.core.session_llm import session_llm_update_fields
+
+                fields = session_llm_update_fields(
+                    provider=sess_provider, model=sess_model
+                )
+                sess_provider = fields.get("llm_provider") or sess_provider
+                sess_model = fields.get("model") or sess_model
+
         session = CS(
             title=req.title,
-            model=req.model,
+            model=sess_model or req.model,
             agent=req.agent,
             project_path=project_path,
+            llm_provider=sess_provider,
         )
         saved = await memory.create_chat_session(session)
         return {
@@ -324,15 +339,19 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         if not api_key and provider in ("ollama", "demo"):
             api_key = "local"
 
-        _apply_llm_to_runtime(
-            runtime,
-            provider=provider,
-            model=model,
-            base_url=base_url,
-            api_key=api_key,
-        )
+        # Session-only switch: persist the tab bind — do NOT thrash the shared
+        # runtime or global config (other tabs may be streaming another provider).
+        # make_default=true: also update global defaults + live runtime (Settings).
+        if req.make_default:
+            _apply_llm_to_runtime(
+                runtime,
+                provider=provider,
+                model=model,
+                base_url=base_url,
+                api_key=api_key,
+            )
 
-        # Persist last_model_by_provider always; global default when asked
+        # Always remember last model for this provider; global default only when asked
         config_path = _find_config_path() or _default_config_path()
         last_by = dict(cfg.get("last_model_by_provider") or {})
         last_by[provider] = model

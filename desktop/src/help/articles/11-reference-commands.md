@@ -7,6 +7,7 @@ Type `/` in the composer for autocomplete. Commands also work via
 |---------|-----------|-------------|
 | `/help` | | Command card + tip to open full Help (**F1**) |
 | `/new` | | New chat session |
+| `/reset` | alias `/clear` | **Full reset** of this session (history, plans, brief, goals buffer, checkpoints, attachments). Same tab — does not open another. Durable `/remember` memory kept. |
 | `/sessions` | | List recent sessions |
 | `/models` | | Model picker guidance |
 | `/thinking` | | Toggle thinking visibility |

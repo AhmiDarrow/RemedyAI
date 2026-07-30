@@ -13,14 +13,17 @@ import {
   addKnownProject,
   getCollapsedProjects,
   getKnownProjects,
+  getLockedProjects,
   groupSessionsByProject,
   isNoProjectPath,
+  isProjectLocked,
   projectKey,
   removeKnownProject,
   setProjectCollapsed,
+  setProjectLocked,
   type ProjectGroup,
 } from '../utils/sessionProjects'
-import { applySidebarOrder } from '../sidebar/orderApply'
+import { applySidebarOrder, PINNED_GROUP_KEY } from '../sidebar/orderApply'
 import { useSidebarOrder } from '../sidebar/useSidebarOrder'
 import { IconEdit } from './icons'
 import { OrderButtons } from './OrderButtons'
@@ -90,6 +93,7 @@ export function Sidebar({
   const [, setTick] = useState(0)
   const [knownProjects, setKnownProjects] = useState<string[]>(() => getKnownProjects())
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => getCollapsedProjects())
+  const [lockedProjects, setLockedProjects] = useState<Set<string>>(() => getLockedProjects())
   const [addingProject, setAddingProject] = useState(false)
   const [addProjectDraft, setAddProjectDraft] = useState('')
   const [moveTarget, setMoveTarget] = useState<string | null>(null)
@@ -175,11 +179,29 @@ export function Sidebar({
     const pinnedIds = new Set(
       list.filter((s) => meta[s.id]?.pinned).map((s) => s.id),
     )
-    return applySidebarOrder(grouped, projectOrder, sessionOrderMap, pinnedIds)
-  }, [sessions, query, meta, filter, knownProjects, openIds, projectOrder, sessionOrderMap])
+    // Pinned filter already shows only stars — skip synthetic strip to avoid empty folders noise.
+    const pinStrip = filter !== 'pinned'
+    return applySidebarOrder(grouped, projectOrder, sessionOrderMap, pinnedIds, {
+      lockedKeys: lockedProjects,
+      pinStrip,
+    })
+  }, [
+    sessions,
+    query,
+    meta,
+    filter,
+    knownProjects,
+    openIds,
+    projectOrder,
+    sessionOrderMap,
+    lockedProjects,
+  ])
 
   const projectKeysInView = useMemo(
-    () => groups.filter((g) => g.key).map((g) => g.key),
+    () =>
+      groups
+        .filter((g) => g.key && g.key !== PINNED_GROUP_KEY)
+        .map((g) => g.key),
     // groups is derived above — recompute when groups identity changes
     [groups],
   )
@@ -567,17 +589,47 @@ export function Sidebar({
             setTagDraft={setTagDraft}
             setMoveTarget={setMoveTarget}
             refreshMeta={refreshMeta}
-            projectDisableUp={!group.key || projectIndex <= 0}
+            isPinnedStrip={group.key === PINNED_GROUP_KEY}
+            projectLocked={Boolean(
+              group.key
+              && group.key !== PINNED_GROUP_KEY
+              && lockedProjects.has(group.key),
+            )}
+            onToggleProjectLock={
+              group.key && group.key !== PINNED_GROUP_KEY
+                ? () => {
+                    const next = setProjectLocked(
+                      group.key,
+                      !isProjectLocked(group.key),
+                    )
+                    setLockedProjects(new Set(next))
+                  }
+                : undefined
+            }
+            projectDisableUp={
+              !group.key
+              || group.key === PINNED_GROUP_KEY
+              || lockedProjects.has(group.key)
+              || projectIndex <= 0
+            }
             projectDisableDown={
-              !group.key || projectIndex < 0 || projectIndex >= projectOnlyKeys.length - 1
+              !group.key
+              || group.key === PINNED_GROUP_KEY
+              || lockedProjects.has(group.key)
+              || projectIndex < 0
+              || projectIndex >= projectOnlyKeys.length - 1
             }
             onMoveProjectUp={
               group.key
+              && group.key !== PINNED_GROUP_KEY
+              && !lockedProjects.has(group.key)
                 ? () => moveProject(group.key, 'up', projectOnlyKeys)
                 : undefined
             }
             onMoveProjectDown={
               group.key
+              && group.key !== PINNED_GROUP_KEY
+              && !lockedProjects.has(group.key)
                 ? () => moveProject(group.key, 'down', projectOnlyKeys)
                 : undefined
             }
@@ -610,6 +662,8 @@ export function Sidebar({
             onDropProject={(e) => onDropOnProject(e, group.key ? group.path : null)}
             onRemoveKnownProject={
               group.key
+              && group.key !== PINNED_GROUP_KEY
+              && !lockedProjects.has(group.key)
                 ? () => setKnownProjects(removeKnownProject(group.path))
                 : undefined
             }
@@ -680,6 +734,9 @@ function ProjectSection({
   setTagDraft,
   setMoveTarget,
   refreshMeta,
+  isPinnedStrip,
+  projectLocked,
+  onToggleProjectLock,
   projectDisableUp,
   projectDisableDown,
   onMoveProjectUp,
@@ -721,6 +778,9 @@ function ProjectSection({
   setTagDraft: (v: string) => void
   setMoveTarget: (v: string | null) => void
   refreshMeta: () => void
+  isPinnedStrip?: boolean
+  projectLocked?: boolean
+  onToggleProjectLock?: () => void
   projectDisableUp?: boolean
   projectDisableDown?: boolean
   onMoveProjectUp?: () => void
@@ -735,9 +795,10 @@ function ProjectSection({
   onDropProject: (e: DragEvent) => void
   onRemoveKnownProject?: () => void
 }) {
-  const isNone = !group.key
+  const isNone = !group.key && !isPinnedStrip
   const count = group.sessions.length
   const hasActive = group.sessions.some((s) => s.id === activeId)
+  const locked = Boolean(projectLocked)
 
   return (
     <div className="mb-0.5">
@@ -748,14 +809,16 @@ function ProjectSection({
             ? 'color-mix(in srgb, var(--accent) 28%, transparent)'
             : hasActive && !isNone
               ? 'color-mix(in srgb, var(--accent) 12%, transparent)'
-              : 'transparent',
+              : isPinnedStrip
+                ? 'color-mix(in srgb, var(--accent) 8%, transparent)'
+                : 'transparent',
           outline: dropHover ? '1px dashed var(--accent)' : 'none',
           color: 'var(--text-secondary)',
         }}
         onClick={onToggle}
-        onDragOver={onDragOverProject}
-        onDragLeave={onDragLeaveProject}
-        onDrop={onDropProject}
+        onDragOver={isPinnedStrip ? undefined : onDragOverProject}
+        onDragLeave={isPinnedStrip ? undefined : onDragLeaveProject}
+        onDrop={isPinnedStrip ? undefined : onDropProject}
       >
         <span
           className="text-[10px] w-3 text-center"
@@ -764,14 +827,18 @@ function ProjectSection({
         >
           {collapsed ? '▸' : '▾'}
         </span>
-        <span className="text-[12px]">{isNone ? '○' : '📁'}</span>
+        <span className="text-[12px]">
+          {isPinnedStrip ? '★' : isNone ? '○' : locked ? '🔒' : '📁'}
+        </span>
         <span
           className="truncate flex-1 min-w-0 text-xs font-semibold"
           style={{ color: 'var(--text-primary)' }}
           title={
-            group.path
-              ? group.path
-              : 'Sessions without a project'
+            isPinnedStrip
+              ? 'Pinned sessions (always at top)'
+              : group.path
+                ? group.path
+                : 'Sessions without a project'
           }
         >
           {group.label}
@@ -779,7 +846,31 @@ function ProjectSection({
         <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
           {count}
         </span>
-        {onMoveProjectUp && onMoveProjectDown && (
+        {onToggleProjectLock && (
+          <button
+            type="button"
+            className={
+              locked
+                ? 'text-[11px] w-4 opacity-100'
+                : 'text-[11px] w-4 opacity-0 group-hover/header:opacity-100'
+            }
+            style={{ color: locked ? 'var(--accent)' : 'var(--text-muted)' }}
+            title={
+              locked
+                ? 'Unlock folder (allows reorder and remove)'
+                : 'Lock folder (prevents reorder and remove)'
+            }
+            aria-label={locked ? 'Unlock project folder' : 'Lock project folder'}
+            aria-pressed={locked}
+            onClick={(e) => {
+              e.stopPropagation()
+              onToggleProjectLock()
+            }}
+          >
+            {locked ? '🔒' : '🔓'}
+          </button>
+        )}
+        {onMoveProjectUp && onMoveProjectDown && !locked && (
           <OrderButtons
             onUp={onMoveProjectUp}
             onDown={onMoveProjectDown}
@@ -789,7 +880,7 @@ function ProjectSection({
             titleDown="Move project folder down"
           />
         )}
-        {onNewInProject && (
+        {onNewInProject && !isPinnedStrip && (
           <button
             type="button"
             className="opacity-0 group-hover/header:opacity-100 text-[10px] px-1 rounded"
@@ -803,7 +894,7 @@ function ProjectSection({
             +
           </button>
         )}
-        {onRemoveKnownProject && count === 0 && (
+        {onRemoveKnownProject && count === 0 && !locked && !isPinnedStrip && (
           <button
             type="button"
             className="opacity-0 group-hover/header:opacity-100 text-[10px] w-4"

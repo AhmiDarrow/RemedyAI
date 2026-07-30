@@ -1,5 +1,7 @@
 """file_edit apply_search_replace + multi-hunk."""
 
+import pytest
+
 from remedy.core.file_edit import apply_multi_hunk, apply_search_replace
 
 
@@ -80,3 +82,70 @@ def test_history_stub_markers_cover_echo_bug():
     assert any(m in stub for m in _HISTORY_STUB_MARKERS)
     old = "[file_write content omitted from provider history: 3903 chars"
     assert any(m in old for m in _HISTORY_STUB_MARKERS)
+
+
+@pytest.mark.asyncio
+async def test_file_write_refuses_history_stub_body(tmp_path, monkeypatch):
+    """Never write provider history stubs to disk; large real bodies write fully."""
+    from types import SimpleNamespace
+
+    from remedy.core.agent_workspace_tools import register_workspace_tools
+    from remedy.core.approvals import APPROVALS
+    from remedy.core.workspace import resolve_under_roots, write_roots_for_scope
+    from remedy.skills.tool_registry import ToolRegistry
+
+    monkeypatch.setattr(APPROVALS, "needs_ask", lambda *a, **k: None)
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+
+    class _RT:
+        def __init__(self) -> None:
+            self.tool_registry = ToolRegistry()
+            self.config = SimpleNamespace(home_dir=str(tmp_path / "remedy_home"))
+            self._session_id = "stub-test"
+
+        def effective_project_path(self):
+            return proj.resolve()
+
+        def access_scope(self):
+            return "project"
+
+        def resolve_tool_path(self, path, for_write=False):
+            roots = write_roots_for_scope("project", proj, home=home)
+            return resolve_under_roots(path or ".", roots, access_scope="project")
+
+        def _track_artifact(self, *_a, **_k):
+            pass
+
+        def _register_comfyui_tools(self):
+            pass
+
+        def _register_vision_tools(self):
+            pass
+
+        def _register_local_discover_tools(self):
+            pass
+
+        def _register_skill_tools(self):
+            pass
+
+    rt = _RT()
+    register_workspace_tools(rt)
+    reg = rt.tool_registry
+
+    stub = (
+        "<<NOT_SOURCE_CODE history_stub kind=file_write content chars=3903 "
+        "DO_NOT_file_write_this_string file_read_the_path_instead>>"
+    )
+    result = await reg.execute("file_write", path="App.tsx", content=stub)
+    assert "HISTORY_STUB" in result or "history" in result.lower()
+    assert not (proj / "App.tsx").exists()
+
+    # Large real body must still write fully (execute path no longer 8k-clips).
+    body = "line\n" * 5000
+    ok = await reg.execute("file_write", path="Big.tsx", content=body)
+    assert "HISTORY_STUB" not in ok
+    assert (proj / "Big.tsx").read_text(encoding="utf-8") == body

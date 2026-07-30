@@ -321,7 +321,8 @@ export async function setSessionLlm(
   sessionId: string,
   provider: string,
   model?: string,
-  makeDefault = true,
+  /** When true, also updates global Settings default + live runtime. Default false = this session only. */
+  makeDefault = false,
 ): Promise<{
   status: string
   provider: string
