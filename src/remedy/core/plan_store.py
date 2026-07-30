@@ -373,8 +373,9 @@ def parse_steps_from_text(text: str) -> list[str]:
 
 # Tools allowed when the UI is in Plan mode (explore, no shell/file mutation).
 # Read/research tools only — no shell/file writes.
-PLAN_MODE_TOOL_NAMES = frozenset(
-    {
+# Computer: only COMPUTER_PLAN_MODE_TOOLS (never click/type/act/app).
+def _plan_mode_tool_names() -> frozenset[str]:
+    base = {
         "plan_save",
         "plan_show",
         "plan_list",
@@ -392,18 +393,28 @@ PLAN_MODE_TOOL_NAMES = frozenset(
         "web_search",
         "media_read",
         "vision_describe",
-        # Computer use (research): see rail / screen; no click/type in Plan
-        "computer_screenshot",
-        "computer_snapshot",
-        "computer_navigate",
-        "computer_windows",
-        "computer_monitors",
-        "computer_page_text",
-        "computer_find",
-        "computer_wait",
-        "computer_act",
     }
-)
+    try:
+        from remedy.core.computer.types import COMPUTER_PLAN_MODE_TOOLS
+
+        return frozenset(base) | frozenset(COMPUTER_PLAN_MODE_TOOLS)
+    except Exception:
+        # Fallback if computer package unavailable (should not happen in product)
+        return frozenset(base) | frozenset(
+            {
+                "computer_screenshot",
+                "computer_snapshot",
+                "computer_navigate",
+                "computer_windows",
+                "computer_monitors",
+                "computer_page_text",
+                "computer_find",
+                "computer_wait",
+            }
+        )
+
+
+PLAN_MODE_TOOL_NAMES = _plan_mode_tool_names()
 
 PLAN_MODE_SYSTEM_ADDENDUM = """
 ## Plan mode (active)

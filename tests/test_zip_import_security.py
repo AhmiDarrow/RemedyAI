@@ -51,6 +51,21 @@ def test_zip_member_stream_cap(tmp_path: Path):
     assert not any(p.is_file() for p in leftovers)
 
 
+def test_zip_symlink_member_blocked(tmp_path: Path):
+    """Unix symlink mode in external_attr must be refused."""
+    zpath = tmp_path / "link.zip"
+    with zipfile.ZipFile(zpath, "w") as zf:
+        info = zipfile.ZipInfo("evil-link")
+        # S_IFLNK = 0o120000 stored in high 16 bits of external_attr
+        info.external_attr = (0o120000 << 16)
+        zf.writestr(info, b"/tmp/escape")
+    dest = tmp_path / "out"
+    dest.mkdir()
+    with zipfile.ZipFile(zpath, "r") as zf, pytest.raises(ValueError, match="symlink"):
+        _safe_extract_zip(zf, dest)
+    assert not (dest / "evil-link").exists()
+
+
 def test_import_quarantine_sets_flag(tmp_path: Path):
     # Build a clean pack via exporter
     src = tmp_path / "src" / "safe-skill"

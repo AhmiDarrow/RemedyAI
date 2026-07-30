@@ -50,6 +50,10 @@ class MCPClient:
 
         try:
             from remedy.execution.process import create_hidden_subprocess_exec
+            from remedy.execution.sandbox import scrub_subprocess_env
+
+            # Never forward provider/API secrets into MCP server children.
+            safe_env = scrub_subprocess_env(env)
 
             proc = await create_hidden_subprocess_exec(
                 command,
@@ -57,7 +61,7 @@ class MCPClient:
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                env=env,
+                env=safe_env,
             )
 
             self._servers[server_name] = {
@@ -191,12 +195,16 @@ class MCPClient:
         import time
         start = time.monotonic()
 
+        # Strip client-only routing keys so they never reach the MCP server.
+        call_args = dict(tool_call.arguments or {})
+        call_args.pop("_mcp_server", None)
+
         result = await self._send_request(
             server_name,
             "tools/call",
             {
                 "name": tool_call.tool_name,
-                "arguments": tool_call.arguments,
+                "arguments": call_args,
             },
             timeout=30.0,
         )

@@ -22,9 +22,20 @@ async def test_plan_mode_allows_plan_save_blocks_bash():
     assert blocked.success is False
     assert "PLAN_MODE" in (blocked.error or "") or "Plan mode" in (blocked.error or "")
 
+    # Multi-step computer_act is Build-only (click/type side effects)
+    act_blocked = await rt.call_tool(
+        ToolCall(
+            tool_name="computer_act",
+            arguments={"url": "https://example.com", "click": "OK", "type": "x"},
+        )
+    )
+    assert act_blocked.success is False
+    assert "PLAN_MODE" in (act_blocked.error or "") or "Plan mode" in (act_blocked.error or "")
+
     # allowlist includes plan tools
     assert "plan_save" in PLAN_MODE_TOOL_NAMES
     assert "checkpoint_save" not in PLAN_MODE_TOOL_NAMES  # build-only
+    assert "computer_act" not in PLAN_MODE_TOOL_NAMES
 
 
 def test_send_message_request_has_plan_mode():
