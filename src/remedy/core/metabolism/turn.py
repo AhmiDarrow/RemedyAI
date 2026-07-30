@@ -168,6 +168,7 @@ def begin_turn_metabolism(
             force_spread=bool(policy.force_spread or gov.force_spread),
         )
 
+    # Hot path: skip expensive organ snapshots (use metabolism_public_snapshot for Advanced)
     return {
         "session_id": sid,
         "tier": int(tier),
@@ -180,11 +181,6 @@ def begin_turn_metabolism(
         "allow_critical_verify": policy.allow_critical_verify or gov.verify_next,
         "injects": injects,
         "action_ir": ir,
-        "governor": gov.snapshot(),
-        "evidence": ledger.snapshot(),
-        "decisions": decisions.snapshot(),
-        "machine_map": mmap.snapshot(),
-        "time_crystal": crystal.snapshot(),
     }
 
 
