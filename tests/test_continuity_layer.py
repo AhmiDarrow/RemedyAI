@@ -67,6 +67,11 @@ def test_context_snapshot_single_pass(tmp_path, monkeypatch):
     assert snap.token_estimate >= 1
     assert snap.intent in ("memory", "chat", "skill", "plan", "tool")
     assert snap.fill_pct >= 0
+    # Small chat history → light phase (pack/scout/spread skipped)
+    assert snap.signals.get("snapshot_phase") in ("light", "full")
+    if snap.fill_pct < 0.40 and not snap.nudge and snap.intent == "chat":
+        assert snap.signals.get("snapshot_phase") == "light"
+        assert (snap.signals.get("pack") or {}).get("skipped") is True
     pub = snap.to_public()
     assert "token_estimate" in pub
 
