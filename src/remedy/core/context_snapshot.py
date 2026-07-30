@@ -58,6 +58,7 @@ def build_context_snapshot(
     project_path: str | None = None,
     apply_brief_touch: bool = True,
     apply_remedies: bool = True,
+    full_snapshot: bool | None = None,
 ) -> ContextSnapshot:
     """One-pass continuity snapshot (deterministic; no network).
 
@@ -144,18 +145,20 @@ def build_context_snapshot(
     tool_msgs = sum(1 for m in msgs if m.get("role") == "tool")
     long_tool_history = tool_msgs >= 4
     heavy_fill = fill >= max(0.40, float(min_use) - 0.20)
-    need_pack = (
+    # Lean tiers force light phase even with long history / tool-ish intent
+    lean = full_snapshot is False
+    need_pack = (not lean) and (
         bool(nudge)
         or fill >= max(0.55, float(min_use) - 0.15)
         or (long_tool_history and fill >= 0.45)
     )
-    need_spread = (
+    need_spread = (not lean) and (
         bool(nudge)
         or heavy_fill
         or intent in ("tool", "plan")
         or long_tool_history
     )
-    need_scout = (
+    need_scout = (not lean) and (
         bool(nudge)
         or heavy_fill
         or intent in ("tool", "plan", "skill")
