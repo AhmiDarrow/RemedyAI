@@ -191,3 +191,52 @@ def test_media_serves_attachment_under_home(tmp_path: Path, monkeypatch):
     res = client.get("/api/media", params={"path": str(att)}, headers=headers)
     assert res.status_code == 200, res.text
     assert res.content[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_media_refuses_auth_secret_paths(tmp_path: Path, monkeypatch):
+    """Even under ~/.remedy allowlist, auth/** must never be served as media."""
+    from remedy.interfaces import api_support
+    from remedy.interfaces.api import create_app
+
+    home = tmp_path / ".remedy"
+    auth = home / "auth"
+    auth.mkdir(parents=True)
+    # PNG under auth would pass content-type checks — must still 403.
+    secret_img = auth / "leak.png"
+    secret_img.write_bytes(_png_bytes())
+    token_file = auth / "local_api_token"
+    token_file.write_text("tokensecretvalue1234567890", encoding="utf-8")
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    cfg = {
+        "project_path": str(proj),
+        "home_dir": str(home),
+        "access_scope": "full",
+    }
+    monkeypatch.setattr(api_support, "load_config", lambda: dict(cfg))
+    monkeypatch.setattr(
+        "remedy.interfaces.routes.workspace.load_config",
+        lambda: dict(cfg),
+    )
+    # Ensure path-part detection (…/.remedy/auth/…) always fires.
+    monkeypatch.setenv("REMEDY_HOME", str(home))
+
+    app = create_app()
+    client = TestClient(app)
+    token = None
+    try:
+        r = client.get("/api/auth/local-bootstrap")
+        if r.status_code == 200:
+            token = (r.json() or {}).get("token")
+    except Exception:
+        pass
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+
+    for target in (secret_img, token_file):
+        res = client.get(
+            "/api/media", params={"path": str(target)}, headers=headers
+        )
+        assert res.status_code in (403, 400), res.text
+        body = (res.text or "").lower()
+        assert "protected" in body or "secret" in body or "not allowed" in body or res.status_code == 403

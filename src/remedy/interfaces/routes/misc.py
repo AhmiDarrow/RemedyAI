@@ -1,6 +1,7 @@
 """API route registration for Remedy FastAPI app."""
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 from pathlib import Path
@@ -165,29 +166,120 @@ def register_misc_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
     # -- project init scanner -------------------------------------------------
     @app.post("/api/projects/scan")
     async def scan_project(path: str = Query(default=".")):
-        target = Path(path).resolve()
+        """Scan a project tree for language mix / deps (path-jailed).
+
+        Never walk ``~/.remedy/auth`` or other protected secret trees, and never
+        accept arbitrary absolute paths outside access-scope roots (was an
+        unauthenticated recon vector when API auth is off / token is held).
+        """
+        from remedy.core.security import (
+            is_protected_secret_path,
+            refuse_protected_secret_path,
+        )
+        from remedy.core.workspace import (
+            allowed_roots_for_scope,
+            default_project_from_config,
+            resolve_under_roots,
+        )
+        from remedy.interfaces.api_support import load_config
+
+        raw = (path or ".").strip() or "."
+        cfg = load_config() or {}
+        scope = str(cfg.get("access_scope") or "home")
+        project = default_project_from_config(cfg)
+        if runtime is not None and hasattr(runtime, "effective_project_path"):
+            with contextlib.suppress(Exception):
+                project = runtime.effective_project_path()
+        roots = allowed_roots_for_scope(scope, project)
+        try:
+            target = resolve_under_roots(raw, roots, access_scope=scope)
+        except Exception as exc:
+            raise HTTPException(400, f"Path not allowed: {exc}") from exc
+        try:
+            refuse_protected_secret_path(target)
+        except Exception as exc:
+            raise HTTPException(
+                400, "Path not allowed: protected Remedy secrets location"
+            ) from exc
         if not target.exists():
             raise HTTPException(404, f"Path not found: {path}")
         if not target.is_dir():
             target = target.parent
+            try:
+                refuse_protected_secret_path(target)
+            except Exception as exc:
+                raise HTTPException(
+                    400, "Path not allowed: protected Remedy secrets location"
+                ) from exc
+            # Parent after file→dir fallback must still be under roots.
+            try:
+                resolve_under_roots(str(target), roots, access_scope=scope)
+            except Exception as exc:
+                raise HTTPException(400, f"Path not allowed: {exc}") from exc
 
-        files: dict[str, list[str]] = {"python": [], "javascript": [], "typescript": [], "rust": [], "other": []}
-        exts_map = {
-            ".py": "python", ".js": "javascript", ".jsx": "javascript",
-            ".ts": "typescript", ".tsx": "typescript", ".mjs": "javascript",
-            ".rs": "rust", ".c": "other", ".cpp": "other", ".h": "other",
-            ".json": "other", ".yaml": "other", ".yml": "other", ".toml": "other",
-            ".md": "other", ".txt": "other", ".css": "other", ".html": "other",
+        # Double-check: never rglob under auth even if roots were misconfigured.
+        if is_protected_secret_path(target):
+            raise HTTPException(
+                400, "Path not allowed: protected Remedy secrets location"
+            )
+
+        files: dict[str, list[str]] = {
+            "python": [],
+            "javascript": [],
+            "typescript": [],
+            "rust": [],
+            "other": [],
         }
-        ignored = {".git", "__pycache__", "node_modules", ".venv", "venv", "dist", "build", ".next", "target"}
+        exts_map = {
+            ".py": "python",
+            ".js": "javascript",
+            ".jsx": "javascript",
+            ".ts": "typescript",
+            ".tsx": "typescript",
+            ".mjs": "javascript",
+            ".rs": "rust",
+            ".c": "other",
+            ".cpp": "other",
+            ".h": "other",
+            ".json": "other",
+            ".yaml": "other",
+            ".yml": "other",
+            ".toml": "other",
+            ".md": "other",
+            ".txt": "other",
+            ".css": "other",
+            ".html": "other",
+        }
+        ignored = {
+            ".git",
+            "__pycache__",
+            "node_modules",
+            ".venv",
+            "venv",
+            "dist",
+            "build",
+            ".next",
+            "target",
+            "auth",
+        }
         for f in target.rglob("*"):
-            if f.is_file() and not any(p in ignored for p in f.parts):
-                ext = f.suffix.lower()
-                cat = exts_map.get(ext, "other")
+            if not f.is_file():
+                continue
+            if any(p in ignored for p in f.parts):
+                continue
+            # Skip any path that resolves into protected secrets mid-walk
+            # (symlink escape / nested .remedy/auth).
+            if is_protected_secret_path(f):
+                continue
+            ext = f.suffix.lower()
+            cat = exts_map.get(ext, "other")
+            try:
                 rel = str(f.relative_to(target))
-                files[cat].append(rel)
-                if len(files[cat]) >= 100:
-                    continue
+            except ValueError:
+                continue
+            files[cat].append(rel)
+            if len(files[cat]) >= 100:
+                continue
 
         summary = {
             "path": str(target),
@@ -199,11 +291,15 @@ def register_misc_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
 
         # try reading pyproject.toml or package.json for deps
         pp = target / "pyproject.toml"
-        if pp.exists():
-            summary["python_deps"] = pp.read_text(encoding="utf-8", errors="replace")[:2000]
+        if pp.exists() and not is_protected_secret_path(pp):
+            summary["python_deps"] = pp.read_text(
+                encoding="utf-8", errors="replace"
+            )[:2000]
         pj = target / "package.json"
-        if pj.exists():
-            summary["js_deps"] = pj.read_text(encoding="utf-8", errors="replace")[:2000]
+        if pj.exists() and not is_protected_secret_path(pj):
+            summary["js_deps"] = pj.read_text(
+                encoding="utf-8", errors="replace"
+            )[:2000]
 
         return summary
 
