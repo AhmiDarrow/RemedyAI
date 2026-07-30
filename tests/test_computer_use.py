@@ -41,6 +41,21 @@ def test_scrub_job_result_strips_password_element_values():
                     "name": "passwd",
                 },
                 {"ref": "e2", "tag": "button", "name": "Submit"},
+                # name=pwd without type=password still secret-bearing
+                {
+                    "ref": "e3",
+                    "tag": "input",
+                    "type": "text",
+                    "name": "pwd",
+                    "value": "PwdFieldSecret99",
+                },
+                {
+                    "ref": "e4",
+                    "tag": "input",
+                    "type": "text",
+                    "autocomplete": "current-password",
+                    "value": "AutoCompleteSecret!",
+                },
             ],
         }
     )
@@ -48,7 +63,12 @@ def test_scrub_job_result_strips_password_element_values():
     els = out.get("elements") or []
     pw = next(e for e in els if e.get("ref") == "e1")
     assert pw.get("value") == "[filled]"
-    assert "SuperSecretPassw0rd" not in json.dumps(out)
+    blob = json.dumps(out)
+    assert "SuperSecretPassw0rd" not in blob
+    assert "PwdFieldSecret99" not in blob
+    assert "AutoCompleteSecret" not in blob
+    assert next(e for e in els if e.get("ref") == "e3").get("value") == "[filled]"
+    assert next(e for e in els if e.get("ref") == "e4").get("value") == "[filled]"
 
 
 def test_complete_scrubs_error_and_typed_payload(tmp_path: Path):
@@ -153,14 +173,21 @@ def test_open_url_refuses_userinfo_credentials():
     import pytest
 
     from remedy.core.computer import desktop_win as win
+    from remedy.core.computer.router import is_valid_navigate_url
 
     for bad in (
         "https://user:pass@example.com/",
         "http://alice:s3cret@localhost:8080/x",
         "https://token@evil.example/path",
+        "https://:secret@example.com/",
+        "https://user:@example.com/",
+        "https://:@example.com/",
+        "HTTPS://User:Pass@Example.com/x",
     ):
         with pytest.raises(ValueError, match="userinfo|credential"):
             win.open_url(bad)
+        # Browser rail must reject the same shapes (empty userinfo included).
+        assert is_valid_navigate_url(bad) is False
 
 
 def test_computer_audit_redacts_secrets(tmp_path: Path):

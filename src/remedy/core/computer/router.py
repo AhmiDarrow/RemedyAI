@@ -111,8 +111,10 @@ def is_valid_navigate_url(url: str | None) -> bool:
             return False
         if p.scheme == "about":
             return True
-        # Block credentials in URL userinfo (user:pass@host)
-        if p.username or p.password:
+        # Block credentials in URL userinfo (user:pass@host).
+        # Use ``is not None`` — empty-string user/pass (https://:@host) still
+        # means userinfo was present and must not land in the rail.
+        if p.username is not None or p.password is not None:
             return False
         host = (p.hostname or "").strip().lower()
         if not host or " " in host or "," in host:

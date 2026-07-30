@@ -233,3 +233,42 @@ def test_resolve_under_roots_blocks_auth_junction(tmp_path: Path):
         resolve_under_roots("leak", [proj], access_scope="project")
     rule = ei.value.details.get("rule")
     assert rule in ("protected_secret_path", "path_traversal", "path_chars")
+
+    # Absolute path to the symlink (not the target) still resolves into auth.
+    with pytest.raises(SecurityError) as ei2:
+        resolve_under_roots(str(link), [proj], access_scope="full")
+    assert ei2.value.details.get("rule") == "protected_secret_path"
+
+    # is_protected_secret_path must detect the resolved symlink target itself.
+    assert is_protected_secret_path(link) is True
+
+
+def test_is_protected_secret_path_dir_symlink_into_auth(tmp_path: Path, monkeypatch):
+    """Directory symlink/junction into $REMEDY_HOME/auth is always protected."""
+    from remedy.core.security import clear_protected_auth_roots_cache
+
+    custom = tmp_path / "custom_home"
+    c_auth = custom / "auth"
+    c_auth.mkdir(parents=True)
+    secret = c_auth / "local_api_token"
+    secret.write_text("tok-secret-value-xyz", encoding="utf-8")
+    monkeypatch.setenv("REMEDY_HOME", str(custom))
+    clear_protected_auth_roots_cache()
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    link_dir = proj / "auth_link"
+    try:
+        link_dir.symlink_to(c_auth, target_is_directory=True)
+    except OSError:
+        pytest.skip("directory symlinks not available on this host")
+
+    via_link = link_dir / "local_api_token"
+    assert is_protected_secret_path(via_link) is True
+    assert is_protected_secret_path(link_dir) is True
+    with pytest.raises(SecurityError) as ei:
+        resolve_under_roots(str(via_link), [proj], access_scope="full")
+    assert ei.value.details.get("rule") == "protected_secret_path"
+    # Relative path through the dir link
+    with pytest.raises(SecurityError):
+        resolve_under_roots("auth_link/local_api_token", [proj], access_scope="project")

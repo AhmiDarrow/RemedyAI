@@ -6,6 +6,11 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ### Gauntlet: continuous security + perf loop (feature/computer-use)
 
+- **Project scan jail:** `/api/projects/scan` resolves under access-scope roots and refuses `auth/**` (was unrestricted absolute-path recon)
+- **Media auth refuse:** `/api/media` never serves `~/.remedy/auth` even under the broad home allowlist
+- **Catalog custom path:** `safe_path(user, base)` argument order fixed for custom commands/agents
+- **a11y secret fields:** scrub `pwd`/`pass`/autocomplete password values, not only `type=password`
+- **Navigate userinfo:** empty `https://:@host` blocked via `username is not None` (was truthy-only)
 - Shell jail: pathless mutations only when cwd∈roots; bare `$var` paths; IEX/Start-Process/EncodedCommand/archive; certutil `-urlcache` / WebClient / FromBase64 / IRM `-OutFile`; `powershell -e` short form; `fsutil`/`mklink`
 - Shadow: all batch paths; relative paths against work roots; opaque payload hard-block (EncodedCommand/IEX/DownloadFile)
 - Evidence: slim→inject→mark order; delta-only JSONL persist; per-session metabolism throttle; ContextVar session id

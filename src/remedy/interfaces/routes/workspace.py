@@ -107,6 +107,17 @@ def register_workspace_routes(app: FastAPI, *, runtime=None, gateway=None, memor
         if candidate is None or not candidate.is_file():
             raise HTTPException(404, "media not found")
 
+        # Never serve under ~/.remedy/auth (or $REMEDY_HOME/auth) — even if
+        # the broad ~/.remedy root allowlist would otherwise accept it.
+        try:
+            from remedy.core.security import refuse_protected_secret_path
+
+            refuse_protected_secret_path(candidate)
+        except SecurityError as exc:
+            raise HTTPException(
+                403, "path is a protected Remedy secrets location"
+            ) from exc
+
         # Jail: project roots, runtime allowed roots, and ~/.remedy
         roots: list[Path] = []
         with contextlib.suppress(Exception):

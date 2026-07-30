@@ -44,6 +44,45 @@ def test_export_redacts_secret_shaped_content() -> None:
     assert "Bearer sk-proj" not in body
 
 
+def test_export_redacts_pem_connection_and_provider_shapes() -> None:
+    """Regression: PEM, DB URLs, Slack/GH tokens must not leave via export."""
+    from remedy.memory.session_io import format_session_markdown
+
+    pem = (
+        "-----BEGIN PRIVATE KEY-----\n"
+        "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7fakekeymaterial\n"
+        "-----END PRIVATE KEY-----"
+    )
+    payloads = [
+        pem,
+        "postgres://user:SuperSecretPass@db.internal:5432/app",
+        "mongodb+srv://admin:hunter2@cluster0.example.net/db",
+        "xoxb-1234567890-abcdefghij",
+        "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+        "AIzaSyA-fakeGoogleApiKey0123456789abcd",
+        "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+        "eyJzdWIiOiIxMjM0NTY3ODkwIn0.signaturepart",
+    ]
+    for raw in payloads:
+        out = _export_content(raw, role="assistant")
+        # Core secret material must not survive
+        assert "SuperSecretPass" not in out
+        assert "hunter2" not in out
+        assert "xoxb-1234567890" not in out
+        assert "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789" not in out
+        assert "AIzaSyA-fakeGoogleApiKey0123456789abcd" not in out
+        assert "BEGIN PRIVATE KEY" not in out or "[redacted]" in out
+        assert "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9" not in out or "[redacted]" in out
+
+    md = format_session_markdown(
+        title="leak",
+        session_id="sid-md",
+        messages=[{"role": "user", "content": payloads[1]}],
+    )
+    assert "SuperSecretPass" not in md
+    assert "[redacted]" in md
+
+
 def test_format_session_txt_basic() -> None:
     body = format_session_txt(
         title="T",
