@@ -385,16 +385,26 @@ def test_shell_write_jail_blocks_mutation_without_paths(tmp_path: Path):
     from remedy.core.shell_write_jail import check_shell_write_jail
 
     proj = tmp_path / "proj"
+    outside = tmp_path / "other"
     proj.mkdir()
-    # Mutation-class with no extractable path tokens
-    block = check_shell_write_jail(
-        "Remove-Item -Recurse -Force",
+    outside.mkdir()
+    # cwd inside project → pathless mutation (e.g. npm install) allowed
+    ok = check_shell_write_jail(
+        "npm install left-pad",
         write_roots=[proj],
         cwd=proj,
         project_bound=True,
     )
+    assert ok is None
+    # cwd outside project → pathless mutation blocked
+    block = check_shell_write_jail(
+        "Remove-Item -Recurse -Force",
+        write_roots=[proj],
+        cwd=outside,
+        project_bound=True,
+    )
     assert block is not None
-    assert "no proven path" in block.lower() or "write roots" in block.lower()
+    assert "write root" in block.lower() or "proven path" in block.lower()
 
 
 def test_shell_write_jail_blocks_interpreter_oneshot_without_paths(tmp_path: Path):

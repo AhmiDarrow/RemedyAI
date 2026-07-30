@@ -302,13 +302,23 @@ def check_shell_write_jail(
             "literal path under the focus folder."
         )
 
-    # Mutation with zero extractable path tokens → fail closed (cannot prove in-root)
+    # Mutation with zero extractable path tokens: allow only if cwd is under
+    # write roots (npm install / git write inside project). Else fail closed.
     if not offenders and not candidates:
+        if cwd is not None:
+            try:
+                from pathlib import Path as _P
+
+                c = _P(cwd).expanduser().resolve()
+                if _under_any(c, write_roots):
+                    return None
+            except Exception:
+                pass
         roots_s = ", ".join(str(r) for r in _norm_roots(write_roots)[:4])
         return (
             "shell write jail: mutation command has no proven path under write "
-            f"roots [{roots_s}]. Prefer file_write/file_edit with absolute paths "
-            "inside the focus folder."
+            f"roots [{roots_s}] and cwd is not inside a write root. "
+            "Prefer file_write/file_edit, or run with project workdir set."
         )
 
     if not offenders:
