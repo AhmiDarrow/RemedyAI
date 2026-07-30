@@ -15,6 +15,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+# In-memory unit list bound (was 400 — tighter for long sessions).
+MAX_EVIDENCE_UNITS = 240
+# Fingerprint set can outlive unit drops; hard-bound to avoid unbounded RAM.
+MAX_SEEN_FPS = MAX_EVIDENCE_UNITS * 2
+# Path extractions per tool result (cheap parse, still O(n) on dump size).
+MAX_PATHS_PER_ADMIT = 16
+# L0/L1 lean: keep far fewer units when tools barely run.
+MAX_EVIDENCE_UNITS_LEAN = 64
+MAX_PATHS_PER_ADMIT_LEAN = 6
+
 # Paths / decisions / test signals — high-value evidence tokens
 _PATH_RE = re.compile(
     r"(?:[A-Za-z]:\\|~/|\./|\.\./|/)"
@@ -90,8 +100,13 @@ class EvidenceLedger:
         tool_call_id: str = "",
         offload_path: str | None = None,
         success: bool = True,
+        lean: bool = False,
     ) -> list[EvidenceUnit]:
-        """Parse tool output into evidence units; skip duplicates and secrets."""
+        """Parse tool output into evidence units; skip duplicates and secrets.
+
+        ``lean=True`` (L0/L1) keeps fewer path EUs and a tighter unit list so
+        pure-chat sessions do not accumulate agency-sized ledgers.
+        """
         raw = _redact(content or "")
         if not raw.strip():
             return []
@@ -104,7 +119,9 @@ class EvidenceLedger:
         admitted: list[EvidenceUnit] = []
         kinds_bodies: list[tuple[str, str]] = []
 
-        paths = list(dict.fromkeys(_PATH_RE.findall(parse_src)))[:24]
+        path_cap = MAX_PATHS_PER_ADMIT_LEAN if lean else MAX_PATHS_PER_ADMIT
+        unit_cap = MAX_EVIDENCE_UNITS_LEAN if lean else MAX_EVIDENCE_UNITS
+        paths = list(dict.fromkeys(_PATH_RE.findall(parse_src)))[:path_cap]
         for p in paths:
             kinds_bodies.append(("path", p[:240]))
         if _DECISION_RE.search(parse_src):
@@ -144,11 +161,16 @@ class EvidenceLedger:
                 self.evidence_units += 1
                 new_eu += 1
                 admitted.append(eu)
-            # Cap memory
-            if len(self.units) > 400:
-                drop = len(self.units) - 400
+            # Cap memory (unit list + fingerprint set)
+            if len(self.units) > unit_cap:
+                drop = len(self.units) - unit_cap
                 self.units = self.units[drop:]
                 self.last_model_eu_index = max(0, self.last_model_eu_index - drop)
+            if len(self.seen_fps) > MAX_SEEN_FPS:
+                # Rebuild from retained units so dedupe stays coherent
+                self.seen_fps = {
+                    _eu_fingerprint(u.kind, u.summary) for u in self.units
+                }
             if new_eu == 0:
                 self.waste_tokens += tokens_est
             return admitted

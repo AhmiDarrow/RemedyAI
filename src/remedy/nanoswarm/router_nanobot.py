@@ -8,9 +8,14 @@ Never starts the server just to classify. Never grants shell/file power.
 from __future__ import annotations
 
 import re
+import threading
 from typing import Any
 
 _LABELS = ("memory", "skill", "chat", "plan", "tool", "autonomous")
+
+# Identical user text is classified multiple times per turn (snapshot, policy,
+# coordinator). Cache last N heuristic results to skip re-regex.
+_INTENT_CACHE_MAX = 48
 
 
 class RouterNanobot:
@@ -20,9 +25,24 @@ class RouterNanobot:
         self.last_label: str | None = None
         self.model_calls = 0
         self.last_method: str = "heuristic"
+        self._intent_cache: dict[str, dict[str, Any]] = {}
+        self._intent_cache_lock = threading.Lock()
+        self.cache_hits = 0
 
     def classify_intent(self, user_msg: str) -> dict[str, Any]:
         text = (user_msg or "").strip().lower()
+        # Cache key: full lowercased text, capped (long msgs still unique head)
+        cache_key = text if len(text) <= 512 else text[:512]
+        if cache_key:
+            with self._intent_cache_lock:
+                hit = self._intent_cache.get(cache_key)
+                if hit is not None:
+                    self.cache_hits += 1
+                    self.last_label = str(hit.get("label") or "chat")
+                    self.last_method = "heuristic"
+                    # Return a shallow copy so callers cannot mutate the cache
+                    return dict(hit)
+
         label = "chat"
         if not text:
             label = "chat"
@@ -77,12 +97,21 @@ class RouterNanobot:
             label = "tool"
         self.last_label = label
         self.last_method = "heuristic"
-        return {
+        out = {
             "label": label,
             "method": "heuristic",
             "bot": "router",
             "ambiguous": label == "chat" and len(text) > 40,
         }
+        if cache_key:
+            with self._intent_cache_lock:
+                self._intent_cache[cache_key] = out
+                if len(self._intent_cache) > _INTENT_CACHE_MAX:
+                    # Drop oldest insertion-order keys (dict preserves order 3.7+)
+                    drop = len(self._intent_cache) - _INTENT_CACHE_MAX
+                    for k in list(self._intent_cache.keys())[:drop]:
+                        self._intent_cache.pop(k, None)
+        return dict(out)
 
     def classify_with_local_model(
         self,
@@ -194,11 +223,15 @@ class RouterNanobot:
         return base
 
     def status(self) -> dict[str, Any]:
+        with self._intent_cache_lock:
+            cache_size = len(self._intent_cache)
         return {
             "bot": "router",
             "last_label": self.last_label,
             "last_method": self.last_method,
             "model_calls": self.model_calls,
+            "cache_hits": self.cache_hits,
+            "cache_size": cache_size,
             "role_model": __import__(
                 "remedy.runtime.catalog", fromlist=["DEFAULT_LOCAL_MODEL_ID"]
             ).DEFAULT_LOCAL_MODEL_ID,  # same as vision — never a second model

@@ -202,6 +202,27 @@ def test_router_heuristic_still_works():
     assert out["method"] == "heuristic"
 
 
+def test_router_intent_cache_identical_messages():
+    """Same user text classified twice in a turn hits cache (no re-regex)."""
+    from remedy.nanoswarm.router_nanobot import RouterNanobot
+
+    r = RouterNanobot()
+    msg = "search the codebase for begin_turn_metabolism"
+    a = r.classify_intent(msg)
+    hits0 = r.cache_hits
+    b = r.classify_intent(msg)
+    assert a["label"] == b["label"] == "tool"
+    assert r.cache_hits == hits0 + 1
+    # Mutating return value must not poison cache
+    b["label"] = "chat"
+    c = r.classify_intent(msg)
+    assert c["label"] == "tool"
+    # Status exposes cache metrics
+    st = r.status()
+    assert st["cache_hits"] >= 1
+    assert st["cache_size"] >= 1
+
+
 def test_router_classifies_browse_and_file_as_tool():
     """Browse/file phrases must be tool intent (L2 agency path), not chat."""
     from remedy.nanoswarm.router_nanobot import RouterNanobot

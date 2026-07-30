@@ -149,6 +149,16 @@ class TestStructuredFormatter:
 
 
 class TestLoggingSetup:
+    def test_hot_debug_tracks_operator_level(self):
+        from remedy.core.logging import hot_debug_enabled, setup_logging
+
+        setup_logging(level="INFO", json_output=False, console_output=False)
+        assert hot_debug_enabled() is False
+        setup_logging(level="DEBUG", json_output=False, console_output=False)
+        assert hot_debug_enabled() is True
+        setup_logging(level="INFO", json_output=False, console_output=False)
+        assert hot_debug_enabled() is False
+
     def test_setup_logging_json(self):
         setup_logging(level="DEBUG", json_output=True, console_output=True)
         root = logging.getLogger()
