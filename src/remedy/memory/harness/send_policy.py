@@ -34,13 +34,23 @@ def resolve_context_window_for_runtime(runtime: Any) -> int:
 
 
 def _ensure_session_brief(runtime: Any, session_id: str = "") -> Any:
-    """Create SessionBrief on first auto-compress if missing."""
+    """Create SessionBrief on first auto-compress if missing.
+
+    Reject briefs stamped for a different session (shared runtime tabs).
+    """
+    sid = session_id or str(getattr(runtime, "_session_id", "") or "")
     brief = getattr(runtime, "_session_brief", None)
     if brief is not None:
-        return brief
+        bsid = str(getattr(brief, "session_id", "") or "")
+        if not sid or not bsid or bsid == sid:
+            if sid and brief is not None and not bsid:
+                with suppress(Exception):
+                    brief.session_id = sid
+            return brief
+        # Foreign brief — drop
+        runtime._session_brief = None
     from remedy.memory.harness.brief import SessionBrief
 
-    sid = session_id or str(getattr(runtime, "_session_id", "") or "")
     brief = SessionBrief(session_id=sid)
     runtime._session_brief = brief
     return brief

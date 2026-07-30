@@ -725,15 +725,27 @@ class PartnerState:
 
 
 def ensure_partner_state(runtime: Any) -> PartnerState:
-    """Get or create PartnerState on runtime (process registry by session)."""
-    existing = getattr(runtime, "_partner_state", None)
-    if isinstance(existing, PartnerState):
-        return existing
+    """Get or create PartnerState on runtime (process registry by session).
+
+    Never return another session's PartnerState when ``runtime._session_id``
+    has changed (shared BasicRuntime across desktop tabs).
+    """
     sid = str(
         getattr(runtime, "_session_id", None)
         or getattr(getattr(runtime, "config", None), "session_id", None)
         or ""
     )
+    key = sid or f"anon-{id(runtime)}"
+
+    existing = getattr(runtime, "_partner_state", None)
+    if isinstance(existing, PartnerState):
+        esid = str(getattr(existing, "session_id", "") or "")
+        # Accept only exact session match (or anon key for unscoped turns)
+        if esid == key or (not sid and esid.startswith("anon-")):
+            return existing
+        # Foreign session — detach
+        runtime._partner_state = None
+
     home = None
     with suppress(Exception):
         home = getattr(getattr(runtime, "config", None), "home_dir", None)
@@ -742,7 +754,6 @@ def ensure_partner_state(runtime: Any) -> PartnerState:
             from remedy.interfaces.config import load_config
 
             home = (load_config() or {}).get("home_dir")
-    key = sid or f"anon-{id(runtime)}"
     with _registry_lock:
         st = _registry.get(key)
         if st is None:
@@ -752,7 +763,10 @@ def ensure_partner_state(runtime: Any) -> PartnerState:
         # Cap registry
         if len(_registry) > 64:
             for k in list(_registry.keys())[:16]:
-                _registry.pop(k, None)
+                if k != key:
+                    _registry.pop(k, None)
+                    if len(_registry) <= 64:
+                        break
     runtime._partner_state = st
     return st
 
