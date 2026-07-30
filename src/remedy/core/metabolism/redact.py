@@ -20,6 +20,9 @@ _SECRET_PATTERNS: list[re.Pattern[str]] = [
         r"\s*[:=]\s*\S+"
     ),
     re.compile(r"(?i)\b(sk|xai|ghp|gho|ghu|ghs|ghr|xox[baprs]|AKIA)[-_][A-Za-z0-9+/=_\-]{8,}"),
+    re.compile(r"(?i)\bya29\.[A-Za-z0-9._\-]{10,}"),
+    re.compile(r"(?i)\b1//[A-Za-z0-9_\-]{10,}"),
+    re.compile(r"(?i)\bxox[baprs]-[A-Za-z0-9\-]{10,}"),
     re.compile(
         r"-----BEGIN[A-Z ]*PRIVATE KEY-----[\s\S]*?-----END[A-Z ]*PRIVATE KEY-----"
     ),
