@@ -72,6 +72,48 @@ async def test_execute_tool_calls_module_pairs_all_ids() -> None:
 
 
 @pytest.mark.asyncio
+async def test_tool_result_ui_preview_redacts_secrets() -> None:
+    """@@tool_result preview is scrubbed; model content keeps full body."""
+    rt = BasicRuntime(AgentConfig(llm_api_key=""))
+
+    secret_body = "config api_key=sk-abcdefghijklmnopqrstuvwxyz0123 ok"
+
+    async def leak(**_kwargs):
+        return secret_body
+
+    rt.tool_registry.register_builtin_handler(
+        "file_read",
+        "read",
+        leak,
+        parameters={"type": "object", "properties": {"path": {"type": "string"}}},
+    )
+    calls = [
+        {
+            "id": "sec1",
+            "type": "function",
+            "function": {"name": "file_read", "arguments": '{"path":"cfg"}'},
+        },
+    ]
+    seen: set[str] = set()
+    cache: dict[str, str] = {}
+    ui_events: list[str] = []
+    tool_msgs: list[dict] = []
+    async for event, msg in execute_tool_calls(
+        rt, calls, seen_fps=seen, result_cache=cache
+    ):
+        if event.startswith("@@tool_result:"):
+            ui_events.append(event)
+        if msg.get("role") == "tool":
+            tool_msgs.append(msg)
+    assert ui_events
+    payload = json.loads(ui_events[0].split(":", 1)[1])
+    assert "sk-abcdefghijklmnopqrstuvwxyz0123" not in payload["preview"]
+    assert "[redacted]" in payload["preview"]
+    # Model still sees full tool content for agency
+    assert "sk-abcdefghijklmnopqrstuvwxyz0123" in tool_msgs[0]["content"]
+
+
+@pytest.mark.asyncio
 async def test_execute_tool_calls_records_turn_steps() -> None:
     rt = BasicRuntime(AgentConfig(llm_api_key=""))
     rt._turn_tool_steps = []

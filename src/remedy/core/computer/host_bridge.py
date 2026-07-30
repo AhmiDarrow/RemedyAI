@@ -26,7 +26,7 @@ _JOB_TEXT_MAX = 4_000
 
 
 def _scrub_job_result(result: dict[str, Any] | None) -> dict[str, Any] | None:
-    """Cap large text fields in job results before writing to disk."""
+    """Cap large text fields and redact secrets before writing to disk."""
     if result is None:
         return None
     out = dict(result)
@@ -53,6 +53,18 @@ def _scrub_job_result(result: dict[str, Any] | None) -> dict[str, Any] | None:
                     e["value"] = v[:40] + "…"
             cleaned.append(e)
         out["elements"] = cleaned
+    # Secret-shaped substrings (API keys, bearer tokens) never land on disk.
+    try:
+        from remedy.core.metabolism.redact import redact_obj
+
+        red = redact_obj(out)
+        if isinstance(red, dict):
+            out = red
+    except Exception:
+        # Fail closed for free-text bodies; keep structural ok/action only
+        for key in ("text", "page_text", "content", "html", "message"):
+            if key in out and isinstance(out.get(key), str):
+                out[key] = "[redacted]"
     return out
 
 

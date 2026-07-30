@@ -2,16 +2,30 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from remedy.core.computer.host_bridge import ComputerHostBridge
+from remedy.core.computer.host_bridge import ComputerHostBridge, _scrub_job_result
 from remedy.core.computer.router import ComputerTarget, resolve_target
 from remedy.core.computer.types import COMPUTER_PLAN_MODE_TOOLS, COMPUTER_TOOL_NAMES
 from remedy.core.plan_store import PLAN_MODE_TOOL_NAMES
 from remedy.interfaces.api import create_app
 from remedy.models import AgentConfig
+
+
+def test_scrub_job_result_redacts_secrets():
+    out = _scrub_job_result(
+        {
+            "ok": True,
+            "text": "page has Bearer sk-abcdefghijklmnopqrstuvwxyz0123 token",
+            "message": "ok",
+        }
+    )
+    assert out is not None
+    assert "sk-abcdefghijklmnopqrstuvwxyz0123" not in json.dumps(out)
+    assert "[redacted]" in (out.get("text") or "")
 
 
 def test_resolve_target_url_prefers_browser():
@@ -36,6 +50,26 @@ def test_normalize_url_rejects_task_text_leak():
     assert normalize_url("gmail") == "https://mail.google.com"
     # first-token recovery from multi-word
     assert normalize_url("gmail sign in please") == "https://mail.google.com"
+    # URL userinfo blocked (credentials never land in rail address bar)
+    assert is_valid_navigate_url("https://user:pass@example.com/") is False
+
+
+def test_computer_audit_redacts_secrets(tmp_path: Path):
+    from remedy.core.computer.audit import audit_path, log_computer_action
+
+    log_computer_action(
+        action="type",
+        target="browser",
+        ok=True,
+        detail={"message": "typed api_key=sk-abcdefghijklmnopqrstuvwxyz0123"},
+        session_id="aud1",
+        home_dir=tmp_path,
+    )
+    path = audit_path(tmp_path)
+    assert path.is_file()
+    body = path.read_text(encoding="utf-8")
+    assert "sk-abcdefghijklmnopqrstuvwxyz0123" not in body
+    assert "[redacted]" in body
 
 
 def test_wants_system_browser_only_when_explicit():

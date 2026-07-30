@@ -50,14 +50,20 @@ _registry_lock = threading.Lock()
 
 
 def _scrub_preview(result: str | None, *, limit: int = 240) -> str:
-    """Redact secrets before partner-state preview hits disk."""
+    """Redact secrets before partner-state preview hits disk.
+
+    Fail closed: if redaction cannot run, drop the body rather than persist raw
+    tool output that may contain secrets.
+    """
     text = (result or "")[: max(limit * 2, 480)]
+    if not text:
+        return ""
     try:
         from remedy.core.metabolism.redact import redact_text
 
         text = redact_text(text)
     except Exception:
-        pass
+        return "[redacted]"
     return text[:limit]
 
 

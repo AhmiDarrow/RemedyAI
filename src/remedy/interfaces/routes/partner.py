@@ -438,11 +438,13 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
         home = None
         if runtime is not None:
             home = getattr(getattr(runtime, "config", None), "home_dir", None)
+        # Always constrain export under home/exports (fail closed path jail)
+        if home is None:
+            home = Path.home() / ".remedy"
         payload = collect_default_payload(home)
         dest = (req.dest or "").strip()
         if not dest:
-            root = Path(home).expanduser() if home else Path.home() / ".remedy"
-            dest_path = root / "exports" / "partner-identity.remedy"
+            dest_path = Path(home).expanduser() / "exports" / "partner-identity.remedy"
         else:
             dest_path = Path(dest).expanduser()
         path = export_identity(

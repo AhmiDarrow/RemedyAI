@@ -509,6 +509,22 @@ def test_skill_genome_atomic_persist(tmp_path: Path):
 
 
 def test_action_ir_strips_url_userinfo():
+    from remedy.core.metabolism.action_ir import ActionIR
+
+    ir = ActionIR(turn_id="t1", session_id="s1")
+    step = ir.add_step(
+        tool="computer_navigate",
+        arguments={"url": "https://user:hunter2@example.com/login?token=abc"},
+        result="ok",
+        ok=True,
+    )
+    blob = json.dumps(step.to_public())
+    assert "hunter2" not in blob
+    assert "token=abc" not in blob
+    assert "example.com" in blob
+
+
+def test_action_ir_strips_url_userinfo():
     ir = start_action_ir(session_id="ir_url", tier=2)
     ir.add_step(
         tool="computer_navigate",
