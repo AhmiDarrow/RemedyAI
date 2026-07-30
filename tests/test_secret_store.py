@@ -96,3 +96,26 @@ def test_clear_provider_secret(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     secret_store.set_provider_secret("groq", "gsk_test", home=tmp_path)
     secret_store.clear_provider_secret("groq", home=tmp_path)
     assert secret_store.get_provider_secret("groq", home=tmp_path) is None
+
+
+def test_clear_all_provider_secrets_invalidates_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Unlink-all must not leave secrets readable from the process cache."""
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    secret_store.set_provider_secret("openai", "sk-must-vanish", home=tmp_path)
+    assert secret_store.load_provider_keys(tmp_path)["openai"] == "sk-must-vanish"
+    secret_store.clear_provider_secret(None, home=tmp_path)
+    assert secret_store.load_provider_keys(tmp_path) == {}
+    assert secret_store.get_provider_secret("openai", home=tmp_path) is None
+
+
+def test_provider_keys_cache_uses_mtime_ns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Rapid rewrite with same second-resolution mtime still reloads."""
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    secret_store.set_provider_secret("a", "v1", home=tmp_path)
+    assert secret_store.get_provider_secret("a", home=tmp_path) == "v1"
+    secret_store.set_provider_secret("a", "v2", home=tmp_path)
+    assert secret_store.get_provider_secret("a", home=tmp_path) == "v2"

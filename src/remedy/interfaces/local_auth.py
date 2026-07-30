@@ -121,12 +121,22 @@ def _persist(token: str, home: Path | str | None) -> None:
         return
     path = token_path(home)
     try:
-        path.write_text(token.strip() + "\n", encoding="utf-8")
+        # Atomic-ish write so a crash cannot leave an empty/half token file.
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        data = (token.strip() + "\n").encode("utf-8")
+        tmp.write_bytes(data)
+        tmp.replace(path)
         from remedy.interfaces.secret_store import _harden_path
 
         _harden_path(path, is_dir=False)
     except OSError as exc:
         logger.warning("Could not persist local API token: %s", exc)
+        try:
+            tmp = path.with_suffix(path.suffix + ".tmp")
+            if tmp.exists():
+                tmp.unlink()
+        except OSError:
+            pass
 
 
 def load_local_api_token(home: Path | str | None = None) -> str:
