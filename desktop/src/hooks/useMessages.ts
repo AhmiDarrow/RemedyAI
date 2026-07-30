@@ -14,6 +14,8 @@ import {
   detachStreamJob,
   getJobPaint,
   getStreamJob,
+  isJobUiCommitted,
+  markJobUiCommitted,
   reattachStreamJob,
   registerStreamJob,
   setJobActiveTools,
@@ -22,6 +24,7 @@ import {
   setJobTaskProgress,
   stopStreamJob,
   touchStreamJob,
+  withStoppedMarker,
 } from '../sessions/streamJobs'
 import type { ChatMessage } from '../types'
 import { toolLabel, type ProcessStep } from '../utils/toolLabels'
@@ -459,25 +462,38 @@ export function useMessages(sessionId: string | null) {
         setStallSeconds(0)
       }
 
-      const finishOk = async () => {
+      const finishOk = async (meta?: { aborted?: boolean }) => {
         if (doneReceived) return
         doneReceived = true
         resetStreamBuffers()
         // Prefer per-job paint (survives detach + concurrent tabs) over hook refs.
         const paint = getJobPaint(targetId)
+        const job = getStreamJob(targetId)
+        const wasAborted = Boolean(
+          meta?.aborted || job?.status === 'aborted',
+        )
+        const alreadyCommitted = isJobUiCommitted(targetId)
         const stepsSnapshot = paint?.processSteps?.length
           ? [...paint.processSteps]
           : [...processStepsRef.current]
-        const assistantText =
+        let assistantText =
           (paint?.partialText && paint.partialText.length
             ? paint.partialText
             : streamAccumRef.current) || ''
+        if (wasAborted && assistantText.trim()) {
+          assistantText = withStoppedMarker(assistantText)
+        }
         const thinkingText =
           (paint?.partialThinking && paint.partialThinking.length
             ? paint.partialThinking
             : thinkingAccumRef.current) || null
         // Optimistic: promote stream into a permanent bubble immediately (no blank gap).
-        if (assistantText.trim() && sessionIdRef.current === targetId) {
+        // Skip when Stop/interrupt already committed this partial (double-bubble guard).
+        if (
+          !alreadyCommitted
+          && assistantText.trim()
+          && sessionIdRef.current === targetId
+        ) {
           const optimistic: ChatMessage = {
             id: crypto.randomUUID(),
             role: 'assistant',
@@ -499,8 +515,9 @@ export function useMessages(sessionId: string | null) {
             reverted: false,
           }
           setMessages((prev) => [...prev, optimistic])
+          if (wasAborted) markJobUiCommitted(targetId)
         }
-        completeStreamJob(targetId, 'done')
+        completeStreamJob(targetId, wasAborted ? 'aborted' : 'done')
         if (isFocusedTurn()) {
           setStreaming(false)
           setStreamStalled(false)
@@ -518,6 +535,15 @@ export function useMessages(sessionId: string | null) {
         }
         // Drop results if the user already switched sessions.
         if (sessionIdRef.current !== targetId) {
+          window.setTimeout(() => {
+            void drainQueue()
+          }, 40)
+          return
+        }
+        // Aborted turns: keep the local Stopped bubble; server often has no final row yet.
+        if (wasAborted) {
+          setProcessSteps([])
+          processStepsRef.current = []
           window.setTimeout(() => {
             void drainQueue()
           }, 40)
@@ -619,8 +645,8 @@ export function useMessages(sessionId: string | null) {
           appendJobToken(targetId, token)
           if (isFocusedTurn()) appendPartialToken(token)
         },
-        () => {
-          void finishOk()
+        (doneMeta) => {
+          void finishOk({ aborted: Boolean(doneMeta?.aborted) })
         },
         (errMsg) => {
           void finishErr(errMsg)
@@ -805,13 +831,46 @@ export function useMessages(sessionId: string | null) {
         if (mode === 'interrupt') {
           // Stop current stream + server turn, then send this first (ahead of after-queue).
           const sidAbort = sessionIdRef.current
+          resetStreamBuffers()
+          // Prefer job paint (background / concurrent) over focused partial state.
+          const paint = sidAbort ? getJobPaint(sidAbort) : null
+          const steps =
+            paint?.processSteps?.length
+              ? paint.processSteps
+              : processStepsRef.current
+          const rawText =
+            (paint?.partialText && paint.partialText.length
+              ? paint.partialText
+              : streamAccumRef.current) || ''
           if (sidAbort) {
-            // Mark job aborted so busy badges clear (mirror stopStreamJob).
             void stopStreamJob(sidAbort).catch(() => {})
           } else {
             streamCtrlRef.current?.abort()
           }
-          resetStreamBuffers()
+          if (rawText.trim() && !isJobUiCommitted(sidAbort || '')) {
+            const assistantMsg: ChatMessage = {
+              id: crypto.randomUUID(),
+              role: 'assistant',
+              content: withStoppedMarker(rawText),
+              thinking: null,
+              tool_calls: steps.map((s) => ({
+                name: s.name,
+                args: s.argsText ? safeParseArgs(s.argsText) : {},
+              })),
+              tool_results: steps.map((s) => ({
+                name: s.name,
+                output: s.resultText || '',
+                error: s.error,
+              })),
+              model: null,
+              agent: null,
+              tokens: null,
+              created_at: new Date().toISOString(),
+              reverted: false,
+            }
+            setMessages((prev) => [...prev, assistantMsg])
+            if (sidAbort) markJobUiCommitted(sidAbort)
+          }
           setStreaming(false)
           setStreamCtrl(null)
           streamCtrlRef.current = null
@@ -820,33 +879,9 @@ export function useMessages(sessionId: string | null) {
           streamingRef.current = false
           sendLockRef.current = false
           setPartialThinking('')
-          setPartialText((pt) => {
-            if (pt.trim()) {
-              const steps = processStepsRef.current
-              const assistantMsg: ChatMessage = {
-                id: crypto.randomUUID(),
-                role: 'assistant',
-                content: pt,
-                thinking: null,
-                tool_calls: steps.map((s) => ({
-                  name: s.name,
-                  args: s.argsText ? safeParseArgs(s.argsText) : {},
-                })),
-                tool_results: steps.map((s) => ({
-                  name: s.name,
-                  output: s.resultText || '',
-                  error: s.error,
-                })),
-                model: null,
-                agent: null,
-                tokens: null,
-                created_at: new Date().toISOString(),
-                reverted: false,
-              }
-              setMessages((prev) => [...prev, assistantMsg])
-            }
-            return ''
-          })
+          setPartialText('')
+          streamAccumRef.current = ''
+          thinkingAccumRef.current = ''
           setProcessSteps([])
           processStepsRef.current = []
           // Put interrupt item at front
@@ -893,6 +928,18 @@ export function useMessages(sessionId: string | null) {
 
   const stop = useCallback(() => {
     const sid = sessionIdRef.current
+    // Flush RAF buffers so paint / accum see the latest tokens before commit.
+    resetStreamBuffers()
+    // Prefer job paint (survives detach) over focused partialText alone.
+    const paint = sid ? getJobPaint(sid) : null
+    const steps =
+      paint?.processSteps?.length
+        ? paint.processSteps
+        : processStepsRef.current
+    const rawText =
+      (paint?.partialText && paint.partialText.length
+        ? paint.partialText
+        : streamAccumRef.current) || ''
     // Focused session only — background jobs keep running until their own stop.
     if (sid) {
       void stopStreamJob(sid)
@@ -900,7 +947,30 @@ export function useMessages(sessionId: string | null) {
       streamCtrlRef.current?.abort()
       streamCtrl?.abort()
     }
-    resetStreamBuffers()
+    if (rawText.trim() && !(sid && isJobUiCommitted(sid))) {
+      const assistantMsg: ChatMessage = {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: withStoppedMarker(rawText),
+        thinking: null,
+        tool_calls: steps.map((s) => ({
+          name: s.name,
+          args: s.argsText ? safeParseArgs(s.argsText) : {},
+        })),
+        tool_results: steps.map((s) => ({
+          name: s.name,
+          output: s.resultText || '',
+          error: s.error,
+        })),
+        model: null,
+        agent: null,
+        tokens: null,
+        created_at: new Date().toISOString(),
+        reverted: false,
+      }
+      setMessages((prev) => [...prev, assistantMsg])
+      if (sid) markJobUiCommitted(sid)
+    }
     setStreaming(false)
     setStreamStalled(false)
     setStallSeconds(0)
@@ -911,33 +981,9 @@ export function useMessages(sessionId: string | null) {
     streamingRef.current = false
     sendLockRef.current = false
     setPartialThinking('')
-    setPartialText((text) => {
-      if (text.trim()) {
-        const steps = processStepsRef.current
-        const assistantMsg: ChatMessage = {
-          id: crypto.randomUUID(),
-          role: 'assistant',
-          content: text,
-          thinking: null,
-          tool_calls: steps.map((s) => ({
-            name: s.name,
-            args: s.argsText ? safeParseArgs(s.argsText) : {},
-          })),
-          tool_results: steps.map((s) => ({
-            name: s.name,
-            output: s.resultText || '',
-            error: s.error,
-          })),
-          model: null,
-          agent: null,
-          tokens: null,
-          created_at: new Date().toISOString(),
-          reverted: false,
-        }
-        setMessages((prev) => [...prev, assistantMsg])
-      }
-      return ''
-    })
+    setPartialText('')
+    streamAccumRef.current = ''
+    thinkingAccumRef.current = ''
     setProcessSteps([])
     processStepsRef.current = []
     // Drain any prompts queued "after" the stopped turn.

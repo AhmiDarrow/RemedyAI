@@ -44,6 +44,11 @@ export type StreamJob = {
   detached: boolean
   /** Accumulated stream paint (tokens/tools) — always updated, even when detached. */
   paint: StreamJobPaint
+  /**
+   * Focused UI already promoted partial text into a chat bubble (Stop / interrupt).
+   * finishOk must not double-commit the same abort.
+   */
+  uiCommitted?: boolean
 }
 
 export function emptyStreamPaint(): StreamJobPaint {
@@ -203,6 +208,28 @@ export function getJobPaint(sessionId: string): StreamJobPaint | null {
     taskProgress: p.taskProgress,
     runUsage: p.runUsage ? { ...p.runUsage } : null,
   }
+}
+
+/** Mark that the UI already committed this turn's partial (Stop / interrupt). */
+export function markJobUiCommitted(sessionId: string): void {
+  const j = jobs.get(sessionId)
+  if (!j) return
+  j.uiCommitted = true
+  emit({ type: 'update', job: { ...j } })
+}
+
+export function isJobUiCommitted(sessionId: string): boolean {
+  return Boolean(jobs.get(sessionId)?.uiCommitted)
+}
+
+/** Suffix for aborted partials — visible in chat that generation was stopped. */
+export const STOPPED_MARKER = '_[Stopped]_'
+
+export function withStoppedMarker(text: string): string {
+  const t = (text || '').trimEnd()
+  if (!t) return STOPPED_MARKER
+  if (t.includes(STOPPED_MARKER)) return t
+  return `${t}\n\n${STOPPED_MARKER}`
 }
 
 /** Stop painting this job as the focused stream; leave server turn running. */

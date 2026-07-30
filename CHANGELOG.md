@@ -6,6 +6,10 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ### Gauntlet: continuous security + perf loop (feature/computer-use)
 
+- **Desktop stream abort UX:** cooperative `event:aborted` completes jobs as `aborted` (not done); Stop/interrupt commit job paint with `_[Stopped]_`; `uiCommitted` prevents double-bubble race; skip listMessages wipe after abort
+- **Session continuity rebound:** tab switch clears turn scratch (`_turn_tool_steps` / stream accum / mission nudge / evidence inject); session reset drops continuity brief/work-roots cache
+- **Assistant privacy re-accept:** `public_status` exposes `consent_ok` / `needs_reaccept` / `current_consent_version`; Settings PA banner + Review & accept when scopes/terms bump
+- **Free demo model clamp:** `normalize_llm_settings` / `validate_provider_model` for `demo` snap junk/image/foreign ids to curated allowlist (not flexible like Ollama)
 - **L0 skill list names:** `list my skills` uses `manifest.name` (was UUID skill ids); hides auto-learned probation like CLI; sorted human list
 - **Desktop stream paint per-job:** tokens/tools accumulate on `streamJobs` paint even when detached; reattach restores partial text + process trail (multi-tab concurrent turns)
 - **Partner status session scope:** `GET /api/partner/status?session_id=` scopes lean metabolism + quality to the focused chat tab; StatusBar passes active session
