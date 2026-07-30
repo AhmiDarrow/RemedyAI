@@ -163,6 +163,7 @@ _TOOL_CHAIN_SEGMENTS = frozenset(
         "memory_search",
         "memory_save",
         "web_fetch",
+        "web_search",
         "vision_decode",
         "computer_navigate",
         "computer_act",

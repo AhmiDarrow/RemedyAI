@@ -156,59 +156,84 @@ def register_goal_and_plan_tools(runtime: Any) -> None:
                 home = load_config().get("home_dir")
         return PlanStore(home or Path.home() / ".remedy")
 
+    def _parse_plan_list_arg(value: Any, *, as_strings: bool = False) -> list[Any]:
+        """Accept native JSON array (tool_calls) or a JSON/bullet string.
+
+        Models often pass ``steps`` / ``risks`` as real arrays — never call
+        ``.strip()`` on those (AttributeError). Mirrors spread_run task parsing.
+        """
+        if value is None or value == "" or value == []:
+            return []
+        if isinstance(value, list):
+            items = value
+        elif isinstance(value, dict):
+            items = [value]
+        elif isinstance(value, str):
+            raw = value.strip()
+            if not raw:
+                return []
+            items = []
+            if raw.startswith("[") or raw.startswith("{"):
+                with suppress(json.JSONDecodeError):
+                    parsed = json.loads(raw)
+                    if isinstance(parsed, list):
+                        items = parsed
+                    elif isinstance(parsed, dict):
+                        items = [parsed]
+            if not items:
+                if as_strings:
+                    items = [
+                        ln.strip("-*• ").strip()
+                        for ln in raw.splitlines()
+                        if ln.strip()
+                    ]
+                else:
+                    from remedy.core.plan_store import parse_steps_from_text
+
+                    items = parse_steps_from_text(raw) or [
+                        ln.strip("-*• ").strip()
+                        for ln in raw.splitlines()
+                        if ln.strip()
+                    ]
+        else:
+            items = [value]
+        if as_strings:
+            out: list[Any] = []
+            for x in items:
+                if isinstance(x, dict):
+                    # Risk object → title/detail string
+                    s = str(x.get("title") or x.get("risk") or x.get("text") or x).strip()
+                else:
+                    s = str(x).strip()
+                if s:
+                    out.append(s)
+            return out
+        return list(items)
+
     async def plan_save(
         title: str = "",
         goal: str = "",
-        steps: str = "",
-        risks: str = "",
+        steps: Any = "",
+        risks: Any = "",
         status: str = "draft",
     ) -> str:
-        """Save a structured plan. steps/risks: JSON array or newline/bullet list."""
+        """Save a structured plan. steps/risks: native array, JSON array, or bullets."""
         store = _plan_store()
-        t = (title or goal or "Session plan").strip()
+        t = str(title or goal or "Session plan").strip()
         if not t:
             return "Provide a plan title."
 
-        step_list: list[Any] = []
-        raw_steps = (steps or "").strip()
-        if raw_steps:
-            if raw_steps.startswith("["):
-                with suppress(json.JSONDecodeError):
-                    parsed = json.loads(raw_steps)
-                    if isinstance(parsed, list):
-                        step_list = parsed
-            if not step_list:
-                from remedy.core.plan_store import parse_steps_from_text
-
-                step_list = parse_steps_from_text(raw_steps) or [
-                    ln.strip("-*• ").strip()
-                    for ln in raw_steps.splitlines()
-                    if ln.strip()
-                ]
-
-        risk_list: list[str] = []
-        raw_risks = (risks or "").strip()
-        if raw_risks:
-            if raw_risks.startswith("["):
-                with suppress(json.JSONDecodeError):
-                    parsed = json.loads(raw_risks)
-                    if isinstance(parsed, list):
-                        risk_list = [str(x) for x in parsed]
-            if not risk_list:
-                risk_list = [
-                    ln.strip("-*• ").strip()
-                    for ln in raw_risks.splitlines()
-                    if ln.strip()
-                ]
+        step_list = _parse_plan_list_arg(steps, as_strings=False)
+        risk_list = [str(x) for x in _parse_plan_list_arg(risks, as_strings=True)]
 
         sid = getattr(runtime, "_session_id", None)
         plan = store.create(
             t,
-            goal=goal or t,
+            goal=str(goal or t),
             steps=step_list,
             risks=risk_list,
             session_id=str(sid) if sid else None,
-            status=(status or "draft").strip().lower(),
+            status=str(status or "draft").strip().lower(),
         )
         # Surface in session brief
         with suppress(Exception):
@@ -223,13 +248,28 @@ def register_goal_and_plan_tools(runtime: Any) -> None:
             + plan.summary_markdown()
         )
 
+    def _plan_owned_by_session(plan: Any, sid: str | None) -> bool:
+        """Refuse cross-session plan_id reads when both sides are tagged."""
+        if not sid:
+            return True
+        psid = str(getattr(plan, "session_id", None) or "")
+        if not psid:
+            # Untagged legacy plans: allow only when no stronger isolation available
+            return True
+        return psid == str(sid)
+
     async def plan_show(plan_id: str = "") -> str:
         store = _plan_store()
         plan = None
+        sid = getattr(runtime, "_session_id", None)
         if (plan_id or "").strip():
             plan = store.get(plan_id.strip())
+            if plan is not None and not _plan_owned_by_session(plan, str(sid) if sid else None):
+                return (
+                    f"Plan {plan_id.strip()} belongs to another session "
+                    "(cross-session plan read blocked)."
+                )
         if plan is None:
-            sid = getattr(runtime, "_session_id", None)
             # Session-scoped only — do not surface another chat's plan.
             plan = store.latest_for_session(str(sid) if sid else None)
         if plan is None:
@@ -263,6 +303,11 @@ def register_goal_and_plan_tools(runtime: Any) -> None:
         sid = getattr(runtime, "_session_id", None)
         pid = (plan_id or "").strip()
         plan = store.get(pid) if pid else None
+        if plan is not None and not _plan_owned_by_session(plan, str(sid) if sid else None):
+            return (
+                f"Plan {pid} belongs to another session "
+                "(cross-session plan update blocked)."
+            )
         if plan is None:
             plan = store.latest_for_session(
                 str(sid) if sid else None,
@@ -395,12 +440,55 @@ def register_goal_and_plan_tools(runtime: Any) -> None:
                 "title": {"type": "string"},
                 "goal": {"type": "string"},
                 "steps": {
-                    "type": "string",
-                    "description": "JSON array of step titles/objects, or a bullet/numbered list",
+                    "description": (
+                        "Step list: native array of titles/objects, a JSON array "
+                        "string, or a bullet/numbered list"
+                    ),
+                    "anyOf": [
+                        {
+                            "type": "array",
+                            "items": {
+                                "anyOf": [
+                                    {"type": "string"},
+                                    {
+                                        "type": "object",
+                                        "properties": {
+                                            "id": {"type": "string"},
+                                            "title": {"type": "string"},
+                                            "detail": {"type": "string"},
+                                            "tools": {
+                                                "type": "array",
+                                                "items": {"type": "string"},
+                                            },
+                                            "risks": {
+                                                "type": "array",
+                                                "items": {"type": "string"},
+                                            },
+                                        },
+                                    },
+                                ]
+                            },
+                        },
+                        {"type": "string"},
+                    ],
                 },
                 "risks": {
-                    "type": "string",
-                    "description": "JSON array or bullet list of risks",
+                    "description": (
+                        "Risk list: native array of strings, JSON array string, "
+                        "or bullet list"
+                    ),
+                    "anyOf": [
+                        {
+                            "type": "array",
+                            "items": {
+                                "anyOf": [
+                                    {"type": "string"},
+                                    {"type": "object"},
+                                ]
+                            },
+                        },
+                        {"type": "string"},
+                    ],
                 },
                 "status": {
                     "type": "string",
