@@ -98,6 +98,20 @@ def test_rearm_restores_run_until_done_after_l1_strip():
     assert pure_chat_wrap is False
 
 
+def test_rearm_coding_promises_match_review_class():
+    """implement/debug/fix short stubs re-arm like review (gauntlet agency)."""
+    from remedy.core.react_policy import agency_tool_promise_claim
+
+    for stub in (
+        "Let me review the project",
+        "I'll implement the handler.",
+        "I'll debug the crash.",
+        "Let me fix that.",
+        "I will run the tests.",
+    ):
+        assert agency_tool_promise_claim(stub) is True, stub
+
+
 def test_fingerprint_loop_patience_for_long_tasks():
     """run_until_done / unfinished work get more loop recovery before force-answer."""
     run_until_done = True

@@ -86,10 +86,31 @@ def test_agency_tool_promise_claim_hard_and_soft() -> None:
     assert agency_tool_promise_claim("Let me fix that.") is True
     assert agency_tool_promise_claim("I will write the tests next.") is True
     assert agency_tool_promise_claim("I'll start coding the solution.") is True
+    # implement / debug / fix — same re-arm class as review
+    for stub in (
+        "I'll implement the handler.",
+        "Let me implement that next.",
+        "I'll debug the crash.",
+        "Let me debug this.",
+        "I will debug the issue.",
+        "I'll fix the failing test.",
+        "Let me fix and re-run.",
+        "I'll refactor the helpers.",
+        "Let me refactor that module.",
+        "I'll test the change.",
+        "I will run the tests.",
+        "I'll run the tests next.",
+        "Debugging now.",
+        "Fixing this now.",
+    ):
+        assert agency_tool_promise_claim(stub) is True, stub
     # Long finished write-up with a buried soft phrase stays final
     long_impl = ("Here is the completed design and analysis.\n" * 40) + "I will implement"
     assert len(long_impl) >= 480
     assert agency_tool_promise_claim(long_impl) is False
+    long_debug = ("Full postmortem and root-cause write-up.\n" * 40) + "I'll debug"
+    assert len(long_debug) >= 480
+    assert agency_tool_promise_claim(long_debug) is False
     # Nudge message shape for loop injection
     nudge = agency_rearm_nudge_message()
     assert nudge["role"] == "user"
@@ -226,6 +247,11 @@ def test_history_suggests_open_work_keeps_agency() -> None:
         "Loading SKILL.md for change-safety…"
     ) is True
     assert looks_like_false_progress("I will use skill_activate now") is True
+    # Coding narration without tool_calls (implement/debug/fix)
+    assert looks_like_false_progress("I'll implement the fix now.") is True
+    assert looks_like_false_progress("Let me debug the crash.") is True
+    assert looks_like_false_progress("I'll fix that next.") is True
+    assert looks_like_false_progress("I am refactoring the module.") is True
 
 
 def test_pseudo_tool_parse_and_log(caplog) -> None:
