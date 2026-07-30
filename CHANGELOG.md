@@ -4,28 +4,29 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
-### Feat: Partner Metabolism OS (speed · accuracy · trust)
+### Feat: Partner Metabolism OS (speed · accuracy · trust) — full program
 
 Local silent metabolism so any provider model acts like a durable partner —
 **one voice**, no multi-agent theater, no Remedy cloud required.
 
 | Capability | What it does |
 |------------|----------------|
-| **Turn Cost Compiler (L0–L3)** | Instant local answers for model/skills/whoami/version; lean chat vs agency vs deep/work-alone |
-| **Evidence Ledger + Decision currency** | Tool results become EU (evidence units); waste batches tracked; delta pointers instead of re-paste |
-| **Machine Map** | Session PC world model (browser URL, work roots, file touches) |
-| **Shadow rehearsal** | High-blast tools dry-run before commit (layers on write jail; never replaces it) |
-| **Action IR** | Redacted replayable agency traces under `~/.remedy/action_ir/` |
-| **Spread muscle** | Force-spread on L3 / partitionable work (still one merged answer) |
-| **Time Crystal** | Multi-horizon memory (turn → session → project week → life); secrets never promote |
-| **Skill genome** | Local phenotype scores (success/fail/protect multi-win) |
-| **Quality Governor** | Observe→decide→act silent remedies (stuck, waste, re-explain) |
-| **Critical verify** | Heuristic false-green / secret-risk checks at judgment points |
-| **Portable identity** | Encrypted export/import (`POST /api/partner/identity/*`) — **never** includes API keys, OAuth, IR, or raw evidence |
+| **Turn Cost Compiler (L0–L3)** | L0 local answers; L1 lean (tools off); L2 agency; L3 deep/work-alone + force-spread |
+| **Evidence Ledger + Decision currency** | EU/DU + waste; mid-turn delta inject; harness + governor consume |
+| **Machine Map** | Browser URL/settle, windows, file touches from tools |
+| **Shadow rehearsal** | High-blast dry-run before commit (on top of write jail) |
+| **Action IR** | Redacted L2/L3 traces under `~/.remedy/action_ir/` |
+| **Spread muscle** | Force-spread policy; `spread_run` merge → ledger |
+| **Time Crystal** | Multi-horizon; `/pin` → life; secrets never promote |
+| **Skill genome** | Ranks on skill_activate/run; protected multi-win |
+| **CUA macros** | Successful computer chains → hints (no typed secrets) |
+| **Quality Governor** | Stuck/waste/re-explain remedies; compress_earlier lowers harness % |
+| **Critical verify** | False-green / secret-risk; next-turn silent remedy |
+| **Portable identity** | Encrypted export/import merges memory+crystal+projects — never keys/OAuth/IR |
 
-Operator surfaces: `/harness` metabolism line · `GET /api/partner/metabolism` · partner status `metabolism` field.
+Operator: `/harness` · `GET /api/partner/metabolism` · F1 **19-metabolism**.
 
-Security: redaction at ledger/IR/export; shadow fail-closed for destructive shell & out-of-root writes; L0/L1 never shadow/verify on hot path.
+Security: redaction at ledger/IR/export; shadow fail-closed; L0/L1 skip shadow/verify on hot path.
 
 ### Fix: only one Remedy at a time
 

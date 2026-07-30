@@ -51,20 +51,44 @@ def schedule_post_turn_prep(
         )
         # Metabolism: finish IR, promote Time Crystal, optional critical verify
         with suppress(Exception):
+            from remedy.core.metabolism.cua_macros import get_cua_macros
+            from remedy.core.metabolism.skill_genome import get_skill_genome
             from remedy.core.metabolism.turn import end_turn_metabolism
+            from remedy.core.turn_context import current_turn_tool_steps
 
             home = getattr(getattr(runtime, "config", None), "home_dir", None)
-            end_turn_metabolism(
+            recent_tools: list[str] = []
+            with suppress(Exception):
+                steps = current_turn_tool_steps(runtime)
+                if isinstance(steps, list):
+                    for s in steps[-12:]:
+                        if isinstance(s, dict):
+                            recent_tools.append(
+                                f"{s.get('tool')}: {s.get('result') or s.get('error') or ''}"[
+                                    :500
+                                ]
+                            )
+            asst = str(getattr(runtime, "_last_assistant_text", "") or "")
+            end = end_turn_metabolism(
                 session_id=sid,
                 action_ir=getattr(runtime, "_action_ir", None),
                 status="done",
-                assistant_text="",
+                assistant_text=asst,
+                recent_tool_texts=recent_tools,
                 allow_verify=bool(
                     getattr(runtime, "_metabolism_allow_verify", False)
+                    or int(getattr(runtime, "_turn_tier", 1) or 1) >= 2
                 ),
                 home=home,
             )
+            # If verify failed, stash silent remedy for next turn inject
+            if end.get("verify_remedy"):
+                runtime._pending_verify_remedy = end["verify_remedy"]
+            with suppress(Exception):
+                get_cua_macros().persist(home)
+                get_skill_genome().persist(home)
             runtime._action_ir = None
+            runtime._last_assistant_text = ""
 
 
 def distill_user_message_now(

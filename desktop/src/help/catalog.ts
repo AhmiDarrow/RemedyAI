@@ -54,6 +54,23 @@ const META: HelpArticleMeta[] = [
       'file_edit, repo_search, missions, silent jobs — multi-hour coding with one partner.',
   },
   {
+    id: '19-metabolism',
+    title: 'Partner Metabolism (Advanced)',
+    category: 'How it works',
+    order: 7.6,
+    tags: [
+      'metabolism',
+      'evidence',
+      'tier',
+      'governor',
+      'time crystal',
+      'shadow',
+      'identity export',
+    ],
+    summary:
+      'Silent partner OS: L0–L3 tiers, evidence ledger, shadow, IR, governor, portable identity.',
+  },
+  {
     id: 'computer-use-soak',
     title: 'Computer-use soak notes',
     category: 'Reference',

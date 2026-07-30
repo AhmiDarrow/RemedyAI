@@ -360,7 +360,13 @@ async def call_llm_stream(runtime, message: str,
             runtime._metabolism_allow_verify = bool(
                 meta.get("allow_critical_verify")
             )
-            injects = meta.get("injects") or []
+            injects = list(meta.get("injects") or [])
+            # Pending verify remedy from prior turn (one-shot)
+            with suppress(Exception):
+                pending = getattr(runtime, "_pending_verify_remedy", None)
+                if pending:
+                    injects.append(str(pending))
+                    runtime._pending_verify_remedy = None
             if injects:
                 messages.insert(
                     -1,
@@ -454,6 +460,22 @@ async def call_llm_stream(runtime, message: str,
                 tools = all_tools
         elif pure_action_kick or clear_goals_only or open_only_browse:
             run_until_done = bool(open_only_browse or clear_goals_only)
+
+        # L1 lean: bias tools off (chat can still answer; agency was L2+)
+        if (
+            int(getattr(runtime, "_turn_tier", 1) or 1) == 1
+            and not plan_mode
+            and not pure_action_kick
+            and not browse_pre_url
+            and not page_interaction
+            and not clear_goals_only
+        ):
+            tools = None  # type: ignore[assignment]
+            run_until_done = False
+            # Keep all_tools for recovery if model later needs agency
+
+        # Accumulated assistant text for critical verify at end
+        assistant_text_acc: list[str] = []
 
         # L0 system fast path: model/skills/whoami/version — no frontier tokens.
         if (
@@ -890,6 +912,22 @@ async def call_llm_stream(runtime, message: str,
                     is_final_step or not tools or force_answer_sticky
                 )
                 step_tools = None if force_answer else tools
+
+                # Metabolism: mark model boundary + inject evidence delta before call
+                with suppress(Exception):
+                    from remedy.core.metabolism.turn import mark_model_call
+                    from remedy.core.metabolism.evidence import get_evidence_ledger
+
+                    sid_mm = str(
+                        getattr(runtime, "_session_id", "") or session_id or ""
+                    )
+                    mark_model_call(sid_mm)
+                    if int(getattr(runtime, "_turn_tier", 1) or 1) >= 2:
+                        eblock = get_evidence_ledger(sid_mm).pointer_block(limit=8)
+                        if eblock and tool_batches_this_turn > 0:
+                            messages.append(
+                                {"role": "system", "content": eblock}
+                            )
 
                 if (
                     force_answer
@@ -1367,6 +1405,9 @@ async def call_llm_stream(runtime, message: str,
 
                 # Finalize text. Live-stream already yielded tokens when tools off.
                 text_out = finalize_round_text(round_state, tool_calls_list)
+                if text_out and not tool_calls_list:
+                    with suppress(Exception):
+                        assistant_text_acc.append(str(text_out)[:8000])
                 # Never treat DSML / text-tool dumps as user-visible answer text.
                 if text_out and _looks_like_pseudo_tools(text_out):
                     recovered_preview = _parse_pseudo_tool_calls(text_out)
@@ -1751,6 +1792,24 @@ async def call_llm_stream(runtime, message: str,
                 tool_batches_in_epoch += 1
                 if is_productive_tool_batch(batch_tool_msgs):
                     productive_in_epoch += 1
+                # CUA macro extraction from successful computer chains
+                with suppress(Exception):
+                    from remedy.core.metabolism.cua_macros import get_cua_macros
+                    from remedy.core.turn_context import current_turn_tool_steps
+
+                    steps_tc = current_turn_tool_steps(runtime)
+                    if isinstance(steps_tc, list) and steps_tc:
+                        get_cua_macros().observe_chain(
+                            [
+                                {
+                                    "tool": s.get("tool"),
+                                    "args": s.get("args") or {},
+                                }
+                                for s in steps_tc
+                                if isinstance(s, dict)
+                            ],
+                            success=True,
+                        )
 
                 # Speed: denser parallel batches without reducing agency.
                 if (
@@ -1937,7 +1996,13 @@ async def call_llm_stream(runtime, message: str,
         # Compound learning + speculative warm for next turn
         from remedy.core.agent_post_turn import schedule_post_turn_prep
 
-        schedule_post_turn_prep(runtime, message=message or "")
+        with suppress(Exception):
+            runtime._last_assistant_text = "".join(assistant_text_acc)[-12000:]
+        schedule_post_turn_prep(
+            runtime,
+            message=message or "",
+            session_id=session_id,
+        )
     except Exception as e:
         logger.exception("LLM stream failed")
         # Never leave the user with only a stack-looking error — give a path forward.

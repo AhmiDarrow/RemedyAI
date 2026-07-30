@@ -49,6 +49,19 @@ class PlanStepStatusRequest(BaseModel):
     )
 
 
+class IdentityExportRequest(BaseModel):
+    passphrase: str = Field(..., min_length=8, description="User passphrase (never stored)")
+    dest: str = Field(
+        default="",
+        description="Optional path; default ~/.remedy/exports/partner-identity.remedy",
+    )
+
+
+class IdentityImportRequest(BaseModel):
+    passphrase: str = Field(..., min_length=8)
+    source: str = Field(..., description="Path to .remedy identity package")
+
+
 def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=None) -> None:
     _ = gateway
 
@@ -389,17 +402,6 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
             "metabolism": metabolism,
         }
 
-    class IdentityExportRequest(BaseModel):
-        passphrase: str = Field(..., min_length=8, description="User passphrase (never stored)")
-        dest: str = Field(
-            default="",
-            description="Optional path; default ~/.remedy/exports/partner-identity.remedy",
-        )
-
-    class IdentityImportRequest(BaseModel):
-        passphrase: str = Field(..., min_length=8)
-        source: str = Field(..., description="Path to .remedy identity package")
-
     @app.get("/api/partner/metabolism")
     async def partner_metabolism(session_id: str | None = None):
         """Advanced: silent metabolism snapshot (tier, EU/DU, governor, map)."""
@@ -460,8 +462,9 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
             payload = import_identity(req.source, passphrase=req.passphrase)
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
-        # Merge Time Crystal life facts only (safe, no credentials)
+        # Merge Time Crystal + Partner Memory facts (safe, no credentials)
         merged = 0
+        mem_merged = 0
         tc = get_time_crystal("_import")
         for fact in payload.get("time_crystal") or []:
             if isinstance(fact, dict) and fact.get("text"):
@@ -471,12 +474,71 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
                     source="import",
                 ):
                     merged += 1
+        # Partner memory rows → life crystal + optional profile upsert
+        for row in payload.get("partner_memory") or []:
+            if not isinstance(row, dict):
+                continue
+            text = str(row.get("text") or row.get("fact") or row.get("content") or "").strip()
+            if not text or len(text) < 4:
+                continue
+            if tc.admit(text[:400], horizon="life", source="import"):
+                mem_merged += 1
+            if memory is not None:
+                try:
+                    from remedy.memory.partner_memory import looks_like_secret, upsert_profile_fact
+
+                    if looks_like_secret(text):
+                        continue
+                    profile = await memory.get_or_create_profile()
+                    upsert_profile_fact(
+                        profile,
+                        text[:400],
+                        category="general",
+                        confidence=0.8,
+                        source="identity_import",
+                        force=False,
+                        pinned=bool(row.get("pinned")),
+                    )
+                    await memory.save_user_profile(profile)
+                except Exception:
+                    pass
+        # Project learning profiles (stats only)
+        proj_merged = 0
+        try:
+            from remedy.core.project_learning import load_all, save_all
+
+            data = load_all()
+            projects = data.setdefault("projects", {})
+            for row in payload.get("project_profiles") or []:
+                if not isinstance(row, dict):
+                    continue
+                pid = str(row.get("id") or "")[:32]
+                if not pid:
+                    continue
+                cur = projects.get(pid) if isinstance(projects.get(pid), dict) else {}
+                projects[pid] = {
+                    **(cur or {}),
+                    "id": pid,
+                    "path": str(row.get("path") or cur.get("path") or "")[:400],
+                    "sessions": max(int(cur.get("sessions") or 0), int(row.get("sessions") or 0)),
+                    "turns": max(int(cur.get("turns") or 0), int(row.get("turns") or 0)),
+                }
+                proj_merged += 1
+            if proj_merged:
+                save_all(data)
+        except Exception:
+            proj_merged = 0
         return {
             "ok": True,
             "display_name": payload.get("display_name") or "",
             "partner_memory_count": len(payload.get("partner_memory") or []),
+            "partner_memory_merged": mem_merged,
             "project_profiles_count": len(payload.get("project_profiles") or []),
+            "project_profiles_merged": proj_merged,
             "time_crystal_merged": merged,
             "excludes": payload.get("excludes") or [],
-            "hint": "Crystal life facts merged into process. Review /whoami; secrets were never in the package.",
+            "hint": (
+                "Partner facts + crystal + project stats merged locally. "
+                "Review /whoami. Secrets were never in the package."
+            ),
         }
