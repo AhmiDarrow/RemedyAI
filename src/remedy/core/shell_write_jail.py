@@ -302,6 +302,15 @@ def check_shell_write_jail(
             "literal path under the focus folder."
         )
 
+    # Mutation with zero extractable path tokens → fail closed (cannot prove in-root)
+    if not offenders and not candidates:
+        roots_s = ", ".join(str(r) for r in _norm_roots(write_roots)[:4])
+        return (
+            "shell write jail: mutation command has no proven path under write "
+            f"roots [{roots_s}]. Prefer file_write/file_edit with absolute paths "
+            "inside the focus folder."
+        )
+
     if not offenders:
         return None
 

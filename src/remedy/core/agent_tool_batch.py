@@ -365,8 +365,7 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
                     session_id=sid,
                 )
             )
-            # Speculative prep while more tools / model continue
-            schedule_mid_turn_warm(runtime)
+            # schedule_mid_turn_warm: once per wave (below), not per tool
         return content_str
 
 
@@ -467,6 +466,11 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
                 percent=(100.0 if done else 100.0 * completed_jobs / total_jobs),
                 force_percent=done,
             ), {}
+        # Speculative warm once per wave (not per tool)
+        with suppress(Exception):
+            from remedy.core.agent_post_turn import schedule_mid_turn_warm
+
+            schedule_mid_turn_warm(runtime)
 
     # Always emit one tool result per original tool_call id (API contract).
     for tc in pending:
