@@ -94,8 +94,13 @@ def plan_spread(
     plan_mode: bool = False,
     use_local: bool = True,
     max_tasks: int = 6,
+    force: bool = False,
 ) -> SpreadPlan:
-    """Heuristic plan; optionally refine with local VLM if server already up."""
+    """Heuristic plan; optionally refine with local VLM if server already up.
+
+    When *force* is True (L3 / governor), lower the score bar so partitionable
+    work defaults to silent parallel spread — still one voice at merge.
+    """
     if inside_worker:
         return SpreadPlan(spread=False, reason="inside_worker", score=0)
     if plan_mode:
@@ -143,8 +148,12 @@ def plan_spread(
     if intent == "autonomous":
         score += 1
 
-    # Need at least 2 signal points to spread
-    if score < 2:
+    # Need at least 2 signal points to spread (1 when force / L3 muscle)
+    min_score = 1 if force else 2
+    if force and score < min_score and intent in ("tool", "autonomous", "plan"):
+        score = max(score, 2)
+        signals["force_spread"] = True
+    if score < min_score:
         return SpreadPlan(
             spread=False,
             reason="score_low",

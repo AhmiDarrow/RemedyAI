@@ -353,6 +353,24 @@ async def handle_slash_command(
                     )
                 if q.get("avg_compress_quality") is not None:
                     quality_line += f"\nAvg compress quality: {q.get('avg_compress_quality')}"
+                meta = q.get("metabolism") or {}
+                if meta:
+                    quality_line += (
+                        f"\n\n**Metabolism** · tier L{meta.get('last_tier', '?')} · "
+                        f"EU {meta.get('evidence_units', 0)} · DU {meta.get('decision_units', 0)} · "
+                        f"waste_tok {meta.get('waste_tokens', 0)} · "
+                        f"spread×{meta.get('force_spread_count', 0)} · "
+                        f"shadow {meta.get('shadow_catch_count', 0)} · "
+                        f"verify {meta.get('verify_catch_count', 0)} · "
+                        f"IR steps {meta.get('ir_step_count', 0)}"
+                    )
+                with contextlib.suppress(Exception):
+                    from remedy.core.metabolism.turn import metabolism_public_snapshot
+
+                    msnap = metabolism_public_snapshot(str(sid or ""))
+                    gov = (msnap.get("governor") or {}).get("last_actions") or []
+                    if gov:
+                        quality_line += f"\nGovernor last: {', '.join(gov[:8])}"
             except Exception:
                 pass
             return {
