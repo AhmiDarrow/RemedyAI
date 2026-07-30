@@ -168,6 +168,37 @@ def test_open_url_refuses_non_http_schemes():
             win.open_url(bad)
 
 
+def test_open_app_refuses_protocol_unc_and_metachar():
+    """computer_app must not launch URLs, UNC shares, or cmd-metachar payloads."""
+    import pytest
+
+    from remedy.core.computer import desktop_win as win
+    from remedy.core.computer.router import looks_like_url
+
+    for bad in (
+        "file:///C:/Windows/System32/cmd.exe",
+        "https://evil.example/payload",
+        "http://127.0.0.1:9/",
+        "javascript:alert(1)",
+        "ms-msdt:something",
+        "search-ms:query=x",
+        "ms-settings:privacy",  # free-form protocol (alias 'settings' only)
+        "\\\\evil\\share\\payload.exe",
+        "//evil/share/payload.exe",
+        "notepad & calc",
+        "calc|whoami",
+        "app%PATH%",
+        "",
+    ):
+        with pytest.raises(ValueError):
+            win.open_app(bad)
+
+    # file:/javascript: must not be treated as browser navigate URLs
+    assert looks_like_url("file:///C:/secret") is False
+    assert looks_like_url("javascript:alert(1)") is False
+    assert looks_like_url("https://example.com") is True
+
+
 def test_open_url_refuses_userinfo_credentials():
     """https://user:pass@host must not open (credentials in address bar / OS)."""
     import pytest

@@ -80,8 +80,11 @@ def looks_like_url(text: str | None) -> bool:
         return False
     if " " in t or "\n" in t or "\t" in t:
         return False
-    if t.startswith(("http://", "https://", "about:", "file:")):
+    # about: for in-rail blanks; never treat file:/javascript: as navigate URLs
+    if t.startswith(("http://", "https://", "about:")):
         return True
+    if t.startswith(("file:", "javascript:", "data:", "vbscript:")):
+        return False
     return bool(_URL_RE.fullmatch(t) or re.match(
         r"^(?:www\.)?[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?(?:\.[a-zA-Z]{2,})+(?:/.*)?$",
         t,
