@@ -6,11 +6,16 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ### Gauntlet: continuous security + perf loop (feature/computer-use)
 
-- Shell jail: pathless mutations only when cwd∈roots; bare `$var` paths; IEX/Start-Process/EncodedCommand/archive
-- Shadow: all batch paths; relative paths against work roots (not process CWD)
-- Evidence: slim→inject→mark order; ContextVar session id; delta order tests
+- Shell jail: pathless mutations only when cwd∈roots; bare `$var` paths; IEX/Start-Process/EncodedCommand/archive; certutil `-urlcache` / WebClient / FromBase64 / IRM `-OutFile`; `powershell -e` short form; `fsutil`/`mklink`
+- Shadow: all batch paths; relative paths against work roots; opaque payload hard-block (EncodedCommand/IEX/DownloadFile)
+- Evidence: slim→inject→mark order; delta-only JSONL persist; per-session metabolism throttle; ContextVar session id
 - L0 works without API key; early L0 skips harness; pairing fast-path; crystal hot_block cache
-- Export rate limit; identity HMAC; UI/partner preview scrub; navigate rejects URL userinfo
+- Redact: Anthropic/OpenRouter/Google/HF/npm/Stripe key shapes; structured+text log formatters
+- Action IR / CUA / machine map: strip URL userinfo+query; IR body-less for write tools
+- web_fetch SSRF: block userinfo + CGNAT (`not is_global`); UI `@@tool_result` preview scrub; computer audit/host result redact fail-closed
+- Identity: HMAC required on import; export+import rate limits; export path jail under `home/exports`
+- Atomic writes: skill_genome, cua_macros, xAI auth store
+- Perf: precompiled hard/soft/self-kill security patterns; shell jail `_norm_roots` once per check
 
 ### Security/perf: metabolism hardening pass
 
