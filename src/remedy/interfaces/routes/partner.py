@@ -420,12 +420,20 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
     @app.post("/api/partner/identity/export")
     async def partner_identity_export(req: IdentityExportRequest):
         """Encrypted portable partner identity — excludes keys/tokens/IR/evidence raw."""
+        import time
         from pathlib import Path
 
         from remedy.core.metabolism.identity_export import (
             collect_default_payload,
             export_identity,
         )
+
+        # Simple process-level rate limit (anti-abuse on local API)
+        now = time.time()
+        last = float(getattr(app.state, "_identity_export_ts", 0) or 0)
+        if now - last < 2.0:
+            raise HTTPException(429, "identity export rate limit — wait a moment")
+        app.state._identity_export_ts = now
 
         home = None
         if runtime is not None:
