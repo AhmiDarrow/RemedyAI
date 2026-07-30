@@ -59,3 +59,20 @@ def test_decode_cache_evicts_at_max():
     finally:
         vs._DECODE_CACHE_MAX = old
         vs.clear_decode_cache()
+
+
+def test_decode_cache_key_includes_model_and_base(tmp_path: Path):
+    """Model/runtime switch must not reuse briefs from a previous decoder."""
+    from remedy.vision import service as vs
+
+    img = tmp_path / "shot.png"
+    img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 32)
+
+    k_a = vs._cache_key(img, model_id="smolvlm2-2.2b", base_url="http://127.0.0.1:8080/v1")
+    k_b = vs._cache_key(img, model_id="other-vlm", base_url="http://127.0.0.1:8080/v1")
+    k_c = vs._cache_key(img, model_id="smolvlm2-2.2b", base_url="http://127.0.0.1:9090/v1")
+    assert k_a != k_b
+    assert k_a != k_c
+    # Same decoder identity → stable hit
+    k_a2 = vs._cache_key(img, model_id="smolvlm2-2.2b", base_url="http://127.0.0.1:8080/v1")
+    assert k_a == k_a2

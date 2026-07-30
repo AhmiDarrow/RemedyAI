@@ -1131,35 +1131,87 @@ class MemoryStore:
             return [self._row_to_message(r) for r in rows]
 
     async def get_chat_message(self, msg_id: str) -> ChatMessage | None:
-        db = self._ensure_db()
+        with self._locked():
+            db = self._ensure_db()
+            row = db.execute(
+                "SELECT * FROM chat_messages WHERE id = ?", (msg_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            return self._row_to_message(row)
+
+    def _sync_session_message_count(
+        self, db: sqlite3.Connection, session_id: str
+    ) -> int:
+        """Recount non-reverted messages and write message_count (caller holds lock)."""
         row = db.execute(
-            "SELECT * FROM chat_messages WHERE id = ?", (msg_id,)
+            "SELECT COUNT(*) AS c FROM chat_messages "
+            "WHERE session_id = ? AND reverted = 0",
+            (session_id,),
         ).fetchone()
-        if row is None:
-            return None
-        return self._row_to_message(row)
+        count = int(row["c"] if row is not None else 0)
+        db.execute(
+            "UPDATE chat_sessions SET message_count = ?, updated_at = ? WHERE id = ?",
+            (count, datetime.now(UTC).isoformat(), session_id),
+        )
+        return count
 
     async def revert_message(self, msg_id: str) -> bool:
-        db = self._ensure_db()
-        cursor = db.execute(
-            "UPDATE chat_messages SET reverted = 1 WHERE id = ?", (msg_id,)
-        )
-        db.commit()
-        return cursor.rowcount > 0
+        """Soft-delete one message and resync session message_count."""
+        with self._locked():
+            db = self._ensure_db()
+            row = db.execute(
+                "SELECT session_id, reverted FROM chat_messages WHERE id = ?",
+                (msg_id,),
+            ).fetchone()
+            if row is None:
+                return False
+            if int(row["reverted"] or 0):
+                return False
+            sid = str(row["session_id"] or "")
+            cursor = db.execute(
+                "UPDATE chat_messages SET reverted = 1 WHERE id = ? AND reverted = 0",
+                (msg_id,),
+            )
+            if cursor.rowcount <= 0:
+                db.rollback()
+                return False
+            if sid:
+                self._sync_session_message_count(db, sid)
+            db.commit()
+            return True
 
     async def revert_from(self, session_id: str, msg_id: str) -> int:
-        """Soft-delete this message and all later messages in the session."""
-        db = self._ensure_db()
-        target = db.execute(
-            "SELECT created_at FROM chat_messages WHERE id = ? AND session_id = ?",
-            (msg_id, session_id),
-        ).fetchone()
-        if target is None:
-            return 0
-        cursor = db.execute(
-            "UPDATE chat_messages SET reverted = 1 "
-            "WHERE session_id = ? AND created_at >= ? AND reverted = 0",
-            (session_id, target["created_at"]),
-        )
-        db.commit()
-        return cursor.rowcount
+        """Soft-delete this message and all later messages; resync message_count.
+
+        Time-travel / edit-and-resend rely on ``message_count`` matching the
+        visible (non-reverted) transcript — previously the counter only ever
+        increased, so session list badges stayed inflated after rollbacks.
+
+        Cut uses ``(created_at, rowid)`` so same-timestamp bursts (common when
+        several messages land in one second) still roll back from the chosen
+        message forward, not the whole second.
+        """
+        with self._locked():
+            db = self._ensure_db()
+            target = db.execute(
+                "SELECT created_at, rowid AS _rid FROM chat_messages "
+                "WHERE id = ? AND session_id = ?",
+                (msg_id, session_id),
+            ).fetchone()
+            if target is None:
+                return 0
+            cut_at = target["created_at"]
+            cut_rid = int(target["_rid"])
+            cursor = db.execute(
+                "UPDATE chat_messages SET reverted = 1 "
+                "WHERE session_id = ? AND reverted = 0 AND ("
+                "  created_at > ? OR (created_at = ? AND rowid >= ?)"
+                ")",
+                (session_id, cut_at, cut_at, cut_rid),
+            )
+            n = int(cursor.rowcount or 0)
+            if n > 0:
+                self._sync_session_message_count(db, session_id)
+            db.commit()
+            return n
