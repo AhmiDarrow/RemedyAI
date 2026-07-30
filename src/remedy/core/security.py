@@ -176,109 +176,122 @@ _DANGEROUS_COMMANDS = {
 }
 
 # Hard block — true wipe / privilege / injection class (always deny)
-_HARD_DANGEROUS_PATTERNS = [
-    (r"(^|[\s;&|])format(\s|$)", "Filesystem format"),
-    (r"(^|[\s;&|])shutdown(\s|$)", "System shutdown"),
-    (r"(^|[\s;&|])reboot(\s|$)", "System reboot"),
-    # Unix recursive wipe of root/home
-    (
-        r"rm\s+(-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*|-[a-zA-Z]*f[a-zA-Z]*r[a-zA-Z]*)\s+(/|~|\$home)",
-        "Recursive delete of system path",
-    ),
-    (r"rm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+)*(/|~|\$home|c:\\)", "Recursive delete of system path"),
-    # Windows recursive wipe (forced flags)
-    (r"del\s+/[fqs]+\s+", "Windows forced recursive delete"),
-    (r"rmdir\s+/s(\s+/q)?\s+", "Windows recursive rmdir"),
-    (r"rd\s+/s(\s+/q)?\s+", "Windows recursive rd"),
-    (r"\|\s*(sh|bash|pwsh|powershell|cmd)(\s|$)", "Shell pipe injection"),
-    (r">\s*/dev/", "Device write"),
-    (r"invoke-expression|iex\s+", "PowerShell Invoke-Expression"),
-    (r"remove-item\s+.*-recurse", "PowerShell recursive delete"),
-    # Bare delete tools only when clearly recursive/forced — not every "del" substring in prose
-    (r"(^|[\s;&|])(rm|del|erase)\s+(-[a-zA-Z]*[rf][a-zA-Z]*\s+)+", "Forced file deletion"),
-    # Encoded payloads hide intent (complement shell write jail)
-    (r"(?:^|[\s;&|])-(?:encodedcommand|enc|ec)\b", "PowerShell EncodedCommand"),
-    # Short -e after powershell/pwsh only (bare -e matches grep -e / set -e — too noisy)
-    (
-        r"(?:powershell|pwsh)(?:\.exe)?(?:\s+[/\-\w]+)*\s+-e(?:\s|$|=)",
-        "PowerShell EncodedCommand (-e)",
-    ),
-    (r"\badd-type\b[^\n]*-typedefinition\b", "PowerShell Add-Type injection"),
-    # Download-and-drop (path often outside project; complement shell write jail)
-    (r"\bcertutil\b[^\n]*-urlcache\b", "certutil URL cache download"),
-    (r"\b(?:system\.)?net\.webclient\b[^\n]*download", "WebClient download"),
-    (r"\bdownloadfile\s*\(", "DownloadFile invoke"),
+# Precompiled: check_dangerous_command runs on every bash_exec / shell gate.
+_HARD_DANGEROUS_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(p, re.I), reason)
+    for p, reason in (
+        (r"(^|[\s;&|])format(\s|$)", "Filesystem format"),
+        (r"(^|[\s;&|])shutdown(\s|$)", "System shutdown"),
+        (r"(^|[\s;&|])reboot(\s|$)", "System reboot"),
+        # Unix recursive wipe of root/home
+        (
+            r"rm\s+(-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*|-[a-zA-Z]*f[a-zA-Z]*r[a-zA-Z]*)\s+(/|~|\$home)",
+            "Recursive delete of system path",
+        ),
+        (r"rm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+)*(/|~|\$home|c:\\)", "Recursive delete of system path"),
+        # Windows recursive wipe (forced flags)
+        (r"del\s+/[fqs]+\s+", "Windows forced recursive delete"),
+        (r"rmdir\s+/s(\s+/q)?\s+", "Windows recursive rmdir"),
+        (r"rd\s+/s(\s+/q)?\s+", "Windows recursive rd"),
+        (r"\|\s*(sh|bash|pwsh|powershell|cmd)(\s|$)", "Shell pipe injection"),
+        (r">\s*/dev/", "Device write"),
+        (r"invoke-expression|iex\s+", "PowerShell Invoke-Expression"),
+        (r"remove-item\s+.*-recurse", "PowerShell recursive delete"),
+        # Bare delete tools only when clearly recursive/forced — not every "del" substring in prose
+        (r"(^|[\s;&|])(rm|del|erase)\s+(-[a-zA-Z]*[rf][a-zA-Z]*\s+)+", "Forced file deletion"),
+        # Encoded payloads hide intent (complement shell write jail)
+        (r"(?:^|[\s;&|])-(?:encodedcommand|enc|ec)\b", "PowerShell EncodedCommand"),
+        # Short -e after powershell/pwsh only (bare -e matches grep -e / set -e — too noisy)
+        (
+            r"(?:powershell|pwsh)(?:\.exe)?(?:\s+[/\-\w]+)*\s+-e(?:\s|$|=)",
+            "PowerShell EncodedCommand (-e)",
+        ),
+        (r"\badd-type\b[^\n]*-typedefinition\b", "PowerShell Add-Type injection"),
+        # Download-and-drop (path often outside project; complement shell write jail)
+        (r"\bcertutil\b[^\n]*-urlcache\b", "certutil URL cache download"),
+        (r"\b(?:system\.)?net\.webclient\b[^\n]*download", "WebClient download"),
+        (r"\bdownloadfile\s*\(", "DownloadFile invoke"),
+    )
 ]
 
 # Soft signals — used by callers that want ask-mode hints; not hard-blocked here
 # (start-process, $(), backticks are common in legitimate Windows/dev scripts)
-_SOFT_DANGEROUS_PATTERNS = [
-    (r"start-process\s+", "Process launch"),
-    (r"`[^`]+`", "Command substitution"),
-    (r"\$\([^)]+\)", "Command substitution"),
-    (r"(^|[\s;&|])(rm|del|erase|rmdir|rd)(\s|$)", "File deletion detected"),
+_SOFT_DANGEROUS_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(p, re.I), reason)
+    for p, reason in (
+        (r"start-process\s+", "Process launch"),
+        (r"`[^`]+`", "Command substitution"),
+        (r"\$\([^)]+\)", "Command substitution"),
+        (r"(^|[\s;&|])(rm|del|erase|rmdir|rd)(\s|$)", "File deletion detected"),
+    )
 ]
 
 # Host self-preservation — Tauri projects often share the binary name ``app.exe``
 # with Remedy Desktop. Indiscriminate kills take out the agent mid-turn.
 # Path-scoped kills (command mentions SecretFolder / project filter) are allowed.
-_SELF_KILL_ALWAYS_BLOCK = [
-    # Never kill the API brain
-    (
-        r"taskkill\s+[^\n]*/im\s+remedy(\.exe)?",
-        "Killing remedy.exe (host API)",
-    ),
-    (
-        r"stop-process[^\n]*-name\s+['\"]?remedy(\.exe)?['\"]?",
-        "Stopping process named remedy (host API)",
-    ),
-    (
-        r"get-process\s+[^\n]*remedy[^\n]*stop-process|stop-process[^\n]*get-process[^\n]*remedy",
-        "Pipeline stop of remedy process",
-    ),
-    # Freeing Remedy's API port
-    (
-        r"(localport|local.?port)\s*[:=]?\s*7400[^\n]{0,200}(stop-process|taskkill|kill)",
-        "Killing process on port 7400 (Remedy API)",
-    ),
-    (
-        r"(stop-process|taskkill|kill)[^\n]{0,200}(localport|local.?port)\s*[:=]?\s*7400",
-        "Killing process on port 7400 (Remedy API)",
-    ),
-    (
-        r"remedy_serve\.lock|remedy serve.*stop|stop[^\n]*remedy serve",
-        "Stopping remedy serve",
-    ),
+_SELF_KILL_ALWAYS_BLOCK: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(p, re.I), reason)
+    for p, reason in (
+        # Never kill the API brain
+        (
+            r"taskkill\s+[^\n]*/im\s+remedy(\.exe)?",
+            "Killing remedy.exe (host API)",
+        ),
+        (
+            r"stop-process[^\n]*-name\s+['\"]?remedy(\.exe)?['\"]?",
+            "Stopping process named remedy (host API)",
+        ),
+        (
+            r"get-process\s+[^\n]*remedy[^\n]*stop-process|stop-process[^\n]*get-process[^\n]*remedy",
+            "Pipeline stop of remedy process",
+        ),
+        # Freeing Remedy's API port
+        (
+            r"(localport|local.?port)\s*[:=]?\s*7400[^\n]{0,200}(stop-process|taskkill|kill)",
+            "Killing process on port 7400 (Remedy API)",
+        ),
+        (
+            r"(stop-process|taskkill|kill)[^\n]{0,200}(localport|local.?port)\s*[:=]?\s*7400",
+            "Killing process on port 7400 (Remedy API)",
+        ),
+        (
+            r"remedy_serve\.lock|remedy serve.*stop|stop[^\n]*remedy serve",
+            "Stopping remedy serve",
+        ),
+    )
 ]
 
 # Indiscriminate Tauri / app.exe kills — blocked unless command scopes to a
 # project path (e.g. SecretFolder in CommandLine/Path filter).
-_SELF_KILL_APP_PATTERNS = [
-    (
-        r"taskkill\s+[^\n]*/im\s+app(\.exe)?",
-        "taskkill /IM app.exe kills ALL Tauri apps including Remedy Desktop",
-    ),
-    (
-        r"stop-process\s+[^\n]*-name\s+['\"]?app(\.exe)?['\"]?",
-        "Stop-Process -Name app kills Remedy Desktop (same default Tauri name)",
-    ),
-    (
-        r"get-process\s+['\"]?app(\.exe)?['\"]?[^\n]{0,80}stop-process",
-        "Get-Process app | Stop-Process kills Remedy Desktop",
-    ),
-    (
-        r"get-process\s+[^\n]*\|\s*[^\n]*stop-process[^\n]*\bapp\b",
-        "Filtered Stop-Process still targeting bare app name",
-    ),
-    (
-        r"stop-process\s+[^\n]*\(?(get-process\s+app)",
-        "Stop-Process (Get-Process app) kills Remedy Desktop",
-    ),
-    # "kill every tauri/app without path scope"
-    (
-        r"(stop-process|taskkill)[^\n]{0,120}(processname\s*-eq\s*['\"]app['\"]|\.name\s*-eq\s*['\"]app['\"])",
-        "Stopping all processes named app (includes Remedy Desktop)",
-    ),
+_SELF_KILL_APP_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(p, re.I), reason)
+    for p, reason in (
+        (
+            r"taskkill\s+[^\n]*/im\s+app(\.exe)?",
+            "taskkill /IM app.exe kills ALL Tauri apps including Remedy Desktop",
+        ),
+        (
+            r"stop-process\s+[^\n]*-name\s+['\"]?app(\.exe)?['\"]?",
+            "Stop-Process -Name app kills Remedy Desktop (same default Tauri name)",
+        ),
+        (
+            r"get-process\s+['\"]?app(\.exe)?['\"]?[^\n]{0,80}stop-process",
+            "Get-Process app | Stop-Process kills Remedy Desktop",
+        ),
+        (
+            r"get-process\s+[^\n]*\|\s*[^\n]*stop-process[^\n]*\bapp\b",
+            "Filtered Stop-Process still targeting bare app name",
+        ),
+        (
+            r"stop-process\s+[^\n]*\(?(get-process\s+app)",
+            "Stop-Process (Get-Process app) kills Remedy Desktop",
+        ),
+        # "kill every tauri/app without path scope"
+        (
+            r"(stop-process|taskkill)[^\n]{0,120}(processname\s*-eq\s*['\"]app['\"]|\.name\s*-eq\s*['\"]app['\"])",
+            "Stopping all processes named app (includes Remedy Desktop)",
+        ),
+    )
 ]
 
 # If any of these appear, path-scoped project kill is likely intentional.
@@ -309,7 +322,7 @@ def check_host_self_kill(command: list[str] | str) -> str | None:
         return None
 
     for pattern, reason in _SELF_KILL_ALWAYS_BLOCK:
-        if re.search(pattern, full, flags=re.IGNORECASE):
+        if pattern.search(full):
             return (
                 f"{reason}. Do not stop the host agent. "
                 "Target only the project app by full Path/CommandLine filter "
@@ -319,7 +332,7 @@ def check_host_self_kill(command: list[str] | str) -> str | None:
     scoped = bool(_SELF_KILL_PROJECT_SCOPE_RE.search(full))
     if not scoped:
         for pattern, reason in _SELF_KILL_APP_PATTERNS:
-            if re.search(pattern, full, flags=re.IGNORECASE):
+            if pattern.search(full):
                 return (
                     f"{reason}. Use a Path/CommandLine filter for the project "
                     r'(e.g. Where-Object { $_.Path -match "SecretFolder" }) '
@@ -347,7 +360,7 @@ def check_dangerous_command(command: list[str]) -> str | None:
 
     full = " ".join(str(a) for a in command).lower()
     for pattern, reason in _HARD_DANGEROUS_PATTERNS:
-        if re.search(pattern, full, flags=re.IGNORECASE):
+        if pattern.search(full):
             return f"{reason}: {full[:100]}"
 
     # Self-preservation (Tauri app.exe / remedy serve) — hard block
@@ -366,6 +379,6 @@ def check_soft_dangerous_command(command: list[str]) -> str | None:
         return None  # hard already covers it
     full = " ".join(str(a) for a in command).lower()
     for pattern, reason in _SOFT_DANGEROUS_PATTERNS:
-        if re.search(pattern, full, flags=re.IGNORECASE):
+        if pattern.search(full):
             return f"{reason}: {full[:100]}"
     return None
