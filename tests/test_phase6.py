@@ -2,7 +2,6 @@
 
 import json
 import os
-import sys
 from pathlib import Path
 from unittest import mock
 
@@ -367,29 +366,23 @@ class TestPluginManager:
         p.write_text(
             "def setup_plugin(h): h.register('on_start', lambda: 'loaded')\n"
         )
-        sys.path.insert(0, str(tmp_path))
-        try:
-            pm.load("test_load")
-            assert "test_load" in pm.loaded_plugins
-            assert hm.fire("on_start") == ["loaded"]
-        finally:
-            sys.path.remove(str(tmp_path))
+        # Load requires plugin_path (or prior discover origin) — bare import refused.
+        assert pm.load("test_load", plugin_path=str(tmp_path)) is True
+        assert "test_load" in pm.loaded_plugins
+        assert hm.fire("on_start") == ["loaded"]
 
     def test_load_without_setup(self, tmp_path):
         hm = HookManager()
         pm = PluginManager(hm)
         p = tmp_path / "plain.py"
         p.write_text("x = 1\n")
-        sys.path.insert(0, str(tmp_path))
-        try:
-            pm.load("plain")
-            assert "plain" in pm.loaded_plugins
-        finally:
-            sys.path.remove(str(tmp_path))
+        assert pm.load("plain", plugin_path=str(tmp_path)) is True
+        assert "plain" in pm.loaded_plugins
 
     def test_load_nonexistent_returns_false(self):
         hm = HookManager()
         pm = PluginManager(hm)
+        # Bare load (no path/discover origin) is refused.
         assert pm.load("nonexistent_module_xyz") is False
 
     def test_unload(self, tmp_path):
@@ -399,13 +392,9 @@ class TestPluginManager:
         p.write_text(
             "teardowns = []\ndef setup_plugin(h): pass\ndef teardown_plugin(): teardowns.append(1)\n"
         )
-        sys.path.insert(0, str(tmp_path))
-        try:
-            pm.load("to_unload")
-            assert pm.unload("to_unload") is True
-            assert "to_unload" not in pm.loaded_plugins
-        finally:
-            sys.path.remove(str(tmp_path))
+        assert pm.load("to_unload", plugin_path=str(tmp_path)) is True
+        assert pm.unload("to_unload") is True
+        assert "to_unload" not in pm.loaded_plugins
 
 
 # ============================================================================
