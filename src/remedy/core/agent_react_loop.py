@@ -360,6 +360,15 @@ async def call_llm_stream(runtime, message: str,
             runtime._metabolism_allow_verify = bool(
                 meta.get("allow_critical_verify")
             )
+            runtime._shadow_strict = bool(
+                (meta.get("policy") or {}).get("shadow_high_blast")
+                and int(meta.get("tier") or 0) >= 2
+            )
+            with suppress(Exception):
+                from remedy.core.metabolism.governor import get_governor
+
+                if get_governor(sid_m).shadow_strict:
+                    runtime._shadow_strict = True
             injects = list(meta.get("injects") or [])
             # Pending verify remedy from prior turn (one-shot)
             with suppress(Exception):
