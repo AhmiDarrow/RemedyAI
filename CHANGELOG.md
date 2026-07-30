@@ -6,6 +6,9 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ### Gauntlet: continuous security + perf loop (feature/computer-use)
 
+- **Coding skill catalog:** demote auto-learned tool-chain skills (`file_read-list_dir-…`) in `match_skills` so curated procedures (`write-tests`, `change-safety`, …) win on implement/refactor queries; reject trivial low-diversity traces at learn gate; trivial effort no longer elevates to VALIDATED
+- **Agency re-arm coding:** short stubs like "I'll implement/fix/apply/write tests" re-arm tools (same path as skill-promise prose)
+- **CLI `remedy skill list`:** hide learned probation by default (`--all` / `--learned`); session CLI remains `start`/`end` only
 - **Security sweep regression:** IPv6 ULA/link-local/loopback/mapped-loopback SSRF pin-on-resolve coverage; open_app protocol-detector drive-letter vs `shell:`/`ms-*`/`data:` handlers
 - **Skill auto-suggest:** `review project` (and review/coding/ship phrasing) re-ranks the catalog and injects preferred procedure (`change-safety` / `project-etiquette` / `refactor-safe`) into context without waiting for `skill_activate`
 - **send_policy dual work:** `begin_turn_metabolism(pre_tier=)` reuses send_policy tier (no second classify walk); autonomous still re-classifies to L3

@@ -36,18 +36,39 @@ def _skill_title_from_steps(message: str, steps: list[dict[str, Any]]) -> str:
 
 
 def should_auto_learn_from_steps(steps: list[dict[str, Any]] | None) -> bool:
-    """Return True when a turn has enough successful tool work to codify."""
+    """Return True when a turn has enough successful tool work to codify.
+
+    Requires multi-tool diversity so trivial file_read spam does not flood
+    the skill catalog (coding long-task product bug).
+    """
     steps = list(steps or [])
     if len(steps) < 3:
         return False
-    real = [s for s in steps if s.get("tool") not in _META_TOOLS]
+    real = [
+        s
+        for s in steps
+        if (s.get("tool") or s.get("name") or s.get("tool_name")) not in _META_TOOLS
+    ]
     if len(real) < 3 and len(steps) < 4:
         if len(steps) < 4:
             return False
     successes = sum(1 for s in steps if s.get("success"))
     if successes < 3:
         return False
-    return successes >= max(2, int(0.5 * len(steps)))
+    if successes < max(2, int(0.5 * len(steps))):
+        return False
+    # Distinct non-meta tools: pure explore loops (read/read/list) are noise.
+    names: list[str] = []
+    for s in real:
+        n = str(s.get("tool") or s.get("name") or s.get("tool_name") or "").strip()
+        if n and n not in names:
+            names.append(n)
+    if len(names) < 2:
+        return False
+    # Need at least 4 real steps OR 3 distinct tools — hard-won short paths OK via lifecycle
+    if len(real) < 4 and len(names) < 3:
+        return False
+    return True
 
 
 def auto_learn_from_turn(

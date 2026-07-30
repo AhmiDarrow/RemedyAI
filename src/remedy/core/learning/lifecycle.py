@@ -28,11 +28,55 @@ Prune:    hopeless / stale DISABLED — high effort resists prune longer
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from remedy.models import Skill, SkillStatus
+
+# Tool-id title fragments from auto-learn (file_read-list_dir-repo_search).
+_TOOL_CHAIN_TITLE_RE = re.compile(
+    r"^(?:[a-z][a-z0-9_]*)(?:-(?:[a-z][a-z0-9_]*)){1,}$"
+)
+
+
+def re_looks_like_tool_chain_title(title: str) -> bool:
+    """True when title is only hyphen-joined tool-like identifiers."""
+    t = (title or "").strip().lower()
+    if not t or not _TOOL_CHAIN_TITLE_RE.match(t):
+        return False
+    parts = [p for p in t.split("-") if p]
+    if len(parts) < 2:
+        return False
+    # At least half look like tool ids (underscore or known verb-ish stems)
+    toolish = sum(1 for p in parts if "_" in p or p in _SIMPLE_TOOL_STEMS)
+    return toolish >= max(2, (len(parts) + 1) // 2)
+
+
+_SIMPLE_TOOL_STEMS = frozenset(
+    {
+        "bash",
+        "comfyui",
+        "web",
+        "fetch",
+        "read",
+        "write",
+        "edit",
+        "list",
+        "search",
+        "mission",
+        "plan",
+        "goal",
+        "spread",
+        "job",
+        "memory",
+        "vision",
+        "computer",
+        "settings",
+        "skill",
+    }
+)
 
 # -- thresholds (tunable) ----------------------------------------------------
 
@@ -322,6 +366,37 @@ class SkillLifecyclePolicy:
                 confidence=0.35,
                 effort=eff.score,
             )
+
+        # Trivial short explore/edit paths become catalog spam (file_read-list_dir-…).
+        # Require either real effort or tool diversity before codifying.
+        if eff.band == "trivial" and not eff.is_hard_won:
+            unique = int(eff.unique_tools or 0)
+            if unique < 3 or step_count < 5:
+                return LifecycleDecision(
+                    "reject",
+                    (
+                        f"Trivial low-diversity trace "
+                        f"(unique_tools={unique}, steps={step_count}) — "
+                        "not worth a skill"
+                    ),
+                    confidence=0.2,
+                    effort=eff.score,
+                    details={
+                        "unique_tools": unique,
+                        "step_count": step_count,
+                        "effort_band": eff.band,
+                    },
+                )
+            # Pure tool-id titles (auto-learn naming) with no struggle → skip
+            t = (title or "").strip().lower()
+            if t and re_looks_like_tool_chain_title(t):
+                return LifecycleDecision(
+                    "reject",
+                    "Trivial tool-chain title without meaningful effort — skip learn",
+                    confidence=0.22,
+                    effort=eff.score,
+                    details={"title": title},
+                )
 
         conf = min(
             0.95,

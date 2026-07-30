@@ -80,6 +80,16 @@ def test_agency_tool_promise_claim_hard_and_soft() -> None:
     assert agency_tool_promise_claim("hi") is False
     assert agency_tool_promise_claim("", "") is False
     assert agency_tool_promise_claim(None, None) is False
+    # Coding / long-task stubs must re-arm (not only review/skill phrases)
+    assert agency_tool_promise_claim("I will implement the fix now.") is True
+    assert agency_tool_promise_claim("I'll apply the patch next.") is True
+    assert agency_tool_promise_claim("Let me fix that.") is True
+    assert agency_tool_promise_claim("I will write the tests next.") is True
+    assert agency_tool_promise_claim("I'll start coding the solution.") is True
+    # Long finished write-up with a buried soft phrase stays final
+    long_impl = ("Here is the completed design and analysis.\n" * 40) + "I will implement"
+    assert len(long_impl) >= 480
+    assert agency_tool_promise_claim(long_impl) is False
     # Nudge message shape for loop injection
     nudge = agency_rearm_nudge_message()
     assert nudge["role"] == "user"

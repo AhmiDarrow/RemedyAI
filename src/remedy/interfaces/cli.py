@@ -113,7 +113,20 @@ def build_parser() -> argparse.ArgumentParser:
     # remedy skill discover <path>
     skill = sub.add_parser("skill", help="Skill operations")
     skill_sub = skill.add_subparsers(dest="skill_cmd")
-    skill_sub.add_parser("list", help="List registered skills")
+    skill_list = skill_sub.add_parser(
+        "list",
+        help="List registered skills (hides learned probation by default)",
+    )
+    skill_list.add_argument(
+        "--all",
+        action="store_true",
+        help="Include auto-learned probation skills (tool-chain noise)",
+    )
+    skill_list.add_argument(
+        "--learned",
+        action="store_true",
+        help="Show only auto-learned skills",
+    )
     skill_discover = skill_sub.add_parser("discover", help="Discover skills in a directory")
     skill_discover.add_argument("path", help="Directory to scan")
     skill_discover.add_argument("--no-recurse", action="store_true")
@@ -611,10 +624,48 @@ async def _cmd_skill(args) -> None:
         if not registry.skills:
             console.print("[dim]No skills registered. Use 'remedy skill discover <path>'[/dim]")
             return
-        console.print(f"[bold]{len(registry.skills)} skill(s):[/bold]")
-        for skill in sorted(registry.skills, key=lambda s: s.manifest.name):
+        show_all = bool(getattr(args, "all", False))
+        learned_only = bool(getattr(args, "learned", False))
+        visible: list = []
+        hidden_learned = 0
+        for skill in registry.skills:
+            meta = skill.manifest.metadata or {}
+            auto = bool(meta.get("auto_generated"))
+            st = skill.manifest.status
+            st_v = st.value if hasattr(st, "value") else str(st)
+            if learned_only:
+                if auto:
+                    visible.append(skill)
+                continue
+            # Default: hide auto-learned probation so coding workflows stay usable.
+            if (
+                auto
+                and not show_all
+                and st_v not in ("active",)
+            ):
+                hidden_learned += 1
+                continue
+            visible.append(skill)
+        total = len(registry.skills)
+        console.print(
+            f"[bold]{len(visible)} skill(s)[/bold]"
+            + (
+                f" [dim](of {total}; {hidden_learned} learned probation hidden — "
+                f"use --all)[/dim]"
+                if hidden_learned
+                else (f" [dim](of {total})[/dim]" if len(visible) != total else "")
+            )
+            + ":"
+        )
+        for skill in sorted(visible, key=lambda s: s.manifest.name):
             desc = skill.manifest.description or ""
-            console.print(f"  [cyan]{skill.manifest.name}[/cyan] {desc[:60]}")
+            meta = skill.manifest.metadata or {}
+            badge = ""
+            if meta.get("auto_generated"):
+                st = skill.manifest.status
+                st_v = st.value if hasattr(st, "value") else str(st)
+                badge = f" [dim](learned/{st_v})[/dim]"
+            console.print(f"  [cyan]{skill.manifest.name}[/cyan]{badge} {desc[:60]}")
         return
     elif args.skill_cmd == "discover":
         count = registry.discover(args.path, recurse=not args.no_recurse)
