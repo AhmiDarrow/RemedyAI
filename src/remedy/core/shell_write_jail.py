@@ -52,9 +52,13 @@ _OPAQUE_PATH_HINT_RE = re.compile(
     r"|\bjoin-path\b"
     r"|\benviron\["
     r"|\bos\.environ"
+    r"|\bprocess\.env\b"
     r"|\bexpanduser\b"
     r"|\bpath\.home\b"
     r"|\bgetfolderpath\b"
+    r"|\binvoke-webrequest\b.*-outfile\b"
+    r"|\bcurl\b[^\n]*\s-o\b"
+    r"|\bwget\b[^\n]*\s-O\b"
     r")"
 )
 
@@ -232,9 +236,9 @@ def check_shell_write_jail(
         if outside is not None:
             offenders.append(str(outside))
 
-    # Mutation with opaque path construction (env / Join-Path) and no proven
-    # in-root target → deny (cannot prove safety).
-    if not offenders and _OPAQUE_PATH_HINT_RE.search(cmd):
+    # Mutation with opaque path construction and no extractable path tokens → deny.
+    # If we already extracted paths and all were under roots, allow (no offenders).
+    if not offenders and not candidates and _OPAQUE_PATH_HINT_RE.search(cmd):
         roots_s = ", ".join(str(r) for r in _norm_roots(write_roots)[:4])
         return (
             "shell write jail: mutation uses opaque path construction "
@@ -243,8 +247,8 @@ def check_shell_write_jail(
             "paths under the focus folder."
         )
 
-    # python/node -c open(...) without extractable path still risky
-    if not offenders and re.search(
+    # python -c open(...) with no extractable path tokens still risky
+    if not offenders and not candidates and re.search(
         r"(?ix)\b(?:python|python3|py)\s+(?:-\w+\s+)*-c\b.*\bopen\s*\(",
         cmd,
     ):

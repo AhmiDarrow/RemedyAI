@@ -68,12 +68,18 @@ class AgentRuntime(ABC):
         parent_id: UUID | None = None,
         tags: list[str] | None = None,
     ) -> Task:
+        meta: dict = {}
+        # Tag with current session so full_reset_session can drop only this tab's tasks.
+        sid = str(getattr(self, "_session_id", "") or "").strip()
+        if sid:
+            meta["session_id"] = sid
         task = Task(
             id=uuid4(),
             title=title,
             description=description,
             parent_id=parent_id,
             tags=tags or [],
+            metadata=meta,
         )
         self._tasks[task.id] = task
         return task
