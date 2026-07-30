@@ -6,8 +6,17 @@ from contextlib import suppress
 from typing import Any
 
 
-def try_l0_system_reply(runtime: Any, message: str) -> str | None:
-    """Return a user-facing string if *message* is a high-confidence L0 ask."""
+def try_l0_system_reply(
+    runtime: Any,
+    message: str,
+    *,
+    preclassified: bool = False,
+) -> str | None:
+    """Return a user-facing string if *message* is a high-confidence L0 ask.
+
+    When the caller already classified as L0, pass ``preclassified=True`` to
+    skip a redundant ``classify_turn_tier`` walk on the hot path.
+    """
     from remedy.core.metabolism.tier import (
         TurnTier,
         classify_turn_tier,
@@ -21,10 +30,11 @@ def try_l0_system_reply(runtime: Any, message: str) -> str | None:
     msg = (message or "").strip()
     if not msg:
         return None
-    # Re-confirm L0 (tier may already be set)
-    tier = classify_turn_tier(msg, intent="chat", tools_enabled=False)
-    if tier != TurnTier.L0_INSTANT:
-        return None
+    # Re-confirm L0 unless the caller already did (early exit / agent gate)
+    if not preclassified:
+        tier = classify_turn_tier(msg, intent="chat", tools_enabled=False)
+        if tier != TurnTier.L0_INSTANT:
+            return None
 
     if _L0_VERSION.match(msg):
         ver = "unknown"

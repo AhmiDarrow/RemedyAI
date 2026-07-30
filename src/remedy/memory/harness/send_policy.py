@@ -160,12 +160,21 @@ def apply_auto_harness_send_policy(
             max_pct = max(min_pct + 0.05, float(max_pct) - 0.05)
             meta["governor_compress_earlier"] = True
 
-    # Pre-classify tier for lean snapshot (cheap heuristics)
+    # Pre-classify tier for lean snapshot (cheap heuristics).
+    # Honor browse / pure-action / attachments stashed by the react loop so
+    # L2 agency does not get a light pack/scout-less snapshot.
     full_snap: bool | None = None
     with suppress(Exception):
         from remedy.core.metabolism.tier import TurnTier, classify_turn_tier
 
-        t0 = classify_turn_tier(user_text or "", tools_enabled=True)
+        t0 = classify_turn_tier(
+            user_text or "",
+            tools_enabled=True,
+            browse=bool(getattr(runtime, "_turn_browse", False)),
+            pure_action=bool(getattr(runtime, "_turn_pure_action", False)),
+            has_attachments=bool(getattr(runtime, "_turn_has_attachments", False)),
+            plan_mode=bool(getattr(runtime, "_plan_mode", False)),
+        )
         full_snap = t0 >= TurnTier.L2_AGENCY
         runtime._turn_tier = int(getattr(runtime, "_turn_tier", None) or int(t0))
     snap = build_context_snapshot(

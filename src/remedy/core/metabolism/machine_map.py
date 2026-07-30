@@ -88,14 +88,28 @@ class MachineMap:
         ttl_s: float = 30.0,
     ) -> MapSlice:
         clean = dict(data or {})
-        # Scrub secrets at admit time so TTL cache never holds credentials
+        # Scrub secrets at admit time so TTL cache never holds credentials.
+        # Fail closed: crude strip if sanitize helper is unavailable.
         if "url" in clean and clean["url"]:
+            u = str(clean["url"])
             try:
                 from remedy.core.metabolism.cua_macros import _sanitize_url
 
-                clean["url"] = _sanitize_url(str(clean["url"]))
+                clean["url"] = _sanitize_url(u)
             except Exception:
-                pass
+                # Never store raw userinfo/query on failure
+                if "?" in u:
+                    u = u.split("?", 1)[0]
+                if "#" in u:
+                    u = u.split("#", 1)[0]
+                if "@" in u:
+                    try:
+                        pre, rest = u.split("://", 1)
+                        if "@" in rest:
+                            u = f"{pre}://{rest.rsplit('@', 1)[-1]}"
+                    except Exception:
+                        u = u.split("@", 1)[-1]
+                clean["url"] = u[:200]
         for secret_k in ("password", "token", "cookie", "authorization", "api_key"):
             clean.pop(secret_k, None)
         sl = MapSlice(kind=kind, key=key, data=clean, ttl_s=ttl_s)
