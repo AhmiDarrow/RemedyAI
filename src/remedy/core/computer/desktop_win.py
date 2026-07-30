@@ -700,15 +700,55 @@ def focus_window_by_title(title_substr: str) -> dict[str, Any] | None:
     return None
 
 
+def _open_app_is_protocol_or_url(raw: str) -> bool:
+    """True for URL/protocol-handler forms that must not hit cmd start / startfile.
+
+    Windows drive paths (``C:\\…``) are not protocols. Single-letter schemes are
+    treated as drive letters; multi-letter ``scheme:`` (javascript:, ms-msdt:,
+    file:, http:, …) are refused. ``://`` always counts as a URL.
+    """
+    import re
+
+    s = (raw or "").strip()
+    if not s:
+        return False
+    if "://" in s or s.startswith("//"):
+        return True
+    m = re.match(r"(?i)^([a-z][a-z0-9+.-]*):", s)
+    if not m:
+        return False
+    # One-letter scheme == drive letter (C:\path, C:foo)
+    return len(m.group(1)) != 1
+
+
 def open_app(app: str) -> dict[str, Any]:
-    """Launch an application by name/path (notepad, calc, explorer, full path, …)."""
-    _require_windows()
+    """Launch an application by name/path (notepad, calc, explorer, full path, …).
+
+    Fail closed on URL/protocol handlers, UNC shares, and shell metacharacters.
+    Web URLs belong in ``open_url`` / navigate — not ``cmd start`` via app launch.
+    """
+    import re
     import shutil
     import subprocess
 
     raw = (app or "").strip()
     if not raw:
         raise ValueError("app name required")
+    if any(c in raw for c in ("\n", "\r", "\x00")):
+        raise ValueError("open_app refuses control characters")
+    # UNC / remote share — never auto-launch from agent tool path
+    if raw.startswith(("\\\\", "//")) or raw.startswith("\\"):
+        raise ValueError("open_app refuses UNC / share paths")
+    if any(c in raw for c in ("&", "|", ">", "<", "^", "%", "`", ";")):
+        raise ValueError("open_app refuses shell metacharacters")
+    if _open_app_is_protocol_or_url(raw):
+        raise ValueError(
+            f"open_app refuses URL/protocol handler (got {raw[:48]!r}); "
+            "use computer_navigate / open_url for web, or an app name/path"
+        )
+
+    _require_windows()
+
     aliases = {
         "notepad": "notepad.exe",
         "calc": "calc.exe",
@@ -725,24 +765,39 @@ def open_app(app: str) -> dict[str, Any]:
     }
     key = raw.lower()
     target = aliases.get(key, raw)
-    if target.startswith("ms-settings:"):
+    # Only the explicit settings alias may open ms-settings: (no free-form protocols)
+    if key == "settings" and target == "ms-settings:":
         os.startfile(target)  # type: ignore[attr-defined]
         return {"app": raw, "method": "startfile", "target": target}
-    # Absolute path
-    if Path(target).is_file() or (len(target) > 2 and target[1] == ":"):
-        subprocess.Popen([target], shell=False, close_fds=True)
-        return {"app": raw, "method": "path", "target": target}
+    # Absolute / existing path only when the file is present (no bare "C:…" probe)
+    path_candidate = Path(target)
+    if path_candidate.is_file():
+        subprocess.Popen([str(path_candidate)], shell=False, close_fds=True)
+        return {"app": raw, "method": "path", "target": str(path_candidate)}
+    # Drive-letter path that is not an existing file — fail closed (was Popen anyway)
+    if len(target) > 2 and target[1] == ":" and target[0].isalpha() and (
+        "/" in target or "\\" in target
+    ):
+        raise ValueError(f"open_app path not found: {target[:80]}")
     which = shutil.which(target) or shutil.which(raw)
     if which:
         subprocess.Popen([which], shell=False, close_fds=True)
         return {"app": raw, "method": "which", "target": which}
-    # Last resort: shell start
+    # Last resort: cmd start only for simple registered app names (no path seps)
+    if "/" in raw or "\\" in raw or ":" in raw:
+        raise ValueError(
+            f"open_app could not resolve {raw[:80]!r} (no path / PATH entry)"
+        )
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._ +\-]*", raw):
+        raise ValueError(
+            f"open_app refuses unsafe app name for shell start: {raw[:48]!r}"
+        )
     subprocess.Popen(
-        ["cmd", "/c", "start", "", target],
+        ["cmd", "/c", "start", "", raw],
         shell=False,
         close_fds=True,
     )
-    return {"app": raw, "method": "cmd start", "target": target}
+    return {"app": raw, "method": "cmd start", "target": raw}
 
 
 def open_url(url: str) -> dict[str, Any]:
