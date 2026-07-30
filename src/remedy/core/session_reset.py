@@ -112,23 +112,48 @@ def _purge_runtime_state(session_id: str, runtime: Any) -> None:
                     else:
                         setattr(runtime, attr, None)
 
-    # In-memory goals/tasks: drop entries for this session only when keyed.
+    # In-memory goals/tasks (dict[UUID, Task]): only drop those tagged for this
+    # session in metadata.session_id. Never clear the whole map (multi-tab).
     with contextlib.suppress(Exception):
         tasks = getattr(runtime, "_tasks", None)
         if isinstance(tasks, dict):
-            # Common shapes: {task_id: {... session_id ...}} or session_id keys
             drop_keys: list[Any] = []
             for k, v in list(tasks.items()):
                 if str(k) == sid:
                     drop_keys.append(k)
                     continue
-                if isinstance(v, dict) and str(v.get("session_id") or "") == sid:
-                    drop_keys.append(k)
-                    continue
-                if hasattr(v, "session_id") and str(getattr(v, "session_id", "") or "") == sid:
+                meta = None
+                if isinstance(v, dict):
+                    meta = v.get("metadata") if isinstance(v.get("metadata"), dict) else v
+                    if str(v.get("session_id") or "") == sid:
+                        drop_keys.append(k)
+                        continue
+                else:
+                    meta = getattr(v, "metadata", None)
+                    if str(getattr(v, "session_id", "") or "") == sid:
+                        drop_keys.append(k)
+                        continue
+                if isinstance(meta, dict) and str(meta.get("session_id") or "") == sid:
                     drop_keys.append(k)
             for k in drop_keys:
                 tasks.pop(k, None)
+            # When this runtime is currently bound to sid, also drop untagged
+            # tasks (legacy Task objects with no session metadata) — only if
+            # no other session is co-using untagged tasks is unknowable, so we
+            # only clear untagged when rt is bound to this session AND the
+            # streaming set has only this sid (single active session).
+            rt_sid = str(getattr(runtime, "_session_id", "") or "")
+            streams = getattr(runtime, "_streaming_sessions", None)
+            solo = isinstance(streams, set) and (not streams or streams == {sid})
+            if rt_sid == sid and solo:
+                for k, v in list(tasks.items()):
+                    meta = getattr(v, "metadata", None) if not isinstance(v, dict) else v.get("metadata")
+                    if not isinstance(meta, dict) or not str(meta.get("session_id") or "").strip():
+                        # untagged legacy task — clear on solo-session reset
+                        if not isinstance(v, dict) or "session_id" not in v:
+                            if not hasattr(v, "session_id") or not getattr(v, "session_id", None):
+                                if k not in drop_keys:
+                                    tasks.pop(k, None)
 
     # Nanoswarm pattern buffer for this session
     with contextlib.suppress(Exception):
