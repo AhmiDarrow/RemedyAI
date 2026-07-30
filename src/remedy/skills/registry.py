@@ -135,6 +135,102 @@ def _tokenize(text: str) -> set[str]:
     return {t for t in re.split(r"[^a-z0-9]+", (text or "").lower()) if len(t) >= 2}
 
 
+# Segments that appear in auto-learned tool-chain skill names (file_read-list_dir-…).
+# Used to demote catalog spam so curated procedures win on coding/long tasks.
+_TOOL_CHAIN_SEGMENTS = frozenset(
+    {
+        "bash_exec",
+        "file_read",
+        "file_write",
+        "file_edit",
+        "file_edit_batch",
+        "list_dir",
+        "repo_search",
+        "spread_run",
+        "job_run",
+        "mission_start",
+        "mission_update",
+        "mission_status",
+        "plan_show",
+        "plan_save",
+        "plan_step_status",
+        "goal_list",
+        "goal_add",
+        "goal_complete",
+        "checkpoint_show",
+        "get_settings",
+        "update_settings",
+        "memory_search",
+        "memory_save",
+        "web_fetch",
+        "vision_decode",
+        "computer_navigate",
+        "computer_act",
+        "computer_snapshot",
+        "computer_screenshot",
+        "computer_windows",
+        "computer_app",
+        "computer_key",
+        "computer_wait",
+        "computer_find",
+        "computer_page_text",
+        "comfyui",
+        "skill_activate",
+        "skill_search",
+        "local_discover",
+        "mail_list",
+        "mail_send",
+        "calendar_list_events",
+        "calendar_create_event",
+        "budget_set",
+        "budget_status",
+        "budget_tx_add",
+        "bill_list",
+        "bill_upsert",
+        "debt_upsert",
+        "assistant_accounts",
+        "compress_context",
+        "read_dir",
+    }
+)
+
+
+def looks_like_tool_chain_skill_name(name: str) -> bool:
+    """True when a skill name is mostly auto-learned tool ids joined by hyphens.
+
+    Names are often slugified (``file_read`` → ``file-read``), so matching is
+    greedy on hyphen-normalized tool ids rather than raw underscore segments.
+    """
+    raw = (name or "").strip().lower().replace("_", "-").strip("-")
+    if not raw or "-" not in raw:
+        return False
+    tools = sorted(
+        {t.replace("_", "-") for t in _TOOL_CHAIN_SEGMENTS},
+        key=len,
+        reverse=True,
+    )
+    remaining = raw
+    found = 0
+    while remaining:
+        remaining = remaining.lstrip("-")
+        if not remaining:
+            break
+        matched = False
+        for t in tools:
+            if remaining == t or remaining.startswith(t + "-"):
+                found += 1
+                remaining = remaining[len(t) :]
+                matched = True
+                break
+        if not matched:
+            # Skip one unknown segment and continue
+            parts = remaining.split("-", 1)
+            remaining = parts[1] if len(parts) > 1 else ""
+    # Need ≥2 tool segments covering most of a multi-segment name
+    segs = [p for p in raw.split("-") if p]
+    return found >= 2 and found >= max(2, len(segs) // 2)
+
+
 class SkillRegistry:
     """Registry of loadable skills with ranking and progressive disclosure.
 
@@ -412,6 +508,25 @@ class SkillRegistry:
             # Hard-won slight preference when equally relevant
             if effort >= 0.62:
                 score += 0.03
+            # Auto-learned probation / tool-chain spam must not bury curated
+            # procedures on coding queries ("implement…", "write tests…").
+            # Meaningful hard-won skills with non-tool names stay competitive;
+            # tool-id chains (file-read-list-dir-…) always demote unless named.
+            if meta.get("auto_generated") and m.status != SkillStatus.ACTIVE:
+                name_l = (m.name or "").lower()
+                ql = (query or "").lower()
+                name_exact = bool(name_l and ql and (name_l in ql or ql in name_l))
+                desc_l = (m.description or "").lower()
+                auto_template = desc_l.startswith(
+                    "use when the user needs help with:"
+                )
+                chain = looks_like_tool_chain_skill_name(m.name) or auto_template
+                if not name_exact:
+                    if chain:
+                        # Tool-chain / template skills are catalog noise for task rank
+                        score -= 0.22
+                    elif effort < 0.62:
+                        score -= 0.14
             # Project-scoped skills: metadata.project_path or tag matching folder name
             if proj:
                 bound = str(meta.get("project_path") or meta.get("project") or "").lower()

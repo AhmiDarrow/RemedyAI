@@ -89,6 +89,55 @@ def test_match_skills_ranks_active_and_effort():
     assert names.index("unrelated") > 0 or "unrelated" not in names[:2]
 
 
+def test_match_skills_demotes_trivial_tool_chain_auto():
+    """Coding queries must surface curated procedures over auto tool-chain spam."""
+    from remedy.skills.registry import looks_like_tool_chain_skill_name
+
+    assert looks_like_tool_chain_skill_name("file_read-list_dir-repo_search")
+    assert looks_like_tool_chain_skill_name(
+        "file_read-file-read-list-dir-repo-search"
+    )
+    assert not looks_like_tool_chain_skill_name("change-safety")
+
+    reg = SkillRegistry()
+    reg.register(
+        _skill(
+            "write-tests",
+            status=SkillStatus.ACTIVE,
+            desc="Add focused unit tests for new or changed behavior",
+            tags=["testing", "coding"],
+        )
+    )
+    reg.register(
+        _skill(
+            "file_read-file-read-list-dir-repo-search",
+            status=SkillStatus.VALIDATED,
+            desc="Use when the user needs help with: file_read list_dir repo_search",
+            tags=["auto-generated", "learned", "probation"],
+            effort=0.66,  # even "hard-won" tool-chain names demote
+            auto=True,
+        )
+    )
+    reg.register(
+        _skill(
+            "bash_exec-file-read-file-write",
+            status=SkillStatus.VALIDATED,
+            desc="Use when the user needs help with: bash_exec file_read file_write",
+            tags=["auto-generated", "learned"],
+            effort=0.15,
+            auto=True,
+        )
+    )
+    ranked = reg.match_skills("write tests for file_edit multi-file fix", limit=5)
+    names = [s.manifest.name for s, _ in ranked]
+    assert names[0] == "write-tests"
+    # Tool-chain auto skills may appear later but not above curated
+    if "file_read-file-read-list-dir-repo-search" in names:
+        assert names.index("write-tests") < names.index(
+            "file_read-file-read-list-dir-repo-search"
+        )
+
+
 def test_skill_body_and_activation_telemetry():
     reg = SkillRegistry()
     reg.register(_skill("demo", status=SkillStatus.ACTIVE, desc="demo skill"))
@@ -151,14 +200,31 @@ def test_merge_same_name_skill(tmp_path: Path):
         TraceStep(3, "file_write", {}, "ok", True, 10),
         TraceStep(4, "bash_exec", {}, "ok", True, 10),
     ]
+    # First trace must clear trivial/diversity gates (3 unique tools + enough steps)
+    # so we use the hard path as the initial learn when the clean short path is rejected.
     t1 = ExecutionTrace(
         task_id=uuid4(),
         title="patch module",
-        steps=steps,
+        steps=hard_steps,
         overall_success=True,
         session_id="s1",
+        total_duration_ms=90_000,
     )
     s1 = loop.learn_from_trace(t1)
+    if s1 is None:
+        # Fallback: longer diverse clean path
+        long_clean = list(steps) + [
+            TraceStep(3, "repo_search", {}, "ok", True, 10),
+            TraceStep(4, "list_dir", {}, "ok", True, 10),
+        ]
+        t1 = ExecutionTrace(
+            task_id=uuid4(),
+            title="patch module carefully with review",
+            steps=long_clean,
+            overall_success=True,
+            session_id="s1",
+        )
+        s1 = loop.learn_from_trace(t1)
     assert s1 is not None
     name = s1.manifest.name
     n_before = reg.count

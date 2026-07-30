@@ -569,13 +569,43 @@ _AGENCY_TOOL_PROMISE_HARD = (
     "i will use tools",
     "calling skill",
     "skill_activate",
+    "calling file_edit",
+    "calling file_write",
+    "i'll call tools",
+    "i will call tools",
 )
 # Soft phrases: only on short stubs so full written reviews are not interrupted.
+# Include coding/long-task promises ("I'll implement…") — not only review.
 _AGENCY_TOOL_PROMISE_SOFT = (
     "let me review",
     "i'll review",
     "i will review",
     "dedicated procedure",
+    "let me implement",
+    "i'll implement",
+    "i will implement",
+    "let me fix",
+    "i'll fix",
+    "i will fix",
+    "let me edit",
+    "i'll edit",
+    "i will edit",
+    "let me apply",
+    "i'll apply",
+    "i will apply",
+    "let me write the test",
+    "i'll write the test",
+    "i will write the test",
+    "let me write tests",
+    "i'll write tests",
+    "i will write tests",
+    "i'll start coding",
+    "i will start coding",
+    "let me start coding",
+    "i'll patch",
+    "i will patch",
+    "working on the fix now",
+    "applying the change",
 )
 
 AGENCY_REARM_NUDGE = (
