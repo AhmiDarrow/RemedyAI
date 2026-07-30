@@ -196,6 +196,9 @@ _HARD_DANGEROUS_PATTERNS = [
     (r"remove-item\s+.*-recurse", "PowerShell recursive delete"),
     # Bare delete tools only when clearly recursive/forced — not every "del" substring in prose
     (r"(^|[\s;&|])(rm|del|erase)\s+(-[a-zA-Z]*[rf][a-zA-Z]*\s+)+", "Forced file deletion"),
+    # Encoded payloads hide intent (complement shell write jail)
+    (r"(?:^|[\s;&|])-(?:encodedcommand|enc|ec)\b", "PowerShell EncodedCommand"),
+    (r"\badd-type\b[^\n]*-typedefinition\b", "PowerShell Add-Type injection"),
 ]
 
 # Soft signals — used by callers that want ask-mode hints; not hard-blocked here
