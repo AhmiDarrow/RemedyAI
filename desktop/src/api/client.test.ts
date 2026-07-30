@@ -17,4 +17,9 @@ describe('formatApiErrorBody', () => {
   it('falls back for empty body', () => {
     expect(formatApiErrorBody(null, 'fallback')).toBe('fallback')
   })
+
+  it('falls back for empty object/array JSON bodies', () => {
+    expect(formatApiErrorBody({}, 'Service Unavailable')).toBe('Service Unavailable')
+    expect(formatApiErrorBody([], 'HTTP 500')).toBe('HTTP 500')
+  })
 })

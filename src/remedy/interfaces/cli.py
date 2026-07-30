@@ -71,7 +71,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # remedy memory search <query>
     mem = sub.add_parser("memory", help="Memory operations")
-    mem_sub = mem.add_subparsers(dest="memory_cmd")
+    mem_sub = mem.add_subparsers(dest="memory_cmd", required=True)
     mem_search = mem_sub.add_parser("search", help="Search memory")
     mem_search.add_argument("query", help="Search query")
     mem_search.add_argument("--limit", type=int, default=10)
@@ -98,7 +98,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # remedy user profile|facts
     user = sub.add_parser("user", help="User profile operations")
-    user_sub = user.add_subparsers(dest="user_cmd")
+    user_sub = user.add_subparsers(dest="user_cmd", required=True)
     user_sub.add_parser("show", help="Show user profile")
     user_facts = user_sub.add_parser("facts", help="Search user facts")
     user_facts.add_argument("query", nargs="?", default="")
@@ -106,13 +106,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     # remedy session start|end
     session = sub.add_parser("session", help="Session management")
-    session_sub = session.add_subparsers(dest="session_cmd")
+    session_sub = session.add_subparsers(dest="session_cmd", required=True)
     session_sub.add_parser("start", help="Start a new session")
     session_sub.add_parser("end", help="End current session")
 
     # remedy skill discover <path>
     skill = sub.add_parser("skill", help="Skill operations")
-    skill_sub = skill.add_subparsers(dest="skill_cmd")
+    skill_sub = skill.add_subparsers(dest="skill_cmd", required=True)
     skill_list = skill_sub.add_parser(
         "list",
         help="List registered skills (hides learned probation by default)",
@@ -150,7 +150,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # remedy tool list|search
     tool = sub.add_parser("tool", help="Tool operations")
-    tool_sub = tool.add_subparsers(dest="tool_cmd")
+    tool_sub = tool.add_subparsers(dest="tool_cmd", required=True)
     tool_sub.add_parser("list", help="List registered tools")
     tool_search = tool_sub.add_parser("search", help="Search tools")
     tool_search.add_argument("query", help="Search query")
@@ -170,7 +170,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # remedy learn reflect|refine|history|stats
     learn = sub.add_parser("learn", help="Learning loop operations")
-    learn_sub = learn.add_subparsers(dest="learn_cmd")
+    learn_sub = learn.add_subparsers(dest="learn_cmd", required=True)
     learn_reflect = learn_sub.add_parser("reflect", help="Reflect on a completed task")
     learn_reflect.add_argument("task_title", help="Task title to reflect on")
     learn_reflect.add_argument("--steps", dest="steps_json", default="[]", help="JSON trace steps")
@@ -186,7 +186,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # remedy handoff create ...
     handoff = sub.add_parser("handoff", help="Handoff note operations")
-    handoff_sub = handoff.add_subparsers(dest="handoff_cmd")
+    handoff_sub = handoff.add_subparsers(dest="handoff_cmd", required=True)
     ho_create = handoff_sub.add_parser("create", help="Create a handoff note")
     ho_create.add_argument("title", help="Note title")
     ho_create.add_argument("content", help="Note content")
@@ -201,7 +201,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # remedy migrate hermes <path>
     migrate = sub.add_parser("migrate", help="Migration operations")
-    migrate_sub = migrate.add_subparsers(dest="migrate_cmd")
+    migrate_sub = migrate.add_subparsers(dest="migrate_cmd", required=True)
     mig_h = migrate_sub.add_parser("hermes", help="Migrate from Hermes Agent")
     mig_h.add_argument("path", help="Path to Hermes skills directory")
     mig_h.add_argument("--no-copy", action="store_true")
@@ -211,7 +211,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # remedy gateway start|status|serve|channels
     gw = sub.add_parser("gateway", help="Gateway operations")
-    gw_sub = gw.add_subparsers(dest="gateway_cmd")
+    gw_sub = gw.add_subparsers(dest="gateway_cmd", required=True)
     gw_start = gw_sub.add_parser("start", help="Start the gateway daemon")
     gw_start.add_argument("--telegram-token", default="")
     gw_start.add_argument("--discord-token", default="")
@@ -223,7 +223,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # remedy config init|show|path
     config_cmd = sub.add_parser("config", help="Configuration management")
-    config_sub = config_cmd.add_subparsers(dest="config_cmd")
+    config_sub = config_cmd.add_subparsers(dest="config_cmd", required=True)
     config_sub.add_parser("init", help="Create default config file")
     config_sub.add_parser("show", help="Show current configuration")
     config_sub.add_parser("path", help="Show config file path")
@@ -282,7 +282,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # remedy auth login|logout|status xai
     auth_cmd = sub.add_parser("auth", help="Provider authentication (OAuth / API keys)")
-    auth_sub = auth_cmd.add_subparsers(dest="auth_cmd")
+    auth_sub = auth_cmd.add_subparsers(dest="auth_cmd", required=True)
     auth_login = auth_sub.add_parser("login", help="Sign in to a provider (device-code OAuth)")
     auth_login.add_argument(
         "provider",
@@ -372,7 +372,7 @@ def build_parser() -> argparse.ArgumentParser:
         "mcp",
         help="MCP host: expose local skills to external apps (stdio)",
     )
-    mcp_sub = mcp_cmd.add_subparsers(dest="mcp_cmd")
+    mcp_sub = mcp_cmd.add_subparsers(dest="mcp_cmd", required=True)
     mcp_sub.add_parser(
         "serve",
         help="Run MCP server on stdio (for any MCP-compatible client config)",
@@ -380,7 +380,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # remedy desktop
     desktop_cmd = sub.add_parser("desktop", help="Desktop app management")
-    desktop_sub = desktop_cmd.add_subparsers(dest="desktop_cmd")
+    desktop_sub = desktop_cmd.add_subparsers(dest="desktop_cmd", required=True)
     desktop_sub.add_parser("install", help="Install desktop Node dependencies")
     desktop_dev = desktop_sub.add_parser("dev", help="Start desktop dev server")
     desktop_dev.add_argument("--open", action="store_true", help="Open browser")
