@@ -224,11 +224,11 @@ _lock = threading.Lock()
 
 
 def get_machine_map(session_id: str | None = None) -> MachineMap:
+    from remedy.core.metabolism.session_registry import registry_get
+
     key = (session_id or "").strip() or "_default"
     with _lock:
-        if key not in _maps:
-            _maps[key] = MachineMap(session_id=key)
-        return _maps[key]
+        return registry_get(_maps, key, lambda: MachineMap(session_id=key))
 
 
 def reset_machine_map(session_id: str | None = None) -> None:

@@ -155,11 +155,13 @@ _lock = threading.Lock()
 
 
 def get_governor(session_id: str | None = None) -> QualityGovernor:
+    from remedy.core.metabolism.session_registry import registry_get
+
     key = (session_id or "").strip() or "_default"
     with _lock:
-        if key not in _govs:
-            _govs[key] = QualityGovernor(session_id=key)
-        return _govs[key]
+        return registry_get(
+            _govs, key, lambda: QualityGovernor(session_id=key)
+        )
 
 
 def reset_governor(session_id: str | None = None) -> None:

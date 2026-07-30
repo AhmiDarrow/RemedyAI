@@ -305,10 +305,19 @@ def classify_turn_tier(
         ):
             return TurnTier.L0_INSTANT
 
-    # L3 only when text is long enough for keywords (min ~6–8 chars)
+    # L3 only when text is long enough for keywords (min ~6–8 chars).
+    # Lazy-cache partition match so agency path never re-runs the same regex.
+    _partition: bool | None = None
+
+    def _partition_hit() -> bool:
+        nonlocal _partition
+        if _partition is None:
+            _partition = bool(n >= 10 and _L3_PARTITION.search(ut))
+        return _partition
+
     if n >= 6 and _L3_AUTONOMOUS.search(ut):
         return TurnTier.L3_DEEP
-    if n >= 10 and _L3_PARTITION.search(ut):
+    if _partition_hit():
         return TurnTier.L3_DEEP
 
     if plan_mode:
@@ -323,7 +332,7 @@ def classify_turn_tier(
         agency = bool(_L2_PATH.search(ut))
     if agency:
         # Nested L3 only when complex multi-step + partition language
-        if n >= 20 and _COMPLEX.search(ut) and _L3_PARTITION.search(ut):
+        if n >= 20 and _COMPLEX.search(ut) and _partition_hit():
             return TurnTier.L3_DEEP
         return TurnTier.L2_AGENCY
 

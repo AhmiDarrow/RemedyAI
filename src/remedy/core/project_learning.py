@@ -43,9 +43,11 @@ def project_id(project_path: str | None) -> str:
     return hashlib.sha256(resolved.encode("utf-8")).hexdigest()[:16]
 
 
-def _store_path() -> Path:
+def _store_path(*, create: bool = False) -> Path:
+    """Path to profiles.json. mkdir only on write — never on hot-path load."""
     d = _home() / "project_learning"
-    d.mkdir(parents=True, exist_ok=True)
+    if create:
+        d.mkdir(parents=True, exist_ok=True)
     return d / "profiles.json"
 
 
@@ -72,14 +74,45 @@ def profile_cache_stats() -> dict[str, int]:
         return {"hits": int(_profile_hit), "misses": int(_profile_miss)}
 
 
+def _stat_ns_size(path: Path) -> tuple[int, int] | None:
+    """Single stat syscall → (mtime_ns, size), or None if missing/unreadable."""
+    try:
+        st = path.stat()
+        mtime_ns = int(getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9)))
+        return mtime_ns, int(st.st_size)
+    except OSError:
+        return None
+
+
 def load_all() -> dict[str, Any]:
-    """Load all project profiles (mtime/size cache — safe across process turns)."""
+    """Load all project profiles (mtime/size cache — safe across process turns).
+
+    Hot path: one ``stat`` when cache is warm (no mkdir, no is_file + stat double).
+    """
     global _all_cache, _all_cache_path, _all_cache_mtime_ns, _all_cache_size
     global _profile_hit, _profile_miss
     with _lock:
-        path = _store_path()
+        # Fast path: re-stat cached path only (no mkdir / path rebuild thrash)
+        if _all_cache is not None and _all_cache_path is not None:
+            path = Path(_all_cache_path)
+            meta = _stat_ns_size(path)
+            if meta is not None:
+                mtime_ns, size = meta
+                if (
+                    _all_cache_mtime_ns == mtime_ns
+                    and _all_cache_size == size
+                ):
+                    _profile_hit += 1
+                    return _all_cache
+            elif _all_cache_mtime_ns is None and _all_cache_size is None:
+                # Cached empty (file absent) — still absent
+                _profile_hit += 1
+                return _all_cache
+
+        path = _store_path(create=False)
         path_s = str(path)
-        if not path.is_file():
+        meta = _stat_ns_size(path)
+        if meta is None:
             empty = {"version": 1, "projects": {}}
             _all_cache = empty
             _all_cache_path = path_s
@@ -87,13 +120,7 @@ def load_all() -> dict[str, Any]:
             _all_cache_size = None
             _profile_miss += 1
             return empty
-        try:
-            st = path.stat()
-            mtime_ns = int(getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9)))
-            size = int(st.st_size)
-        except OSError:
-            _profile_miss += 1
-            return {"version": 1, "projects": {}}
+        mtime_ns, size = meta
         if (
             _all_cache is not None
             and _all_cache_path == path_s
@@ -123,22 +150,21 @@ def load_all() -> dict[str, Any]:
 
 
 def save_all(data: dict[str, Any]) -> None:
-    path = _store_path()
+    path = _store_path(create=True)
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
     tmp.replace(path)
     # Keep cache coherent with what we just wrote
     global _all_cache, _all_cache_path, _all_cache_mtime_ns, _all_cache_size
     with _lock:
-        try:
-            st = path.stat()
+        meta = _stat_ns_size(path)
+        if meta is not None:
+            mtime_ns, size = meta
             _all_cache = data
             _all_cache_path = str(path)
-            _all_cache_mtime_ns = int(
-                getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9))
-            )
-            _all_cache_size = int(st.st_size)
-        except OSError:
+            _all_cache_mtime_ns = mtime_ns
+            _all_cache_size = size
+        else:
             _invalidate_all_cache()
 
 
