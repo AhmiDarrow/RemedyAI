@@ -4,6 +4,14 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Gauntlet: continuous security + perf loop (feature/computer-use)
+
+- Shell jail: pathless mutations only when cwd∈roots; bare `$var` paths; IEX/Start-Process/EncodedCommand/archive
+- Shadow: all batch paths; relative paths against work roots (not process CWD)
+- Evidence: slim→inject→mark order; ContextVar session id; delta order tests
+- L0 works without API key; early L0 skips harness; pairing fast-path; crystal hot_block cache
+- Export rate limit; identity HMAC; UI/partner preview scrub; navigate rejects URL userinfo
+
 ### Security/perf: metabolism hardening pass
 
 - Shared secret redaction (`metabolism/redact.py`) for ledger, IR, crystal, macros, UI tool args, partner-state previews
