@@ -95,11 +95,23 @@ async def build_turn_context(runtime: Any) -> str:
                     "not required. Prefer reversible writes; confirm destructive ops."
                 )
 
+    # Partner State dual streams (Phase D) — separate partner vs project budgets
+    with suppress(Exception):
+        from remedy.memory.partner_state import partner_context_blocks
+
+        for block in partner_context_blocks(runtime):
+            if block:
+                parts.append(block)
+
     # Session Brief (Memory Harness L2) when present on agent
     with suppress(Exception):
         from remedy.memory.harness.brief import brief_to_context_block
+        from remedy.memory.partner_state import ensure_partner_state
 
         brief = getattr(runtime, "_session_brief", None)
+        # Phase C: project epistemic graph → brief before inject
+        with suppress(Exception):
+            ensure_partner_state(runtime).apply_graph_to_brief(brief)
         block = brief_to_context_block(brief)
         if block:
             parts.append(block)

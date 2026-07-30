@@ -94,6 +94,18 @@ def _purge_runtime_state(session_id: str, runtime: Any) -> None:
         with _brief_registry_lock:
             _brief_registry.pop(sid, None)
 
+    # Partner State registry (subgoals / txns / graph) — drop this session only
+    with contextlib.suppress(Exception):
+        from remedy.memory.partner_state.state import _registry, _registry_lock
+
+        with _registry_lock:
+            _registry.pop(sid, None)
+        rt_sid = str(getattr(runtime, "_session_id", "") or "")
+        if rt_sid == sid and hasattr(runtime, "_partner_state"):
+            runtime._partner_state = None  # type: ignore[attr-defined]
+        if hasattr(runtime, "_prospective_session_fired") and rt_sid == sid:
+            runtime._prospective_session_fired = False
+
     # Turn scratch: only clear if this runtime is currently bound to *sid*
     # (never wipe another tab's in-flight turn buffers).
     with contextlib.suppress(Exception):

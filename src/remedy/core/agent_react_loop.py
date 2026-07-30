@@ -781,6 +781,18 @@ async def call_llm_stream(runtime, message: str,
                                         _TOOL_RESULT_CHAR_CAP or 0
                                     ),
                                 )
+                            with suppress(Exception):
+                                from remedy.memory.partner_state import (
+                                    ensure_partner_state,
+                                )
+                                from remedy.memory.partner_state.continuity import (
+                                    schedule_continuity_core,
+                                )
+
+                                ensure_partner_state(runtime).fire_prospectives(
+                                    "epoch_roll"
+                                )
+                                schedule_continuity_core(runtime, use_local=False)
                             messages.append(
                                 epoch_continue_message(
                                     epoch=epoch_index - 1,
