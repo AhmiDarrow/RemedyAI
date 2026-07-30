@@ -490,7 +490,7 @@ async def apply_settings_update(
     cfg = scrub_config_secrets(cfg)
     cfg["llm_api_key"] = ""
     cfg.pop("provider_keys", None)
-    _write_config(config_path, cfg)
+    _api_support._write_config(config_path, cfg)
 
     if isinstance(model_discovery_cache, dict):
         model_discovery_cache.clear()
