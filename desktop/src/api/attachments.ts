@@ -1,4 +1,4 @@
-import { getApiBase } from './client'
+import { formatApiErrorBody, getApiBase } from './client'
 import { isTauri, tauriInvoke, tauriListen } from './tauri'
 
 export interface AttachmentMeta {
@@ -60,12 +60,12 @@ async function postAttachmentJson(
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
-    const msg =
-      (body as { detail?: string; error?: string })?.detail
-      || (body as { error?: string })?.error
-      || res.statusText
-      || `Upload failed (${res.status})`
-    throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg))
+    throw new Error(
+      formatApiErrorBody(
+        body,
+        res.statusText || `Upload failed (${res.status})`,
+      ),
+    )
   }
 
   return (await res.json()) as AttachmentMeta

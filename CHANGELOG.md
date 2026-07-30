@@ -10,6 +10,19 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 - **Provider sanitize:** outbound scrub uses shared metabolism redaction (Anthropic/OpenRouter/HF/npm/Stripe/Google/JWT/PEM/DB URLs) so tool results match ledger fail-closed policy
 - **Time travel restore:** refuse auth/undo paths; skip incomplete (oversized) prior bodies so truncation stubs never rewrite source; API passes `message_id` + timestamp fallback
 - **Nanoswarm session residual:** `goal.clear_session` + purge pattern/goal on session delete/reset via `get_swarm` (not only rare runtime attrs)
+- **Session cascade wipe:** DELETE session + full reset purge attachments, plans, checkpoints, and undo JSONL so chat delete cannot leave prior file bodies on disk
+- **Computer shot TTL:** desktop PNGs age out via `purge_old` / `purge_old_shots` (S-COMP-02); opportunistic sweep after screenshot capture
+- **Multi-tab job cancel:** `ComputerJob` stamps `session_id`; abort/cancel only that session’s host jobs so concurrent tabs no longer clobber sibling browser work
+- **Plan native arrays + session jail:** `plan_save` accepts native steps/risks arrays; `plan_show`/`step` block cross-session `plan_id`; attachment path jail is session-scoped when `session_id` is set
+- **Spread abort + web_search:** `spread_run` cancels remaining waves on turn abort; register `web_search` (DDG HTML + SSRF pin) so plan mode/skills stop missing the tool
+- **Batch recovery quality:** soft tool errors / gather exceptions advance fail streaks + recovery telemetry; recovery nudges emit metrics + quality
+- **Messenger token redact:** expand scrub shapes (xapp, Discord, Matrix, Bearer); packaged `skill_run` requires `scripts/`, redacts stdout, and is counted
+- **Agency metrics API:** `/api/metrics` gains agency rollup
+- **Time-travel message_count:** soft-delete (`revert_from`/`revert_message`) resyncs `chat_sessions.message_count` from non-reverted rows; cut on `(created_at, rowid)` so same-second bursts roll back from the chosen message
+- **Vision decode model cache:** cache keys include `model_id` + `base_url` so decoder switches do not replay stale briefs
+- **Desktop stream HTTP errors:** `formatApiErrorBody` flattens FastAPI validation arrays (not `[object Object]`); empty `{}` bodies fall back to status text; skills import/export + attachment upload share the same flattener
+- **Stop & retry provider bind:** stop/retry and promote-queued preserve per-session provider for multi-tab multi-provider
+- **Bare CLI group help:** `session`/`skill`/`memory`/… without a subcommand print usage instead of silent no-op (`settings`/`computer` still default show/status)
 - **Shell write jail + auth path:** mutations into `~/.remedy/auth/**` / `$REMEDY_HOME/auth/**` refused even when home write roots contain the profile (parity with `resolve_under_roots`); regression covers home-scope Set-Content + relative auth walks
 - **SSRF redirect re-validation regression:** `_pinned_fetch` 302 Location to loopback/metadata/userinfo fails closed (`SSRF_BLOCKED_REDIRECT` / `URL_USERINFO_BLOCKED`)
 - **Desktop stream abort UX:** cooperative `event:aborted` completes jobs as `aborted` (not done); Stop/interrupt commit job paint with `_[Stopped]_`; `uiCommitted` prevents double-bubble race; skip listMessages wipe after abort
@@ -64,7 +77,7 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 - Hot path: Action IR steps cap 96; CUA macros `MAX_CUA_MACROS=64` verified; evidence units 240/lean 64 + seen_fps bound; L0 skips full organ snapshots; intent router cache; hot-path debug gated on operator DEBUG
 - Hot path: time crystal `MAX_CRYSTAL_FACTS=128` + hot_block rev on hit; skill genome `MAX_PHENOTYPES=128` prune; governor `MAX_GOVERNOR_DECISIONS=40` named; L0 begin_turn skips map/crystal/gov warm; L3 false-positive fixes (`go over` / `step away from` / `review all options` / conceptual compare)
 - Hot path: partner memory `MAX_HOT_FACTS=12` / `MAX_HOT_TRAITS=8`; UI `@@tool_result` preview `UI_TOOL_RESULT_PREVIEW_CHARS=8k` (was 500k); drop epoch-roll double `slim_messages_mid_turn`; snapshot reuses send_policy `turn_tier` (no second classify for force_spread)
-- Docs: README pytest count ~1273
+- Docs: README pytest count ~1339 (collect-only)
 - Gateway: `gateway serve` installs local API token; Teams JWT `aud`/`exp` fail-closed; secret cache `mtime_ns`+size; generic webhook 503 without secret
 - Plan mode: exclude `computer_act`; CUA mutations go through Ask approvals; skill learning path jail; MCP env scrub; zip rejects symlinks
 - **Plan mode:** drop `computer_act` (and keep allowlist = research tools ∪ `COMPUTER_PLAN_MODE_TOOLS` only — no click/type/app)
