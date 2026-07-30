@@ -496,10 +496,14 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
             content_str = content_str.split(marker, 1)[0].strip()
             if len(content_str) > 2000:
                 content_str = content_str[:2000] + "\n…[image already sent to user]"
-        # Full raw dump for UI process trace (Full mode).
-        # Keep a hard ceiling only so multi‑MB binary dumps cannot freeze SSE.
+        # UI process-trace preview (Full mode). Model still receives full content
+        # below — only the SSE/UI surface is redacted + capped.
         ui_trace_cap = 500_000
         preview = content_str
+        with suppress(Exception):
+            from remedy.core.metabolism.redact import redact_text
+
+            preview = redact_text(preview)
         if len(preview) > ui_trace_cap:
             preview = (
                 preview[:ui_trace_cap]

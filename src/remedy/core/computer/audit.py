@@ -30,13 +30,22 @@ def log_computer_action(
     home_dir: Path | str | None = None,
 ) -> None:
     try:
+        safe_detail: dict[str, Any] = dict(detail or {})
+        try:
+            from remedy.core.metabolism.redact import redact_obj
+
+            red = redact_obj(safe_detail)
+            safe_detail = red if isinstance(red, dict) else {"_redacted": True}
+        except Exception:
+            # Fail closed: never write unredacted detail if scrub fails
+            safe_detail = {}
         rec = {
             "ts": datetime.now(UTC).isoformat(),
             "action": action,
             "target": target,
             "ok": ok,
             "session_id": session_id,
-            "detail": detail or {},
+            "detail": safe_detail,
         }
         path = audit_path(home_dir)
         with path.open("a", encoding="utf-8") as f:

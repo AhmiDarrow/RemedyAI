@@ -36,8 +36,15 @@ def _web_enabled(runtime: Any) -> bool:
 
 
 def _ip_is_blocked(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """Refuse non-globally-routable addresses (fail closed).
+
+    Uses ``not is_global`` so CGNAT (100.64/10), documentation, benchmark,
+    and other non-public ranges are blocked even when ``is_private`` is False.
+    Also keeps explicit private/loopback/link-local/reserved checks for clarity.
+    """
     return bool(
-        ip.is_private
+        (not ip.is_global)
+        or ip.is_private
         or ip.is_loopback
         or ip.is_link_local
         or ip.is_reserved
@@ -148,6 +155,9 @@ def _pinned_fetch(url: str, *, max_chars: int, timeout: float = 25.0) -> tuple[s
         if not current.startswith(("http://", "https://")):
             raise ValueError("url must start with http:// or https://")
         parsed = urlparse(current)
+        # Block credentials in URL userinfo (user:pass@host) — never send them
+        if parsed.username is not None or parsed.password is not None:
+            raise ValueError("URL_USERINFO_BLOCKED")
         host = (parsed.hostname or "").strip()
         if not host:
             raise ValueError("URL missing hostname")
@@ -200,7 +210,10 @@ def _pinned_fetch(url: str, *, max_chars: int, timeout: float = 25.0) -> tuple[s
                     raise ValueError(f"HTTP {status} redirect without Location")
                 next_url = urljoin(current, loc)
                 # Re-validate next hop before following (including private targets)
-                next_host = urlparse(next_url).hostname or ""
+                next_parsed = urlparse(next_url)
+                if next_parsed.username is not None or next_parsed.password is not None:
+                    raise ValueError("URL_USERINFO_BLOCKED")
+                next_host = next_parsed.hostname or ""
                 if _host_is_blocked(next_host) or not _resolve_public_ips(next_host):
                     raise ValueError("SSRF_BLOCKED_REDIRECT")
                 current = next_url
@@ -254,6 +267,13 @@ def register_web_tools(runtime: Any) -> None:
             final_url, raw, charset = _pinned_fetch(u, max_chars=cap, timeout=25.0)
         except ValueError as e:
             msg = str(e)
+            if "USERINFO" in msg:
+                return format_tool_error(
+                    "Refused: URLs must not include user:password@ credentials.",
+                    code="URL_USERINFO_BLOCKED",
+                    tool_name="web_fetch",
+                    suggestion="Pass a plain https URL without embedded credentials.",
+                )
             if "SSRF" in msg:
                 return format_tool_error(
                     "Refused: private/localhost/metadata URLs are blocked (SSRF protection).",

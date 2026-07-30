@@ -10,6 +10,35 @@ from remedy.memory.harness.pruner import prune_messages_for_send
 from remedy.memory.partner_state.state import PartnerState, ensure_partner_state
 
 
+def test_scrub_preview_redacts_secrets():
+    from remedy.memory.partner_state.state import _scrub_preview
+
+    raw = "ok api_key=sk-abcdefghijklmnopqrstuvwxyz0123 done"
+    out = _scrub_preview(raw, limit=240)
+    assert "sk-abcdefghijklmnopqrstuvwxyz0123" not in out
+    assert "[redacted]" in out
+
+
+def test_scrub_preview_fail_closed_on_redact_error(monkeypatch):
+    import remedy.memory.partner_state.state as ps
+
+    def boom(_text: str) -> str:
+        raise RuntimeError("redact broken")
+
+    monkeypatch.setattr(
+        "remedy.core.metabolism.redact.redact_text",
+        boom,
+        raising=False,
+    )
+    # Import path inside _scrub_preview — patch module after import
+    import remedy.core.metabolism.redact as redact_mod
+
+    monkeypatch.setattr(redact_mod, "redact_text", boom)
+    out = ps._scrub_preview("api_key=sk-abcdefghijklmnopqrstuvwxyz0123", limit=80)
+    assert out == "[redacted]"
+    assert "sk-" not in out
+
+
 def test_subgoal_protects_tool_results():
     st = PartnerState(session_id="sg-test")
     sg = st.open_subgoal("Implement write jail")
