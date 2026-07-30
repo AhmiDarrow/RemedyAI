@@ -36,24 +36,45 @@ def _get_root_version() -> str:
 
 
 def sync_versions() -> str:
+    """Stamp desktop manifests from pyproject (package.json, lock, tauri, cargo).
+
+    package-lock root version was previously left stale — npm tooling and
+    release check scripts then disagree with the sidecar PE version.
+    """
     v = _get_root_version()
     changes = []
 
     pkg_json = ROOT / "desktop" / "package.json"
     if pkg_json.exists():
         pkg = json.loads(pkg_json.read_text(encoding="utf-8"))
-        if pkg.get("version") != v:
+        old = pkg.get("version")
+        if old != v:
             pkg["version"] = v
             pkg_json.write_text(json.dumps(pkg, indent=2) + "\n", encoding="utf-8")
-            changes.append(f"package.json: {pkg.get('version')} -> {v}")
+            changes.append(f"package.json: {old} -> {v}")
+
+    pkg_lock = ROOT / "desktop" / "package-lock.json"
+    if pkg_lock.exists():
+        lock = json.loads(pkg_lock.read_text(encoding="utf-8"))
+        old_lock = lock.get("version")
+        packages = lock.get("packages")
+        root_pkg = packages.get("") if isinstance(packages, dict) else None
+        old_root = root_pkg.get("version") if isinstance(root_pkg, dict) else None
+        if old_lock != v or old_root != v:
+            lock["version"] = v
+            if isinstance(packages, dict) and isinstance(packages.get(""), dict):
+                packages[""]["version"] = v
+            pkg_lock.write_text(json.dumps(lock, indent=2) + "\n", encoding="utf-8")
+            changes.append(f"package-lock.json: {old_lock} -> {v}")
 
     tauri_conf = ROOT / "desktop" / "src-tauri" / "tauri.conf.json"
     if tauri_conf.exists():
         conf = json.loads(tauri_conf.read_text(encoding="utf-8"))
-        if conf.get("version") != v:
+        old = conf.get("version")
+        if old != v:
             conf["version"] = v
             tauri_conf.write_text(json.dumps(conf, indent=2) + "\n", encoding="utf-8")
-            changes.append(f"tauri.conf.json: {conf.get('version')} -> {v}")
+            changes.append(f"tauri.conf.json: {old} -> {v}")
 
     cargo_toml = ROOT / "desktop" / "src-tauri" / "Cargo.toml"
     if cargo_toml.exists():
@@ -358,7 +379,9 @@ if __name__ == "__main__":
         "--stage", action="store_true", help="Copy final installer to dist/ dir"
     )
     p.add_argument(
-        "--ci", action="store_true", help="CI mode — skip version sync and interactive prompts"
+        "--ci",
+        action="store_true",
+        help="CI mode — require REMEDY_RELEASE_VERSION match when set; still syncs versions",
     )
     args = p.parse_args()
 

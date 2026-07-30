@@ -52,4 +52,35 @@ describe('browserBookmarks', () => {
     expect(addBookmark('javascript:alert(1)')).toHaveLength(0)
     expect(addBookmark('not a url')).toHaveLength(0)
   })
+
+  it('refuses to persist bookmarks with URL userinfo credentials', () => {
+    expect(addBookmark('https://alice:secret@example.com/a')).toHaveLength(0)
+    expect(isBookmarked('https://alice:secret@example.com/a')).toBe(false)
+    // Legitimate host still works
+    addBookmark('https://example.com/safe')
+    expect(isBookmarked('https://example.com/safe')).toBe(true)
+  })
+
+  it('drops poisoned localStorage entries that carry userinfo', () => {
+    localStorage.setItem(
+      'remedy.browserBookmarks.v1',
+      JSON.stringify([
+        {
+          id: 'bad',
+          title: 'leak',
+          url: 'https://user:pass@evil.example/',
+          createdAt: 1,
+        },
+        {
+          id: 'good',
+          title: 'ok',
+          url: 'https://example.com/',
+          createdAt: 2,
+        },
+      ]),
+    )
+    const list = loadBookmarks()
+    expect(list).toHaveLength(1)
+    expect(list[0]!.url).toBe('https://example.com/')
+  })
 })

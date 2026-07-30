@@ -37,6 +37,11 @@ export function normalizeBrowserUrl(raw: string): string {
   try {
     const parsed = new URL(u)
     if (!parsed.hostname || /\s/.test(parsed.hostname)) return ''
+    // Never keep credentials in browser URLs (bookmarks / iframe / external open).
+    if (parsed.username !== '' || parsed.password !== '') return ''
+    // Empty userinfo (https://@host): URL API clears username but '@' remains in authority.
+    const authMatch = u.match(/^https?:\/\/([^/?#]*)/i)
+    if (authMatch && authMatch[1]!.includes('@')) return ''
   } catch {
     return ''
   }
