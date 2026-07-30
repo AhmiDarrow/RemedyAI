@@ -114,6 +114,49 @@ async def test_tool_result_ui_preview_redacts_secrets() -> None:
 
 
 @pytest.mark.asyncio
+async def test_tool_result_ui_preview_char_cap() -> None:
+    """UI preview is hard-capped; model tool content keeps the fat body."""
+    from remedy.core.agent_tool_batch import UI_TOOL_RESULT_PREVIEW_CHARS
+
+    assert UI_TOOL_RESULT_PREVIEW_CHARS == 8_000
+    rt = BasicRuntime(AgentConfig(llm_api_key=""))
+    rt._turn_tier = 2  # L2 model cap 12k > UI 8k
+    fat = "x" * 40_000
+
+    async def huge(**_kwargs):
+        return fat
+
+    rt.tool_registry.register_builtin_handler(
+        "file_read",
+        "read",
+        huge,
+        parameters={"type": "object", "properties": {"path": {"type": "string"}}},
+    )
+    calls = [
+        {
+            "id": "fat1",
+            "type": "function",
+            "function": {"name": "file_read", "arguments": '{"path":"big"}'},
+        },
+    ]
+    ui_events: list[str] = []
+    tool_msgs: list[dict] = []
+    async for event, msg in execute_tool_calls(
+        rt, calls, seen_fps=set(), result_cache={}
+    ):
+        if event.startswith("@@tool_result:"):
+            ui_events.append(event)
+        if msg.get("role") == "tool":
+            tool_msgs.append(msg)
+    assert ui_events
+    payload = json.loads(ui_events[0].split(":", 1)[1])
+    assert len(payload["preview"]) <= UI_TOOL_RESULT_PREVIEW_CHARS + 80
+    assert "UI safety cap" in payload["preview"]
+    # Model path keeps the larger tier/safety body — not the tiny UI preview
+    assert len(tool_msgs[0]["content"]) > UI_TOOL_RESULT_PREVIEW_CHARS
+
+
+@pytest.mark.asyncio
 async def test_execute_tool_calls_records_turn_steps() -> None:
     rt = BasicRuntime(AgentConfig(llm_api_key=""))
     rt._turn_tool_steps = []

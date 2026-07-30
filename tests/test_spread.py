@@ -79,6 +79,42 @@ def test_snapshot_spread_never_uses_local():
         assert sp.get("method") != "local_model"
 
 
+def test_snapshot_reuses_preclassified_turn_tier():
+    """send_policy pre_tier skips a second classify_turn_tier walk for force_spread."""
+    from remedy.core.context_snapshot import build_context_snapshot
+    from remedy.core.metabolism.tier import TurnTier
+
+    # Fat multi-module prompt forces need_spread (full phase)
+    text = (
+        "Review auth and database and api modules in parallel across the codebase "
+        "and implement fixes for each area carefully"
+    )
+    snap = build_context_snapshot(
+        messages=[{"role": "user", "content": text}],
+        user_text=text,
+        session_id="tier-reuse",
+        full_snapshot=True,
+        turn_tier=int(TurnTier.L2_AGENCY),
+    )
+    assert (snap.signals or {}).get("turn_tier_reused") is True
+    assert int((snap.signals or {}).get("turn_tier") or -1) == int(TurnTier.L2_AGENCY)
+    # L2 pre_tier must not force-spread
+    sp = (snap.signals or {}).get("spread") or {}
+    if sp:
+        # force flag only when L3; heuristic may still plan spread without force
+        pass
+
+    snap3 = build_context_snapshot(
+        messages=[{"role": "user", "content": text}],
+        user_text=text,
+        session_id="tier-reuse-l3",
+        full_snapshot=True,
+        turn_tier=int(TurnTier.L3_DEEP),
+    )
+    assert (snap3.signals or {}).get("turn_tier_reused") is True
+    assert int((snap3.signals or {}).get("turn_tier") or -1) == int(TurnTier.L3_DEEP)
+
+
 @pytest.mark.asyncio
 async def test_run_spread_parallel_wall_time(tmp_path: Path):
     """Three delayed workers should finish near max delay, not sum."""

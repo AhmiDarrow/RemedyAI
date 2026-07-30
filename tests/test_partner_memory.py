@@ -8,6 +8,8 @@ import pytest
 
 from remedy.memory.partner_memory import (
     DEFAULT_MAX_CHARS,
+    MAX_HOT_FACTS,
+    MAX_HOT_TRAITS,
     MIN_INJECT_CONFIDENCE,
     build_partner_memory_block,
     distill_user_text,
@@ -88,6 +90,35 @@ def test_inject_budget_cap():
     assert block
     assert len(block) <= DEFAULT_MAX_CHARS + 80  # header + address line slack
     assert "Partner memory" in block
+
+
+def test_hot_block_fact_and_trait_caps():
+    """Hot inject ranks at most MAX_HOT_FACTS / MAX_HOT_TRAITS items."""
+    from remedy.memory.profile import UserTrait
+
+    assert MAX_HOT_FACTS == 12
+    assert MAX_HOT_TRAITS == 8
+    profile = UserProfile()
+    for i in range(30):
+        profile.facts.append(
+            UserFact(
+                fact=f"Durable fact {i:02d} about preferred toolchain option {i}",
+                category="preference",
+                confidence=0.95,
+            )
+        )
+    profile.traits = {
+        f"trait_{i}": UserTrait(key=f"trait_{i}", value=f"v{i}", confidence=0.9)
+        for i in range(30)
+    }
+    # Generous char budget so item caps (not max_chars) bind first
+    block = build_partner_memory_block(profile, max_chars=50_000)
+    assert block
+    body = [ln for ln in block.splitlines() if ln.startswith("- ")]
+    trait_lines = [ln for ln in body if any(f"trait_{i}:" in ln for i in range(30))]
+    fact_lines = [ln for ln in body if "(preference)" in ln]
+    assert len(trait_lines) <= MAX_HOT_TRAITS
+    assert len(fact_lines) <= MAX_HOT_FACTS
 
 
 def test_low_confidence_not_injected():
