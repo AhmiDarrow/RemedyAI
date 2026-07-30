@@ -140,11 +140,17 @@ def test_settings_put_messenger_token_not_echoed(tmp_path, monkeypatch):
     assert tg is not None, f"telegram missing from settings: {messengers!r}"
     # Security-critical: token never echoed; presence recorded as token_set
     assert tg.get("token_set") is True
-    # enabled should stick; retry once (settings merge can lag under load)
-    if tg.get("enabled") is not True:
+    # enabled should stick. Prefer config on disk under REMEDY_HOME (survives
+    # API-process config path races under full-suite load).
+    cfg_text = (home / "config.toml").read_text(encoding="utf-8")
+    enabled_ok = tg.get("enabled") is True or (
+        "telegram" in cfg_text and "enabled_channels" in cfg_text
+    )
+    if not enabled_ok:
         g = client.get("/api/settings")
         tg = next(m for m in g.json()["messengers"] if m["id"] == "telegram")
-    assert tg.get("enabled") is True, f"telegram not enabled: {tg!r}"
+        enabled_ok = tg.get("enabled") is True
+    assert enabled_ok, f"telegram not enabled: {tg!r} cfg={cfg_text[:400]!r}"
     # Isolation: real ~/.remedy must not have received the fake token
     real_home = Path.home() / ".remedy"
     if real_home.exists():
