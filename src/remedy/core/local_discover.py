@@ -171,26 +171,49 @@ def port_open(host: str, port: int, timeout: float = 0.3) -> bool:
 
 
 def http_get_json(url: str, timeout: float = 2.5) -> Any | None:
+    """GET JSON from a **loopback** URL only (SSRF guard for local discover)."""
+    from remedy.core.security import is_loopback_service_url
+
+    raw = (url or "").strip()
+    if not raw or not is_loopback_service_url(raw):
+        return None
     req = urllib.request.Request(
-        url,
+        raw,
         headers={"Accept": "application/json", "User-Agent": "Remedy-LocalDiscover/1.0"},
         method="GET",
     )
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            raw = resp.read()
-            if not raw:
+            raw_body = resp.read()
+            if not raw_body:
                 return {"_empty": True, "status": getattr(resp, "status", 200)}
             try:
-                return json.loads(raw.decode("utf-8"))
+                return json.loads(raw_body.decode("utf-8"))
             except json.JSONDecodeError:
-                return {"_text": raw[:200].decode("utf-8", errors="replace")}
+                return {"_text": raw_body[:200].decode("utf-8", errors="replace")}
     except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError):
         return None
 
 
+def _loopback_hosts_only(hosts: list[str]) -> list[str]:
+    """Clamp skill/config hosts to loopback names (block LAN/metadata SSRF)."""
+    from remedy.core.security import is_loopback_service_url
+
+    out: list[str] = []
+    for h in hosts or []:
+        name = str(h or "").strip()
+        if not name:
+            continue
+        # Probe as http://host (port irrelevant for host check)
+        if is_loopback_service_url(f"http://{name}"):
+            out.append(name)
+    return out or ["127.0.0.1", "localhost"]
+
+
 def probe_http_service(spec: HttpServiceSpec) -> list[dict[str, Any]]:
-    """Return live endpoints matching the service spec."""
+    """Return live endpoints matching the service spec (loopback HTTP only)."""
+    from remedy.core.security import is_loopback_service_url
+
     cfg = _load_remedy_config()
     side = _side_json(spec.id)
     urls: list[str] = []
@@ -207,35 +230,41 @@ def probe_http_service(spec: HttpServiceSpec) -> list[dict[str, Any]]:
         if side.get(key):
             urls.append(str(side[key]).rstrip("/"))
 
-    for host in spec.hosts:
+    for host in _loopback_hosts_only(list(spec.hosts or [])):
         for port in spec.ports:
             urls.append(f"http://{host}:{port}")
 
     seen: set[str] = set()
     hits: list[dict[str, Any]] = []
     health = spec.path if spec.path.startswith("/") else f"/{spec.path}"
+    # Health path must stay relative (no scheme injection into full URL)
+    if "://" in health or health.startswith("//") or ".." in health:
+        health = "/"
     for base in urls:
         key = base.lower()
         if key in seen:
             continue
         seen.add(key)
+        check = base if "://" in base else f"http://{base}"
+        if not is_loopback_service_url(check):
+            continue
         # Fast TCP skip
         try:
             from urllib.parse import urlparse
 
-            u = urlparse(base if "://" in base else f"http://{base}")
+            u = urlparse(check)
             host = u.hostname or "127.0.0.1"
             port = u.port or 80
             if not port_open(host, port):
                 continue
         except Exception:
             pass
-        body = http_get_json(f"{base.rstrip('/')}{health}")
+        body = http_get_json(f"{check.rstrip('/')}{health}")
         if body is not None:
             hits.append(
                 {
                     "id": spec.id,
-                    "base_url": base.rstrip("/"),
+                    "base_url": check.rstrip("/"),
                     "health_path": health,
                     "ok": True,
                     "sample": body if not isinstance(body, dict) or len(json.dumps(body)) < 800 else {"_truncated": True},
