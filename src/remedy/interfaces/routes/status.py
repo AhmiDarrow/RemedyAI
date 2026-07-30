@@ -16,6 +16,54 @@ from remedy.interfaces.api_models import (
 logger = logging.getLogger(__name__)
 
 
+def _agency_metrics_rollup(snap: dict[str, Any]) -> dict[str, Any]:
+    """Sum labeled counters into a small trust/agency view for /api/metrics JSON."""
+    totals: dict[str, float] = {
+        "tool_calls": 0.0,
+        "tool_success": 0.0,
+        "tool_soft_errors": 0.0,
+        "tool_errors": 0.0,
+        "tool_batch_errors": 0.0,
+        "tool_batch_exceptions": 0.0,
+        "tool_recovery_nudges": 0.0,
+        "skill_activate_ok": 0.0,
+        "skill_auto_suggest": 0.0,
+        "skill_run_ok": 0.0,
+        "skill_run_error": 0.0,
+    }
+    name_map = {
+        "remedy_tool_calls_total": "tool_calls",
+        "remedy_tool_success_total": "tool_success",
+        "remedy_tool_soft_errors_total": "tool_soft_errors",
+        "remedy_tool_errors_total": "tool_errors",
+        "remedy_tool_batch_errors_total": "tool_batch_errors",
+        "remedy_tool_batch_exceptions_total": "tool_batch_exceptions",
+        "remedy_tool_recovery_nudge_total": "tool_recovery_nudges",
+        "remedy_skill_auto_suggest_inject_total": "skill_auto_suggest",
+    }
+    for c in snap.get("counters") or []:
+        if not isinstance(c, dict):
+            continue
+        name = str(c.get("name") or "")
+        val = float(c.get("value") or 0)
+        if name in name_map:
+            totals[name_map[name]] += val
+        elif name == "remedy_skill_activate_total":
+            labels = c.get("labels") or {}
+            if str(labels.get("status") or "") == "ok":
+                totals["skill_activate_ok"] += val
+            else:
+                totals["skill_activate_ok"] += val
+        elif name == "remedy_skill_run_total":
+            labels = c.get("labels") or {}
+            st = str(labels.get("status") or "")
+            if st == "ok":
+                totals["skill_run_ok"] += val
+            else:
+                totals["skill_run_error"] += val
+    return totals
+
+
 def register_status_routes(app: FastAPI, *, runtime=None, gateway=None, memory=None) -> None:
     """Register routes (closes over runtime/gateway/memory)."""
     # -- health / status -----------------------------------------------------
@@ -52,9 +100,13 @@ def register_status_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
             return Response(content=body, media_type="text/plain; version=0.0.4; charset=utf-8")
 
         health = await default_health.check()
+        snap = default_registry.snapshot()
+        # Compact agency/trust rollup for operators (recovery + skills).
+        agency = _agency_metrics_rollup(snap)
         return {
             "version": _remedy_version,
-            "metrics": default_registry.snapshot(),
+            "metrics": snap,
+            "agency": agency,
             "health": health,
             "lines": default_registry.describe(),
         }

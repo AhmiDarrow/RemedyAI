@@ -23,8 +23,17 @@ _SECRET_PATTERNS: list[re.Pattern[str]] = [
     # OpenAI / Anthropic / OpenRouter / xAI / GitHub / Slack / AWS-style
     re.compile(
         r"(?i)\b(sk-ant-|sk-or-|sk-proj-|sk-|xai-|ghp_|gho_|ghu_|ghs_|ghr_|"
-        r"xox[baprs]-|AKIA|ASIA)[A-Za-z0-9+/=_\-]{8,}"
+        r"xox[baprs]-|xapp-|AKIA|ASIA)[A-Za-z0-9+/=_\-]{8,}"
     ),
+    # Discord webhook token path + classic bot tokens (id.timestamp.hmac)
+    re.compile(
+        r"(?i)(https?://(?:canary\.|ptb\.)?discord(?:app)?\.com/api/webhooks/\d+/)([A-Za-z0-9_\-]+)"
+    ),
+    re.compile(
+        r"\b([A-Za-z0-9_\-]{20,40}\.[A-Za-z0-9_\-]{4,10}\.[A-Za-z0-9_\-]{20,})\b"
+    ),
+    # Matrix access tokens
+    re.compile(r"\bsyt_[A-Za-z0-9._\-]{16,}\b"),
     # Google API keys, HuggingFace, npm, Stripe
     re.compile(r"(?i)\bAIza[0-9A-Za-z\-_]{20,}"),
     re.compile(r"(?i)\bhf_[A-Za-z0-9]{20,}"),
@@ -98,11 +107,15 @@ def _needs_secret_scan(text: str) -> bool:
             "xai-",
             "ghp_",
             "xox",
+            "xapp",
             "akia",
             "aiza",
             "hf_",
             "npm_",
             "ya29",
+            "syt_",
+            "discord",
+            "webhook",
             "begin ",
             "mongo",
             "postgre",

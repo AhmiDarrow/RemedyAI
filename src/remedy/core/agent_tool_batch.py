@@ -175,7 +175,13 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
                 seen_fps.add(fp)
                 return content_str
 
-        async def _call() -> tuple[Any, str]:
+        async def _call() -> tuple[Any, str, bool]:
+            """Return (result, content, effective_ok).
+
+            Soft failures (Error-prefixed / structured tool errors) still return
+            data for the model, but count as failures for quality/metabolism so
+            stuck recovery and fail streaks fire.
+            """
             result = await runtime.call_tool(ToolCall(tool_name=name, arguments=args))
             if result.success:
                 payload = result.data
@@ -191,7 +197,14 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
                     tool_name=name or "unknown",
                     suggestion="Retry with corrected arguments or a different tool.",
                 )
-            return result, content_str
+            effective_ok = bool(result.success)
+            if effective_ok:
+                with suppress(Exception):
+                    from remedy.core.react_policy import tool_content_is_error
+
+                    if tool_content_is_error(content_str):
+                        effective_ok = False
+            return result, content_str, effective_ok
 
         # Shadow rehearsal (L2/L3 high-blast only) — never replaces write jail.
         # Resolve session quality once per tool (not per shadow/record path).
@@ -283,9 +296,9 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
         if lock_key:
             lock = path_locks.setdefault(lock_key, asyncio.Lock())
             async with lock:
-                result, content_str = await _call()
+                result, content_str, effective_ok = await _call()
         else:
-            result, content_str = await _call()
+            result, content_str, effective_ok = await _call()
 
         # Full tool results for the model (cap only if TOOL_RESULT_CHAR_CAP > 0).
         # Tier policy may further tighten (L0/L1 lean).
@@ -320,9 +333,9 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
                             k: (str(v)[:80] if not isinstance(v, (int, float, bool)) else v)
                             for k, v in list(args.items())[:12]
                         },
-                        "success": bool(result.success),
+                        "success": bool(effective_ok),
                         "result": (content_str or "")[:200],
-                        "error": None if result.success else (result.error or "failed"),
+                        "error": None if effective_ok else (result.error or "failed"),
                         "duration_ms": float(getattr(result, "duration_ms", 0) or 0),
                     }
                 )
@@ -336,7 +349,7 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
                 name=name or "unknown",
                 args=args if isinstance(args, dict) else {},
                 result=content_str or "",
-                success=bool(result.success),
+                success=bool(effective_ok),
                 tool_call_id=tc_id,
             )
         # Metabolism: evidence ledger + decision currency + action IR
@@ -351,7 +364,7 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
                 arguments=args if isinstance(args, dict) else {},
                 content=content_str or "",
                 tool_call_id=tc_id,
-                success=bool(result.success),
+                success=bool(effective_ok),
                 tier=int(getattr(runtime, "_turn_tier", 2) or 2),
                 action_ir=getattr(runtime, "_action_ir", None),
                 shadow_outcome=shadow_outcome,
@@ -364,17 +377,17 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
 
             sid = sid_tool or str(turn_session_id(runtime) or "")
             if sq_handle is not None:
-                sq_handle.record_tool_result(success=bool(result.success))
+                sq_handle.record_tool_result(success=bool(effective_ok))
             else:
                 from remedy.core.session_quality import get_session_quality
 
                 get_session_quality(sid).record_tool_result(
-                    success=bool(result.success)
+                    success=bool(effective_ok)
                 )
             get_swarm().dispatch(
                 SwarmEvent.tool_step(
                     name or "unknown",
-                    success=bool(result.success),
+                    success=bool(effective_ok),
                     duration_ms=float(getattr(result, "duration_ms", 0) or 0),
                     session_id=sid,
                 )
@@ -470,6 +483,38 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
                 )
                 result_cache[fp] = content_str
                 seen_fps.add(fp)
+                # Outer gather exceptions bypass _run_one telemetry — recover it.
+                with suppress(Exception):
+                    from remedy.core.metrics import default_registry
+
+                    default_registry.counter(
+                        "remedy_tool_batch_exceptions_total",
+                        tool=name or "unknown",
+                    ).inc()
+                with suppress(Exception):
+                    from remedy.core.session_quality import get_session_quality
+                    from remedy.core.turn_context import turn_session_id
+
+                    sid = str(turn_session_id(runtime) or "")
+                    get_session_quality(sid).record_tool_result(success=False)
+                with suppress(Exception):
+                    from remedy.core.metabolism.turn import after_tool_batch
+                    from remedy.core.turn_context import turn_session_id
+
+                    tc_ex = fp_to_tc[fp]
+                    after_tool_batch(
+                        session_id=str(turn_session_id(runtime) or ""),
+                        tool_name=name or "unknown",
+                        arguments={},
+                        content=content_str,
+                        tool_call_id=str(
+                            tc_ex.get("id") or tc_ex.get("tool_call_id") or ""
+                        ),
+                        success=False,
+                        tier=int(getattr(runtime, "_turn_tier", 2) or 2),
+                        action_ir=getattr(runtime, "_action_ir", None),
+                        shadow_outcome="pass",
+                    )
             # Success path already wrote result_cache inside _run_one.
             completed_jobs += 1
             done = completed_jobs >= total_jobs
