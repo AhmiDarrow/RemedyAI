@@ -92,12 +92,26 @@ export async function getTokenNanobotStatus() {
 }
 
 export async function exportUsageCsv(rangeDays = 30): Promise<string> {
-  const { ensureApiToken, authHeaders, getApiBase } = await import('./client')
+  const { ensureApiToken, authHeaders, formatApiErrorBody, getApiBase } =
+    await import('./client')
   await ensureApiToken()
   const r = await fetch(
     `${getApiBase()}/usage/export?range_days=${rangeDays}&format=csv`,
     { headers: { ...authHeaders(), Accept: 'text/csv' } },
   )
-  if (!r.ok) throw new Error(`Export failed (${r.status})`)
+  if (!r.ok) {
+    // Prefer JSON error bodies (FastAPI validation arrays); CSV failures may be text.
+    const ct = (r.headers.get('content-type') || '').toLowerCase()
+    if (ct.includes('application/json')) {
+      const body = await r.json().catch(() => ({}))
+      throw new Error(
+        formatApiErrorBody(body, r.statusText || `Export failed (${r.status})`),
+      )
+    }
+    const text = (await r.text().catch(() => '')).trim()
+    throw new Error(
+      text.slice(0, 240) || r.statusText || `Export failed (${r.status})`,
+    )
+  }
   return r.text()
 }
