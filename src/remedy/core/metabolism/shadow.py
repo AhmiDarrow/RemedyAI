@@ -33,6 +33,18 @@ _DESTRUCTIVE_SHELL = re.compile(
     r")\b"
 )
 
+# Opaque download / encoded payloads — high blast even if jail also catches them
+_OPAQUE_PAYLOAD_SHELL = re.compile(
+    r"(?ix)("
+    r"(?:^|[\s;|&])-(?:encodedcommand|enc|ec)\b"
+    r"|(?:powershell|pwsh)(?:\.exe)?(?:\s+[/\-\w]+)*\s+-e(?:\s|$|=)"
+    r"|\bfrombase64string\b"
+    r"|\bdownloadfile\b|\bdownloadstring\b"
+    r"|\bcertutil\b[^\n]*-(?:decode|urlcache)\b"
+    r"|\binvoke-expression\b|\biex\b"
+    r")"
+)
+
 
 @dataclass(frozen=True)
 class ShadowResult:
@@ -97,6 +109,13 @@ def rehearse(
             return ShadowResult(
                 "hard_block",
                 "destructive_shell_pattern",
+                "critical",
+                name,
+            )
+        if _OPAQUE_PAYLOAD_SHELL.search(cmd):
+            return ShadowResult(
+                "hard_block",
+                "opaque_payload_shell",
                 "critical",
                 name,
             )
