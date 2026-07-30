@@ -138,13 +138,13 @@ def _request(
     data: bytes | None = None,
     timeout: float = 30.0,
 ) -> Any:
-    from remedy.core.security import require_loopback_service_url
+    from remedy.core.security import require_loopback_service_url, urlopen_no_redirect
 
     # Fail closed: never open non-loopback bases (env poison / tool param SSRF).
     safe_base = require_loopback_service_url(base, context="comfyui base_url")
     # path must be relative (leading /); reject absolute/scheme injection
     rel = path if path.startswith("/") else f"/{path}"
-    if "://" in rel or rel.startswith("//"):
+    if "://" in rel or rel.startswith("//") or ".." in rel:
         raise RuntimeError(f"Invalid ComfyUI path: {path!r}")
     url = f"{safe_base}{rel}"
     headers = {"Accept": "application/json", "User-Agent": "Remedy-ComfyUI-Tool/1.0"}
@@ -152,11 +152,12 @@ def _request(
         headers["Content-Type"] = "application/json"
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            raw = resp.read()
+        # Never follow redirects — Location off-loopback is SSRF.
+        with urlopen_no_redirect(req, timeout=timeout) as resp:  # type: ignore[union-attr]
+            raw = resp.read()  # type: ignore[union-attr]
             if not raw:
                 return None
-            ctype = resp.headers.get("Content-Type", "")
+            ctype = resp.headers.get("Content-Type", "")  # type: ignore[union-attr]
             if "json" in ctype or raw[:1] in (b"{", b"["):
                 return json.loads(raw.decode("utf-8"))
             return raw

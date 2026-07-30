@@ -171,8 +171,12 @@ def port_open(host: str, port: int, timeout: float = 0.3) -> bool:
 
 
 def http_get_json(url: str, timeout: float = 2.5) -> Any | None:
-    """GET JSON from a **loopback** URL only (SSRF guard for local discover)."""
-    from remedy.core.security import is_loopback_service_url
+    """GET JSON from a **loopback** URL only (SSRF guard for local discover).
+
+    Does **not** follow HTTP redirects — a loopback service that returns
+    ``Location: http://169.254.169.254/...`` must not become an outbound SSRF.
+    """
+    from remedy.core.security import is_loopback_service_url, urlopen_no_redirect
 
     raw = (url or "").strip()
     if not raw or not is_loopback_service_url(raw):
@@ -183,8 +187,8 @@ def http_get_json(url: str, timeout: float = 2.5) -> Any | None:
         method="GET",
     )
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            raw_body = resp.read()
+        with urlopen_no_redirect(req, timeout=timeout) as resp:  # type: ignore[union-attr]
+            raw_body = resp.read()  # type: ignore[union-attr]
             if not raw_body:
                 return {"_empty": True, "status": getattr(resp, "status", 200)}
             try:

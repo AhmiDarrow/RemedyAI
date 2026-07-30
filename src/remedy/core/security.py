@@ -328,6 +328,48 @@ def require_loopback_service_url(url: str, *, context: str = "url") -> str:
     return cleaned
 
 
+class _NoHttpRedirectHandler:
+    """Lazy subclass of urllib.request.HTTPRedirectHandler — never follows Location.
+
+    Default ``urlopen`` will chase 3xx to cloud metadata / LAN if a loopback
+    service (or malicious local listener) returns an off-host redirect. Local
+    discover + ComfyUI clients must not follow any redirects.
+    """
+
+    _handler_cls: type | None = None
+    _opener = None
+
+    @classmethod
+    def _ensure(cls) -> None:
+        if cls._opener is not None:
+            return
+        import urllib.request
+
+        class _Handler(urllib.request.HTTPRedirectHandler):
+            def redirect_request(  # type: ignore[no-untyped-def]
+                self, req, fp, code, msg, headers, newurl
+            ):
+                return None
+
+        cls._handler_cls = _Handler
+        cls._opener = urllib.request.build_opener(_Handler)
+
+    @classmethod
+    def open(cls, req: object, *, timeout: float = 30.0) -> object:
+        cls._ensure()
+        assert cls._opener is not None
+        return cls._opener.open(req, timeout=timeout)  # type: ignore[no-any-return]
+
+
+def urlopen_no_redirect(req: object, *, timeout: float = 30.0) -> object:
+    """``urlopen`` that never follows HTTP redirects (SSRF hardening).
+
+    Use for loopback-only service clients after :func:`is_loopback_service_url`
+    / :func:`require_loopback_service_url` have already gated the *initial* URL.
+    """
+    return _NoHttpRedirectHandler.open(req, timeout=timeout)
+
+
 def sanitize_sql_identifier(name: str, max_len: int = 64) -> str:
     """Sanitize a string for use as a SQL identifier (table/column name)."""
     sanitized = re.sub(r"[^a-zA-Z0-9_]", "", name)

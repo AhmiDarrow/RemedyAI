@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from remedy.core.errors import SecurityError
 from remedy.core.mission import (
     Mission,
     MissionStore,
@@ -11,6 +12,7 @@ from remedy.core.mission import (
     create_mission,
     mission_summary,
 )
+from remedy.core.security import sanitize_mission_session_id, validate_mission_id
 
 
 def test_create_and_advance(tmp_path):
@@ -78,3 +80,65 @@ def test_mission_session_id_cannot_escape_pointer(tmp_path: Path) -> None:
         assert ".." not in p.name
     # Sanitized session_id dropped → only global latest.txt
     assert (tmp_path / "missions" / "latest.txt").is_file()
+
+
+def test_validate_mission_id_rejects_path_forms() -> None:
+    """Central id gate — UUID/prefix ok; path/null/short refuse."""
+    ok = validate_mission_id("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+    assert ok == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    assert validate_mission_id("abcd") == "abcd"
+    for bad in (
+        "",
+        "ab",
+        "../auth/token",
+        "..\\auth\\token",
+        "foo/bar",
+        "foo\\bar",
+        "/etc/passwd",
+        "a" * 80,
+        "null\x00byte",
+        "has space",
+        "foo.json",  # dot not allowed — blocks extension tricks
+        "sess..ion",
+    ):
+        with pytest.raises(SecurityError):
+            validate_mission_id(bad)
+
+
+def test_sanitize_mission_session_id_unit() -> None:
+    assert sanitize_mission_session_id("ok_session.1") == "ok_session.1"
+    assert sanitize_mission_session_id("../auth") is None
+    assert sanitize_mission_session_id("a/b") is None
+    assert sanitize_mission_session_id("a\\b") is None
+    assert sanitize_mission_session_id("has..dots") is None
+    assert sanitize_mission_session_id("") is None
+    assert sanitize_mission_session_id(None) is None
+    assert sanitize_mission_session_id("x" * 200) is None
+
+
+def test_mission_save_rejects_forged_traversal_id(tmp_path: Path) -> None:
+    store = MissionStore(tmp_path)
+    with pytest.raises(SecurityError):
+        store.save(Mission(id="../auth/local_api_token", goal="leak"))
+    # Nothing written outside missions/
+    assert not (tmp_path / "auth").exists()
+    # No traversal-named file under missions either
+    names = [p.name for p in (tmp_path / "missions").iterdir()] if (tmp_path / "missions").exists() else []
+    assert not any(".." in n or "auth" in n for n in names)
+
+
+def test_mission_poisoned_latest_pointer_ignored(tmp_path: Path) -> None:
+    """latest.txt content with path traversal must not load outside missions/."""
+    store = MissionStore(tmp_path)
+    create_mission("real", steps=["A"], home=tmp_path)
+    missions = tmp_path / "missions"
+    # Overwrite pointer with classic traversal / absolute
+    (missions / "latest.txt").write_text("../auth/local_api_token", encoding="utf-8")
+    assert store.latest() is None
+    (missions / "latest.txt").write_text("/etc/passwd", encoding="utf-8")
+    assert store.latest() is None
+    (missions / "latest.txt").write_text("..\\auth\\token", encoding="utf-8")
+    assert store.latest() is None
+    # Session pointer similarly ignored
+    (missions / "latest-ok_session.txt").write_text("../auth/x", encoding="utf-8")
+    assert store.latest(session_id="ok_session") is None
