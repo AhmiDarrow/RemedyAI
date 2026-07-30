@@ -324,3 +324,8 @@ def register_memory_tools(runtime: Any) -> None:
         {"type": "object", "properties": {}},
     )
 
+    # --- Partner State Machine (subgoals / txns / graph / prospective) ---
+    from remedy.core.agent_partner_tools import register_partner_state_tools
+
+    register_partner_state_tools(runtime)
+

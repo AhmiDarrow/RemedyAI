@@ -32,6 +32,7 @@ def prune_messages_for_send(
     model: str | None = None,
     collapse_completed_tools: bool = False,
     keep_recent_tool_pairs: int = 4,
+    protect_tool_call_ids: set[str] | frozenset[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Return a pruned *copy* of messages for the provider request.
 
@@ -44,9 +45,12 @@ def prune_messages_for_send(
       (keep last N assistant+tool pairs full; earlier tool bodies → short outcomes)
     - Optional token_budget: shrink older tool bodies until under budget
       (reserve_tokens held for Session Brief / reply headroom)
+    - protect_tool_call_ids: open-subgoal tool results stay full (Partner State A)
     """
     if not messages:
         return []
+
+    protect_ids = {str(x) for x in (protect_tool_call_ids or set()) if x}
 
     # First pass: only truncate when explicitly requested (max_tool_chars > 0)
     trimmed: list[dict[str, Any]] = []
@@ -54,10 +58,12 @@ def prune_messages_for_send(
         m = dict(msg)
         role = m.get("role")
         content = m.get("content")
+        tcid = str(m.get("tool_call_id") or "")
         if (
             max_tool_chars > 0
             and isinstance(content, str)
             and len(content) > max_tool_chars
+            and tcid not in protect_ids
         ):
             if role == "tool":
                 m["content"] = (
@@ -92,7 +98,9 @@ def prune_messages_for_send(
 
     if collapse_completed_tools:
         out = _collapse_old_tool_spans(
-            out, keep_recent_pairs=max(1, int(keep_recent_tool_pairs))
+            out,
+            keep_recent_pairs=max(1, int(keep_recent_tool_pairs)),
+            protect_tool_call_ids=protect_ids,
         )
 
     if token_budget is not None and token_budget > 0:
@@ -102,6 +110,7 @@ def prune_messages_for_send(
             provider=provider,
             model=model,
             keep_recent_tools=max(1, int(keep_recent_tool_pairs)),
+            protect_tool_call_ids=protect_ids,
         )
     return out
 
@@ -147,16 +156,23 @@ def _collapse_old_tool_spans(
     messages: list[dict[str, Any]],
     *,
     keep_recent_pairs: int = 4,
+    protect_tool_call_ids: set[str] | frozenset[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Structural prune: older tool results → short outcome lines; keep recent full.
 
     Preserves role/tool_call_id pairing so providers still accept the history.
+    Open-subgoal tool_call_ids (Partner State) are never collapsed.
     """
+    protect_ids = {str(x) for x in (protect_tool_call_ids or set()) if x}
     # Index of tool messages from oldest to newest
     tool_idxs = [i for i, m in enumerate(messages) if m.get("role") == "tool"]
-    if len(tool_idxs) <= keep_recent_pairs:
+    if len(tool_idxs) <= keep_recent_pairs and not protect_ids:
         return messages
-    protect = set(tool_idxs[-keep_recent_pairs:])
+    protect = set(tool_idxs[-keep_recent_pairs:]) if tool_idxs else set()
+    # Also protect by tool_call_id for open subgoals
+    for i, msg in enumerate(messages):
+        if msg.get("role") == "tool" and str(msg.get("tool_call_id") or "") in protect_ids:
+            protect.add(i)
     out: list[dict[str, Any]] = []
     for i, msg in enumerate(messages):
         if i in protect or msg.get("role") != "tool":
@@ -241,6 +257,7 @@ def _shrink_to_token_budget(
     provider: str | None = None,
     model: str | None = None,
     keep_recent_tools: int = 4,
+    protect_tool_call_ids: set[str] | frozenset[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Progressively cap older tool bodies until under budget.
 
@@ -307,6 +324,11 @@ def _shrink_to_token_budget(
         keep_n = max(keep_n, keep_recent_for_chain(msgs, keep_n))
     tool_idxs = [i for i, m in enumerate(msgs) if m.get("role") == "tool"]
     protect_tools = set(tool_idxs[-keep_n:]) if tool_idxs else set()
+    protect_ids = {str(x) for x in (protect_tool_call_ids or set()) if x}
+    if protect_ids:
+        for i, m in enumerate(msgs):
+            if m.get("role") == "tool" and str(m.get("tool_call_id") or "") in protect_ids:
+                protect_tools.add(i)
 
     # Phase 1: trim unprotected tools only
     if _apply_cap("tool", protect_tools, (8000, 4000, 2000, 800, 200)):

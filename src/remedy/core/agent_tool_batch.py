@@ -225,6 +225,19 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
                         "duration_ms": float(getattr(result, "duration_ms", 0) or 0),
                     }
                 )
+        # Partner State Phase B: tool transaction ledger + write-set
+        with suppress(Exception):
+            from remedy.memory.partner_state import record_tool_from_runtime
+
+            tc_id = str(tc.get("id") or tc.get("tool_call_id") or "")
+            record_tool_from_runtime(
+                runtime,
+                name=name or "unknown",
+                args=args if isinstance(args, dict) else {},
+                result=content_str or "",
+                success=bool(result.success),
+                tool_call_id=tc_id,
+            )
         # Background continuity: pattern observation + stuck signals
         with suppress(Exception):
             from remedy.core.agent_post_turn import schedule_mid_turn_warm
