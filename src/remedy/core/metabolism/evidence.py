@@ -78,6 +78,8 @@ class EvidenceLedger:
     evidence_units: int = 0  # count of EU admitted
     waste_tokens: int = 0  # tokens with 0 new EU
     last_model_eu_index: int = 0  # for delta since last model call
+    _persist_cursor: int = 0  # units already flushed to disk (avoid thrash)
+    _tool_batch_n: int = 0  # per-session throttle counter for metabolism writes
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def admit_tool_result(
@@ -184,7 +186,11 @@ class EvidenceLedger:
             }
 
     def persist_index(self, home: Path | str | None = None) -> Path | None:
-        """Write redacted index only (not full tool bodies). Fail soft."""
+        """Write redacted index only (not full tool bodies). Fail soft.
+
+        Appends only units not yet flushed (cursor-based) to avoid thrashing the
+        same JSONL rows on every end-turn when the ledger is quiet.
+        """
         try:
             root = Path(home).expanduser() if home else Path.home() / ".remedy"
             d = root / "evidence"
@@ -194,10 +200,21 @@ class EvidenceLedger:
             )[:48]
             path = d / f"{sid or 'default'}.jsonl"
             with self._lock:
-                # append last units only
+                start = max(0, int(self._persist_cursor or 0))
+                # If memory was capped, cursor may be ahead of list — resync
+                if start > len(self.units):
+                    start = 0
+                chunk = self.units[start:]
+                if not chunk:
+                    return path if path.is_file() else None
+                # Cap single flush (safety)
+                if len(chunk) > 40:
+                    chunk = chunk[-40:]
+                    start = len(self.units) - len(chunk)
                 with path.open("a", encoding="utf-8") as f:
-                    for u in self.units[-20:]:
+                    for u in chunk:
                         f.write(json.dumps(u.to_public(), ensure_ascii=False) + "\n")
+                self._persist_cursor = len(self.units)
             return path
         except Exception:
             return None
