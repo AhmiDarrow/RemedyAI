@@ -135,3 +135,97 @@ def test_llm_binding_contextvar_stack() -> None:
     reset_llm_binding(tok_b)
     assert get_llm_binding().provider == "xai"
     reset_llm_binding(tok_a)
+
+
+@pytest.mark.asyncio
+async def test_abort_one_session_leaves_other_streaming(runtime: BasicRuntime) -> None:
+    """Concurrent multi-provider: Stop on sess-a must not abort sess-b."""
+    from remedy.core.turn_context import abort_session, begin_turn, end_turn, is_turn_aborted
+
+    order: list[str] = []
+    both_started = asyncio.Event()
+    started = 0
+    hold_b = asyncio.Event()
+
+    async def fake_stream(*_a, **kwargs):
+        nonlocal started
+        sid = str(kwargs.get("session_id") or "")
+        started += 1
+        order.append(f"start-{sid}")
+        if started >= 2:
+            both_started.set()
+        # Stay in body until aborted (a) or released (b).
+        for _ in range(200):
+            if is_turn_aborted():
+                order.append(f"aborted-{sid}")
+                yield "@@aborted\n"
+                return
+            if sid == "sess-b" and hold_b.is_set():
+                break
+            await asyncio.sleep(0.01)
+        order.append(f"tok-{sid}")
+        yield "ok"
+
+    runtime._call_llm_stream = fake_stream  # type: ignore[method-assign]
+
+    async def run_a() -> None:
+        async for tok in runtime.stream_response("msg-a", session_id="sess-a"):
+            if isinstance(tok, str) and tok.startswith("@@aborted"):
+                order.append("got-abort-a")
+
+    async def run_b() -> None:
+        async for tok in runtime.stream_response("msg-b", session_id="sess-b"):
+            order.append(f"b-saw:{tok!r}" if not str(tok).startswith("@@") else "b-ctl")
+        order.append("done-b")
+
+    t_a = asyncio.create_task(run_a())
+    t_b = asyncio.create_task(run_b())
+    await asyncio.wait_for(both_started.wait(), timeout=2.0)
+    # Abort only A while B is mid-stream.
+    n = abort_session("sess-a")
+    assert n >= 1
+    await asyncio.wait_for(t_a, timeout=2.0)
+    assert "got-abort-a" in order or "aborted-sess-a" in order
+    # B still streaming — release and finish cleanly.
+    assert runtime.is_session_streaming("sess-b") or "done-b" not in order
+    hold_b.set()
+    await asyncio.wait_for(t_b, timeout=2.0)
+    assert "done-b" in order
+    assert "aborted-sess-b" not in order
+    assert "got-abort-a" in order or any(x.startswith("aborted-sess-a") for x in order)
+
+
+@pytest.mark.asyncio
+async def test_parallel_abort_registry_isolated() -> None:
+    """begin_turn registry: abort sess-1 never sets sess-2's event."""
+    from remedy.core.turn_context import (
+        abort_session,
+        begin_turn,
+        end_turn,
+        is_turn_aborted,
+    )
+
+    # Nested-style sequential ContextVars cannot both be current; use registry
+    # notify count + is_session_streaming instead of dual is_turn_aborted.
+    t1 = begin_turn("iso-1", project_raw=None, active_path=".")
+    try:
+        t2_tokens = None
+        # Register second session on a nested begin (overwrites ContextVar but
+        # keeps both abort Events in the registry).
+        t2_tokens = begin_turn("iso-2", project_raw=None, active_path=".")
+        try:
+            from remedy.core.turn_context import is_session_streaming
+
+            assert is_session_streaming("iso-1")
+            assert is_session_streaming("iso-2")
+            n = abort_session("iso-1")
+            assert n == 1
+            assert is_session_streaming("iso-1")  # event still registered until end_turn
+            assert is_session_streaming("iso-2")
+            # Current ContextVar is iso-2 — must NOT be aborted.
+            assert is_turn_aborted() is False
+        finally:
+            if t2_tokens is not None:
+                end_turn("iso-2", *t2_tokens)
+    finally:
+        end_turn("iso-1", *t1)
