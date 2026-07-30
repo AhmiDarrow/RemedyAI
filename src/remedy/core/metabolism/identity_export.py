@@ -74,6 +74,26 @@ def build_identity_payload(
 ) -> dict[str, Any]:
     """Assemble redacted portable payload (no secrets fields)."""
 
+    from remedy.core.metabolism.redact import looks_like_secret_text
+
+    _DROP_KEYS = frozenset(
+        {
+            "api_key",
+            "token",
+            "password",
+            "secret",
+            "refresh_token",
+            "access_token",
+            "client_secret",
+            "session_token",
+            "id_token",
+            "auth_token",
+            "private_key",
+            "bot_token",
+            "app_password",
+        }
+    )
+
     def scrub_list(items: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []
         for it in items or []:
@@ -82,20 +102,9 @@ def build_identity_payload(
             clean = {
                 k: v
                 for k, v in it.items()
-                if str(k).lower()
-                not in (
-                    "api_key",
-                    "token",
-                    "password",
-                    "secret",
-                    "refresh_token",
-                    "access_token",
-                    "client_secret",
-                )
+                if str(k).lower() not in _DROP_KEYS
             }
             # Drop values that look like secrets
-            from remedy.core.metabolism.redact import looks_like_secret_text
-
             text = json.dumps(clean, default=str)
             if looks_like_secret_text(text):
                 continue
