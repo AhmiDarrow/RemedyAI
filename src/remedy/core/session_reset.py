@@ -93,6 +93,7 @@ def purge_session_disk_artifacts(
         "attachments_purged": False,
         "undo_purged": False,
         "nanoswarm_cleared": False,
+        "usage_events_deleted": 0,
     }
     if not sid:
         return stats
@@ -105,6 +106,14 @@ def purge_session_disk_artifacts(
         stats["attachments_purged"] = _purge_attachments(sid, root)
     with contextlib.suppress(Exception):
         stats["undo_purged"] = _purge_undo(sid, root)
+    # Usage ledger rows tag session_id — drop so chat delete cannot leave
+    # token/cost traces after the conversation is gone (privacy cascade).
+    with contextlib.suppress(Exception):
+        from remedy.core.usage_ledger import delete_session_events
+
+        stats["usage_events_deleted"] = int(
+            delete_session_events(sid, home=root) or 0
+        )
     # Process-local nanoswarm residual (even when no runtime is wired on delete)
     with contextlib.suppress(Exception):
         from remedy.nanoswarm import get_swarm

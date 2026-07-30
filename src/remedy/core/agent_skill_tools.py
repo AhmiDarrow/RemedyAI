@@ -245,11 +245,12 @@ def register_skill_tools(runtime: Any) -> None:
             with suppress(Exception):
                 loop = runtime._get_learning_loop()
                 if loop is not None:
+                    _skill_sid = str(getattr(runtime, "_session_id", "") or "")
                     loop.record_skill_feedback(
                         nm,
                         success=ok,
                         duration_ms=float(result.duration_ms or 0),
-                        session_id=str(getattr(runtime, "_session_id", "") or ""),
+                        session_id=_skill_sid,
                         error=result.error,
                     )
                     loop.auto_refine_skill(sk)
@@ -262,9 +263,17 @@ def register_skill_tools(runtime: Any) -> None:
                                 nm,
                                 success=ok,
                                 duration_ms=float(result.duration_ms or 0),
+                                session_id=_skill_sid,
+                                error=result.error,
+                                # Feedback already recorded above — avoid double count.
+                                record_feedback=False,
+                                auto_refine=False,
                             ),
                             learning_loop=loop,
                             skill=sk,
+                            session_id=_skill_sid,
+                            record_feedback=False,
+                            auto_refine=False,
                         )
             with suppress(Exception):
                 from remedy.core.metabolism.skill_genome import get_skill_genome

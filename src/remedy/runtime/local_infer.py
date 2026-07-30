@@ -14,6 +14,11 @@ from urllib.request import Request
 logger = logging.getLogger(__name__)
 
 
+# Hard caps so a runaway ranker/router cannot flood llama-server with multi-MB prompts.
+_MAX_PROMPT_CHARS = 12_000
+_MAX_SYSTEM_CHARS = 2_000
+
+
 def local_text_complete(
     prompt: str,
     *,
@@ -33,14 +38,21 @@ def local_text_complete(
     if not is_loopback_service_url(base):
         return {"ok": False, "text": "", "error": "local base_url must be loopback"}
     url = base if base.endswith("/chat/completions") else f"{base}/chat/completions"
+    # Truncate (do not refuse) so classify/rerank still get a usable prefix.
+    prompt_s = str(prompt or "")
+    if len(prompt_s) > _MAX_PROMPT_CHARS:
+        prompt_s = prompt_s[:_MAX_PROMPT_CHARS] + "\n…[truncated]"
+    system_s = str(system).strip() if system else ""
+    if system_s and len(system_s) > _MAX_SYSTEM_CHARS:
+        system_s = system_s[:_MAX_SYSTEM_CHARS] + "…"
     messages: list[dict[str, str]] = []
-    if system:
-        messages.append({"role": "system", "content": system})
-    messages.append({"role": "user", "content": prompt})
+    if system_s:
+        messages.append({"role": "system", "content": system_s})
+    messages.append({"role": "user", "content": prompt_s})
     body = {
         "model": "local-qwen",
         "temperature": temperature,
-        "max_tokens": max(1, int(max_tokens)),
+        "max_tokens": max(1, min(512, int(max_tokens or 16))),
         "messages": messages,
     }
     req = Request(

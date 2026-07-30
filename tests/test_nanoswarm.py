@@ -230,6 +230,116 @@ def test_local_text_complete_refuses_non_loopback():
         mock_open.assert_not_called()
 
 
+def test_local_text_complete_truncates_huge_prompt():
+    """Runaway ranker/router must not POST multi-MB prompts to llama-server."""
+    import json
+    from unittest.mock import MagicMock, patch
+
+    from remedy.runtime.local_infer import _MAX_PROMPT_CHARS, local_text_complete
+
+    captured: dict = {}
+
+    def _fake_urlopen(req, timeout=None):  # noqa: ANN001
+        body = json.loads(req.data.decode("utf-8"))
+        captured["messages"] = body["messages"]
+        captured["max_tokens"] = body["max_tokens"]
+        resp = MagicMock()
+        resp.read.return_value = json.dumps(
+            {"choices": [{"message": {"content": "ok"}}]}
+        ).encode("utf-8")
+        resp.__enter__ = lambda s: s
+        resp.__exit__ = lambda *a: None
+        return resp
+
+    huge = "x" * (_MAX_PROMPT_CHARS + 5000)
+    with patch("remedy.core.security.urlopen_no_redirect", side_effect=_fake_urlopen):
+        out = local_text_complete(
+            huge,
+            base_url="http://127.0.0.1:8080/v1",
+            max_tokens=9999,
+            system="s" * 5000,
+        )
+    assert out["ok"] is True
+    user = captured["messages"][-1]["content"]
+    assert len(user) <= _MAX_PROMPT_CHARS + 20
+    assert "truncated" in user
+    sys_msg = captured["messages"][0]["content"]
+    assert len(sys_msg) <= 2100
+    assert captured["max_tokens"] <= 512
+
+
+def test_skill_nanobot_passes_session_id_and_skips_double_record(tmp_path):
+    """Learning loop multi-session promote needs session_id; skill_run must not double-count."""
+    from pathlib import Path
+
+    from remedy.core.learning_loop import LearningLoop
+    from remedy.models import Skill, SkillKind, SkillManifest, SkillStatus
+    from remedy.nanoswarm.events import SwarmEvent
+    from remedy.nanoswarm.skill_nanobot import SkillNanobot
+
+    home = Path(tmp_path)
+    skills = home / "skills"
+    skills.mkdir()
+    loop = LearningLoop(skills_dir=skills, stats_path=home / "skill_stats.json")
+    skill = Skill(
+        manifest=SkillManifest(
+            name="sess-skill",
+            description="Test skill description long enough for validation",
+            version="0.1.0",
+            kind=SkillKind.NATIVE,
+            status=SkillStatus.VALIDATED,
+            metadata={"auto_generated": True, "effort_weight": 0.2},
+        ),
+        instructions="# steps\n" + ("do the thing\n" * 12),
+    )
+    bot = SkillNanobot()
+    # First record with session (as skill_run does)
+    loop.record_skill_feedback("sess-skill", success=True, session_id="sess-a")
+    # Nanobot secondary path must not double-count
+    out = bot.on_skill_result(
+        "sess-skill",
+        success=True,
+        learning_loop=loop,
+        skill=skill,
+        session_id="sess-a",
+        record_feedback=False,
+        auto_refine=False,
+    )
+    assert out.get("feedback_skipped") == "already_recorded"
+    stats = loop.get_skill_stats("sess-skill")
+    assert stats.total_executions == 1
+    assert "sess-a" in stats.execution_by_session
+
+    # Direct nanobot path still records with session_id
+    out2 = bot.on_skill_result(
+        "sess-skill",
+        success=True,
+        learning_loop=loop,
+        skill=skill,
+        session_id="sess-b",
+    )
+    assert out2.get("feedback_recorded") is True
+    assert out2.get("session_id") == "sess-b"
+    stats2 = loop.get_skill_stats("sess-skill")
+    assert stats2.total_executions == 2
+    assert set(stats2.execution_by_session) >= {"sess-a", "sess-b"}
+
+    # Coordinator passes session_id from event payload
+    swarm = get_swarm()
+    r = swarm.dispatch(
+        SwarmEvent.skill_result(
+            "sess-skill",
+            success=True,
+            session_id="sess-c",
+            duration_ms=5.0,
+        ),
+        learning_loop=loop,
+        skill=skill,
+    )
+    assert r["signals"]["skill"].get("session_id") == "sess-c"
+    assert "sess-c" in loop.get_skill_stats("sess-skill").execution_by_session
+
+
 def test_local_text_complete_does_not_follow_redirect():
     """Loopback 302 → off-host must fail closed (no SSRF follow)."""
     import http.server

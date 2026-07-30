@@ -204,13 +204,29 @@ async def test_purge_session_disk_artifacts_cascade(tmp_path: Path):
     )
     assert undo._path(sid).is_file()
 
+    # Usage ledger row for this session (privacy residual)
+    from remedy.core.usage_ledger import close_conn, record_usage_event, session_usage
+
+    close_conn()
+    record_usage_event(
+        session_id=sid,
+        provider="xai",
+        model="g",
+        prompt_tokens=9,
+        completion_tokens=1,
+        home=home,
+    )
+
     stats = purge_session_disk_artifacts(sid, home)
     assert stats["attachments_purged"] is True
     assert stats["plans"] >= 1
     assert stats["undo_purged"] is True
+    assert stats.get("usage_events_deleted", 0) >= 1
     assert not att.is_dir() or not any(att.iterdir())
     assert not (plans / "plandrop1.json").is_file()
     assert not undo._path(sid).is_file()
+    assert session_usage(sid, home=home)["totals"]["events"] == 0
+    close_conn()
 
 
 @pytest.mark.asyncio
