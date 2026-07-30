@@ -170,12 +170,15 @@ async def call_llm_stream(runtime, message: str,
 
                 context = (context or "") + "\n\n" + COMPUTER_USE_SYSTEM_ADDENDUM
         history = await runtime._load_session_history(session_id, message)
-        # Memory Harness L0: prune send-view only (stored transcript untouched)
+        # Memory Harness L0: light prune of send-view (stored transcript untouched).
+        # auto mode skips this pre-pass — apply_auto_harness_send_policy owns full
+        # prune/offload/budget and would re-walk the same history (double work).
+        # manual mode keeps a cheap dedupe + optional char-cap pass only.
         with suppress(Exception):
             from remedy.memory.harness.pruner import prune_messages_for_send
 
-            if runtime._harness_mode != "off":
-                # max_tool_chars=0 → no content shortening (dedupe only).
+            mode = str(getattr(runtime, "_harness_mode", "auto") or "auto").lower()
+            if mode == "manual":
                 history = prune_messages_for_send(
                     history,
                     max_tool_chars=_TOOL_RESULT_CHAR_CAP,
