@@ -144,12 +144,26 @@ def create_app(
             logger.info("API shutdown: stopping vision decoder if running")
             _shutdown_vision_decoder()
 
+    # Packaged desktop sidecar / opt-in: hide Swagger/ReDoc + default OpenAPI
+    # JSON (S-AUTH-05). Dev/serve keep docs; set REMEDY_DISABLE_API_DOCS=0 to
+    # force-enable even when frozen.
+    _docs_env = str(os.environ.get("REMEDY_DISABLE_API_DOCS", "")).strip().lower()
+    if _docs_env in ("0", "false", "no", "off"):
+        _disable_api_docs = False
+    elif _docs_env in ("1", "true", "yes", "on"):
+        _disable_api_docs = True
+    else:
+        _disable_api_docs = bool(getattr(sys, "frozen", False))
     app = FastAPI(
         title=title,
         version=version,
         description="Remedy AI Agent Framework — Desktop & Web API",
         lifespan=lifespan,
+        docs_url=None if _disable_api_docs else "/docs",
+        redoc_url=None if _disable_api_docs else "/redoc",
+        openapi_url=None if _disable_api_docs else "/openapi.json",
     )
+    app.state.disable_api_docs = _disable_api_docs  # type: ignore[attr-defined]
 
     # CORS: REMEDY_CORS_ORIGINS env wins, then config.toml `cors_origins`, else safe defaults.
     # NEVER allow "*" when API auth is enabled — any website could read loopback bootstrap.
@@ -220,18 +234,23 @@ def create_app(
     # Local agent API: auth is ON by default when a key is available.
     # Public allowlist is intentionally small (health + docs + token bootstrap).
     _AUTH_PUBLIC = {
-        "/docs",
-        "/redoc",
-        "/openapi.json",
         "/dashboard",
         "/api/status",
         "/api/ping",
         "/api/auth/local-bootstrap",
-        "/api/openapi.json",
-        "/api/openapi.yaml",
         # Google OAuth browser redirect (state is one-time secret; no bearer).
         "/api/assistant/google/callback",
     }
+    if not _disable_api_docs:
+        _AUTH_PUBLIC.update(
+            {
+                "/docs",
+                "/redoc",
+                "/openapi.json",
+                "/api/openapi.json",
+                "/api/openapi.yaml",
+            }
+        )
     # Messenger platform webhooks cannot send our Bearer token; they authenticate
     # via their own verify tokens / HMAC / JWT inside the route handlers.
     _AUTH_PUBLIC_PREFIXES = (
@@ -269,7 +288,11 @@ def create_app(
             if request.method == "OPTIONS":
                 return await call_next(request)
             # Public docs / health / bootstrap
-            if path in _AUTH_PUBLIC or path.startswith("/docs") or path.startswith("/redoc"):
+            if path in _AUTH_PUBLIC:
+                return await call_next(request)
+            if not _disable_api_docs and (
+                path.startswith("/docs") or path.startswith("/redoc")
+            ):
                 return await call_next(request)
             if any(path.startswith(p) for p in _AUTH_PUBLIC_PREFIXES):
                 return await call_next(request)

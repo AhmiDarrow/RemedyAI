@@ -6,6 +6,9 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ### Gauntlet: continuous security + perf loop (feature/computer-use)
 
+- **Skills catalog URL allowlist (S-SKILL-01):** remote catalog/sig fetches require GitHub release (or raw.githubusercontent.com for this library repo) paths — same host policy as skill zips; non-default verify key ignored unless `REMEDY_SKILLS_DEV=1`
+- **Packaged API docs hide (S-AUTH-05):** frozen sidecar / `REMEDY_DISABLE_API_DOCS=1` drops Swagger/ReDoc and `/api/openapi.{json,yaml}` (force-enable with `=0`)
+- **Docs:** README pytest count ~1369 (collect-only)
 - **CLI updater package identity:** `remedy update` checks PyPI **`remedy-ai`** (not unrelated occupied `remedy`); dist metadata + project-root detection prefer `remedy-ai`; failure hint clones `AhmiDarrow/RemedyAI`; git behind uses upstream/master/main
 - **Full wipe shortcuts:** uninstall wipe removes user **and** Common/Public Desktop + Start Menu + Startup `Remedy Desktop.lnk` ghosts
 - **Browser URL userinfo:** normalize/open/bookmarks reject `https://user:pass@host` (no credential persistence in localStorage)
