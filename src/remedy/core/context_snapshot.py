@@ -1,7 +1,8 @@
-"""Single-pass context snapshot for a turn — continuity layer metabolism.
+"""Context snapshot for a turn — continuity layer metabolism.
 
-One walk of messages produces token estimate, fill %, compress nudge,
-intent label, policy pack, quality remedies, and optional brief touch.
+Phase 1 (always): token fill, intent/policy, library chip, quality remedies.
+Phase 2 (elevated fill / compress / tool-ish intent): pack, scout, spread.
+
 Replaces scattered Token + Memory + quality double-work on the hot path.
 """
 
@@ -135,6 +136,17 @@ def build_context_snapshot(
         "ambiguous": bool(intent_out.get("ambiguous")),
     }
 
+    # Two-phase metabolism: always run fill + intent + library + quality.
+    # Heavy bots (pack / spread / scout warm) only when fill is elevated,
+    # compress is active, or the turn already looks tool/plan-ish.
+    heavy_fill = fill >= max(0.40, float(min_use) - 0.20)
+    need_pack = bool(nudge) or fill >= max(0.55, float(min_use) - 0.15)
+    need_spread = bool(nudge) or heavy_fill or intent in ("tool", "plan")
+    need_scout = bool(nudge) or heavy_fill or intent in ("tool", "plan", "skill")
+    snap.signals["snapshot_phase"] = (
+        "full" if (need_pack or need_spread or need_scout) else "light"
+    )
+
     # Library skill check — cache-only rank; never HTTP / never auto-install
     try:
         from remedy.skills.shared import get_shared_registry
@@ -168,37 +180,41 @@ def build_context_snapshot(
     except Exception as e:
         snap.signals["library_suggest_error"] = str(e)
 
-    # Spread planner — HEURISTICS ONLY on the hot path.
+    # Spread planner — HEURISTICS ONLY on the hot path (gated when light chat).
     # Never block chat on local VLM (use_local only when the model calls spread_run).
-    try:
-        from remedy.core.spread.planner import plan_spread
+    if need_spread:
+        try:
+            from remedy.core.spread.planner import plan_spread
 
-        spread_plan = plan_spread(
-            user_text or "",
-            intent=intent,
-            project_path=project_path,
-            use_local=False,
-        )
-        snap.signals["spread"] = spread_plan.to_public()
-        if spread_plan.spread:
-            hint = spread_plan.system_hint()
-            if hint:
-                snap.policy_system = (
-                    (snap.policy_system + "\n" if snap.policy_system else "") + hint
-                )
-            # Bias tool suggestions toward spread when fan-out is useful
-            tools = list(pack.get("suggest_tools") or [])
-            if "spread_run" not in tools:
-                tools = ["spread_run", *tools]
-            snap.signals["policy"]["suggest_tools"] = tools
-            try:
-                from remedy.core.metrics import default_registry
+            spread_plan = plan_spread(
+                user_text or "",
+                intent=intent,
+                project_path=project_path,
+                use_local=False,
+            )
+            snap.signals["spread"] = spread_plan.to_public()
+            if spread_plan.spread:
+                hint = spread_plan.system_hint()
+                if hint:
+                    snap.policy_system = (
+                        (snap.policy_system + "\n" if snap.policy_system else "")
+                        + hint
+                    )
+                # Bias tool suggestions toward spread when fan-out is useful
+                tools = list(pack.get("suggest_tools") or [])
+                if "spread_run" not in tools:
+                    tools = ["spread_run", *tools]
+                snap.signals["policy"]["suggest_tools"] = tools
+                try:
+                    from remedy.core.metrics import default_registry
 
-                default_registry.counter("remedy_spread_plans_total").inc()
-            except Exception:
-                pass
-    except Exception as e:
-        snap.signals["spread_error"] = str(e)
+                    default_registry.counter("remedy_spread_plans_total").inc()
+                except Exception:
+                    pass
+        except Exception as e:
+            snap.signals["spread_error"] = str(e)
+    else:
+        snap.signals["spread"] = {"skipped": True, "reason": "light_phase"}
 
     # Pattern nanobot window (per-session) → stuck recovery when tools fail
     pat_rate: float | None = None
@@ -256,52 +272,58 @@ def build_context_snapshot(
         else:
             snap.remedy_system = t
 
-    # Pack nanobot — silent hint when context is heavy
-    try:
-        pack_out = swarm.pack.pack_for_turn(
-            messages=msgs,
-            brief=brief if apply_brief_touch else None,
-            context_window=context_window,
-            fill_pct=fill,
-            pattern_recent=recent,
-            intent=intent,
-        )
-        snap.signals["pack"] = {
-            "keep_recent_tool_pairs": pack_out.get("keep_recent_tool_pairs"),
-            "aggressive": pack_out.get("aggressive"),
-            "pins": len(pack_out.get("pins") or []),
-        }
-        _append_remedy(str(pack_out.get("system_hint") or ""))
-    except Exception as e:
-        snap.signals["pack_error"] = str(e)
+    # Pack nanobot — only when fill/nudge makes packing relevant
+    if need_pack:
+        try:
+            pack_out = swarm.pack.pack_for_turn(
+                messages=msgs,
+                brief=brief if apply_brief_touch else None,
+                context_window=context_window,
+                fill_pct=fill,
+                pattern_recent=recent,
+                intent=intent,
+            )
+            snap.signals["pack"] = {
+                "keep_recent_tool_pairs": pack_out.get("keep_recent_tool_pairs"),
+                "aggressive": pack_out.get("aggressive"),
+                "pins": len(pack_out.get("pins") or []),
+            }
+            _append_remedy(str(pack_out.get("system_hint") or ""))
+        except Exception as e:
+            snap.signals["pack_error"] = str(e)
+    else:
+        snap.signals["pack"] = {"skipped": True, "reason": "light_phase"}
 
     # Scout — first-tool orientation for tool/plan work (+ warm cache if ready)
-    try:
-        # Kick warm early (async); reuse cache when already filled
-        if project_path and intent in ("tool", "plan", "skill"):
-            with suppress(Exception):
-                swarm.scout.schedule_warm(project_path, user_text=user_text or "")
-        scout_out = swarm.scout.scout(
-            user_text or "",
-            intent=intent,
-            project_path=project_path,
-        )
-        snap.signals["scout"] = {
-            "active": scout_out.get("active"),
-            "suggest_tools": scout_out.get("suggest_tools") or [],
-            "warm": scout_out.get("warm"),
-        }
-        if scout_out.get("active"):
-            _append_remedy(str(scout_out.get("system_hint") or ""))
-            # Merge scout tools into policy signal
-            st = list(snap.signals.get("policy", {}).get("suggest_tools") or [])
-            for t in scout_out.get("suggest_tools") or []:
-                if t not in st:
-                    st.append(t)
-            if "policy" in snap.signals:
-                snap.signals["policy"]["suggest_tools"] = st[:12]
-    except Exception as e:
-        snap.signals["scout_error"] = str(e)
+    if need_scout:
+        try:
+            # Kick warm early (async); reuse cache when already filled
+            if project_path and intent in ("tool", "plan", "skill"):
+                with suppress(Exception):
+                    swarm.scout.schedule_warm(project_path, user_text=user_text or "")
+            scout_out = swarm.scout.scout(
+                user_text or "",
+                intent=intent,
+                project_path=project_path,
+            )
+            snap.signals["scout"] = {
+                "active": scout_out.get("active"),
+                "suggest_tools": scout_out.get("suggest_tools") or [],
+                "warm": scout_out.get("warm"),
+            }
+            if scout_out.get("active"):
+                _append_remedy(str(scout_out.get("system_hint") or ""))
+                # Merge scout tools into policy signal
+                st = list(snap.signals.get("policy", {}).get("suggest_tools") or [])
+                for t in scout_out.get("suggest_tools") or []:
+                    if t not in st:
+                        st.append(t)
+                if "policy" in snap.signals:
+                    snap.signals["policy"]["suggest_tools"] = st[:12]
+        except Exception as e:
+            snap.signals["scout_error"] = str(e)
+    else:
+        snap.signals["scout"] = {"skipped": True, "reason": "light_phase"}
 
     # Goal — open checklist stale detection
     try:
