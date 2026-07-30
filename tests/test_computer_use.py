@@ -199,6 +199,34 @@ def test_open_app_refuses_protocol_unc_and_metachar():
     assert looks_like_url("https://example.com") is True
 
 
+def test_open_app_protocol_detector_drive_vs_handler():
+    """Drive letters are not protocols; multi-letter handlers and data: are.
+
+    Regression for open_app hardening: C:\\ paths must remain launchable when
+    the file exists, while shell:/ms-*/data:/about: never reach cmd start.
+    """
+    import pytest
+
+    from remedy.core.computer.desktop_win import _open_app_is_protocol_or_url, open_app
+
+    # Drive-letter forms are not protocol handlers
+    assert _open_app_is_protocol_or_url(r"C:\Windows\System32\notepad.exe") is False
+    assert _open_app_is_protocol_or_url("C:foo") is False
+    assert _open_app_is_protocol_or_url("notepad") is False
+
+    for handler in (
+        "shell:AppsFolder",
+        "ms-excel:ofe|u|https://evil.example",
+        "data:text/html,hi",
+        "about:blank",
+        "ms-settings:privacy",
+        "javascript:alert(1)",
+    ):
+        assert _open_app_is_protocol_or_url(handler) is True, handler
+        with pytest.raises(ValueError, match="URL/protocol|UNC|metachar|required"):
+            open_app(handler)
+
+
 def test_open_url_refuses_userinfo_credentials():
     """https://user:pass@host must not open (credentials in address bar / OS)."""
     import pytest
