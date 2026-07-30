@@ -128,6 +128,12 @@ def ensure_handlers_registered() -> None:
 
         return process_brief_update_job(job)
 
+    def _continuity_core(job: LocalJob) -> Any:
+        """Partner State Continuity Core (graph + brief maintenance)."""
+        from remedy.memory.partner_state.continuity import process_continuity_core_job
+
+        return process_continuity_core_job(job)
+
     def _text_job(job: LocalJob) -> Any:
         """Generic local text complete (spread_plan, worker_summarize)."""
         p = job.payload or {}
@@ -144,6 +150,7 @@ def ensure_handlers_registered() -> None:
     q.register("vision_decode", _vision_decode)
     q.register("nano_classify", _nano_classify)
     q.register("brief_update", _brief_update)
+    q.register("continuity_core", _continuity_core)
     def _library_rerank(job: LocalJob) -> Any:
         """Optional next-turn library pick (config skills.library_suggest.local_rerank)."""
         p = job.payload or {}

@@ -71,6 +71,21 @@ def _is_tool_chain(messages: list[dict[str, Any]]) -> bool:
     return tool_chain_active(messages)
 
 
+def _protect_ids_from_runtime(runtime: Any) -> set[str]:
+    """Open-subgoal tool_call_ids must stay full (Partner State Phase A)."""
+    ids: set[str] = set()
+    with suppress(Exception):
+        from remedy.memory.partner_state import ensure_partner_state
+
+        st = ensure_partner_state(runtime)
+        ids |= st.protected_tool_call_ids()
+        # Also protect recent write-set related txns
+        for t in list(st.tool_txns)[-24:]:
+            if t.effect == "write" and t.tool_call_id:
+                ids.add(t.tool_call_id)
+    return ids
+
+
 def apply_auto_harness_send_policy(
     runtime: Any,
     messages: list[dict[str, Any]],
@@ -195,6 +210,8 @@ def apply_auto_harness_send_policy(
 
     chain = _is_tool_chain(messages)
     meta["tool_chain_active"] = chain
+    protect_ids = _protect_ids_from_runtime(runtime)
+    meta["protected_tool_ids"] = len(protect_ids)
 
     if level == "soft":
         # Soft: collapse older sludge but keep a long recent tool window for
@@ -211,6 +228,7 @@ def apply_auto_harness_send_policy(
             reserve_tokens=max(512, int(window * 0.08)),
             provider=provider or None,
             model=model or None,
+            protect_tool_call_ids=protect_ids,
         )
         with suppress(Exception):
             messages[:] = maybe_offload_messages(
@@ -230,6 +248,10 @@ def apply_auto_harness_send_policy(
             meta["local_queued"] = schedule_background_brief_update(
                 runtime, messages, intent_hint=user_text, level="soft"
             )
+        with suppress(Exception):
+            from remedy.memory.partner_state.continuity import schedule_continuity_core
+
+            schedule_continuity_core(runtime, use_local=False)
         runtime._last_send_messages = list(messages)
         with suppress(Exception):
             from remedy.core.metrics import default_registry
@@ -256,6 +278,7 @@ def apply_auto_harness_send_policy(
         reserve_tokens=max(768, int(window * 0.1)),
         provider=provider or None,
         model=model or None,
+        protect_tool_call_ids=protect_ids,
     )
     with suppress(Exception):
         messages[:] = maybe_offload_messages(
@@ -271,10 +294,14 @@ def apply_auto_harness_send_policy(
         brief = _ensure_session_brief(runtime, sid)
         from remedy.core.session_quality import get_session_quality
         from remedy.memory.harness.quality import review_compress_quality
+        from remedy.memory.partner_state import ensure_partner_state
 
         runtime._session_brief = heuristic_merge_from_history(
             brief, pre_prune, intent_hint=user_text
         )
+        # Phase C: project epistemic graph into brief before quality score
+        with suppress(Exception):
+            ensure_partner_state(runtime).apply_graph_to_brief(runtime._session_brief)
         with suppress(Exception):
             runtime._session_brief.append_history_thread(
                 f"Auto-compress at ~{snap.fill_pct:.0%} fill "
@@ -365,6 +392,14 @@ def apply_auto_harness_send_policy(
         )
         meta["local_queued"] = local_ok
 
+    # Continuity Core (Partner State Phase E) — always schedule on strong
+    with suppress(Exception):
+        from remedy.memory.partner_state.continuity import schedule_continuity_core
+
+        meta["continuity_core"] = schedule_continuity_core(
+            runtime, use_local=True, priority=1
+        )
+
     # Phase E: when local queue unavailable and quality poor, heuristic enrich only
     # (no paid provider call on the hot path — avoids latency + surprise $).
     if not local_ok and score < 0.55:
@@ -435,6 +470,7 @@ def slim_messages_mid_turn(
     hard_cap = max(4_000, (tool_result_char_cap or 64_000) // 4) if strong else 0
     # Mid-turn budget slightly looser than turn-start strong so chains can finish
     budget = max(2048, int(window * (0.50 if strong else 0.58)))
+    protect_ids = _protect_ids_from_runtime(runtime)
     out = prune_messages_for_send(
         messages,
         max_tool_chars=hard_cap,
@@ -445,6 +481,7 @@ def slim_messages_mid_turn(
         reserve_tokens=max(512, int(window * 0.08)),
         provider=provider or None,
         model=model or None,
+        protect_tool_call_ids=protect_ids,
     )
     with suppress(Exception):
         out = maybe_offload_messages(
