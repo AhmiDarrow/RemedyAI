@@ -939,42 +939,62 @@ def register_workspace_tools(runtime: Any) -> None:
             timeout = 60.0
         timeout = max(5.0, min(600.0, timeout))
 
+        # Write roots only — never fall back to read roots (Desktop/Docs/Downloads).
         try:
-            roots = runtime.write_roots()
+            roots = list(runtime.write_roots() or [])
+        except Exception as exc:
+            return format_tool_error(
+                f"cannot resolve write roots for shell jail: {exc}",
+                code="WRITE_JAIL",
+                tool_name="bash_exec",
+                suggestion=(
+                    "Ensure a project folder is set. Shell refused fail-closed "
+                    "(will not fall back to profile read roots)."
+                ),
+            )
+        if not roots:
+            roots = [root]
+
+        # Project write jail for shell mutations (not just cwd). Fail closed.
+        from remedy.core.shell_write_jail import check_shell_write_jail
+
+        try:
+            bound = not bool(runtime.project_path_is_unset())
         except Exception:
-            roots = runtime.allowed_roots()
-
-        # Project write jail for shell mutations (not just cwd).
-        # Blocks Set-Content/Out-File/redirects to sibling trees while focus is bound.
+            bound = True  # fail closed: treat as bound if unknown
         try:
-            from remedy.core.shell_write_jail import check_shell_write_jail
-
-            bound = True
-            with suppress(Exception):
-                bound = not bool(runtime.project_path_is_unset())
+            scope = str(runtime.access_scope() or "project")
+        except Exception:
             scope = "project"
-            with suppress(Exception):
-                scope = str(runtime.access_scope() or "project")
+        try:
             jail_hit = check_shell_write_jail(
                 command,
-                write_roots=list(roots or [root]),
+                write_roots=list(roots),
                 cwd=cwd,
                 project_bound=bound,
                 access_scope=scope,
             )
-            if jail_hit:
-                return format_tool_error(
-                    jail_hit,
-                    code="WRITE_JAIL",
-                    tool_name="bash_exec",
-                    suggestion=(
-                        "Stay inside the focus project. Prefer file_write/file_edit. "
-                        "Do not retarget sibling folders (SecretFolder vs SecretSticky). "
-                        "To edit another tree, switch session project explicitly with the user."
-                    ),
-                )
-        except Exception:
-            pass
+        except Exception as exc:
+            return format_tool_error(
+                f"shell write jail check failed (refused): {exc}",
+                code="WRITE_JAIL",
+                tool_name="bash_exec",
+                suggestion=(
+                    "Stay inside the focus project with file_write/file_edit. "
+                    "Jail check errors fail closed — shell not executed."
+                ),
+            )
+        if jail_hit:
+            return format_tool_error(
+                jail_hit,
+                code="WRITE_JAIL",
+                tool_name="bash_exec",
+                suggestion=(
+                    "Stay inside the focus project. Prefer file_write/file_edit. "
+                    "Do not retarget sibling folders (SecretFolder vs SecretSticky). "
+                    "To edit another tree, switch session project explicitly with the user."
+                ),
+            )
 
         argv = [*win_shell_prefix(), command]
         sandbox = SubprocessSandbox(allowed_paths=roots or [root, cwd])

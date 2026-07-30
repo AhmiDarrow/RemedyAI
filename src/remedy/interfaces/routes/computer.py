@@ -199,24 +199,42 @@ def register_computer_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             raise HTTPException(404, "job not found")
         return {"job": job.to_dict()}
 
-    def _a11y_cors(resp: Response) -> Response:
-        # In-page snapshot POST from arbitrary https origins (job_id is the secret).
-        resp.headers["Access-Control-Allow-Origin"] = "*"
-        resp.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
-        resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
-        resp.headers["Access-Control-Allow-Private-Network"] = "true"
+    def _a11y_cors(resp: Response, *, request: Request | None = None) -> Response:
+        # Prefer no open CORS. Only echo a loopback Origin when present so
+        # same-machine tooling can complete; never * + Private-Network.
+        origin = ""
+        if request is not None:
+            origin = (request.headers.get("origin") or "").strip()
+        if origin in (
+            "http://127.0.0.1:7400",
+            "http://localhost:7400",
+            "http://127.0.0.1:5173",
+            "http://localhost:5173",
+            "null",
+        ):
+            resp.headers["Access-Control-Allow-Origin"] = origin
+            resp.headers["Vary"] = "Origin"
+            resp.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+            resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
+        # Do NOT set Access-Control-Allow-Private-Network — browser PNA to
+        # loopback a11y is closed. Desktop host completes via ureq (no CORS).
         return resp
 
     @app.options("/api/computer/a11y/push")
     async def computer_a11y_push_options(request: Request):
-        _ = request
-        return _a11y_cors(Response(status_code=204))
+        return _a11y_cors(Response(status_code=204), request=request)
 
     @app.post("/api/computer/a11y/push")
-    async def computer_a11y_push(req: A11yPushRequest):
-        """Complete a snapshot job from injected page JS (no API bearer)."""
+    async def computer_a11y_push(req: A11yPushRequest, request: Request):
+        """Complete a snapshot job from same-machine tooling (no open CORS *).
+
+        Preferred path is Desktop/Tauri host complete (Bearer not required on
+        loopback host routes). This push endpoint remains for legacy inject
+        but no longer advertises * + Private-Network to the public web.
+        """
         jid = (req.job_id or "").strip()
-        if not jid or len(jid) < 8:
+        # Prefer full uuid hex (32); still accept legacy 16-char ids.
+        if not jid or len(jid) < 16:
             raise HTTPException(400, "invalid job_id")
         b = _bridge()
         elements = [e for e in (req.elements or []) if isinstance(e, dict)][:120]
@@ -227,5 +245,6 @@ def register_computer_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             Response(
                 content='{"ok":true}',
                 media_type="application/json",
-            )
+            ),
+            request=request,
         )

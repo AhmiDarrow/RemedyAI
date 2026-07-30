@@ -122,11 +122,20 @@ async def test_full_reset_wipes_context_keeps_session(store: MemoryStore, tmp_pa
 
     get_session_quality(sid).record_tool_result(success=True)
 
+    class FakeBrief:
+        def __init__(self) -> None:
+            self.session_id = sid
+
     class FakeRuntime:
         def __init__(self) -> None:
-            self._session_brief = object()
+            self._session_id = sid
+            self._session_brief = FakeBrief()
             self._streaming_sessions = {sid}
-            self._tasks = {"x": "goal"}
+            # Session-keyed + foreign entry (must not clear other tabs)
+            self._tasks = {
+                "mine": {"session_id": sid, "goal": "x"},
+                "other": {"session_id": "other-tab", "goal": "y"},
+            }
             self.config = type("C", (), {"home_dir": str(home)})()
 
     rt = FakeRuntime()
@@ -143,7 +152,8 @@ async def test_full_reset_wipes_context_keeps_session(store: MemoryStore, tmp_pa
     assert sess.project_path == r"C:\Work\App"
     assert rt._session_brief is None
     assert sid not in rt._streaming_sessions
-    assert rt._tasks == {}
+    assert "mine" not in rt._tasks
+    assert "other" in rt._tasks  # other tab preserved
     assert not (plans / "planreset1.json").is_file()
     assert not att.is_dir() or not any(att.iterdir())
     # Session-scoped notes gone

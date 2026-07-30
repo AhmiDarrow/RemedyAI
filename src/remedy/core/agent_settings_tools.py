@@ -196,23 +196,43 @@ def register_settings_tools(runtime: Any) -> None:
 
         # Project focus jail: refuse silently retargeting to a sibling tree
         # (SecretSticky session → update_settings(project_path=SecretFolder)).
+        # force_project_switch alone is NOT enough — requires UI/user approval.
         force_switch = force_project_switch in (True, "true", "1", "yes", "on")
         if "force_project_switch" in patch:
             fv = patch.pop("force_project_switch", None)
             if fv in (True, "true", "1", "yes", "on"):
                 force_switch = True
-        if "project_path" in patch and not force_switch:
-            try:
-                from remedy.core.workspace import (
-                    is_unset_project_path,
-                    resolve_project_path,
-                )
+        if "project_path" in patch:
+            from remedy.core.approvals import APPROVALS
+            from remedy.core.turn_context import turn_session_id
+            from remedy.core.workspace import (
+                is_unset_project_path,
+                resolve_project_path,
+            )
 
-                new_raw = patch.get("project_path")
-                if not is_unset_project_path(new_raw) and not runtime.project_path_is_unset():
+            new_raw = patch.get("project_path")
+            try:
+                bound = not bool(runtime.project_path_is_unset())
+            except Exception as exc:
+                return format_tool_error(
+                    f"cannot read current project binding: {exc}",
+                    code="PROJECT_JAIL",
+                    tool_name="update_settings",
+                    suggestion="Retry get_settings; project switch refused fail-closed.",
+                )
+            if not is_unset_project_path(new_raw) and bound:
+                try:
                     cur = runtime.effective_project_path().resolve()
                     nxt = resolve_project_path(str(new_raw)).resolve()
-                    if cur != nxt:
+                except Exception as exc:
+                    return format_tool_error(
+                        f"invalid project_path (refused): {exc}",
+                        code="PROJECT_JAIL",
+                        tool_name="update_settings",
+                        suggestion="Pass an existing folder path under the intended tree.",
+                    )
+                if cur != nxt:
+                    if not force_switch:
                         return format_tool_error(
                             (
                                 f"refusing to switch project focus from {cur} to {nxt}. "
@@ -224,11 +244,35 @@ def register_settings_tools(runtime: Any) -> None:
                             suggestion=(
                                 "Keep editing under the current focus folder. "
                                 "If the user explicitly asked to switch projects, call "
-                                "update_settings(project_path=…, force_project_switch=true)."
+                                "update_settings(project_path=…, force_project_switch=true) "
+                                "and wait for user approval in the UI."
                             ),
                         )
-            except Exception:
-                pass
+                    # Force path still needs human approval (model cannot free-bypass).
+                    sid = turn_session_id(runtime)
+                    cmd = f"switch_project_path:{nxt}"
+                    ask_reason = (
+                        APPROVALS.needs_ask(cmd, tool_name="update_settings")
+                        or "Switch project focus requires approval"
+                    )
+                    if not APPROVALS.is_approved(
+                        "update_settings", cmd, session_id=sid
+                    ):
+                        item = APPROVALS.create(
+                            tool_name="update_settings",
+                            command=cmd,
+                            reason=ask_reason,
+                            session_id=sid,
+                        )
+                        return (
+                            f"APPROVAL_REQUIRED id={item.id}\n"
+                            f"reason={ask_reason}\n"
+                            f"from={cur}\n"
+                            f"to={nxt}\n"
+                            "Do not invent success. Tell the user this needs approval "
+                            f"in the UI (or /approve {item.id}), then retry with "
+                            "force_project_switch=true after they approve."
+                        )
 
         try:
             result = await apply_settings_update(
@@ -275,8 +319,8 @@ def register_settings_tools(runtime: Any) -> None:
         "Examples: setup='web tools'; web_tools_enabled=true; approval_mode='auto'; "
         "user_name='Ahmi'; llm_provider='deepseek'; llm_model='deepseek-v4-flash'; "
         "vision_enabled=true; access_scope='full'. "
-        "project_path changes require force_project_switch=true when a focus folder "
-        "is already bound (prevents sibling-project retarget).",
+        "project_path changes while a focus folder is bound require "
+        "force_project_switch=true AND user approval (no silent retarget).",
         update_settings,
         {
             "type": "object",
@@ -291,9 +335,9 @@ def register_settings_tools(runtime: Any) -> None:
                 "force_project_switch": {
                     "type": "boolean",
                     "description": (
-                        "Set true only when the user explicitly asked to change the "
-                        "project folder. Without it, project_path updates are refused "
-                        "if a different focus is already bound."
+                        "Required (with user approval) when changing project_path "
+                        "while another focus is bound. Alone is not enough — the UI "
+                        "must approve. Never invent approval."
                     ),
                 },
                 "settings": {

@@ -283,12 +283,18 @@ def create_app(
                 return await call_next(request)
             auth = request.headers.get("Authorization", "")
             expected = f"Bearer {api_key}"
-            # Constant-time compare for Bearer
-            bearer_ok = hmac.compare_digest(auth.encode("utf-8"), expected.encode("utf-8"))
+            # Constant-time compare — never raise on length mismatch (→ always 401).
+            def _ct_eq(a: str, b: str) -> bool:
+                ae, be = a.encode("utf-8"), b.encode("utf-8")
+                if len(ae) != len(be):
+                    # Still touch compare_digest shape for timing hygiene
+                    hmac.compare_digest(ae, ae)
+                    return False
+                return hmac.compare_digest(ae, be)
+
+            bearer_ok = _ct_eq(auth, expected)
             alt = request.headers.get("X-Remedy-Token", "")
-            alt_ok = bool(alt) and hmac.compare_digest(
-                alt.encode("utf-8"), api_key.encode("utf-8")
-            )
+            alt_ok = bool(alt) and _ct_eq(alt, api_key)
             if not (bearer_ok or alt_ok):
                 return JSONResponse(
                     status_code=401,
