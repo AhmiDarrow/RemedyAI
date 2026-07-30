@@ -103,6 +103,17 @@ class ActionIR:
             args_r = _redact_obj(slim)
         else:
             args_r = _redact_obj(raw_args)
+        # Strip URL credentials/query from any remaining url field (CUA/browse)
+        if isinstance(args_r, dict) and "url" in args_r and args_r["url"]:
+            try:
+                from remedy.core.metabolism.cua_macros import _sanitize_url
+
+                args_r["url"] = _sanitize_url(str(args_r["url"]))
+            except Exception:
+                u = str(args_r["url"])
+                if "?" in u:
+                    u = u.split("?", 1)[0]
+                args_r["url"] = u[:200]
         if not isinstance(args_r, dict):
             args_r = {}
         res_r = redact_text(result or "")[:2000]
