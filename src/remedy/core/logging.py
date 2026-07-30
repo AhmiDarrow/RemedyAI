@@ -24,6 +24,15 @@ _session_id: ContextVar[str | None] = ContextVar("session_id", default=None)
 _channel: ContextVar[str | None] = ContextVar("channel", default=None)
 _request_id: ContextVar[str | None] = ContextVar("request_id", default=None)
 
+# Operator asked for DEBUG (env/config). Distinct from the always-on debug.log
+# ring under setup_serve_logging — hot-path traces only when this is True.
+_hot_debug: bool = False
+
+
+def hot_debug_enabled() -> bool:
+    """True when operator set DEBUG (REMEDY_LOG_LEVEL / config), not mere file ring."""
+    return _hot_debug
+
 
 def set_log_context(
     session_id: str | None = None,
@@ -154,8 +163,12 @@ def setup_logging(
     """Configure root logger with structured output, optional file rotation, and context propagation."""
     from logging.handlers import RotatingFileHandler
 
+    global _hot_debug
+    lvl_name = (level or "INFO").upper()
+    _hot_debug = lvl_name == "DEBUG"
+
     root = logging.getLogger()
-    root.setLevel(getattr(logging, level.upper(), logging.INFO))
+    root.setLevel(getattr(logging, lvl_name, logging.INFO))
     root.handlers.clear()
 
     if json_output and console_output:
@@ -208,7 +221,7 @@ def setup_logging(
         # Console/file handlers keep their own levels; only dh is DEBUG.
         for h in root.handlers:
             if h is not dh and h.level == logging.NOTSET:
-                h.setLevel(getattr(logging, level.upper(), logging.INFO))
+                h.setLevel(getattr(logging, lvl_name, logging.INFO))
 
     # Shush noisy libraries
     for noisy in ("httpx", "httpcore", "urllib3", "asyncio", "aiohttp", "multipart"):

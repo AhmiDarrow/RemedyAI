@@ -18,6 +18,11 @@ from urllib.parse import urlparse, urlunparse
 
 from remedy.core.metabolism.redact import looks_like_secret_text
 
+# Hard cap on stored macros (evict lowest hits first when exceeded).
+MAX_CUA_MACROS = 64
+# Steps kept per macro after clean (navigate→act chains stay short).
+MAX_CUA_MACRO_STEPS = 8
+
 
 def _sanitize_url(val: str) -> str:
     """Strip query string and userinfo (user:pass@host) from stored URLs."""
@@ -91,7 +96,7 @@ class CuaMacroStore:
         if len(comp) < 2:
             return None
         clean_steps: list[dict[str, Any]] = []
-        for s in comp[:8]:
+        for s in comp[:MAX_CUA_MACRO_STEPS]:
             tool = str(s.get("tool") or "")
             args = s.get("args") if isinstance(s.get("args"), dict) else {}
             safe_args: dict[str, Any] = {}
@@ -123,11 +128,12 @@ class CuaMacroStore:
                 return existing
             m = CuaMacro(name=name, steps=clean_steps)
             self.macros[name] = m
-            if len(self.macros) > 64:
+            if len(self.macros) > MAX_CUA_MACROS:
                 ordered = sorted(
                     self.macros.items(), key=lambda kv: (kv[1].hits, kv[1].last_ts)
                 )
-                for k, _ in ordered[:8]:
+                drop_n = max(1, len(self.macros) - MAX_CUA_MACROS)
+                for k, _ in ordered[:drop_n]:
                     self.macros.pop(k, None)
             return m
 

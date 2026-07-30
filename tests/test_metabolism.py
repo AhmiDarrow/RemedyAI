@@ -208,6 +208,99 @@ def test_evidence_ledger_admits_paths_and_dedupes():
     assert led.snapshot()["evidence_units"] >= 1
 
 
+def test_evidence_units_cap_and_lean_path():
+    """Unit list + path admit are bounded; lean mode keeps a tighter ledger."""
+    from remedy.core.metabolism.evidence import (
+        MAX_EVIDENCE_UNITS,
+        MAX_EVIDENCE_UNITS_LEAN,
+        MAX_PATHS_PER_ADMIT_LEAN,
+    )
+
+    reset_evidence_ledger("eu_cap")
+    led = get_evidence_ledger("eu_cap")
+    # Flood unique tool summaries past the hard cap
+    for i in range(MAX_EVIDENCE_UNITS + 40):
+        led.admit_tool_result(
+            tool_name="bash_exec",
+            content=f"ok exit code 0 unique-{i}\n",
+            success=True,
+        )
+    assert len(led.units) <= MAX_EVIDENCE_UNITS
+    assert len(led.seen_fps) <= MAX_EVIDENCE_UNITS * 2
+
+    reset_evidence_ledger("eu_lean")
+    lean = get_evidence_ledger("eu_lean")
+    # Many path lines — lean must keep path admit tight and unit list small
+    body = "\n".join(f"src/remedy/core/file_{i}.py" for i in range(40))
+    admitted = lean.admit_tool_result(
+        tool_name="list_dir",
+        content=body,
+        success=True,
+        lean=True,
+    )
+    path_eus = [u for u in admitted if u.kind == "path"]
+    assert len(path_eus) <= MAX_PATHS_PER_ADMIT_LEAN
+    for i in range(MAX_EVIDENCE_UNITS_LEAN + 20):
+        lean.admit_tool_result(
+            tool_name="bash_exec",
+            content=f"lean unique {i}\n",
+            success=True,
+            lean=True,
+        )
+    assert len(lean.units) <= MAX_EVIDENCE_UNITS_LEAN
+
+
+def test_action_ir_steps_capped():
+    from remedy.core.metabolism.action_ir import MAX_IR_STEPS, start_action_ir
+
+    ir = start_action_ir(session_id="ir_cap", tier=2, brief_head="long run")
+    for i in range(MAX_IR_STEPS + 30):
+        ir.add_step(tool="file_read", arguments={"path": f"f{i}.py"}, result="ok")
+    assert len(ir.steps) == MAX_IR_STEPS
+    # Retains the most recent steps
+    assert ir.steps[-1].args_redacted.get("path") == f"f{MAX_IR_STEPS + 29}.py"
+
+
+def test_cua_macros_capped_at_64():
+    from remedy.core.metabolism.cua_macros import (
+        MAX_CUA_MACROS,
+        get_cua_macros,
+        reset_cua_macros,
+    )
+
+    reset_cua_macros()
+    store = get_cua_macros()
+    assert MAX_CUA_MACROS == 64
+    for i in range(MAX_CUA_MACROS + 12):
+        store.observe_chain(
+            [
+                {
+                    "tool": "computer_navigate",
+                    "args": {"url": f"https://example.com/page{i}"},
+                },
+                {"tool": "computer_click", "args": {"ref": f"e{i}"}},
+            ],
+            success=True,
+        )
+    assert len(store.macros) <= MAX_CUA_MACROS
+
+
+def test_l0_begin_turn_skips_full_organ_snapshots():
+    """L0 must not pay for full evidence/decision list copies on the hot path."""
+    meta = begin_turn_metabolism(
+        session_id="test_meta_sess",
+        user_text="what model am I using?",
+        intent="chat",
+        tools_enabled=False,
+    )
+    assert meta["tier"] == 0
+    assert meta["record_ir"] is False
+    assert meta["injects"] == []
+    # Lean stubs — no "recent" list payload
+    assert "recent" not in (meta.get("evidence") or {})
+    assert "recent" not in (meta.get("decisions") or {})
+
+
 def test_evidence_redacts_secrets():
     led = get_evidence_ledger("test_meta_sess")
     led.admit_tool_result(
