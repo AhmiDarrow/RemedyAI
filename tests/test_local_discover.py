@@ -89,21 +89,86 @@ def test_loopback_service_url_helper() -> None:
     assert is_loopback_service_url("http://127.0.0.1:8188")
     assert is_loopback_service_url("http://localhost:11434")
     assert is_loopback_service_url("http://[::1]:8080")
+    assert is_loopback_service_url("https://127.0.0.1/")
+    assert is_loopback_service_url("http://[0:0:0:0:0:0:0:1]/")
     assert not is_loopback_service_url("http://169.254.169.254/")
     assert not is_loopback_service_url("http://8.8.8.8/")
     assert not is_loopback_service_url("http://10.0.0.1:8188")
     assert not is_loopback_service_url("file:///etc/passwd")
     assert not is_loopback_service_url("http://user:secret@127.0.0.1/")
+    assert not is_loopback_service_url("http://user@127.0.0.1/")
     assert not is_loopback_service_url("gopher://127.0.0.1/")
+    # Encoded / alternate-form loopback bypass attempts
+    assert not is_loopback_service_url("http://0.0.0.0:8188")
+    assert not is_loopback_service_url("http://2130706433/")  # decimal 127.0.0.1
+    assert not is_loopback_service_url("http://0x7f000001/")
+    assert not is_loopback_service_url("http://[fc00::1]/")  # ULA
+    assert not is_loopback_service_url("http://[fe80::1]/")  # link-local
+    assert not is_loopback_service_url("http://[::ffff:169.254.169.254]/")
+    assert not is_loopback_service_url("ftp://127.0.0.1/")
+    assert not is_loopback_service_url("")
+
+
+def test_loopback_service_url_mixed_dns_fail_closed() -> None:
+    """If DNS returns any non-loopback A/AAAA, reject (anti-rebinding)."""
+    fake = [
+        (0, 0, 0, "", ("127.0.0.1", 0)),
+        (0, 0, 0, "", ("8.8.8.8", 0)),
+    ]
+    with patch("socket.getaddrinfo", return_value=fake):
+        assert not is_loopback_service_url("http://evil.example/")
+    with patch("socket.getaddrinfo", side_effect=OSError("nxdomain")):
+        assert not is_loopback_service_url("http://no-such.invalid/")
 
 
 def test_http_get_json_refuses_ssrf_targets() -> None:
     """Must not open non-loopback URLs (no network call)."""
-    with patch("urllib.request.urlopen") as mock_open:
+    with patch("remedy.core.security.urlopen_no_redirect") as mock_open:
         assert http_get_json("http://169.254.169.254/latest/meta-data") is None
         assert http_get_json("http://8.8.8.8/") is None
         assert http_get_json("file:///C:/Windows/win.ini") is None
         mock_open.assert_not_called()
+
+
+def test_http_get_json_does_not_follow_off_loopback_redirect() -> None:
+    """Loopback 302 → metadata/LAN must not become outbound SSRF."""
+    import http.server
+    import threading
+
+    class _H(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802
+            if self.path == "/redir-meta":
+                self.send_response(302)
+                self.send_header("Location", "http://169.254.169.254/latest/meta-data")
+                self.end_headers()
+            elif self.path == "/redir-lan":
+                self.send_response(302)
+                self.send_header("Location", "http://10.0.0.5/secret")
+                self.end_headers()
+            elif self.path == "/ok":
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"ok":true}')
+            else:
+                self.send_response(404)
+                self.end_headers()
+
+        def log_message(self, *_args: object) -> None:
+            return
+
+    httpd = http.server.HTTPServer(("127.0.0.1", 0), _H)
+    port = httpd.server_address[1]
+    thr = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thr.start()
+    try:
+        base = f"http://127.0.0.1:{port}"
+        assert http_get_json(f"{base}/ok") == {"ok": True}
+        # Redirect responses must not follow — returns None (HTTPError 302)
+        assert http_get_json(f"{base}/redir-meta") is None
+        assert http_get_json(f"{base}/redir-lan") is None
+    finally:
+        httpd.shutdown()
 
 
 def test_loopback_hosts_only_clamps_skill_hosts() -> None:
@@ -137,3 +202,24 @@ def test_probe_ignores_poisoned_env_url(
     for call in mock_get.call_args_list:
         url = call.args[0] if call.args else ""
         assert is_loopback_service_url(url)
+
+
+def test_probe_health_path_injection_clamped() -> None:
+    """Skill health path with scheme / .. must not open arbitrary URLs."""
+    svc = HttpServiceSpec(
+        id="inject",
+        ports=[1],
+        path="http://evil.example/steal",
+        hosts=["127.0.0.1"],
+    )
+    with patch("remedy.core.local_discover.http_get_json") as mock_get:
+        mock_get.return_value = None
+        with patch("remedy.core.local_discover.port_open", return_value=True):
+            probe_http_service(svc)
+    assert mock_get.call_args_list, "expected at least one loopback probe"
+    for call in mock_get.call_args_list:
+        url = str(call.args[0] if call.args else "")
+        assert "evil.example" not in url
+        # Health path collapsed to "/" so URL is loopback base + /
+        assert url.endswith("/")
+        assert is_loopback_service_url(url.rstrip("/") or url)
