@@ -34,6 +34,9 @@ _MUTATION_HINT_RE = re.compile(
     r"|\becho\b(?=[^\n]*>)|\bprintf\b(?=[^\n]*>)|\bcat\b(?=[^\n]*>)"
     r"|\bgit\s+checkout\b|\bgit\s+restore\b|\bgit\s+clean\b|\bgit\s+reset\b"
     r"|\bnpm\s+install\b|\bpip\s+install\b|\bcargo\s+install\b"
+    # Download / fetch to file
+    r"|\binvoke-webrequest\b|\biwr\b"
+    r"|\bcurl\b|\bwget\b"
     # Interpreter one-shot writes
     r"|\b(?:python|python3|py)\s+(?:-\w+\s+)*-c\b"
     r"|\bnode\s+(?:-\w+\s+)*-e\b"
@@ -49,16 +52,30 @@ _OPAQUE_PATH_HINT_RE = re.compile(
     r"(?:"
     r"\$env:[A-Za-z_][\w]*"
     r"|\$\{env:[A-Za-z_][\w]*\}"
+    # cmd.exe / delayed-expansion env vars used as path roots
+    r"|%[A-Za-z_][\w]*%"
+    r"|![A-Za-z_][\w]*!"
     r"|\bjoin-path\b"
     r"|\benviron\["
     r"|\bos\.environ"
     r"|\bprocess\.env\b"
+    r"|\bos\.homedir\b"
     r"|\bexpanduser\b"
     r"|\bpath\.home\b"
     r"|\bgetfolderpath\b"
     r"|\binvoke-webrequest\b.*-outfile\b"
+    r"|\biwr\b[^\n]*-outfile\b"
     r"|\bcurl\b[^\n]*\s-o\b"
     r"|\bwget\b[^\n]*\s-O\b"
+    r")"
+)
+
+# Interpreter one-shots: without proven in-root path tokens, cannot prove safety.
+_INTERPRETER_ONESHOT_RE = re.compile(
+    r"(?ix)"
+    r"(?:"
+    r"\b(?:python|python3|py)\s+(?:-\w+\s+)*-c\b"
+    r"|\bnode\s+(?:-\w+\s+)*-e\b"
     r")"
 )
 
@@ -236,26 +253,29 @@ def check_shell_write_jail(
         if outside is not None:
             offenders.append(str(outside))
 
-    # Mutation with opaque path construction and no extractable path tokens → deny.
-    # If we already extracted paths and all were under roots, allow (no offenders).
-    if not offenders and not candidates and _OPAQUE_PATH_HINT_RE.search(cmd):
+    # Mutation + opaque path construction → deny even if another candidate is
+    # in-root (e.g. `copy C:\proj\a $env:USERPROFILE\Desktop\b`). Opaque dests
+    # are not extractable as path tokens, so mixed forms must fail closed.
+    if not offenders and _OPAQUE_PATH_HINT_RE.search(cmd):
         roots_s = ", ".join(str(r) for r in _norm_roots(write_roots)[:4])
         return (
             "shell write jail: mutation uses opaque path construction "
-            "($env:/Join-Path/etc.) that cannot be proven under write roots. "
+            "($env:/%VAR%/Join-Path/process.env/curl -o/etc.) that cannot be "
+            "proven under write roots. "
             f"Allowed write roots: [{roots_s}]. Prefer file_write/file_edit with "
             "paths under the focus folder."
         )
 
-    # python -c open(...) with no extractable path tokens still risky
-    if not offenders and not candidates and re.search(
-        r"(?ix)\b(?:python|python3|py)\s+(?:-\w+\s+)*-c\b.*\bopen\s*\(",
-        cmd,
-    ):
+    # python -c / node -e: without extractable path tokens we cannot prove the
+    # write target (open/writeFile/pathlib/dynamic paths). Fail closed.
+    # When every candidate is under roots (no offenders), allow proven in-root
+    # one-shots such as python -c "open(r'<project>\\x','w')…".
+    if not offenders and not candidates and _INTERPRETER_ONESHOT_RE.search(cmd):
         roots_s = ", ".join(str(r) for r in _norm_roots(write_roots)[:4])
         return (
-            "shell write jail: interpreter -c open(...) write cannot be proven "
-            f"under write roots [{roots_s}]. Use file_write/file_edit instead."
+            "shell write jail: interpreter -c/-e write cannot be proven under "
+            f"write roots [{roots_s}]. Use file_write/file_edit, or pass a "
+            "literal path under the focus folder."
         )
 
     if not offenders:

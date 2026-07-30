@@ -334,6 +334,67 @@ def test_shell_write_jail_blocks_sc_copy_python_and_opaque(tmp_path: Path):
         assert hit is not None, f"expected jail for: {cmd}"
 
 
+def test_shell_write_jail_blocks_mixed_opaque_dest(tmp_path: Path):
+    """Issue 9: in-root source + opaque dest must still fail closed."""
+    sticky = tmp_path / "SecretSticky"
+    sticky.mkdir()
+    (sticky / "a.txt").write_text("x", encoding="utf-8")
+    roots = [sticky.resolve()]
+    cases = [
+        rf'copy "{sticky / "a.txt"}" $env:USERPROFILE\Desktop\b.txt',
+        rf'Copy-Item "{sticky / "a.txt"}" (Join-Path $env:USERPROFILE Desktop\b.txt)',
+        r'copy a.txt %USERPROFILE%\Desktop\b.txt',
+        r'Set-Content -Path %TEMP%\leak.txt -Value z',
+        r'iwr https://example.com -OutFile %TEMP%\x.html',
+        r'curl -o %USERPROFILE%\Desktop\x.html https://example.com',
+    ]
+    for cmd in cases:
+        hit = check_shell_write_jail(
+            cmd,
+            write_roots=roots,
+            cwd=sticky,
+            project_bound=True,
+            access_scope="project",
+        )
+        assert hit is not None, f"expected jail for mixed/opaque: {cmd}"
+
+
+def test_shell_write_jail_blocks_interpreter_oneshot_without_paths(tmp_path: Path):
+    """Issue 10: python -c / node -e without extractable paths fail closed."""
+    sticky = tmp_path / "SecretSticky"
+    sticky.mkdir()
+    roots = [sticky.resolve()]
+    cases = [
+        r'''python -c "open(r'C:\\Users\\Public\\pwn.txt','w').write('x')"''',
+        r'''python -c "from pathlib import Path; Path.home().joinpath('Desktop','x').write_text('z')"''',
+        r'''node -e "require('fs').writeFileSync(process.env.USERPROFILE+'/Desktop/x','z')"''',
+        r'''node -e "require('fs').writeFileSync('C:\\\\Users\\\\Public\\\\x','z')"''',
+        r'''py -c "print(1)"''',  # classified mutation; no proven in-root path
+    ]
+    for cmd in cases:
+        hit = check_shell_write_jail(
+            cmd,
+            write_roots=roots,
+            cwd=sticky,
+            project_bound=True,
+            access_scope="project",
+        )
+        assert hit is not None, f"expected jail for interpreter: {cmd}"
+
+    # Proven in-root path still allowed (no outside offenders, no opaque)
+    ok = f'''python -c "open(r'{sticky / "ok.txt"}','w').write('y')"'''
+    assert (
+        check_shell_write_jail(
+            ok,
+            write_roots=roots,
+            cwd=sticky,
+            project_bound=True,
+            access_scope="project",
+        )
+        is None
+    )
+
+
 def test_shell_write_jail_blocks_relative_escape(tmp_path: Path):
     proj = tmp_path / "SecretSticky"
     sibling = tmp_path / "SecretFolder"
