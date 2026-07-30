@@ -177,3 +177,90 @@ def test_locate_shape() -> None:
     assert "installs" in loc
     assert "config_keys" in loc
     assert "COMFYUI_HOME" in loc["config_keys"]["env"]
+
+
+def test_safe_image_filename_blocks_traversal() -> None:
+    """Residual path jail: absolute / .. / separators must not become write names."""
+    assert comfy._safe_image_filename("ComfyUI_00001_.png") == "ComfyUI_00001_.png"  # noqa: SLF001
+    assert comfy._safe_image_filename("sub/ComfyUI_1.png") is None  # noqa: SLF001
+    assert comfy._safe_image_filename("../escape.png") is None  # noqa: SLF001
+    assert comfy._safe_image_filename(r"..\escape.png") is None  # noqa: SLF001
+    assert comfy._safe_image_filename(r"C:\Windows\evil.png") is None  # noqa: SLF001
+    assert comfy._safe_image_filename("/etc/passwd") is None  # noqa: SLF001
+    assert comfy._safe_image_filename("") is None  # noqa: SLF001
+    assert comfy._safe_image_filename("..") is None  # noqa: SLF001
+
+
+def test_download_images_jails_filename(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Unsafe Comfy history filenames must not write outside out_dir."""
+    out = tmp_path / "comfy_out"
+    out.mkdir()
+    history = {
+        "outputs": {
+            "9": {
+                "images": [
+                    {
+                        "filename": r"C:\Windows\evil.png",
+                        "subfolder": "",
+                        "type": "output",
+                    },
+                    {
+                        "filename": "../escape.png",
+                        "subfolder": "",
+                        "type": "output",
+                    },
+                    {
+                        "filename": "good_ok.png",
+                        "subfolder": "",
+                        "type": "output",
+                    },
+                ]
+            }
+        }
+    }
+
+    def fake_request(method, path, *, base, data=None, timeout=30.0):  # noqa: ANN001
+        if path.startswith("/view?"):
+            return b"PNGDATA"
+        raise AssertionError(f"unexpected request {path}")
+
+    monkeypatch.setattr(comfy, "_request", fake_request)
+    saved = comfy.download_images(
+        "pid1", out, base_url="http://127.0.0.1:8188", history_entry=history
+    )
+    assert len(saved) == 1
+    assert saved[0].name == "good_ok.png"
+    assert saved[0].is_relative_to(out.resolve())
+    # Nothing escaped beside out_dir
+    assert not (tmp_path / "escape.png").exists()
+    assert list(out.iterdir()) == [out / "good_ok.png"]
+
+
+def test_generate_default_out_dir_uses_remedy_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """REMEDY_HOME residual: default comfy_out must not ignore isolated home."""
+    home = tmp_path / ".remedy"
+    home.mkdir()
+    monkeypatch.setenv("REMEDY_HOME", str(home))
+    # Skip network: stub generate pipeline pieces
+    monkeypatch.setattr(comfy, "resolve_base_url", lambda _o=None: "http://127.0.0.1:8188")
+    monkeypatch.setattr(comfy, "_probe_api", lambda *_a, **_k: {"ok": True})
+    monkeypatch.setattr(
+        comfy,
+        "build_txt2img_workflow",
+        lambda *a, **k: {"8": {"inputs": {"seed": 1}}},
+    )
+    monkeypatch.setattr(comfy, "queue_prompt", lambda *a, **k: "p1")
+    monkeypatch.setattr(comfy, "wait_prompt", lambda *a, **k: {"outputs": {}})
+    captured: dict[str, Path] = {}
+
+    def fake_dl(pid, dest, **kwargs):  # noqa: ANN001
+        captured["dest"] = Path(dest)
+        return []
+
+    monkeypatch.setattr(comfy, "download_images", fake_dl)
+    comfy.generate_image("a cat")
+    assert captured["dest"] == home / "comfy_out"
