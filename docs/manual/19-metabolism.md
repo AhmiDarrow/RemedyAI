@@ -43,9 +43,13 @@ Normal chat still talks to **one Remedy**. These organs never appear as named bo
 
 - One voice only  
 - Local-first under `~/.remedy`  
-- Secrets redacted at ledger / IR / export  
-- Shadow never replaces write jail or approvals  
+- Secrets redacted at ledger / IR / export / logs / UI tool previews  
+- Shadow never replaces write jail or approvals (opaque shell payloads hard-block)  
+- Shell write jail fails closed on encoded/download-drop mutations when a project is bound  
+- URL userinfo and query tokens stripped from machine map, CUA macros, and Action IR  
+- Identity export/import rate-limited; packages require passphrase + HMAC  
 - Hot path never blocks on local model inference  
+- Plan mode stays research-only (no `computer_act` / click / type mutations)
 
 ## Related
 
