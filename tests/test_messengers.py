@@ -14,6 +14,8 @@ from remedy.gateway.messengers import (
     is_messenger_channel,
     list_messenger_definitions,
     max_reply_chars,
+    public_fields_from_section,
+    redact_messenger_secrets,
     split_message,
 )
 from remedy.interfaces.api import create_app
@@ -235,3 +237,42 @@ def test_session_events_endpoint():
     # OpenAPI must list the events path
     paths = client.get("/openapi.json").json().get("paths") or {}
     assert "/api/events/sessions" in paths
+
+
+def test_redact_messenger_secrets_strips_telegram_url_token():
+    tok = "7123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw"
+    url = f"https://api.telegram.org/bot{tok}/getUpdates"
+    scrubbed = redact_messenger_secrets(f"ClientConnectorError: {url}")
+    assert tok not in scrubbed
+    assert "api.telegram.org/bot" in scrubbed
+    assert "[redacted]" in scrubbed
+    assert tok not in redact_messenger_secrets(tok)
+
+
+def test_public_fields_never_echo_legacy_plaintext_token():
+    fields = public_fields_from_section(
+        "telegram",
+        {
+            "bot_token": "should-never-appear",
+            "allow_chat_ids": ["1", "2"],
+            "allow_all": False,
+        },
+    )
+    assert "bot_token" not in fields
+    assert "should-never-appear" not in str(fields)
+    assert fields.get("allow_chat_ids") == ["1", "2"]
+    assert fields.get("allow_all") is False
+
+
+def test_public_fields_unknown_channel_strips_secret_suffixes():
+    fields = public_fields_from_section(
+        "not_a_real_channel",
+        {
+            "bot_token": "x",
+            "app_password": "y",
+            "signing_secret": "z",
+            "channel_id": "ok",
+        },
+    )
+    assert fields == {"channel_id": "ok"}
+

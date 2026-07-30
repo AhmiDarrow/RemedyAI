@@ -166,3 +166,11 @@ def test_catalog_all_have_fields():
     for m in list_messenger_definitions():
         assert m.id and m.name
         assert m.status in ("ready", "partial", "planned")
+
+
+def test_whatsapp_verify_token_rejects_length_mismatch():
+    wa = WhatsAppChannel(_GW(), verify_token="secret")
+    assert wa.verify_webhook_challenge("subscribe", "secretx", "42") is None
+    assert wa.verify_webhook_challenge("subscribe", "", "42") is None
+    assert wa.verify_webhook_challenge("subscribe", "secret", "42") == "42"
+

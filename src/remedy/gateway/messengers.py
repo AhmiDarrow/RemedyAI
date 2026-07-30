@@ -61,6 +61,23 @@ SECRET_FIELD_KEYS = frozenset(
     }
 )
 
+# Telegram bot tokens live in the API URL path (api.telegram.org/bot<token>/...).
+# Exception strings from aiohttp often embed that URL — never log them raw.
+_TG_BOT_URL_RE = re.compile('(?i)(https?://api\\.telegram\\.org/bot)([^/\\s<>\\"\']+)')
+_TG_BOT_TOKEN_RE = re.compile('\\b(\\d{6,12}:[A-Za-z0-9_-]{20,})\\b')
+
+
+def redact_messenger_secrets(text: str) -> str:
+    """Scrub messenger tokens/URLs from free text before logging or display."""
+    if not text:
+        return ""
+    out = _TG_BOT_URL_RE.sub(r"\1[redacted]", str(text))
+    out = _TG_BOT_TOKEN_RE.sub("[redacted]", out)
+    # Slack-style bot tokens if they appear in error strings
+    out = re.sub('(?i)\\bxox[baprs]-[A-Za-z0-9-]{10,}', "xox[redacted]", out)
+    return out
+
+
 MESSENGERS: tuple[MessengerDef, ...] = (
     MessengerDef(
         id="telegram",
@@ -382,12 +399,17 @@ def public_fields_from_section(channel: str, section: dict[str, Any] | None) -> 
     mdef = get_messenger(channel)
     raw = dict(section or {}) if isinstance(section, dict) else {}
     if not mdef:
-        # Strip known secret keys
-        return {
-            k: v
-            for k, v in raw.items()
-            if str(k).lower() not in SECRET_FIELD_KEYS and not str(k).lower().endswith("_token")
-        }
+        # Strip known secret keys (and common secret-shaped suffixes)
+        def _is_secret_key(k: str) -> bool:
+            kl = str(k).lower()
+            return (
+                kl in SECRET_FIELD_KEYS
+                or kl.endswith("_token")
+                or kl.endswith("_password")
+                or kl.endswith("_secret")
+            )
+
+        return {k: v for k, v in raw.items() if not _is_secret_key(k)}
     out: dict[str, Any] = {}
     for f in mdef.fields:
         if f.kind == "secret":
