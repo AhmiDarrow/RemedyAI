@@ -8,6 +8,32 @@ from remedy.core.computer.executor import get_computer_executor
 from remedy.core.computer.types import ComputerAction
 
 
+def _computer_approval_gate(runtime: Any, tool_name: str, summary: str) -> str | None:
+    """Return APPROVAL_REQUIRED text when Ask mode blocks a mutation, else None."""
+    from remedy.core.approvals import APPROVALS
+    from remedy.core.turn_context import turn_session_id
+
+    ask_reason = APPROVALS.needs_ask(summary, tool_name=tool_name)
+    if not ask_reason:
+        return None
+    sid = turn_session_id(runtime)
+    if APPROVALS.is_approved(tool_name, summary, session_id=sid):
+        return None
+    item = APPROVALS.create(
+        tool_name=tool_name,
+        command=summary,
+        reason=ask_reason,
+        session_id=sid,
+    )
+    return (
+        f"APPROVAL_REQUIRED id={item.id}\n"
+        f"reason={ask_reason}\n"
+        f"command={summary[:400]}\n"
+        "Do not invent success. Tell the user this needs approval in the UI "
+        f"(or /approve {item.id}). After they approve, retry {tool_name}."
+    )
+
+
 def register_computer_tools(runtime: Any) -> None:
     """Always-on computer use (browser rail + full desktop). No feature gate."""
 
@@ -77,6 +103,13 @@ def register_computer_tools(runtime: Any) -> None:
 
         Prefer text=\"Membership options\" or ref=e3 over guessing pixels.
         """
+        summary = (
+            f"click text={text!r} ref={ref!r} x={x} y={y} "
+            f"button={button} clicks={clicks} target={target or 'auto'}"
+        )
+        blocked = _computer_approval_gate(runtime, "computer_click", summary)
+        if blocked:
+            return blocked
         return ex.run(
             ComputerAction.CLICK,
             target=target or "auto",
@@ -102,6 +135,10 @@ def register_computer_tools(runtime: Any) -> None:
 
     async def computer_app(app: str = "", hint: str = "") -> str:
         """Launch a desktop app (notepad, calc, explorer, chrome, path to .exe)."""
+        summary = f"app launch app={app!r}"
+        blocked = _computer_approval_gate(runtime, "computer_app", summary)
+        if blocked:
+            return blocked
         return ex.run(
             ComputerAction.APP,
             target="desktop",
@@ -152,6 +189,15 @@ def register_computer_tools(runtime: Any) -> None:
         Prefer this for login/search flows instead of many tiny tool rounds.
         Example: url=https://mail.google.com click=\"Sign in\" type=\"user@gmail.com\" key=enter
         """
+        # Do not put typed secrets in the approval banner; only lengths / labels.
+        type_note = f"type_chars={len(type)}" if type else "type=-"
+        summary = (
+            f"act url={url!r} click={click!r} {type_note} key={key!r} "
+            f"goal={goal!r} target={target or 'browser'}"
+        )
+        blocked = _computer_approval_gate(runtime, "computer_act", summary)
+        if blocked:
+            return blocked
         return ex.run(
             ComputerAction.ACT,
             target=target or "browser",
@@ -172,6 +218,10 @@ def register_computer_tools(runtime: Any) -> None:
         hint: str = "",
     ) -> str:
         """Type text into the focused UI (browser or desktop)."""
+        summary = f"type chars={len(text or '')} target={target or 'auto'}"
+        blocked = _computer_approval_gate(runtime, "computer_type", summary)
+        if blocked:
+            return blocked
         return ex.run(
             ComputerAction.TYPE,
             target=target or "auto",
@@ -186,6 +236,10 @@ def register_computer_tools(runtime: Any) -> None:
         hint: str = "",
     ) -> str:
         """Press a key or combo (enter, tab, ctrl+s, alt+f4, …)."""
+        summary = f"key={key!r} target={target or 'auto'}"
+        blocked = _computer_approval_gate(runtime, "computer_key", summary)
+        if blocked:
+            return blocked
         return ex.run(
             ComputerAction.KEY,
             target=target or "auto",
@@ -259,6 +313,10 @@ def register_computer_tools(runtime: Any) -> None:
         hint: str = "",
     ) -> str:
         """Drag from (x,y) to (x2,y2)."""
+        summary = f"drag ({x},{y})->({x2},{y2}) target={target or 'auto'}"
+        blocked = _computer_approval_gate(runtime, "computer_drag", summary)
+        if blocked:
+            return blocked
         return ex.run(
             ComputerAction.DRAG,
             target=target or "auto",

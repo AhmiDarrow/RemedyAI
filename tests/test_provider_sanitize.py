@@ -125,6 +125,39 @@ def test_sanitize_tool_arguments_redacts_secrets_inside_json():
     assert parsed.get("ok") is True
 
 
+def test_computer_type_secret_payload_redacted_in_history():
+    """Login-style typed payloads must not re-enter provider history."""
+    out = sanitize_tool_arguments(
+        {"text": "MyP@ssw0rd99", "target": "browser"},
+        tool_name="computer_type",
+    )
+    parsed = json.loads(out)
+    assert "MyP@ssw0rd99" not in out
+    assert "redacted" in str(parsed.get("text", "")).lower()
+    assert parsed.get("target") == "browser"
+
+
+def test_computer_act_type_field_redacted_when_secretish():
+    out = sanitize_tool_arguments(
+        {"url": "https://mail.example", "click": "Sign in", "type": "tok3nSecretX"},
+        tool_name="computer_act",
+    )
+    parsed = json.loads(out)
+    assert "tok3nSecretX" not in out
+    assert "redacted" in str(parsed.get("type", "")).lower()
+    assert parsed.get("click") == "Sign in"
+
+
+def test_computer_type_normal_phrase_kept():
+    """Ordinary multi-word typing is not secret-like — keep for agent context."""
+    out = sanitize_tool_arguments(
+        {"text": "hello world search query", "target": "browser"},
+        tool_name="computer_type",
+    )
+    parsed = json.loads(out)
+    assert parsed.get("text") == "hello world search query"
+
+
 def test_file_write_large_content_summarized_not_half_clipped():
     """History must not look like a truncated file body (causes rewrite thrash)."""
     body = "line\n" * 5000  # >> 8k

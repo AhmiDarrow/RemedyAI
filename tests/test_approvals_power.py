@@ -17,6 +17,9 @@ def test_auto_mode_skips_high_impact_on_trusted_scope(monkeypatch):
     assert q.needs_ask("write src/a.py", tool_name="file_write") is None
     assert q.needs_ask("edit src/a.py", tool_name="file_edit") is None
     assert q.needs_ask("run skill", tool_name="skill_run") is None
+    assert q.needs_ask("click text='OK'", tool_name="computer_click") is None
+    assert q.needs_ask("type chars=8", tool_name="computer_type") is None
+    assert q.needs_ask("act url=…", tool_name="computer_act") is None
 
 
 def test_ask_mode_requires_bash_and_soft_risk(monkeypatch):
@@ -29,6 +32,27 @@ def test_ask_mode_requires_bash_and_soft_risk(monkeypatch):
     reason = q.needs_ask("echo hi", tool_name="bash_exec")
     assert reason is not None
     assert "bash_exec" in reason.lower() or "shell" in reason.lower()
+
+
+def test_ask_mode_requires_computer_mutation(monkeypatch):
+    """OS click/type/act/app must prompt in Ask mode (same bar as shell)."""
+    q = ApprovalQueue()
+    q.set_mode("ask")
+    monkeypatch.setattr(
+        "remedy.interfaces.api_support.load_config",
+        lambda: {"access_scope": "project"},
+    )
+    for tool in (
+        "computer_click",
+        "computer_type",
+        "computer_key",
+        "computer_drag",
+        "computer_act",
+        "computer_app",
+    ):
+        reason = q.needs_ask(f"summary for {tool}", tool_name=tool)
+        assert reason is not None, tool
+        assert "computer" in reason.lower(), reason
 
 
 def test_untrusted_scope_asks_even_in_auto(monkeypatch):

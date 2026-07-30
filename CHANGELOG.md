@@ -16,6 +16,12 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 - Identity: HMAC required on import; export+import rate limits; export path jail under `home/exports`
 - Atomic writes: skill_genome, cua_macros, xAI auth store
 - Perf: precompiled hard/soft/self-kill security patterns; shell jail `_norm_roots` once per check
+- **Plan mode:** drop `computer_act` (and keep allowlist = research tools ∪ `COMPUTER_PLAN_MODE_TOOLS` only — no click/type/app)
+- **Approvals:** computer mutation tools (`click`/`type`/`key`/`drag`/`act`/`app`) require Ask approval like shell
+- **Learning loop:** skill dir names path-jailed (`is_safe_skill_name` + slug); reflection tool prefix slugified
+- **MCP client:** scrub child env of provider secrets; strip `_mcp_server` from tools/call args
+- **Zip import:** reject Unix symlink members; **provider sanitize:** redact secret-like computer type payloads
+- Docs: README pytest count ~1174
 
 ### Security/perf: metabolism hardening pass
 

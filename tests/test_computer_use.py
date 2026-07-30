@@ -153,7 +153,11 @@ def test_plan_mode_includes_read_computer_tools():
     assert "computer_windows" in PLAN_MODE_TOOL_NAMES
     assert "computer_click" not in PLAN_MODE_TOOL_NAMES
     assert "computer_type" not in PLAN_MODE_TOOL_NAMES
+    # Multi-step act can click/type — must stay Build-only (aligned with COMPUTER_PLAN_MODE_TOOLS)
+    assert "computer_act" not in PLAN_MODE_TOOL_NAMES
+    assert "computer_app" not in PLAN_MODE_TOOL_NAMES
     assert COMPUTER_PLAN_MODE_TOOLS <= COMPUTER_TOOL_NAMES
+    assert COMPUTER_PLAN_MODE_TOOLS <= PLAN_MODE_TOOL_NAMES
 
 
 def test_host_bridge_enqueue_claim_complete(tmp_path: Path):
