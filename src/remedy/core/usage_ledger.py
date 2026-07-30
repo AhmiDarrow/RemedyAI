@@ -286,3 +286,36 @@ def session_usage(
     home: Path | str | None = None,
 ) -> dict[str, Any]:
     return summary(range_days=3650.0, session_id=session_id, home=home)
+
+
+def delete_session_events(
+    session_id: str,
+    *,
+    home: Path | str | None = None,
+) -> int:
+    """Remove all usage events for a session (privacy cascade on chat delete).
+
+    Returns the number of rows deleted. Empty/missing session_id is a no-op.
+    """
+    sid = (session_id or "").strip()
+    if not sid:
+        return 0
+    conn = _get_conn(home)
+    with _lock:
+        cur = conn.execute(
+            "DELETE FROM usage_events WHERE session_id = ?",
+            (sid,),
+        )
+        conn.commit()
+        return int(cur.rowcount or 0)
+
+
+def close_conn() -> None:
+    """Close the process-global connection (tests / home switch)."""
+    global _conn, _path
+    with _lock:
+        if _conn is not None:
+            with suppress(Exception):
+                _conn.close()
+        _conn = None
+        _path = None

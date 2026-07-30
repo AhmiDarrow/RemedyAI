@@ -141,8 +141,11 @@ def test_goal_scout_health_nanobots(tmp_path: Path):
 
 
 def test_usage_ledger_summary(tmp_path: Path):
+    from remedy.core.usage_ledger import close_conn
+
     home = tmp_path / "remedy-home"
     home.mkdir()
+    close_conn()
     record_usage_event(
         session_id="s1",
         provider="xai",
@@ -166,3 +169,51 @@ def test_usage_ledger_summary(tmp_path: Path):
     assert len(s["by_provider"]) == 2
     ser = series(range_days=7, group="provider", home=home)
     assert "points" in ser
+    close_conn()
+
+
+def test_usage_ledger_delete_session_and_cascade(tmp_path: Path):
+    """Session delete cascade must drop usage.db rows for that session only."""
+    from remedy.core.session_reset import purge_session_disk_artifacts
+    from remedy.core.usage_ledger import close_conn, delete_session_events, session_usage
+
+    home = tmp_path / "remedy-home"
+    home.mkdir()
+    close_conn()
+    record_usage_event(
+        session_id="drop-me",
+        provider="xai",
+        model="grok",
+        prompt_tokens=50,
+        completion_tokens=10,
+        home=home,
+    )
+    record_usage_event(
+        session_id="keep-me",
+        provider="openai",
+        model="gpt",
+        prompt_tokens=20,
+        completion_tokens=5,
+        home=home,
+    )
+    n = delete_session_events("drop-me", home=home)
+    assert n == 1
+    left = session_usage("drop-me", home=home)
+    assert left["totals"]["events"] == 0
+    kept = session_usage("keep-me", home=home)
+    assert kept["totals"]["events"] == 1
+    assert kept["totals"]["total_tokens"] == 25
+
+    # Re-seed and purge via session cascade
+    record_usage_event(
+        session_id="cascade-sid",
+        provider="xai",
+        model="g",
+        prompt_tokens=1,
+        completion_tokens=1,
+        home=home,
+    )
+    stats = purge_session_disk_artifacts("cascade-sid", home)
+    assert stats.get("usage_events_deleted", 0) >= 1
+    assert session_usage("cascade-sid", home=home)["totals"]["events"] == 0
+    close_conn()

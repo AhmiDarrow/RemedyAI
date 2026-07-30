@@ -6,6 +6,10 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ### Gauntlet: continuous security + perf loop (feature/computer-use)
 
+- **job_run verify write jail:** silent `job_run`/`mission_verify` share `bash_exec` shell write jail + write-roots fail-closed (no bypass via jobs path)
+- **Usage ledger session cascade:** `delete_session_events` + purge on session delete/reset so chat wipe drops token/cost rows from `usage.db`
+- **Learning loop session_id:** skill nanobot/coordinator pass `session_id` for multi-session ACTIVE promotion; `skill_run` skips double feedback record
+- **local_infer prompt caps:** truncate huge prompts/system + clamp `max_tokens` so ranker/router cannot flood llama-server
 - **MCP residual tools:** disconnect / reader EOF / rediscover purge `mcp:{server}:*` registrations so dead servers cannot still resolve `call_tool`; pending JSON-RPC futures fail closed
 - **Provider sanitize:** outbound scrub uses shared metabolism redaction (Anthropic/OpenRouter/HF/npm/Stripe/Google/JWT/PEM/DB URLs) so tool results match ledger fail-closed policy
 - **Time travel restore:** refuse auth/undo paths; skip incomplete (oversized) prior bodies so truncation stubs never rewrite source; API passes `message_id` + timestamp fallback

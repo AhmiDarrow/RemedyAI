@@ -23,6 +23,10 @@ class SkillNanobot:
         learning_loop: Any | None = None,
         duration_ms: float = 0.0,
         skill: Any | None = None,
+        session_id: str | None = None,
+        error: str | None = None,
+        record_feedback: bool = True,
+        auto_refine: bool = True,
     ) -> dict[str, Any]:
         out: dict[str, Any] = {"bot": "skill", "skill": skill_name, "success": success}
         # Always track duration on skill metadata when object is available (rank cost signal)
@@ -41,14 +45,30 @@ class SkillNanobot:
             out["skipped"] = "no_learning_loop"
             return out
         try:
-            learning_loop.record_skill_feedback(
-                skill_name,
-                success=success,
-                duration_ms=duration_ms,
-            )
-            self.feedback_count += 1
-            out["feedback_recorded"] = True
-            if skill is not None and hasattr(learning_loop, "auto_refine_skill"):
+            # session_id is required for multi-session ACTIVE promotion — never drop it.
+            sid = str(session_id or "").strip()
+            if sid:
+                out["session_id"] = sid
+            # skill_run may already have recorded — pass record_feedback=False to avoid
+            # double-counting total_executions (which inflated success rates / stalled promote).
+            if record_feedback:
+                learning_loop.record_skill_feedback(
+                    skill_name,
+                    success=success,
+                    duration_ms=duration_ms,
+                    session_id=sid,
+                    error=error,
+                )
+                self.feedback_count += 1
+                out["feedback_recorded"] = True
+            else:
+                out["feedback_recorded"] = False
+                out["feedback_skipped"] = "already_recorded"
+            if (
+                auto_refine
+                and skill is not None
+                and hasattr(learning_loop, "auto_refine_skill")
+            ):
                 changed = learning_loop.auto_refine_skill(skill)
                 out["refined"] = bool(changed)
                 dec = getattr(learning_loop, "last_lifecycle_decision", None) or getattr(
