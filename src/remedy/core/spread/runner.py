@@ -96,6 +96,26 @@ async def run_spread(
     wall_ms = (time.perf_counter() - t0) * 1000.0
     merged = _merge_results(results, reason=reason)
     ok = any(r.ok for r in results)
+    # Evidence ledger + decision currency for silent parallel work
+    try:
+        from remedy.core.metabolism.decision import get_decision_tracker
+        from remedy.core.metabolism.evidence import get_evidence_ledger
+        from remedy.core.turn_context import turn_session_id
+
+        sid = str(turn_session_id(runtime) or getattr(runtime, "_session_id", "") or "")
+        led = get_evidence_ledger(sid)
+        admitted = led.admit_tool_result(
+            tool_name="spread_run",
+            content=merged or "",
+            success=ok,
+        )
+        get_decision_tracker(sid).record_tool_batch(new_eu=len(admitted))
+        get_decision_tracker(sid).record(
+            "spread",
+            f"spread ok={ok} workers={len(results)} wall_ms={wall_ms:.0f}",
+        )
+    except Exception:
+        pass
     return SpreadResult(
         ok=ok,
         strategy=strategy,

@@ -150,6 +150,15 @@ def apply_auto_harness_send_policy(
     window = resolve_context_window_for_runtime(runtime)
     min_pct = float(getattr(runtime, "_harness_min_pct", 0.75) or 0.75)
     max_pct = float(getattr(runtime, "_harness_max_pct", 0.92) or 0.92)
+    # Governor: compress earlier when stuck/waste — lower soft threshold.
+    with suppress(Exception):
+        from remedy.core.metabolism.governor import get_governor
+
+        gov = get_governor(sid)
+        if gov.compress_earlier:
+            min_pct = max(0.45, float(min_pct) - 0.12)
+            max_pct = max(min_pct + 0.05, float(max_pct) - 0.05)
+            meta["governor_compress_earlier"] = True
 
     snap = build_context_snapshot(
         messages=messages,
@@ -177,7 +186,7 @@ def apply_auto_harness_send_policy(
     if level:
         pre_prune = [dict(m) for m in messages]
 
-    # Inject policy + remedies + project pins
+    # Inject policy + remedies + project pins + metabolism deltas
     injects: list[str] = []
     if snap.policy_system:
         injects.append(snap.policy_system)
@@ -189,6 +198,21 @@ def apply_auto_harness_send_policy(
         pin = pinned_constraints_block(project_path)
         if pin:
             injects.append(pin)
+    with suppress(Exception):
+        from remedy.core.metabolism.evidence import get_evidence_ledger
+        from remedy.core.metabolism.time_crystal import get_time_crystal
+        from remedy.core.metabolism.cua_macros import get_cua_macros
+
+        eblock = get_evidence_ledger(sid).pointer_block(limit=10)
+        if eblock:
+            injects.append(eblock)
+            meta["evidence_delta"] = True
+        cblock = get_time_crystal(sid).hot_block(max_chars=600)
+        if cblock:
+            injects.append(cblock)
+        mhint = get_cua_macros().top_hints(3)
+        if mhint:
+            injects.append(mhint)
     if injects:
         messages.insert(
             -1,

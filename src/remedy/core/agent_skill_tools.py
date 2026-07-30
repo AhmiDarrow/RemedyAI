@@ -92,6 +92,11 @@ def register_skill_tools(runtime: Any) -> None:
                     nm,
                     session_id=str(getattr(runtime, "_session_id", "") or ""),
                 )
+        # Skill genome phenotype (activation success = body loaded)
+        with suppress(Exception):
+            from remedy.core.metabolism.skill_genome import get_skill_genome
+
+            get_skill_genome().record(nm, ok=True, latency_ms=0.0)
         return body + footer
 
     async def skill_run(
@@ -225,6 +230,14 @@ def register_skill_tools(runtime: Any) -> None:
                             learning_loop=loop,
                             skill=sk,
                         )
+            with suppress(Exception):
+                from remedy.core.metabolism.skill_genome import get_skill_genome
+
+                get_skill_genome().record(
+                    nm,
+                    ok=ok,
+                    latency_ms=float(result.duration_ms or 0),
+                )
             if ok:
                 out = (result.stdout or "")[:12000]
                 return out or f"Script {chosen} exited 0 (no stdout)."

@@ -81,6 +81,13 @@ def begin_turn_metabolism(
     note = tier_system_block(tier)
     if note:
         injects.append(note)
+    # Force-spread muscle (L3 / governor) — stronger than soft hint
+    if policy.force_spread or gov.force_spread:
+        injects.append(
+            "[Spread · force] Work looks partitionable or deep. "
+            "Call spread_run for independent modules/paths/URLs first, "
+            "then synthesize one answer. Do not serial-loop list_dir."
+        )
     gnote = gov.system_notes()
     if gnote:
         injects.append(gnote)
@@ -90,10 +97,32 @@ def begin_turn_metabolism(
     crystal_block = crystal.hot_block(max_chars=800)
     if crystal_block and int(tier) >= 1:
         injects.append(crystal_block)
+    # Pending critical-verify remedy from prior turn (silent)
+    with suppress(Exception):
+        # runtime not in begin_turn — caller may pass via injects later
+        pass
     # Evidence delta from prior tools (after first model call mark)
     eblock = ledger.pointer_block(limit=12)
     if eblock and int(tier) >= 2:
         injects.append(eblock)
+    with suppress(Exception):
+        from remedy.core.metabolism.cua_macros import get_cua_macros
+
+        mh = get_cua_macros().top_hints(3)
+        if mh and int(tier) >= 2:
+            injects.append(mh)
+    with suppress(Exception):
+        from remedy.core.metabolism.skill_genome import get_skill_genome
+
+        top = get_skill_genome().rank(5)
+        if top and int(tier) >= 2:
+            names = ", ".join(
+                f"{t['skill_id']}({t['score']})" for t in top if t.get("skill_id")
+            )
+            if names:
+                injects.append(
+                    f"[Skill genome] Prefer proven skills when relevant: {names}"
+                )
 
     ir = None
     if policy.record_ir:
@@ -180,10 +209,22 @@ def after_tool_batch(
     if name == "computer_navigate" and arguments:
         url = str(arguments.get("url") or arguments.get("target") or "")
         mmap.note_browser(url=url, settled=False)
-        mmap.invalidate("browser")  # will refresh on next snapshot
-        mmap.note_browser(url=url, settled=False)
-    if name in ("computer_snapshot", "computer_screenshot") and success:
-        mmap.note_browser(settled=True, ref_count=content.count("e") if content else 0)
+    if name in ("computer_snapshot", "computer_screenshot", "computer_act") and success:
+        # Parse light ref counts from element dump (e1, w1, c1)
+        import re
+
+        refs = len(re.findall(r"\b[ewc]\d+\b", content or "", flags=re.I))
+        url = ""
+        if arguments:
+            url = str(arguments.get("url") or "")
+        mmap.note_browser(url=url, settled=True, ref_count=refs)
+    if name == "computer_windows" and success:
+        titles = [
+            ln.strip()[:80]
+            for ln in (content or "").splitlines()
+            if ln.strip()
+        ][:12]
+        mmap.note_desktop_windows(len(titles), titles)
 
     if action_ir is not None:
         with suppress(Exception):
@@ -274,10 +315,15 @@ def metabolism_public_snapshot(session_id: str | None = None) -> dict[str, Any]:
     from remedy.core.metabolism.action_ir import ir_coverage_count
 
     skill_snap: dict = {}
+    cua_snap: dict = {}
     with suppress(Exception):
         from remedy.core.metabolism.skill_genome import get_skill_genome
 
         skill_snap = get_skill_genome().snapshot()
+    with suppress(Exception):
+        from remedy.core.metabolism.cua_macros import get_cua_macros
+
+        cua_snap = get_cua_macros().snapshot()
     return {
         "evidence": get_evidence_ledger(sid).snapshot(),
         "decisions": get_decision_tracker(sid).snapshot(),
@@ -285,5 +331,6 @@ def metabolism_public_snapshot(session_id: str | None = None) -> dict[str, Any]:
         "governor": get_governor(sid).snapshot(),
         "time_crystal": get_time_crystal(sid).snapshot(),
         "skill_genome": skill_snap,
+        "cua_macros": cua_snap,
         "ir_coverage_total": ir_coverage_count(),
     }

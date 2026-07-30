@@ -23,6 +23,7 @@ Open **Help** ( **F1** or **Ctrl+/** ) for a searchable wiki UI that loads these
 | [05-chat-and-sessions.md](05-chat-and-sessions.md) | Chat, rails, Plan/Build |
 | [06-memory-and-harness.md](06-memory-and-harness.md) | Memory & harness |
 | [18-agency.md](18-agency.md) | Coding agency (Build-class tools) |
+| [19-metabolism.md](19-metabolism.md) | Partner Metabolism (Advanced) |
 | [07-skills.md](07-skills.md) | Skills & Library |
 | [08-updates-and-uninstall.md](08-updates-and-uninstall.md) | Updates & uninstall |
 | [09-troubleshooting.md](09-troubleshooting.md) | Troubleshooting |

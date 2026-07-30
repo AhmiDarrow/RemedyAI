@@ -60,6 +60,13 @@ def save_vision_json(data: dict[str, Any], home_dir: str | Path | None = None) -
     root.mkdir(parents=True, exist_ok=True)
     path = vision_json_path(home_dir)
     path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    # Force runtime hot-path reparse (Windows mtime granularity)
+    try:
+        from remedy.vision.runtime import invalidate_running_cache
+
+        invalidate_running_cache()
+    except Exception:
+        pass
     return path
 
 

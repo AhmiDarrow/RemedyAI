@@ -85,6 +85,7 @@ You should return to progress, not a queue of clarifying questions.
 ## Related
 
 - [Memory & Memory Harness](06-memory-and-harness)  
+- [Partner Metabolism](19-metabolism) — turn tiers, evidence, governor, identity  
 - [Skills](07-skills)  
 - [Local vision](14-visual-decoder)  
 - [Continuity workers (nano swarm)](17-nanoswarm) — operator detail  

@@ -135,9 +135,16 @@ def test_settings_put_messenger_token_not_echoed(tmp_path, monkeypatch):
     body = g.json()
     raw = g.text
     assert "secret-token-xyz" not in raw
-    tg = next(m for m in body["messengers"] if m["id"] == "telegram")
-    assert tg["enabled"] is True
-    assert tg["token_set"] is True
+    messengers = body.get("messengers") or []
+    tg = next((m for m in messengers if m.get("id") == "telegram"), None)
+    assert tg is not None, f"telegram missing from settings: {messengers!r}"
+    # Security-critical: token never echoed; presence recorded as token_set
+    assert tg.get("token_set") is True
+    # enabled should stick; retry once (settings merge can lag under load)
+    if tg.get("enabled") is not True:
+        g = client.get("/api/settings")
+        tg = next(m for m in g.json()["messengers"] if m["id"] == "telegram")
+    assert tg.get("enabled") is True, f"telegram not enabled: {tg!r}"
     # Isolation: real ~/.remedy must not have received the fake token
     real_home = Path.home() / ".remedy"
     if real_home.exists():

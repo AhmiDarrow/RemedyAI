@@ -62,24 +62,37 @@ def _health(base_url: str, timeout: float = _HEALTH_TIMEOUT_S) -> bool:
 
 
 def _load_vision_json_cached(home_dir: str | Path | None = None) -> dict[str, Any]:
-    """Load vision.json using mtime — skip disk parse when unchanged."""
+    """Load vision.json using mtime+size — skip disk parse when unchanged.
+
+    Windows often keeps st_mtime at 1s resolution; include size and mtime_ns
+    so rapid rewrite (tests / Settings save) still invalidates.
+    """
     from remedy.vision.config import vision_json_path
 
     path = vision_json_path(home_dir)
     path_s = str(path)
     try:
-        mtime = path.stat().st_mtime if path.is_file() else -1.0
+        if path.is_file():
+            st = path.stat()
+            mtime = float(getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9)))
+            size = int(st.st_size)
+        else:
+            mtime = -1.0
+            size = -1
     except OSError:
         mtime = -1.0
+        size = -1
     if (
         _vision_json_cache.get("path") == path_s
         and float(_vision_json_cache.get("mtime") or -2) == mtime
+        and int(_vision_json_cache.get("size") or -2) == size
     ):
         data = _vision_json_cache.get("data")
         return dict(data) if isinstance(data, dict) else {}
     state = load_vision_json(home_dir)
     _vision_json_cache["path"] = path_s
     _vision_json_cache["mtime"] = mtime
+    _vision_json_cache["size"] = size
     _vision_json_cache["data"] = state
     return state
 
