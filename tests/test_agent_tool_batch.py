@@ -265,6 +265,111 @@ async def test_execute_tool_calls_records_turn_steps() -> None:
 
 
 @pytest.mark.asyncio
+async def test_soft_error_counts_as_quality_failure() -> None:
+    """Error-prefixed tool bodies must advance fail streak (recovery signal)."""
+    from remedy.core.session_quality import get_session_quality, reset_session_quality
+
+    rt = BasicRuntime(AgentConfig(llm_api_key=""))
+    rt._session_id = "batch_soft_fail"
+    rt._turn_tool_steps = []
+    reset_session_quality("batch_soft_fail")
+
+    async def soft_fail(**_kwargs):
+        return "Error path not found: missing.py"
+
+    rt.tool_registry.register_builtin_handler(
+        "file_read",
+        "read",
+        soft_fail,
+        parameters={"type": "object", "properties": {"path": {"type": "string"}}},
+    )
+    calls = [
+        {
+            "id": "sf1",
+            "type": "function",
+            "function": {"name": "file_read", "arguments": '{"path":"missing.py"}'},
+        }
+    ]
+    tool_msgs = []
+    async for _e, msg in execute_tool_calls(
+        rt, calls, seen_fps=set(), result_cache={}
+    ):
+        if msg.get("role") == "tool":
+            tool_msgs.append(msg)
+    assert tool_msgs and "Error" in tool_msgs[0]["content"]
+    # Turn steps + session quality treat soft error as failure
+    assert rt._turn_tool_steps and rt._turn_tool_steps[-1]["success"] is False
+    q = get_session_quality("batch_soft_fail")
+    assert q.tool_fail_streak >= 1
+    assert q.max_tool_fail_streak >= 1
+
+
+@pytest.mark.asyncio
+async def test_gather_exception_records_batch_exception_metric() -> None:
+    """Outer gather exceptions still pair tool ids and emit recovery telemetry.
+
+    When runtime.call_tool raises (instead of returning ToolResult), the wave
+    gather path must still emit one tool message, metrics, and quality fail.
+    """
+    from remedy.core.metrics import default_registry
+    from remedy.core.session_quality import get_session_quality, reset_session_quality
+
+    rt = BasicRuntime(AgentConfig(llm_api_key=""))
+    rt._session_id = "batch_gather_ex"
+    reset_session_quality("batch_gather_ex")
+    before = default_registry.counter(
+        "remedy_tool_batch_exceptions_total", tool="boom_tool"
+    ).value
+
+    async def ok(**_kwargs):
+        return "ok"
+
+    rt.tool_registry.register_builtin_handler(
+        "boom_tool",
+        "x",
+        ok,
+        parameters={"type": "object", "properties": {}},
+    )
+
+    class _BoomRuntime:
+        def __init__(self, inner):
+            self._inner = inner
+            self._turn_tier = 2
+            self._session_id = "batch_gather_ex"
+            self.tool_registry = inner.tool_registry
+            self.config = inner.config
+
+        def __getattr__(self, item):
+            return getattr(self._inner, item)
+
+        async def call_tool(self, tool_call):
+            raise RuntimeError("simulated batch explode")
+
+    tool_msgs = []
+    async for _e, msg in execute_tool_calls(
+        _BoomRuntime(rt),
+        [
+            {
+                "id": "ex1",
+                "type": "function",
+                "function": {"name": "boom_tool", "arguments": "{}"},
+            }
+        ],
+        seen_fps=set(),
+        result_cache={},
+    ):
+        if msg.get("role") == "tool":
+            tool_msgs.append(msg)
+    assert len(tool_msgs) == 1
+    assert "Error" in tool_msgs[0]["content"]
+    after = default_registry.counter(
+        "remedy_tool_batch_exceptions_total", tool="boom_tool"
+    ).value
+    assert after == before + 1
+    assert get_session_quality("batch_gather_ex").tool_fail_streak >= 1
+
+
+@pytest.mark.asyncio
 async def test_parallel_cap_patch_on_tool_batch_module() -> None:
     rt = BasicRuntime(AgentConfig(llm_api_key=""))
     n = {"c": 0}

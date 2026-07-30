@@ -249,6 +249,25 @@ def test_redact_messenger_secrets_strips_telegram_url_token():
     assert tok not in redact_messenger_secrets(tok)
 
 
+def test_redact_messenger_secrets_residual_channels():
+    """Slack xapp, Discord webhook/bot, Matrix syt_, Bearer must not leak."""
+    samples = {
+        "xapp": "xapp-1-A0123456789-1234567890123-abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+        "webhook": (
+            "https://discord.com/api/webhooks/123456789012345678/"
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ012345"
+        ),
+        "discord_bot": "MTIzNDU2Nzg5MDEyMzQ1Njc4.GhIjKl.abcdefghijklmnopqrstuvwxyz0123456789",
+        "matrix": "syt_abcdefgh_abcdefghijklmnopqrstuv_abc123",
+        "bearer": "Authorization failed: Bearer mfa.abcdefghijklmnopqrstuvwxyz012345",
+    }
+    for label, secret in samples.items():
+        scrubbed = redact_messenger_secrets(f"poll error: {secret}")
+        # Token body must not appear verbatim after scrub
+        assert secret not in scrubbed, f"{label} leaked: {scrubbed}"
+        assert "redacted" in scrubbed.lower(), f"{label} missing redaction: {scrubbed}"
+
+
 def test_public_fields_never_echo_legacy_plaintext_token():
     fields = public_fields_from_section(
         "telegram",

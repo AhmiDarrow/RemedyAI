@@ -69,6 +69,8 @@ class SessionQuality:
     stuck_signal_count: int = 0
     tool_fail_streak: int = 0
     max_tool_fail_streak: int = 0
+    recovery_nudge_count: int = 0
+    last_recovery_kind: str = ""
     last_user_text: str = ""
     started_at: float = field(default_factory=time.time)
     # Metabolism (silent partner OS) — Advanced / harness only
@@ -128,6 +130,14 @@ class SessionQuality:
                 self.strong_nudge_count += 1
             elif level == "soft":
                 self.soft_nudge_count += 1
+
+    def record_recovery_nudge(self, *, kind: str = "tool_error") -> None:
+        """One automatic post-batch recovery injection (fail→retry guidance)."""
+        with self._lock:
+            self.recovery_nudge_count += 1
+            self.last_recovery_kind = str(kind or "tool_error")[:40]
+            # Recovery after tool fail is also a soft continuity signal
+            self.soft_nudge_count += 1
 
     def record_tool_result(self, *, success: bool) -> None:
         with self._lock:
@@ -261,7 +271,10 @@ class SessionQuality:
                 "re_explain_rate": round(re_rate, 4),
                 "stuck_signal_count": self.stuck_signal_count,
                 "stuck_rate": round(stuck_rate, 4),
+                "tool_fail_streak": self.tool_fail_streak,
                 "max_tool_fail_streak": self.max_tool_fail_streak,
+                "recovery_nudge_count": self.recovery_nudge_count,
+                "last_recovery_kind": self.last_recovery_kind or None,
                 "avg_compress_quality": (
                     round(avg_q, 3) if avg_q is not None else None
                 ),

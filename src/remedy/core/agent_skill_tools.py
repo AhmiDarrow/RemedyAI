@@ -191,14 +191,39 @@ def register_skill_tools(runtime: Any) -> None:
                     tool_name="skill_run",
                     suggestion=f"Available: {', '.join(scripts)}",
                 )
-        base = Path(sk.source_skill_dir or sk.manifest.path or "")
-        script_path = (base / chosen).resolve()
-        # Jail: must stay under skill dir
+        # Packaged skills: only scripts/ tree is executable (never SKILL.md etc.)
+        chosen_norm = chosen.replace("\\", "/").lstrip("./")
+        if not chosen_norm.startswith("scripts/"):
+            return format_tool_error(
+                f"Script must live under scripts/: {chosen}",
+                code="SCRIPT_NOT_PACKAGED",
+                tool_name="skill_run",
+                suggestion=f"Available: {', '.join(scripts)}",
+            )
+        base_raw = (sk.source_skill_dir or sk.manifest.path or "").strip()
+        if not base_raw:
+            return format_tool_error(
+                f"Skill '{nm}' has no source directory",
+                code="NO_SKILL_DIR",
+                tool_name="skill_run",
+                suggestion="Re-discover skills or reinstall the pack.",
+            )
+        base = Path(base_raw).resolve()
+        if not base.is_dir():
+            return format_tool_error(
+                f"Skill directory missing: {base}",
+                code="NO_SKILL_DIR",
+                tool_name="skill_run",
+                suggestion="Re-install or re-seed the skill pack.",
+            )
+        script_path = (base / chosen_norm).resolve()
+        # Jail: must stay under skill dir (and under scripts/)
         try:
-            script_path.relative_to(base.resolve())
+            script_path.relative_to(base)
+            script_path.relative_to((base / "scripts").resolve())
         except Exception:
             return format_tool_error(
-                "Script path escapes skill directory",
+                "Script path escapes skill scripts/ directory",
                 code="PATH_JAIL",
                 tool_name="skill_run",
                 suggestion="Use a relative scripts/ path only.",
@@ -210,6 +235,13 @@ def register_skill_tools(runtime: Any) -> None:
             ex = SkillExecutor()
             result = await ex.run_script(script_path, args=arg_list)
             ok = bool(result.success)
+            with suppress(Exception):
+                from remedy.core.metrics import default_registry
+
+                default_registry.counter(
+                    "remedy_skill_run_total",
+                    status=("ok" if ok else "error"),
+                ).inc()
             with suppress(Exception):
                 loop = runtime._get_learning_loop()
                 if loop is not None:
@@ -244,14 +276,30 @@ def register_skill_tools(runtime: Any) -> None:
                 )
             if ok:
                 out = (result.stdout or "")[:12000]
-                return out or f"Script {chosen} exited 0 (no stdout)."
+                # Trust: never echo secret-shaped script output into the model/UI
+                with suppress(Exception):
+                    from remedy.core.metabolism.redact import redact_text
+
+                    out = redact_text(out)
+                return out or f"Script {chosen_norm} exited 0 (no stdout)."
+            err_body = result.error or result.stderr or "script failed"
+            with suppress(Exception):
+                from remedy.core.metabolism.redact import redact_text
+
+                err_body = redact_text(str(err_body))
             return format_tool_error(
-                result.error or result.stderr or "script failed",
+                err_body,
                 code="SCRIPT_FAILED",
                 tool_name="skill_run",
                 suggestion="Check script args or skill_activate for manual steps.",
             )
         except Exception as e:
+            with suppress(Exception):
+                from remedy.core.metrics import default_registry
+
+                default_registry.counter(
+                    "remedy_skill_run_total", status="error"
+                ).inc()
             return format_tool_error(
                 str(e),
                 code="SCRIPT_ERROR",

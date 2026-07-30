@@ -65,16 +65,46 @@ SECRET_FIELD_KEYS = frozenset(
 # Exception strings from aiohttp often embed that URL — never log them raw.
 _TG_BOT_URL_RE = re.compile('(?i)(https?://api\\.telegram\\.org/bot)([^/\\s<>\\"\']+)')
 _TG_BOT_TOKEN_RE = re.compile('\\b(\\d{6,12}:[A-Za-z0-9_-]{20,})\\b')
+# Slack bot/user tokens + app-level tokens (Socket Mode xapp-…)
+_SLACK_XOX_RE = re.compile(r"(?i)\bxox[baprs]-[A-Za-z0-9-]{10,}")
+_SLACK_XAPP_RE = re.compile(r"(?i)\bxapp-[A-Za-z0-9-]{10,}")
+# Discord webhook URLs embed a long token path segment
+_DISCORD_WEBHOOK_RE = re.compile(
+    r"(?i)(https?://(?:canary\.|ptb\.)?discord(?:app)?\.com/api/webhooks/\d+/)([A-Za-z0-9_\-]+)"
+)
+# Classic Discord bot tokens: base64id.timestamp.hmac (three dotted segments)
+_DISCORD_BOT_TOKEN_RE = re.compile(
+    r"\b([A-Za-z0-9_\-]{20,40}\.[A-Za-z0-9_\-]{4,10}\.[A-Za-z0-9_\-]{20,})\b"
+)
+# Matrix client access tokens (syt_…) and generic Bearer headers in error bodies
+_MATRIX_SYT_RE = re.compile(r"\bsyt_[A-Za-z0-9._\-]{16,}\b")
+_BEARER_RE = re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._\-+/=]{8,}")
 
 
 def redact_messenger_secrets(text: str) -> str:
-    """Scrub messenger tokens/URLs from free text before logging or display."""
+    """Scrub messenger tokens/URLs from free text before logging or display.
+
+    Covers Telegram bot URL/path tokens, Slack xox*/xapp*, Discord webhooks and
+    classic bot tokens, Matrix syt_ tokens, and Authorization Bearer values.
+    Falls back to metabolism redact for residual secret-shaped strings.
+    """
     if not text:
         return ""
     out = _TG_BOT_URL_RE.sub(r"\1[redacted]", str(text))
     out = _TG_BOT_TOKEN_RE.sub("[redacted]", out)
-    # Slack-style bot tokens if they appear in error strings
-    out = re.sub('(?i)\\bxox[baprs]-[A-Za-z0-9-]{10,}', "xox[redacted]", out)
+    out = _SLACK_XOX_RE.sub("xox[redacted]", out)
+    out = _SLACK_XAPP_RE.sub("xapp[redacted]", out)
+    out = _DISCORD_WEBHOOK_RE.sub(r"\1[redacted]", out)
+    out = _DISCORD_BOT_TOKEN_RE.sub("[redacted]", out)
+    out = _MATRIX_SYT_RE.sub("[redacted]", out)
+    out = _BEARER_RE.sub("Bearer [redacted]", out)
+    # Residual provider/messenger secrets (sk-, ghp_, PEM, …)
+    try:
+        from remedy.core.metabolism.redact import redact_text
+
+        out = redact_text(out)
+    except Exception:
+        pass
     return out
 
 

@@ -87,6 +87,20 @@ def test_tool_fail_streak_counts_stuck():
     q.record_tool_result(success=False)
     assert q.max_tool_fail_streak >= 3
     assert q.stuck_signal_count >= 1
+    snap = q.snapshot()
+    assert snap["tool_fail_streak"] == 3
+    assert snap["max_tool_fail_streak"] == 3
+
+
+def test_recovery_nudge_recorded_on_session_quality():
+    reset_session_quality("recov1")
+    q = get_session_quality("recov1")
+    q.record_recovery_nudge(kind="tool_error")
+    q.record_recovery_nudge(kind="empty_search")
+    snap = q.snapshot()
+    assert snap["recovery_nudge_count"] == 2
+    assert snap["last_recovery_kind"] == "empty_search"
+    assert snap["soft_nudge_count"] >= 2
 
 
 def test_snapshot_running_aggregates_o1():

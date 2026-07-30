@@ -134,6 +134,56 @@ async def test_skill_run_requires_approval(runtime, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_skill_run_executes_packaged_script_and_redacts(runtime, monkeypatch):
+    """Packaged scripts/ run under auto; secret-shaped stdout is scrubbed."""
+    skill = _reg_skill(runtime, "secret-runner", scripts=["scripts/run.py"])
+    script = Path(skill.source_skill_dir) / "scripts" / "run.py"
+    script.write_text(
+        "print('token=sk-abcdefghijklmnopqrstuvwxyz012345 done')\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "remedy.interfaces.api_support.load_config",
+        lambda: {"access_scope": "project", "approval_mode": "auto"},
+    )
+    APPROVALS.set_mode("auto")
+    res = await runtime.call_tool(
+        ToolCall(
+            tool_name="skill_run",
+            arguments={"skill": "secret-runner", "script": "scripts/run.py"},
+        )
+    )
+    text = str(res.data or res.error or "")
+    assert res.success, text
+    assert "sk-abcdefghijklmnopqrstuvwxyz012345" not in text
+    assert "redacted" in text.lower() or "token=" in text  # key scrubbed, label may remain
+
+
+@pytest.mark.asyncio
+async def test_skill_run_rejects_non_scripts_path(runtime, monkeypatch):
+    skill = _reg_skill(runtime, "jail-runner", scripts=["scripts/run.py"])
+    # Plant a decoy outside scripts/ and try to force it via bare name tricks
+    decoy = Path(skill.source_skill_dir) / "evil.py"
+    decoy.write_text("print('pwn')\n", encoding="utf-8")
+    # Manually inject a non-scripts path into the skill's script list
+    skill.scripts = ["scripts/run.py", "evil.py"]
+    monkeypatch.setattr(
+        "remedy.interfaces.api_support.load_config",
+        lambda: {"access_scope": "project", "approval_mode": "auto"},
+    )
+    APPROVALS.set_mode("auto")
+    res = await runtime.call_tool(
+        ToolCall(
+            tool_name="skill_run",
+            arguments={"skill": "jail-runner", "script": "evil.py"},
+        )
+    )
+    text = str(res.data or res.error or "")
+    assert "SCRIPT_NOT_PACKAGED" in text or "scripts/" in text.lower()
+    assert "pwn" not in text
+
+
+@pytest.mark.asyncio
 async def test_skill_search(runtime):
     _reg_skill(runtime, "git-helper")
     res = await runtime.call_tool(

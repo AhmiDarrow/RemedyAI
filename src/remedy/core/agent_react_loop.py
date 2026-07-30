@@ -1587,6 +1587,27 @@ async def call_llm_stream(runtime, message: str,
                                 )
                             )
                             with suppress(Exception):
+                                from remedy.core.metrics import default_registry
+                                from remedy.core.session_quality import (
+                                    get_session_quality,
+                                )
+                                from remedy.core.turn_context import turn_session_id
+
+                                kind = (
+                                    "approval"
+                                    if need_appr
+                                    else ("empty_search" if empty else "tool_error")
+                                )
+                                default_registry.counter(
+                                    "remedy_tool_recovery_nudge_total", kind=kind
+                                ).inc()
+                                default_registry.counter(
+                                    "remedy_tool_batch_errors_total"
+                                ).inc()
+                                get_session_quality(
+                                    str(turn_session_id(runtime) or "")
+                                ).record_recovery_nudge(kind=kind)
+                            with suppress(Exception):
                                 md = runtime._maybe_auto_checkpoint(
                                     reason="recovery",
                                     title="After tool failure",
@@ -2013,6 +2034,26 @@ async def call_llm_stream(runtime, message: str,
                     messages.append(
                         recovery_nudge_message(empty_search=empty, approval=need_appr)
                     )
+                    # Trust/speed: surface batch recovery on quality + metrics so
+                    # dashboards and continuity remedies see fail→recover loops.
+                    with suppress(Exception):
+                        from remedy.core.metrics import default_registry
+                        from remedy.core.session_quality import get_session_quality
+                        from remedy.core.turn_context import turn_session_id
+
+                        kind = (
+                            "approval"
+                            if need_appr
+                            else ("empty_search" if empty else "tool_error")
+                        )
+                        default_registry.counter(
+                            "remedy_tool_recovery_nudge_total", kind=kind
+                        ).inc()
+                        default_registry.counter(
+                            "remedy_tool_batch_errors_total"
+                        ).inc()
+                        sid_r = str(turn_session_id(runtime) or "")
+                        get_session_quality(sid_r).record_recovery_nudge(kind=kind)
                     try:
                         from remedy.core.logging import hot_debug_enabled
 

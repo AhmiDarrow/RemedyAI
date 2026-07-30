@@ -30,7 +30,28 @@ def test_api_metrics_json() -> None:
     data = r.json()
     assert "metrics" in data
     assert "health" in data
+    assert "agency" in data
     assert data["health"]["status"] in ("ok", "degraded")
+    agency = data["agency"]
+    assert "tool_recovery_nudges" in agency
+    assert "tool_batch_errors" in agency
+    assert "skill_run_ok" in agency
+
+
+def test_agency_rollup_sums_recovery_and_skill_counters() -> None:
+    default_registry.counter(
+        "remedy_tool_recovery_nudge_total", kind="tool_error"
+    ).inc(2)
+    default_registry.counter("remedy_tool_batch_errors_total").inc()
+    default_registry.counter("remedy_skill_run_total", status="ok").inc()
+    default_registry.counter("remedy_skill_run_total", status="error").inc()
+    client = TestClient(create_app())
+    data = client.get("/api/metrics").json()
+    agency = data["agency"]
+    assert agency["tool_recovery_nudges"] >= 2
+    assert agency["tool_batch_errors"] >= 1
+    assert agency["skill_run_ok"] >= 1
+    assert agency["skill_run_error"] >= 1
 
 
 def test_api_metrics_prometheus() -> None:
