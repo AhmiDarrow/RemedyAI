@@ -260,51 +260,74 @@ async def build_turn_context(runtime: Any) -> str:
                 "full procedure; skill_search to rank by task):\n"
                 + "\n".join(ranked_lines)
             )
-            # Auto-suggest: high-confidence task match → inject procedure body
-            # (stage-2 progressive disclosure without waiting for a tool hop).
-            # Targets review/coding turns so "review project" gets change-safety
-            # (or best match) checklist in context immediately.
+            # Auto-suggest: review/coding tasks → inject preferred procedure body
+            # (stage-2 progressive disclosure without waiting for a skill_activate hop).
+            # "review project" must surface change-safety even when token overlap is modest.
             with suppress(Exception):
-                _TASK_PROC = _re.compile(
-                    r"\b("
-                    r"review|audit|refactor|implement|fix|debug|ship|release|"
-                    r"codebase|code review|blast.?radius|change.?safety|"
-                    r"project.?etiquette|test suite|multi-?file|neighbors"
-                    r")\b",
-                    _re.I,
-                )
+                tq = (task_q or "").lower()
+                preferred: list[str] = []
+                if _re.search(
+                    r"\b(review|audit|blast.?radius|neighbors|code review)\b", tq
+                ):
+                    preferred = [
+                        "change-safety",
+                        "project-etiquette",
+                        "refactor-safe",
+                    ]
+                elif _re.search(r"\b(ship|release|publish|etiquette|ci|pypi)\b", tq):
+                    preferred = ["project-etiquette", "change-safety"]
+                elif _re.search(r"\b(refactor)\b", tq):
+                    preferred = ["refactor-safe", "change-safety"]
+                elif _re.search(
+                    r"\b(implement|fix|debug|multi-?file|codebase)\b", tq
+                ):
+                    preferred = ["change-safety", "refactor-safe"]
                 # Cap keeps one skill from dominating (change-safety ~3.5k).
                 _PROC_CAP = 4_000
-                _MIN_SCORE = 0.48
-                if (
-                    task_q
-                    and _TASK_PROC.search(task_q)
-                    and top_ranked
-                    and float(top_ranked[0][1]) >= _MIN_SCORE
-                ):
-                    best_skill, best_score = top_ranked[0]
-                    m = best_skill.manifest
+                _GENERIC_MIN = 0.48
+                _PREFERRED_MIN = 0.18
+                pick_skill = None
+                pick_score = 0.0
+                ranked_map = {
+                    str(s.manifest.name): (s, float(sc)) for s, sc in top_ranked
+                }
+                for name in preferred:
+                    hit = ranked_map.get(name)
+                    if hit is not None and hit[1] >= _PREFERRED_MIN:
+                        pick_skill, pick_score = hit
+                        break
+                    # Preferred skill installed but weak rank — still inject for
+                    # clear review/coding asks (SO leap for "review project").
+                    if hasattr(reg, "get"):
+                        sk = reg.get(name)
+                        if sk is not None:
+                            pick_skill, pick_score = sk, max(
+                                _PREFERRED_MIN, float(hit[1]) if hit else 0.5
+                            )
+                            break
+                if pick_skill is None and top_ranked:
+                    sk0, sc0 = top_ranked[0]
+                    if float(sc0) >= _GENERIC_MIN:
+                        pick_skill, pick_score = sk0, float(sc0)
+                if pick_skill is not None:
+                    m = pick_skill.manifest
                     meta = m.metadata or {}
-                    # Never auto-inject quarantined / inactive skills
-                    if meta.get("quarantine"):
-                        best_skill = None  # type: ignore[assignment]
                     st = (
                         m.status.value
                         if hasattr(m.status, "value")
                         else str(m.status)
                     )
-                    if str(st).lower() in (
+                    injectable = not meta.get("quarantine") and str(st).lower() not in (
                         "disabled",
                         "archived",
                         "deprecated",
-                    ):
-                        best_skill = None  # type: ignore[assignment]
-                    if best_skill is not None:
-                        body = (getattr(best_skill, "instructions", None) or "").strip()
+                    )
+                    if injectable:
+                        body = (
+                            getattr(pick_skill, "instructions", None) or ""
+                        ).strip()
                         if not body and hasattr(reg, "skill_body"):
-                            raw = reg.skill_body(m.name) or ""
-                            # skill_body includes headers — prefer instructions when present
-                            body = raw.strip()
+                            body = str(reg.skill_body(m.name) or "").strip()
                         if body:
                             if len(body) > _PROC_CAP:
                                 body = (
@@ -314,7 +337,7 @@ async def build_turn_context(runtime: Any) -> str:
                                 )
                             parts.append(
                                 f"[Skill auto-suggest] Top match for this task: "
-                                f"**{m.name}** (score={float(best_score):.2f}). "
+                                f"**{m.name}** (score={float(pick_score):.2f}). "
                                 "Procedure loaded into context — follow it; "
                                 f"skill_activate(name={m.name}) only if you need "
                                 "references or a refresh.\n\n"
@@ -326,8 +349,8 @@ async def build_turn_context(runtime: Any) -> str:
                                 default_registry.counter(
                                     "remedy_skill_auto_suggest_inject_total"
                                 ).inc()
-                                # Treat as soft activation for genome / learning
-                                with suppress(Exception):
+                            with suppress(Exception):
+                                if hasattr(reg, "mark_activated"):
                                     reg.mark_activated(m.name)
             with suppress(Exception):
                 from remedy.core.metrics import default_registry

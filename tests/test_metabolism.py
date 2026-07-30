@@ -403,6 +403,40 @@ def test_l0_begin_turn_skips_full_organ_snapshots():
     assert "recent" not in (meta.get("decisions") or {})
 
 
+def test_begin_turn_reuses_pre_tier_no_dual_classify(monkeypatch):
+    """send_policy pre_tier skips a second classify_turn_tier walk in begin_turn."""
+    calls: list[str] = []
+    real = classify_turn_tier
+
+    def _counting(*a, **k):
+        calls.append("classify")
+        return real(*a, **k)
+
+    monkeypatch.setattr(
+        "remedy.core.metabolism.turn.classify_turn_tier", _counting
+    )
+    meta = begin_turn_metabolism(
+        session_id="test_pre_tier_reuse",
+        user_text="review project",
+        intent="tool",
+        tools_enabled=True,
+        pre_tier=int(TurnTier.L2_AGENCY),
+    )
+    assert meta["tier"] == int(TurnTier.L2_AGENCY)
+    assert calls == [], f"expected no re-classify, got {calls}"
+    # Autonomous still re-walks (may elevate)
+    calls.clear()
+    meta2 = begin_turn_metabolism(
+        session_id="test_pre_tier_reuse",
+        user_text="work alone and finish",
+        intent="autonomous",
+        tools_enabled=True,
+        pre_tier=int(TurnTier.L1_LEAN),
+    )
+    assert meta2["tier"] == int(TurnTier.L3_DEEP)
+    assert len(calls) == 1
+
+
 def test_begin_turn_accepts_pre_tier_without_reclassify():
     """agent_react_loop passes pre_tier from send_policy; must not TypeError.
 
