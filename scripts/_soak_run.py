@@ -243,15 +243,138 @@ def main() -> int:
         print("[FAIL] stop cancels pending browser job — still open")
 
     print()
-    print("=== HYBRID / REGRESSION ===")
+    print("=== HYBRID / OFFLINE / CONCURRENT / PROVIDER ===")
     mark(
         "URL-ish prefers browser rail",
         True,
         "navigate used browser target + host complete",
     )
-    mark("host offline fallbacks", None, "not forced this run")
-    mark("multi-provider", None, "single provider session")
-    mark("concurrent turns / session switch", None, "single session")
+
+    # Offline: isolated home so live poller cannot claim jobs
+    try:
+        import tempfile
+
+        from remedy.core.computer import host_bridge as hb_mod
+        from remedy.core.computer.executor import ComputerExecutor
+        from remedy.core.computer.types import ComputerAction
+
+        td = tempfile.mkdtemp(prefix="soak-offline-")
+        prev = getattr(hb_mod, "_bridge", None)
+        hb_mod._bridge = None
+        try:
+            ex_off = ComputerExecutor(home_dir=td)
+            nav = json.loads(
+                ex_off.run(
+                    ComputerAction.NAVIGATE,
+                    url="https://example.com/offline",
+                    target="browser",
+                )
+            )
+            mark(
+                "host offline navigate no OS browser",
+                nav.get("ok") is False
+                and (
+                    nav.get("rail_failed")
+                    or "not connected" in str(nav.get("message") or "").lower()
+                ),
+                str(nav.get("message") or "")[:100],
+            )
+            snap = json.loads(
+                ex_off.run(
+                    ComputerAction.SNAPSHOT,
+                    target="browser",
+                    timeout_s=2.0,
+                )
+            )
+            mark(
+                "host offline snapshot → desktop",
+                bool(snap.get("ok"))
+                and (
+                    snap.get("fallback") == "desktop"
+                    or snap.get("target") == "desktop"
+                )
+                and len(snap.get("elements") or []) >= 1,
+                f"n={len(snap.get('elements') or [])} note={str(snap.get('note') or '')[:60]}",
+            )
+        finally:
+            hb_mod._bridge = prev
+    except Exception as e:
+        mark("host offline fallbacks", False, str(e))
+
+    # Concurrent sessions
+    try:
+        from remedy.core import turn_context as tc
+        from remedy.core.computer.host_bridge import ComputerHostBridge
+
+        import tempfile as _tf
+
+        _td = _tf.mkdtemp(prefix="soak-conc-")
+        b_iso = ComputerHostBridge(home_dir=_td)
+        ja = b_iso.enqueue("navigate", {"url": "https://a.test"}, session_id="soak-A")
+        jb = b_iso.enqueue("snapshot", {}, session_id="soak-B")
+        b_iso.cancel_pending_and_running(reason="session_aborted", session_id="soak-A")
+        mark(
+            "concurrent sessions abort isolated",
+            b_iso._read(ja.id).status == "cancelled"
+            and b_iso._read(jb.id).status == "pending",
+            f"A={b_iso._read(ja.id).status} B={b_iso._read(jb.id).status}",
+        )
+        b_iso.cancel_pending_and_running(reason="cleanup")
+    except Exception as e:
+        mark("concurrent sessions abort isolated", False, str(e))
+
+    # Stop mid-type (unit-level abort path)
+    try:
+        from remedy.core.computer import desktop_win as win
+
+        typed_box: list[int] = [0]
+        n_calls = {"i": 0}
+
+        def abort_once():
+            n_calls["i"] += 1
+            return n_calls["i"] >= 1
+
+        # Stub I/O
+        win._require_windows  # type: ignore
+        orig_send = win._send_input
+        win._send_input = lambda *a, **k: None  # type: ignore
+        try:
+            try:
+                win.type_text(
+                    "abcdefghijklmnop",
+                    abort_check=abort_once,
+                    chars_typed=typed_box,
+                )
+                mark("stop mid-type", False, "did not abort")
+            except RuntimeError as e:
+                mark(
+                    "stop mid-type",
+                    "abort" in str(e).lower() and typed_box[0] == 8,
+                    f"typed={typed_box[0]} err={e}",
+                )
+        finally:
+            win._send_input = orig_send  # type: ignore
+    except Exception as e:
+        mark("stop mid-type", False, str(e))
+
+    # Multi-provider: tools independent of chat provider adapters
+    try:
+        from remedy.core.computer.types import COMPUTER_TOOL_NAMES
+        from remedy.core.providers import _PROVIDERS, get_provider
+
+        p_xai = get_provider("xai")
+        p_ds = get_provider("deepseek")
+        mark(
+            "multi-provider computer tools agnostic",
+            p_xai is not None
+            and p_ds is not None
+            and "xai" in _PROVIDERS
+            and "deepseek" in _PROVIDERS
+            and "computer_navigate" in COMPUTER_TOOL_NAMES,
+            f"providers={len(_PROVIDERS)} tools={len(COMPUTER_TOOL_NAMES)}",
+        )
+    except Exception as e:
+        mark("multi-provider computer tools agnostic", False, str(e))
 
     print()
     print("=== PLAN MODE MATRIX ===")

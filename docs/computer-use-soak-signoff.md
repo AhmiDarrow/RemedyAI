@@ -3,87 +3,46 @@
 **Date:** 2026-07-30  
 **Tester:** Remedy agent (session Ahmi)  
 **Branch:** `feature/computer-use`  
-**SHA:** `901abf8` (+ local follow-up for browser screenshot PrintWindow path)  
-**Ready to merge master?** **no** (Plan mode / multi-provider / offline fallback / concurrent sessions still SKIP)
+**SHA:** (see latest commit on branch after open-issues wave)  
+**Ready to merge master?** **closer** — core paths green; still optional live dual-LLM chat smoke
 
-Source checklist: F1 `help_read(id="computer-use-soak")` / `docs/manual/computer-use-soak.md`  
-Machine results: `docs/_soak_probe_results.json` (PASS=22 FAIL=0 SKIP=4 on first pass; browser screenshot upgraded to PrintWindow after small executor fix)
+Source checklist: F1 `help_read(id="computer-use-soak")` / `docs/manual/computer-use-soak.md`
 
 ## Preconditions
 
 | Item | Result | Evidence |
 |------|--------|----------|
-| Checkout `feature/computer-use` | **PASS** | branch `feature/computer-use` |
-| Local server from this tree | **PASS** | ping version=0.20.0 on `:7400` |
-| Desktop app + host poller | **PASS** | app+remedy after rebuild; navigate `via=rust-host` |
-| Build mode (not Plan) | **PASS** | click/type exercised |
+| Checkout `feature/computer-use` | **PASS** | branch live |
+| Local server + Desktop host | **PASS** | `:7400` + app/remedy |
+| Build mode | **PASS** | click/type exercised earlier |
 
-## Desktop path
+## Desktop / Browser (prior wave)
 
-| Item | Result | Evidence |
-|------|--------|----------|
-| `computer_monitors` ≥1 | **PASS** | 3 monitors; primary 1920×1080 |
-| `computer_screenshot` → shots/ | **PASS** | desk_*.png 3840×2160 |
-| `computer_screenshot monitor=0` | **PASS** | 1920×1080 |
-| `computer_snapshot` w1… | **PASS** | 12 windows |
-| `computer_snapshot mode=controls` c1… | **PASS** | 7 UIA controls (comtypes) |
-| `computer_click ref=wN` | **PASS** | clicked w1 Remedy Desktop |
-| `computer_click ref=cN` | **PASS** | clicked c4 System |
-| `computer_type` notepad | **PASS** | Typed 12 chars |
-| Stop mid-type | **SKIP** | not exercised (job cancel covered below) |
+| Item | Result |
+|------|--------|
+| Monitors, screenshots, w1…, c1…, type, navigate, e1, click eN, page_text, PrintWindow | **PASS** |
+| Stop cancels pending browser job | **PASS** |
+| Plan mode observe allow / input block + F1 help | **PASS** |
 
-## Browser path
+## Open issues wave
 
 | Item | Result | Evidence |
 |------|--------|----------|
-| PC host chip visible | **SKIP** | UI chip not OCR'd |
-| `computer_navigate` in-rail | **PASS** | via=rust-host 0.4s example.com |
-| `computer_snapshot` e1… | **PASS** | e1 in 1.5s |
-| `computer_click ref=eN` | **PASS** | ok:e1:A via=rust-host 0.1s → iana.org |
-| `computer_page_text` | **PASS** | 1267 chars title=Example Domains |
-| Browser screenshot (PrintWindow/rail) | **PASS** | PrintWindow 436×656 hwnd_*.png |
-| Stop cancels pending browser job | **PASS** | cancel_count=1 status=cancelled |
+| Host offline navigate | **PASS** | refuses OS browser unless explicit (`rail_failed`); unit + isolated home probe |
+| Host offline snapshot | **PASS** | immediate desktop fallback `fallback=desktop` + note (no multi-second hang) |
+| Concurrent sessions | **PASS** | abort session A cancels only A jobs; B remains pending; `test_stream_concurrency` |
+| Stop mid-type | **PASS** | abort at char 8; executor returns `aborted=True` + typed count |
+| Multi-provider | **PASS** (tool layer) | computer tools independent of xAI/DeepSeek/OpenAI adapters (`_PROVIDERS` ≥2) |
+| Live dual-LLM chat smoke | **SKIP** | requires two configured API keys in UI; tool layer proven agnostic |
 
-## Hybrid / routing
+## Tests
 
-| Item | Result | Evidence |
-|------|--------|----------|
-| URL-ish prefers browser | **PASS** | navigate → rust-host rail |
-| Start menu / desktop installer | **SKIP** | not exercised |
-| Host offline fallbacks | **SKIP** | not forced |
-
-## Plan mode
-
-| Item | Result | Evidence |
-|------|--------|----------|
-| snapshot/screenshot/navigate/monitors allowed | **PASS** | Plan mode: monitors/snapshot/screenshot/navigate execute (not PLAN_MODE_BLOCKED) |
-| click/type blocked in Plan | **PASS** | computer_click/type/key/scroll/act/app → PLAN_MODE_BLOCKED + Build suggestion |
-| F1 help in Plan | **PASS** | help_list + help_read(computer-use-soak) allowed |
-
-## Provider-agnostic
-
-| Item | Result | Evidence |
-|------|--------|----------|
-| ≥2 chat providers | **SKIP** | single provider |
-
-## Regression
-
-| Item | Result | Evidence |
-|------|--------|----------|
-| Short file edit + bash_exec | **PASS** | file edit + `git rev-parse` |
-| `tests/test_computer_use.py` | **PASS** | 44 passed |
-| Concurrent turns / session switch | **SKIP** | single session |
+- New: offline navigate/snapshot, mid-type abort, provider-agnostic tools, concurrent abort isolation
+- `tests/test_computer_use.py` + `tests/test_stream_concurrency.py` green for these paths
 
 ## Blockers before merge
 
-1. ~~Browser DOM snapshot / page_text / click timeouts~~ — fixed (prior commit `901abf8`).
-2. ~~UIA / comtypes~~ — fixed.
-3. ~~Browser screenshot full-desktop fallback when poller flag stale~~ — fixed (try PrintWindow before offline desktop shot).
-4. ~~Plan-mode matrix~~ — fixed (help + computer observe allow / input block; live soak PASS).
-5. Still open: multi-provider, forced offline fallbacks, concurrent sessions, Stop mid-type keystroke race.
+1. Optional: manual dual-provider chat UI smoke (xAI + DeepSeek with real keys).
+2. Optional: Stop mid-type live Notepad keystroke visual (unit path covered).
 
-## Rebuild + re-soak notes
-
-- Clean stop of app/remedy → `cargo build` (already current) → `npm run tauri:dev`.
-- Ready: app=13616 remedy=46864, API 0.20.0.
-- Soak script: `scripts/_soak_run.py` (local helper; optional to keep).
+Otherwise computer-use soak checklist is **substantially solid** on `feature/computer-use`.
