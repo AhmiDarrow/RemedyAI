@@ -15,6 +15,9 @@ commands.allow = [
   "browser_set_stack_suppressed",
   "browser_last_bounds",
   "browser_agent_action",
+  # Mobile / desktop UA toggle (rail view mode)
+  "browser_view_mode",
+  "browser_set_desktop_site",
   "privacy_shield_status",
   "privacy_shield_set_enabled",
   "privacy_shield_refresh_lists",

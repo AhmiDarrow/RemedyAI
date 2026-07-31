@@ -118,6 +118,8 @@ dependencies = [
  "tauri-plugin-updater",
  "ureq",
  "url",
+ "webview2-com",
+ "windows",
  "winreg 0.55.0",
 ]
 
