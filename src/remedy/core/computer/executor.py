@@ -380,7 +380,43 @@ class ComputerExecutor:
             )
         if act is ComputerAction.TYPE:
             text = str(kwargs.get("text") or "")
-            win.type_text(text, abort_check=self._abort_check)
+            typed_box: list[int] = [0]
+            try:
+                win.type_text(
+                    text,
+                    abort_check=self._abort_check,
+                    chars_typed=typed_box,
+                )
+            except RuntimeError as e:
+                if "abort" in str(e).lower():
+                    self._cancel_open_jobs(reason="aborted")
+                    n = int(typed_box[0] if typed_box else 0)
+                    return public_result(
+                        ok=False,
+                        target="desktop",
+                        action="type",
+                        message=f"Aborted by user during type after {n} chars",
+                        extra={
+                            "length": len(text),
+                            "typed": n,
+                            "aborted": True,
+                        },
+                    )
+                raise
+            if self._abort_check():
+                self._cancel_open_jobs(reason="aborted")
+                n = int(typed_box[0] if typed_box else 0)
+                return public_result(
+                    ok=False,
+                    target="desktop",
+                    action="type",
+                    message=f"Aborted by user during type after {n} chars",
+                    extra={
+                        "length": len(text),
+                        "typed": n,
+                        "aborted": True,
+                    },
+                )
             return public_result(
                 ok=True,
                 target="desktop",
@@ -739,8 +775,29 @@ class ComputerExecutor:
 
         # Snapshot: settle after navigate, then eval-callback (host retries mid-load).
         if act is ComputerAction.SNAPSHOT:
-            slept = self.bridge.settle_after_navigate(min_s=0.7, max_s=1.8)
             query = str(kwargs.get("hint") or kwargs.get("query") or "").strip()
+
+            def _desktop_snapshot_fallback(reason: str) -> dict[str, Any]:
+                """Host offline / rail miss → window+UIA tree (never hang the agent)."""
+                desk = self._run_desktop(
+                    ComputerAction.SNAPSHOT,
+                    limit=kwargs.get("limit") or 40,
+                    mode=kwargs.get("mode") or "auto",
+                    hwnd=kwargs.get("hwnd"),
+                )
+                desk["note"] = (
+                    f"Browser rail unavailable ({reason}); "
+                    "desktop window/control snapshot instead"
+                )
+                desk["fallback"] = "desktop"
+                desk.setdefault("target", "desktop")
+                return desk
+
+            # No live poller → skip job queue; desktop windows immediately.
+            if not self.bridge.host_connected(max_age_s=12.0):
+                return _desktop_snapshot_fallback("host offline")
+
+            slept = self.bridge.settle_after_navigate(min_s=0.7, max_s=1.8)
             unclaimed = 6.0
             # Host may wait for page ready + up to 2×5s eval retries.
             total_wait = float(kwargs.get("timeout_s") or 14.0)
@@ -804,6 +861,20 @@ class ComputerExecutor:
                     time.sleep(0.55)
                     continue
                 break
+            # Rail miss after retries → desktop tree (soak: offline/host-dead path)
+            low = last_err.lower()
+            if any(
+                k in low
+                for k in (
+                    "timeout",
+                    "timed out",
+                    "not claim",
+                    "offline",
+                    "not connected",
+                    "not open",
+                )
+            ):
+                return _desktop_snapshot_fallback(last_err)
             return public_result(
                 ok=False,
                 target="browser",

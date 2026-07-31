@@ -17,6 +17,10 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
   in-process host_connected flag is stale (CLI soak no longer forces full desktop).
 - **Plan mode:** `help_list` / `help_read` allowlisted; system addendum documents
   computer observe vs input tools; blocked computer tools suggest Build (Ctrl+B).
+- **Offline host:** browser snapshot falls back immediately to desktop windows/UIA
+  (no long host wait); navigate still refuses surprise OS browser unless asked.
+- **Stop mid-type:** `type_text` reports chars typed before abort; executor surfaces
+  `aborted` on desktop type.
 
 ## [0.20.0] - 2026-07-30
 

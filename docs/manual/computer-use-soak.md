@@ -43,7 +43,8 @@ outside access scope.
 
 - [ ] URL-ish task prefers browser tools when host is up
 - [ ] “Open Start menu / desktop installer” uses desktop tools
-- [ ] Host offline: navigate falls back to system browser; snapshot falls back to windows
+- [ ] Host offline: navigate **refuses** surprise OS browser (unless user asked system/external);
+      snapshot falls back to desktop windows/controls quickly
 
 ## Plan mode
 

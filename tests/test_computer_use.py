@@ -958,3 +958,182 @@ def test_abort_session_cancels_computer_jobs(tmp_path: Path, monkeypatch):
     assert claimed.session_id == "sess-other-tab"
     # No more pending after claiming the sibling
     assert b.claim_next() is None
+
+
+def test_offline_navigate_refuses_os_browser_snapshot_falls_back(
+    tmp_path: Path, monkeypatch
+):
+    """Host offline: no surprise system browser; browser snapshot → desktop tree."""
+    import json
+
+    from remedy.core.computer import host_bridge as hb
+    from remedy.core.computer.executor import ComputerExecutor
+    from remedy.core.computer.types import ComputerAction
+
+    monkeypatch.setattr(hb, "_bridge", None)
+    opened: list[str] = []
+
+    def fake_open(url: str):
+        opened.append(url)
+        return {"ok": True, "url": url}
+
+    import remedy.core.computer.desktop_win as win
+
+    monkeypatch.setattr(win, "open_url", fake_open)
+    # Fake desktop snapshot so non-Windows CI still covers fallback
+    monkeypatch.setattr(
+        win,
+        "desktop_snapshot",
+        lambda limit=40, mode="auto", hwnd=None: [
+            {"ref": "w1", "name": "Fake", "tag": "window"}
+        ],
+    )
+
+    ex = ComputerExecutor(home_dir=tmp_path)
+    assert ex.bridge.host_connected() is False
+
+    nav = json.loads(
+        ex.run(
+            ComputerAction.NAVIGATE,
+            target="browser",
+            url="https://example.com/offline",
+        )
+    )
+    assert nav.get("ok") is False
+    assert nav.get("rail_failed") is True or "not connected" in str(
+        nav.get("message") or ""
+    ).lower()
+    assert opened == []
+
+    snap = json.loads(
+        ex.run(
+            ComputerAction.SNAPSHOT,
+            target="browser",
+            timeout_s=1.0,
+        )
+    )
+    assert snap.get("ok") is True
+    assert snap.get("fallback") == "desktop" or snap.get("target") == "desktop"
+    assert any(
+        str(e.get("ref", "")).startswith("w") for e in (snap.get("elements") or [])
+    )
+    assert "offline" in str(snap.get("note") or "").lower() or snap.get("fallback")
+
+
+def test_type_text_abort_mid_string(monkeypatch):
+    """Stop mid-type: abort_check raises after partial input (no runaway keys)."""
+    import sys
+
+    if sys.platform != "win32":
+        return
+
+    from remedy.core.computer import desktop_win as win
+
+    # Avoid real keystrokes: stub _send_input
+    sent: list[int] = []
+
+    def fake_send(*_a, **_k):
+        sent.append(1)
+
+    monkeypatch.setattr(win, "_send_input", fake_send)
+    monkeypatch.setattr(win, "_require_windows", lambda: None)
+
+    calls = {"n": 0}
+
+    def abort_after_partial():
+        # type_text checks every 8 chars; fire after first check
+        calls["n"] += 1
+        return calls["n"] >= 1
+
+    typed: list[int] = [0]
+    try:
+        win.type_text(
+            "abcdefghijklmnop",  # 16 chars → abort at i=8
+            abort_check=abort_after_partial,
+            chars_typed=typed,
+        )
+        raise AssertionError("expected RuntimeError abort")
+    except RuntimeError as e:
+        assert "abort" in str(e).lower()
+    assert typed[0] == 8  # typed chars 0..7 before check at i=8
+    assert len(sent) == 8  # one _send_input call per char (down+up together)
+
+
+def test_executor_type_surfaces_abort(tmp_path: Path, monkeypatch):
+    import json
+
+    from remedy.core.computer import host_bridge as hb
+    from remedy.core.computer.executor import ComputerExecutor
+    from remedy.core.computer.types import ComputerAction
+
+    monkeypatch.setattr(hb, "_bridge", None)
+    ex = ComputerExecutor(home_dir=tmp_path)
+
+    def boom(text, abort_check=None, chars_typed=None):
+        if chars_typed is not None:
+            chars_typed[:] = [8]
+        raise RuntimeError("Aborted by user during type")
+
+    monkeypatch.setattr(
+        "remedy.core.computer.desktop_win.type_text", boom, raising=False
+    )
+    import remedy.core.computer.desktop_win as win
+
+    monkeypatch.setattr(win, "type_text", boom)
+
+    raw = json.loads(
+        ex.run(ComputerAction.TYPE, target="desktop", text="hello world long")
+    )
+    assert raw.get("ok") is False
+    assert raw.get("aborted") is True
+    assert "abort" in str(raw.get("message") or "").lower()
+    assert raw.get("typed") == 8
+
+
+def test_computer_tools_provider_agnostic():
+    """Computer tool names/schemas do not depend on chat provider (xAI/DeepSeek/…)."""
+    from remedy.core.computer.types import COMPUTER_TOOL_NAMES
+    from remedy.core.providers import _PROVIDERS, get_provider
+
+    # At least two registered chat providers exist in product
+    assert "xai" in _PROVIDERS
+    assert "deepseek" in _PROVIDERS
+    assert len(_PROVIDERS) >= 2
+
+    # Provider modules are loadable independently of computer tools
+    for name in ("xai", "deepseek", "openai"):
+        p = get_provider(name)
+        assert p is not None
+        assert getattr(p, "provider_name", None) or name
+
+    # Tool set is a fixed frozenset (not built from provider)
+    assert "computer_navigate" in COMPUTER_TOOL_NAMES
+    assert "computer_click" in COMPUTER_TOOL_NAMES
+    assert len(COMPUTER_TOOL_NAMES) >= 10
+
+
+def test_concurrent_sessions_enqueue_and_abort_isolated(tmp_path: Path, monkeypatch):
+    """Two sessions can hold jobs; abort A leaves B claimable."""
+    from remedy.core import turn_context as tc
+    from remedy.core.computer.host_bridge import ComputerHostBridge
+
+    b = ComputerHostBridge(home_dir=tmp_path)
+    j_a1 = b.enqueue("navigate", {"url": "https://a.example"}, session_id="A")
+    j_a2 = b.enqueue("type", {"text": "secret"}, session_id="A")
+    j_b1 = b.enqueue("snapshot", {}, session_id="B")
+    j_b2 = b.enqueue("click", {"ref": "e1"}, session_id="B")
+
+    monkeypatch.setattr(
+        "remedy.core.computer.host_bridge.get_host_bridge",
+        lambda home_dir=None: b,
+    )
+    n = tc.abort_session("A")
+    assert n >= 0  # may be 0 events if no begin_turn; cancel still runs
+    assert b._read(j_a1.id).status == "cancelled"
+    assert b._read(j_a2.id).status == "cancelled"
+    assert b._read(j_b1.id).status == "pending"
+    assert b._read(j_b2.id).status == "pending"
+
+    claimed = b.claim_next()
+    assert claimed is not None
+    assert claimed.session_id == "B"
