@@ -16,15 +16,21 @@ Work top-down: is the **local server** up, is **auth** loaded, is the **provider
 “Start with Windows” and “Start hidden in tray” are **separate**. Older setup incorrectly
 turned on **start hidden** whenever login-at-startup was enabled.
 
-1. Open **Settings → Always ready**.  
+1. Open **Settings** (desktop / shell section).  
 2. Uncheck **Start hidden in tray** (leave **Start with Windows** on if you want).  
-3. **Save**, fully Quit, relaunch — the main window should open normally.  
-4. Tray-only start is only when that box is checked (stored in `%USERPROFILE%\.remedy\desktop.json`).
+3. **Save**, fully **tray → Quit**, relaunch — the main window should open normally.  
+4. Tray-only *start* is only when that box is checked (`%USERPROFILE%\.remedy\desktop.json`).
+
+**Note (0.20.0+):** clicking **✕** always hides to tray by design (keeps the server up). That
+is not the same as “start hidden.” To leave Remedy, use **tray → Quit**.
 
 ## Title bar min / max / close unresponsive
 
 **0.18.6+** uses the **OS title bar** for window controls. If buttons still misbehave,
 that is Windows chrome (not WebView drag-region residue). Fully Quit and relaunch.
+
+**0.20.0+:** ✕ should **hide to tray**, not quit. If ✕ still kills the process, install the
+latest 0.20.x build (older prefs with `close_to_tray=false` are healed on load).
 
 Older undecorated builds could lose clicks after move/maximize; install the latest.
 

@@ -1,8 +1,8 @@
 # Partner Metabolism (Advanced)
 
-Remedy’s **metabolism** is the silent local system that makes any chat model feel
-like the same durable partner — faster, leaner, and safer — without multi-agent
-theater.
+**Shipped in 0.20.0.** Remedy’s **metabolism** is the silent local system that makes any
+chat model feel like the same durable partner — faster, leaner, and safer — without
+multi-agent theater.
 
 Normal chat still talks to **one Remedy**. These organs never appear as named bots.
 

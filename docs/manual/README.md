@@ -12,7 +12,7 @@ Open **Help** ( **F1** or **Ctrl+/** ) for a searchable wiki UI that loads these
 
 | File | Title |
 |------|--------|
-| [00-overview.md](00-overview.md) | Overview — what Remedy can do (incl. always-ready tray) |
+| [00-overview.md](00-overview.md) | Overview — what Remedy can do (**0.20.0** metabolism + tray) |
 | [16-continuity-philosophy.md](16-continuity-philosophy.md) | How Remedy works (continuity) |
 | [14-visual-decoder.md](14-visual-decoder.md) | Local vision & on-device SmolVLM2 |
 | [17-nanoswarm.md](17-nanoswarm.md) | Continuity workers (operators) |
@@ -23,7 +23,7 @@ Open **Help** ( **F1** or **Ctrl+/** ) for a searchable wiki UI that loads these
 | [05-chat-and-sessions.md](05-chat-and-sessions.md) | Chat, rails, Plan/Build |
 | [06-memory-and-harness.md](06-memory-and-harness.md) | Memory & harness |
 | [18-agency.md](18-agency.md) | Coding agency (Build-class tools) |
-| [19-metabolism.md](19-metabolism.md) | Partner Metabolism L0–L3 (Advanced) |
+| [19-metabolism.md](19-metabolism.md) | Partner Metabolism L0–L3 (**0.20.0**, Advanced) |
 | [07-skills.md](07-skills.md) | Skills & Library |
 | [08-updates-and-uninstall.md](08-updates-and-uninstall.md) | Updates & uninstall |
 | [09-troubleshooting.md](09-troubleshooting.md) | Troubleshooting |
