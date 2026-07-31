@@ -20,7 +20,9 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 - **Offline host:** browser snapshot falls back immediately to desktop windows/UIA
   (no long host wait); navigate still refuses surprise OS browser unless asked.
 - **Stop mid-type:** `type_text` reports chars typed before abort; executor surfaces
-  `aborted` on desktop type.
+  `aborted` on desktop type; abort polled every 2 keystrokes (was 8).
+- **Provider soak:** computer tools verified with live xAI + DeepSeek tool_calls
+  (`computer_monitors`) end-to-end.
 
 ## [0.20.0] - 2026-07-30
 

@@ -3,10 +3,11 @@
 **Date:** 2026-07-30  
 **Tester:** Remedy agent (session Ahmi)  
 **Branch:** `feature/computer-use`  
-**SHA:** (see latest commit on branch after open-issues wave)  
-**Ready to merge master?** **closer** — core paths green; still optional live dual-LLM chat smoke
+**SHA:** (latest local commit after open-issues final wave)  
+**Ready to merge master?** **yes** (local merge OK; push only when you choose a release path)
 
-Source checklist: F1 `help_read(id="computer-use-soak")` / `docs/manual/computer-use-soak.md`
+Source checklist: F1 `help_read(id="computer-use-soak")` / `docs/manual/computer-use-soak.md`  
+Evidence: `docs/_open_issues_final.json`, `docs/_soak_probe_results.json`, unit suite
 
 ## Preconditions
 
@@ -14,9 +15,9 @@ Source checklist: F1 `help_read(id="computer-use-soak")` / `docs/manual/computer
 |------|--------|----------|
 | Checkout `feature/computer-use` | **PASS** | branch live |
 | Local server + Desktop host | **PASS** | `:7400` + app/remedy |
-| Build mode | **PASS** | click/type exercised earlier |
+| Build mode | **PASS** | click/type exercised |
 
-## Desktop / Browser (prior wave)
+## Desktop / Browser
 
 | Item | Result |
 |------|--------|
@@ -24,25 +25,51 @@ Source checklist: F1 `help_read(id="computer-use-soak")` / `docs/manual/computer
 | Stop cancels pending browser job | **PASS** |
 | Plan mode observe allow / input block + F1 help | **PASS** |
 
-## Open issues wave
+## Hybrid / routing
 
 | Item | Result | Evidence |
 |------|--------|----------|
-| Host offline navigate | **PASS** | refuses OS browser unless explicit (`rail_failed`); unit + isolated home probe |
-| Host offline snapshot | **PASS** | immediate desktop fallback `fallback=desktop` + note (no multi-second hang) |
-| Concurrent sessions | **PASS** | abort session A cancels only A jobs; B remains pending; `test_stream_concurrency` |
-| Stop mid-type | **PASS** | abort at char 8; executor returns `aborted=True` + typed count |
-| Multi-provider | **PASS** (tool layer) | computer tools independent of xAI/DeepSeek/OpenAI adapters (`_PROVIDERS` ≥2) |
-| Live dual-LLM chat smoke | **SKIP** | requires two configured API keys in UI; tool layer proven agnostic |
+| URL-ish prefers browser | **PASS** | navigate → rust-host rail |
+| Start menu / installer → desktop | **PASS** | `resolve_target` desktop for Start menu + setup.exe |
+| Host offline navigate | **PASS** | refuses surprise OS browser |
+| Host offline snapshot | **PASS** | immediate desktop fallback |
 
-## Tests
+## Plan mode
 
-- New: offline navigate/snapshot, mid-type abort, provider-agnostic tools, concurrent abort isolation
-- `tests/test_computer_use.py` + `tests/test_stream_concurrency.py` green for these paths
+| Item | Result |
+|------|--------|
+| snapshot/screenshot/navigate/monitors + help | **PASS** |
+| click/type/act blocked | **PASS** |
+
+## Provider-agnostic
+
+| Item | Result | Evidence |
+|------|--------|----------|
+| Two chat providers + computer tools | **PASS** | Live xAI grok-4.5 **and** DeepSeek both emitted `computer_monitors` tool_calls; tool executed (3 monitors) |
+
+## Stop / concurrency
+
+| Item | Result | Evidence |
+|------|--------|----------|
+| Stop mid-type | **PASS** | Live Notepad path: abort on turn thread → `Aborted by user` mid-type (check every 2 chars) |
+| Concurrent sessions | **PASS** | abort A cancels A only; B stays pending |
+| Concurrent streams unit | **PASS** | `test_stream_concurrency` |
+
+## Regression
+
+| Item | Result |
+|------|--------|
+| File edit + bash | **PASS** |
+| Computer unit tests | **PASS** (49+ in test_computer_use) |
 
 ## Blockers before merge
 
-1. Optional: manual dual-provider chat UI smoke (xAI + DeepSeek with real keys).
-2. Optional: Stop mid-type live Notepad keystroke visual (unit path covered).
+None for computer-use soak. Optional release hygiene only (CHANGELOG polish, PR).
 
-Otherwise computer-use soak checklist is **substantially solid** on `feature/computer-use`.
+## Commits (local, not pushed)
+
+- Host snapshot/page_text/click + comtypes  
+- Soak + PrintWindow path  
+- Plan-mode matrix + F1 help  
+- Offline fallback + mid-type + open-issue tests  
+- Final wave: dual-provider live smoke, mid-type on turn thread, tighter abort checks  
