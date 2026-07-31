@@ -13,12 +13,15 @@ from remedy.core.react_policy import (
     agency_tool_promise_claim,
     batch_has_tool_errors,
     is_serial_explore_batch,
+    looks_like_leaked_scratchpad,
     looks_like_pseudo_tools,
     message_wants_tools,
     parse_pseudo_tool_calls,
+    post_tools_user_summary_nudge,
     recovered_tool_call_is_complete,
     recovery_nudge_message,
     speed_batch_nudge_message,
+    strip_stream_status_noise,
     tool_call_fingerprint,
     tool_content_is_error,
 )
@@ -421,3 +424,31 @@ def test_batch_has_tool_errors_and_nudge() -> None:
     assert nudge["role"] == "user"
     assert nudge["content"] == RECOVERY_NUDGE
     assert "Recover" in RECOVERY_NUDGE
+
+def test_strip_stream_status_noise_auth_prefix() -> None:
+    raw = (
+        "\n[auth] Refreshed xAI session; retrying request…\n"
+        "The user wants a status update. I should not leak tool markup."
+    )
+    cleaned = strip_stream_status_noise(raw)
+    assert "[auth]" not in cleaned
+    assert "user wants" in cleaned.lower()
+
+
+def test_looks_like_leaked_scratchpad_dogfood_fail() -> None:
+    bad = (
+        "\n[auth] Refreshed xAI session; retrying request…\n"
+        "The user wants a status update. I should not leak tool markup. "
+        "I already completed the self-dev loop work. Give a clean summary from context."
+    )
+    assert looks_like_leaked_scratchpad(bad) is True
+    good = (
+        "## Self-dev iteration complete\n\n"
+        "- Fixed ToolRegistry unknown kwargs\n"
+        "- Migrated retired vision model pins\n"
+        "- pytest: 1389 passed\n"
+    )
+    assert looks_like_leaked_scratchpad(good) is False
+    nudge = post_tools_user_summary_nudge()
+    assert nudge["role"] == "user"
+    assert "scratchpad" in nudge["content"].lower() or "user-facing" in nudge["content"].lower()

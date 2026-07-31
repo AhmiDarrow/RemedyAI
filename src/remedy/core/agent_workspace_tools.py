@@ -835,13 +835,16 @@ def register_workspace_tools(runtime: Any) -> None:
         command: str = "",
         timeout_seconds: float = 60.0,
         workdir: str = "",
+        description: str = "",
     ) -> str:
         """Run a shell command through SubprocessSandbox (hidden console on Windows).
 
         *timeout_seconds* default 60, clamped to 5–600. *workdir* optional
         absolute or relative path (defaults to focus/default cwd). Local
         venv/node_modules/.bin and repo-root tools are prepended to PATH.
+        *description* is accepted (and ignored) when models pass a human note.
         """
+        _ = description
         from remedy.core.approvals import APPROVALS
         from remedy.core.project_fingerprint import path_env_with_local_bins
         from remedy.execution.process import win_shell_prefix
@@ -1315,6 +1318,13 @@ def register_workspace_tools(runtime: Any) -> None:
                 "workdir": {
                     "type": "string",
                     "description": "Optional working directory (absolute or relative)",
+                },
+                "description": {
+                    "type": "string",
+                    "description": (
+                        "Optional human note about the command (ignored by the runner; "
+                        "accepted so models do not fail on extra kwargs)"
+                    ),
                 },
             },
             "required": ["command"],

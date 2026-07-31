@@ -31,6 +31,11 @@ _HEALTH_TIMEOUT_S = 0.35
 _vision_json_cache: dict[str, Any] = {"path": "", "mtime": -1.0, "data": {}}
 
 
+def _proc_ref() -> subprocess.Popen[Any] | None:
+    """Snapshot the global Popen handle (stop_server may clear it concurrently)."""
+    return _proc
+
+
 def _port_open(host: str, port: int, timeout: float = 0.15) -> bool:
     try:
         with socket.create_connection((host, port), timeout=timeout):
@@ -130,7 +135,8 @@ def is_running(
     ):
         return bool(_running_cache.get("value"))
 
-    child_alive = _proc is not None and _proc.poll() is None
+    proc = _proc_ref()
+    child_alive = proc is not None and proc.poll() is None
     port_up = _port_open(host, port)
 
     if child_alive and port_up:
@@ -277,15 +283,33 @@ def start_server(
     """
     global _proc
     state = load_vision_json(home_dir)
-    # Ignore retired local model pins left in vision.json.
+    # Ignore retired local model pins left in vision.json (e.g. qwen2.5-vl-3b).
+    # Prefer soft-migrate to the product default rather than KeyError spam in logs.
     mid = str((state or {}).get("model_id") or "")
     if mid and mid not in ("", "smolvlm2-2.2b"):
-        try:
-            from remedy.vision.catalog import get_model_spec
+        from remedy.vision.catalog import DEFAULT_MODEL_ID, get_model_spec
 
+        try:
             get_model_spec(mid)
         except Exception:
-            state = {}
+            # Retired / unknown pin: clear paths so bundle activate can rebind,
+            # and rewrite model_id to the product default (no KeyError spam).
+            default_mid = DEFAULT_MODEL_ID or "smolvlm2-2.2b"
+            if isinstance(state, dict) and state:
+                state = dict(state)
+                state["model_id"] = default_mid
+                state.pop("model_path", None)
+                state.pop("mmproj_path", None)
+                state.pop("pid", None)
+                with contextlib.suppress(Exception):
+                    save_vision_json(state, home_dir)
+                logger.info(
+                    "Migrated retired vision model_id %r → %r",
+                    mid,
+                    default_mid,
+                )
+            else:
+                state = {}
     if not state or not Path(str(state.get("model_path") or "")).is_file():
         try:
             from remedy.runtime.bundle import activate_local_bundle
@@ -384,11 +408,18 @@ def start_server(
     invalidate_running_cache()
     deadline = time.time() + wait_s
     while time.time() < deadline:
-        if _proc.poll() is not None:
+        proc = _proc_ref()
+        if proc is None:
             invalidate_running_cache()
             return {
                 "ok": False,
-                "error": f"llama-server exited early (code {_proc.returncode})",
+                "error": "llama-server handle cleared during start (stopped concurrently)",
+            }
+        if proc.poll() is not None:
+            invalidate_running_cache()
+            return {
+                "ok": False,
+                "error": f"llama-server exited early (code {proc.returncode})",
             }
         # Port first (cheap); then a short HTTP probe once listening.
         if _port_open(host, port) and (
@@ -396,7 +427,7 @@ def start_server(
         ):
             mark_used()
             ensure_idle_watcher(home_dir)
-            state["pid"] = _proc.pid
+            state["pid"] = proc.pid
             save_vision_json(state, home_dir)
             invalidate_running_cache()
             # Seed cache as running so status polls stay cheap after start.
@@ -405,7 +436,7 @@ def start_server(
                 "ok": True,
                 "already_running": False,
                 "base_url": base,
-                "pid": _proc.pid,
+                "pid": proc.pid,
             }
         time.sleep(0.4)
 
@@ -509,21 +540,22 @@ def stop_server(home_dir: str | Path | None = None) -> dict[str, Any]:
     pids: list[int] = []
     invalidate_running_cache()
 
-    if _proc is not None:
+    proc = _proc_ref()
+    if proc is not None:
         with contextlib.suppress(Exception):
-            if _proc.poll() is None and _proc.pid:
-                pids.append(int(_proc.pid))
+            if proc.poll() is None and proc.pid:
+                pids.append(int(proc.pid))
         # Prefer graceful terminate via Popen handle first
-        if _proc.poll() is None:
+        if proc.poll() is None:
             with contextlib.suppress(Exception):
-                _proc.terminate()
+                proc.terminate()
                 try:
-                    _proc.wait(timeout=5)
+                    proc.wait(timeout=5)
                     killed = True
                 except subprocess.TimeoutExpired:
                     with contextlib.suppress(Exception):
-                        _proc.kill()
-                        _proc.wait(timeout=3)
+                        proc.kill()
+                        proc.wait(timeout=3)
                     killed = True
         _proc = None
 
@@ -573,6 +605,7 @@ def shutdown_vision_for_exit(home_dir: str | Path | None = None) -> dict[str, An
 
 
 def _pid() -> int | None:
-    if _proc is not None and _proc.poll() is None:
-        return _proc.pid
+    proc = _proc_ref()
+    if proc is not None and proc.poll() is None:
+        return proc.pid
     return None
