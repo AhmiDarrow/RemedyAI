@@ -369,56 +369,22 @@ fn is_enabled() -> bool {
     global().enabled.load(Ordering::SeqCst)
 }
 
-/// Hosts used by major OAuth / SSO identity providers.
-/// Document navigations to these must never be cancelled by EasyPrivacy-style lists
-/// (same-window login in the Browser rail).
-const IDP_HOST_EXACT: &[&str] = &[
-    "accounts.google.com",
-    "accounts.youtube.com",
-    "myaccount.google.com",
-    "oauth2.googleapis.com",
-    "www.googleapis.com",
-    "content.googleapis.com",
-    "appleid.apple.com",
-    "login.microsoftonline.com",
-    "login.live.com",
-    "login.windows.net",
-    "account.live.com",
-    "login.yahoo.com",
-    "api.twitter.com",
-    "api.x.com",
-    "auth0.com",
-    "discord.com",
-    "slack.com",
-    "login.openai.com",
-    "auth.openai.com",
-    "id.proton.me",
-    "account.proton.me",
-    "ssl.reddit.com",
-    "www.reddit.com",
-    "reddit.com",
-    // Common OAuth callback / CDN hops after Google consent
-    "gstatic.com",
-    "www.gstatic.com",
-    "ssl.gstatic.com",
-    "apis.google.com",
-];
-
-/// Suffix match (e.g. `foo.auth0.com`, `company.okta.com`).
-const IDP_HOST_SUFFIXES: &[&str] = &[
+/// Multi-tenant SSO platforms (host is the IdP for many apps).
+/// Not a brand blocklist of content sites — only platforms that *are* auth.
+const SSO_PLATFORM_SUFFIXES: &[&str] = &[
     ".auth0.com",
     ".okta.com",
     ".oktacdn.com",
+    ".onelogin.com",
+    ".pingidentity.com",
+    ".duosecurity.com",
     ".microsoftonline.com",
-    ".microsoft.com",
-    ".live.com",
-    ".google.com",
-    ".googleusercontent.com",
-    ".gstatic.com", // Google account assets sometimes hop here mid-flow
+    ".windows.net",
 ];
 
 /// True when this document URL is part of an identity / OAuth login hop.
 /// Used to allowlist navigations that filter lists would otherwise block.
+/// Prefer path/query/host-shape heuristics — no product-specific site lists.
 pub fn is_identity_provider_url(url: &str) -> bool {
     let Ok(parsed) = url::Url::parse(url) else {
         return false;
@@ -428,59 +394,72 @@ pub fn is_identity_provider_url(url: &str) -> bool {
         return false;
     }
     let path = parsed.path().to_lowercase();
+    let query = parsed.query().unwrap_or("").to_lowercase();
 
-    if IDP_HOST_EXACT.iter().any(|h| host == *h) {
+    // Query flags used by OAuth/OIDC/SAML SDKs (any provider)
+    for key in [
+        "ux_mode=",
+        "response_type=",
+        "client_id=",
+        "redirect_uri=",
+        "response_mode=",
+        "code_challenge=",
+        "samlrequest=",
+        "samlresponse=",
+    ] {
+        if query.contains(key) {
+            return true;
+        }
+    }
+
+    // Path segments common to auth
+    for token in [
+        "/oauth",
+        "/oauth2",
+        "/oidc",
+        "/saml",
+        "/sso/",
+        "/authorize",
+        "/signin",
+        "/sign-in",
+        "/sign_in",
+        "/login",
+        "/log-in",
+        "/log_in",
+        "/auth/",
+        "/session",
+        "/connect/",
+        "/users/sign_in",
+        "/dialog/oauth",
+        "/i/flow/login",
+    ] {
+        if path.contains(token) {
+            return true;
+        }
+    }
+
+    // Host shape: login.*, accounts.*, auth.*, sso.*, id.*, identity.*
+    let first_label = host.split('.').next().unwrap_or("");
+    if matches!(
+        first_label,
+        "login" | "accounts" | "account" | "auth" | "sso" | "id" | "identity" | "signin" | "ssoauth"
+    ) {
         return true;
     }
-    if IDP_HOST_SUFFIXES
+
+    // Multi-tenant SSO platforms
+    if SSO_PLATFORM_SUFFIXES
         .iter()
         .any(|suf| host.ends_with(suf) || host == suf.trim_start_matches('.'))
     {
         return true;
     }
 
-    // GitHub / GitLab login & OAuth paths (host is multipurpose)
-    if matches!(
-        host.as_str(),
-        "github.com" | "www.github.com" | "gitlab.com" | "www.gitlab.com"
-    ) && (path.starts_with("/login")
-        || path.starts_with("/sessions")
-        || path.starts_with("/oauth")
-        || path.starts_with("/users/sign_in")
-        || path.contains("/authorize")
-        || path.starts_with("/signin"))
-    {
-        return true;
-    }
-
-    // Facebook / Meta
-    if matches!(
-        host.as_str(),
-        "facebook.com" | "www.facebook.com" | "m.facebook.com" | "web.facebook.com"
-    ) && (path.contains("login") || path.contains("oauth") || path.starts_with("/dialog"))
-    {
-        return true;
-    }
-
-    // X / Twitter auth
-    if matches!(host.as_str(), "twitter.com" | "www.twitter.com" | "x.com" | "www.x.com")
-        && (path.contains("oauth") || path.starts_with("/i/flow/login") || path.starts_with("/login"))
-    {
-        return true;
-    }
-
-    // Discord / Slack oauth paths
-    if host == "discord.com" && path.starts_with("/api/oauth2") {
-        return true;
-    }
-    if host == "slack.com" && (path.contains("oauth") || path.starts_with("/signin")) {
-        return true;
-    }
-
-    // Generic authorize on known SaaS IdP-ish hosts
-    if (path.contains("/oauth2/") || path.contains("/oauth/") || path.ends_with("/authorize"))
-        && (host.contains("auth") || host.contains("login") || host.contains("sso") || host.contains("idp"))
-    {
+    // Host contains auth/login/sso/idp as a label (e.g. auth.example.com already
+    // covered; also corp-sso.example.com)
+    if host.split('.').any(|lab| {
+        matches!(lab, "auth" | "login" | "sso" | "idp" | "oauth" | "oidc" | "saml")
+    }) {
         return true;
     }
 
@@ -578,9 +557,9 @@ fn is_safe_hide_selector(sel: &str) -> bool {
 /// CSS + optional scriptlet for the page (cosmetic phase).
 ///
 /// **Disabled for page inject.** EasyList hide-selectors routinely match real app
-/// chrome (toolbars, Material Icons wrappers). Result: invisible-but-clickable
-/// controls on Gmail and many other SPAs. Privacy Shield still blocks **document
-/// navigations** to tracker/ad URLs via [`should_block_navigation`].
+/// chrome (toolbars, icon wrappers). Result: invisible-but-clickable controls on
+/// many SPAs. Privacy Shield still blocks **document navigations** to tracker/ad
+/// URLs via [`should_block_navigation`].
 ///
 /// Re-enable only with a much stricter selector pipeline + UI tests.
 pub fn cosmetic_inject_js(_page_url: &str) -> Option<String> {

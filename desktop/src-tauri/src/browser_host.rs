@@ -18,13 +18,7 @@ use url::Url;
 const LABEL: &str = "remedy-browser-embed";
 
 /// Force OAuth / SSO into the same rail WebView (no popup window).
-///
-/// Handles:
-/// - `window.open(url)` → same-tab navigation
-/// - `open('about:blank')` then `popup.location = authUrl`
-/// - `window.close()` after IdP → return to site that started OAuth
-/// - "You can close this window" dead-ends after Google login
-/// - `target=_blank` login links
+/// Brand-agnostic: path/query heuristics, not site-specific hosts.
 const SAME_WINDOW_OAUTH_JS: &str = r#"(function(){
   if (window.__remedySameWindowOpen) return;
   window.__remedySameWindowOpen = true;
@@ -33,16 +27,28 @@ const SAME_WINDOW_OAUTH_JS: &str = r#"(function(){
   var origOpen = window.open;
   var origClose = window.close;
 
+  /** True when this page looks like an auth / SSO hop (any provider). */
+  function looksLikeAuthUrl(href, host, path, search){
+    var h = (host || '').toLowerCase();
+    var p = (path || '').toLowerCase();
+    var s = (search || '').toLowerCase();
+    var blob = (href || '').toLowerCase();
+    if (/[?&](ux_mode|response_type|client_id|redirect_uri|scope)=/.test(s) || /[?&](ux_mode|response_type|client_id)=/.test(blob)) return true;
+    if (/\/(oauth2?|oidc|saml|sso|authorize|signin|sign-in|sign_in|login|log-in|log_in|auth|session|connect)(\/|$|\?)/.test(p)) return true;
+    if (/^(login|accounts|account|auth|sso|id|identity|signin)\./.test(h)) return true;
+    if (/\.(auth0|okta|onelogin|pingidentity|duosecurity)\./.test(h) || /\.(auth0|okta)\.com$/.test(h)) return true;
+    return false;
+  }
+
   function rememberReturn(){
     try {
       var href = String(window.location.href || '');
       if (!href || href.indexOf('about:')===0) return;
-      // Don't overwrite return with IdP pages
       var h = (window.location.hostname || '').toLowerCase();
-      if (/google\.|microsoftonline\.|live\.com|github\.com|apple\.com|okta\.|auth0\.|facebook\.|twitter\.|x\.com/.test(h)
-          && /accounts\.|login\.|oauth|signin|authorize/.test(href.toLowerCase()+h)) {
-        return;
-      }
+      var p = (window.location.pathname || '').toLowerCase();
+      var s = (window.location.search || '').toLowerCase();
+      // Don't overwrite return URL while already on an auth hop
+      if (looksLikeAuthUrl(href, h, p, s)) return;
       sessionStorage.setItem(SS_RET, href);
       sessionStorage.setItem(SS_TS, String(Date.now()));
     } catch(e) {}
@@ -57,25 +63,25 @@ const SAME_WINDOW_OAUTH_JS: &str = r#"(function(){
     } catch(e) { return ''; }
   }
 
-  /** Google GIS popup mode cannot finish in a single WebView — force redirect UX. */
-  function rewriteGooglePopupMode(abs){
+  /** Popup OAuth (ux_mode=popup) cannot finish in a single WebView — use redirect UX. */
+  function rewritePopupAuthMode(abs){
     try {
       var u = new URL(abs);
-      var h = (u.hostname || '').toLowerCase();
-      if (h !== 'accounts.google.com' && h.indexOf('.google.com') < 0) return abs;
-      // gsi/select and oauth authorize with ux_mode=popup
-      var path = (u.pathname || '').toLowerCase();
-      if (path.indexOf('/gsi/') >= 0 || path.indexOf('/o/oauth') >= 0 || path.indexOf('/signin') >= 0
-          || path.indexOf('/v3/signin') >= 0 || u.search.indexOf('ux_mode') >= 0) {
-        if (u.searchParams.get('ux_mode') === 'popup') {
-          u.searchParams.set('ux_mode', 'redirect');
-        }
-        // card UI is popup-oriented; full page is more reliable in-rail
-        if (u.searchParams.get('ui_mode') === 'card') {
-          u.searchParams.delete('ui_mode');
-        }
-        return u.toString();
+      var changed = false;
+      if (u.searchParams.get('ux_mode') === 'popup') {
+        u.searchParams.set('ux_mode', 'redirect');
+        changed = true;
       }
+      // display=popup is a common OIDC/OAuth hint — prefer page
+      if (u.searchParams.get('display') === 'popup') {
+        u.searchParams.set('display', 'page');
+        changed = true;
+      }
+      if (u.searchParams.get('ui_mode') === 'card') {
+        u.searchParams.delete('ui_mode');
+        changed = true;
+      }
+      return changed ? u.toString() : abs;
     } catch(e) {}
     return abs;
   }
@@ -83,13 +89,12 @@ const SAME_WINDOW_OAUTH_JS: &str = r#"(function(){
   function go(u){
     try {
       var abs = new URL(String(u), window.location.href).href;
-      abs = rewriteGooglePopupMode(abs);
+      abs = rewritePopupAuthMode(abs);
       if (/^https?:/i.test(abs)) {
         rememberReturn();
         window.location.assign(abs);
         return true;
       }
-      // Non-http (storagerelay / intent) — leave for native rewrite if any
       if (abs.indexOf('about:')===0) {
         return false;
       }
@@ -110,24 +115,22 @@ const SAME_WINDOW_OAUTH_JS: &str = r#"(function(){
       var path = (window.location.pathname || '').toLowerCase();
       var host = (window.location.hostname || '').toLowerCase();
       var search = (window.location.search || '').toLowerCase();
-      var stuckClose = /you may now close|you can close this|close this window|return to the app|authentication complete|sign-?in complete|login successful|successfully signed in|returned to the app/.test(text);
-      var stuckPath = /\/oauth\/(success|complete|done|callback)|\/signin\/oauth\/consent\/approval|\/gsi\/(status|issue)/.test(path);
-      // GIS popup card left open after account pick (no redirect)
-      var gsiPopupStuck = host === 'accounts.google.com' && path.indexOf('/gsi/') >= 0
-        && (search.indexOf('ux_mode=popup') >= 0 || search.indexOf('ui_mode=card') >= 0);
-      var idpHost = /(^|\.)accounts\.google\.com$|(^|\.)login\.microsoftonline\.com$|(^|\.)login\.live\.com$/.test(host);
+      var href = String(window.location.href || '');
+      var stuckClose = /you may now close|you can close this|close this window|return to the app|authentication complete|sign-?in complete|login successful|successfully signed in|returned to the app|you can return to/.test(text);
+      var stuckPath = /\/oauth\/(success|complete|done|callback)|\/auth\/(success|complete|callback)|\/signin\/.*\/(approval|complete)/.test(path);
+      var popupModeStuck = looksLikeAuthUrl(href, host, path, search)
+        && (search.indexOf('ux_mode=popup') >= 0 || search.indexOf('display=popup') >= 0 || search.indexOf('ui_mode=card') >= 0);
       if (stuckClose || stuckPath) {
         window.location.assign(ret);
         return;
       }
-      // Still on GSI popup URL after user likely finished — force return to site
-      if (gsiPopupStuck) {
+      // Auth page still open in popup mode after user likely finished
+      if (popupModeStuck) {
         var ts0 = parseInt(sessionStorage.getItem(SS_TS) || '0', 10) || 0;
         if (ts0 && (Date.now() - ts0) > 8000) {
-          // Prefer continue= if Google put one in the URL
           try {
-            var cont = new URLSearchParams(window.location.search).get('continue')
-              || new URLSearchParams(window.location.search).get('redirect_uri');
+            var sp = new URLSearchParams(window.location.search);
+            var cont = sp.get('continue') || sp.get('redirect_uri') || sp.get('return') || sp.get('return_to') || sp.get('next');
             if (cont && /^https?:/i.test(cont)) {
               window.location.assign(cont);
               return;
@@ -137,10 +140,12 @@ const SAME_WINDOW_OAUTH_JS: &str = r#"(function(){
           return;
         }
       }
-      // If Google shows account home after OAuth without redirect, bounce home
-      if (idpHost && /myaccount\.google|ManageAccount|Sign out/.test(text) && !/oauth|authorize|consent|challenge|gsi/.test(path+text.slice(0,200))) {
+      // Generic account-home dead-end after auth (no active challenge in path)
+      if (looksLikeAuthUrl(href, host, path, search)
+          && /sign out|log out|manage account|your account|security settings/.test(text)
+          && !/oauth|authorize|consent|challenge|password|verify|mfa|2fa|otp/.test(path + text.slice(0, 200))) {
         var ts = parseInt(sessionStorage.getItem(SS_TS) || '0', 10) || 0;
-        if (ts && (Date.now() - ts) > 2500) {
+        if (ts && (Date.now() - ts) > 4000) {
           window.location.assign(ret);
         }
       }
@@ -233,8 +238,14 @@ const SAME_WINDOW_OAUTH_JS: &str = r#"(function(){
       if (!href || href.charAt(0)==='#') return;
       var abs = new URL(href, window.location.href).href;
       if (!/^https?:/i.test(abs)) return;
-      // Only force same-window for likely auth links
-      if (!/oauth|authorize|login|signin|accounts\.google|microsoftonline|github\.com\/login|auth0|okta/i.test(abs+href)) return;
+      // Only force same-window for likely auth links (any provider)
+      try {
+        var au = new URL(abs);
+        if (!looksLikeAuthUrl(abs, au.hostname, au.pathname, au.search)
+            && !/oauth|authorize|signin|sign-in|login|sso|saml|oidc/i.test(abs)) return;
+      } catch(e) {
+        if (!/oauth|authorize|signin|login|sso/i.test(abs)) return;
+      }
       ev.preventDefault();
       ev.stopPropagation();
       go(abs);
@@ -300,9 +311,8 @@ const RAIL_LAYOUT_JS: &str = r#"(function(){
   setTimeout(applyFit, 400);
 })();"#;
 
-/// Rewrite OAuth navigations that cannot complete inside a single WebView.
-/// - `storagerelay://…` / Android `intent:` → real https
-/// - Google GIS `ux_mode=popup` → `ux_mode=redirect` (popup handshake needs opener)
+/// Rewrite auth navigations that cannot complete inside a single WebView.
+/// Brand-agnostic: query flags + special schemes only.
 fn rewrite_oauth_navigation(raw: &str) -> Option<String> {
     let s = raw.trim();
     if s.is_empty() {
@@ -310,26 +320,30 @@ fn rewrite_oauth_navigation(raw: &str) -> Option<String> {
     }
     let lower = s.to_ascii_lowercase();
 
-    // Google Identity Services / OAuth: popup mode never finishes without a real popup.
-    if lower.starts_with("https://accounts.google.com/")
-        || lower.starts_with("http://accounts.google.com/")
-    {
+    // Popup OAuth (any provider using ux_mode/display=popup) needs redirect/page in-rail.
+    if lower.starts_with("http://") || lower.starts_with("https://") {
         if let Ok(mut u) = Url::parse(s) {
-            let mut changed = false;
             let pairs: Vec<(String, String)> = u
                 .query_pairs()
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect();
-            if pairs.iter().any(|(k, v)| k == "ux_mode" && v == "popup") {
-                // Rebuild query with ux_mode=redirect
+            let needs = pairs.iter().any(|(k, v)| {
+                (k == "ux_mode" && v == "popup")
+                    || (k == "display" && v == "popup")
+                    || (k == "ui_mode" && v == "card")
+            });
+            if needs {
                 let mut ser = url::form_urlencoded::Serializer::new(String::new());
+                let mut changed = false;
                 for (k, v) in &pairs {
-                    if k == "ux_mode" {
+                    if k == "ux_mode" && v == "popup" {
                         ser.append_pair("ux_mode", "redirect");
                         changed = true;
-                    } else if k == "ui_mode" && v == "card" {
-                        // drop card chrome (popup-oriented)
+                    } else if k == "display" && v == "popup" {
+                        ser.append_pair("display", "page");
                         changed = true;
+                    } else if k == "ui_mode" && v == "card" {
+                        changed = true; // drop
                     } else {
                         ser.append_pair(k, v);
                     }
@@ -338,7 +352,7 @@ fn rewrite_oauth_navigation(raw: &str) -> Option<String> {
                     u.set_query(Some(&ser.finish()));
                     let out = u.to_string();
                     if out != s {
-                        log::info!("browser oauth rewrite Google popup→redirect");
+                        log::info!("browser oauth rewrite popup→redirect/page");
                         return Some(out);
                     }
                 }
@@ -346,11 +360,10 @@ fn rewrite_oauth_navigation(raw: &str) -> Option<String> {
         }
     }
 
-    // Google GIS / GSI: storagerelay://https/www.example.com?id=authz_cb
+    // Cross-origin storage relay used by some SSO SDKs: storagerelay://https/host?…
     if lower.starts_with("storagerelay://") {
         let rest = s.get("storagerelay://".len()..)?;
         let scheme_host = rest.split('?').next().unwrap_or(rest);
-        // scheme_host = "https/www.example.com" or "https/www.example.com/path"
         let mut parts = scheme_host.splitn(2, '/');
         let scheme = parts.next().unwrap_or("https");
         let hostpath = parts.next().unwrap_or("");
@@ -388,6 +401,41 @@ fn rewrite_oauth_navigation(raw: &str) -> Option<String> {
     }
 
     None
+}
+
+/// Path/query heuristics for auth flows (no brand host hardcoding).
+fn looks_like_auth_url_str(url: &str) -> bool {
+    let lower = url.to_ascii_lowercase();
+    if lower.contains("ux_mode=")
+        || lower.contains("response_type=")
+        || lower.contains("client_id=")
+        || lower.contains("redirect_uri=")
+    {
+        return true;
+    }
+    // Path segments common to OAuth/OIDC/SAML/login
+    for token in [
+        "/oauth",
+        "/oauth2",
+        "/oidc",
+        "/saml",
+        "/sso/",
+        "/authorize",
+        "/signin",
+        "/sign-in",
+        "/sign_in",
+        "/login",
+        "/log-in",
+        "/log_in",
+        "/auth/",
+        "/session",
+        "/connect/",
+    ] {
+        if lower.contains(token) {
+            return true;
+        }
+    }
+    false
 }
 
 fn urlencoding_minimal(enc: &str) -> Result<String, ()> {
@@ -781,14 +829,8 @@ pub fn browser_set_bounds(
 }
 
 fn schedule_reload(wv: tauri::Webview, url: String, delay_ms: u64, allow_show: bool) {
-    // Never force re-navigate IdP / OAuth pages — reloads wipe mid-login state
-    // (user stuck after password / account picker).
-    if crate::privacy_shield::is_identity_provider_url(&url)
-        || url.to_ascii_lowercase().contains("accounts.google.com")
-        || url.to_ascii_lowercase().contains("ux_mode=")
-        || url.to_ascii_lowercase().contains("/gsi/")
-        || url.to_ascii_lowercase().contains("oauth")
-    {
+    // Never force re-navigate auth/SSO pages — reloads wipe mid-login state.
+    if crate::privacy_shield::is_identity_provider_url(&url) || looks_like_auth_url_str(&url) {
         log::info!("browser skip delayed reload on auth URL");
         if allow_show {
             let _ = wv.show();
