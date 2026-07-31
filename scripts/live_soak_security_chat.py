@@ -15,15 +15,20 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+import sys
+from pathlib import Path as _PathForToken
+_SCRIPTS = _PathForToken(__file__).resolve().parent
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+from lib_local_token import resolve_local_api_token
+
 HOME = Path(os.environ.get("REMEDY_HOME", Path.home() / ".remedy")).expanduser()
 BASE = os.environ.get("REMEDY_API", "http://127.0.0.1:7400").rstrip("/")
 TOKEN_PATH = HOME / "auth" / "local_api_token"
 
 
 def token() -> str:
-    if not TOKEN_PATH.is_file():
-        raise SystemExit(f"missing API token at {TOKEN_PATH}")
-    return TOKEN_PATH.read_text(encoding="utf-8").strip()
+    return resolve_local_api_token(home=HOME, base=BASE)
 
 
 def req(
