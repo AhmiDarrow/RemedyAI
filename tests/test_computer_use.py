@@ -1048,15 +1048,15 @@ def test_type_text_abort_mid_string(monkeypatch):
     typed: list[int] = [0]
     try:
         win.type_text(
-            "abcdefghijklmnop",  # 16 chars → abort at i=8
+            "abcdefghijklmnop",  # abort check every 2 chars → stop at i=2
             abort_check=abort_after_partial,
             chars_typed=typed,
         )
         raise AssertionError("expected RuntimeError abort")
     except RuntimeError as e:
         assert "abort" in str(e).lower()
-    assert typed[0] == 8  # typed chars 0..7 before check at i=8
-    assert len(sent) == 8  # one _send_input call per char (down+up together)
+    assert typed[0] == 2  # typed chars 0,1 before check at i=2
+    assert len(sent) == 2  # one _send_input call per char (down+up together)
 
 
 def test_executor_type_surfaces_abort(tmp_path: Path, monkeypatch):

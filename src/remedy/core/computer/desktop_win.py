@@ -400,7 +400,8 @@ def type_text(
     _require_windows()
     n = 0
     for i, ch in enumerate(text or ""):
-        if abort_check is not None and i > 0 and i % 8 == 0:
+        # Check often so Stop mid-type reacts within ~2 keystrokes (was every 8).
+        if abort_check is not None and i > 0 and i % 2 == 0:
             try:
                 if abort_check():
                     if chars_typed is not None:
