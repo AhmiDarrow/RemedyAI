@@ -57,9 +57,33 @@ const SAME_WINDOW_OAUTH_JS: &str = r#"(function(){
     } catch(e) { return ''; }
   }
 
+  /** Google GIS popup mode cannot finish in a single WebView — force redirect UX. */
+  function rewriteGooglePopupMode(abs){
+    try {
+      var u = new URL(abs);
+      var h = (u.hostname || '').toLowerCase();
+      if (h !== 'accounts.google.com' && h.indexOf('.google.com') < 0) return abs;
+      // gsi/select and oauth authorize with ux_mode=popup
+      var path = (u.pathname || '').toLowerCase();
+      if (path.indexOf('/gsi/') >= 0 || path.indexOf('/o/oauth') >= 0 || path.indexOf('/signin') >= 0
+          || path.indexOf('/v3/signin') >= 0 || u.search.indexOf('ux_mode') >= 0) {
+        if (u.searchParams.get('ux_mode') === 'popup') {
+          u.searchParams.set('ux_mode', 'redirect');
+        }
+        // card UI is popup-oriented; full page is more reliable in-rail
+        if (u.searchParams.get('ui_mode') === 'card') {
+          u.searchParams.delete('ui_mode');
+        }
+        return u.toString();
+      }
+    } catch(e) {}
+    return abs;
+  }
+
   function go(u){
     try {
       var abs = new URL(String(u), window.location.href).href;
+      abs = rewriteGooglePopupMode(abs);
       if (/^https?:/i.test(abs)) {
         rememberReturn();
         window.location.assign(abs);
@@ -82,20 +106,39 @@ const SAME_WINDOW_OAUTH_JS: &str = r#"(function(){
     try {
       var ret = returnUrl();
       if (!ret) return;
-      var text = ((document.body && (document.body.innerText || document.body.textContent)) || '').slice(0, 800).toLowerCase();
+      var text = ((document.body && (document.body.innerText || document.body.textContent)) || '').slice(0, 1200).toLowerCase();
       var path = (window.location.pathname || '').toLowerCase();
       var host = (window.location.hostname || '').toLowerCase();
-      var stuckClose = /you may now close|you can close this|close this window|return to the app|authentication complete|sign-?in complete|login successful|successfully signed in/.test(text);
-      var stuckPath = /\/oauth\/(success|complete|done|callback)|\/signin\/oauth\/consent\/approval/.test(path);
-      // Logged into Google but stranded on accounts.google without continue
+      var search = (window.location.search || '').toLowerCase();
+      var stuckClose = /you may now close|you can close this|close this window|return to the app|authentication complete|sign-?in complete|login successful|successfully signed in|returned to the app/.test(text);
+      var stuckPath = /\/oauth\/(success|complete|done|callback)|\/signin\/oauth\/consent\/approval|\/gsi\/(status|issue)/.test(path);
+      // GIS popup card left open after account pick (no redirect)
+      var gsiPopupStuck = host === 'accounts.google.com' && path.indexOf('/gsi/') >= 0
+        && (search.indexOf('ux_mode=popup') >= 0 || search.indexOf('ui_mode=card') >= 0);
       var idpHost = /(^|\.)accounts\.google\.com$|(^|\.)login\.microsoftonline\.com$|(^|\.)login\.live\.com$/.test(host);
       if (stuckClose || stuckPath) {
         window.location.assign(ret);
         return;
       }
-      // If Google shows account home after OAuth without redirect, offer auto-return after short settle
-      if (idpHost && /myaccount\.google|ManageAccount|Sign out/.test(text) && !/oauth|authorize|consent|challenge/.test(path+text.slice(0,200))) {
-        // Only bounce if we have a return and spent >2s on this dead-end
+      // Still on GSI popup URL after user likely finished — force return to site
+      if (gsiPopupStuck) {
+        var ts0 = parseInt(sessionStorage.getItem(SS_TS) || '0', 10) || 0;
+        if (ts0 && (Date.now() - ts0) > 8000) {
+          // Prefer continue= if Google put one in the URL
+          try {
+            var cont = new URLSearchParams(window.location.search).get('continue')
+              || new URLSearchParams(window.location.search).get('redirect_uri');
+            if (cont && /^https?:/i.test(cont)) {
+              window.location.assign(cont);
+              return;
+            }
+          } catch(e) {}
+          window.location.assign(ret);
+          return;
+        }
+      }
+      // If Google shows account home after OAuth without redirect, bounce home
+      if (idpHost && /myaccount\.google|ManageAccount|Sign out/.test(text) && !/oauth|authorize|consent|challenge|gsi/.test(path+text.slice(0,200))) {
         var ts = parseInt(sessionStorage.getItem(SS_TS) || '0', 10) || 0;
         if (ts && (Date.now() - ts) > 2500) {
           window.location.assign(ret);
@@ -211,14 +254,51 @@ const SAME_WINDOW_OAUTH_JS: &str = r#"(function(){
   window.addEventListener('load', function(){ setTimeout(bounceHomeIfStuck, 600); });
 })();"#;
 
-/// Rewrite Google/Android special schemes that WebView2 cannot load as documents.
-/// e.g. `storagerelay://https/example.com?id=…` → `https://example.com/`
+/// Rewrite OAuth navigations that cannot complete inside a single WebView.
+/// - `storagerelay://…` / Android `intent:` → real https
+/// - Google GIS `ux_mode=popup` → `ux_mode=redirect` (popup handshake needs opener)
 fn rewrite_oauth_navigation(raw: &str) -> Option<String> {
     let s = raw.trim();
     if s.is_empty() {
         return None;
     }
     let lower = s.to_ascii_lowercase();
+
+    // Google Identity Services / OAuth: popup mode never finishes without a real popup.
+    if lower.starts_with("https://accounts.google.com/")
+        || lower.starts_with("http://accounts.google.com/")
+    {
+        if let Ok(mut u) = Url::parse(s) {
+            let mut changed = false;
+            let pairs: Vec<(String, String)> = u
+                .query_pairs()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect();
+            if pairs.iter().any(|(k, v)| k == "ux_mode" && v == "popup") {
+                // Rebuild query with ux_mode=redirect
+                let mut ser = url::form_urlencoded::Serializer::new(String::new());
+                for (k, v) in &pairs {
+                    if k == "ux_mode" {
+                        ser.append_pair("ux_mode", "redirect");
+                        changed = true;
+                    } else if k == "ui_mode" && v == "card" {
+                        // drop card chrome (popup-oriented)
+                        changed = true;
+                    } else {
+                        ser.append_pair(k, v);
+                    }
+                }
+                if changed {
+                    u.set_query(Some(&ser.finish()));
+                    let out = u.to_string();
+                    if out != s {
+                        log::info!("browser oauth rewrite Google popup→redirect");
+                        return Some(out);
+                    }
+                }
+            }
+        }
+    }
 
     // Google GIS / GSI: storagerelay://https/www.example.com?id=authz_cb
     if lower.starts_with("storagerelay://") {
@@ -534,6 +614,20 @@ pub fn browser_set_bounds(
 }
 
 fn schedule_reload(wv: tauri::Webview, url: String, delay_ms: u64, allow_show: bool) {
+    // Never force re-navigate IdP / OAuth pages — reloads wipe mid-login state
+    // (user stuck after password / account picker).
+    if crate::privacy_shield::is_identity_provider_url(&url)
+        || url.to_ascii_lowercase().contains("accounts.google.com")
+        || url.to_ascii_lowercase().contains("ux_mode=")
+        || url.to_ascii_lowercase().contains("/gsi/")
+        || url.to_ascii_lowercase().contains("oauth")
+    {
+        log::info!("browser skip delayed reload on auth URL");
+        if allow_show {
+            let _ = wv.show();
+        }
+        return;
+    }
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(delay_ms));
         if let Ok(u) = url.parse::<Url>() {
@@ -590,7 +684,11 @@ pub fn navigate_embed(
     url_raw: &str,
     bounds: Option<BrowserBounds>,
 ) -> Result<String, String> {
-    let url = normalize_url(url_raw)?;
+    let mut url = normalize_url(url_raw)?;
+    // Rewrite Google popup-mode GIS → redirect before navigating (same-window).
+    if let Some(fixed) = rewrite_oauth_navigation(&url) {
+        url = fixed;
+    }
     {
         let mut cur = state.current_url.lock().map_err(|e| e.to_string())?;
         *cur = url.clone();
