@@ -17,6 +17,67 @@ use url::Url;
 
 const LABEL: &str = "remedy-browser-embed";
 
+/// Force OAuth / SSO into the same rail WebView (no popup window).
+/// Handles both `window.open(url)` and the common `open('about:blank')` then
+/// `popup.location = authUrl` pattern.
+const SAME_WINDOW_OAUTH_JS: &str = r#"(function(){
+  if (window.__remedySameWindowOpen) return;
+  window.__remedySameWindowOpen = true;
+  var orig = window.open;
+  function go(u){
+    try {
+      var abs = new URL(String(u), window.location.href).href;
+      if (/^https?:/i.test(abs) || abs.indexOf('about:')===0) {
+        window.location.assign(abs);
+        return true;
+      }
+    } catch(e) {}
+    try { window.location.href = String(u); return true; } catch(e2) {}
+    return false;
+  }
+  function blankStub(){
+    var stub = {
+      closed: false,
+      close: function(){ this.closed = true; },
+      focus: function(){},
+      blur: function(){},
+      opener: null,
+      postMessage: function(){},
+      document: document
+    };
+    var loc = {
+      get href(){ return window.location.href; },
+      set href(v){ go(v); },
+      assign: function(v){ go(v); },
+      replace: function(v){ try { window.location.replace(String(v)); } catch(e){ go(v); } },
+      reload: function(){ try { window.location.reload(); } catch(e){} },
+      toString: function(){ return window.location.href; }
+    };
+    try {
+      Object.defineProperty(stub, 'location', {
+        get: function(){ return loc; },
+        set: function(v){ go(v); },
+        configurable: true
+      });
+    } catch(e) {
+      stub.location = loc;
+    }
+    return stub;
+  }
+  window.open = function(url, name, features){
+    try {
+      var u = (url==null || url==='') ? '' : String(url);
+      if (!u || u === 'about:blank' || u.indexOf('about:blank')===0) {
+        return blankStub();
+      }
+      go(u);
+      return null;
+    } catch(e) {
+      try { return orig ? orig.apply(window, arguments) : null; } catch(e2) { return null; }
+    }
+  };
+})();"#;
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct BrowserBounds {
     pub x: f64,
@@ -383,6 +444,8 @@ pub fn navigate_embed(
                 }
             }
             let _ = app_for_load.emit("browser-url-changed", json!({ "url": u }));
+            // Same-window OAuth: window.open → location.assign (no popup surface).
+            let _ = wv.eval(SAME_WINDOW_OAUTH_JS);
             // Phase 1 cosmetic: hide ad/tracker elements via EasyList CSS
             if let Some(js) = crate::privacy_shield::cosmetic_inject_js(&u) {
                 let _ = wv.eval(&js);

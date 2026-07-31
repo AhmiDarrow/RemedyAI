@@ -369,12 +369,127 @@ fn is_enabled() -> bool {
     global().enabled.load(Ordering::SeqCst)
 }
 
+/// Hosts used by major OAuth / SSO identity providers.
+/// Document navigations to these must never be cancelled by EasyPrivacy-style lists
+/// (same-window login in the Browser rail).
+const IDP_HOST_EXACT: &[&str] = &[
+    "accounts.google.com",
+    "accounts.youtube.com",
+    "myaccount.google.com",
+    "oauth2.googleapis.com",
+    "appleid.apple.com",
+    "login.microsoftonline.com",
+    "login.live.com",
+    "login.windows.net",
+    "account.live.com",
+    "login.yahoo.com",
+    "api.twitter.com",
+    "api.x.com",
+    "auth0.com",
+    "discord.com",
+    "slack.com",
+    "login.openai.com",
+    "auth.openai.com",
+    "id.proton.me",
+    "account.proton.me",
+    "ssl.reddit.com",
+    "www.reddit.com",
+    "reddit.com",
+];
+
+/// Suffix match (e.g. `foo.auth0.com`, `company.okta.com`).
+const IDP_HOST_SUFFIXES: &[&str] = &[
+    ".auth0.com",
+    ".okta.com",
+    ".oktacdn.com",
+    ".microsoftonline.com",
+    ".microsoft.com",
+    ".live.com",
+    ".google.com",
+    ".googleusercontent.com",
+    ".gstatic.com", // Google account assets sometimes hop here mid-flow
+];
+
+/// True when this document URL is part of an identity / OAuth login hop.
+/// Used to allowlist navigations that filter lists would otherwise block.
+pub fn is_identity_provider_url(url: &str) -> bool {
+    let Ok(parsed) = url::Url::parse(url) else {
+        return false;
+    };
+    let host = parsed.host_str().unwrap_or("").to_lowercase();
+    if host.is_empty() {
+        return false;
+    }
+    let path = parsed.path().to_lowercase();
+
+    if IDP_HOST_EXACT.iter().any(|h| host == *h) {
+        return true;
+    }
+    if IDP_HOST_SUFFIXES
+        .iter()
+        .any(|suf| host.ends_with(suf) || host == suf.trim_start_matches('.'))
+    {
+        return true;
+    }
+
+    // GitHub / GitLab login & OAuth paths (host is multipurpose)
+    if matches!(
+        host.as_str(),
+        "github.com" | "www.github.com" | "gitlab.com" | "www.gitlab.com"
+    ) && (path.starts_with("/login")
+        || path.starts_with("/sessions")
+        || path.starts_with("/oauth")
+        || path.starts_with("/users/sign_in")
+        || path.contains("/authorize")
+        || path.starts_with("/signin"))
+    {
+        return true;
+    }
+
+    // Facebook / Meta
+    if matches!(
+        host.as_str(),
+        "facebook.com" | "www.facebook.com" | "m.facebook.com" | "web.facebook.com"
+    ) && (path.contains("login") || path.contains("oauth") || path.starts_with("/dialog"))
+    {
+        return true;
+    }
+
+    // X / Twitter auth
+    if matches!(host.as_str(), "twitter.com" | "www.twitter.com" | "x.com" | "www.x.com")
+        && (path.contains("oauth") || path.starts_with("/i/flow/login") || path.starts_with("/login"))
+    {
+        return true;
+    }
+
+    // Discord / Slack oauth paths
+    if host == "discord.com" && path.starts_with("/api/oauth2") {
+        return true;
+    }
+    if host == "slack.com" && (path.contains("oauth") || path.starts_with("/signin")) {
+        return true;
+    }
+
+    // Generic authorize on known SaaS IdP-ish hosts
+    if (path.contains("/oauth2/") || path.contains("/oauth/") || path.ends_with("/authorize"))
+        && (host.contains("auth") || host.contains("login") || host.contains("sso") || host.contains("idp"))
+    {
+        return true;
+    }
+
+    false
+}
+
 /// True if a main-frame document navigation should be cancelled.
 pub fn should_block_navigation(url: &str) -> bool {
     if !is_enabled() {
         return false;
     }
     if url.starts_with("about:") || url.starts_with("data:") || url.starts_with("blob:") {
+        return false;
+    }
+    // Never block OAuth / SSO identity hops (same-window Browser rail login).
+    if is_identity_provider_url(url) {
         return false;
     }
     let g = global();
