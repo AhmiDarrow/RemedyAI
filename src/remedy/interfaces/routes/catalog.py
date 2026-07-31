@@ -56,9 +56,7 @@ def _demo_model_allowed(mid: str, catalog: list[dict]) -> bool:
     if allow and m not in allow:
         return False
     low = m.lower()
-    if any(s in low for s in _DEMO_BLOCK_SUBSTR):
-        return False
-    return True
+    return not any(s in low for s in _DEMO_BLOCK_SUBSTR)
 
 
 def _looks_like_media_model(mid: str) -> bool:

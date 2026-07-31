@@ -6,12 +6,13 @@ Uses real agent turns (not just API probes) so tools + LLM + consent paths run.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import time
 import urllib.error
 import urllib.request
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 BASE = os.environ.get("REMEDY_API", "http://127.0.0.1:7400").rstrip("/")
@@ -106,14 +107,16 @@ def chat(sid: str, message: str, timeout: float = 180.0) -> tuple[float, str, in
 
 def main() -> int:
     print(f"AGENT FULL WORKOUT @ {BASE}")
-    print(f"home={HOME} started={datetime.now(timezone.utc).isoformat()}")
+    print(f"home={HOME} started={datetime.now(UTC).isoformat()}")
 
-    stop_host_poller = lambda: None  # type: ignore
+    def stop_host_poller():
+        return None  # type: ignore
     try:
         import sys
 
         sys.path.insert(0, str(Path(__file__).resolve().parent))
-        from lib_host_poller import start_host_poller, stop_host_poller as _stop
+        from lib_host_poller import start_host_poller
+        from lib_host_poller import stop_host_poller as _stop
 
         stop_host_poller = _stop
         start_host_poller()
@@ -288,7 +291,7 @@ def main() -> int:
     dt, text, code = chat(
         sid,
         f"Create a Gmail draft to {to_addr} subject 'Remedy workout draft' "
-        f"body 'Automated draft from Remedy full workout at {datetime.now(timezone.utc).isoformat()}.'. "
+        f"body 'Automated draft from Remedy full workout at {datetime.now(UTC).isoformat()}.'. "
         "If API disabled say GMAIL_API_DISABLED else DRAFTOK with draft id.",
         timeout=120,
     )
@@ -308,7 +311,7 @@ def main() -> int:
         sid,
         f"SEND a real email now to {to_addr} with subject "
         f"'Remedy workout send {date.today().isoformat()}' and body "
-        f"'Hello from Remedy agent full workout. Time={datetime.now(timezone.utc).isoformat()}.'. "
+        f"'Hello from Remedy agent full workout. Time={datetime.now(UTC).isoformat()}.'. "
         "Use mail_send. If API disabled say GMAIL_API_DISABLED else SENDOK with message id. "
         "I explicitly authorize this one send.",
         timeout=120,
@@ -464,10 +467,8 @@ def main() -> int:
     # ------------------------------------------------------------------
     api("DELETE", f"/api/sessions/{sid}")
     mark("delete workout session", True)
-    try:
+    with contextlib.suppress(Exception):
         stop_host_poller()
-    except Exception:
-        pass
 
     print(f"\n{'='*60}")
     print(f"WORKOUT COMPLETE  PASS={PASS}  FAIL={FAIL}  SKIP={SKIP}")

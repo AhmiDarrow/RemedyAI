@@ -6,9 +6,11 @@ vulnerabilities like path traversal, injection, and unsafe defaults.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 from pathlib import Path
+from typing import Any, cast
 
 from remedy.core.errors import SecurityError
 
@@ -48,10 +50,8 @@ def _resolved_auth_roots() -> list[Path]:
     candidates: list[Path] = []
     if env_home:
         candidates.append(Path(env_home).expanduser() / "auth")
-    try:
+    with contextlib.suppress(Exception):
         candidates.append(Path.home() / ".remedy" / "auth")
-    except Exception:
-        pass
     for auth in candidates:
         try:
             a = auth.expanduser().resolve(strict=False)
@@ -303,7 +303,7 @@ def is_loopback_service_url(url: str) -> bool:
     saw = False
     for info in infos:
         addr = info[4][0]
-        if not _ip_loopback(addr):
+        if not _ip_loopback(str(addr)):
             return False
         saw = True
     return saw
@@ -346,22 +346,20 @@ class _NoHttpRedirectHandler:
         import urllib.request
 
         class _Handler(urllib.request.HTTPRedirectHandler):
-            def redirect_request(  # type: ignore[no-untyped-def]
-                self, req, fp, code, msg, headers, newurl
-            ):
+            def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
                 return None
 
         cls._handler_cls = _Handler
         cls._opener = urllib.request.build_opener(_Handler)
 
     @classmethod
-    def open(cls, req: object, *, timeout: float = 30.0) -> object:
+    def open(cls, req: object, *, timeout: float = 30.0) -> Any:
         cls._ensure()
         assert cls._opener is not None
-        return cls._opener.open(req, timeout=timeout)  # type: ignore[no-any-return]
+        return cast(Any, cls._opener.open(cast(Any, req), timeout=timeout))
 
 
-def urlopen_no_redirect(req: object, *, timeout: float = 30.0) -> object:
+def urlopen_no_redirect(req: object, *, timeout: float = 30.0) -> Any:
     """``urlopen`` that never follows HTTP redirects (SSRF hardening).
 
     Use for loopback-only service clients after :func:`is_loopback_service_url`

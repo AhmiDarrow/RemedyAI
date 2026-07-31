@@ -145,10 +145,7 @@ def looks_like_secret_text(text: str) -> bool:
     t = text.strip()
     if not _needs_secret_scan(t):
         return False
-    for rx in _SECRET_PATTERNS:
-        if rx.search(t):
-            return True
-    return False
+    return any(rx.search(t) for rx in _SECRET_PATTERNS)
 
 
 def redact_obj(obj: Any, *, depth: int = 0) -> Any:

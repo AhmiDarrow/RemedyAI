@@ -1048,8 +1048,8 @@ async def call_llm_stream(runtime, message: str,
 
                 # 2) Evidence inject AFTER slim, then mark (mark clears delta)
                 with suppress(Exception):
-                    from remedy.core.metabolism.turn import mark_model_call
                     from remedy.core.metabolism.evidence import get_evidence_ledger
+                    from remedy.core.metabolism.turn import mark_model_call
 
                     if (
                         int(getattr(runtime, "_turn_tier", 1) or 1) >= 2

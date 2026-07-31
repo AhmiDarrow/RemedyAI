@@ -153,11 +153,11 @@ def _request(
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
         # Never follow redirects — Location off-loopback is SSRF.
-        with urlopen_no_redirect(req, timeout=timeout) as resp:  # type: ignore[union-attr]
-            raw = resp.read()  # type: ignore[union-attr]
+        with urlopen_no_redirect(req, timeout=timeout) as resp:
+            raw = resp.read()
             if not raw:
                 return None
-            ctype = resp.headers.get("Content-Type", "")  # type: ignore[union-attr]
+            ctype = resp.headers.get("Content-Type", "")
             if "json" in ctype or raw[:1] in (b"{", b"["):
                 return json.loads(raw.decode("utf-8"))
             return raw

@@ -79,7 +79,7 @@ def note_work_path(runtime: Any, path: Path | str | None) -> Path | None:
     runtime._work_roots = roots[:_MAX_ROOTS]
     # Keep session cache in sync so tab switches restore the right set
     with suppress(Exception):
-        from remedy.core.session_continuity import _work_roots_by_session, _trim_cache
+        from remedy.core.session_continuity import _trim_cache, _work_roots_by_session
 
         sid = str(getattr(runtime, "_session_id", "") or "").strip()
         if sid:

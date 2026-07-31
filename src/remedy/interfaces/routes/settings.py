@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import logging
 import os
-from pathlib import Path
 
 from fastapi import FastAPI
 
@@ -12,7 +11,6 @@ from remedy.interfaces.api_models import (
     SettingsUpdateRequest,
 )
 from remedy.interfaces.api_support import (
-    _apply_llm_to_runtime,
     _default_config_path,
     _find_config_path,
     _write_config,

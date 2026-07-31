@@ -6,6 +6,7 @@ Default package excludes API keys, OAuth tokens, raw evidence blobs, and IR.
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import json
 import os
@@ -171,10 +172,8 @@ def export_identity(
         path = Path(dest).expanduser()
         path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(package, indent=2), encoding="utf-8")
-    try:
+    with contextlib.suppress(Exception):
         os.chmod(path, 0o600)
-    except Exception:
-        pass
     return path
 
 

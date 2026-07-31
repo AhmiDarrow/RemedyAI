@@ -61,7 +61,7 @@ def _req(
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             raw = resp.read()
-            ctype = resp.headers.get("Content-Type", "")
+            resp.headers.get("Content-Type", "")
             try:
                 payload = json.loads(raw.decode("utf-8")) if raw else None
             except Exception:
@@ -530,8 +530,9 @@ def main() -> int:
 
     # --- F. Unit-level SSRF + shell jail (no real internal network abuse) ---
     try:
-        from remedy.core.agent_web_tools import _host_is_blocked, _pinned_fetch
         from urllib.parse import urlparse
+
+        from remedy.core.agent_web_tools import _host_is_blocked, _pinned_fetch
 
         ssrf_hosts = [
             ("127.0.0.1", True),
@@ -672,8 +673,8 @@ def main() -> int:
 
     # Auth path resolve under full scope
     try:
+        from remedy.core.security import SecurityError, refuse_protected_secret_path
         from remedy.core.workspace import resolve_under_roots
-        from remedy.core.security import refuse_protected_secret_path, SecurityError
 
         auth_target = str(HOME / "auth" / "provider_keys.json")
         try:

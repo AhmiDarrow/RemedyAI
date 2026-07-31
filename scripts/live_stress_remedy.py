@@ -507,7 +507,7 @@ def _run_once(loop: int) -> int:
     print(f"\n=== STRESS LOOP {loop} RESULT (cumulative PASS={PASS} FAIL={FAIL}) ===")
     for w in WEAK[-5:]:
         print(f"  ~ {w}")
-    return 0 if FAIL == fail_before else 1
+    return 0 if fail_before == FAIL else 1
 
 
 if __name__ == "__main__":

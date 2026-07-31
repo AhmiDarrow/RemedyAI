@@ -699,7 +699,6 @@ async def distill_user_text(
                     from remedy.models import MemoryEntry, MemoryEntryType
 
                     if hasattr(memory, "upsert"):
-                        import asyncio
                         import inspect
 
                         entry = MemoryEntry(

@@ -619,10 +619,8 @@ def get_valid_access_token(home: Path | str | None = None) -> str:
 def disconnect(home: Path | str | None = None) -> None:
     tokens = load_tokens(home)
     if tokens.access_token:
-        try:
+        with contextlib.suppress(Exception):
             _http_form(REVOKE_URL, {"token": tokens.access_token})
-        except Exception:
-            pass
     clear_tokens(home)
     try:
         from remedy.assistant.models import LinkedAccount

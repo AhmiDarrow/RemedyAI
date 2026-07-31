@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import re
-from enum import Enum
-from urllib.parse import urlparse
+from enum import StrEnum
 
 
-class ComputerTarget(str, Enum):
+class ComputerTarget(StrEnum):
     BROWSER = "browser"
     DESKTOP = "desktop"
 
@@ -133,9 +132,7 @@ def is_valid_navigate_url(url: str | None) -> bool:
             if host.startswith(("10.", "192.168.", "172.")):
                 return True
             return True  # keep prior behavior for other IPs
-        if not re.match(r"^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", host):
-            return False
-        return True
+        return bool(re.match(r"^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", host))
     except Exception:
         return False
 

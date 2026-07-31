@@ -736,11 +736,7 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                     r"\.(png|jpe?g|gif|webp|bmp|heic|pdf|docx?)$", t, re.I
                 ):
                     return True
-                if re.match(r"^Screenshot\b", t, re.I) and re.search(
-                    r"\.(png|jpe?g|gif|webp)$", t, re.I
-                ):
-                    return True
-                return False
+                return bool(re.match(r"^Screenshot\b", t, re.I) and re.search(r"\.(png|jpe?g|gif|webp)$", t, re.I))
 
             def _title_from_attachment_name(name: str, *, max_len: int = 52) -> str:
                 raw = (name or "").strip().replace("/", "\\")

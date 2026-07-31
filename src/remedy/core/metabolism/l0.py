@@ -18,13 +18,13 @@ def try_l0_system_reply(
     skip a redundant ``classify_turn_tier`` walk on the hot path.
     """
     from remedy.core.metabolism.tier import (
-        TurnTier,
-        classify_turn_tier,
         _L0_MODEL,
         _L0_SKILLS,
         _L0_STATUS,
         _L0_VERSION,
         _L0_WHOAMI,
+        TurnTier,
+        classify_turn_tier,
     )
 
     msg = (message or "").strip()
@@ -82,24 +82,21 @@ def try_l0_system_reply(
         )
 
     if _L0_WHOAMI.match(msg):
-        lines: list[str] = []
         with suppress(Exception):
-            from remedy.memory.profile import load_profile
+            from remedy.memory.partner_memory import format_whoami
 
-            home = getattr(getattr(runtime, "config", None), "home_dir", None)
-            prof = load_profile(home)
-            if isinstance(prof, dict):
-                name = prof.get("display_name") or prof.get("name")
-                if name:
-                    lines.append(f"**Name:** {name}")
-                facts = prof.get("facts") or []
-                for f in list(facts)[:8]:
-                    if isinstance(f, str) and f.strip():
-                        lines.append(f"- {f.strip()[:200]}")
-                    elif isinstance(f, dict):
-                        t = str(f.get("text") or f.get("content") or "").strip()
-                        if t:
-                            lines.append(f"- {t[:200]}")
+            prof = getattr(runtime, "_user_profile", None)
+            if prof is not None:
+                text = format_whoami(prof)
+                with suppress(Exception):
+                    from remedy.core.metabolism.time_crystal import get_time_crystal
+
+                    sid = str(getattr(runtime, "_session_id", "") or "")
+                    block = get_time_crystal(sid).hot_block(max_chars=600)
+                    if block:
+                        text = f"{text}\n\n{block}"
+                return text
+        lines: list[str] = []
         with suppress(Exception):
             from remedy.core.metabolism.time_crystal import get_time_crystal
 
@@ -148,7 +145,11 @@ def try_l0_system_reply(
                 if m is not None:
                     meta = getattr(m, "metadata", None) or {}
                     st = getattr(m, "status", None)
-                    st_v = st.value if hasattr(st, "value") else str(st or "")
+                    st_v = (
+                        st.value
+                        if st is not None and hasattr(st, "value")
+                        else str(st or "")
+                    )
                 else:
                     meta = getattr(s, "metadata", None) or {}
                     st_v = str(getattr(s, "status", "") or "")

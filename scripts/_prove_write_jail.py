@@ -9,8 +9,8 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from remedy.core.approvals import APPROVALS
 from remedy.core.agent_workspace_tools import register_workspace_tools
+from remedy.core.approvals import APPROVALS
 from remedy.core.shell_write_jail import check_shell_write_jail
 from remedy.core.workspace import (
     allowed_roots_for_scope,

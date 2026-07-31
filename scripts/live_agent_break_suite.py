@@ -9,20 +9,22 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import threading
 import time
 import traceback
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-
-import sys
 from pathlib import Path as _PathForToken
+
 _SCRIPTS = _PathForToken(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
+import contextlib
+
 from lib_local_token import resolve_local_api_token
 
 BASE = os.environ.get("REMEDY_API", "http://127.0.0.1:7400").rstrip("/")
@@ -139,7 +141,7 @@ def has_tool_leak(text: str) -> bool:
 
 def main() -> int:
     print(f"BREAK SUITE @ {BASE}")
-    print(f"home={HOME} started={datetime.now(timezone.utc).isoformat()}")
+    print(f"home={HOME} started={datetime.now(UTC).isoformat()}")
     sids: list[str] = []
 
     # Desktop host sim (computer tools need poller for host_connected)
@@ -153,7 +155,8 @@ def main() -> int:
     except Exception as e:
         poller_ok = False
         print(f"  [poller] start failed: {e}", flush=True)
-        stop_host_poller = lambda: None  # type: ignore
+        def stop_host_poller():
+            return None  # type: ignore
 
     # ------------------------------------------------------------------
     section("0. Baseline + prep")
@@ -724,10 +727,8 @@ def main() -> int:
     code, st = api("GET", "/api/status")
     mark("final status still ok", code == 200, str(st)[:80])
 
-    try:
+    with contextlib.suppress(Exception):
         stop_host_poller()
-    except Exception:
-        pass
 
     print(f"\n{'='*64}")
     print(f"BREAK SUITE  PASS={PASS}  FAIL={FAIL}  WARN={WARN}  SKIP={SKIP}")

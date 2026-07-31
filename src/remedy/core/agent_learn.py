@@ -66,9 +66,7 @@ def should_auto_learn_from_steps(steps: list[dict[str, Any]] | None) -> bool:
     if len(names) < 2:
         return False
     # Need at least 4 real steps OR 3 distinct tools — hard-won short paths OK via lifecycle
-    if len(real) < 4 and len(names) < 3:
-        return False
-    return True
+    return not (len(real) < 4 and len(names) < 3)
 
 
 def auto_learn_from_turn(

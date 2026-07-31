@@ -187,8 +187,8 @@ def http_get_json(url: str, timeout: float = 2.5) -> Any | None:
         method="GET",
     )
     try:
-        with urlopen_no_redirect(req, timeout=timeout) as resp:  # type: ignore[union-attr]
-            raw_body = resp.read()  # type: ignore[union-attr]
+        with urlopen_no_redirect(req, timeout=timeout) as resp:
+            raw_body = resp.read()
             if not raw_body:
                 return {"_empty": True, "status": getattr(resp, "status", 200)}
             try:

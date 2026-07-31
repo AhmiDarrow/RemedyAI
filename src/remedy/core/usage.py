@@ -242,10 +242,7 @@ def merge_usage(*parts: dict[str, Any] | None) -> dict[str, Any]:
     if total <= 0:
         total = prompt + completion
     cache_hit = int(acc.get("cache_hit_tokens") or 0)
-    if acc.get("cache_miss_tokens") is not None:
-        cache_miss = int(acc["cache_miss_tokens"])
-    else:
-        cache_miss = None
+    cache_miss = int(acc["cache_miss_tokens"]) if acc.get("cache_miss_tokens") is not None else None
     source = str(acc.get("source") or "estimate")
     model = acc.get("model")
     provider = acc.get("provider")
@@ -283,9 +280,7 @@ def _looks_like_same_call_update(prev: dict[str, Any], nxt: dict[str, Any]) -> b
     # Same (or nearly same) prompt size; completion/total only grow or stay.
     if abs(pp - np_) > max(32, int(0.02 * max(pp, np_))):
         return False
-    if nc < pc and nt < pt:
-        return False
-    return True
+    return not (nc < pc and nt < pt)
 
 
 def _prefer_later_snapshot(prev: dict[str, Any], nxt: dict[str, Any]) -> dict[str, Any]:

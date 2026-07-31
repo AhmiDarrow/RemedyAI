@@ -835,7 +835,7 @@ async def handle_slash_command(
         if sb is not None:
             lines.append(f"📦 **Skills Active Budget:** `{sb}`")
 
-        lines.append(f"\nRun `/help` for all commands.")
+        lines.append("\nRun `/help` for all commands.")
         return {"text": "\n".join(lines)}
 
     return {"text": f"Unknown command: {command}\nType /help for available commands."}

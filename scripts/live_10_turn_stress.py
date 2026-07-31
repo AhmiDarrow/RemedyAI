@@ -17,7 +17,7 @@ import time
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 BASE = os.environ.get("REMEDY_API", "http://127.0.0.1:7400").rstrip("/")
@@ -27,7 +27,9 @@ REPO = Path(__file__).resolve().parents[1]
 TURNS = int(os.environ.get("STRESS_TURNS", "20"))
 
 sys.path.insert(0, str(REPO / "scripts"))
-from lib_host_poller import start_host_poller, stop_host_poller, host_connected  # noqa: E402
+import contextlib
+
+from lib_host_poller import host_connected, start_host_poller, stop_host_poller  # noqa: E402
 
 PASS = FAIL = 0
 LATENCIES: dict[str, list[float]] = {}
@@ -428,7 +430,7 @@ def run_turn(n: int) -> None:
 
 def main() -> int:
     print(f"EXPANDED STRESS @ {BASE} turns={TURNS}")
-    print(f"started={datetime.now(timezone.utc).isoformat()}")
+    print(f"started={datetime.now(UTC).isoformat()}")
     if not start_host_poller(wait_connected=12):
         print("WARN: host poller not connected — navigate may soft-fail")
     mark("host_connected", host_connected())
@@ -474,10 +476,8 @@ def main() -> int:
         print("\nFailures:")
         for i in ISSUES[:40]:
             print(f"  - {i}")
-    try:
+    with contextlib.suppress(Exception):
         stop_host_poller()
-    except Exception:
-        pass
     return 0 if FAIL == 0 else 1
 
 

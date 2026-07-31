@@ -14,9 +14,8 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-
-import sys
 from pathlib import Path as _PathForToken
+
 _SCRIPTS = _PathForToken(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))

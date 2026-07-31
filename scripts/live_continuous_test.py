@@ -20,7 +20,7 @@ PY = sys.executable
 
 def run_step(name: str, args: list[str], timeout: int) -> tuple[bool, float, str]:
     env = {
-        **dict(**{k: v for k, v in __import__("os").environ.items()}),
+        **dict(**dict(__import__("os").environ.items())),
         "PYTHONPATH": str(SRC),
         "REMEDY_HOME": str(Path.home() / ".remedy"),
     }
@@ -37,7 +37,7 @@ def run_step(name: str, args: list[str], timeout: int) -> tuple[bool, float, str
         dt = time.perf_counter() - t0
         tail = (p.stdout or "")[-400:] + (p.stderr or "")[-200:]
         return p.returncode == 0, dt, tail.replace("\n", " ")[:300]
-    except subprocess.TimeoutExpired as e:
+    except subprocess.TimeoutExpired:
         dt = time.perf_counter() - t0
         return False, dt, f"TIMEOUT after {timeout}s"
     except Exception as e:

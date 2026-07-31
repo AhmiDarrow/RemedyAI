@@ -15,7 +15,6 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from remedy.core.computer.host_bridge import ComputerHostBridge, canonical_home  # noqa: E402
 
-
 URLS = [
     "https://www.google.com",
     "https://en.wikipedia.org/wiki/Grand_Theft_Auto_V",
