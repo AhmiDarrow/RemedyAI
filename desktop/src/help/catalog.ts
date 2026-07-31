@@ -76,7 +76,8 @@ const META: HelpArticleMeta[] = [
     category: 'Reference',
     order: 18,
     tags: ['computer-use', 'browser', 'rail', 'soak', 'navigate'],
-    summary: 'Browser rail / computer-use soak checklist and operator notes.',
+    summary:
+      'Maintainer QA checklist for computer-use (soak test). Not end-user how-to; agent can help_read it.',
   },
   {
     id: '01-install-windows',

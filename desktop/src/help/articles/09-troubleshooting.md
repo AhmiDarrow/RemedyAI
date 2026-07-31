@@ -111,6 +111,17 @@ so the webview reported a network error. **0.10.38+** lets OPTIONS through auth;
 - Do not call the API from non-loopback hosts.  
 - Advanced: `REMEDY_API_AUTH=0` only for local debugging.
 
+## Agent says F1 / help is “outside access scope”
+
+**0.20.0+:** That is wrong. Owner’s manual chapters (same as F1) are always
+readable via tools:
+
+1. `help_list` — article ids  
+2. `help_read(id="computer-use-soak")` — full markdown  
+
+Or `file_read` on an absolute path under `docs/manual/` when the repo is on disk.
+If the model still refuses, resend “use help_read on computer-use-soak”.
+
 ## Images in chat show “Loading…” / broken / blank
 
 Remedy does **not** depend on the LLM provider for image *display*. Models often

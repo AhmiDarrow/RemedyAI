@@ -166,6 +166,13 @@ async def build_turn_context(runtime: Any) -> str:
         "(in addition to any automatic silent save). Confirm briefly what was stored. "
         "Never store secrets or API keys."
     )
+    parts.append(
+        "Owner's manual / F1 Help: you CAN and SHOULD read it. Call help_list to "
+        "see article ids (same chapters as in-app F1), then help_read(id=…) for the "
+        "full markdown (e.g. computer-use-soak, 19-metabolism, 00-overview). "
+        "Never claim F1/help is outside access scope — help_read bypasses project "
+        "jail for these read-only manuals. file_read on absolute help paths also works."
+    )
 
     # Skills catalog (progressive disclosure stage 1) — ranked, not full bodies.
     # Prefer warm rank cache from speculative prep / prior turns (skip re-rank).
