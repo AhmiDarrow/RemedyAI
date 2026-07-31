@@ -22,6 +22,15 @@ def test_bundled_skills_exist():
     assert "github" in names
     assert "project-etiquette" in names
     assert "change-safety" in names
+    # Self-dev / dogfood quality loop (Remedy on Remedy)
+    for self_dev in (
+        "dogfood-isolated",
+        "gauntlet-security",
+        "soak-product",
+        "stress-suite",
+        "self-dev-loop",
+    ):
+        assert self_dev in names
     for d in dirs:
         assert (d / "SKILL.md").is_file()
     comfy = bundled_skills_dir() / "comfyui"
@@ -53,12 +62,18 @@ def test_discover_defaults_loads_bundled(tmp_path: Path):
     assert reg.get("github") is not None
     assert reg.get("project-etiquette") is not None
     assert reg.get("change-safety") is not None
+    assert reg.get("self-dev-loop") is not None
+    assert reg.get("dogfood-isolated") is not None
+    assert reg.get("gauntlet-security") is not None
+    assert reg.get("soak-product") is not None
+    assert reg.get("stress-suite") is not None
     # Seeded into user skills dir for customization
     assert (home / "skills" / "project-overview" / "SKILL.md").is_file()
     assert (home / "skills" / "comfyui" / "SKILL.md").is_file()
     assert (home / "skills" / "github" / "SKILL.md").is_file()
     assert (home / "skills" / "project-etiquette" / "SKILL.md").is_file()
     assert (home / "skills" / "change-safety" / "SKILL.md").is_file()
+    assert (home / "skills" / "self-dev-loop" / "SKILL.md").is_file()
 
 def test_skills_meta_question_skips_tools():
     assert _message_wants_tools("what skills do you have?") is False
