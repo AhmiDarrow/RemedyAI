@@ -32,6 +32,21 @@ On Windows, `~` is your user profile (`C:\Users\<you>`).
 
 **Outbound chat sanitization:** before each provider HTTP call, Remedy **redacts secret-like strings/keys** and **caps oversized tool payloads**. This reduces accidental key leakage; it does **not** remove mail subjects or code you asked the agent to handle.
 
+### Privacy mode (opt-in)
+
+| Control | Where |
+|---------|--------|
+| **Privacy** chip | Bottom status bar (Simple **and** Advanced UI) |
+| **Privacy** section | Settings (Simple + Advanced) |
+| Also | Settings → Advanced → Security & power |
+
+| Mode | Behavior |
+|------|----------|
+| **Off** (default) | Lightning path — secret scrub + normal tool caps. Best for capable coding. |
+| **On** | Email / phone / SSN shapes redacted · shorter tool results (especially mail/page/computer) · still secret-safe |
+
+API keys and OAuth tokens never leave as model input either way. Env override: `REMEDY_PRIVACY_MODE=1`.
+
 ## Personal assistant (Gmail / Calendar)
 
 | Item | Where it goes |
@@ -59,6 +74,7 @@ On Windows, `~` is your user profile (`C:\Users\<you>`).
 |---------|--------|---------|
 | **Simple UI / Advanced UI** | Bottom status bar | How busy the **chrome** is (Memory, Skills, Think, …) |
 | **Simple \| Advanced** | Settings header | How many **settings knobs** are listed |
+| **Privacy** | Status bar + Settings | Always available — not buried in Advanced-only chrome |
 
 ## Design goal
 
