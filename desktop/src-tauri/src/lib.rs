@@ -3470,6 +3470,8 @@ pub fn run() {
             browser_host::browser_set_stack_suppressed,
             browser_host::browser_last_bounds,
             browser_host::browser_agent_action,
+            browser_host::browser_view_mode,
+            browser_host::browser_set_desktop_site,
             privacy_shield::privacy_shield_status,
             privacy_shield::privacy_shield_set_enabled,
             privacy_shield::privacy_shield_refresh_lists,

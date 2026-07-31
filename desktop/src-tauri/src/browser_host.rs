@@ -434,23 +434,102 @@ pub struct BrowserBounds {
     pub height: f64,
 }
 
+/// Chrome mobile — sites serve compact / mobile templates suited to the rail.
+const UA_MOBILE: &str = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36";
+/// Desktop Edge — full multi-column layouts when user requests desktop site.
+const UA_DESKTOP: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0";
+
+fn browser_rail_prefs_path() -> std::path::PathBuf {
+    let home = if cfg!(target_os = "windows") {
+        std::env::var("USERPROFILE").unwrap_or_else(|_| ".".into())
+    } else {
+        std::env::var("HOME").unwrap_or_else(|_| ".".into())
+    };
+    std::path::PathBuf::from(home)
+        .join(".remedy")
+        .join("browser_rail.json")
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+struct BrowserRailPrefs {
+    /// When true, embed uses desktop UA; default false = mobile (better in narrow rail).
+    pub desktop_site: bool,
+}
+
+impl Default for BrowserRailPrefs {
+    fn default() -> Self {
+        Self {
+            desktop_site: false,
+        }
+    }
+}
+
+fn load_rail_prefs() -> BrowserRailPrefs {
+    let p = browser_rail_prefs_path();
+    if let Ok(raw) = std::fs::read_to_string(&p) {
+        if let Ok(prefs) = serde_json::from_str::<BrowserRailPrefs>(&raw) {
+            return prefs;
+        }
+    }
+    BrowserRailPrefs::default()
+}
+
+fn save_rail_prefs(prefs: &BrowserRailPrefs) {
+    let p = browser_rail_prefs_path();
+    if let Some(parent) = p.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(raw) = serde_json::to_string_pretty(prefs) {
+        let _ = std::fs::write(p, raw);
+    }
+}
+
 pub struct BrowserState {
     current_url: Mutex<String>,
     last_bounds: Mutex<Option<BrowserBounds>>,
     /// When true, do not show() the embed (Settings/Help/overlays cover the host).
     /// Prevents the native WebView2 HWND from floating above React chrome.
     stack_suppressed: AtomicBool,
+    /// Request desktop site (full UA); default mobile for rail formatting.
+    desktop_site: AtomicBool,
 }
 
 impl Default for BrowserState {
     fn default() -> Self {
+        let prefs = load_rail_prefs();
         Self {
             current_url: Mutex::new("https://github.com/AhmiDarrow/RemedyAI".into()),
             last_bounds: Mutex::new(None),
             stack_suppressed: AtomicBool::new(false),
+            desktop_site: AtomicBool::new(prefs.desktop_site),
         }
     }
 }
+
+fn rail_user_agent(desktop: bool) -> &'static str {
+    if desktop {
+        UA_DESKTOP
+    } else {
+        UA_MOBILE
+    }
+}
+
+/// Ensure mobile pages get a proper viewport (some sites omit it and look huge).
+const MOBILE_VIEWPORT_JS: &str = r#"(function(){
+  try {
+    var m = document.querySelector('meta[name="viewport"]');
+    if (!m) {
+      m = document.createElement('meta');
+      m.setAttribute('name', 'viewport');
+      (document.head || document.documentElement).appendChild(m);
+    }
+    var c = m.getAttribute('content') || '';
+    if (!/width\s*=\s*device-width/i.test(c)) {
+      m.setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=5, viewport-fit=cover');
+    }
+  } catch(e) {}
+})();"#;
 
 fn normalize_url(raw: &str) -> Result<String, String> {
     let u = raw.trim();
@@ -580,6 +659,48 @@ fn destroy_embed(app: &AppHandle) {
 }
 
 /// Destroy embedded browser (idempotent).
+/// Current rail view mode: mobile (default) or desktop site.
+#[tauri::command]
+pub fn browser_view_mode(state: State<'_, BrowserState>) -> Result<serde_json::Value, String> {
+    let desktop = state.desktop_site.load(Ordering::SeqCst);
+    Ok(json!({
+        "desktop_site": desktop,
+        "mode": if desktop { "desktop" } else { "mobile" },
+    }))
+}
+
+/// Toggle desktop vs mobile UA. Recreates the embed on next navigate (callers
+/// should destroy + navigate after this so the new UA applies).
+#[tauri::command]
+pub fn browser_set_desktop_site(
+    app: AppHandle,
+    state: State<'_, BrowserState>,
+    enabled: bool,
+) -> Result<serde_json::Value, String> {
+    state.desktop_site.store(enabled, Ordering::SeqCst);
+    save_rail_prefs(&BrowserRailPrefs {
+        desktop_site: enabled,
+    });
+    // UA is fixed at WebView create time — must recreate embed.
+    destroy_embed(&app);
+    log::info!(
+        "browser rail view mode → {}",
+        if enabled { "desktop" } else { "mobile" }
+    );
+    let _ = app.emit(
+        "browser-view-mode",
+        json!({
+            "desktop_site": enabled,
+            "mode": if enabled { "desktop" } else { "mobile" },
+        }),
+    );
+    Ok(json!({
+        "desktop_site": enabled,
+        "mode": if enabled { "desktop" } else { "mobile" },
+        "recreate": true,
+    }))
+}
+
 #[tauri::command]
 pub fn browser_close(app: AppHandle) -> Result<(), String> {
     destroy_embed(&app);
@@ -789,8 +910,16 @@ pub fn navigate_embed(
     let app_for_nav = app.clone();
     // Dark chrome — pure white reads as a distracting border around the page
     // Do not focus on create — steals focus and worsens z-order over React chrome.
+    let desktop = state.desktop_site.load(Ordering::SeqCst);
+    let ua = rail_user_agent(desktop);
+    log::info!(
+        "browser embed create mode={} ua={}",
+        if desktop { "desktop" } else { "mobile" },
+        if desktop { "desktop-chrome" } else { "mobile-chrome" }
+    );
     let builder = WebviewBuilder::new(LABEL, WebviewUrl::External(blank))
         .focused(false)
+        .user_agent(ua)
         .background_color(Color(18, 18, 22, 255))
         // Privacy Shield + OAuth special-scheme rewrite (storagerelay / intent)
         .on_navigation(move |url| {
@@ -827,14 +956,17 @@ pub fn navigate_embed(
             let _ = app_for_load.emit("browser-url-changed", json!({ "url": u }));
             // Same-window OAuth: window.open → location.assign (no popup surface).
             let _ = wv.eval(SAME_WINDOW_OAUTH_JS);
-            // Scrollbars + mild zoom so narrow-rail desktop sites stay usable
+            // Scrollbars only (no zoom / chrome overrides)
             let _ = wv.eval(RAIL_LAYOUT_JS);
-            // Phase 1 cosmetic: hide ad/tracker elements via EasyList CSS
-            // (skipped on Gmail/Docs/etc. — those lists break scroll panes)
+            // Mobile mode: ensure viewport meta so sites scale correctly
+            if let Some(st) = app_for_load.try_state::<BrowserState>() {
+                if !st.desktop_site.load(Ordering::SeqCst) {
+                    let _ = wv.eval(MOBILE_VIEWPORT_JS);
+                }
+            }
             if let Some(js) = crate::privacy_shield::cosmetic_inject_js(&u) {
                 let _ = wv.eval(&js);
             }
-            // Re-fit after SPA chrome mounts
             let wv2 = wv.clone();
             std::thread::spawn(move || {
                 std::thread::sleep(std::time::Duration::from_millis(800));
