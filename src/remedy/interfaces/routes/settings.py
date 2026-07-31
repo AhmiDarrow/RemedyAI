@@ -189,6 +189,8 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             "tool_process": _normalize_tool_process(cfg),
             "web_tools_enabled": bool(cfg.get("web_tools_enabled", False)),
             "http_bootstrap": _effective_http_bootstrap(cfg),
+            # Opt-in: tighter tool caps + email/phone scrub on LLM egress (default off = fast)
+            "privacy_mode": bool(cfg.get("privacy_mode", False)),
             "allow_skill_creation": bool(cfg.get("allow_skill_creation", True)),
             "auto_approve_threshold": float(cfg.get("auto_approve_threshold", 0.8)),
             "log_level": str(cfg.get("log_level") or "INFO").upper(),

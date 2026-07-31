@@ -37,23 +37,13 @@ def _is_allowed_botframework_service_url(url: str) -> bool:
 
 
 def _jwt_payload_unverified(token: str) -> dict[str, Any] | None:
-    """Decode JWT payload without signature verify (structure + claim checks only)."""
-    import base64
-    import json
+    """Decode JWT payload without signature verify (claims only; signature separate)."""
+    from remedy.gateway.channels.jwt_rs256 import decode_jwt_payload_unverified
 
-    parts = (token or "").split(".")
-    if len(parts) != 3:
-        return None
-    try:
-        pad = "=" * (-len(parts[1]) % 4)
-        raw = base64.urlsafe_b64decode(parts[1] + pad)
-        data = json.loads(raw.decode("utf-8"))
-        return data if isinstance(data, dict) else None
-    except Exception:
-        return None
+    return decode_jwt_payload_unverified(token)
 
 
-# Known Bot Framework / Azure AD token issuers (claim structure only — not JWKS).
+# Known Bot Framework / Azure AD token issuers (claim structure + JWKS sig).
 _BF_ISS_SUFFIXES = (
     "sts.windows.net",
     "login.microsoftonline.com",
@@ -222,13 +212,15 @@ class TeamsChannel(HttpSessionMixin, ChannelAdapter):
             pass
 
     def verify_inbound_auth(self, authorization: str | None) -> bool:
-        """Lightweight Bot Framework JWT gate (no PyJWT dependency).
+        """Bot Framework JWT gate: claims + RS256 JWKS signature (stdlib).
 
-        Requires Bearer JWT when ``app_id`` is configured. Fail-closed claim
-        checks: ``aud`` must match app_id, ``exp`` required and not expired,
-        optional ``nbf``/``iss`` hygiene. Full JWKS signature verification is
-        still not performed here (residual risk if the webhook is reachable).
+        Requires Bearer JWT when ``app_id`` is configured. Fail-closed:
+        - ``aud`` / ``exp`` / ``nbf`` / ``iss`` structure checks
+        - RS256 signature against Bot Framework / Azure AD JWKS (cached 6h)
+
+        Not on the desktop chat hot path — only Teams webhook POSTs.
         Set ``REMEDY_TEAMS_SKIP_JWT=1`` only for local tunnel debugging.
+        Set ``REMEDY_TEAMS_SKIP_JWKS=1`` to claim-check only (legacy; not recommended).
         """
         import os
 
@@ -255,6 +247,21 @@ class TeamsChannel(HttpSessionMixin, ChannelAdapter):
             logger.warning(
                 "Teams JWT claim check failed (aud/exp/nbf/iss fail-closed)"
             )
+            return False
+        # Signature verify (skip only when explicitly debugging claim structure)
+        skip_jwks = str(os.environ.get("REMEDY_TEAMS_SKIP_JWKS", "")).strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        )
+        if skip_jwks:
+            logger.warning("Teams JWT JWKS signature skipped (REMEDY_TEAMS_SKIP_JWKS)")
+            return True
+        from remedy.gateway.channels.jwt_rs256 import verify_jwt_rs256_jwks
+
+        if not verify_jwt_rs256_jwks(token, allow_network=True):
+            logger.warning("Teams JWT RS256/JWKS verification failed")
             return False
         return True
 

@@ -189,6 +189,8 @@ class SettingsUpdateRequest(BaseModel):
     # Loopback HTTP may hand out the local API token (browser Web UI). Desktop
     # always prefers IPC. Default True; set False for IPC-only (safer).
     http_bootstrap: bool | None = None
+    # Opt-in: tighter tool caps + email/phone scrub before cloud LLM (default off = fast)
+    privacy_mode: bool | None = None
     # Learning / advanced (safe defaults; never strips owner power)
     allow_skill_creation: bool | None = None
     # Bounds clamped in PUT handler (0..1) so partial/bulk saves never 422
