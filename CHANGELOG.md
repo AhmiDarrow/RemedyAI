@@ -4,6 +4,16 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Computer-use host reliability (feature/computer-use)
+
+- Browser **snapshot / page_text / click** no longer die on mid-load WebView eval or
+  navigating-link teardown: ready probe, eval retries, deferred click, double-JSON
+  unwrap for page_text, longer host waits, DOM jobs off the poller thread.
+- **UIA controls:** soft `comtypes` is now a win32 dependency so `mode=controls`
+  returns `c1…` without a separate manual install.
+- Do not mark the desktop host “dead” after DOM job timeouts (avoids false
+  “Desktop host not connected” on page_text/click).
+
 ## [0.20.0] - 2026-07-30
 
 Partner Metabolism OS + always-ready desktop. One voice; local-first; provider freedom.
