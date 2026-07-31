@@ -4,6 +4,12 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Browser rail OAuth (same-window)
+
+- Force `window.open` → same-tab `location.assign` (handles `about:blank` stubs).
+- Privacy Shield **never blocks** major IdP / SSO hosts (Google, Microsoft, GitHub
+  login, Auth0, Okta, Discord/Slack OAuth, …) so login hops complete in-rail.
+
 ### Computer-use host reliability (feature/computer-use)
 
 - Browser **snapshot / page_text / click** no longer die on mid-load WebView eval or

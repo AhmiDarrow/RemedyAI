@@ -44,6 +44,16 @@ The Browser rail uses a **child WebView2** (not an iframe). Common causes:
 4. Use **↗** to open the same URL in the system browser as a fallback.  
 5. Check `%LOCALAPPDATA%\com.remedy.desktop\logs\` for `browser embed` / `add_child` lines.
 
+## “Sign in with Google / Microsoft” stuck in Browser rail
+
+The rail is a **single WebView** (no OAuth popup window). Remedy forces `window.open`
+into the **same tab** and **never blocks** major identity hosts (Google, Microsoft,
+GitHub login, Auth0, Okta, …) via Privacy Shield.
+
+1. After click, the rail should navigate to the IdP in-place — complete login there.  
+2. If still stuck: toggle **Privacy Shield off**, retry, then turn it back on.  
+3. Last resort: **↗** system browser for that login only.
+
 ## Telegram / messengers not realtime / “stuck syncing”
 
 Telegram allows **only one** `getUpdates` long-poll per bot token. Two Remedy windows, a leftover `remedy serve`, or `tauri:dev` plus an installed desktop all fighting the same bot produce HTTP **409** and feel like chat is dead or endlessly catching up.
