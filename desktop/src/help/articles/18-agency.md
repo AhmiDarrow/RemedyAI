@@ -33,7 +33,7 @@ Access scope (`project` / `home` / `full`) is a **security** control, separate f
 | **`web_search`** | Lightweight web search when web tools are enabled (SSRF-safe resolve) |
 | **`skill_activate` / `skill_run`** | Load procedure packs; scripts stay blocked until Trust |
 
-### Review / implement (must use tools)
+### Review / implement (must use tools) — **0.20.0+**
 
 Phrases like **“review project”**, **“implement the fix”**, **“run the tests”** stay in
 **agency mode** (tools on). If the model only *narrates* “activating skill” without a

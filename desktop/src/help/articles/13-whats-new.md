@@ -53,6 +53,7 @@ stays ready on this PC. Full detail: [19-metabolism](19-metabolism) · `CHANGELO
 
 - **Window min / max / close** use the real Windows title bar (no more dead WebView buttons after move).
 - **Built-in Browser** auto-loads the homepage and recovers from blank embeds more reliably.
+- Note: **✕ always → tray** is a **0.20.0** product rule (earlier builds could still full-quit on close depending on prefs).
 
 ## 0.18.5 - Telegram poll lock recovery
 
@@ -84,7 +85,7 @@ stays ready on this PC. Full detail: [19-metabolism](19-metabolism) · `CHANGELO
 
 - **Long coding / missions keep going** until the work is done — soft “epochs” only compact context and checkpoint; they do **not** stop tools with a fake tool-limit answer (Build-class agency).
 - Pathological loops still have a high safety ceiling; idle pauses only after long stretches with **no** tool activity.
-- **Title bar:** min / max / close stay clickable after you move, minimize, or maximize the window (explicit drag on the middle strip; controls never steal-hit as drag).
+- **Title bar:** min / max / close stay clickable after you move, minimize, or maximize the window (explicit drag on the middle strip; controls never steal-hit as drag). Always-hide-to-tray on ✕ is **0.20.0**.
 
 ## 0.18.0 - Spread + Library suggest
 

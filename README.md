@@ -59,12 +59,12 @@ One desktop app. One local API. Your data under `~/.remedy`.
 | **Workspace** | **Files** · **Terminal** · **Browser** · **Scratch** · **Computer use** — rails beside chat |
 | **Local brain** | **SmolVLM2 2.2B** on this PC — visual decoder + harness assist (optional download) |
 | **Continuity** | Session Brief, partner memory, skills, context budget — silent workers, one voice |
-| **Metabolism** | L0–L3 turn tiers, evidence ledger, shadow, governor, portable identity ([manual](docs/manual/19-metabolism.md)) |
+| **Metabolism** | **0.20.0+** L0–L3 turn tiers, evidence ledger, shadow, governor, portable identity ([manual](docs/manual/19-metabolism.md)) |
 | **Messengers** | Telegram, Discord, Slack, Mattermost, Matrix, WhatsApp, Teams, Google Chat, Signal (Settings) |
 | **Skills** | Progressive disclosure · Installed \| Library · signed community catalog |
 | **Memory** | Durable facts · Progress snapshots · plans — calm UI, not scare-logs |
 | **Agency** | `file_edit`, repo search, shell write jail, missions, `spread_run`, `web_search` / `web_fetch`, approvals |
-| **Always ready** | Title-bar **✕ → tray** (API stays up); **tray Quit** for full stop |
+| **Always ready** | **0.20.0+** title-bar **✕ → tray** (API stays up); **tray Quit** for full stop |
 | **Web UI** | Same SPA at `http://127.0.0.1:7400/` (Switch to WebUI → tray) |
 | **Updates** | Minisign-signed auto-update from GitHub Releases |
 

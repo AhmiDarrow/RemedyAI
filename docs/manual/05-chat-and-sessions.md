@@ -14,9 +14,10 @@
 ```
 
 **F1** / **Ctrl+/** open this Help wiki (not only a chat dump).  
-Minimize / maximize / close are the **OS** title-bar buttons. **✕ always hides to the
-system tray** and keeps the local API running (always-ready partner). Fully exit only
-from the **tray menu → Quit** (or app menu Quit) — that stops the server and browser WebUI.
+Minimize / maximize / close are the **OS** title-bar buttons. **Since 0.20.0**, **✕ always
+hides to the system tray** and keeps the local API running (always-ready partner — not
+optional). Fully exit only from the **tray menu → Quit** (or app menu Quit) — that stops
+the server and browser WebUI.
 
 ## Sending messages
 

@@ -68,7 +68,7 @@ const META: HelpArticleMeta[] = [
       'identity export',
     ],
     summary:
-      'Silent partner OS: L0–L3 tiers, evidence ledger, shadow, IR, governor, portable identity.',
+      '0.20.0+ silent partner OS: L0–L3 tiers, evidence ledger, shadow, IR, governor, portable identity.',
   },
   {
     id: 'computer-use-soak',
