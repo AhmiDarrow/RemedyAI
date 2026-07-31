@@ -6,6 +6,7 @@ export type SettingsSectionId =
   | 'workspace'
   | 'access'
   | 'security-power'
+  | 'privacy'
   | 'always-ready'
   | 'tool-process'
   | 'vision'
@@ -51,7 +52,13 @@ export const SETTINGS_SECTION_META: Record<
   'security-power': {
     title: 'Security & power',
     summary: 'Approvals, web, bootstrap',
-    keywords: 'approval auto ask shell web_fetch bootstrap token ssrf thinking',
+    keywords: 'approval auto ask shell web_fetch bootstrap token ssrf thinking privacy',
+  },
+  privacy: {
+    title: 'Privacy',
+    summary: 'What leaves this PC to your model',
+    keywords:
+      'privacy mode pii email phone scrub redact tool results llm egress cloud mail calendar page',
   },
   'always-ready': {
     title: 'Always ready',

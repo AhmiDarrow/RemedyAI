@@ -93,6 +93,8 @@ export interface SettingsFormProps {
   setWebToolsEnabled: Dispatch<SetStateAction<boolean>>
   httpBootstrap: boolean
   setHttpBootstrap: Dispatch<SetStateAction<boolean>>
+  privacyMode: boolean
+  setPrivacyMode: Dispatch<SetStateAction<boolean>>
   approvalMode: 'ask' | 'auto'
   setApprovalMode: Dispatch<SetStateAction<'ask' | 'auto'>>
   harnessMode: string
@@ -191,10 +193,12 @@ export function SettingsFormSections(p: SettingsFormProps): ReactNode {
     accessScope, setAccessScope,
     launchAtLogin, setLaunchAtLogin,
     startInTray, setStartInTray,
-    closeToTray, setCloseToTray,
+    closeToTray: _closeToTray,
+    setCloseToTray: _setCloseToTray,
     skipQuitWarn, setSkipQuitWarn,
     webToolsEnabled, setWebToolsEnabled,
     httpBootstrap, setHttpBootstrap,
+    privacyMode, setPrivacyMode,
     approvalMode, setApprovalMode,
     harnessMode, setHarnessMode,
     harnessMinPct, setHarnessMinPct,
@@ -758,6 +762,66 @@ export function SettingsFormSections(p: SettingsFormProps): ReactNode {
               )}
             </SettingsSection>
 
+            {/* Privacy — simple + advanced (what leaves this PC to the model) */}
+            <SettingsSection {...sectionProps('privacy')}>
+              <div className="text-[10px] leading-snug mb-2" style={{ color: 'var(--text-muted)' }}>
+                Remedy is local-first. Chat and tool results still go to{' '}
+                <strong style={{ color: 'var(--text-secondary)' }}>your chosen LLM</strong> when
+                you use a cloud model. Privacy mode tightens what we send — default stays off for
+                maximum speed and capability.
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={privacyMode}
+                onClick={() => setPrivacyMode(!privacyMode)}
+                className="w-full flex items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left transition-colors"
+                style={{
+                  background: privacyMode
+                    ? 'color-mix(in srgb, var(--accent) 14%, var(--bg-tertiary))'
+                    : 'var(--bg-tertiary)',
+                  border: `1px solid ${privacyMode ? 'var(--accent)' : 'var(--border)'}`,
+                }}
+                title={
+                  privacyMode
+                    ? 'Privacy mode on — click to return to full-speed secret scrub only'
+                    : 'Privacy mode off — click for tighter tool caps + email/phone scrub to the model'
+                }
+              >
+                <div className="min-w-0">
+                  <div
+                    className="text-xs font-semibold"
+                    style={{ color: privacyMode ? 'var(--accent)' : 'var(--text-primary)' }}
+                  >
+                    {privacyMode ? 'Privacy mode on' : 'Privacy mode off'}
+                  </div>
+                  <div className="text-[10px] leading-snug mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                    {privacyMode
+                      ? 'Email, phone, and SSN shapes redacted · shorter tool results · still secret-safe'
+                      : 'Lightning path — secrets redacted, full tool context for capable work'}
+                  </div>
+                </div>
+                <span
+                  className="flex-shrink-0 relative inline-flex h-6 w-11 rounded-full transition-colors"
+                  style={{
+                    background: privacyMode ? 'var(--accent)' : 'var(--border)',
+                  }}
+                  aria-hidden
+                >
+                  <span
+                    className="absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform"
+                    style={{
+                      left: privacyMode ? 'calc(100% - 1.35rem)' : '0.125rem',
+                    }}
+                  />
+                </span>
+              </button>
+              <div className="text-[10px] leading-snug mt-2" style={{ color: 'var(--text-muted)' }}>
+                Also on the status bar. API keys never leave this PC as model input. Keys stay under{' '}
+                <code className="text-[10px]">~/.remedy/auth/</code> (DPAPI on Windows).
+              </div>
+            </SettingsSection>
+
             {/* Access */}
             <SettingsSection
               {...sectionProps('access')}
@@ -867,6 +931,20 @@ export function SettingsFormSections(p: SettingsFormProps): ReactNode {
                 <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
                   Also on the status bar. High = more deliberation when the model supports it.
                 </div>
+              </div>
+              <label className="flex items-center gap-2 mb-1.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={privacyMode}
+                  onChange={(e) => setPrivacyMode(e.target.checked)}
+                  style={{ accentColor: 'var(--accent)' }}
+                />
+                <span style={{ color: 'var(--text-primary)' }}>
+                  Privacy mode (tighter model egress)
+                </span>
+              </label>
+              <div className="text-[10px] leading-snug mb-1.5 pl-6" style={{ color: 'var(--text-muted)' }}>
+                Same control as the Privacy section / status bar. Off by default so Remedy stays fast.
               </div>
               <label className="flex items-center gap-2 mb-1.5 cursor-pointer">
                 <input
