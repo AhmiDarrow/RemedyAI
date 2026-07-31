@@ -13,6 +13,8 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
   returns `c1…` without a separate manual install.
 - Do not mark the desktop host “dead” after DOM job timeouts (avoids false
   “Desktop host not connected” on page_text/click).
+- Browser **screenshot** tries WebView PrintWindow / rail crop even when the
+  in-process host_connected flag is stale (CLI soak no longer forces full desktop).
 
 ## [0.20.0] - 2026-07-30
 
