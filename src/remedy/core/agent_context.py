@@ -264,7 +264,8 @@ async def build_turn_context(runtime: Any) -> str:
                         get_swarm().skill._rank_cache = list(ranked_lines)
             parts.append(
                 "Skills catalog (name+status only — call skill_activate to load "
-                "full procedure; skill_search to rank by task):\n"
+                "ONE full procedure for the current task; skill_search to rank; "
+                "skill_reload to rescan disk — never skill_activate every pack):\n"
                 + "\n".join(ranked_lines)
             )
             # Auto-suggest: review/coding tasks → inject preferred procedure body
@@ -283,6 +284,18 @@ async def build_turn_context(runtime: Any) -> str:
                     ]
                 elif _re.search(r"\b(ship|release|publish|etiquette|ci|pypi)\b", tq):
                     preferred = ["project-etiquette", "change-safety"]
+                elif _re.search(
+                    r"\b(dogfood|self-?dev|isolated dev|work on herself|gauntlet|"
+                    r"product soak|stress suite|red-?team)\b",
+                    tq,
+                ):
+                    preferred = [
+                        "self-dev-loop",
+                        "dogfood-isolated",
+                        "gauntlet-security",
+                        "soak-product",
+                        "stress-suite",
+                    ]
                 elif _re.search(r"\b(refactor)\b", tq):
                     preferred = ["refactor-safe", "change-safety"]
                 elif _re.search(

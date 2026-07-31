@@ -15,6 +15,52 @@ logger = logging.getLogger(__name__)
 def register_skill_tools(runtime: Any) -> None:
     """Progressive disclosure: activate full SKILL.md / run skill scripts."""
 
+    async def skill_reload() -> str:
+        """Rescan disk + re-seed curated packs into the registry (does NOT load bodies).
+
+        Use when the user says reload/rescan/refresh skills — never skill_activate every pack.
+        """
+        reg = getattr(runtime, "skills", None)
+        if reg is None:
+            return format_tool_error(
+                "No skill registry",
+                code="NO_SKILLS",
+                tool_name="skill_reload",
+                suggestion="Restart the server so skills can load.",
+            )
+        home = getattr(getattr(runtime, "config", None), "home_dir", None)
+        before = int(getattr(reg, "count", 0) or 0)
+        try:
+            n = reg.discover_defaults(home_dir=home)
+        except Exception as e:
+            return format_tool_error(
+                str(e),
+                code="RELOAD_FAILED",
+                tool_name="skill_reload",
+                suggestion="Check REMEDY_HOME / REMEDY_DEV_ROOT and restart serve.",
+            )
+        # Curated summary (hide auto-learned spam)
+        curated: list[str] = []
+        learned = 0
+        for sk in getattr(reg, "skills", []) or []:
+            m = sk.manifest
+            meta = m.metadata or {}
+            if meta.get("auto_generated"):
+                learned += 1
+                continue
+            curated.append(str(m.name))
+        curated.sort(key=str.lower)
+        sample = ", ".join(curated[:24])
+        more = f" (+{len(curated) - 24} more)" if len(curated) > 24 else ""
+        return (
+            f"Skills rescanned. Registry count={n} (was {before}). "
+            f"Curated packs={len(curated)}; auto-learned hidden from this summary={learned}.\n"
+            f"Curated: {sample}{more}\n"
+            "_Do not skill_activate every name. Use skill_search(query=task) then "
+            "skill_activate only for the pack you will follow. "
+            "Self-dev: skill_activate(skill=self-dev-loop)._"
+        )
+
     async def skill_activate(
         skill: str = "",
         include_references: bool = False,
@@ -30,6 +76,28 @@ def register_skill_tools(runtime: Any) -> None:
                 suggestion="Restart the server so bundled skills can load.",
             )
         nm = (skill or name or "").strip()
+        # Guard the "reload all / activate every skill" death spiral
+        bulk = nm.lower().replace("_", " ").replace("-", " ")
+        if bulk in (
+            "all",
+            "*",
+            "every",
+            "everything",
+            "reload",
+            "reload all",
+            "rescan",
+            "refresh",
+            "all skills",
+            "every skill",
+        ) or bulk.startswith("all "):
+            return (
+                "Refusing bulk skill_activate. Progressive disclosure loads **one** "
+                "procedure per task — activating every pack floods context and loops.\n"
+                "• Rescan disk/catalog: **skill_reload** (no bodies)\n"
+                "• Find packs: **skill_search(query=…)**\n"
+                "• Load one body: **skill_activate(skill=name)**\n"
+                "• Self-dev loop: skill_activate(skill=self-dev-loop)"
+            )
         if not nm:
             # Rank against empty → top trusted catalog
             ranked = reg.match_skills("", limit=10)
@@ -368,16 +436,25 @@ def register_skill_tools(runtime: Any) -> None:
         return "\n".join(lines)
 
     runtime.tool_registry.register_builtin_handler(
+        "skill_reload",
+        "Rescan disk and re-seed curated skills into the registry. "
+        "Use when the user says reload/refresh/rescan skills. "
+        "Does NOT load procedure bodies — never a substitute for activating one skill.",
+        skill_reload,
+        {"type": "object", "properties": {}},
+    )
+    runtime.tool_registry.register_builtin_handler(
         "skill_activate",
-        "Load full instructions for a skill pack (progressive disclosure). "
-        "Use when a catalog skill matches the task. Pass skill= exact skill id.",
+        "Load full instructions for ONE skill pack (progressive disclosure). "
+        "Never pass all/reload/* — use skill_reload to rescan, skill_search to rank, "
+        "then skill_activate only for the pack you will follow.",
         skill_activate,
         {
             "type": "object",
             "properties": {
                 "skill": {
                     "type": "string",
-                    "description": "Skill id (from catalog)",
+                    "description": "Exact skill id (e.g. self-dev-loop). Not 'all' or 'reload'.",
                 },
                 "name": {
                     "type": "string",
