@@ -41,6 +41,11 @@ export interface Settings {
    * Desktop prefers IPC. Default true; set false for IPC-only.
    */
   http_bootstrap?: boolean
+  /**
+   * Opt-in privacy: tighter tool caps + email/phone scrub before cloud LLM.
+   * Default false keeps the lightning path (secret scrub only).
+   */
+  privacy_mode?: boolean
   allow_skill_creation?: boolean
   auto_approve_threshold?: number
   log_level?: string
@@ -188,6 +193,7 @@ export interface SettingsUpdate {
   tool_process?: string
   web_tools_enabled?: boolean
   http_bootstrap?: boolean
+  privacy_mode?: boolean
   allow_skill_creation?: boolean
   auto_approve_threshold?: number
   log_level?: string

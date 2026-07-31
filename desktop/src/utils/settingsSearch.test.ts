@@ -20,4 +20,11 @@ describe('settings search', () => {
     expect(sectionMatchesSearch('gmail', m.title, m.summary, m.keywords)).toBe(true)
     expect(sectionMatchesSearch('xyzzy-nope', m.title, m.summary, m.keywords)).toBe(false)
   })
+
+  it('matches privacy section by keyword', () => {
+    const m = SETTINGS_SECTION_META.privacy
+    expect(sectionMatchesSearch('email', m.title, m.summary, m.keywords)).toBe(true)
+    expect(sectionMatchesSearch('pii', m.title, m.summary, m.keywords)).toBe(true)
+    expect(sectionMatchesSearch('xyzzy-nope', m.title, m.summary, m.keywords)).toBe(false)
+  })
 })

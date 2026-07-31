@@ -162,8 +162,8 @@ export function BrowserSlide() {
       })
       .catch(() => {})
     let unlisten: (() => void) | undefined
-    void tauriListen<{ desktop_site?: boolean }>('browser-view-mode', (ev) => {
-      setDesktopSite(Boolean(ev.payload?.desktop_site))
+    void tauriListen<{ desktop_site?: boolean }>('browser-view-mode', (payload) => {
+      setDesktopSite(Boolean(payload?.desktop_site))
     })
       .then((u) => {
         unlisten = u
