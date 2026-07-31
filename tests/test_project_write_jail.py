@@ -381,6 +381,39 @@ def test_shell_write_jail_blocks_encoded_and_archive(tmp_path: Path):
     assert block2 is not None
 
 
+def test_shell_write_jail_blocks_global_package_installs(tmp_path: Path):
+    """Global package managers write outside project roots (red-team 2026-07-30)."""
+    from remedy.core.shell_write_jail import check_shell_write_jail
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    for cmd in (
+        "npm install -g evil-pkg",
+        "npm i --global evil",
+        "npm -g install evil",
+        "yarn global add evil",
+        "cargo install ripgrep",
+        "gem install foo",
+        "go install example.com/x@latest",
+        "pip install --user evil",
+        "python -m pip install --user evil",
+    ):
+        hit = check_shell_write_jail(
+            cmd, write_roots=[proj], cwd=proj, project_bound=True
+        )
+        assert hit is not None, f"expected block for: {cmd}"
+    # Local npm install under project cwd remains allowed (capability)
+    assert (
+        check_shell_write_jail(
+            "npm install lodash",
+            write_roots=[proj],
+            cwd=proj,
+            project_bound=True,
+        )
+        is None
+    )
+
+
 def test_shell_write_jail_blocks_powershell_short_e(tmp_path: Path):
     """powershell -e <base64> is EncodedCommand short form — fail closed."""
     from remedy.core.shell_write_jail import check_shell_write_jail

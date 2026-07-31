@@ -1071,6 +1071,42 @@ pub async fn browser_navigate(
 
 static COMPUTER_HOST_STARTED: AtomicBool = AtomicBool::new(false);
 
+/// Cached Bearer for host/jobs/ui (API requires auth; a11y push stays job_id-only).
+/// Refresh every ~30s so DPAPI is not hit on the 25ms poll hot path.
+fn host_bearer_cached() -> String {
+    use std::sync::Mutex;
+    use std::time::Instant;
+    static CACHE: Mutex<Option<(Instant, String)>> = Mutex::new(None);
+    const TTL: Duration = Duration::from_secs(30);
+    if let Ok(guard) = CACHE.lock() {
+        if let Some((t, tok)) = guard.as_ref() {
+            if t.elapsed() < TTL && !tok.is_empty() {
+                return tok.clone();
+            }
+        }
+    }
+    let tok = crate::get_local_api_token().unwrap_or_default();
+    if tok.is_empty() {
+        // Do not cache empty — sidecar may write the token moments later.
+        log::debug!("computer-host: no local API bearer yet — host routes will 401");
+        return String::new();
+    }
+    if let Ok(mut guard) = CACHE.lock() {
+        *guard = Some((Instant::now(), tok.clone()));
+    }
+    tok
+}
+
+/// Attach Authorization when we have a token (host/jobs/ui require Bearer).
+fn auth_req(req: ureq::Request) -> ureq::Request {
+    let tok = host_bearer_cached();
+    if tok.is_empty() {
+        req
+    } else {
+        req.set("Authorization", &format!("Bearer {tok}"))
+    }
+}
+
 /// Background poller: open Browser rail + drive WebView when the agent navigates.
 /// Runs in Rust so it works even if the React host hook never mounts.
 pub fn start_computer_host_poller(app: AppHandle) {
@@ -1095,7 +1131,14 @@ fn computer_host_loop(app: AppHandle) {
         }
         std::thread::sleep(Duration::from_millis(500));
     }
-    log::info!("computer-host: API reachable, polling ui/command + jobs");
+    // Wait briefly for token file (sidecar may write DPAPI envelope just after ping).
+    for _ in 0..40 {
+        if !host_bearer_cached().is_empty() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    log::info!("computer-host: API reachable, polling ui/command + jobs (Bearer auth)");
     // Track last *completed* navigate job so renudge take of the same id is a
     // real re-navigate (never fake-complete without opening the URL).
     let mut last_completed_nav = String::new();
@@ -1106,16 +1149,19 @@ fn computer_host_loop(app: AppHandle) {
         hello_tick = hello_tick.wrapping_add(1);
         // Hello ~every 2s
         if hello_tick % 80 == 0 {
-            let _ = agent
-                .post("http://127.0.0.1:7400/api/computer/host/hello")
-                .set("Content-Type", "application/json")
-                .send_string(r#"{"client":"desktop-rust"}"#);
+            let _ = auth_req(
+                agent
+                    .post("http://127.0.0.1:7400/api/computer/host/hello")
+                    .set("Content-Type", "application/json"),
+            )
+            .send_string(r#"{"client":"desktop-rust"}"#);
         }
 
         // take=1 clears command atomically — prevents reloading the same wiki forever
-        if let Ok(resp) = agent
-            .get("http://127.0.0.1:7400/api/computer/ui/command?take=1")
-            .call()
+        if let Ok(resp) = auth_req(
+            agent.get("http://127.0.0.1:7400/api/computer/ui/command?take=1"),
+        )
+        .call()
         {
             if let Ok(v) = resp.into_json::<serde_json::Value>() {
                 if let Some(cmd) = v.get("command").filter(|c| !c.is_null() && c.is_object()) {
@@ -1137,11 +1183,10 @@ fn computer_host_loop(app: AppHandle) {
         // Claim navigate leftovers + DOM jobs (SPA may also claim; only one wins).
         // page_text/ready must be claimable by Rust — SPA alone is not enough when
         // the React host is busy or mid-bootstrap after navigate.
-        if let Ok(resp) = agent
-            .get(
-                "http://127.0.0.1:7400/api/computer/jobs/next?only=navigate,snapshot,a11y,page_text,ready,click",
-            )
-            .call()
+        if let Ok(resp) = auth_req(agent.get(
+            "http://127.0.0.1:7400/api/computer/jobs/next?only=navigate,snapshot,a11y,page_text,ready,click",
+        ))
+        .call()
         {
             if let Ok(v) = resp.into_json::<serde_json::Value>() {
                 if let Some(job) = v.get("job").filter(|j| !j.is_null() && j.is_object()) {
@@ -1304,11 +1349,7 @@ fn handle_job(app: &AppHandle, agent: &ureq::Agent, job: &serde_json::Value) {
         );
         let _ = app.emit("computer-browser-url", json!({ "url": url }));
         fire_navigate(app, &url);
-        let _ = agent
-            .post(&format!(
-                "http://127.0.0.1:7400/api/computer/ui/command/ack?job_id={id}"
-            ))
-            .call();
+        ack_ui_command(agent, &id);
         return;
     }
 
@@ -1323,11 +1364,7 @@ fn handle_job(app: &AppHandle, agent: &ureq::Agent, job: &serde_json::Value) {
                 complete_job(agent, &id, false, json!({}), Some(e));
             }
         }
-        let _ = agent
-            .post(&format!(
-                "http://127.0.0.1:7400/api/computer/ui/command/ack?job_id={id}"
-            ))
-            .call();
+        ack_ui_command(agent, &id);
         return;
     }
 
@@ -1363,11 +1400,7 @@ fn handle_job(app: &AppHandle, agent: &ureq::Agent, job: &serde_json::Value) {
                 complete_job(agent, &id, false, json!({}), Some(e));
             }
         }
-        let _ = agent
-            .post(&format!(
-                "http://127.0.0.1:7400/api/computer/ui/command/ack?job_id={id}"
-            ))
-            .call();
+        ack_ui_command(agent, &id);
         return;
     }
 
@@ -1478,11 +1511,7 @@ fn handle_job(app: &AppHandle, agent: &ureq::Agent, job: &serde_json::Value) {
             }
             Err(e) => complete_job(agent, &id, false, json!({}), Some(e)),
         }
-        let _ = agent
-            .post(&format!(
-                "http://127.0.0.1:7400/api/computer/ui/command/ack?job_id={id}"
-            ))
-            .call();
+        ack_ui_command(agent, &id);
         return;
     }
 
@@ -1680,15 +1709,22 @@ fn complete_job(
         "error": error,
     });
     let url = format!("http://127.0.0.1:7400/api/computer/jobs/{job_id}/complete");
-    if let Err(e) = agent
-        .post(&url)
-        .set("Content-Type", "application/json")
-        .send_json(body)
+    if let Err(e) = auth_req(
+        agent
+            .post(&url)
+            .set("Content-Type", "application/json"),
+    )
+    .send_json(body)
     {
         log::warn!("computer-host complete {job_id}: {e}");
     } else {
         log::info!("computer-host completed job {job_id} ok={ok}");
     }
+}
+
+fn ack_ui_command(agent: &ureq::Agent, job_id: &str) {
+    let url = format!("http://127.0.0.1:7400/api/computer/ui/command/ack?job_id={job_id}");
+    let _ = auth_req(agent.post(&url)).call();
 }
 
 #[tauri::command]

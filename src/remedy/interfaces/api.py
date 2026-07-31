@@ -256,14 +256,14 @@ def create_app(
     _AUTH_PUBLIC_PREFIXES = (
         "/api/webhooks/",
     )
-    # Computer-use Desktop host poller (loopback only). Must work even when the
-    # SPA token is not ready yet — otherwise navigate jobs sit unclaimed forever
-    # and the agent wrongly falls back to the system browser.
-    _COMPUTER_HOST_LOOPBACK_PREFIXES = (
-        "/api/computer/host/",
-        "/api/computer/jobs/",
-        "/api/computer/ui/",
-        # a11y push: same-user desktop host only (was fully public).
+    # Computer-use: host/jobs/ui require Bearer (same as the rest of the API).
+    # Rust Desktop poller DPAPI-loads ``local_api_token`` and sends Authorization;
+    # SPA ``hostFetch`` already attaches auth headers. Unauthenticated loopback
+    # claim/complete was a same-user job-theft surface (S-AUTH-04).
+    #
+    # a11y push stays loopback-only without Bearer: legacy in-page inject uses
+    # job_id (≥16 chars) as the capability secret, not the API token.
+    _COMPUTER_A11Y_LOOPBACK_PREFIXES = (
         "/api/computer/a11y/",
     )
 
@@ -296,9 +296,9 @@ def create_app(
                 return await call_next(request)
             if any(path.startswith(p) for p in _AUTH_PUBLIC_PREFIXES):
                 return await call_next(request)
-            # Desktop host poller on same machine — no bearer required from loopback
+            # Legacy a11y inject: loopback + job_id secret only (no Bearer).
             if _client_is_loopback(request) and any(
-                path.startswith(p) for p in _COMPUTER_HOST_LOOPBACK_PREFIXES
+                path.startswith(p) for p in _COMPUTER_A11Y_LOOPBACK_PREFIXES
             ):
                 return await call_next(request)
             # SPA / static Web UI (GET only) — browser loads shell then bootstraps token
