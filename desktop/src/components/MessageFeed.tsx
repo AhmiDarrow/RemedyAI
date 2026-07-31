@@ -425,8 +425,44 @@ const MessageBubble = memo(function MessageBubble({
                         if (!h || !/^(https?:|mailto:)/i.test(h)) {
                           return <span>{children}</span>
                         }
+                        if (/^mailto:/i.test(h)) {
+                          return (
+                            <a href={h} rel="noopener noreferrer">
+                              {children}
+                            </a>
+                          )
+                        }
+                        // Double-click → in-rail Browser. Ctrl/Cmd+click → system browser.
                         return (
-                          <a href={h} target="_blank" rel="noopener noreferrer">
+                          <a
+                            href={h}
+                            className="chat-rail-link"
+                            title="Double-click: open in Browser rail · Ctrl+click: system browser"
+                            onClick={(e) => {
+                              // Prevent accidental leave of the app on single click
+                              if (!e.ctrlKey && !e.metaKey) {
+                                e.preventDefault()
+                              }
+                            }}
+                            onDoubleClick={(e) => {
+                              e.preventDefault()
+                              e.stopPropagation()
+                              try {
+                                window.dispatchEvent(
+                                  new CustomEvent('remedy:computer-ui', {
+                                    detail: { openBrowser: true },
+                                  }),
+                                )
+                                window.dispatchEvent(
+                                  new CustomEvent('remedy:browser-set-url', {
+                                    detail: { url: h, navigate: true },
+                                  }),
+                                )
+                              } catch {
+                                window.open(h, '_blank', 'noopener,noreferrer')
+                              }
+                            }}
+                          >
                             {children}
                           </a>
                         )
