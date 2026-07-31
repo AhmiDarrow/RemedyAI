@@ -712,31 +712,9 @@ fn embed_may_show(state: &BrowserState) -> bool {
     !state.stack_suppressed.load(Ordering::SeqCst)
 }
 
-/// Fill the main window under the title bar (for HTML/video fullscreen).
-fn window_fill_bounds(app: &AppHandle) -> BrowserBounds {
-    if let Some(ww) = app.get_webview_window("main") {
-        if let (Ok(size), Ok(scale)) = (ww.inner_size(), ww.scale_factor()) {
-            let w = (size.width as f64 / scale).max(400.0);
-            let h = (size.height as f64 / scale).max(300.0);
-            const TOP: f64 = 36.0; // in-app title strip
-            return BrowserBounds {
-                x: 0.0,
-                y: TOP,
-                width: w,
-                height: (h - TOP).max(200.0),
-            };
-        }
-    }
-    BrowserBounds {
-        x: 0.0,
-        y: 36.0,
-        width: 1200.0,
-        height: 800.0,
-    }
-}
-
-/// WebView2: when the page goes fullscreen (video), expand the child embed to
-/// fill the app window so the player is usable. SPA rail bounds resume on exit.
+/// WebView2: when the page goes fullscreen (video), keep the embed inside the
+/// **Browser rail host** (not the whole app window). SPA hides rail chrome and
+/// pushes larger host bounds; we re-apply last rail rect immediately.
 #[cfg(windows)]
 fn attach_fullscreen_handler(app: AppHandle, wv: tauri::Webview) {
     let app_cb = app.clone();
@@ -796,39 +774,32 @@ fn apply_page_fullscreen(app: &AppHandle, fullscreen: bool) {
     let Some(wv) = app.get_webview(LABEL) else {
         return;
     };
-    if fullscreen {
-        let fill = window_fill_bounds(app);
-        if let Err(e) = apply_bounds(&wv, &fill, true) {
-            log::warn!("browser fullscreen expand failed: {e}");
-        } else {
-            log::info!(
-                "browser page fullscreen ON — embed expanded to {}x{}",
-                fill.width,
-                fill.height
-            );
-        }
-        let _ = app.emit(
-            "browser-page-fullscreen",
-            json!({ "fullscreen": true }),
-        );
+    // Stay inside the Browser rail: re-apply last host rect (SPA will grow the
+    // host to fill the rail panel after chrome hides). Never cover the whole app.
+    let rail = state
+        .last_bounds
+        .lock()
+        .ok()
+        .and_then(|g| g.clone())
+        .unwrap_or_else(|| default_rail_bounds(app));
+    let b = clamp_bounds(&rail);
+    let may_show = embed_may_show(state.inner()) || fullscreen;
+    if let Err(e) = apply_bounds(&wv, &b, may_show) {
+        log::warn!("browser rail fullscreen bounds failed: {e}");
     } else {
-        let restore = state
-            .last_bounds
-            .lock()
-            .ok()
-            .and_then(|g| g.clone())
-            .unwrap_or_else(|| default_rail_bounds(app));
-        let b = clamp_bounds(&restore);
-        if let Err(e) = apply_bounds(&wv, &b, embed_may_show(state.inner())) {
-            log::warn!("browser fullscreen restore failed: {e}");
-        } else {
-            log::info!("browser page fullscreen OFF — rail bounds restored");
-        }
-        let _ = app.emit(
-            "browser-page-fullscreen",
-            json!({ "fullscreen": false }),
+        log::info!(
+            "browser page fullscreen {} — rail embed {}x{} @ ({},{})",
+            if fullscreen { "ON" } else { "OFF" },
+            b.width,
+            b.height,
+            b.x,
+            b.y
         );
     }
+    let _ = app.emit(
+        "browser-page-fullscreen",
+        json!({ "fullscreen": fullscreen }),
+    );
 }
 
 fn destroy_embed(app: &AppHandle) {
@@ -960,15 +931,12 @@ pub fn browser_set_bounds(
     bounds: BrowserBounds,
 ) -> Result<(), String> {
     let b = clamp_bounds(&bounds);
-    // Always remember rail bounds so we can restore after video fullscreen.
+    // Always remember rail host bounds (SPA grows host while video is fullscreen).
     if let Ok(mut g) = state.last_bounds.lock() {
         *g = Some(b.clone());
     }
-    // While HTML/video fullscreen is active, do not shrink the embed back to the rail.
-    if state.page_fullscreen.load(Ordering::SeqCst) {
-        return Ok(());
-    }
-    let may_show = embed_may_show(state.inner());
+    let may_show =
+        embed_may_show(state.inner()) || state.page_fullscreen.load(Ordering::SeqCst);
     if let Some(wv) = app.get_webview(LABEL) {
         apply_bounds(&wv, &b, may_show)?;
     }

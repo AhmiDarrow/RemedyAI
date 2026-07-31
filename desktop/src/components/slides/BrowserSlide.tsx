@@ -23,9 +23,13 @@ import {
 type Bounds = { x: number; y: number; width: number; height: number }
 
 /** Keep native embed below app title / popout chrome and above status bar. */
-function chromeSafeBand(hostRect: DOMRect): { minY: number; maxBottom: number } {
+function chromeSafeBand(
+  hostRect: DOMRect,
+  opts?: { pageFullscreen?: boolean },
+): { minY: number; maxBottom: number } {
   let minY = 0
   let maxBottom = window.innerHeight
+  const pageFs = Boolean(opts?.pageFullscreen)
 
   const title = document.querySelector('.titlebar')
   if (title) {
@@ -36,28 +40,32 @@ function chromeSafeBand(hostRect: DOMRect): { minY: number; maxBottom: number } 
   }
 
   const popChrome = document.querySelector('[data-popout-chrome]')
-  if (popChrome) {
+  if (popChrome && !pageFs) {
     const pr = popChrome.getBoundingClientRect()
     if (pr.height > 8 && pr.bottom > minY) {
       minY = Math.max(minY, pr.bottom)
     }
   }
 
-  // URL toolbar for *this* browser panel (horizontal overlap with host)
-  for (const tb of document.querySelectorAll('[data-browser-toolbar]')) {
-    const tr = tb.getBoundingClientRect()
-    if (tr.height < 4) continue
-    if (tr.right < hostRect.left + 4 || tr.left > hostRect.right - 4) continue
-    minY = Math.max(minY, tr.bottom)
-  }
+  // During page/video fullscreen, fill the whole Browser *rail panel*
+  // (ignore URL toolbar + panel header — SPA hides them).
+  if (!pageFs) {
+    // URL toolbar for *this* browser panel (horizontal overlap with host)
+    for (const tb of document.querySelectorAll('[data-browser-toolbar]')) {
+      const tr = tb.getBoundingClientRect()
+      if (tr.height < 4) continue
+      if (tr.right < hostRect.left + 4 || tr.left > hostRect.right - 4) continue
+      minY = Math.max(minY, tr.bottom)
+    }
 
-  // Panel "Browser" header row (WorkspaceSide) when it sits above the host
-  for (const hd of document.querySelectorAll('[data-workspace-panel-header]')) {
-    const hr = hd.getBoundingClientRect()
-    if (hr.height < 4) continue
-    if (hr.right < hostRect.left + 4 || hr.left > hostRect.right - 4) continue
-    if (hr.bottom <= hostRect.top + 2 || hr.top < hostRect.top) {
-      minY = Math.max(minY, hr.bottom)
+    // Panel "Browser" header row (WorkspaceSide) when it sits above the host
+    for (const hd of document.querySelectorAll('[data-workspace-panel-header]')) {
+      const hr = hd.getBoundingClientRect()
+      if (hr.height < 4) continue
+      if (hr.right < hostRect.left + 4 || hr.left > hostRect.right - 4) continue
+      if (hr.bottom <= hostRect.top + 2 || hr.top < hostRect.top) {
+        minY = Math.max(minY, hr.bottom)
+      }
     }
   }
 
@@ -66,13 +74,15 @@ function chromeSafeBand(hostRect: DOMRect): { minY: number; maxBottom: number } 
     maxBottom = Math.min(maxBottom, status.getBoundingClientRect().top)
   }
 
-  // Browser slide status strip under the host
-  for (const st of document.querySelectorAll('[data-browser-status]')) {
-    const sr = st.getBoundingClientRect()
-    if (sr.height < 4) continue
-    if (sr.right < hostRect.left + 4 || sr.left > hostRect.right - 4) continue
-    if (sr.top >= hostRect.top) {
-      maxBottom = Math.min(maxBottom, sr.top)
+  // Browser slide status strip under the host (hidden in page fullscreen)
+  if (!pageFs) {
+    for (const st of document.querySelectorAll('[data-browser-status]')) {
+      const sr = st.getBoundingClientRect()
+      if (sr.height < 4) continue
+      if (sr.right < hostRect.left + 4 || sr.left > hostRect.right - 4) continue
+      if (sr.top >= hostRect.top) {
+        maxBottom = Math.min(maxBottom, sr.top)
+      }
     }
   }
 
@@ -99,11 +109,18 @@ function readBounds(el: HTMLElement | null): Bounds | null {
   if (r.bottom < 0 || r.right < 0) return null
   if (r.top > window.innerHeight || r.left > window.innerWidth) return null
 
-  const { minY, maxBottom } = chromeSafeBand(r)
+  const pageFullscreen =
+    el.getAttribute('data-page-fullscreen') === '1'
+    || el.closest('[data-page-fullscreen="1"]') != null
+  const { minY, maxBottom } = chromeSafeBand(r, { pageFullscreen })
+  // Fullscreen in rail: prefer the host's full box (SPA already hid chrome).
+  // Still clamp to titlebar + app status bar so we never cover the whole app.
   const x = Math.round(r.left)
-  const y = Math.round(Math.max(r.top, minY))
+  const y = Math.round(pageFullscreen ? Math.max(r.top, minY) : Math.max(r.top, minY))
   const right = Math.round(r.right)
-  const bottom = Math.round(Math.min(r.bottom, maxBottom))
+  const bottom = Math.round(
+    pageFullscreen ? Math.min(r.bottom, maxBottom) : Math.min(r.bottom, maxBottom),
+  )
   const width = Math.max(0, right - x)
   const height = Math.max(0, bottom - y)
   if (width < 80 || height < 80) return null
@@ -137,6 +154,11 @@ export function BrowserSlide() {
   const [shieldOn, setShieldOn] = useState(true)
   /** false = mobile UA (default, better in narrow rail); true = desktop site */
   const [desktopSite, setDesktopSite] = useState(false)
+  /**
+   * HTML/video fullscreen: hide rail chrome so the embed host fills *only* the
+   * Browser panel (not the whole app). Rust keeps WebView2 bounds = host rect.
+   */
+  const [pageFullscreen, setPageFullscreen] = useState(false)
 
   // Privacy Shield status (desktop)
   useEffect(() => {
@@ -174,6 +196,51 @@ export function BrowserSlide() {
       unlisten?.()
     }
   }, [])
+
+  // Video/HTML fullscreen → fill Browser rail only (hide toolbar/status, grow host)
+  useEffect(() => {
+    if (!isTauri()) return
+    let unlisten: (() => void) | undefined
+    void tauriListen<{ fullscreen?: boolean }>('browser-page-fullscreen', (payload) => {
+      const on = Boolean(payload?.fullscreen)
+      setPageFullscreen(on)
+      setStatus(on ? 'Fullscreen in Browser rail (Esc to exit)' : 'Browser ready')
+      // Layout settles after chrome hide/show — push host bounds into WebView2
+      const kick = () => {
+        window.dispatchEvent(new Event('remedy:browser-resync-bounds'))
+      }
+      window.requestAnimationFrame(kick)
+      window.setTimeout(kick, 30)
+      window.setTimeout(kick, 120)
+      window.setTimeout(kick, 280)
+    })
+      .then((u) => {
+        unlisten = u
+      })
+      .catch(() => {})
+    return () => {
+      unlisten?.()
+    }
+  }, [])
+
+  // Esc while rail chrome is hidden: force-exit UI fullscreen if page already exited
+  useEffect(() => {
+    if (!pageFullscreen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      // WebView2 usually exits first and emits fullscreen=false; this is a safety net.
+      window.setTimeout(() => {
+        setPageFullscreen((cur) => {
+          if (!cur) return cur
+          setStatus('Browser ready')
+          window.dispatchEvent(new Event('remedy:browser-resync-bounds'))
+          return false
+        })
+      }, 50)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [pageFullscreen])
 
   // Settings → browser_home_url (default: Remedy GitHub)
   useEffect(() => {
@@ -555,8 +622,13 @@ export function BrowserSlide() {
   }
 
   return (
-    <div className="flex flex-col h-full min-h-0 max-h-full overflow-hidden text-xs">
-      {/* React toolbar stays above native WebView2 (hostRef only below this) */}
+    <div
+      className="flex flex-col h-full min-h-0 max-h-full overflow-hidden text-xs"
+      data-browser-rail-root
+      data-page-fullscreen={pageFullscreen ? '1' : '0'}
+    >
+      {/* React toolbar stays above native WebView2 (hostRef only below this).
+          Hidden during page/video fullscreen so the host fills this rail only. */}
       <form
         data-browser-toolbar
         className="flex gap-1 px-2 py-1.5 border-b shrink-0"
@@ -565,6 +637,7 @@ export function BrowserSlide() {
           background: 'var(--bg-secondary)',
           position: 'relative',
           zIndex: 2,
+          display: pageFullscreen ? 'none' : undefined,
         }}
         onSubmit={(e) => {
           e.preventDefault()
@@ -843,14 +916,16 @@ export function BrowserSlide() {
         className="flex-1 min-h-0 relative w-full"
         style={{
           // Match app chrome — white flash/border around WebView was distracting
-          background: 'var(--bg-primary)',
-          minHeight: 160,
+          background: pageFullscreen ? '#000' : 'var(--bg-primary)',
+          minHeight: pageFullscreen ? 0 : 160,
+          flex: '1 1 0%',
           zIndex: 1,
           isolation: 'isolate',
           // Let the native child own scrolling; don't clip hit-testing oddly
           overflow: 'visible',
         }}
         data-browser-embed-host
+        data-page-fullscreen={pageFullscreen ? '1' : '0'}
       >
         {!loaded && (
           <div
@@ -882,7 +957,7 @@ export function BrowserSlide() {
         )}
       </div>
 
-      {status && (
+      {status && !pageFullscreen && (
         <div
           data-browser-status
           className="px-2 py-1 border-t truncate shrink-0"
