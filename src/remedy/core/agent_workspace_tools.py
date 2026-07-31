@@ -199,24 +199,6 @@ def register_workspace_tools(runtime: Any) -> None:
         from remedy.core.approvals import APPROVALS
         from remedy.core.turn_context import turn_session_id
 
-        ask_reason = APPROVALS.needs_ask(f"write {path}", tool_name="file_write")
-        sid = turn_session_id(runtime)
-        if ask_reason and not APPROVALS.is_approved(
-            "file_write", f"write {path}", session_id=sid
-        ):
-            item = APPROVALS.create(
-                tool_name="file_write",
-                command=f"write {path}",
-                reason=ask_reason,
-                session_id=sid,
-            )
-            return (
-                f"APPROVAL_REQUIRED id={item.id}\n"
-                f"reason={ask_reason}\n"
-                f"path={path}\n"
-                "Do not invent success. Tell the user this needs approval in the UI "
-                f"(or /approve {item.id}). After they approve, retry file_write."
-            )
         bad = _reserved_guard(path)
         if bad:
             return format_tool_error(
@@ -267,6 +249,7 @@ def register_workspace_tools(runtime: Any) -> None:
                     "if replacing a large existing file)."
                 ),
             )
+        # Path jail before approval so denied scopes never create Ask tickets.
         try:
             target = runtime.resolve_tool_path(path, for_write=True)
         except Exception as e:
@@ -279,6 +262,24 @@ def register_workspace_tools(runtime: Any) -> None:
                     "Use a path under the focus folder, or raise access_scope "
                     "to home/full in Settings for multi-tree edits."
                 ),
+            )
+        sid = turn_session_id(runtime)
+        ask_reason = APPROVALS.needs_ask(f"write {path}", tool_name="file_write")
+        if ask_reason and not APPROVALS.is_approved(
+            "file_write", f"write {path}", session_id=sid
+        ):
+            item = APPROVALS.create(
+                tool_name="file_write",
+                command=f"write {path}",
+                reason=ask_reason,
+                session_id=sid,
+            )
+            return (
+                f"APPROVAL_REQUIRED id={item.id}\n"
+                f"reason={ask_reason}\n"
+                f"path={path}\n"
+                "Do not invent success. Tell the user this needs approval in the UI "
+                f"(or /approve {item.id}). After they approve, retry file_write."
             )
         _note_path(target)
         # Capture prior content for time-travel undo (best-effort).
@@ -395,8 +396,21 @@ def register_workspace_tools(runtime: Any) -> None:
             )
         from remedy.core.turn_context import turn_session_id
 
-        ask_reason = APPROVALS.needs_ask(f"edit {path}", tool_name="file_edit")
+        # Path jail before approval so denied scopes never create Ask tickets.
+        try:
+            target = runtime.resolve_tool_path(path, for_write=True)
+        except Exception as e:
+            return format_tool_error(
+                f"path not allowed for edit: {path} ({e})",
+                code="PATH_DENIED",
+                tool_name="file_edit",
+                suggestion=(
+                    "Edits stay inside the project folder under project scope. "
+                    "Raise access_scope to home/full only for intentional multi-tree edits."
+                ),
+            )
         sid = turn_session_id(runtime)
+        ask_reason = APPROVALS.needs_ask(f"edit {path}", tool_name="file_edit")
         if ask_reason and not APPROVALS.is_approved(
             "file_edit", f"edit {path}", session_id=sid
         ):
@@ -412,18 +426,6 @@ def register_workspace_tools(runtime: Any) -> None:
                 f"path={path}\n"
                 "Do not invent success. Tell the user this needs approval "
                 f"(or /approve {item.id}), then retry file_edit."
-            )
-        try:
-            target = runtime.resolve_tool_path(path, for_write=True)
-        except Exception as e:
-            return format_tool_error(
-                f"path not allowed for edit: {path} ({e})",
-                code="PATH_DENIED",
-                tool_name="file_edit",
-                suggestion=(
-                    "Edits stay inside the project folder under project scope. "
-                    "Raise access_scope to home/full only for intentional multi-tree edits."
-                ),
             )
         _note_path(target)
         if not target.is_file():
