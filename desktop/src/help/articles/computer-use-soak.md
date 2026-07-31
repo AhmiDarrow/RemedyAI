@@ -1,8 +1,15 @@
 # Computer use — local soak checklist
 
+**Audience:** maintainers / operators validating computer-use before merge or release.
+Not a day-to-day end-user feature guide.
+
 **Branch:** `feature/computer-use` only. Do **not** push or merge until this checklist is solid.
 
 Run server + Desktop from this branch (not the installed stable release).
+
+**Agent note:** Remedy can always open this chapter with
+`help_read(id="computer-use-soak")` (or `help_list` first) — F1 help is not
+outside access scope.
 
 ## Preconditions
 

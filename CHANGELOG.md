@@ -8,6 +8,14 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 Partner Metabolism OS + always-ready desktop. One voice; local-first; provider freedom.
 
+### Help always readable by the agent
+
+- **`help_list` / `help_read`** tools load F1 / owner's manual markdown (same as
+  `docs/manual/`) without project access-scope jail.
+- Read roots always include help dirs; system prompt forbids claiming F1 is out of scope.
+- Fixes chat where the model refused “run the computer-use soak checklist” as
+  “outside access scope.”
+
 ### Desktop always-ready
 
 - OS close (✕ / Alt+F4) **always** hides to the system tray — never kills the sidecar from chrome alone.
