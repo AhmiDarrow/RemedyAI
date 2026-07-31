@@ -368,7 +368,7 @@ def end_turn_metabolism(
             out["verify"] = verify_result.to_public()
             if verify_result.silent_remedy:
                 out["verify_remedy"] = verify_result.silent_remedy
-            gov = get_governor(sid)
+            get_governor(sid)
             if not verify_result.ok:
                 with suppress(Exception):
                     from remedy.core.session_quality import get_session_quality

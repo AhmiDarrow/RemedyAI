@@ -15,10 +15,7 @@ results: list[tuple[str, str, str]] = []
 
 
 def mark(name: str, ok: bool | None, detail: str = "") -> bool:
-    if ok is None:
-        status = "SKIP"
-    else:
-        status = "PASS" if ok else "FAIL"
+    status = "SKIP" if ok is None else "PASS" if ok else "FAIL"
     results.append((name, status, detail))
     print(f"[{status}] {name}" + (f" — {detail}" if detail else ""))
     return bool(ok)
@@ -303,10 +300,9 @@ def main() -> int:
 
     # Concurrent sessions
     try:
-        from remedy.core import turn_context as tc
-        from remedy.core.computer.host_bridge import ComputerHostBridge
-
         import tempfile as _tf
+
+        from remedy.core.computer.host_bridge import ComputerHostBridge
 
         _td = _tf.mkdtemp(prefix="soak-conc-")
         b_iso = ComputerHostBridge(home_dir=_td)

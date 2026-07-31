@@ -7,7 +7,6 @@ Secrets never promote. Per-tab isolation via session_id.
 from __future__ import annotations
 
 import json
-import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -169,17 +168,14 @@ class TimeCrystal:
                     break
                 lines.append(line)
                 used += len(line) + 1
-            if not lines:
-                out = ""
-            else:
-                out = "[Time Crystal]\n" + "\n".join(lines)
+            out = "" if not lines else "[Time Crystal]\n" + "\n".join(lines)
             self._hot_cache = (cache_key, out)
             return out
 
     def snapshot(self, *, lean: bool = False) -> dict[str, Any]:
         """Horizon counts. *lean* skips recent fact list copy."""
         with self._lock:
-            by_h = {h: 0 for h in HORIZONS}
+            by_h = dict.fromkeys(HORIZONS, 0)
             for f in self.facts:
                 by_h[f.horizon] = by_h.get(f.horizon, 0) + 1
             out: dict[str, Any] = {

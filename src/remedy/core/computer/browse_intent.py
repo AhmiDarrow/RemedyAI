@@ -232,9 +232,7 @@ def is_pure_action_kick(message: str) -> bool:
     # Multi-step login/click tasks are not pure kicks — full agent loop required
     if wants_page_interaction(msg):
         return False
-    if parse_browse_navigate_url(msg):
-        return True
-    return False
+    return bool(parse_browse_navigate_url(msg))
 
 
 def _first_site_token(target: str) -> str | None:

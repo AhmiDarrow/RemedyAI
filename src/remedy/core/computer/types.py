@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from typing import Any, Literal
 
 # Explicit targets the model (or router) may choose.
@@ -44,7 +44,7 @@ COMPUTER_PLAN_MODE_TOOLS = frozenset(
 )
 
 
-class ComputerAction(str, Enum):
+class ComputerAction(StrEnum):
     SCREENSHOT = "screenshot"
     SNAPSHOT = "snapshot"
     CLICK = "click"

@@ -17,7 +17,6 @@ from remedy.core.computer.router import (
     looks_like_url,
     normalize_url,
     resolve_target,
-    wants_rail_browser,
     wants_system_browser,
 )
 from remedy.core.computer.types import ComputerAction, public_result
@@ -85,10 +84,7 @@ class ComputerExecutor:
         req_target = target
         # Navigate defaults to in-app rail unless user asked for system/external browser
         if act is ComputerAction.NAVIGATE:
-            if wants_system_browser(str(hint), target):
-                req_target = "desktop"
-            else:
-                req_target = "browser"
+            req_target = "desktop" if wants_system_browser(str(hint), target) else "browser"
         if act is ComputerAction.CLICK and (
             str(kwargs.get("ref") or "").strip() or str(kwargs.get("text") or "").strip()
         ):
@@ -248,7 +244,8 @@ class ComputerExecutor:
                 extra={"elements": elements, "mode": mode},
             )
         if act is ComputerAction.WAIT:
-            sec = float(kwargs.get("seconds") if kwargs.get("seconds") is not None else 0.5)
+            raw_sec = kwargs.get("seconds")
+            sec = float(raw_sec) if raw_sec is not None else 0.5
             sec = max(0.05, min(sec, 30.0))
             time.sleep(sec)
             return public_result(
@@ -436,7 +433,8 @@ class ComputerExecutor:
             )
         if act is ComputerAction.SCROLL:
             x, y = int(kwargs.get("x", 0)), int(kwargs.get("y", 0))
-            dy = int(kwargs.get("dy") if kwargs.get("dy") is not None else -3)
+            raw_dy = kwargs.get("dy")
+            dy = int(raw_dy) if raw_dy is not None else -3
             win.scroll(x, y, dy=dy)
             return public_result(
                 ok=True,
@@ -762,7 +760,8 @@ class ComputerExecutor:
             return self._browser_page_text()
 
         if act is ComputerAction.WAIT:
-            sec = float(kwargs.get("seconds") if kwargs.get("seconds") is not None else 0.5)
+            raw_sec = kwargs.get("seconds")
+            sec = float(raw_sec) if raw_sec is not None else 0.5
             sec = max(0.05, min(sec, 30.0))
             time.sleep(sec)
             return public_result(
@@ -1250,11 +1249,8 @@ class ComputerExecutor:
             out.setdefault("action", "navigate")
             # Brief settle so follow-up snapshot/click sees painted DOM
             default_settle = 0.55 if optimistic else 0.35
-            settle = float(
-                payload.get("settle_s")
-                if payload.get("settle_s") is not None
-                else default_settle
-            )
+            raw_settle = payload.get("settle_s")
+            settle = float(raw_settle) if raw_settle is not None else default_settle
             if settle > 0:
                 time.sleep(min(max(settle, 0.0), 1.5))
                 out["settled_s"] = min(max(settle, 0.0), 1.5)

@@ -6,6 +6,7 @@ Falls back to None so callers keep window-level snapshot.
 
 from __future__ import annotations
 
+import contextlib
 import sys
 from typing import Any
 
@@ -99,15 +100,13 @@ def uia_control_snapshot(
     except ImportError:
         return None
 
-    try:
+    with contextlib.suppress(OSError):
         comtypes.CoInitialize()
-    except OSError:
-        pass
 
     try:
         # Generate / load UIAutomationClient typelib
         try:
-            from comtypes.gen.UIAutomationClient import (  # type: ignore
+            from comtypes.gen.UIAutomationClient import (
                 CUIAutomation,
                 IUIAutomation,
                 TreeScope_Children,
@@ -120,7 +119,7 @@ def uia_control_snapshot(
             )
         except (ImportError, OSError, ValueError):
             comtypes.client.GetModule("UIAutomationCore.dll")
-            from comtypes.gen.UIAutomationClient import (  # type: ignore
+            from comtypes.gen.UIAutomationClient import (
                 CUIAutomation,
                 IUIAutomation,
                 TreeScope_Children,

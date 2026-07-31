@@ -11,7 +11,6 @@ import os
 import time
 import urllib.error
 import urllib.request
-from copy import deepcopy
 from pathlib import Path
 
 BASE = os.environ.get("REMEDY_API", "http://127.0.0.1:7400").rstrip("/")

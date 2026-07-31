@@ -6,6 +6,7 @@ Exit 0 only if no FAIL results (SKIP allowed).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import subprocess
 import sys
@@ -23,10 +24,7 @@ results: list[dict] = []
 
 
 def mark(name: str, ok: bool | None, detail: str = "") -> None:
-    if ok is None:
-        status = "SKIP"
-    else:
-        status = "PASS" if ok else "FAIL"
+    status = "SKIP" if ok is None else "PASS" if ok else "FAIL"
     results.append({"name": name, "status": status, "detail": detail[:500]})
     print(f"[{status}] {name}" + (f" — {detail[:200]}" if detail else ""))
 
@@ -360,10 +358,8 @@ def concurrent_and_abort() -> None:
         )
         mark("stop mid-type", aborted, str(r)[:140])
     finally:
-        try:
+        with contextlib.suppress(Exception):
             tc.end_turn("full-soak-midtype", *toks)
-        except Exception:
-            pass
 
 
 def providers_live() -> None:

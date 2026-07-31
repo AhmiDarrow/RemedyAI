@@ -62,8 +62,9 @@ def test_garbage_model_snaps_to_default_on_closed_provider() -> None:
 
 
 def test_validate_provider_model_rejects_garbage() -> None:
-    from remedy.interfaces.config import validate_provider_model
     import pytest
+
+    from remedy.interfaces.config import validate_provider_model
 
     with pytest.raises(ValueError, match="Unknown model"):
         validate_provider_model("deepseek", "not-a-real-model-zzz")

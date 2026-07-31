@@ -418,10 +418,10 @@ _META_NO_TOOLS_RE = re.compile(
 _TOOL_ID = r"[a-z][a-z0-9_]{1,64}"
 # Models sometimes emit tool syntax as plain text instead of function-calls.
 _PSEUDO_TOOL_RE = re.compile(
-    rf"\b(file_read|file_write|list_dir|bash_exec|comfyui|local_discover|"
-    rf"get_settings|update_settings|mail_list|mail_send|mail_create_draft|"
-    rf"calendar_list_events|calendar_create_event|budget_set|bill_upsert|"
-    rf"debt_upsert|assistant_brief)\s*\(",
+    r"\b(file_read|file_write|list_dir|bash_exec|comfyui|local_discover|"
+    r"get_settings|update_settings|mail_list|mail_send|mail_create_draft|"
+    r"calendar_list_events|calendar_create_event|budget_set|bill_upsert|"
+    r"debt_upsert|assistant_brief)\s*\(",
     re.IGNORECASE,
 )
 # Leaked "tool markup" (DSML / XML-ish tool_calls) that must never show as chat text.
@@ -656,9 +656,7 @@ def agency_tool_promise_claim(
     if any(p in claim for p in _AGENCY_TOOL_PROMISE_HARD):
         return True
     stub = len(text) < max(1, int(stub_char_limit))
-    if stub and any(p in claim for p in _AGENCY_TOOL_PROMISE_SOFT):
-        return True
-    return False
+    return bool(stub and any(p in claim for p in _AGENCY_TOOL_PROMISE_SOFT))
 
 
 def agency_rearm_nudge_message() -> dict[str, str]:
@@ -952,15 +950,11 @@ def _parse_dsml_tool_calls(text: str) -> list[dict[str, Any]]:
             # Coerce simple numerics when models put numbers as strings
             for k, v in list(args.items()):
                 if isinstance(v, str) and re.fullmatch(r"-?\d+", v.strip()):
-                    try:
+                    with suppress(ValueError):
                         args[k] = int(v.strip())
-                    except ValueError:
-                        pass
                 elif isinstance(v, str) and re.fullmatch(r"-?\d+\.\d+", v.strip()):
-                    try:
+                    with suppress(ValueError):
                         args[k] = float(v.strip())
-                    except ValueError:
-                        pass
 
         if name == "bash_exec" and not args.get("command"):
             continue

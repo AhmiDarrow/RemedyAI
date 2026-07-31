@@ -6,6 +6,7 @@ critical for the Remedy/Reme companion experience.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sqlite3
 import threading
@@ -1022,13 +1023,11 @@ class MemoryStore:
             )
             deleted = int(cursor.rowcount or 0)
             # Drop Memory Harness session summary for this chat (fresh slate).
-            try:
+            with contextlib.suppress(sqlite3.Error):
                 db.execute(
                     "DELETE FROM session_summaries WHERE session_id = ?",
                     (session_id,),
                 )
-            except sqlite3.Error:
-                pass
             db.execute(
                 "UPDATE chat_sessions SET message_count = 0, updated_at = ? WHERE id = ?",
                 (now, session_id),

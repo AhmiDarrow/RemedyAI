@@ -12,8 +12,8 @@ write roots — or that hide the target path (env expansion / Join-Path / python
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 # Commands / cmdlets that mutate the filesystem (case-insensitive).
 # Avoid bare short aliases as bare \bmd\b (matches ".md" extensions).
@@ -216,9 +216,7 @@ def looks_like_mutation(command: str) -> bool:
     c = command or ""
     if _MUTATION_HINT_RE.search(c):
         return True
-    if _REDIRECT_WRITE_RE.search(c):
-        return True
-    return False
+    return bool(_REDIRECT_WRITE_RE.search(c))
 
 
 def path_outside_write_roots(

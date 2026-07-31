@@ -80,13 +80,30 @@ unsafe-fixes = false
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["N802", "N803", "N806", "SIM117"]
-"scripts/*" = ["B007", "N806"]
+# Soak/live scripts: path bootstrap imports, intentional bare Fail, loop closures.
+"scripts/*" = [
+    "B007",
+    "B018",
+    "B023",
+    "B904",
+    "E402",
+    "E741",
+    "N806",
+    "N818",
+    "SIM115",
+    "SIM117",
+]
 "src/remedy/interfaces/api.py" = ["N806"]
 "src/remedy/interfaces/secret_store.py" = ["N801"]
 "src/remedy/execution/sandbox.py" = ["N806"]
 "src/remedy/core/agent.py" = ["N806"]
+"src/remedy/core/agent_context.py" = ["N806"]
+"src/remedy/core/computer/desktop_win.py" = ["N801", "N806"]
+"src/remedy/core/metabolism/identity_export.py" = ["N806"]
+"src/remedy/core/react_policy.py" = ["N806"]
 "src/remedy/interfaces/config.py" = ["N806"]
-"src/remedy/interfaces/routes/*" = ["SIM117"]
+"src/remedy/interfaces/routes/*" = ["SIM117", "N806"]
+"src/remedy/vision/config.py" = ["N806"]
 
 [tool.ruff.format]
 quote-style = "double"

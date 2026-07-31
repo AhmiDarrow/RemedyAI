@@ -20,7 +20,7 @@ import traceback
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -33,11 +33,13 @@ OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 sys.path.insert(0, str(REPO / "src"))
 
+import contextlib
+
 from remedy.core.computer import desktop_win as win  # noqa: E402
 
 
 def log(msg: str) -> None:
-    ts = datetime.now(timezone.utc).strftime("%H:%M:%S")
+    ts = datetime.now(UTC).strftime("%H:%M:%S")
     line = f"[{ts}] {msg}"
     print(line, flush=True)
     try:
@@ -410,7 +412,7 @@ def ui_sidebar_click(info: dict) -> tuple[bool, str]:
 
 
 def ui_help(info: dict) -> tuple[bool, str]:
-    info = focus_desktop()
+    focus_desktop()
     press("f1")
     time.sleep(0.9)
     press("escape")
@@ -618,10 +620,8 @@ def run_one(n: int) -> Run:
         result.error = f"{e}\n{traceback.format_exc()}"
         result.ok = False
         log(f"  EXC: {e}")
-        try:
+        with contextlib.suppress(Exception):
             shot(focus_desktop(), f"run{n:02d}_exc")
-        except Exception:
-            pass
     result.duration_s = time.time() - t0
     log(f"=== RUN {n} {'PASS' if result.ok else 'FAIL'} in {result.duration_s:.1f}s ===\n")
     return result
@@ -651,7 +651,7 @@ def main() -> int:
     passed = sum(1 for r in results if r.ok)
     failed = len(results) - passed
     report = {
-        "ts": datetime.now(timezone.utc).isoformat(),
+        "ts": datetime.now(UTC).isoformat(),
         "api": API,
         "mode": "desktop_ui",
         "passed": passed,

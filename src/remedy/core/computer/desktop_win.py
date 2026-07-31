@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import contextlib
 import ctypes
 import os
 import struct
 import sys
 import time
+from collections.abc import Callable
 from ctypes import wintypes
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 # Virtual-key codes (subset)
 _VK = {
@@ -160,10 +162,8 @@ def screenshot_png(path: Path | None = None) -> dict[str, Any]:
     out.parent.mkdir(parents=True, exist_ok=True)
     _write_png_bgr(out, width, height, raw, stride)
     # Opportunistic TTL so desktop captures do not accumulate forever.
-    try:
+    with contextlib.suppress(Exception):
         purge_old_shots(max_age_s=900.0)
-    except Exception:
-        pass
     return {
         "path": str(out),
         "width": width,
@@ -458,7 +458,7 @@ def list_windows(limit: int = 40) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
 
     @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
-    def enum_proc(hwnd, _lparam):  # type: ignore[no-untyped-def]
+    def enum_proc(hwnd, _lparam):
         if len(results) >= max(1, limit):
             return False
         if not user32.IsWindowVisible(hwnd):
@@ -664,7 +664,7 @@ def find_child_hwnd(
     found: list[int] = []
 
     @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
-    def enum_child(hwnd, _lp):  # type: ignore[no-untyped-def]
+    def enum_child(hwnd, _lp):
         if found:
             return False
         if class_name:
@@ -692,7 +692,7 @@ def find_webview_host_hwnd() -> int | None:
     candidates: list[int] = []
 
     @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
-    def enum_top(hwnd, _lp):  # type: ignore[no-untyped-def]
+    def enum_top(hwnd, _lp):
         if not user32.IsWindowVisible(hwnd):
             return True
         length = user32.GetWindowTextLengthW(hwnd)
@@ -823,7 +823,7 @@ def open_app(app: str) -> dict[str, Any]:
     target = aliases.get(key, raw)
     # Only the explicit settings alias may open ms-settings: (no free-form protocols)
     if key == "settings" and target == "ms-settings:":
-        os.startfile(target)  # type: ignore[attr-defined]
+        os.startfile(target)
         return {"app": raw, "method": "startfile", "target": target}
     # Absolute / existing path only when the file is present (no bare "C:…" probe)
     path_candidate = Path(target)
@@ -893,12 +893,12 @@ def open_url(url: str) -> dict[str, Any]:
     if sys.platform == "win32":
         # os.startfile is more reliable than webbrowser on Windows (default app).
         try:
-            os.startfile(u)  # type: ignore[attr-defined]
+            os.startfile(u)
             return {"url": u, "method": "os.startfile"}
         except OSError:
             import subprocess
 
-            # Empty title arg after start is required for URLs with & 
+            # Empty title arg after start is required for URLs with &
             subprocess.Popen(
                 ["cmd", "/c", "start", "", u],
                 shell=False,
@@ -934,7 +934,7 @@ def list_monitors() -> list[dict[str, Any]]:
         wintypes.LPARAM,
     )
 
-    def _callback(hmon, _hdc, lprect, _lparam):  # type: ignore[no-untyped-def]
+    def _callback(hmon, _hdc, lprect, _lparam):
         r = lprect.contents
         idx = len(monitors)
         monitors.append(

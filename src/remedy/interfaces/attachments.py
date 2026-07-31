@@ -394,6 +394,4 @@ def _looks_like_raster_image(data: bytes) -> bool:
         return True
     if data[:2] == b"BM":
         return True
-    if data[:4] == b"RIFF" and len(data) >= 12 and data[8:12] == b"WEBP":
-        return True
-    return False
+    return bool(data[:4] == b"RIFF" and len(data) >= 12 and data[8:12] == b"WEBP")

@@ -165,9 +165,7 @@ def _has_tz(iso_dt: str) -> bool:
     # ...±HH:MM or ±HHMM at end (avoid matching date separators)
     if len(s) >= 5 and s[-3] == ":" and s[-6] in "+-" and s[-5:-3].isdigit() and s[-2:].isdigit():
         return True
-    if len(s) >= 5 and s[-5] in "+-" and s[-4:].isdigit():
-        return True
-    return False
+    return bool(len(s) >= 5 and s[-5] in "+-" and s[-4:].isdigit())
 
 
 def get_google_calendar(home: Path | str | None = None) -> CalendarProvider | None:

@@ -16,7 +16,7 @@ T = TypeVar("T")
 MAX_SESSION_ENTRIES = 96
 
 
-def registry_get(
+def registry_get[T](
     store: dict[str, T],
     key: str,
     factory: Callable[[], T],

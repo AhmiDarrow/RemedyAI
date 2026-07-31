@@ -74,7 +74,7 @@ def _parse_lock_payload(raw: str) -> tuple[int, float] | None:
 
 # In-process holders: flock is re-entrant on Unix, so a second MessengerPollLock
 # in the same process must not start a dual getUpdates poller.
-_PROCESS_HOLDERS: dict[str, "MessengerPollLock"] = {}
+_PROCESS_HOLDERS: dict[str, MessengerPollLock] = {}
 
 
 class MessengerPollLock:

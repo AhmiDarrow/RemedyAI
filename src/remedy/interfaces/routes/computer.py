@@ -115,10 +115,7 @@ def register_computer_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         """
         b = _bridge()
         b.mark_host_alive(poller=True)
-        if take:
-            cmd = b.take_ui_command()
-        else:
-            cmd = b.peek_ui_command()
+        cmd = b.take_ui_command() if take else b.peek_ui_command()
         return {"command": cmd}
 
     @app.post("/api/computer/ui/command/ack")

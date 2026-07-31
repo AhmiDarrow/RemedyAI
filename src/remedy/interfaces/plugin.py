@@ -154,9 +154,7 @@ def is_safe_plugin_name(name: str) -> bool:
     n = (name or "").strip()
     if not n or not _SAFE_PLUGIN_NAME.match(n):
         return False
-    if n.lower() in _PLUGIN_NAME_DENY or n.startswith("_"):
-        return False
-    return True
+    return not (n.lower() in _PLUGIN_NAME_DENY or n.startswith("_"))
 
 
 class PluginManager:

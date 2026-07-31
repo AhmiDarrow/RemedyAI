@@ -6,6 +6,7 @@ the live runtime, and optionally messenger adapters.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from pathlib import Path
 from typing import Any
@@ -14,7 +15,6 @@ from remedy.interfaces.api_support import (
     _apply_llm_to_runtime,
     _default_config_path,
     _find_config_path,
-    _write_config,
     load_config,
 )
 from remedy.interfaces.config import normalize_llm_settings
@@ -534,10 +534,8 @@ async def apply_settings_update(
             "allow_skill_creation",
         ):
             if attr in cfg:
-                try:
+                with contextlib.suppress(Exception):
                     setattr(runtime.config, attr, cfg[attr])
-                except Exception:
-                    pass
 
     changes = list(patch.keys())
     if vision_enabled is not None or vision_model_id is not None or vision_force_decode is not None:

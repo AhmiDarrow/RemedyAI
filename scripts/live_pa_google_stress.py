@@ -84,14 +84,13 @@ def new_session(title: str) -> str:
 
 def send_draft(home: Path, draft_id: str) -> dict:
     """Send an existing Gmail draft (compose scope)."""
-    import base64
     import json as _json
     import urllib.request as _u
 
     from remedy.assistant.google_oauth import get_valid_access_token
 
     token = get_valid_access_token(home)
-    url = f"https://gmail.googleapis.com/gmail/v1/users/me/drafts/send"
+    url = "https://gmail.googleapis.com/gmail/v1/users/me/drafts/send"
     body = _json.dumps({"id": draft_id}).encode("utf-8")
     req = _u.Request(
         url,
@@ -237,7 +236,7 @@ def main() -> int:
         from remedy.assistant.providers.google_gmail import GoogleGmailProvider
 
         mail = GoogleGmailProvider(home=HOME)
-        found = mail.list_messages(query=f'subject:"[Remedy stress] PA harness"', limit=5)
+        found = mail.list_messages(query='subject:"[Remedy stress] PA harness"', limit=5)
         mark(
             "self-test mail visible in Gmail",
             len(found) >= 1,
@@ -368,7 +367,7 @@ def main() -> int:
     wall = time.perf_counter() - t0
     mark("parallel 3 after PA", len(results) == 3, f"wall={wall:.2f}s")
     for i, (dt, text, code) in enumerate(results):
-        mark(f"parallel slot content", "G" in text and "OK" in text, f"{dt:.2f}s {text[:40]}")
+        mark("parallel slot content", "G" in text and "OK" in text, f"{dt:.2f}s {text[:40]}")
 
     # Final google still connected
     code, g2 = api("GET", "/api/assistant/google")

@@ -410,7 +410,7 @@ def test_evidence_ledger_admits_paths_and_dedupes():
     )
     assert a
     n = led.evidence_units
-    b = led.admit_tool_result(
+    led.admit_tool_result(
         tool_name="file_read",
         content="ok\npath: C:\\Users\\Administrator\\RemedyAI\\src\\remedy\\core\\agent.py\n",
         success=True,
@@ -985,8 +985,8 @@ def test_identity_export_import_roundtrip(tmp_path: Path):
     raw = path.read_text(encoding="utf-8")
     path.write_text(raw.replace("Prefers", "HackedX"), encoding="utf-8")
     # ciphertext base64 may not contain that plaintext; flip a cipher byte instead
-    import json as _json
     import base64
+    import json as _json
 
     pkg = _json.loads(path.read_text(encoding="utf-8") if "ciphertext" in raw else raw)
     # re-export clean and tamper ciphertext
@@ -1001,7 +1001,7 @@ def test_identity_export_import_roundtrip(tmp_path: Path):
 
 
 def test_redact_shared_patterns():
-    from remedy.core.metabolism.redact import redact_text, looks_like_secret_text
+    from remedy.core.metabolism.redact import looks_like_secret_text, redact_text
 
     assert looks_like_secret_text("api_key=sk-abcdefghijklmnopqrst")
     s = redact_text("Authorization: Bearer abcdefghijklmnop")
@@ -1027,7 +1027,6 @@ def test_redact_shared_patterns():
 
 def test_identity_import_requires_hmac(tmp_path: Path):
     """Missing hmac_hex must fail closed (no decrypt without MAC)."""
-    import base64
     import json as _json
 
     payload = build_identity_payload(
@@ -1225,7 +1224,8 @@ def test_action_ir_strips_url_userinfo():
     assert "example.com" in blob
 
 
-def test_action_ir_strips_url_userinfo():
+def test_action_ir_strips_url_userinfo_via_start_helper():
+    """Same redaction via start_action_ir helper (session-bound IR)."""
     ir = start_action_ir(session_id="ir_url", tier=2)
     ir.add_step(
         tool="computer_navigate",

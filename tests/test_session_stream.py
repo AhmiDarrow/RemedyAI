@@ -6,7 +6,6 @@ import asyncio
 from collections.abc import AsyncIterator
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 
 from remedy.interfaces.api import create_app

@@ -4,37 +4,43 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
-### Browser rail OAuth (same-window)
-
-- Force `window.open` → same-tab `location.assign` (handles `about:blank` stubs).
-- Privacy Shield **never blocks** major IdP / SSO hosts (Google, Microsoft, GitHub
-  login, Auth0, Okta, Discord/Slack OAuth, …) so login hops complete in-rail.
-- Unstick after Google login: remember return URL; `window.close` / “close this window”
-  pages bounce back; rewrite `storagerelay://` and intent fallbacks to https.
-
-### Computer-use host reliability (feature/computer-use)
-
-- Browser **snapshot / page_text / click** no longer die on mid-load WebView eval or
-  navigating-link teardown: ready probe, eval retries, deferred click, double-JSON
-  unwrap for page_text, longer host waits, DOM jobs off the poller thread.
-- **UIA controls:** soft `comtypes` is now a win32 dependency so `mode=controls`
-  returns `c1…` without a separate manual install.
-- Do not mark the desktop host “dead” after DOM job timeouts (avoids false
-  “Desktop host not connected” on page_text/click).
-- Browser **screenshot** tries WebView PrintWindow / rail crop even when the
-  in-process host_connected flag is stale (CLI soak no longer forces full desktop).
-- **Plan mode:** `help_list` / `help_read` allowlisted; system addendum documents
-  computer observe vs input tools; blocked computer tools suggest Build (Ctrl+B).
-- **Offline host:** browser snapshot falls back immediately to desktop windows/UIA
-  (no long host wait); navigate still refuses surprise OS browser unless asked.
-- **Stop mid-type:** `type_text` reports chars typed before abort; executor surfaces
-  `aborted` on desktop type; abort polled every 2 keystrokes (was 8).
-- **Provider soak:** computer tools verified with live xAI + DeepSeek tool_calls
-  (`computer_monitors`) end-to-end.
-
-## [0.20.0] - 2026-07-30
+## [0.20.0] - 2026-07-31
 
 Partner Metabolism OS + always-ready desktop. One voice; local-first; provider freedom.
+First public cut of the 0.20 line (PyPI + GitHub release).
+
+### Privacy + browser rail (ship polish)
+
+- **Privacy mode** opt-in (status bar + Simple settings): redacts secret-shaped
+  content on the provider path when enabled; zero cost when off.
+- Browser **video fullscreen** stays inside the Browser rail (WebView2
+  `ContainsFullScreenElement` + rail-as-screen geometry; not full-app expand).
+- **Mobile / Desktop site** toggle works in-place (UA via Settings2 + ACL for
+  `browser_view_mode` / `browser_set_desktop_site`).
+- Chat **attachment / Comfy images** load with Bearer media auth + basename
+  fallback under `~/.remedy`.
+- Double-click chat links open in the Browser rail; sticky `example.com` home
+  no longer treated as the real home (config + resolve).
+- Same-window OAuth: force `window.open` → same-tab; Privacy Shield never blocks
+  major IdP/SSO hosts; post-login return URL / `storagerelay` unstick.
+
+### Computer-use host reliability
+
+- Browser **snapshot / page_text / click** survive mid-load WebView eval and
+  navigating-link teardown: ready probe, eval retries, deferred click, longer waits.
+- **UIA controls:** soft `comtypes` win32 dependency for `mode=controls`.
+- Do not mark host “dead” after DOM job timeouts; screenshot tries PrintWindow /
+  rail crop when host flag is stale.
+- **Plan mode:** `help_list` / `help_read` allowlisted; computer observe vs input
+  documented; offline snapshot falls back to desktop windows/UIA.
+- **Stop mid-type:** chars typed before abort; abort polled every 2 keystrokes.
+- **Host auth:** computer host job endpoints require Bearer (local DPAPI token).
+- **Shell write jail:** block global package manager write roots outside work roots.
+
+### Security (gauntlet + Teams)
+
+- Teams JWT verified via JWKS RS256; tighter a11y job ids.
+- Provider sanitize honors privacy_mode; red-team live probes + SECURITY_AUDIT docs.
 
 ### Help always readable by the agent
 

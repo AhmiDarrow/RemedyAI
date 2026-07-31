@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Any
 
 from remedy.assistant.disclaimer import MONEY_DISCLAIMER_FULL, MONEY_DISCLAIMER_SHORT

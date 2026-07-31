@@ -16,7 +16,7 @@ import ssl
 from contextlib import suppress
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import parse_qs, unquote, urljoin, urlparse, urlencode
+from urllib.parse import parse_qs, unquote, urlencode, urljoin, urlparse
 
 from remedy.core.errors import format_tool_error
 

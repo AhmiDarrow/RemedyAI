@@ -112,10 +112,7 @@ def resolve_help_article(article_id: str) -> Path | None:
         return None
     # Strip wiki-style prefixes
     raw = raw.replace("\\", "/").split("/")[-1]
-    if raw.lower().endswith(".md"):
-        stem = raw[:-3]
-    else:
-        stem = raw
+    stem = raw[:-3] if raw.lower().endswith(".md") else raw
     if not _ARTICLE_ID_RE.match(stem):
         return None
     name = f"{stem}.md"

@@ -144,7 +144,7 @@ def _purge_runtime_state(session_id: str, runtime: Any) -> None:
             bsid = str(getattr(brief, "session_id", "") or "")
             rt_sid = str(getattr(runtime, "_session_id", "") or "")
             if bsid == sid or (not bsid and rt_sid == sid):
-                runtime._session_brief = None  # type: ignore[attr-defined]
+                runtime._session_brief = None
     with contextlib.suppress(Exception):
         from remedy.memory.harness.local_brief import _brief_registry, _brief_registry_lock
 
@@ -165,7 +165,7 @@ def _purge_runtime_state(session_id: str, runtime: Any) -> None:
             _registry.pop(sid, None)
         rt_sid = str(getattr(runtime, "_session_id", "") or "")
         if rt_sid == sid and hasattr(runtime, "_partner_state"):
-            runtime._partner_state = None  # type: ignore[attr-defined]
+            runtime._partner_state = None
         if hasattr(runtime, "_prospective_session_fired") and rt_sid == sid:
             runtime._prospective_session_fired = False
 

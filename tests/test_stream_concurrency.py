@@ -140,7 +140,7 @@ def test_llm_binding_contextvar_stack() -> None:
 @pytest.mark.asyncio
 async def test_abort_one_session_leaves_other_streaming(runtime: BasicRuntime) -> None:
     """Concurrent multi-provider: Stop on sess-a must not abort sess-b."""
-    from remedy.core.turn_context import abort_session, begin_turn, end_turn, is_turn_aborted
+    from remedy.core.turn_context import abort_session, is_turn_aborted
 
     order: list[str] = []
     both_started = asyncio.Event()
