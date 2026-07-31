@@ -9,6 +9,8 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 - Force `window.open` → same-tab `location.assign` (handles `about:blank` stubs).
 - Privacy Shield **never blocks** major IdP / SSO hosts (Google, Microsoft, GitHub
   login, Auth0, Okta, Discord/Slack OAuth, …) so login hops complete in-rail.
+- Unstick after Google login: remember return URL; `window.close` / “close this window”
+  pages bounce back; rewrite `storagerelay://` and intent fallbacks to https.
 
 ### Computer-use host reliability (feature/computer-use)
 
