@@ -793,14 +793,18 @@ class ComputerExecutor:
                 desk.setdefault("target", "desktop")
                 return desk
 
-            # No live poller → skip job queue; desktop windows immediately.
-            if not self.bridge.host_connected(max_age_s=12.0):
-                return _desktop_snapshot_fallback("host offline")
-
+            # In-process host_connected can be false (CLI / separate process) even when
+            # Desktop is polling jobs from disk. Always try the rail job first; fall
+            # back to desktop only if unclaimed / failed.
+            host_looks_live = self.bridge.host_connected(max_age_s=12.0)
             slept = self.bridge.settle_after_navigate(min_s=0.7, max_s=1.8)
-            unclaimed = 6.0
+            # Shorter unclaimed wait when we already believe host is offline.
+            unclaimed = 6.0 if host_looks_live else 2.5
             # Host may wait for page ready + up to 2×5s eval retries.
-            total_wait = float(kwargs.get("timeout_s") or 14.0)
+            total_wait = float(
+                kwargs.get("timeout_s")
+                or (14.0 if host_looks_live else 5.0)
+            )
             last_err = ""
             last_job_id = ""
             for attempt in range(2):
