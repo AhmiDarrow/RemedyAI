@@ -36,6 +36,9 @@ interface StatusBarProps {
   onThinkingLevelChange?: (level: ThinkingLevel) => void
   approvalMode: ApprovalMode
   onApprovalModeChange?: (mode: ApprovalMode) => void
+  /** Opt-in privacy: tighter tool egress to the LLM (default off = fast). */
+  privacyMode?: boolean
+  onPrivacyModeChange?: (on: boolean) => void
   toolProcessMode?: ToolProcessMode
   onToolProcessChange?: (mode: ToolProcessMode) => void
   themeId: ThemeId
@@ -216,6 +219,8 @@ export function StatusBar({
   onThinkingLevelChange,
   approvalMode,
   onApprovalModeChange,
+  privacyMode = false,
+  onPrivacyModeChange,
   toolProcessMode = 'off',
   onToolProcessChange,
   themeId,
@@ -688,6 +693,19 @@ export function StatusBar({
           >
             Settings
           </SegButton>
+          {onPrivacyModeChange && (
+            <SegButton
+              active={privacyMode}
+              onClick={() => onPrivacyModeChange(!privacyMode)}
+              title={
+                privacyMode
+                  ? 'Privacy mode ON — tighter tool caps + email/phone scrub before the cloud model. Click to turn off (faster).'
+                  : 'Privacy mode OFF (default) — lightning path with secret scrub. Click for tighter privacy to the model.'
+              }
+            >
+              Privacy
+            </SegButton>
+          )}
           {onOpenHelp && (
             <SegButton
               active={false}
@@ -966,10 +984,17 @@ function SegButton({
       type="button"
       onClick={onClick}
       title={title}
-      className="px-2 py-0.5 rounded text-xs font-medium"
+      aria-pressed={active}
+      className="px-2 py-0.5 rounded text-xs font-medium transition-colors"
       style={{
-        background: active ? 'var(--accent)' : 'var(--bg-tertiary)',
+        background: active
+          ? 'var(--accent)'
+          : 'var(--bg-tertiary)',
         color: active ? '#fff' : 'var(--text-secondary)',
+        border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
+        boxShadow: active
+          ? '0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent)'
+          : 'none',
       }}
     >
       {children}

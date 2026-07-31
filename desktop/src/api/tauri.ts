@@ -51,14 +51,16 @@ export async function tauriInvoke<T = unknown>(
 
 /**
  * Listen for Tauri events. Returns an unlisten function.
+ * Handler receives the **event payload** (not the envelope).
+ * Use ``tauriListen<{ desktop_site?: boolean }>('…', (p) => …)`` for typed payloads.
  */
-export async function tauriListen(
+export async function tauriListen<T = unknown>(
   event: string,
-  handler: (payload: unknown) => void,
+  handler: (payload: T) => void,
 ): Promise<() => void> {
   try {
     const unlisten = await officialListen(event, (e) => {
-      handler(e.payload)
+      handler(e.payload as T)
     })
     return unlisten
   } catch {
@@ -67,8 +69,8 @@ export async function tauriListen(
       const w = window as any
       const coreListen = w.__TAURI__?.event?.listen
       if (typeof coreListen === 'function') {
-        const unlisten = await coreListen(event, (e: { payload?: unknown }) => {
-          handler(e?.payload !== undefined ? e.payload : e)
+        const unlisten = await coreListen(event, (e: { payload?: T }) => {
+          handler((e?.payload !== undefined ? e.payload : e) as T)
         })
         return typeof unlisten === 'function' ? unlisten : () => {}
       }

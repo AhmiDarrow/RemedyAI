@@ -139,6 +139,7 @@ export function SettingsPanel({
   const [skipQuitWarn, setSkipQuitWarn] = useState(false)
   const [webToolsEnabled, setWebToolsEnabled] = useState(false)
   const [httpBootstrap, setHttpBootstrap] = useState(true)
+  const [privacyMode, setPrivacyMode] = useState(false)
   const [approvalMode, setApprovalMode] = useState<'ask' | 'auto'>('ask')
   const [harnessMode, setHarnessMode] = useState('auto')
   const [harnessMinPct, setHarnessMinPct] = useState(0.75)
@@ -360,6 +361,7 @@ export function SettingsPanel({
       setSarcasmMode(Boolean(s.sarcasm_mode))
       setWebToolsEnabled(Boolean(s.web_tools_enabled))
       setHttpBootstrap(s.http_bootstrap !== false)
+      setPrivacyMode(Boolean(s.privacy_mode))
       {
         const list = Array.isArray(s.messengers) ? s.messengers : []
         setMessengers(list)
@@ -634,6 +636,7 @@ export function SettingsPanel({
       skills_active_budget: skillsBudget,
       web_tools_enabled: webToolsEnabled,
       http_bootstrap: httpBootstrap,
+      privacy_mode: privacyMode,
       approval_mode: approvalMode,
       allow_skill_creation: allowSkillCreation,
       auto_approve_threshold: autoApproveThreshold,
@@ -885,6 +888,8 @@ export function SettingsPanel({
               setWebToolsEnabled={setWebToolsEnabled}
               httpBootstrap={httpBootstrap}
               setHttpBootstrap={setHttpBootstrap}
+              privacyMode={privacyMode}
+              setPrivacyMode={setPrivacyMode}
               approvalMode={approvalMode}
               setApprovalMode={setApprovalMode}
               harnessMode={harnessMode}

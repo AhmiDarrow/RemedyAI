@@ -317,6 +317,7 @@ export default function App() {
   const [models, setModels] = useState<ModelInfo[]>([])
   const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>('high')
   const [approvalMode, setApprovalMode] = useState<ApprovalMode>('ask')
+  const [privacyMode, setPrivacyMode] = useState(false)
   const [toolProcessMode, setToolProcessMode] = useState<ToolProcessMode>('off')
   const [uiMode, setUiMode] = useState<UiMode>(() => loadUiMode())
   /** Plan mode is per-session so switching chats does not stick Plan/Build. */
@@ -961,6 +962,7 @@ export default function App() {
         }
         const am = String(settings.approval_mode || 'ask').toLowerCase()
         if (am === 'ask' || am === 'auto') setApprovalMode(am)
+        setPrivacyMode(Boolean(settings.privacy_mode))
         setToolProcessMode(normalizeToolProcess(settings.tool_process ?? settings.show_tool_calls))
         const un = (settings.user_name || '').trim()
         setUserName(un)
@@ -2051,6 +2053,10 @@ export default function App() {
                   }
                   setUserName((s.user_name || '').trim())
                   setToolProcessMode(normalizeToolProcess(s.tool_process))
+                  setPrivacyMode(Boolean(s.privacy_mode))
+                  setApprovalMode(
+                    String(s.approval_mode || 'ask').toLowerCase() === 'auto' ? 'auto' : 'ask',
+                  )
                   return refreshModels({
                     provider: s.llm_provider ? String(s.llm_provider) : undefined,
                   })
@@ -2447,6 +2453,10 @@ export default function App() {
               }
               setUserName((s.user_name || '').trim())
               setToolProcessMode(normalizeToolProcess(s.tool_process))
+              setPrivacyMode(Boolean(s.privacy_mode))
+              setApprovalMode(
+                String(s.approval_mode || 'ask').toLowerCase() === 'auto' ? 'auto' : 'ask',
+              )
               return refreshModels({
                 provider: s.llm_provider ? String(s.llm_provider) : undefined,
               })
@@ -2524,6 +2534,11 @@ export default function App() {
           onApprovalModeChange={(mode) => {
             setApprovalMode(mode)
             updateSettings({ approval_mode: mode }).catch(() => {})
+          }}
+          privacyMode={privacyMode}
+          onPrivacyModeChange={(on) => {
+            setPrivacyMode(on)
+            updateSettings({ privacy_mode: on }).catch(() => {})
           }}
           toolProcessMode={toolProcessMode}
           onToolProcessChange={(mode) => {

@@ -10,6 +10,7 @@ describe('SettingsUpdate payload shape', () => {
       approval_mode: 'auto',
       web_tools_enabled: false,
       http_bootstrap: true,
+      privacy_mode: false,
       allow_skill_creation: true,
       auto_approve_threshold: 0.8,
       log_level: 'INFO',
