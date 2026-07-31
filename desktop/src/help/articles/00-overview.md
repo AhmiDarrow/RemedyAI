@@ -7,6 +7,8 @@
 **Feel of the product:** easy, sleek, familiar, and powerful — Simple UI by default, Advanced when you want full rails, metabolism, and process detail.
 
 Offline Help: **F1** or **Ctrl+/** · Same chapters live in the repo under `docs/manual/`.
+The agent can read them anytime with **`help_list`** / **`help_read`** (not limited by
+project access scope).
 
 ![How Remedy fits together](assets/remedy-partner-architecture.jpg)
 

@@ -182,6 +182,16 @@ def allowed_roots_for_scope(
         h = _home_root(home=home)
         if h not in roots:
             roots.append(h)
+    # F1 / owner's manual — always readable (not writable). Fixes agents claiming
+    # in-app help is "outside access scope" when project ≠ RemedyAI repo.
+    try:
+        from remedy.core.help_docs import help_read_roots
+
+        for hr in help_read_roots():
+            if hr not in roots:
+                roots.append(hr)
+    except Exception:
+        pass
     # full: roots still list project + home for cwd defaults; absolute paths
     # under the user's OS permissions are allowed via resolve_under_roots.
     return roots
