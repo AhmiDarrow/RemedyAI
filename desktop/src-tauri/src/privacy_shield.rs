@@ -377,6 +377,8 @@ const IDP_HOST_EXACT: &[&str] = &[
     "accounts.youtube.com",
     "myaccount.google.com",
     "oauth2.googleapis.com",
+    "www.googleapis.com",
+    "content.googleapis.com",
     "appleid.apple.com",
     "login.microsoftonline.com",
     "login.live.com",
@@ -395,6 +397,11 @@ const IDP_HOST_EXACT: &[&str] = &[
     "ssl.reddit.com",
     "www.reddit.com",
     "reddit.com",
+    // Common OAuth callback / CDN hops after Google consent
+    "gstatic.com",
+    "www.gstatic.com",
+    "ssl.gstatic.com",
+    "apis.google.com",
 ];
 
 /// Suffix match (e.g. `foo.auth0.com`, `company.okta.com`).

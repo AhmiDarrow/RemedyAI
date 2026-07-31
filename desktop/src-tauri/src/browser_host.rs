@@ -18,38 +18,133 @@ use url::Url;
 const LABEL: &str = "remedy-browser-embed";
 
 /// Force OAuth / SSO into the same rail WebView (no popup window).
-/// Handles both `window.open(url)` and the common `open('about:blank')` then
-/// `popup.location = authUrl` pattern.
+///
+/// Handles:
+/// - `window.open(url)` → same-tab navigation
+/// - `open('about:blank')` then `popup.location = authUrl`
+/// - `window.close()` after IdP → return to site that started OAuth
+/// - "You can close this window" dead-ends after Google login
+/// - `target=_blank` login links
 const SAME_WINDOW_OAUTH_JS: &str = r#"(function(){
   if (window.__remedySameWindowOpen) return;
   window.__remedySameWindowOpen = true;
-  var orig = window.open;
+  var SS_RET = '__remedy_oauth_return';
+  var SS_TS = '__remedy_oauth_ts';
+  var origOpen = window.open;
+  var origClose = window.close;
+
+  function rememberReturn(){
+    try {
+      var href = String(window.location.href || '');
+      if (!href || href.indexOf('about:')===0) return;
+      // Don't overwrite return with IdP pages
+      var h = (window.location.hostname || '').toLowerCase();
+      if (/google\.|microsoftonline\.|live\.com|github\.com|apple\.com|okta\.|auth0\.|facebook\.|twitter\.|x\.com/.test(h)
+          && /accounts\.|login\.|oauth|signin|authorize/.test(href.toLowerCase()+h)) {
+        return;
+      }
+      sessionStorage.setItem(SS_RET, href);
+      sessionStorage.setItem(SS_TS, String(Date.now()));
+    } catch(e) {}
+  }
+
+  function returnUrl(){
+    try {
+      var r = sessionStorage.getItem(SS_RET) || '';
+      var ts = parseInt(sessionStorage.getItem(SS_TS) || '0', 10) || 0;
+      if (!r || !ts || (Date.now() - ts) > 20*60*1000) return '';
+      return r;
+    } catch(e) { return ''; }
+  }
+
   function go(u){
     try {
       var abs = new URL(String(u), window.location.href).href;
-      if (/^https?:/i.test(abs) || abs.indexOf('about:')===0) {
+      if (/^https?:/i.test(abs)) {
+        rememberReturn();
         window.location.assign(abs);
         return true;
       }
+      // Non-http (storagerelay / intent) — leave for native rewrite if any
+      if (abs.indexOf('about:')===0) {
+        return false;
+      }
     } catch(e) {}
-    try { window.location.href = String(u); return true; } catch(e2) {}
+    try {
+      rememberReturn();
+      window.location.href = String(u);
+      return true;
+    } catch(e2) {}
     return false;
   }
+
+  function bounceHomeIfStuck(){
+    try {
+      var ret = returnUrl();
+      if (!ret) return;
+      var text = ((document.body && (document.body.innerText || document.body.textContent)) || '').slice(0, 800).toLowerCase();
+      var path = (window.location.pathname || '').toLowerCase();
+      var host = (window.location.hostname || '').toLowerCase();
+      var stuckClose = /you may now close|you can close this|close this window|return to the app|authentication complete|sign-?in complete|login successful|successfully signed in/.test(text);
+      var stuckPath = /\/oauth\/(success|complete|done|callback)|\/signin\/oauth\/consent\/approval/.test(path);
+      // Logged into Google but stranded on accounts.google without continue
+      var idpHost = /(^|\.)accounts\.google\.com$|(^|\.)login\.microsoftonline\.com$|(^|\.)login\.live\.com$/.test(host);
+      if (stuckClose || stuckPath) {
+        window.location.assign(ret);
+        return;
+      }
+      // If Google shows account home after OAuth without redirect, offer auto-return after short settle
+      if (idpHost && /myaccount\.google|ManageAccount|Sign out/.test(text) && !/oauth|authorize|consent|challenge/.test(path+text.slice(0,200))) {
+        // Only bounce if we have a return and spent >2s on this dead-end
+        var ts = parseInt(sessionStorage.getItem(SS_TS) || '0', 10) || 0;
+        if (ts && (Date.now() - ts) > 2500) {
+          window.location.assign(ret);
+        }
+      }
+    } catch(e) {}
+  }
+
   function blankStub(){
+    var closed = false;
     var stub = {
-      closed: false,
-      close: function(){ this.closed = true; },
+      get closed(){ return closed; },
+      close: function(){
+        closed = true;
+        var ret = returnUrl();
+        if (ret) { try { window.location.assign(ret); } catch(e) {} }
+      },
       focus: function(){},
       blur: function(){},
-      opener: null,
-      postMessage: function(){},
-      document: document
+      // Sites postMessage to popup; forward onto current window (same-tab OAuth)
+      postMessage: function(msg, origin){
+        try {
+          var o = (origin && origin !== '*') ? origin : window.location.origin;
+          window.postMessage(msg, o === '/' ? window.location.origin : origin || '*');
+        } catch(e) {
+          try { window.postMessage(msg, '*'); } catch(e2) {}
+        }
+      },
+      document: document,
+      window: window,
+      self: null,
+      frames: window.frames,
+      parent: window,
+      top: window
     };
+    stub.self = stub;
+    // opener = current window so GIS / OAuth can postMessage back
+    try {
+      Object.defineProperty(stub, 'opener', {
+        get: function(){ return window; },
+        set: function(){},
+        configurable: true
+      });
+    } catch(e) { stub.opener = window; }
     var loc = {
       get href(){ return window.location.href; },
       set href(v){ go(v); },
       assign: function(v){ go(v); },
-      replace: function(v){ try { window.location.replace(String(v)); } catch(e){ go(v); } },
+      replace: function(v){ try { rememberReturn(); window.location.replace(String(v)); } catch(e){ go(v); } },
       reload: function(){ try { window.location.reload(); } catch(e){} },
       toString: function(){ return window.location.href; }
     };
@@ -59,11 +154,10 @@ const SAME_WINDOW_OAUTH_JS: &str = r#"(function(){
         set: function(v){ go(v); },
         configurable: true
       });
-    } catch(e) {
-      stub.location = loc;
-    }
+    } catch(e) { stub.location = loc; }
     return stub;
   }
+
   window.open = function(url, name, features){
     try {
       var u = (url==null || url==='') ? '' : String(url);
@@ -71,12 +165,140 @@ const SAME_WINDOW_OAUTH_JS: &str = r#"(function(){
         return blankStub();
       }
       go(u);
-      return null;
+      // Never return null (sites treat that as "popup blocked" and hang)
+      return blankStub();
     } catch(e) {
-      try { return orig ? orig.apply(window, arguments) : null; } catch(e2) { return null; }
+      try { return origOpen ? origOpen.apply(window, arguments) : blankStub(); } catch(e2) { return blankStub(); }
     }
   };
+
+  // Popup flows call close() when done — take user back to the app site
+  window.close = function(){
+    var ret = returnUrl();
+    if (ret) {
+      try { window.location.assign(ret); return; } catch(e) {}
+    }
+    try { if (origClose) origClose.call(window); } catch(e2) {}
+  };
+
+  // target=_blank login buttons
+  document.addEventListener('click', function(ev){
+    try {
+      var a = ev.target && ev.target.closest ? ev.target.closest('a[target="_blank"], area[target="_blank"]') : null;
+      if (!a) return;
+      var href = a.getAttribute('href') || '';
+      if (!href || href.charAt(0)==='#') return;
+      var abs = new URL(href, window.location.href).href;
+      if (!/^https?:/i.test(abs)) return;
+      // Only force same-window for likely auth links
+      if (!/oauth|authorize|login|signin|accounts\.google|microsoftonline|github\.com\/login|auth0|okta/i.test(abs+href)) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      go(abs);
+    } catch(e) {}
+  }, true);
+
+  // After load: unstick "close this window" / stranded IdP pages
+  if (document.readyState === 'complete' || document.readyState === 'interactive') {
+    setTimeout(bounceHomeIfStuck, 400);
+    setTimeout(bounceHomeIfStuck, 2000);
+  } else {
+    document.addEventListener('DOMContentLoaded', function(){
+      setTimeout(bounceHomeIfStuck, 400);
+      setTimeout(bounceHomeIfStuck, 2000);
+    });
+  }
+  window.addEventListener('load', function(){ setTimeout(bounceHomeIfStuck, 600); });
 })();"#;
+
+/// Rewrite Google/Android special schemes that WebView2 cannot load as documents.
+/// e.g. `storagerelay://https/example.com?id=…` → `https://example.com/`
+fn rewrite_oauth_navigation(raw: &str) -> Option<String> {
+    let s = raw.trim();
+    if s.is_empty() {
+        return None;
+    }
+    let lower = s.to_ascii_lowercase();
+
+    // Google GIS / GSI: storagerelay://https/www.example.com?id=authz_cb
+    if lower.starts_with("storagerelay://") {
+        let rest = s.get("storagerelay://".len()..)?;
+        let scheme_host = rest.split('?').next().unwrap_or(rest);
+        // scheme_host = "https/www.example.com" or "https/www.example.com/path"
+        let mut parts = scheme_host.splitn(2, '/');
+        let scheme = parts.next().unwrap_or("https");
+        let hostpath = parts.next().unwrap_or("");
+        if hostpath.is_empty() {
+            return None;
+        }
+        let host = hostpath.split('/').next().unwrap_or(hostpath);
+        if host.is_empty() {
+            return None;
+        }
+        let scheme = if scheme.eq_ignore_ascii_case("http") {
+            "http"
+        } else {
+            "https"
+        };
+        let out = format!("{scheme}://{host}/");
+        log::info!("browser oauth rewrite storagerelay → {out}");
+        return Some(out);
+    }
+
+    // Android intent://…;S.browser_fallback_url=https%3A%2F%2F…
+    if lower.starts_with("intent:") {
+        if let Some(idx) = lower.find("s.browser_fallback_url=") {
+            let start = idx + "s.browser_fallback_url=".len();
+            let rest = s.get(start..)?;
+            let end = rest.find(';').unwrap_or(rest.len());
+            let enc = rest.get(..end)?.trim();
+            if let Ok(dec) = urlencoding_minimal(enc) {
+                if dec.starts_with("http://") || dec.starts_with("https://") {
+                    log::info!("browser oauth rewrite intent fallback → {dec}");
+                    return Some(dec);
+                }
+            }
+        }
+    }
+
+    None
+}
+
+fn urlencoding_minimal(enc: &str) -> Result<String, ()> {
+    let bytes = enc.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'%' if i + 2 < bytes.len() => {
+                let h = |c: u8| -> Option<u8> {
+                    match c {
+                        b'0'..=b'9' => Some(c - b'0'),
+                        b'a'..=b'f' => Some(c - b'a' + 10),
+                        b'A'..=b'F' => Some(c - b'A' + 10),
+                        _ => None,
+                    }
+                };
+                if let (Some(a), Some(b)) = (h(bytes[i + 1]), h(bytes[i + 2])) {
+                    out.push((a << 4) | b);
+                    i += 3;
+                    continue;
+                }
+                out.push(bytes[i]);
+                i += 1;
+            }
+            b'+' => {
+                out.push(b' ');
+                i += 1;
+            }
+            c => {
+                out.push(c);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8(out).map_err(|_| ())
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct BrowserBounds {
@@ -420,14 +642,29 @@ pub fn navigate_embed(
     let blank: Url = "about:blank".parse().map_err(|e: url::ParseError| e.to_string())?;
     // Keep SPA address bar in sync when the user clicks links inside the page.
     let app_for_load = app.clone();
+    let app_for_nav = app.clone();
     // Dark chrome — pure white reads as a distracting border around the page
     // Do not focus on create — steals focus and worsens z-order over React chrome.
     let builder = WebviewBuilder::new(LABEL, WebviewUrl::External(blank))
         .focused(false)
         .background_color(Color(18, 18, 22, 255))
-        // Privacy Shield: cancel document navigations that match block lists
-        .on_navigation(|url| {
+        // Privacy Shield + OAuth special-scheme rewrite (storagerelay / intent)
+        .on_navigation(move |url| {
             let s = url.as_str();
+            if let Some(fixed) = rewrite_oauth_navigation(s) {
+                let app2 = app_for_nav.clone();
+                let fixed2 = fixed.clone();
+                let _ = app2.clone().run_on_main_thread(move || {
+                    if let Some(wv) = app2.get_webview(LABEL) {
+                        if let Ok(u) = fixed2.parse::<Url>() {
+                            if let Err(e) = wv.navigate(u) {
+                                log::warn!("browser oauth rewrite navigate failed: {e}");
+                            }
+                        }
+                    }
+                });
+                return false;
+            }
             if crate::privacy_shield::should_block_navigation(s) {
                 return false;
             }
