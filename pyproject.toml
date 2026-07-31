@@ -129,6 +129,9 @@ exclude = [
     "src/remedy/core/agent_react_loop.py",  # large stream loop; type gradually
     "src/remedy/core/learning_loop.py",
     "src/remedy/core/learning",
+    # Win32-only ctypes/os.startfile — mypy on Linux CI has no windll/WINFUNCTYPE.
+    "src/remedy/core/computer/desktop_win.py",
+    "src/remedy/core/computer/desktop_uia.py",
 ]
 
 [dependency-groups]
