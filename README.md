@@ -1,49 +1,103 @@
 # Remedy
 
-![Remedy](assets/previews/hero_logo_color_on_dark.png)
+<p align="center">
+  <img src="assets/previews/hero_logo_color_on_dark.png" alt="Remedy" width="420" />
+</p>
 
-**Your personal AI partner — on your machine.**
+<p align="center">
+  <strong>Your personal AI partner — on your machine.</strong><br/>
+  Knowledge · design · code · computer use · get-it-done.<br/>
+  <em>One continuous partner</em> — not a thin chat wrapper, not a farm of bots.
+</p>
 
-Knowledge, design, code, computer use, and get-it-done work. **One continuous partner** —
-not a thin chat wrapper, not a farm of bots. Local continuity + your choice of frontier model.
+<p align="center">
+  <a href="https://github.com/AhmiDarrow/RemedyAI/releases/latest"><strong>Download for Windows</strong></a>
+  ·
+  <a href="docs/manual/00-overview.md">Owner’s manual</a>
+  ·
+  <a href="docs/manual/13-whats-new.md">What’s new</a>
+  ·
+  <code>pip install remedy-ai</code>
+</p>
 
-**Not** a medical product; the name means unsticking problems and finishing requests.
+**Not** a medical product; the name means unsticking problems and finishing requests.  
+**F1** opens the same Help wiki offline inside the app.
 
-**[Download latest for Windows](https://github.com/AhmiDarrow/RemedyAI/releases/latest)** · **[Owner’s manual](docs/manual/00-overview.md)** · **F1** in-app
+---
+
+## About
+
+<p align="center">
+  <img src="assets/previews/hero_icon_color_on_dark.png" alt="Remedy icon" width="96" />
+</p>
+
+**Remedy** is a Windows-first desktop partner (Tauri + local FastAPI) that keeps **continuity on disk** under `~/.remedy` while **you** pick the chat model (xAI, OpenAI, Anthropic, Google, DeepSeek, Groq, Mistral, OpenRouter, Ollama, Custom).
+
+| | |
+|--|--|
+| **Who it’s for** | Owners who want power without multi-agent theater — chat, files, shell, browser rail, computer use |
+| **What stays local** | Memory, Session Brief, skills, approvals, DPAPI secrets, optional SmolVLM2 vision |
+| **What you bring** | Your API keys / local Ollama — no Remedy cloud account for core use |
+| **Current** | **v0.20.0** on [PyPI](https://pypi.org/project/remedy-ai/) · [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases) |
+
+From the creator: *My name is Ahmi, I hope you enjoy my Remedy.*  
+In-app: title-bar / tray → **About Remedy** · **Settings → About**.
+
+---
+
+## What’s new
+
+**Latest: [v0.20.0](https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.20.0)** — Partner Metabolism OS + always-ready desktop.
+
+<p align="center">
+  <img src="docs/manual/assets/remedy-partner-architecture.jpg" alt="How Remedy fits together" width="640" />
+</p>
+
+| Highlight | Why it matters |
+|-----------|----------------|
+| **L0–L3 turn tiers** | Instant local answers for “what model / skills / version”; full tools only when work needs them |
+| **Agency that runs tools** | Review / implement keep tools on; false “activating skill” prose re-arms real function calls |
+| **✕ → tray always** | Title-bar close hides to tray; local API stays warm. **Tray Quit** for full stop |
+| **Write jail + security** | Project write roots, shell auth refuse, SSRF harden, Bearer computer host, opt-in **Privacy mode** |
+| **Browser rail polish** | Video fullscreen stays **in-rail**; mobile/desktop site toggle; chat images with Bearer media; same-window OAuth |
+
+**Also in 0.20:** evidence ledger, shadow rehearsal, Action IR, Time Crystal, skill genome, portable identity, multi-tab stream paint, messengers, signed Skills Library.
+
+Full owner notes → **[docs/manual/13-whats-new.md](docs/manual/13-whats-new.md)** · engineering detail → **[CHANGELOG.md](CHANGELOG.md)**  
+Earlier: [0.19.0 parallel multi-provider](docs/manual/13-whats-new.md#0190---parallel-multi-provider--background-turns) · [0.18.x](docs/manual/13-whats-new.md)
 
 ---
 
 ## Contents
 
-1. [What you get](#what-you-get) — product at a glance  
-2. [Why it’s different](#why-its-different) — local continuity + metabolism  
-3. [Workspace on your PC](#workspace-on-your-pc) — files, terminal, browser, computer  
-4. [Local brain (SmolVLM2)](#local-brain-smolvlm2) — vision + efficiency without a second persona  
-5. [Continuity workers](#continuity-workers) — silent nano swarm  
-6. [Messengers](#messengers) — chat where you already are  
-7. [Skills & Library](#skills--library)  
-8. [Memory & long work](#memory--long-work)  
-9. [Install](#install)  
-10. [Security](#security)  
-11. [Slash commands](#slash-commands)  
-12. [Architecture](#architecture)  
-13. [CLI & API](#cli--api)  
-14. [Development](#development)  
-15. [Support](#support) · [License](#license)  
+1. [About](#about) · [What’s new](#whats-new)  
+2. [What you get](#what-you-get) — product at a glance  
+3. [Why it’s different](#why-its-different) — local continuity + metabolism  
+4. [Workspace on your PC](#workspace-on-your-pc) — files, terminal, browser, computer  
+5. [Local brain (SmolVLM2)](#local-brain-smolvlm2) — vision + efficiency without a second persona  
+6. [Continuity workers](#continuity-workers) — silent nano swarm  
+7. [Messengers](#messengers) — chat where you already are  
+8. [Skills & Library](#skills--library)  
+9. [Memory & long work](#memory--long-work)  
+10. [Install](#install)  
+11. [Security](#security)  
+12. [Slash commands](#slash-commands)  
+13. [Architecture](#architecture)  
+14. [CLI & API](#cli--api)  
+15. [Development](#development)  
+16. [Support](#support) · [License](#license)  
 
-### Owner’s manual (hosted on GitHub)
-
-GitHub renders the full Help wiki as markdown (same chapters as in-app **F1**):
+### Owner’s manual (GitHub + F1)
 
 | | |
 |--|--|
-| **Start here** | [Overview](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/00-overview.md) |
-| **All chapters** | [docs/manual/](https://github.com/AhmiDarrow/RemedyAI/tree/master/docs/manual) · [chapter index](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/README.md) |
-| **Continuity** | [How Remedy works](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/16-continuity-philosophy.md) |
-| **Local SmolVLM2** | [Vision & on-device SmolVLM2](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/14-visual-decoder.md) |
-| **Chat & rails** | [Chat & sessions](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/05-chat-and-sessions.md) |
-| **Skills** | [Skills](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/07-skills.md) |
-| **What’s new** | [What’s new](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/13-whats-new.md) |
+| **Start here** | [Overview](docs/manual/00-overview.md) |
+| **What’s new** | [13-whats-new](docs/manual/13-whats-new.md) |
+| **All chapters** | [docs/manual/](docs/manual/) · [index](docs/manual/README.md) |
+| **Continuity** | [How Remedy works](docs/manual/16-continuity-philosophy.md) |
+| **Local SmolVLM2** | [Vision decoder](docs/manual/14-visual-decoder.md) |
+| **Metabolism** | [Partner metabolism](docs/manual/19-metabolism.md) |
+| **Security** | [Security & data](docs/manual/04-security-and-data.md) |
 
 Also: [CHANGELOG.md](CHANGELOG.md) · [AGENTS.md](AGENTS.md)
 
@@ -227,12 +281,16 @@ Full list: [Commands](docs/manual/11-reference-commands.md)
 
 ## Architecture
 
+<p align="center">
+  <img src="docs/manual/assets/remedy-partner-architecture.jpg" alt="Remedy partner architecture" width="560" />
+</p>
+
 ```text
 ┌─ Desktop (Tauri 2) ─────────────────────────────────────┐
 │  React SPA · tray · updates · Files/Terminal/Browser   │
 │              │                                           │
 │  remedy serve · FastAPI :7400                            │
-│    gateway · core · memory · skills · vision (SmolVLM2)      │
+│    gateway · core · memory · skills · vision (SmolVLM2)  │
 └──────────────────────────────────────────────────────────┘
      CLI · WebUI · Telegram · Discord · Slack · …
 ```
