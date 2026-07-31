@@ -108,7 +108,7 @@ so the webview reported a network error. **0.10.38+** lets OPTIONS through auth;
 ## Images in chat show “Loading…” / broken / blank
 
 Remedy does **not** depend on the LLM provider for image *display*. Models often
-write markdown like `![preview](assets/previews/hero.png)`. The desktop loads
+write markdown like `![preview](assets/previews/hero_logo_color_on_dark.png)`. The desktop loads
 those through the local API (`GET /api/media`) with your project path.
 
 | Check | Fix |

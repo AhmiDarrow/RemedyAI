@@ -27,7 +27,8 @@ Logo menu / status bar **WebUI** / Settings → **Switch to WebUI**:
 2. Browser opens `http://127.0.0.1:7400/` (same chat + local API).  
 3. Tray → **Show Remedy** returns to the desktop shell.  
 
-Full **Quit** stops the server — the WebUI will stop working.
+**Title-bar ✕** always hides to the tray (server stays up). Full **Quit** from the tray
+(or app menu) stops the server — the WebUI will stop working.
 
 ## Install an update
 

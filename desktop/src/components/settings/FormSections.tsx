@@ -928,19 +928,24 @@ export function SettingsFormSections(p: SettingsFormProps): ReactNode {
                 Off = window opens normally (recommended). On = only a tray icon until you click it.
                 Independent of “Start with Windows”.
               </div>
-              <label className="flex items-center gap-2 mb-1 cursor-pointer">
+              <label className="flex items-center gap-2 mb-1" style={{ opacity: 0.95 }}>
                 <input
                   type="checkbox"
-                  checked={closeToTray}
-                  onChange={(e) => setCloseToTray(e.target.checked)}
+                  checked
+                  disabled
+                  readOnly
                   style={{ accentColor: 'var(--accent)' }}
+                  aria-label="Close window always hides to tray"
                 />
-                <span style={{ color: 'var(--text-primary)' }}>Close window hides to tray</span>
+                <span style={{ color: 'var(--text-primary)' }}>
+                  Close window (✕) always hides to tray
+                </span>
               </label>
               <div className="text-[10px] leading-snug mb-1.5 pl-6" style={{ color: 'var(--text-muted)' }}>
-                On (default): the ✕ button hides Remedy to the tray and keeps the local server running.
-                Off: ✕ asks to quit and stops the server. Menu <strong>Quit Remedy</strong> always
-                fully exits. Shift+click ✕ also requests a full quit.
+                Always on for the always-ready partner: the OS ✕ / Alt+F4 hides Remedy to the
+                system tray and keeps the local API running (Web UI and chat stay warm).
+                Fully stop Remedy only from the tray menu <strong>Quit</strong> (or app menu Quit) —
+                that stops the local server.
               </div>
               <label className="flex items-center gap-2 mb-1 cursor-pointer">
                 <input

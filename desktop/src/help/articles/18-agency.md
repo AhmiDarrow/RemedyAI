@@ -30,6 +30,18 @@ Access scope (`project` / `home` / `full`) is a **security** control, separate f
 | **`spread_run`** | Silent **fan-out** of several jobs in parallel (cover more ground) — one merged digest |
 | **`mission_*`** | Durable checklist + verify for work-alone builds |
 | **`web_fetch`** | Optional HTTP fetch — enable `web_tools_enabled: true` in config |
+| **`web_search`** | Lightweight web search when web tools are enabled (SSRF-safe resolve) |
+| **`skill_activate` / `skill_run`** | Load procedure packs; scripts stay blocked until Trust |
+
+### Review / implement (must use tools)
+
+Phrases like **“review project”**, **“implement the fix”**, **“run the tests”** stay in
+**agency mode** (tools on). If the model only *narrates* “activating skill” without a
+function call, Remedy **re-arms tools** and requires real `skill_activate` / `list_dir` /
+`file_read` / etc. — you should see process trail activity, not a one-line promise.
+
+Shell mutations stay inside **write roots** (project / home scope); opaque payloads
+(`EncodedCommand`, WebClient download, certutil urlcache, …) fail closed when bound.
 
 ### Search (language-agnostic)
 

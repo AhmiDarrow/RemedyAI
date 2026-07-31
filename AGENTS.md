@@ -122,7 +122,7 @@ Run when the change touches shell, chrome, messengers, or browser. **One** clean
 |---|-------|------|
 | 1 | Launch → server ready | Status connected |
 | 2 | New chat → short reply | Stream completes |
-| 3 | Min / max / restore / close (or close-to-tray) | OS chrome works every time |
+| 3 | Min / max / restore / **✕ → tray** (Quit only from tray) | Always-ready chrome works every time |
 | 4 | Open Browser rail | Page loads (or clear error + ↗ works) |
 | 5 | If messengers enabled | Telegram in → desktop; desktop reply → Telegram |
 | 6 | Quit fully → relaunch | No dual serve / dual poller |

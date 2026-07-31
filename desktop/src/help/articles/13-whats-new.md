@@ -2,11 +2,35 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current series: **v0.19.0**.
+Current series: **v0.20.0**.
 
 ## Contents
 
-- [0.19.0](#0190---parallel-multi-provider--background-turns) · [0.18.6](#0186---os-chrome--browser-embed) · [0.18.5](#0185---telegram-poll-lock-recovery) · [0.18.4](#0184---messenger-realtime--sync) · [0.18.3](#0183---provider-switch--stability) · [0.18.2](#0182---spread-run-fix) · [0.18.1](#0181---run-until-finished--title-bar) · [0.18.0](#0180---spread--library-suggest) · [0.17.0](#0170---coding-agency--process-trail) · older below
+- [0.20.0](#0200---partner-metabolism--always-ready) · [0.19.0](#0190---parallel-multi-provider--background-turns) · [0.18.6](#0186---os-chrome--browser-embed) · older below
+
+## 0.20.0 - Partner metabolism + always-ready
+
+The “so” leap: a **Partner Metabolism OS** under one voice, plus desktop chrome that
+stays ready on this PC. Full detail: [19-metabolism](19-metabolism) · `CHANGELOG.md`.
+
+- **Turn tiers L0–L3** — L0 instant local answers (model / skills / version / whoami);
+  L1 lean chat; L2 full tools (review, implement, files, shell, computer); L3 deep /
+  work-alone + force-spread.
+- **Evidence + decisions** — tool facts get IDs; waste scoring; mid-turn delta inject.
+- **Shadow + write jail** — high-blast dry-run on top of project write roots; shell
+  cannot mutate `~/.remedy/auth` even under home scope.
+- **Agency that actually runs tools** — “review project” keeps tools on; if the model
+  only *says* “activating skill”, Remedy re-arms tools and demands real function calls.
+- **Skills** — progressive disclosure; review injects change-safety procedure when useful;
+  CLI `skill list` hides noisy auto-learned probation packs unless `--all`.
+- **Desktop always-ready** — **✕ / Alt+F4 always hides to the system tray** (local API
+  stays up). Full stop only from tray **Quit**. Multi-tab stream paint, abort UX, and
+  session-scoped partner status.
+- **Computer use** — host jobs, shot TTL, multi-tab cancel, open_app protocol/UNC harden.
+- **Security** — web_fetch SSRF (userinfo, CGNAT, redirects), DPAPI local API token,
+  identity export HMAC + rate limits, MCP residual purge, plugin path-required load.
+- **Docs** — owner’s manual + README refreshed for metabolism, agency, and tray behavior
+  (F1 wiki includes architecture diagram).
 
 ## 0.19.0 - Parallel multi-provider + background turns
 
