@@ -575,28 +575,60 @@ const MOBILE_VIEWPORT_JS: &str = r#"(function(){
       m.setAttribute('name', 'viewport');
       (document.head || document.documentElement).appendChild(m);
     }
-    var c = m.getAttribute('content') || '';
-    if (!/width\s*=\s*device-width/i.test(c)) {
-      m.setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=5, viewport-fit=cover');
-    }
+    m.setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=5, viewport-fit=cover');
   } catch(e) {}
 })();"#;
 
-/// Fullscreen CSS so video / :fullscreen elements fill the WebView2 surface
-/// (host also expands bounds on ContainsFullScreenElementChanged).
-const FULLSCREEN_CSS_JS: &str = r#"(function(){
-  if (window.__remedyFsCss) return;
-  window.__remedyFsCss = true;
+/// Desktop mode: wide viewport so sites don't stay stuck in mobile layout after toggle.
+const DESKTOP_VIEWPORT_JS: &str = r#"(function(){
+  try {
+    var m = document.querySelector('meta[name="viewport"]');
+    if (!m) {
+      m = document.createElement('meta');
+      m.setAttribute('name', 'viewport');
+      (document.head || document.documentElement).appendChild(m);
+    }
+    // Wide fixed width — many sites key off this for "desktop" CSS.
+    m.setAttribute('content', 'width=1280, initial-scale=1');
+  } catch(e) {}
+})();"#;
+
+/// Tell the page the WebView (rail host) *is* the screen — no polyfill of
+/// requestFullscreen. Sites use screen/inner dimensions; matching them to the
+/// rail makes native fullscreen fill this surface only.
+const RAIL_AS_SCREEN_JS: &str = r#"(function(){
+  if (window.__remedyRailAsScreen) return;
+  window.__remedyRailAsScreen = true;
+  function wh() {
+    var w = window.innerWidth || document.documentElement.clientWidth || 1;
+    var h = window.innerHeight || document.documentElement.clientHeight || 1;
+    return { w: Math.max(1, Math.round(w)), h: Math.max(1, Math.round(h)) };
+  }
+  function patch(proto, keys, pick) {
+    keys.forEach(function(k) {
+      try {
+        Object.defineProperty(proto, k, {
+          configurable: true,
+          enumerable: true,
+          get: function() { return pick(wh()); }
+        });
+      } catch (e) {}
+    });
+  }
+  try {
+    patch(Screen.prototype, ['width', 'availWidth'], function(d) { return d.w; });
+    patch(Screen.prototype, ['height', 'availHeight'], function(d) { return d.h; });
+  } catch (e) {}
+  // Minimal CSS: when native :fullscreen fires, fill the WebView (the rail).
   try {
     var s = document.createElement('style');
-    s.id = 'remedy-fullscreen-css';
+    s.id = 'remedy-rail-fs';
     s.textContent = [
-      ':fullscreen,:-webkit-full-screen{width:100%!important;height:100%!important;background:#000!important;}',
-      'video:fullscreen,video:-webkit-full-screen{object-fit:contain;width:100%!important;height:100%!important;max-width:100%!important;max-height:100%!important;}',
-      '*:fullscreen video, *:-webkit-full-screen video{width:100%!important;height:100%!important;object-fit:contain;}'
+      ':fullscreen,:-webkit-full-screen{box-sizing:border-box;width:100%!important;height:100%!important;max-width:100vw!important;max-height:100vh!important;background:#000!important;}',
+      'video:fullscreen,video:-webkit-full-screen{object-fit:contain;width:100%!important;height:100%!important;}'
     ].join('');
-    (document.documentElement||document.head).appendChild(s);
-  } catch(e) {}
+    (document.documentElement || document.head).appendChild(s);
+  } catch (e) {}
 })();"#;
 
 fn normalize_url(raw: &str) -> Result<String, String> {
@@ -712,9 +744,12 @@ fn embed_may_show(state: &BrowserState) -> bool {
     !state.stack_suppressed.load(Ordering::SeqCst)
 }
 
-/// WebView2: when the page goes fullscreen (video), keep the embed inside the
-/// **Browser rail host** (not the whole app window). SPA hides rail chrome and
-/// pushes larger host bounds; we re-apply last rail rect immediately.
+/// WebView2: page/video fullscreen stays inside the rail host.
+/// SPA may hide toolbar/header so the host grows to the full rail panel;
+/// we never expand past last_bounds into the whole app window.
+///
+/// Handler is intentionally leaked after attach — COM callbacks must outlive
+/// the with_webview closure or events never fire.
 #[cfg(windows)]
 fn attach_fullscreen_handler(app: AppHandle, wv: tauri::Webview) {
     let app_cb = app.clone();
@@ -753,6 +788,8 @@ fn attach_fullscreen_handler(app: AppHandle, wv: tauri::Webview) {
         {
             log::warn!("browser fullscreen handler attach failed: {e}");
         } else {
+            // Keep COM handler alive for the lifetime of the process/embed.
+            std::mem::forget(handler);
             log::info!("browser fullscreen handler attached (token={token})");
         }
     });
@@ -830,24 +867,131 @@ pub fn browser_view_mode(state: State<'_, BrowserState>) -> Result<serde_json::V
     }))
 }
 
-/// Toggle desktop vs mobile UA. Recreates the embed on next navigate (callers
-/// should destroy + navigate after this so the new UA applies).
+/// Apply mobile/desktop User-Agent on a live embed (WebView2 Settings2).
+#[cfg(windows)]
+fn set_embed_user_agent(wv: &tauri::Webview, desktop: bool) -> Result<(), String> {
+    let ua = rail_user_agent(desktop).to_string();
+    let (tx, rx) = std::sync::mpsc::sync_channel::<Result<(), String>>(1);
+    wv.with_webview(move |platform| {
+        use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Settings2;
+        use windows::core::{Interface, HSTRING};
+
+        let result = (|| {
+            let controller = platform.controller();
+            let core = unsafe { controller.CoreWebView2() }.map_err(|e| e.to_string())?;
+            let settings = unsafe { core.Settings() }.map_err(|e| e.to_string())?;
+            let settings2: ICoreWebView2Settings2 =
+                settings.cast().map_err(|e| format!("Settings2 cast: {e}"))?;
+            let hs = HSTRING::from(ua.as_str());
+            unsafe { settings2.SetUserAgent(&hs) }.map_err(|e| format!("SetUserAgent: {e}"))?;
+            Ok(())
+        })();
+        let _ = tx.send(result);
+    })
+    .map_err(|e| format!("with_webview: {e}"))?;
+    rx.recv().map_err(|e| format!("UA channel: {e}"))?
+}
+
+#[cfg(not(windows))]
+fn set_embed_user_agent(_wv: &tauri::Webview, _desktop: bool) -> Result<(), String> {
+    Err("User-Agent switch requires Windows WebView2".into())
+}
+
+/// Toggle desktop vs mobile site for the Browser rail.
+///
+/// Prefers **in-place** User-Agent change + hard reload (no destroy). Falls back
+/// to destroy+recreate if Settings2 is unavailable. SPA should pass current URL
+/// + host bounds when available.
 #[tauri::command]
 pub fn browser_set_desktop_site(
     app: AppHandle,
     state: State<'_, BrowserState>,
     enabled: bool,
+    url: Option<String>,
+    bounds: Option<BrowserBounds>,
 ) -> Result<serde_json::Value, String> {
     state.desktop_site.store(enabled, Ordering::SeqCst);
     save_rail_prefs(&BrowserRailPrefs {
         desktop_site: enabled,
     });
-    // UA is fixed at WebView create time — must recreate embed.
-    destroy_embed(&app);
     log::info!(
         "browser rail view mode → {}",
         if enabled { "desktop" } else { "mobile" }
     );
+
+    let target = url
+        .map(|u| u.trim().to_string())
+        .filter(|u| !u.is_empty() && !u.starts_with("about:"))
+        .or_else(|| {
+            state
+                .current_url
+                .lock()
+                .ok()
+                .map(|g| g.clone())
+                .filter(|u| !u.is_empty() && !u.starts_with("about:"))
+        });
+
+    let mut method = "prefs_only";
+    if let Some(ref target_url) = target {
+        if let Some(wv) = app.get_webview(LABEL) {
+            match set_embed_user_agent(&wv, enabled) {
+                Ok(()) => {
+                    // Hard reload with new UA (same URL).
+                    if let Some(ref b) = bounds {
+                        let cb = clamp_bounds(b);
+                        if let Ok(mut g) = state.last_bounds.lock() {
+                            *g = Some(cb.clone());
+                        }
+                        let _ = apply_bounds(&wv, &cb, embed_may_show(state.inner()));
+                    }
+                    match target_url.parse::<Url>() {
+                        Ok(parsed) => {
+                            if let Err(e) = wv.navigate(parsed) {
+                                log::warn!("browser UA toggle navigate failed: {e}");
+                            } else {
+                                method = "ua_inplace";
+                                log::info!("browser UA applied in-place, reloading {target_url}");
+                            }
+                        }
+                        Err(e) => log::warn!("browser UA toggle bad url: {e}"),
+                    }
+                    // Viewport script after a beat (page load handler also runs).
+                    let js = if enabled {
+                        DESKTOP_VIEWPORT_JS
+                    } else {
+                        MOBILE_VIEWPORT_JS
+                    };
+                    let wv2 = wv.clone();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_millis(400));
+                        let _ = wv2.eval(js);
+                        std::thread::sleep(std::time::Duration::from_millis(600));
+                        let _ = wv2.eval(js);
+                    });
+                }
+                Err(e) => {
+                    log::warn!("browser set UA failed ({e}); recreate embed");
+                    destroy_embed(&app);
+                    match navigate_embed(&app, state.inner(), target_url, bounds.clone()) {
+                        Ok(_) => method = "recreate",
+                        Err(ne) => {
+                            log::warn!("browser recreate after UA fail: {ne}");
+                            return Err(ne);
+                        }
+                    }
+                }
+            }
+        } else {
+            // No embed yet — flag is set; next navigate creates with correct UA.
+            method = "prefs_next_open";
+            if let Some(b) = bounds {
+                if let Ok(mut g) = state.last_bounds.lock() {
+                    *g = Some(clamp_bounds(&b));
+                }
+            }
+        }
+    }
+
     let _ = app.emit(
         "browser-view-mode",
         json!({
@@ -858,7 +1002,8 @@ pub fn browser_set_desktop_site(
     Ok(json!({
         "desktop_site": enabled,
         "mode": if enabled { "desktop" } else { "mobile" },
-        "recreate": true,
+        "method": method,
+        "recreate": method == "recreate",
     }))
 }
 
@@ -1115,10 +1260,13 @@ pub fn navigate_embed(
             let _ = wv.eval(SAME_WINDOW_OAUTH_JS);
             // Scrollbars only (no zoom / chrome overrides)
             let _ = wv.eval(RAIL_LAYOUT_JS);
-            let _ = wv.eval(FULLSCREEN_CSS_JS);
-            // Mobile mode: ensure viewport meta so sites scale correctly
+            // Screen/viewport = this WebView (the rail) so native fullscreen fills it.
+            let _ = wv.eval(RAIL_AS_SCREEN_JS);
+            // Viewport meta for mobile vs desktop rail mode (re-applied every load).
             if let Some(st) = app_for_load.try_state::<BrowserState>() {
-                if !st.desktop_site.load(Ordering::SeqCst) {
+                if st.desktop_site.load(Ordering::SeqCst) {
+                    let _ = wv.eval(DESKTOP_VIEWPORT_JS);
+                } else {
                     let _ = wv.eval(MOBILE_VIEWPORT_JS);
                 }
             }
@@ -1129,7 +1277,7 @@ pub fn navigate_embed(
             std::thread::spawn(move || {
                 std::thread::sleep(std::time::Duration::from_millis(800));
                 let _ = wv2.eval(RAIL_LAYOUT_JS);
-                let _ = wv2.eval(FULLSCREEN_CSS_JS);
+                let _ = wv2.eval(RAIL_AS_SCREEN_JS);
             });
         });
 
