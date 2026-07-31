@@ -20,8 +20,9 @@ export type BrowserBoundsPayload = {
 }
 
 /**
- * Loopback host calls — server allows these without Bearer from 127.0.0.1
- * so the poller works even when token bootstrap is late.
+ * Loopback host calls — Bearer required (S-AUTH-04). We still try ensureApiToken
+ * first so late SPA bootstrap does not 401; Rust poller loads the DPAPI token
+ * independently when the React host is not mounted.
  */
 async function hostFetch<T>(path: string, init?: RequestInit): Promise<T> {
   await ensureApiToken().catch(() => null)

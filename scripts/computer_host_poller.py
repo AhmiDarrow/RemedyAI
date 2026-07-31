@@ -21,8 +21,31 @@ from pathlib import Path
 BASE = os.environ.get("REMEDY_API", "http://127.0.0.1:7400").rstrip("/")
 HOME = Path(os.environ.get("REMEDY_HOME", Path.home() / ".remedy")).expanduser()
 TOKEN_PATH = HOME / "auth" / "local_api_token"
-# Host routes are loopback no-auth, but send token if present
-TOKEN = TOKEN_PATH.read_text(encoding="utf-8").strip() if TOKEN_PATH.is_file() else ""
+
+
+def _load_token() -> str:
+    """Host/jobs/ui require Bearer — load plain or DPAPI-sealed local_api_token."""
+    try:
+        import sys
+
+        root = Path(__file__).resolve().parents[1]
+        sys.path.insert(0, str(root / "src"))
+        sys.path.insert(0, str(root / "scripts"))
+        from lib_local_token import resolve_local_api_token
+
+        return resolve_local_api_token(home=HOME, base=BASE)
+    except Exception:
+        pass
+    if not TOKEN_PATH.is_file():
+        return ""
+    raw = TOKEN_PATH.read_text(encoding="utf-8").strip()
+    if raw and not raw.lstrip().startswith("{"):
+        return raw
+    return ""
+
+
+# Host routes require Bearer (S-AUTH-04 hardening)
+TOKEN = _load_token()
 
 
 def api(method: str, path: str, body: dict | None = None, timeout: float = 15.0):
