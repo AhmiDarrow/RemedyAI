@@ -54,6 +54,18 @@ GitHub login, Auth0, Okta, …) via Privacy Shield.
 2. If still stuck: toggle **Privacy Shield off**, retry, then turn it back on.  
 3. Last resort: **↗** system browser for that login only.
 
+## Mobile vs desktop layout in the Browser rail
+
+The rail defaults to a **mobile** browser identity so sites (Gmail, Reddit, …) serve
+compact layouts that fit the panel. Toolbar control:
+
+| Control | Meaning |
+|---------|---------|
+| **📱** | Mobile view (default) |
+| **🖥** | Desktop site (full multi-column layout; may feel cramped) |
+
+Preference is stored in `~/.remedy/browser_rail.json`. Use **↗** for a real full-window desktop browser when needed.
+
 ## Telegram / messengers not realtime / “stuck syncing”
 
 Telegram allows **only one** `getUpdates` long-poll per bot token. Two Remedy windows, a leftover `remedy serve`, or `tauri:dev` plus an installed desktop all fighting the same bot produce HTTP **409** and feel like chat is dead or endlessly catching up.
