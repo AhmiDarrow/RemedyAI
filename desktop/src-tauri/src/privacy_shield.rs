@@ -520,35 +520,59 @@ pub fn should_block_navigation(url: &str) -> bool {
     }
 }
 
-/// Heavy web apps where EasyList hide-selectors break layout/scroll (Gmail, Docs, …).
-fn skip_cosmetic_for_host(page_url: &str) -> bool {
-    let Ok(u) = url::Url::parse(page_url) else {
+/// Drop cosmetic hide selectors that commonly nuke real UI (toolbars, icons).
+/// Applies to **every** site — not a host denylist.
+fn is_safe_hide_selector(sel: &str) -> bool {
+    let s = sel.trim();
+    if s.len() < 4 {
         return false;
-    };
-    let host = u.host_str().unwrap_or("").to_lowercase();
-    // Mail / office / chat SPAs — filter CSS often hides scroll containers or panes.
-    const SKIP: &[&str] = &[
-        "mail.google.com",
-        "docs.google.com",
-        "sheets.google.com",
-        "slides.google.com",
-        "drive.google.com",
-        "calendar.google.com",
-        "outlook.live.com",
-        "outlook.office.com",
-        "outlook.office365.com",
-        "teams.microsoft.com",
-        "www.notion.so",
-        "notion.so",
-        "app.slack.com",
-        "discord.com",
-        "web.whatsapp.com",
-        "www.figma.com",
-        "figma.com",
-        "github.com",
-        "gitlab.com",
+    }
+    let lower = s.to_ascii_lowercase();
+    // Bare / near-bare elements — far too broad
+    const BARE: &[&str] = &[
+        "div", "span", "a", "i", "img", "svg", "button", "input", "header", "nav", "main",
+        "section", "ul", "li", "table", "tr", "td",
     ];
-    SKIP.iter().any(|h| host == *h || host.ends_with(&format!(".{h}")))
+    if BARE.iter().any(|b| lower == *b) {
+        return false;
+    }
+    // Must be somewhat specific
+    if !lower.contains('.') && !lower.contains('#') && !lower.contains('[') {
+        return false;
+    }
+    // High risk of hiding real app chrome (unless clearly an ad selector)
+    let adish = [
+        "ad-", "-ad-", "_ad_", "adsby", "sponsor", "promo", "banner-ad", "cookie-banner",
+        "consent", "newsletter", "popup-ad", "doubleclick", "taboola", "outbrain",
+    ];
+    let chrome_risk = [
+        "toolbar",
+        "tool-bar",
+        "actionbar",
+        "action-bar",
+        "icon-btn",
+        "iconbtn",
+        "iconbutton",
+        "menubar",
+        "menu-bar",
+        "appbar",
+        "app-bar",
+        "[role=button]",
+        "[role=\"button\"]",
+        "[role=toolbar]",
+        "[role=\"toolbar\"]",
+        "aria-label",
+        "data-tooltip",
+    ];
+    let looks_ad = adish.iter().any(|t| lower.contains(t));
+    if !looks_ad && chrome_risk.iter().any(|t| lower.contains(t)) {
+        return false;
+    }
+    // Extremely long comma-lists already split; reject universal *
+    if lower == "*" || lower.starts_with("*:") {
+        return false;
+    }
+    true
 }
 
 /// CSS + optional scriptlet for the page (cosmetic phase).
@@ -557,10 +581,6 @@ pub fn cosmetic_inject_js(page_url: &str) -> Option<String> {
         return None;
     }
     if page_url.starts_with("about:") {
-        return None;
-    }
-    // Prefer working scroll/layout over ad-hiding on complex SPAs.
-    if skip_cosmetic_for_host(page_url) {
         return None;
     }
     let g = global();
@@ -573,23 +593,28 @@ pub fn cosmetic_inject_js(page_url: &str) -> Option<String> {
         let sel: Vec<String> = resources
             .hide_selectors
             .iter()
-            .take(800)
+            .filter(|s| is_safe_hide_selector(s))
+            .take(500)
             .cloned()
             .collect();
-        // Escape for embedding in a JS string used as CSS text
-        let css = sel.join(",\n");
-        let css_escaped = css
-            .replace('\\', "\\\\")
-            .replace('`', "\\`")
-            .replace("${", "\\${");
-        parts.push(format!(
-            r#"(function(){{try{{
+        if !sel.is_empty() {
+            // Escape for embedding in a JS string used as CSS text
+            let css = sel.join(",\n");
+            let css_escaped = css
+                .replace('\\', "\\\\")
+                .replace('`', "\\`")
+                .replace("${", "\\${");
+            // display:none only — avoid visibility/height nukes that leave
+            // invisible-but-clickable ghosts when selectors partially match.
+            parts.push(format!(
+                r#"(function(){{try{{
   var s=document.getElementById('remedy-privacy-shield-css');
   if(!s){{s=document.createElement('style');s.id='remedy-privacy-shield-css';
     (document.documentElement||document.head||document.body).appendChild(s);}}
-  s.textContent=`{css_escaped}{{display:none!important;visibility:hidden!important;height:0!important;max-height:0!important;overflow:hidden!important;}}`;
+  s.textContent=`{css_escaped}{{display:none!important;}}`;
 }}catch(e){{}}}})();"#
-        ));
+            ));
+        }
     }
 
     // Scriptlets from filter lists are powerful (arbitrary page JS). Off by default.
