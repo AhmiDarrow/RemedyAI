@@ -2689,22 +2689,37 @@ export default function App() {
           }}
           onClick={(e) => e.stopPropagation()}
         >
-          <img
-            src="/logo.png"
-            alt="Remedy"
-            draggable={false}
-            style={{
-              height: 36,
-              width: 'auto',
-              maxWidth: 220,
-              objectFit: 'contain',
-              marginBottom: 12,
-              display: 'block',
-            }}
-          />
+          <div className="flex items-center gap-3 mb-3">
+            <img
+              src="/icon.png"
+              alt=""
+              draggable={false}
+              style={{
+                height: 40,
+                width: 40,
+                objectFit: 'contain',
+                borderRadius: 8,
+                flexShrink: 0,
+              }}
+            />
+            <img
+              src="/logo.png"
+              alt="Remedy"
+              draggable={false}
+              style={{
+                height: 32,
+                width: 'auto',
+                maxWidth: 200,
+                objectFit: 'contain',
+                display: 'block',
+              }}
+            />
+          </div>
           <div className="text-sm font-semibold mb-1">About Remedy</div>
-          <div className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>
-            Your personal AI partner — knowledge, design, code, and get-it-done.
+          <div className="text-xs mb-2 leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+            Your personal AI partner on this PC — knowledge, design, code, computer use,
+            and get-it-done. One continuous voice; continuity stays under{' '}
+            <code style={{ fontSize: '0.65rem' }}>~/.remedy</code>. Not a medical product.
           </div>
           <div
             className="text-xs mb-3 leading-relaxed rounded-lg px-3 py-2"
@@ -2725,10 +2740,11 @@ export default function App() {
               <span style={{ color: 'var(--accent)' }}>
                 {appVersion || updateInfo?.current_version || desktopInfo?.current_version || '—'}
               </span>
+              <span style={{ color: 'var(--text-muted)' }}> · Windows desktop + local API</span>
             </div>
             {userName && <div>Signed in as {userName}</div>}
           </div>
-          <div className="flex justify-end gap-2">
+          <div className="flex flex-wrap justify-end gap-2">
             <button
               type="button"
               className="px-3 py-1.5 rounded-lg text-xs"
@@ -2740,6 +2756,21 @@ export default function App() {
               onClick={() => {
                 setAboutOpen(false)
                 openHelp('13-whats-new')
+              }}
+            >
+              What&apos;s new
+            </button>
+            <button
+              type="button"
+              className="px-3 py-1.5 rounded-lg text-xs"
+              style={{
+                background: 'var(--bg-tertiary)',
+                color: 'var(--text-secondary)',
+                border: '1px solid var(--border)',
+              }}
+              onClick={() => {
+                setAboutOpen(false)
+                openHelp('00-overview')
               }}
             >
               Help

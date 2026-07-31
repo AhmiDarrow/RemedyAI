@@ -14,10 +14,39 @@ project access scope).
 
 ---
 
+## About
+
+| | |
+|--|--|
+| **Product** | Windows desktop partner + local API (`127.0.0.1:7400`) |
+| **Data home** | `~/.remedy` (config, memory, skills, DPAPI secrets) |
+| **Models** | *Your* provider keys or Ollama — continuity stays on disk |
+| **Current** | **v0.20.0** — metabolism, always-ready tray, privacy mode, browser rail polish |
+| **Install** | [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases/latest) · PyPI `remedy-ai` |
+
+In-app: title-bar / tray → **About Remedy** · **Settings → About**.  
+Creator note: *My name is Ahmi, I hope you enjoy my Remedy.*
+
+---
+
+## What’s new (start here)
+
+**v0.20.0** highlights:
+
+- Partner **metabolism** (L0–L3), evidence, shadow, write jail  
+- **✕ always → tray**; Quit from tray only  
+- Opt-in **Privacy mode**; browser **fullscreen in-rail**; chat media + OAuth polish  
+- Security gauntlet (SSRF, Bearer host, auth path refuse)
+
+Full list: **[What’s new](13-whats-new)** · engineering: repo `CHANGELOG.md`.
+
+---
+
 ## Contents
 
 | | Topic |
 |--|--------|
+| [About](#about) · [What’s new](#whats-new-start-here) | Who / version / highlights |
 | [What you get](#what-you-get) | Product at a glance |
 | [Workspace tools](#workspace-tools) | Files, Terminal, Browser, Scratch, Computer |
 | [Local brain](#local-brain) | SmolVLM2 on this PC |
