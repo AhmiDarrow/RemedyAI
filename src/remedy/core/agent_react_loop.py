@@ -35,9 +35,12 @@ from remedy.core.react_policy import (
     is_productive_tool_batch,
     is_serial_explore_batch,
     looks_like_false_progress,
+    looks_like_leaked_scratchpad,
     mission_verify_gate_message,
+    post_tools_user_summary_nudge,
     recovery_nudge_message,
     speed_batch_nudge_message,
+    strip_stream_status_noise,
     strip_tool_markup,
     turn_has_unfinished_work,
 )
@@ -435,6 +438,9 @@ async def call_llm_stream(runtime, message: str,
         pseudo_nudge_count = 0
         # Nudge once when the model claims progress without native tool_calls.
         false_progress_nudge_count = 0
+        # Reject monologue finals after a tool-heavy turn (auth/DSML recovery bug).
+        scratchpad_nudge_count = 0
+        tools_executed_this_turn = 0
         # One automatic recovery nudge per turn after a failing tool batch.
         recovery_nudge_done = False
         # One speed nudge if the model serializes explore as 1 tool/step.
@@ -1172,18 +1178,23 @@ async def call_llm_stream(runtime, message: str,
                                         "xAI credentials refreshed after HTTP %s; retrying",
                                         resp.status,
                                     )
-                                    yield (
-                                        "\n[auth] Refreshed xAI session; "
-                                        "retrying request…\n"
-                                    )
+                                    # Status channel only — never user answer tokens
+                                    # (session 2026-07-31 leaked [auth] into final content).
+                                    yield "@@status:Refreshed xAI session; retrying request…\n"
                                     continue
                             except Exception as auth_exc:
                                 logger.debug("xAI re-auth failed: %s", auth_exc)
                             # Refresh failed → clear soft-continue noise with guidance.
                             yield (
-                                "\n[auth required] xAI session expired or rejected. "
+                                "@@status:xAI session expired or rejected. "
                                 "Sign in again in Settings (Sign in with xAI) or "
                                 "update your API key.\n"
+                            )
+                            # User-visible hard stop (not a monologue).
+                            yield (
+                                "xAI session expired or was rejected. "
+                                "Sign in again under Settings (Sign in with xAI) "
+                                "or update your API key, then resend."
                             )
                             return
                         # DeepSeek thinking mode: tool turns require reasoning_content.
@@ -1199,8 +1210,8 @@ async def call_llm_stream(runtime, message: str,
                                     "turns; retrying request"
                                 )
                                 yield (
-                                    "\n[provider fix] Restored thinking-mode "
-                                    "reasoning for tool turns; continuing…\n"
+                                    "@@status:Restored thinking-mode reasoning "
+                                    "for tool turns; continuing…\n"
                                 )
                                 continue
                         # Truncated / invalid tool-call JSON in history (often after
@@ -1513,6 +1524,9 @@ async def call_llm_stream(runtime, message: str,
 
                 # Finalize text. Live-stream already yielded tokens when tools off.
                 text_out = finalize_round_text(round_state, tool_calls_list)
+                # Drop auth/provider status lines if they leaked into model content
+                if text_out:
+                    text_out = strip_stream_status_noise(str(text_out))
                 if text_out and not tool_calls_list:
                     with suppress(Exception):
                         assistant_text_acc.append(str(text_out)[:8000])
@@ -1632,8 +1646,9 @@ async def call_llm_stream(runtime, message: str,
                                     "tool_calls as text. Call tools via the "
                                     "function-calling API now "
                                     "(file_read / list_dir / bash_exec / "
-                                    "repo_search / file_edit), or give a short "
-                                    "status update from context."
+                                    "repo_search / file_edit). If work is already "
+                                    "done, write a **user-facing** summary of "
+                                    "results — not internal monologue."
                                 ),
                             }
                         )
@@ -1645,6 +1660,30 @@ async def call_llm_stream(runtime, message: str,
                         continue
 
                 if text_out and (not tool_calls_list or force_answer):
+                    # After tools: refuse monologue / recovery-echo as the answer
+                    # (install dogfood: 122 tools then final = "The user wants…").
+                    if (
+                        tools_executed_this_turn > 0
+                        and looks_like_leaked_scratchpad(text_out)
+                        and scratchpad_nudge_count < 2
+                    ):
+                        scratchpad_nudge_count += 1
+                        force_answer_sticky = True
+                        tools = []
+                        messages.append(
+                            {
+                                "role": "assistant",
+                                "content": text_out[:2000],
+                            }
+                        )
+                        messages.append(post_tools_user_summary_nudge())
+                        logger.info(
+                            "Scratchpad final rejected after %d tools "
+                            "(nudge %d/2)",
+                            tools_executed_this_turn,
+                            scratchpad_nudge_count,
+                        )
+                        continue
                     # Don't ship faux tool syntax as the final answer.
                     if (
                         raw_round
@@ -1880,6 +1919,8 @@ async def call_llm_stream(runtime, message: str,
                 fresh_calls = normalize_tool_calls(
                     filter_fresh_tool_calls(tool_calls_list, seen_fps)
                 )
+                if fresh_calls:
+                    tools_executed_this_turn += len(fresh_calls)
                 if not fresh_calls:
                     # Model is looping the same tools — feed cached results, nudge
                     # different actions. Only force-answer after repeated loops with

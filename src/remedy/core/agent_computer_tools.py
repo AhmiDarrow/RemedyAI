@@ -147,8 +147,13 @@ def register_computer_tools(runtime: Any) -> None:
             app=app,
         )
 
-    async def computer_page_text(hint: str = "") -> str:
-        """Extract visible text from the Browser rail page (no vision)."""
+    async def computer_page_text(hint: str = "", target: str = "browser") -> str:
+        """Extract visible text from the Browser rail page (no vision).
+
+        ``target`` is accepted for schema parity with other computer tools; page
+        text is always read from the in-app Browser rail (not full desktop).
+        """
+        _ = target  # browser-rail only; ignore desktop/auto extras from the model
         return ex.run(
             ComputerAction.PAGE_TEXT,
             target="browser",
@@ -439,7 +444,11 @@ def register_computer_tools(runtime: Any) -> None:
         computer_page_text,
         {
             "type": "object",
-            "properties": {"hint": hint_prop},
+            "properties": {
+                "hint": hint_prop,
+                # Accepted for parity; always routes to browser rail.
+                "target": target_prop,
+            },
         },
     )
     reg.register_builtin_handler(

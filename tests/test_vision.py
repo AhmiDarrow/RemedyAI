@@ -226,6 +226,53 @@ def test_legacy_qwen_model_id_migrates_to_smolvlm2():
     assert sec["model_id"] == DEFAULT_MODEL_ID
 
 
+def test_start_server_soft_migrates_retired_vision_json(tmp_path: Path, monkeypatch):
+    """Retired vision.json pins must not KeyError on auto-start."""
+    from remedy.vision import runtime as rt
+    from remedy.vision.config import save_vision_json, vision_json_path
+
+    home = tmp_path / "home"
+    save_vision_json(
+        {
+            "enabled": True,
+            "model_id": "qwen2.5-vl-3b",
+            "model_path": str(home / "missing-old.gguf"),
+            "host": "127.0.0.1",
+            "port": 8740,
+        },
+        home_dir=home,
+    )
+
+    def fake_activate(home_dir, enabled=True):
+        # Simulate bundle rebinding to product default
+        save_vision_json(
+            {
+                "enabled": True,
+                "model_id": DEFAULT_MODEL_ID,
+                "model_path": str(home / "still-missing.gguf"),
+                "host": "127.0.0.1",
+                "port": 8740,
+            },
+            home_dir=home_dir,
+        )
+        return {"ok": True}
+
+    monkeypatch.setattr(
+        "remedy.runtime.bundle.activate_local_bundle", fake_activate
+    )
+    # Already-running short-circuit off
+    monkeypatch.setattr(rt, "is_running", lambda *a, **k: False)
+    monkeypatch.setattr(rt, "runtime_binary_path", lambda *a, **k: home / "no-bin.exe")
+
+    result = rt.start_server(home_dir=home, wait_s=0.1)
+    # Soft-migrate must not raise; either activates or fails cleanly on missing binary
+    assert isinstance(result, dict)
+    assert "Unknown local model_id" not in str(result.get("error") or "")
+    side = vision_json_path(home).read_text(encoding="utf-8")
+    assert DEFAULT_MODEL_ID in side
+    assert "qwen2.5-vl-3b" not in side
+
+
 def test_save_vision_json(tmp_path: Path):
     p = save_vision_json(
         {"enabled": True, "model_id": DEFAULT_MODEL_ID},

@@ -562,6 +562,68 @@ def looks_like_false_progress(text: str) -> bool:
     return bool(text and _FALSE_PROGRESS_RE.search(text))
 
 
+# Internal monologue / recovery-prompt echo — must never be the user-facing answer.
+_LEAKED_SCRATCHPAD_MARKERS = (
+    "the user wants",
+    "i should not leak",
+    "do not leak tool markup",
+    "don't leak tool markup",
+    "give a clean summary from context",
+    "give a short status update from context",
+    "status update from context",
+    "i already completed the self-dev",
+    "without leaking tool",
+    "i should give a clean",
+    "from context without making more tool",
+)
+
+
+def strip_stream_status_noise(text: str) -> str:
+    """Remove auth/provider status lines that were wrongly streamed as tokens."""
+    t = text or ""
+    t = re.sub(r"(?m)^\s*\[auth\][^\n]*\n?", "", t)
+    t = re.sub(r"(?m)^\s*\[auth required\][^\n]*\n?", "", t)
+    t = re.sub(r"(?m)^\s*\[provider fix\][^\n]*\n?", "", t)
+    return t.strip()
+
+
+def looks_like_leaked_scratchpad(text: str) -> bool:
+    """True when the model dumped planning/meta notes instead of a user answer.
+
+    Session 2026-07-31: after xAI re-auth + DSML recovery, final content became
+    ``[auth] … The user wants a status update. I should not leak tool markup…``
+    """
+    cleaned = strip_stream_status_noise(text or "")
+    if not cleaned:
+        return False
+    low = cleaned.lower()
+    if any(m in low for m in _LEAKED_SCRATCHPAD_MARKERS):
+        return True
+    # Short self-talk after status strip
+    if len(cleaned) < 480 and re.search(
+        r"\b(the user wants|i should|from context)\b", low
+    ):
+        return True
+    return False
+
+
+def post_tools_user_summary_nudge() -> dict[str, str]:
+    """Force a real user-facing summary after tools (no monologue)."""
+    return {
+        "role": "user",
+        "content": (
+            "Your last message was **internal scratchpad**, not a user-facing answer. "
+            "Write a clear summary for the user now:\n"
+            "• What you found / fixed\n"
+            "• Files changed (paths)\n"
+            "• Tests run and results\n"
+            "• What is still open\n"
+            "Do **not** say “the user wants…” or “I should not leak…”. "
+            "Do not call tools unless one critical verification is missing."
+        ),
+    }
+
+
 # Hard phrases: always re-arm tools (even if the model wrote a longer stub).
 _AGENCY_TOOL_PROMISE_HARD = (
     "activating skill",

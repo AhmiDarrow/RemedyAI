@@ -351,6 +351,42 @@ class TestToolRegistry:
         # execute is async — call handler map directly
         assert registry._handlers["bash_exec"] is builtin_h  # noqa: SLF001
 
+    @pytest.mark.asyncio
+    async def test_execute_strips_unknown_kwargs(self):
+        """LLM extras (description/target/…) must not TypeError fixed signatures."""
+        registry = ToolRegistry()
+        seen: dict[str, object] = {}
+
+        async def bash_like(command: str = "", timeout_seconds: float = 60.0) -> str:
+            seen["command"] = command
+            seen["timeout_seconds"] = timeout_seconds
+            return "ok"
+
+        registry.register_builtin_handler("bash_exec", "shell", bash_like)
+        out = await registry.execute(
+            "bash_exec",
+            command="echo hi",
+            timeout_seconds=12,
+            description="human note models love to pass",
+            target="desktop",
+        )
+        assert out == "ok"
+        assert seen == {"command": "echo hi", "timeout_seconds": 12}
+
+    @pytest.mark.asyncio
+    async def test_execute_keeps_var_keyword(self):
+        registry = ToolRegistry()
+        seen: dict[str, object] = {}
+
+        async def flexible(**kwargs):
+            seen.update(kwargs)
+            return "ok"
+
+        registry.register_builtin_handler("flex", "flex", flexible)
+        out = await registry.execute("flex", a=1, b=2, description="keep me")
+        assert out == "ok"
+        assert seen == {"a": 1, "b": 2, "description": "keep me"}
+
 
 class TestHermesDeepAdapter:
     def test_map_hermes_tools(self):
