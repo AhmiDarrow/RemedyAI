@@ -4,15 +4,13 @@
  * desktop refreshes the sidebar and active thread without polling alone.
  */
 
-import { authHeaders, ensureApiToken } from './client'
-
-const SERVER_URL = 'http://127.0.0.1:7400'
+import { authHeaders, ensureApiToken, getServerUrl } from './client'
 
 function eventsUrl(): string {
   if (typeof window !== 'undefined') {
     const w = window as Window & { __TAURI__?: unknown; __TAURI_INTERNALS__?: unknown }
     if (w.__TAURI__ || w.__TAURI_INTERNALS__) {
-      return `${SERVER_URL}/api/events/sessions`
+      return `${getServerUrl()}/api/events/sessions`
     }
   }
   return '/api/events/sessions'

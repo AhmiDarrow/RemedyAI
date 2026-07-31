@@ -1,3 +1,4 @@
+import { getServerUrl } from '../api/client'
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { getSettings, updateSettings } from '../api/settings'
 import {
@@ -225,7 +226,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
         const up = await waitForLocalApi(20000)
         if (!up) {
           throw new Error(
-            'Local Remedy server is not responding on http://127.0.0.1:7400. '
+            `Local Remedy server is not responding on ${getServerUrl()}. `
               + 'Close setup, click Retry on the connection screen, then try Sign in again.',
           )
         }

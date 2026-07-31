@@ -1,3 +1,4 @@
+import { getServerUrl } from '../api/client'
 import { useEffect, useState } from 'react'
 import { isTauri, tauriInvoke } from '../api/tauri'
 
@@ -49,7 +50,7 @@ export function QuitServerWarning({ open, onCancel, onConfirmQuit }: QuitServerW
         <div className="text-xs leading-relaxed mb-3" style={{ color: 'var(--text-secondary)' }}>
           <p className="mb-2">
             Quitting fully <strong>stops the local API</strong> on{' '}
-            <code style={{ color: 'var(--accent)' }}>127.0.0.1:7400</code>.
+            <code style={{ color: 'var(--accent)' }}>{getServerUrl().replace(/^https?:\/\//, '')}</code>.
             Any browser WebUI will disconnect and stop working.
           </p>
           <p className="mb-2">
@@ -98,10 +99,10 @@ export function QuitServerWarning({ open, onCancel, onConfirmQuit }: QuitServerW
               onCancel()
               if (isTauri()) {
                 void tauriInvoke('switch_to_web_ui').catch(() => {
-                  window.open('http://127.0.0.1:7400/', '_blank', 'noopener,noreferrer')
+                  window.open(getServerUrl() + '/', '_blank', 'noopener,noreferrer')
                 })
               } else {
-                window.open('http://127.0.0.1:7400/', '_blank', 'noopener,noreferrer')
+                window.open(getServerUrl() + '/', '_blank', 'noopener,noreferrer')
               }
             }}
           >
