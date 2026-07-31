@@ -79,6 +79,41 @@ def test_sanitize_does_not_mutate_input():
     assert "sk-abcdefghijklmnopqrstuvwxyz123456" not in out["messages"][0]["content"]
 
 
+def test_privacy_mode_redacts_email_phone_and_tighter_tool_cap(monkeypatch):
+    """Opt-in privacy: PII scrub + shorter tool bodies; default path unchanged."""
+    from remedy.core.provider_sanitize import (
+        TOOL_CONTENT_MAX,
+        TOOL_CONTENT_MAX_PRIVACY,
+        clear_privacy_mode_cache,
+        sanitize_message,
+    )
+
+    clear_privacy_mode_cache()
+    monkeypatch.delenv("REMEDY_PRIVACY_MODE", raising=False)
+    # Default off: email survives (secret scrub only)
+    m0 = sanitize_message(
+        {
+            "role": "tool",
+            "name": "gmail_search",
+            "content": "From: alice@example.com called 555-123-4567 about sk-abcdefghijklmnopqrstuvwxyz123456",
+        },
+        privacy=False,
+    )
+    assert "alice@example.com" in m0["content"]
+    assert "sk-abcdefghijklmnopqrstuvwxyz123456" not in m0["content"]
+
+    huge = ("contact me at bob@corp.example " * 400) + ("y" * 5000)
+    m1 = sanitize_message(
+        {"role": "tool", "name": "gmail_read", "content": huge},
+        privacy=True,
+    )
+    assert "bob@corp.example" not in m1["content"]
+    assert "[email]" in m1["content"]
+    assert len(m1["content"]) <= TOOL_CONTENT_MAX_PRIVACY + 50
+    assert len(m1["content"]) < TOOL_CONTENT_MAX
+    clear_privacy_mode_cache()
+
+
 def test_tool_call_arguments_not_mid_string_clipped():
     """Regression: clipping args at TOOL_CONTENT_MAX broke JSON → provider 400."""
     # Build valid JSON args larger than the old 6k clip threshold.

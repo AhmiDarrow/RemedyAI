@@ -233,8 +233,8 @@ def register_computer_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         but no longer advertises * + Private-Network to the public web.
         """
         jid = (req.job_id or "").strip()
-        # Prefer full uuid hex (32); still accept legacy 16-char ids.
-        if not jid or len(jid) < 16:
+        # Full uuid hex is 32; reject short ids (spoof surface). Alnum only.
+        if not jid or len(jid) < 32 or not jid.isalnum():
             raise HTTPException(400, "invalid job_id")
         b = _bridge()
         elements = [e for e in (req.elements or []) if isinstance(e, dict)][:120]

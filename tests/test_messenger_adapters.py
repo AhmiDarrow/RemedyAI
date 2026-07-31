@@ -191,8 +191,11 @@ def test_teams_jwt_fail_closed_requires_aud_and_exp(monkeypatch):
     import time
 
     from remedy.gateway.channels import teams as teams_mod
+    from remedy.gateway.channels import jwt_rs256 as jwks_mod
 
     monkeypatch.delenv("REMEDY_TEAMS_SKIP_JWT", raising=False)
+    # Structure-only path for claim tests (signature covered separately)
+    monkeypatch.setenv("REMEDY_TEAMS_SKIP_JWKS", "1")
     ch = TeamsChannel(_GW(), app_id="my-app-id", app_password="pw")
 
     # Missing aud → reject
@@ -233,7 +236,7 @@ def test_teams_jwt_fail_closed_requires_aud_and_exp(monkeypatch):
     )
     assert ch.verify_inbound_auth(f"Bearer {tok}") is False
 
-    # Valid structure (still no signature verify — residual risk)
+    # Valid structure (JWKS skipped via env for this claim suite)
     tok = _fake_jwt(
         {
             "aud": "my-app-id",
@@ -268,6 +271,71 @@ def test_teams_jwt_fail_closed_requires_aud_and_exp(monkeypatch):
         {"aud": "x", "exp": time.time() + 10, "iss": "https://sts.windows.net/t/"},
         app_id="x",
     )
+    monkeypatch.delenv("REMEDY_TEAMS_SKIP_JWKS", raising=False)
+    _ = jwks_mod  # import used by signature suite
+
+
+def test_teams_jwt_rs256_signature_required(monkeypatch):
+    """Forged unsigned JWT must fail when JWKS verify is on (S-MSG-01)."""
+    import json
+    import time
+
+    from remedy.gateway.channels.jwt_rs256 import (
+        b64url_encode,
+        clear_test_rsa_keys,
+        inject_test_rsa_key,
+        verify_jwt_rs256_jwks,
+    )
+
+    monkeypatch.delenv("REMEDY_TEAMS_SKIP_JWT", raising=False)
+    monkeypatch.delenv("REMEDY_TEAMS_SKIP_JWKS", raising=False)
+
+    # Deterministic 1024-bit RSA (seed 42) — public only injected for verify
+    n_b64 = (
+        "bpQFAK6Xu7a1pUYfFGNS_0fqnz9wdIW-_5bCBHXIYvy5kwALgdRY1X31gcyO2nJwCe7tksbMkrHMox1UTIN8GLuqYFmYqBc4f_hrYNA4WoDqCofOcZxOiiVLYPUio1lV-VcQdXs88dMjNy8NbyworNy4uw85O8aq2SHGgv9u8Dc"
+    )
+    e_b64 = "AQAB"
+    # Pre-signed token for aud=my-app-id (matching private d; see jwt_rs256 tests)
+    good_token = (
+        "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InRlc3QtMSJ9."
+        "eyJhdWQiOiJteS1hcHAtaWQiLCJleHAiOjk5OTk5OTk5OTksImlzcyI6Imh0dHBzOi8vYXBpLmJvdGZyYW1ld29yay5jb20ifQ."
+        "P_Suow7oRzjfGOPJDZiXNlyyKeWKB0M3er3Yw9VKfkF92XZtngAbvjfeEavwNsoGItr01xo8mu9KkN2-Gq9CO5JBKG6ngGYSTf18UN6phGbAow1Uidh52kt8i6XXxAUpHS0rEioU9jWM0mbumk8V1YNy0M-9QygknSHD33ANfr0"
+    )
+
+    clear_test_rsa_keys()
+    inject_test_rsa_key(kid="test-1", n_b64=n_b64, e_b64=e_b64)
+    assert verify_jwt_rs256_jwks(good_token, allow_network=False) is True
+
+    ch = TeamsChannel(_GW(), app_id="my-app-id", app_password="pw")
+    assert ch.verify_inbound_auth(f"Bearer {good_token}") is True
+
+    # Unsigned / alg=none style forgery rejected
+    forged = _fake_jwt(
+        {
+            "aud": "my-app-id",
+            "exp": time.time() + 3600,
+            "iss": "https://api.botframework.com",
+        }
+    )
+    assert ch.verify_inbound_auth(f"Bearer {forged}") is False
+
+    # Wrong signature (tamper payload)
+    parts = good_token.split(".")
+    bad_payload = b64url_encode(
+        json.dumps(
+            {
+                "aud": "my-app-id",
+                "exp": 9999999999,
+                "iss": "https://api.botframework.com",
+                "evil": 1,
+            },
+            separators=(",", ":"),
+        ).encode()
+    )
+    tampered = f"{parts[0]}.{bad_payload}.{parts[2]}"
+    assert ch.verify_inbound_auth(f"Bearer {tampered}") is False
+
+    clear_test_rsa_keys()
 
 
 def test_google_chat_auth_length_mismatch_false_not_raise():
