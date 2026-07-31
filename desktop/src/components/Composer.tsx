@@ -1531,10 +1531,10 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
               : planMode
                 ? 'Plan mode — explore & plan (Shift+Tab → Build)'
                 : streaming
-                  ? 'Send to queue (Enter) · Ctrl+Enter interrupt…'
+                  ? 'Queue next message (Enter) · Ctrl+Enter interrupt…'
                   : attachments.length
-                    ? 'Message (optional)…'
-                    : 'Message, /command, @file… (Shift+Tab Plan/Build)'
+                    ? 'Add a note for these files…'
+                    : 'Message Remedy — /command · @file · Shift+Tab Plan'
           }
           disabled={disabled}
           title={

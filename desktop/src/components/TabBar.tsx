@@ -15,6 +15,8 @@ export function TabBar({ tabs, activeId, onSelect, onClose, onNew, onExport }: T
   return (
     <div
       className="flex items-center border-b overflow-x-auto"
+      role="tablist"
+      aria-label="Open chats"
       style={{
         background: 'var(--bg-primary)',
         borderColor: 'var(--border)',
@@ -22,42 +24,64 @@ export function TabBar({ tabs, activeId, onSelect, onClose, onNew, onExport }: T
         flexShrink: 0,
       }}
     >
-      {tabs.map((tab) => (
-        <div
-          key={tab.id}
-          className="flex items-center gap-1 px-3 h-full cursor-pointer border-r text-xs whitespace-nowrap transition-colors"
-          style={{
-            background: tab.id === activeId ? 'var(--bg-secondary)' : 'transparent',
-            borderColor: 'var(--border)',
-            color: tab.id === activeId ? 'var(--text-primary)' : 'var(--text-muted)',
-            borderBottom: tab.id === activeId ? '2px solid var(--accent)' : '2px solid transparent',
-          }}
-          onClick={() => onSelect(tab.id)}
-          onContextMenu={(e) => {
-            e.preventDefault()
-            onExport?.(tab.id)
-          }}
-        >
-          <span className="truncate max-w-[140px]">{tab.title || 'Untitled'}</span>
-          <button
-            className="ml-0.5 text-xs rounded-full w-4 h-4 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity"
-            style={{ color: 'var(--text-muted)' }}
-            onClick={(e) => {
-              e.stopPropagation()
-              onClose(tab.id)
+      {tabs.map((tab) => {
+        const active = tab.id === activeId
+        const title = tab.title || 'Untitled'
+        return (
+          <div
+            key={tab.id}
+            role="tab"
+            aria-selected={active}
+            tabIndex={active ? 0 : -1}
+            className="group flex items-center gap-1 px-3 h-full cursor-pointer border-r text-xs whitespace-nowrap transition-colors"
+            style={{
+              background: active
+                ? 'var(--bg-secondary)'
+                : 'transparent',
+              borderColor: 'var(--border)',
+              color: active ? 'var(--text-primary)' : 'var(--text-muted)',
+              borderBottom: active
+                ? '2px solid var(--accent)'
+                : '2px solid transparent',
             }}
-            title="Close tab"
+            onClick={() => onSelect(tab.id)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                onSelect(tab.id)
+              }
+            }}
+            onContextMenu={(e) => {
+              e.preventDefault()
+              onExport?.(tab.id)
+            }}
+            title={title}
           >
-            {'\u00D7'}
-          </button>
-        </div>
-      ))}
+            <span className="truncate max-w-[140px]">{title}</span>
+            <button
+              type="button"
+              className="ml-0.5 text-xs rounded-full w-4 h-4 flex items-center justify-center opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
+              style={{ color: 'var(--text-muted)' }}
+              onClick={(e) => {
+                e.stopPropagation()
+                onClose(tab.id)
+              }}
+              title="Close tab"
+              aria-label={`Close ${title}`}
+            >
+              {'\u00D7'}
+            </button>
+          </div>
+        )
+      })}
 
       <button
+        type="button"
         onClick={onNew}
         className="px-3 h-full text-xs transition-colors flex-shrink-0"
         style={{ color: 'var(--text-muted)', background: 'transparent' }}
         title="New tab"
+        aria-label="New chat tab"
       >
         +
       </button>
