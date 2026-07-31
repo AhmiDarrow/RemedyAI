@@ -11,6 +11,7 @@ write roots — or that hide the target path (env expansion / Join-Path / python
 
 from __future__ import annotations
 
+import os
 import re
 from collections.abc import Iterable
 from pathlib import Path
@@ -219,6 +220,14 @@ def looks_like_mutation(command: str) -> bool:
     return bool(_REDIRECT_WRITE_RE.search(c))
 
 
+def _is_windows_abs_path(raw: str) -> bool:
+    """Drive-letter or UNC path — absolute on Windows even if POSIX Path disagrees."""
+    s = raw or ""
+    if re.match(r"^[A-Za-z]:[\\/]", s):
+        return True
+    return s.startswith("\\\\") or s.startswith("//")
+
+
 def path_outside_write_roots(
     path_str: str,
     *,
@@ -238,7 +247,29 @@ def path_outside_write_roots(
     if "$" in raw or "%" in raw:
         return Path(raw)
 
-    cand = Path(raw).expanduser()
+    # Windows absolute paths must not resolve under POSIX cwd as relative tokens
+    # (Linux CI: Path(r"C:\Users\…") is relative → wrongly appears inside project).
+    if _is_windows_abs_path(raw):
+        if os.name != "nt":
+            return Path(raw)
+        try:
+            cand = Path(raw).expanduser().resolve(strict=False)
+        except OSError:
+            cand = Path(raw).expanduser().absolute()
+        try:
+            from remedy.core.security import is_protected_secret_path
+
+            if is_protected_secret_path(cand):
+                return cand
+        except Exception:
+            pass
+        if _under_any(cand, roots):
+            return None
+        return cand
+
+    # Normalize Windows-style relative escapes on non-Windows so ..\sibling works.
+    norm = raw.replace("\\", "/") if os.name != "nt" and "\\" in raw else raw
+    cand = Path(norm).expanduser()
     if not cand.is_absolute():
         base = cwd or roots[0]
         try:

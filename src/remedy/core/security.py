@@ -285,7 +285,24 @@ def is_loopback_service_url(url: str) -> bool:
         except ValueError:
             return False
 
+    # Reject alternate-form IPv4 (decimal/hex/octal) — browsers/libs may map
+    # 2130706433 → 127.0.0.1; we only accept dotted IPv4 or standard IPv6.
+    if re.fullmatch(r"0x[0-9a-f]+", host) or re.fullmatch(r"\d+", host):
+        return False
+    if re.fullmatch(r"\d+(?:\.\d+){1,3}", host):
+        # Dotted forms with leading zeros (octal tricks) — fail closed.
+        parts = host.split(".")
+        if any(p.startswith("0") and p != "0" for p in parts):
+            return False
+
     if _ip_loopback(host):
+        # Only pure loopback literals (127.0.0.0/8, ::1) — not 0.0.0.0.
+        try:
+            ip = ipaddress.ip_address(host)
+            if isinstance(ip, ipaddress.IPv4Address) and int(ip) == 0:
+                return False
+        except ValueError:
+            pass
         return True
     if host in ("localhost",):
         # Still resolve — rebinding / misconfigured hosts file must not open LAN.
