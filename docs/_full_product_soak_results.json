@@ -1,0 +1,215 @@
+{
+  "branch": "master",
+  "sha": "2b6b4ec7df240456417beac93b16e07b07505b05",
+  "elapsed_s": 112.5,
+  "passed": 39,
+  "failed": 0,
+  "skipped": 2,
+  "results": [
+    {
+      "name": "git branch master",
+      "status": "PASS",
+      "detail": "master"
+    },
+    {
+      "name": "git sha",
+      "status": "PASS",
+      "detail": "2b6b4ec"
+    },
+    {
+      "name": "API /api/ping",
+      "status": "PASS",
+      "detail": "{'status': 'ok', 'version': '0.20.0', 'ts': 1785467132.6479685}"
+    },
+    {
+      "name": "desktop process app.exe",
+      "status": "PASS",
+      "detail": " Image Name                     PID Session Name        Session#    Mem Usage =="
+    },
+    {
+      "name": "GET /api/ping",
+      "status": "PASS",
+      "detail": "code=200 body={'status': 'ok', 'version': '0.20.0', 'ts': 1785467132.7819078}"
+    },
+    {
+      "name": "GET /api/status",
+      "status": "PASS",
+      "detail": "code=200 body={'status': 'ok', 'version': '0.20.0', 'uptime': '0h 2m 56s', 'gateway': {'events_processed': 2, 'cha"
+    },
+    {
+      "name": "GET /api/computer/host/status",
+      "status": "PASS",
+      "detail": "code=200 body={'host_connected': True, 'browser_bounds': {'x': 1264.0, 'y': 72.0, 'width': 620.0, 'height': 865.0,"
+    },
+    {
+      "name": "GET /api/computer/jobs/next?only=navigate",
+      "status": "PASS",
+      "detail": "code=200 body={'job': None}"
+    },
+    {
+      "name": "POST computer host/hello",
+      "status": "PASS",
+      "detail": "{'ok': True, 'client': 'full-soak', 'host_connected': True, 'poller_required': True}"
+    },
+    {
+      "name": "resolve_target matrix",
+      "status": "PASS",
+      "detail": "'Open Start menu'->desktop; 'run the installer se'->desktop; 'open https://example'->browser; 'wiki documentation p'->browser"
+    },
+    {
+      "name": "computer_monitors",
+      "status": "PASS",
+      "detail": "n=3"
+    },
+    {
+      "name": "computer_snapshot windows",
+      "status": "PASS",
+      "detail": "n=12"
+    },
+    {
+      "name": "uia/comtypes available",
+      "status": "PASS",
+      "detail": "True"
+    },
+    {
+      "name": "computer_snapshot controls",
+      "status": "PASS",
+      "detail": "controls=10"
+    },
+    {
+      "name": "computer_navigate rail",
+      "status": "PASS",
+      "detail": "via=rust-host msg=SUCCESS: Page is open in the in-app Browser rail (right panel). URL: https://exa"
+    },
+    {
+      "name": "computer_snapshot browser eN",
+      "status": "PASS",
+      "detail": "n=15 fallback=desktop refs=[]"
+    },
+    {
+      "name": "computer_click eN",
+      "status": "SKIP",
+      "detail": "no e refs"
+    },
+    {
+      "name": "computer_page_text",
+      "status": "PASS",
+      "detail": "tlen=127 title='Example Domain'"
+    },
+    {
+      "name": "computer_screenshot browser",
+      "status": "PASS",
+      "detail": "method=PrintWindow 1371x920"
+    },
+    {
+      "name": "offline navigate no OS surprise",
+      "status": "PASS",
+      "detail": "Desktop host not connected \u2014 cannot open Browser rail. URL: https://example.com/offline. Start Remed"
+    },
+    {
+      "name": "offline snapshot desktop fallback",
+      "status": "PASS",
+      "detail": "n=22"
+    },
+    {
+      "name": "plan allowlist help",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "plan allow computer_monitors",
+      "status": "PASS",
+      "detail": "ok=True"
+    },
+    {
+      "name": "plan allow help_read",
+      "status": "PASS",
+      "detail": "ok=True"
+    },
+    {
+      "name": "plan block computer_click",
+      "status": "PASS",
+      "detail": "Error [PLAN_MODE_BLOCKED:computer_click]: Tool 'computer_click' blocked in Plan "
+    },
+    {
+      "name": "plan block computer_type",
+      "status": "PASS",
+      "detail": "Error [PLAN_MODE_BLOCKED:computer_type]: Tool 'computer_type' blocked in Plan mo"
+    },
+    {
+      "name": "plan block bash_exec",
+      "status": "PASS",
+      "detail": "Error [PLAN_MODE_BLOCKED:bash_exec]: Tool 'bash_exec' blocked in Plan mode\nSugge"
+    },
+    {
+      "name": "plan block file_write",
+      "status": "PASS",
+      "detail": "Error [PLAN_MODE_BLOCKED:file_write]: Tool 'file_write' blocked in Plan mode\nSug"
+    },
+    {
+      "name": "plan computer matrix complete",
+      "status": "PASS",
+      "detail": "allowed=8 blocked=7"
+    },
+    {
+      "name": "session-scoped cancel",
+      "status": "PASS",
+      "detail": "A=cancelled B=pending"
+    },
+    {
+      "name": "stop mid-type",
+      "status": "PASS",
+      "detail": "{'ok': False, 'target': 'desktop', 'action': 'type', 'message': 'Aborted by user', 'partial': {'ok': False, 'target': 'desktop', 'action': '"
+    },
+    {
+      "name": "provider registry size>=2",
+      "status": "PASS",
+      "detail": "n=12"
+    },
+    {
+      "name": "provider xai tool call",
+      "status": "PASS",
+      "detail": "tools=['computer_monitors'] mon=3"
+    },
+    {
+      "name": "provider deepseek tool call",
+      "status": "PASS",
+      "detail": "tools=['computer_monitors'] mon=3"
+    },
+    {
+      "name": "browser_rail prefs path ready",
+      "status": "PASS",
+      "detail": "exists=False path=C:\\Users\\Administrator\\.remedy\\browser_rail.json"
+    },
+    {
+      "name": "host_connected (in-process may be false)",
+      "status": "SKIP",
+      "detail": "connected=False"
+    },
+    {
+      "name": "file write/edit",
+      "status": "PASS",
+      "detail": "_full_soak_tmp.txt"
+    },
+    {
+      "name": "git bash-equivalent",
+      "status": "PASS",
+      "detail": "2b6b4ec"
+    },
+    {
+      "name": "pytest core computer/plan/help/stream",
+      "status": "PASS",
+      "detail": "rator\\RemedyAI\\.venv\\Lib\\site-packages\\fastapi\\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.     from starlette.testclient import TestClient as TestClient  # noqa  -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html ================== 74 passed, 1 warning in 91.32s (0:01:31) ===================  "
+    },
+    {
+      "name": "check_docs.py",
+      "status": "PASS",
+      "detail": "exit=0 n tolerance (\u0394=11)   note: consider bumping 'currently ~1369' \u2192 ~1380 (not required until \u0394>25)  === [OK ] readme-pointers ===   ok: README mentions version sync script   ok: README mentions help manual sync script   ok: README mentions docs check aggregator  All 7 documentation surface(s) aligned. "
+    },
+    {
+      "name": "pytest session/security sample",
+      "status": "PASS",
+      "detail": "ationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.     from starlette.testclient import TestClient as TestClient  # noqa  -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html ======================== 27 passed, 1 warning in 8.85s ========================  Vision pid 50484 in vision.json does not look like llama-server; skipping kill "
+    }
+  ]
+}
