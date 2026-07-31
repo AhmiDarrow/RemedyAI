@@ -37,7 +37,7 @@ Offline Help: **F1** or **Ctrl+/** · Same chapters live in the repo under `docs
 | **Workspace** | **Files** · **Terminal** · **Browser** · **Scratch** · **Computer use** rails beside chat |
 | **Local brain** | **SmolVLM2 2.2B** on this PC — vision briefs + harness assist (not a second persona) |
 | **Continuity** | Session Brief, partner memory, skills, silent nano swarm |
-| **Metabolism** | Turn tiers L0–L3, evidence ledger, shadow, Action IR, governor, portable identity |
+| **Metabolism** | **0.20.0+** turn tiers L0–L3, evidence ledger, shadow, Action IR, governor, portable identity |
 | **Messengers** | Telegram (live) + modular Discord / Slack / Mattermost / Matrix / WhatsApp / Teams / Google Chat / Signal |
 | **Skills** | Bundled + learned + **Library** (signed catalog); progressive disclosure (`skill_activate`) |
 | **Agency** | `file_edit`, repo search, shell (write jail), missions, `spread_run`, `web_search` / `web_fetch` |
@@ -79,7 +79,7 @@ Details: [Local model (SmolVLM2)](14-visual-decoder) · Workers: [Continuity wor
 
 ## Partner metabolism
 
-Silent local “partner OS” so any frontier model acts faster, leaner, and safer — still **one voice**.
+**Since 0.20.0.** Silent local “partner OS” so any frontier model acts faster, leaner, and safer — still **one voice**.
 
 | Tier | When | Behavior |
 |------|------|----------|
@@ -93,6 +93,8 @@ Also: evidence/decision currency, machine map, Action IR, Time Crystal, skill ge
 ---
 
 ## Always-ready desktop
+
+**Since 0.20.0** (title-bar ✕ is always hide-to-tray — not a Settings opt-out).
 
 | Action | Result |
 |--------|--------|

@@ -83,17 +83,17 @@ On Windows, `~` is your user profile (`C:\Users\<you>`).
 - **SSRF protection**: private/localhost/metadata hosts blocked; DNS is resolved once and the connection is **pinned** to a public IP (mitigates DNS rebinding). Redirects re-validated per hop.  
 - Does **not** remove public-web fetch power when enabled — only blocks non-public targets.  
 
-## WebUI vs quit (always-ready)
+## WebUI vs quit (always-ready · **0.20.0+**)
 
 | Action | Server | Notes |
 |--------|--------|--------|
-| **✕ / Alt+F4** | **Stays up** | Always hides to tray (not optional). Continuity stays warm. |
+| **✕ / Alt+F4** | **Stays up** | **0.20.0+** always hides to tray (not a Settings toggle). Continuity stays warm. |
 | **Switch to WebUI** | **Stays up** | Opens `http://127.0.0.1:7400/` and hides desktop. |
 | **Tray → Quit** | **Stops** | Full exit. Warning dialog unless you disabled it in Settings. |
 
 Secrets stay under `~/.remedy/auth` (DPAPI-sealed tokens where applicable). Tools cannot
-write into auth paths via shell or file tools. `web_fetch` / `web_search` block private
-and metadata targets (SSRF fail-closed).
+write into auth paths via shell or file tools (**0.20.0+** jail). `web_fetch` / `web_search`
+block private and metadata targets (SSRF fail-closed).
 
 ## Access scope
 

@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-30  
 **Codebase:** `C:\Users\Administrator\RemedyAI` · branch context `feature/computer-use`  
-**Version series:** 0.19.x  
+**Version series:** 0.19.x at audit time (product line advanced to **0.20.0** afterward)  
 **Method:** Static code review of current sources + tests (not a live pentest, SOC2, or legal cert)  
 **Threat model:** Local-first **owner-power** desktop agent. Same Windows user compromise ≈ full access is accepted and must be stated honestly. Remote / LAN / webhook exposure is in scope.
 
