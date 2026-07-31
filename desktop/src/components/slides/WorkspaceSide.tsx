@@ -1,5 +1,6 @@
-import { useEffect, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { isTauri, tauriListen } from '../../api/tauri'
 import { ALL_SLIDES, SLIDE_META, type SlideId } from '../../workspace/types'
 import {
   clampRailWidth,
@@ -45,6 +46,27 @@ export function WorkspaceSide({
   const meta = SLIDE_META[active] ?? SLIDE_META.sessions
   const open = railMode === 'open'
   const thin = railMode === 'thin'
+  /** Browser video/HTML fullscreen: hide panel header so host fills this rail tab. */
+  const [browserPageFs, setBrowserPageFs] = useState(false)
+
+  useEffect(() => {
+    if (!isTauri() || active !== 'browser') {
+      setBrowserPageFs(false)
+      return
+    }
+    let unlisten: (() => void) | undefined
+    void tauriListen<{ fullscreen?: boolean }>('browser-page-fullscreen', (p) => {
+      setBrowserPageFs(Boolean(p?.fullscreen))
+    })
+      .then((u) => {
+        unlisten = u
+      })
+      .catch(() => {})
+    return () => {
+      unlisten?.()
+      setBrowserPageFs(false)
+    }
+  }, [active])
 
   if (thin) {
     return (
@@ -153,52 +175,54 @@ export function WorkspaceSide({
       className="flex flex-col min-w-0 min-h-0 flex-1"
       style={{ background: 'var(--bg-secondary)' }}
     >
-      <div
-        data-workspace-panel-header
-        className="flex items-center gap-1 px-2 py-1 border-b shrink-0 text-xs font-semibold"
-        style={{ borderColor: 'var(--border)', color: 'var(--text-primary)' }}
-      >
-        <span className="truncate flex-1">{meta.label}</span>
-        {onSwap && (
-          <button
-            type="button"
-            className="px-1.5 py-0.5 rounded opacity-80 hover:opacity-100"
-            style={{
-              background: 'var(--bg-primary)',
-              border: '1px solid var(--border)',
-              color: 'var(--text-secondary)',
-              fontSize: 10,
-            }}
-            title="Swap left and right panels"
-            onClick={onSwap}
-          >
-            ⇄
-          </button>
-        )}
-        {meta.popout && onPopout && (
-          <button type="button" className="px-1 opacity-70" title="Pop out" onClick={onPopout}>
-            ↗
-          </button>
-        )}
-        {meta.popout && onFullscreen && (
+      {!(active === 'browser' && browserPageFs) && (
+        <div
+          data-workspace-panel-header
+          className="flex items-center gap-1 px-2 py-1 border-b shrink-0 text-xs font-semibold"
+          style={{ borderColor: 'var(--border)', color: 'var(--text-primary)' }}
+        >
+          <span className="truncate flex-1">{meta.label}</span>
+          {onSwap && (
+            <button
+              type="button"
+              className="px-1.5 py-0.5 rounded opacity-80 hover:opacity-100"
+              style={{
+                background: 'var(--bg-primary)',
+                border: '1px solid var(--border)',
+                color: 'var(--text-secondary)',
+                fontSize: 10,
+              }}
+              title="Swap left and right panels"
+              onClick={onSwap}
+            >
+              ⇄
+            </button>
+          )}
+          {meta.popout && onPopout && (
+            <button type="button" className="px-1 opacity-70" title="Pop out" onClick={onPopout}>
+              ↗
+            </button>
+          )}
+          {meta.popout && onFullscreen && (
+            <button
+              type="button"
+              className="px-1 opacity-70"
+              title="Fullscreen"
+              onClick={onFullscreen}
+            >
+              ⛶
+            </button>
+          )}
           <button
             type="button"
             className="px-1 opacity-70"
-            title="Fullscreen"
-            onClick={onFullscreen}
+            title="Minimize to thin rail"
+            onClick={() => onRailMode('thin')}
           >
-            ⛶
+            ×
           </button>
-        )}
-        <button
-          type="button"
-          className="px-1 opacity-70"
-          title="Minimize to thin rail"
-          onClick={() => onRailMode('thin')}
-        >
-          ×
-        </button>
-      </div>
+        </div>
+      )}
       <div className="flex-1 min-h-0 overflow-hidden">{children}</div>
     </div>
   )
