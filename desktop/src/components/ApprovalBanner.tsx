@@ -52,17 +52,24 @@ export function ApprovalBanner({ sessionId, onResolved }: ApprovalBannerProps) {
     <div
       className="mx-4 mt-2 mb-1 space-y-2"
       style={{ color: 'var(--text-primary)' }}
+      role="region"
+      aria-label="Pending tool approvals"
     >
       {items.map((item) => (
         <div
           key={item.id}
-          className="rounded-lg px-3 py-2.5 text-xs"
+          className="rounded-lg px-3 py-2.5 text-xs shadow-sm"
           style={{
-            background: 'var(--bg-secondary)',
-            border: '1px solid var(--warning)',
+            background:
+              'color-mix(in srgb, var(--warning) 8%, var(--bg-secondary))',
+            border: '1px solid color-mix(in srgb, var(--warning) 55%, var(--border))',
           }}
         >
-          <div className="font-semibold mb-1" style={{ color: 'var(--warning)' }}>
+          <div
+            className="font-semibold mb-1 flex items-center gap-1.5"
+            style={{ color: 'var(--warning)' }}
+          >
+            <span aria-hidden>⚠</span>
             Approval required
           </div>
           <div className="mb-1" style={{ color: 'var(--text-secondary)' }}>
@@ -78,21 +85,25 @@ export function ApprovalBanner({ sessionId, onResolved }: ApprovalBannerProps) {
           >
             {item.command}
           </code>
-          <div className="flex gap-2">
+          <div className="flex gap-2 items-center flex-wrap">
             <button
               type="button"
               disabled={busyId === item.id}
               onClick={() => void act(item, true)}
-              className="px-3 py-1 rounded font-medium"
-              style={{ background: 'var(--accent)', color: '#fff' }}
+              className="px-3 py-1.5 rounded font-medium transition-opacity"
+              style={{
+                background: 'var(--accent)',
+                color: '#fff',
+                opacity: busyId === item.id ? 0.7 : 1,
+              }}
             >
-              Approve once
+              {busyId === item.id ? 'Working…' : 'Approve once'}
             </button>
             <button
               type="button"
               disabled={busyId === item.id}
               onClick={() => void act(item, false)}
-              className="px-3 py-1 rounded font-medium"
+              className="px-3 py-1.5 rounded font-medium"
               style={{
                 background: 'var(--bg-tertiary)',
                 color: 'var(--text-primary)',
@@ -101,9 +112,6 @@ export function ApprovalBanner({ sessionId, onResolved }: ApprovalBannerProps) {
             >
               Deny
             </button>
-            <span className="ml-auto self-center" style={{ color: 'var(--text-muted)' }}>
-              id {item.id}
-            </span>
           </div>
         </div>
       ))}

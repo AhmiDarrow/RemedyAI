@@ -703,7 +703,7 @@ export function StatusBar({
                   : 'Privacy mode OFF (default) — lightning path with secret scrub. Click for tighter privacy to the model.'
               }
             >
-              Privacy
+              {privacyMode ? 'Privacy · on' : 'Privacy'}
             </SegButton>
           )}
           {onOpenHelp && (
@@ -904,23 +904,24 @@ export function StatusBar({
               <button
                 type="button"
                 onClick={() => onApprovalModeChange?.(autoApprove ? 'ask' : 'auto')}
-                className="flex items-center justify-center rounded px-1.5 py-0.5 text-sm"
+                className="flex items-center justify-center rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide transition-colors"
                 title={
                   autoApprove
-                    ? 'Auto-approve on — click for Ask'
-                    : 'Ask before risky tools — click for Auto'
+                    ? 'Auto-approve on — shell/write run without prompts. Click for Ask.'
+                    : 'Ask before risky tools (safe default). Click for Auto.'
                 }
-                aria-label={autoApprove ? 'Auto-approve' : 'Ask before risky actions'}
+                aria-label={autoApprove ? 'Auto-approve on' : 'Ask before risky actions'}
+                aria-pressed={autoApprove}
                 style={{
                   background: autoApprove
-                    ? 'color-mix(in srgb, var(--success) 25%, var(--bg-tertiary))'
+                    ? 'color-mix(in srgb, var(--success) 28%, var(--bg-tertiary))'
                     : 'var(--bg-tertiary)',
                   color: autoApprove ? 'var(--success)' : 'var(--text-secondary)',
                   border: `1px solid ${autoApprove ? 'var(--success)' : 'var(--border)'}`,
-                  minWidth: 28,
+                  minWidth: 36,
                 }}
               >
-                {autoApprove ? '👍' : '👎'}
+                {autoApprove ? 'Auto' : 'Ask'}
               </button>
 
               <button

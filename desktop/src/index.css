@@ -411,17 +411,18 @@ html.theme-animating body * {
 }
 
 ::-webkit-scrollbar {
-  width: 6px;
+  width: 7px;
+  height: 7px;
 }
 ::-webkit-scrollbar-track {
-  background: var(--bg-secondary);
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: 3px;
+  background: color-mix(in srgb, var(--text-muted) 50%, var(--border));
+  border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--text-muted);
+  background: color-mix(in srgb, var(--accent) 40%, var(--text-muted));
 }
 
 code {
@@ -948,4 +949,61 @@ pre code {
 .composer-input:focus {
   border-color: var(--accent) !important;
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+/* ---- Global keyboard focus + selection (theme-aware) ---- */
+:focus {
+  outline: none;
+}
+:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 75%, transparent);
+  outline-offset: 2px;
+}
+/* Dense chrome: keep focus rings tight on dock controls */
+[data-remedy-status-bar] :focus-visible,
+.titlebar :focus-visible {
+  outline-offset: 1px;
+}
+::selection {
+  background: color-mix(in srgb, var(--accent) 38%, transparent);
+  color: var(--text-primary);
+}
+
+/* Starter chips — keyboard + press feedback */
+.message-feed .starter-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-color: var(--accent);
+}
+.message-feed .starter-chip:active {
+  transform: scale(0.98);
+}
+
+/* Jump FAB focus */
+.scroll-latest-fab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Live session pulse */
+@keyframes remedy-busy-pulse {
+  0%, 100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+  50% {
+    opacity: 0.85;
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 0%, transparent);
+  }
+}
+.session-busy-dot {
+  animation: remedy-busy-pulse 1.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .session-busy-dot {
+    animation: none;
+  }
+  .message-feed .starter-chip:active {
+    transform: none;
+  }
 }

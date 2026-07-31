@@ -90,10 +90,22 @@ function firstName(name: string | undefined | null): string {
 }
 
 const STARTERS = [
-  { label: 'What can you help with?', text: 'What can you help me with on this machine?' },
-  { label: 'Explore this project', text: 'Scan the open project and summarize structure, stack, and what I should know.' },
-  { label: 'Generate an image', text: 'Generate an image with ComfyUI: a cozy desk at night with soft neon lights.' },
-  { label: 'Plan a task', text: 'Help me plan: ' },
+  {
+    label: 'What can you help with?',
+    text: 'What can you help me with on this machine?',
+  },
+  {
+    label: 'Explore this project',
+    text: 'Scan the open project and summarize structure, stack, and what I should know first.',
+  },
+  {
+    label: 'Fix something',
+    text: 'Help me fix a bug: ',
+  },
+  {
+    label: 'Plan a task',
+    text: 'Help me plan: ',
+  },
 ]
 
 /** Do not collapse answers — user wants full provider text visible. */
@@ -844,8 +856,13 @@ export function MessageFeed({
         >
           {/* Monogram only — no rounded plate; ~20% larger than prior 77px. */}
           <RemedyLogo size={92} variant="auto" title="Remedy" />
-          <div className="text-lg font-medium" style={{ color: 'var(--text-primary)' }}>
-            Your partner is ready
+          <div
+            className="text-lg font-semibold tracking-tight"
+            style={{ color: 'var(--text-primary)' }}
+          >
+            {userName?.trim()
+              ? `Ready when you are, ${firstName(userName)}`
+              : 'Your partner is ready'}
           </div>
           <div className="text-xs max-w-sm leading-relaxed">
             Ask anything, plan, research, or open a project to build.{' '}
@@ -853,7 +870,11 @@ export function MessageFeed({
             <code style={{ color: 'var(--accent)' }}>F1</code> opens the Help wiki.
           </div>
           {onQuickPrompt && (
-            <div className="flex flex-wrap justify-center gap-2 mt-1 max-w-lg">
+            <div
+              className="flex flex-wrap justify-center gap-2 mt-1 max-w-lg"
+              role="group"
+              aria-label="Starter prompts"
+            >
               {STARTERS.map((s) => (
                 <button
                   key={s.label}
@@ -866,14 +887,21 @@ export function MessageFeed({
               ))}
             </div>
           )}
-          <div className="text-[0.7rem] max-w-sm leading-relaxed mt-1" style={{ color: 'var(--text-muted)' }}>
+          <div
+            className="text-[0.7rem] max-w-sm leading-relaxed mt-1"
+            style={{ color: 'var(--text-muted)' }}
+          >
             <code style={{ color: 'var(--accent)' }}>Enter</code> send ·{' '}
             <code style={{ color: 'var(--accent)' }}>Shift+Enter</code> new line ·{' '}
             <code style={{ color: 'var(--accent)' }}>@</code> files ·{' '}
-            <code style={{ color: 'var(--accent)' }}>/</code> commands
+            <code style={{ color: 'var(--accent)' }}>/</code> commands ·{' '}
+            <code style={{ color: 'var(--accent)' }}>Shift+Tab</code> Plan/Build
           </div>
-          <div className="text-[0.7rem] max-w-sm leading-relaxed italic" style={{ color: 'var(--text-muted)' }}>
-            My name is Ahmi, I hope you enjoy my Remedy.
+          <div
+            className="text-[0.7rem] max-w-sm leading-relaxed italic"
+            style={{ color: 'var(--text-muted)', opacity: 0.9 }}
+          >
+            My name is Ahmi — I hope you enjoy my Remedy.
           </div>
         </div>
       )}
