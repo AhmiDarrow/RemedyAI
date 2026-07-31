@@ -1,3 +1,4 @@
+import { getServerUrl } from '../../api/client'
 /** Modal: privacy + optional app OAuth setup + Connect — keeps Settings lean. */
 
 import { useState, type ReactNode } from 'react'
@@ -5,7 +6,7 @@ import { saveGoogleApp } from '../../api/assistant'
 import { updateSettings } from '../../api/settings'
 import { RemedyLogo } from '../RemedyLogo'
 
-const REDIRECT = 'http://127.0.0.1:7400/api/assistant/google/callback'
+const REDIRECT = () => getServerUrl() + '/api/assistant/google/callback'
 
 export type ConnectNotices = {
   privacy_ai_short?: string
@@ -70,7 +71,7 @@ export function AssistantConnectDialog({
         await saveGoogleApp({
           client_id: id,
           ...(clientSecret.trim() ? { client_secret: clientSecret.trim() } : {}),
-          redirect_uri: REDIRECT,
+          redirect_uri: REDIRECT(),
         })
       }
       await onContinue()
@@ -174,7 +175,7 @@ export function AssistantConnectDialog({
           <div className="mb-3 space-y-1.5">
             <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
               This install needs an OAuth Client ID (one-time). Redirect:{' '}
-              <code className="text-[9px]">{REDIRECT}</code>
+              <code className="text-[9px]">{REDIRECT()}</code>
             </div>
             <input
               type="text"

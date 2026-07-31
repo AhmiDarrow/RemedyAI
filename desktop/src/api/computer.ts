@@ -1,7 +1,9 @@
 /** Computer-use host bridge (desktop claims browser jobs from the local API). */
-import { apiFetch, authHeaders, ensureApiToken } from './client'
+import { apiFetch, authHeaders, ensureApiToken, getServerUrl } from './client'
 
-const LOOPBACK_API = 'http://127.0.0.1:7400/api'
+function loopbackApi(): string {
+  return `${getServerUrl()}/api`
+}
 
 export type ComputerJob = {
   id: string
@@ -34,7 +36,7 @@ async function hostFetch<T>(path: string, init?: RequestInit): Promise<T> {
   if (init?.body && !headers['Content-Type']) {
     headers['Content-Type'] = 'application/json'
   }
-  const res = await fetch(`${LOOPBACK_API}${path}`, {
+  const res = await fetch(`${loopbackApi()}${path}`, {
     ...init,
     headers,
   })

@@ -1,3 +1,4 @@
+import { getServerUrl } from '../../api/client'
 /** Settings form sections — presentation + local UI state wiring via props. */
 import type { Dispatch, ReactNode, SetStateAction } from 'react'
 import { updateSettings, type Settings } from '../../api/settings'
@@ -1998,7 +1999,7 @@ export function SettingsFormSections(p: SettingsFormProps): ReactNode {
                       } catch (e) {
                         console.warn('switch_to_web_ui:', e)
                       }
-                      await openExternalUrl('http://127.0.0.1:7400/')
+                      await openExternalUrl(getServerUrl() + '/')
                     })()
                   }}
                   className="w-full py-1.5 rounded text-xs font-medium transition-colors"
@@ -2013,7 +2014,7 @@ export function SettingsFormSections(p: SettingsFormProps): ReactNode {
                 </button>
                 <div className="text-[10px] px-0.5" style={{ color: 'var(--text-muted)' }}>
                   Hides Remedy to the tray and opens the local WebUI at{' '}
-                  <code style={{ color: 'var(--accent)' }}>http://127.0.0.1:7400/</code>
+                  <code style={{ color: 'var(--accent)' }}>{getServerUrl()}/</code>
                   . Tray → Show Remedy returns to desktop.
                 </div>
                 <button

@@ -2,10 +2,46 @@ declare global {
   interface Window {
     __TAURI__?: unknown
     __TAURI_INTERNALS__?: unknown
+    /** Optional inject for dual-instance / tests */
+    __REMEDY_API_ORIGIN__?: string
   }
 }
 
-const SERVER_URL = 'http://127.0.0.1:7400'
+/**
+ * Local API origin (no trailing slash, no `/api` suffix).
+ * - `VITE_REMEDY_API` for isolated dogfood (`http://127.0.0.1:7410`)
+ * - `window.__REMEDY_API_ORIGIN__` optional inject
+ * - default release: `http://127.0.0.1:7400`
+ */
+function resolveServerUrl(): string {
+  try {
+    const envUrl = (import.meta as ImportMeta & { env?: Record<string, string> }).env
+      ?.VITE_REMEDY_API
+    if (envUrl && String(envUrl).trim()) {
+      return String(envUrl)
+        .trim()
+        .replace(/\/$/, '')
+        .replace(/\/api$/i, '')
+    }
+  } catch {
+    /* non-vite */
+  }
+  if (typeof window !== 'undefined' && window.__REMEDY_API_ORIGIN__) {
+    return String(window.__REMEDY_API_ORIGIN__)
+      .trim()
+      .replace(/\/$/, '')
+      .replace(/\/api$/i, '')
+  }
+  return 'http://127.0.0.1:7400'
+}
+
+/** Origin of the local API (e.g. http://127.0.0.1:7400 or :7410 for isolated dev). */
+export function getServerUrl(): string {
+  return resolveServerUrl()
+}
+
+/** @deprecated Prefer getServerUrl(); kept for any external imports. */
+const SERVER_URL = resolveServerUrl()
 
 let _apiToken: string | null = null
 let _tokenPromise: Promise<string | null> | null = null
@@ -18,11 +54,10 @@ function inTauriShell(): boolean {
 function getApiBase(): string {
   // Desktop shell always talks to the local sidecar (not Vite's relative /api).
   if (inTauriShell()) {
-    return `${SERVER_URL}/api`
+    return `${getServerUrl()}/api`
   }
   return '/api'
 }
-
 /** Clear cached token so the next call re-bootstraps (e.g. after server restart). */
 export function clearApiToken(): void {
   _apiToken = null
@@ -61,14 +96,19 @@ export async function ensureApiToken(): Promise<string | null> {
       const bootstrapUrls: string[] = []
       if (typeof window !== 'undefined') {
         const origin = window.location.origin || ''
+        // Same-origin when SPA is served by the local API (any port).
         if (
-          origin.includes('127.0.0.1:7400')
-          || origin.includes('localhost:7400')
+          /https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i.test(origin)
+          || origin.includes('127.0.0.1:')
+          || origin.includes('localhost:')
         ) {
-          bootstrapUrls.push(`${origin}/api/auth/local-bootstrap`)
+          // Prefer API origin, not Vite :517x (bootstrap is on the FastAPI host).
+          if (!origin.includes(':517') && !origin.includes(':1420')) {
+            bootstrapUrls.push(`${origin}/api/auth/local-bootstrap`)
+          }
         }
       }
-      bootstrapUrls.push(`${SERVER_URL}/api/auth/local-bootstrap`)
+      bootstrapUrls.push(`${getServerUrl()}/api/auth/local-bootstrap`)
       for (const url of bootstrapUrls) {
         try {
           const r = await fetch(url, {

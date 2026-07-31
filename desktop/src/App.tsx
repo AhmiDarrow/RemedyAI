@@ -49,7 +49,7 @@ import { shouldConfirmNewTurn } from './sessions/concurrentTurns'
 import { ConcurrentTurnDialog } from './components/ConcurrentTurnDialog'
 import { getStreamJob, subscribeStreamJobs } from './sessions/streamJobs'
 import { listAgents, listCommands, exportSession, importSession } from './api/messages'
-import { apiFetch } from './api/client'
+import { apiFetch, getServerUrl } from './api/client'
 import { getSettings, updateSettings } from './api/settings'
 import {
   listConnectedProviders,
@@ -680,7 +680,7 @@ export default function App() {
           void (async () => {
             if (!isTauri()) {
               // Browser already — open API web UI in a new tab
-              window.open('http://127.0.0.1:7400/', '_blank', 'noopener,noreferrer')
+              window.open(getServerUrl() + '/', '_blank', 'noopener,noreferrer')
               return
             }
             try {
@@ -698,9 +698,9 @@ export default function App() {
               }
               try {
                 const { openExternalUrl } = await import('./api/auth')
-                await openExternalUrl('http://127.0.0.1:7400/')
+                await openExternalUrl(getServerUrl() + '/')
               } catch {
-                window.open('http://127.0.0.1:7400/', '_blank', 'noopener,noreferrer')
+                window.open(getServerUrl() + '/', '_blank', 'noopener,noreferrer')
               }
             }
           })()
