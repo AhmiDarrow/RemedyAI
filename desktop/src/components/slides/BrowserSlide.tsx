@@ -756,41 +756,60 @@ export function BrowserSlide() {
         </div>
         <button
           type="button"
-          className="px-1.5 py-1 rounded font-medium"
+          className="px-1.5 py-1 rounded font-medium text-[10px] whitespace-nowrap"
           style={{
-            border: '1px solid var(--border)',
+            border: `1px solid ${desktopSite ? 'var(--accent)' : 'var(--border)'}`,
             color: desktopSite ? 'var(--accent)' : 'var(--text-secondary)',
-            background: desktopSite ? 'var(--bg-primary)' : 'transparent',
-            minWidth: 28,
+            background: desktopSite
+              ? 'color-mix(in srgb, var(--accent) 12%, transparent)'
+              : 'transparent',
+            minWidth: 52,
           }}
           title={
             desktopSite
-              ? 'Desktop site on — click for mobile view (better in this rail)'
-              : 'Mobile view (default) — click to request desktop site'
+              ? 'Desktop site on — full layout UA. Click for mobile view (better in this rail).'
+              : 'Mobile view (default) — compact layout for the rail. Click for desktop site.'
           }
+          aria-pressed={desktopSite}
+          aria-label={desktopSite ? 'Desktop site on' : 'Mobile view on'}
           onClick={() => {
-            if (!isTauri()) return
+            if (!isTauri()) {
+              setStatus('Mobile/Desktop view needs the desktop app (WebView2)')
+              return
+            }
             const next = !desktopSite
-            void tauriInvoke<{ desktop_site?: boolean }>('browser_set_desktop_site', {
-              enabled: next,
-            })
+            // Optimistic UI so the click always feels live
+            setDesktopSite(next)
+            setStatus(next ? 'Desktop site — reloading…' : 'Mobile view — reloading…')
+            void tauriInvoke<{ desktop_site?: boolean; recreate?: boolean }>(
+              'browser_set_desktop_site',
+              { enabled: next },
+            )
               .then((s) => {
                 const on = Boolean(s?.desktop_site ?? next)
                 setDesktopSite(on)
                 setLoaded(false)
-                setStatus(on ? 'Desktop site — reloading…' : 'Mobile view — reloading…')
-                // Recreate embed with new UA + reload current URL
+                // Recreate embed with new UA + reload current URL (destroy already ran)
                 const target = activeUrl || url || home
                 window.setTimeout(() => {
-                  void goRef.current(target)
-                }, 80)
+                  void goRef.current(target).finally(() => {
+                    setStatus(on ? 'Desktop site' : 'Mobile view')
+                  })
+                }, 120)
               })
               .catch((e: unknown) => {
-                setStatus(e instanceof Error ? e.message : String(e))
+                // Roll back optimistic toggle
+                setDesktopSite(!next)
+                const msg = e instanceof Error ? e.message : String(e)
+                setStatus(
+                  msg.includes('not allowed') || msg.includes('Forbidden')
+                    ? 'View mode blocked — rebuild Desktop with browser permissions'
+                    : msg,
+                )
               })
           }}
         >
-          {desktopSite ? '🖥' : '📱'}
+          {desktopSite ? '🖥 Desktop' : '📱 Mobile'}
         </button>
         <button
           type="button"
