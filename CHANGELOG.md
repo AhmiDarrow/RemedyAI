@@ -4,6 +4,26 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Tool dispatch robustness
+
+- **Unknown tool kwargs:** `ToolRegistry.execute` filters LLM-supplied extras
+  against the handler signature so models can pass `description` / `target` /
+  similar without `TypeError: unexpected keyword argument` mid-turn.
+- **`bash_exec`:** accepts optional `description` (ignored) for schema parity.
+- **`computer_page_text`:** accepts optional `target` (always browser rail).
+- **Vision start:** retired `vision.json` model pins (e.g. `qwen2.5-vl-3b`) soft-
+  migrate to the product default instead of raising `Unknown local model_id`.
+- **Vision `_proc` races:** snapshot the Popen handle before `.poll()` so concurrent
+  `stop_server` cannot raise `NoneType has no attribute poll` mid-start/status.
+
+### Stream / final-answer integrity
+
+- **xAI re-auth:** status is `@@status:…` only — no longer streams `[auth]…` into
+  the assistant bubble (dogfood: 122 tools then empty monologue).
+- **Leaked scratchpad finals:** after tools, reject “The user wants… / I should not
+  leak tool markup…” answers and force a user-facing summary nudge.
+- **DSML recovery:** no longer invites a “short status update from context” stub.
+
 ## [0.20.0] - 2026-07-31
 
 Partner Metabolism OS + always-ready desktop. One voice; local-first; provider freedom.

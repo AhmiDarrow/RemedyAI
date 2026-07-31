@@ -24,6 +24,37 @@ _SOURCE_TRUST_ORDER: tuple[ToolSource, ...] = (
 )
 
 
+def _filter_handler_arguments(
+    handler: Callable[..., Any],
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    """Drop unknown kwargs so LLM extras do not TypeError the handler.
+
+    Models often pass schema-adjacent keys (``description``, ``target``,
+    ``timeout``) that are not on the Python signature. Handlers that declare
+    ``**kwargs`` keep the full dict. Required missing params still raise at call.
+    """
+    try:
+        sig = inspect.signature(handler)
+    except (TypeError, ValueError):
+        return arguments
+    params = sig.parameters
+    if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        return arguments
+    allowed = {
+        name
+        for name, p in params.items()
+        if p.kind
+        in (
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+        )
+    }
+    if not allowed:
+        return {}
+    return {k: v for k, v in arguments.items() if k in allowed}
+
+
 class ToolRegistry:
     """Catalog of all available tools across sources (MCP, skills, builtins)."""
 
@@ -113,6 +144,9 @@ class ToolRegistry:
         # when the model mirrored the tool name into arguments.
         if "name" in arguments and arguments.get("name") == tool_name:
             arguments = {k: v for k, v in arguments.items() if k != "name"}
+        # LLM tool-calls routinely include extra keys; strip unknowns before invoke
+        # so handlers without **kwargs do not raise TypeError mid-turn.
+        arguments = _filter_handler_arguments(handler, arguments)
         if inspect.iscoroutinefunction(handler):
             return await handler(**arguments)
         return handler(**arguments)
