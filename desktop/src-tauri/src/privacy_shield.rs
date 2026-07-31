@@ -576,62 +576,16 @@ fn is_safe_hide_selector(sel: &str) -> bool {
 }
 
 /// CSS + optional scriptlet for the page (cosmetic phase).
-pub fn cosmetic_inject_js(page_url: &str) -> Option<String> {
-    if !is_enabled() {
-        return None;
-    }
-    if page_url.starts_with("about:") {
-        return None;
-    }
-    let g = global();
-    let guard = g.inner.lock().ok()?;
-    let engine = guard.engine.as_ref()?;
-    let resources = engine.url_cosmetic_resources(page_url);
-    let mut parts: Vec<String> = Vec::new();
-
-    if !resources.hide_selectors.is_empty() {
-        let sel: Vec<String> = resources
-            .hide_selectors
-            .iter()
-            .filter(|s| is_safe_hide_selector(s))
-            .take(500)
-            .cloned()
-            .collect();
-        if !sel.is_empty() {
-            // Escape for embedding in a JS string used as CSS text
-            let css = sel.join(",\n");
-            let css_escaped = css
-                .replace('\\', "\\\\")
-                .replace('`', "\\`")
-                .replace("${", "\\${");
-            // display:none only — avoid visibility/height nukes that leave
-            // invisible-but-clickable ghosts when selectors partially match.
-            parts.push(format!(
-                r#"(function(){{try{{
-  var s=document.getElementById('remedy-privacy-shield-css');
-  if(!s){{s=document.createElement('style');s.id='remedy-privacy-shield-css';
-    (document.documentElement||document.head||document.body).appendChild(s);}}
-  s.textContent=`{css_escaped}{{display:none!important;}}`;
-}}catch(e){{}}}})();"#
-            ));
-        }
-    }
-
-    // Scriptlets from filter lists are powerful (arbitrary page JS). Off by default.
-    if ALLOW_SCRIPTLET_INJECT && !resources.injected_script.is_empty() {
-        let script = resources
-            .injected_script
-            .replace("</script>", "<\\/script>");
-        parts.push(format!(
-            r#"(function(){{try{{{script}}}catch(e){{}}}})();"#
-        ));
-    }
-
-    if parts.is_empty() {
-        None
-    } else {
-        Some(parts.join("\n"))
-    }
+///
+/// **Disabled for page inject.** EasyList hide-selectors routinely match real app
+/// chrome (toolbars, Material Icons wrappers). Result: invisible-but-clickable
+/// controls on Gmail and many other SPAs. Privacy Shield still blocks **document
+/// navigations** to tracker/ad URLs via [`should_block_navigation`].
+///
+/// Re-enable only with a much stricter selector pipeline + UI tests.
+pub fn cosmetic_inject_js(_page_url: &str) -> Option<String> {
+    let _ = is_safe_hide_selector; // keep helper for future re-enable
+    None
 }
 
 fn status_of(state: &PrivacyShieldState) -> PrivacyShieldStatus {
