@@ -1,3 +1,4 @@
+import { getServerUrl } from '../api/client'
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { getLatestCheckpoint, getPartnerStatus } from '../api/partner'
 import { getVisionStatus, type VisionStatus } from '../api/vision'
@@ -304,7 +305,7 @@ export function StatusBar({
         let ok = false
         let ver = ''
         try {
-          const ping = await fetch('http://127.0.0.1:7400/api/ping', {
+          const ping = await fetch(getServerUrl() + '/api/ping', {
             signal: AbortSignal.timeout(2500),
             headers: { Accept: 'application/json' },
           })
@@ -321,7 +322,7 @@ export function StatusBar({
           /* try status */
         }
         if (!ok) {
-          const res = await fetch('http://127.0.0.1:7400/api/status', {
+          const res = await fetch(getServerUrl() + '/api/status', {
             signal: AbortSignal.timeout(4000),
           })
           ok = res.ok
@@ -487,7 +488,7 @@ export function StatusBar({
       } catch (e) {
         console.warn('switch_to_web_ui:', e)
       }
-      window.open('http://127.0.0.1:7400/', '_blank', 'noopener,noreferrer')
+      window.open(getServerUrl() + '/', '_blank', 'noopener,noreferrer')
     })()
   }
 

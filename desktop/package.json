@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
+    "tauri:dev:isolated": "node ./scripts/tauri-dev-isolated.mjs",
     "tauri:build": "tauri build",
     "lint": "oxlint",
     "test": "vitest run",

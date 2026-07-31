@@ -16,8 +16,16 @@ use std::os::windows::process::CommandExt;
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-/// Sidecar / user-data home: `%USERPROFILE%\.remedy` on Windows, `~/.remedy` elsewhere.
+/// Sidecar / user-data home.
+/// - `REMEDY_HOME` when set (isolated dev: e.g. `%USERPROFILE%\.remedy-dev`)
+/// - else `%USERPROFILE%\.remedy` / `~/.remedy`
 fn remedy_home() -> PathBuf {
+    if let Ok(h) = env::var("REMEDY_HOME") {
+        let p = PathBuf::from(h.trim());
+        if !p.as_os_str().is_empty() {
+            return p;
+        }
+    }
     let home = if cfg!(target_os = "windows") {
         env::var("USERPROFILE").unwrap_or_else(|_| ".".to_string())
     } else {
@@ -26,8 +34,41 @@ fn remedy_home() -> PathBuf {
     PathBuf::from(home).join(".remedy")
 }
 
+/// Local API port (default 7400). Isolated dev uses e.g. `REMEDY_API_PORT=7410`.
+fn api_port() -> u16 {
+    env::var("REMEDY_API_PORT")
+        .ok()
+        .and_then(|s| s.trim().parse::<u16>().ok())
+        .filter(|p| *p > 0)
+        .unwrap_or(7400)
+}
+
 fn status_addr() -> SocketAddr {
-    SocketAddr::from(([127, 0, 0, 1], 7400))
+    SocketAddr::from(([127, 0, 0, 1], api_port()))
+}
+
+fn api_base_url() -> String {
+    format!("http://127.0.0.1:{}", api_port())
+}
+
+/// True when this process is an isolated dogfood profile (not the default release port/home).
+fn is_isolated_profile() -> bool {
+    api_port() != 7400
+        || env::var("REMEDY_PROFILE")
+            .map(|s| s.eq_ignore_ascii_case("dev") || s.eq_ignore_ascii_case("isolated"))
+            .unwrap_or(false)
+        || env::var("REMEDY_HOME").map(|h| {
+            let h = h.replace('\\', "/").to_lowercase();
+            h.contains(".remedy-dev") || h.ends_with("remedy-dev")
+        }).unwrap_or(false)
+}
+
+fn window_title() -> String {
+    if is_isolated_profile() {
+        format!("Remedy Desktop (dev · :{})", api_port())
+    } else {
+        "Remedy Desktop".to_string()
+    }
 }
 
 struct DesktopPrefs {
@@ -297,9 +338,14 @@ fn which_remedy_on_path() -> Result<String, ()> {
     Err(())
 }
 
-/// True when something is already accepting connections on 127.0.0.1:7400.
-fn port_7400_in_use() -> bool {
+/// True when something is already accepting connections on our API port.
+fn api_port_in_use() -> bool {
     TcpStream::connect_timeout(&status_addr(), Duration::from_millis(250)).is_ok()
+}
+
+/// Back-compat alias used in a few call sites.
+fn port_7400_in_use() -> bool {
+    api_port_in_use()
 }
 
 /// User choice when a foreign process already owns the Remedy API port.
@@ -322,12 +368,15 @@ fn ask_foreign_serve_dialog() -> ForeignServeChoice {
         .set_level(MessageLevel::Warning)
         .set_title("Remedy server already running")
         .set_description(
-            "Another Remedy server is already using port 7400 \
+            &format!(
+                "Another Remedy server is already using port {} \
              (for example `remedy serve` in a terminal).\n\n\
              Choose how to continue:\n\n\
-             • Use existing server — open Desktop UI without stopping CLI serve\n\
-             • Stop CLI & start Desktop server — end the background process, Desktop owns :7400\n\
-             • Exit Desktop — leave CLI serve running; do not open Desktop",
+             • Use existing server — open Desktop UI without stopping that serve\n\
+             • Stop & start Desktop server — end the process on this port only\n\
+             • Exit Desktop — leave the other server running",
+                api_port()
+            ),
         )
         .set_buttons(MessageButtons::YesNoCancelCustom(
             "Use existing server".into(),
@@ -406,6 +455,7 @@ fn find_webui_dir() -> Option<PathBuf> {
 fn spawn_remedy(cmd: &str) -> Option<Child> {
     let home_dir = remedy_home();
     let home_str = home_dir.to_string_lossy();
+    let port_str = api_port().to_string();
     // --skip-setup: never block the sidecar on interactive CLI wizard.
     // Desktop SetupWizard is the first-run UX (needs a running API).
     let args = [
@@ -415,7 +465,7 @@ fn spawn_remedy(cmd: &str) -> Option<Child> {
         "--host",
         "127.0.0.1",
         "--port",
-        "7400",
+        port_str.as_str(),
         "--skip-setup",
     ];
 
@@ -624,9 +674,8 @@ fn try_stop_vision_http() {
                 .timeout(Duration::from_millis(800))
                 .build();
             // Bootstrap is optional; stop often works without auth on loopback.
-            let _ = agent
-                .post("http://127.0.0.1:7400/api/vision/stop")
-                .call();
+            let stop_url = format!("{}/api/vision/stop", api_base_url());
+            let _ = agent.post(&stop_url).call();
         });
     // Cap wait so quit stays snappy even if the request is slow.
     thread::sleep(Duration::from_millis(250));
@@ -672,13 +721,23 @@ fn force_stop_vision_processes() {
         .status();
 }
 
-/// Force-stop every process that can lock install-dir files (sidecar + stray copies).
-/// Used before launching the NSIS updater so "Can't write remedy-desktop.exe" is rare.
+/// Force-stop processes that block *this* instance's API port / install files.
 ///
-/// Also kills CLI ``remedy serve`` / python serve holding :7400 (not only
-/// ``remedy-desktop*.exe`` images — that miss was why Take over left CLI serve running).
+/// **Isolated dogfood** (`REMEDY_API_PORT` / `REMEDY_HOME` / `REMEDY_PROFILE=dev`):
+/// only frees **our** TCP port — never kills release `remedy-desktop.exe` or `:7400`.
+///
+/// **Default install:** also kills packaged sidecar images + CLI serve by name
+/// (needed for NSIS update / Take over on the default port).
 #[cfg(target_os = "windows")]
 fn force_stop_remedy_processes() {
+    if is_isolated_profile() {
+        log::info!(
+            "Isolated profile: freeing only API port {} (leaving release alone)",
+            api_port()
+        );
+        kill_api_port_windows();
+        return;
+    }
     let images = [
         "remedy-desktop.exe",
         "remedy-desktop-x86_64-pc-windows-msvc.exe",
@@ -692,39 +751,38 @@ fn force_stop_remedy_processes() {
             .stderr(Stdio::null())
             .status();
     }
-    // Kill whatever still owns the sidecar port (netstat + PowerShell fallback).
-    kill_port_7400_windows();
-    // Kill CLI `remedy serve` / python -m remedy serve by command line.
+    kill_api_port_windows();
     kill_cli_serve_windows();
 }
 
-/// Kill LISTENING owners of TCP 7400 (tree-kill each PID).
+/// Kill LISTENING owners of **this instance's** API port only.
 #[cfg(target_os = "windows")]
-fn kill_port_7400_windows() {
-    // netstat path (fast; works offline)
+fn kill_api_port_windows() {
+    let port = api_port();
+    let netstat_cmd = format!(
+        r#"for /f "tokens=5" %a in ('netstat -ano ^| findstr :{port} ^| findstr LISTENING') do taskkill /F /T /PID %a"#
+    );
     let _ = Command::new("cmd")
-        .args([
-            "/C",
-            r#"for /f "tokens=5" %a in ('netstat -ano ^| findstr :7400 ^| findstr LISTENING') do taskkill /F /T /PID %a"#,
-        ])
+        .args(["/C", &netstat_cmd])
         .creation_flags(CREATE_NO_WINDOW)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
-    // PowerShell is more reliable when netstat column layout differs
+    let ps = format!(
+        "Get-NetTCPConnection -LocalPort {port} -State Listen -ErrorAction SilentlyContinue | ForEach-Object {{ Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }}"
+    );
     let _ = Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            "Get-NetTCPConnection -LocalPort 7400 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }",
-        ])
+        .args(["-NoProfile", "-NonInteractive", "-Command", &ps])
         .creation_flags(CREATE_NO_WINDOW)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
 }
 
+#[cfg(target_os = "windows")]
+fn kill_port_7400_windows() {
+    kill_api_port_windows();
+}
 /// Kill ``remedy.exe serve`` and ``python … remedy … serve`` process trees.
 #[cfg(target_os = "windows")]
 fn kill_cli_serve_windows() {
@@ -819,16 +877,17 @@ fn start_sidecar(
                         ForeignServeChoice::UseExisting => {
                             // Attach to CLI/external serve — do not kill, do not spawn.
                             log::info!(
-                                "User chose Use existing server — Desktop will use :7400 as-is"
+                                "User chose Use existing server — Desktop will use :{} as-is",
+                                api_port()
                             );
                             return Ok(());
                         }
                         ForeignServeChoice::TakeOver => {
-                            log::info!("User chose Take over — stopping foreign server");
+                            log::info!("User chose Take over — stopping foreign server on :{}", api_port());
                             // Kill immediately (before re-locking) so CLI serve stops
                             // even if spawn later fails.
                             force_stop_remedy_processes();
-                            // Wait until :7400 is free (up to ~5s)
+                            // Wait until our port is free (up to ~5s)
                             for _ in 0..25 {
                                 if !port_7400_in_use() {
                                     break;
@@ -837,14 +896,14 @@ fn start_sidecar(
                                 force_stop_remedy_processes();
                             }
                             if port_7400_in_use() {
-                                log::error!("Port 7400 still busy after Take over kill");
-                                return Err(
-                                    "Could not stop the background Remedy server on port 7400. \
-                                     Close the terminal running `remedy serve` (Ctrl+C), then try again."
-                                        .into(),
-                                );
+                                log::error!("Port {} still busy after Take over kill", api_port());
+                                return Err(format!(
+                                    "Could not stop the background Remedy server on port {}. \
+                                     Close the terminal running `remedy serve` (Ctrl+C), then try again.",
+                                    api_port()
+                                ));
                             }
-                            log::info!("Foreign server stopped; port 7400 free");
+                            log::info!("Foreign server stopped; port {} free", api_port());
                             // Re-acquire and continue spawn below.
                             guard = process
                                 .lock()
@@ -854,26 +913,30 @@ fn start_sidecar(
                 }
                 SidecarStartMode::InteractiveLaunch => {
                     // Port held but not healthy (zombie) — take over without a dialog.
-                    log::warn!("Port 7400 busy but unhealthy; taking over without prompt");
+                    log::warn!(
+                        "Port {} busy but unhealthy; taking over without prompt",
+                        api_port()
+                    );
                 }
                 SidecarStartMode::ForceRestart => {
-                    log::info!("Force restart — taking over port 7400");
+                    log::info!("Force restart — taking over port {}", api_port());
                 }
             }
         }
     }
 
     kill_child(&mut guard);
-    // Free :7400 for our managed process (after user consent when interactive).
+    // Free our API port for managed process (after user consent when interactive).
     force_stop_remedy_processes();
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
+        let port = api_port();
+        let netstat_cmd = format!(
+            r#"for /f "tokens=5" %a in ('netstat -ano ^| findstr :{port} ^| findstr LISTENING') do taskkill /F /PID %a"#
+        );
         let _ = Command::new("cmd")
-            .args([
-                "/C",
-                r#"for /f "tokens=5" %a in ('netstat -ano ^| findstr :7400 ^| findstr LISTENING') do taskkill /F /PID %a"#,
-            ])
+            .args(["/C", &netstat_cmd])
             .creation_flags(CREATE_NO_WINDOW)
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -1619,7 +1682,7 @@ fn switch_to_web_ui(app: AppHandle) -> Result<String, String> {
     let url = std::env::var("REMEDY_WEB_UI_URL")
         .ok()
         .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| "http://127.0.0.1:7400/".to_string());
+        .unwrap_or_else(|| format!("{}/", api_base_url()));
 
     // Brief wait so a just-started sidecar can answer before the browser loads.
     let deadline = Instant::now() + Duration::from_secs(8);
@@ -3341,7 +3404,13 @@ fn acquire_desktop_single_instance() -> bool {
     const ERROR_ALREADY_EXISTS: u32 = 183;
     const SW_RESTORE: i32 = 9;
 
-    let name: Vec<u16> = OsStr::new("Local\\RemedyDesktop-SingleInstance")
+    // Separate mutex per profile so release (:7400) and isolated dev (:7410) coexist.
+    let mutex_name = if is_isolated_profile() {
+        format!("Local\\RemedyDesktop-SingleInstance-p{}", api_port())
+    } else {
+        "Local\\RemedyDesktop-SingleInstance".to_string()
+    };
+    let name: Vec<u16> = OsStr::new(&mutex_name)
         .encode_wide()
         .chain(std::iter::once(0))
         .collect();
@@ -3353,7 +3422,7 @@ fn acquire_desktop_single_instance() -> bool {
         }
         if GetLastError() == ERROR_ALREADY_EXISTS {
             // Focus existing main window if we can find it.
-            let title: Vec<u16> = OsStr::new("Remedy Desktop")
+            let title: Vec<u16> = OsStr::new(&window_title())
                 .encode_wide()
                 .chain(std::iter::once(0))
                 .collect();
@@ -3367,8 +3436,15 @@ fn acquire_desktop_single_instance() -> bool {
                 CloseHandle(handle);
                 return false;
             }
-            // Mutex held but no window — zombie / crashed instance. Steal: kill
-            // other app.exe processes and continue so the user is not stuck.
+            // Mutex held but no window — zombie. Isolated profile never kills
+            // app.exe (would murder release tauri:dev / other shells).
+            if is_isolated_profile() {
+                log::warn!(
+                    "Isolated single-instance mutex held with no window; continuing without reclaim kill"
+                );
+                CloseHandle(handle);
+                return true;
+            }
             log::warn!(
                 "Single-instance mutex held but no Remedy Desktop window; \
                  reclaiming (killing orphan app.exe)"
@@ -3477,6 +3553,16 @@ pub fn run() {
             privacy_shield::privacy_shield_refresh_lists,
         ])
         .setup(|app| {
+            // Dual-instance dogfood: title shows port when not default :7400
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.set_title(&window_title());
+            }
+            log::info!(
+                "profile home={} api_port={} isolated={}",
+                remedy_home().display(),
+                api_port(),
+                is_isolated_profile()
+            );
             let _shell = app.handle().plugin(tauri_plugin_shell::init())?;
             let _updater = app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
             let app_handle = app.handle().clone();
