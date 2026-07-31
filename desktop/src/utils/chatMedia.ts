@@ -118,11 +118,16 @@ async function fetchAuthedBlob(url: string, cacheKey: string): Promise<string> {
   const hit = cacheGet(cacheKey)
   if (hit) return hit
 
-  await ensureApiToken()
+  const tok = await ensureApiToken()
+  if (!tok) {
+    throw new Error('media auth: no API token (restart Desktop / check bootstrap)')
+  }
   const res = await fetch(url, {
     headers: {
       Accept: 'image/*,*/*',
       ...authHeaders(),
+      // Belt-and-suspenders: authHeaders can race empty if token was just set
+      Authorization: `Bearer ${tok}`,
     },
   })
   if (!res.ok) {
@@ -164,7 +169,32 @@ export async function resolveChatMediaUrl(src: string): Promise<string> {
       const base = getApiBase().replace(/\/api\/?$/, '')
       absolute = `${base || SERVER_URL}${raw}`
     }
-    return fetchAuthedBlob(absolute, `api:${absolute}`)
+    try {
+      return await fetchAuthedBlob(absolute, `api:${absolute}`)
+    } catch (first) {
+      // Fallback: session attachment URL → /api/media under ~/.remedy/attachments
+      const m = absolute.match(
+        /\/api\/sessions\/([^/]+)\/attachments\/([^/?#]+)/i,
+      )
+      if (m) {
+        const sid = m[1]!
+        const name = decodeURIComponent(m[2]!)
+        const relative = `attachments/${sid}/${name}`
+        try {
+          const url = `${getApiBase()}/media?path=${encodeURIComponent(relative)}`
+          return await fetchAuthedBlob(url, `media-rel:${relative}`)
+        } catch {
+          // Bare filename search (server walks attachments/**)
+          try {
+            const url = `${getApiBase()}/media?path=${encodeURIComponent(name)}`
+            return await fetchAuthedBlob(url, `media-name:${name}`)
+          } catch {
+            /* fall through */
+          }
+        }
+      }
+      throw first
+    }
   }
 
   // Public https only (not loopback)

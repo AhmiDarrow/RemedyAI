@@ -80,9 +80,34 @@ export function resolveBrowserAddressBar(
   return browserSearchUrl(q, searchTemplate || DEFAULT_BROWSER_SEARCH)
 }
 
+/** Soak / placeholder homes that should never stick as the real homepage. */
+const PLACEHOLDER_HOMES = new Set([
+  'https://example.com',
+  'https://example.com/',
+  'http://example.com',
+  'http://example.com/',
+  'https://www.example.com',
+  'https://www.example.com/',
+  'about:blank',
+])
+
 /** Settings / home button: normalize or fall back to Remedy GitHub. */
 export function resolveBrowserHome(raw?: string | null): string {
-  return normalizeBrowserUrl(raw || '') || DEFAULT_BROWSER_HOME
+  const n = normalizeBrowserUrl(raw || '')
+  if (!n) return DEFAULT_BROWSER_HOME
+  const key = n.replace(/\/$/, '').toLowerCase()
+  const withSlash = key.endsWith('/') ? key : `${key}/`
+  if (
+    PLACEHOLDER_HOMES.has(n)
+    || PLACEHOLDER_HOMES.has(n.toLowerCase())
+    || PLACEHOLDER_HOMES.has(key)
+    || PLACEHOLDER_HOMES.has(withSlash)
+    || key === 'https://example.com'
+    || key === 'http://example.com'
+  ) {
+    return DEFAULT_BROWSER_HOME
+  }
+  return n
 }
 
 /** True when the URL is safe to open externally (matches Rust open_external_url). */

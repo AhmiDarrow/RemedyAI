@@ -99,8 +99,36 @@ def register_workspace_routes(app: FastAPI, *, runtime=None, gateway=None, memor
             if p.is_absolute():
                 candidate = p.resolve()
             else:
+                # Relative: try project base first, then ~/.remedy (session attachments).
                 base = _files_base()
                 candidate = (base / raw).resolve()
+                if not candidate.is_file():
+                    with contextlib.suppress(Exception):
+                        home = Path(
+                            load_config().get("home_dir")
+                            or (Path.home() / ".remedy")
+                        ).expanduser()
+                        home_cand = (home / raw).resolve()
+                        if home_cand.is_file():
+                            candidate = home_cand
+                # Bare filename (e.g. remedy_comfy_00019_.png) — search attachments tree
+                if (
+                    candidate is None or not candidate.is_file()
+                ) and "/" not in raw.replace("\\", "/") and raw.lower().endswith(
+                    (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".svg")
+                ):
+                    with contextlib.suppress(Exception):
+                        home = Path(
+                            load_config().get("home_dir")
+                            or (Path.home() / ".remedy")
+                        ).expanduser()
+                        att = home / "attachments"
+                        if att.is_dir():
+                            hits = list(att.glob(f"**/{Path(raw).name}"))
+                            # Prefer most recently modified
+                            hits.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+                            if hits:
+                                candidate = hits[0].resolve()
         except Exception as exc:
             raise HTTPException(400, f"invalid path: {exc}") from exc
 
