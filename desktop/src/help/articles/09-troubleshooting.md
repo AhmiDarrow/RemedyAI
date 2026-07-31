@@ -56,8 +56,8 @@ GitHub login, Auth0, Okta, …) via Privacy Shield.
 
 ## Mobile vs desktop layout in the Browser rail
 
-The rail defaults to a **mobile** browser identity so sites (Gmail, Reddit, …) serve
-compact layouts that fit the panel. Toolbar control:
+The rail defaults to a **mobile** browser identity so sites serve compact layouts
+that fit the panel. Toolbar control:
 
 | Control | Meaning |
 |---------|---------|
