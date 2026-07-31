@@ -3,8 +3,20 @@
 ## Overview
 
 **Remedy Desktop** is the recommended way to use Remedy — your personal AI
-partner for knowledge, design, code, and get-it-done work (not a medical or
-clinical product). Current package series: **0.12.x** (see root `CHANGELOG.md`).
+partner for knowledge, design, code, computer use, and get-it-done work (not a
+medical or clinical product). Current package series: **0.20.x** (see root
+`CHANGELOG.md`).
+
+### Always-ready window (close → tray)
+
+| Chrome | Behavior |
+|--------|----------|
+| **OS ✕ / Alt+F4** | **Always hide to system tray** — sidecar/API stays up |
+| **Tray click / Show** | Restore + focus main window |
+| **Tray Quit** | Full process exit (stops local server + Web UI) |
+
+Stale `close_to_tray=false` in `~/.remedy/desktop.json` or `config.toml` is healed to
+**true** on load. Settings shows the behavior as always-on (not an opt-out).
 
 ### Local model packaging (0.11+)
 
@@ -42,7 +54,7 @@ force-promote.
 - Offline owner’s manual: **F1** / status bar **Help** (`docs/manual/` + in-app wiki).
 - **Switch to Web UI**: hide to tray + open `http://127.0.0.1:7400/` (same SPA as desktop; API serves built assets).
 - **WebUI vs desktop dev:** `tauri:dev` uses Vite HMR; WebUI needs `cd desktop && npm run build` then **restart serve** (or sync into staged `webui/`). Prefer `desktop/dist` over stale `target/debug/webui` — see **AGENTS.md** (“Desktop SPA vs WebUI”).
-- Full quit warns that the local server stops (Web UI dies); hide-to-tray does not.
+- **✕ always hide-to-tray** (server stays up). **Tray → Quit** fully exits and warns that the local server stops (Web UI dies).
 - Sync wiki copies: `python scripts/sync_help_manual.py`
 - Docs stay aligned with code (CI gate): `python scripts/check_docs.py` — help bodies, versions, slash commands, hotkeys, catalog ids, README test-count claim
 

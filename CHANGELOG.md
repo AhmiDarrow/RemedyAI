@@ -4,7 +4,26 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
-### Gauntlet: continuous security + perf loop (feature/computer-use)
+## [0.20.0] - 2026-07-30
+
+Partner Metabolism OS + always-ready desktop. One voice; local-first; provider freedom.
+
+### Desktop always-ready
+
+- OS close (✕ / Alt+F4) **always** hides to the system tray — never kills the sidecar from chrome alone.
+- Heals stale `close_to_tray=false` in `~/.remedy/desktop.json` / `config.toml` on load.
+- Settings: close-to-tray is always-on (not opt-out); full stop remains **tray Quit** only.
+- Multi-tab stream paint, abort UX, session-scoped partner status, SPA ErrorBoundary recover.
+
+### Partner Metabolism
+
+- Turn tiers L0–L3, evidence ledger, decision currency, machine map, shadow, Action IR,
+  Time Crystal, skill genome, CUA macros, quality governor, critical verify, portable identity.
+- Agency re-arm when the model only promises tools/skills; “review project” stays L2 with tools.
+- Skill procedure inject (change-safety on review); coding catalog demotion of auto tool-chains.
+- Operator: `/harness` · `GET /api/partner/metabolism` · F1 **19-metabolism**.
+
+### Security + trust (gauntlet)
 
 - **Skills catalog URL allowlist (S-SKILL-01):** remote catalog/sig fetches require GitHub release (or raw.githubusercontent.com for this library repo) paths — same host policy as skill zips; non-default verify key ignored unless `REMEDY_SKILLS_DEV=1`
 - **Packaged API docs hide (S-AUTH-05):** frozen sidecar / `REMEDY_DISABLE_API_DOCS=1` drops Swagger/ReDoc and `/api/openapi.{json,yaml}` (force-enable with `=0`)

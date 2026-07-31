@@ -46,8 +46,10 @@ Normal chat still talks to **one Remedy**. These organs never appear as named bo
 - Secrets redacted at ledger / IR / export / logs / UI tool previews  
 - Shadow never replaces write jail or approvals (opaque shell payloads hard-block)  
 - Shell write jail fails closed on encoded/download-drop mutations when a project is bound  
+- Auth paths under `~/.remedy/auth` never writable via tools/shell (even under home scope)  
 - URL userinfo and query tokens stripped from machine map, CUA macros, and Action IR  
 - Identity export/import rate-limited; packages require passphrase + HMAC  
+- Agency re-arms if the model only *promises* tools/skills without function calls  
 - Hot path never blocks on local model inference  
 - Plan mode stays research-only (no `computer_act` / click / type mutations)
 

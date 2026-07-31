@@ -87,25 +87,33 @@ struct DesktopPrefsFile {
 }
 
 fn load_desktop_prefs() -> DesktopPrefs {
-    // Defaults: always-ready partner UX - close hides to tray (does not kill).
+    // Always-ready partner: title-bar X always hides (never kills sidecar).
+    // close_to_tray is forced true on load; only start_in_tray / quit-warn vary.
     let mut prefs = DesktopPrefs {
         close_to_tray: true,
         start_in_tray: false,
         skip_quit_server_warning: false,
     };
+    let mut healed_close = false;
 
     // 1) Prefer shell-owned desktop.json when present (proper JSON via serde_json)
     let desk = desktop_prefs_path();
     if let Ok(raw) = std::fs::read_to_string(&desk) {
         if let Ok(file) = serde_json::from_str::<DesktopPrefsFile>(&raw) {
-            if let Some(v) = file.close_to_tray {
-                prefs.close_to_tray = v;
+            if let Some(false) = file.close_to_tray {
+                healed_close = true;
             }
+            // Always true — ignore false from older Setup / Settings.
+            prefs.close_to_tray = true;
             if let Some(v) = file.start_in_tray {
                 prefs.start_in_tray = v;
             }
             if let Some(v) = file.skip_quit_server_warning {
                 prefs.skip_quit_server_warning = v;
+            }
+            if healed_close {
+                let _ = save_desktop_prefs(&prefs);
+                log::info!("desktop.json: close_to_tray forced true (title-bar X → tray)");
             }
             return prefs;
         }
@@ -114,9 +122,11 @@ fn load_desktop_prefs() -> DesktopPrefs {
 
     // 2) Fall back to config.toml (Settings writes here; desktop.json may be missing)
     if let Ok(raw) = std::fs::read_to_string(config_toml_path()) {
-        if let Some(v) = toml_bool(&raw, "close_to_tray") {
-            prefs.close_to_tray = v;
+        // Never honor close_to_tray=false from TOML for window chrome.
+        if let Some(false) = toml_bool(&raw, "close_to_tray") {
+            healed_close = true;
         }
+        prefs.close_to_tray = true;
         // start_in_tray: do NOT seed `true` from config.toml alone.
         // Older Setup coupled "Start with Windows" -> start_in_tray=true, so many
         // installs always hid on launch. Only honor an explicit false here; an
@@ -131,10 +141,11 @@ fn load_desktop_prefs() -> DesktopPrefs {
         // Seed desktop.json so CloseRequested and future launches stay in sync
         let _ = save_desktop_prefs(&prefs);
         log::info!(
-            "desktop prefs seeded from config.toml (close_to_tray={}, start_in_tray={}, skip_quit_warn={})",
+            "desktop prefs seeded from config.toml (close_to_tray={}, start_in_tray={}, skip_quit_warn={}, healed_close={})",
             prefs.close_to_tray,
             prefs.start_in_tray,
-            prefs.skip_quit_server_warning
+            prefs.skip_quit_server_warning,
+            healed_close
         );
     }
     prefs
@@ -1474,13 +1485,15 @@ fn set_desktop_prefs(
     start_in_tray: bool,
     skip_quit_server_warning: Option<bool>,
 ) -> Result<(), String> {
+    let _ignored_close_flag = close_to_tray; // callers may still pass it; product forces true
     let prev_skip = state
         .desktop_prefs
         .lock()
         .map(|g| g.skip_quit_server_warning)
         .unwrap_or(false);
     let prefs = DesktopPrefs {
-        close_to_tray,
+        // Title-bar X always hides; never accept false from Settings/API.
+        close_to_tray: true,
         start_in_tray,
         skip_quit_server_warning: skip_quit_server_warning.unwrap_or(prev_skip),
     };
@@ -1668,31 +1681,31 @@ fn toggle_maximize_main_window(app: AppHandle) -> Result<bool, String> {
         .map_err(|e| format!("is_maximized failed: {e}"))
 }
 
-/// Close button: hide to tray when enabled, otherwise quit (sidecar stopped via CloseRequested).
+/// Close button / chrome: always hide to tray (always-ready partner).
+/// Full quit is tray "Quit" / `request_quit_app` only.
 #[tauri::command]
 fn request_close_main_window(
     app: AppHandle,
     state: State<'_, ServerState>,
 ) -> Result<(), String> {
-    // Always re-read disk so Settings changes apply without restart.
     let fresh = load_desktop_prefs();
     if let Ok(mut g) = state.desktop_prefs.lock() {
         *g = DesktopPrefs {
-            close_to_tray: fresh.close_to_tray,
+            close_to_tray: true,
             start_in_tray: fresh.start_in_tray,
             skip_quit_server_warning: fresh.skip_quit_server_warning,
         };
     }
-    let close_to_tray = fresh.close_to_tray;
-    let w = primary_window(&app).ok_or_else(|| "no main window".to_string())?;
-    if close_to_tray {
-        w.hide().map_err(|e| format!("hide failed: {e}"))?;
-        log::info!("request_close_main_window: hidden to tray");
-    } else {
-        // Triggers CloseRequested -> sidecar shutdown on full quit
-        w.close().map_err(|e| format!("close failed: {e}"))?;
-        log::info!("request_close_main_window: close requested (full quit path)");
+    if !fresh.close_to_tray {
+        save_desktop_prefs(&DesktopPrefs {
+            close_to_tray: true,
+            start_in_tray: fresh.start_in_tray,
+            skip_quit_server_warning: fresh.skip_quit_server_warning,
+        });
     }
+    let w = primary_window(&app).ok_or_else(|| "no main window".to_string())?;
+    w.hide().map_err(|e| format!("hide failed: {e}"))?;
+    log::info!("request_close_main_window: hidden to tray");
     Ok(())
 }
 
@@ -3708,46 +3721,41 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             match event {
-                // Close-to-tray: hide instead of quit when always-ready is enabled.
+                // Title-bar X / Alt+F4: always hide to tray (always-ready partner).
+                // Full quit only via tray "Quit" / request_quit_app — never kill
+                // sidecar from the window chrome alone.
                 tauri::WindowEvent::CloseRequested { api, .. } => {
-                    // Re-read disk in case Settings saved prefs without a live reload.
+                    // Re-read disk so Settings stay in sync for other prefs.
                     let fresh = load_desktop_prefs();
                     if let Ok(mut g) = window.state::<ServerState>().desktop_prefs.lock() {
                         *g = DesktopPrefs {
-                            close_to_tray: fresh.close_to_tray,
+                            // Force always-ready: X never means quit.
+                            close_to_tray: true,
                             start_in_tray: fresh.start_in_tray,
                             skip_quit_server_warning: fresh.skip_quit_server_warning,
                         };
                     }
-                    let close_to_tray = fresh.close_to_tray;
-                    if close_to_tray {
-                        // Hide to tray - server keeps running (Web UI stays alive).
-                        api.prevent_close();
-                        let _ = window.hide();
-                        log::info!("close_to_tray: window hidden (sidecar stays up)");
-                    } else if fresh.skip_quit_server_warning {
-                        // Full quit without dialog
-                        let state = window.state::<ServerState>();
-                        shutdown_sidecar(&state);
-                    } else {
-                        // Confirm: quitting kills local server + browser Web UI
-                        api.prevent_close();
-                        let _ = window.emit("app-quit-requested", ());
-                        log::info!("close_to_tray=false: asked UI to confirm quit (server would stop)");
+                    // Heal stale desktop.json / config that had close_to_tray=false
+                    // (common after older Setup) so next launch matches behavior.
+                    if !fresh.close_to_tray {
+                        let healed = DesktopPrefs {
+                            close_to_tray: true,
+                            start_in_tray: fresh.start_in_tray,
+                            skip_quit_server_warning: fresh.skip_quit_server_warning,
+                        };
+                        save_desktop_prefs(&healed);
+                        log::info!(
+                            "close_to_tray healed to true (title-bar X always hides; quit via tray)"
+                        );
                     }
+                    api.prevent_close();
+                    let _ = window.hide();
+                    log::info!("window close → tray (sidecar stays up; Quit from tray to stop server)");
                 }
                 tauri::WindowEvent::Destroyed => {
-                    // Full quit only (hide-to-tray never destroys the window).
-                    let close_to_tray = window
-                        .state::<ServerState>()
-                        .desktop_prefs
-                        .lock()
-                        .map(|p| p.close_to_tray)
-                        .unwrap_or(true);
-                    if !close_to_tray {
-                        let state = window.state::<ServerState>();
-                        shutdown_sidecar(&state);
-                    }
+                    // Only runs on real process teardown (tray Quit), not hide-to-tray.
+                    // Sidecar stop is owned by quit_app / Exit handlers.
+                    log::info!("main window destroyed");
                 }
                 // Native OS file drops (Explorer -> app). WebView2 often won't
                 // deliver HTML5 DataTransfer.files for external drops.
