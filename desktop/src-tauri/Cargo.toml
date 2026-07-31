@@ -43,3 +43,8 @@ adblock = { version = "0.13.2", default-features = false, features = [
   "full-regex-handling",
 ] }
 
+# WebView2 COM for in-rail video fullscreen (ContainsFullScreenElementChanged).
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.38"
+windows = { version = "0.61", features = ["Win32_Foundation"] }
+

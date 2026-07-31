@@ -541,6 +541,8 @@ pub struct BrowserState {
     stack_suppressed: AtomicBool,
     /// Request desktop site (full UA); default mobile for rail formatting.
     desktop_site: AtomicBool,
+    /// HTML/video fullscreen active — SPA rail bounds must not shrink the embed.
+    page_fullscreen: AtomicBool,
 }
 
 impl Default for BrowserState {
@@ -551,6 +553,7 @@ impl Default for BrowserState {
             last_bounds: Mutex::new(None),
             stack_suppressed: AtomicBool::new(false),
             desktop_site: AtomicBool::new(prefs.desktop_site),
+            page_fullscreen: AtomicBool::new(false),
         }
     }
 }
@@ -576,6 +579,23 @@ const MOBILE_VIEWPORT_JS: &str = r#"(function(){
     if (!/width\s*=\s*device-width/i.test(c)) {
       m.setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=5, viewport-fit=cover');
     }
+  } catch(e) {}
+})();"#;
+
+/// Fullscreen CSS so video / :fullscreen elements fill the WebView2 surface
+/// (host also expands bounds on ContainsFullScreenElementChanged).
+const FULLSCREEN_CSS_JS: &str = r#"(function(){
+  if (window.__remedyFsCss) return;
+  window.__remedyFsCss = true;
+  try {
+    var s = document.createElement('style');
+    s.id = 'remedy-fullscreen-css';
+    s.textContent = [
+      ':fullscreen,:-webkit-full-screen{width:100%!important;height:100%!important;background:#000!important;}',
+      'video:fullscreen,video:-webkit-full-screen{object-fit:contain;width:100%!important;height:100%!important;max-width:100%!important;max-height:100%!important;}',
+      '*:fullscreen video, *:-webkit-full-screen video{width:100%!important;height:100%!important;object-fit:contain;}'
+    ].join('');
+    (document.documentElement||document.head).appendChild(s);
   } catch(e) {}
 })();"#;
 
@@ -692,8 +712,130 @@ fn embed_may_show(state: &BrowserState) -> bool {
     !state.stack_suppressed.load(Ordering::SeqCst)
 }
 
+/// Fill the main window under the title bar (for HTML/video fullscreen).
+fn window_fill_bounds(app: &AppHandle) -> BrowserBounds {
+    if let Some(ww) = app.get_webview_window("main") {
+        if let (Ok(size), Ok(scale)) = (ww.inner_size(), ww.scale_factor()) {
+            let w = (size.width as f64 / scale).max(400.0);
+            let h = (size.height as f64 / scale).max(300.0);
+            const TOP: f64 = 36.0; // in-app title strip
+            return BrowserBounds {
+                x: 0.0,
+                y: TOP,
+                width: w,
+                height: (h - TOP).max(200.0),
+            };
+        }
+    }
+    BrowserBounds {
+        x: 0.0,
+        y: 36.0,
+        width: 1200.0,
+        height: 800.0,
+    }
+}
+
+/// WebView2: when the page goes fullscreen (video), expand the child embed to
+/// fill the app window so the player is usable. SPA rail bounds resume on exit.
+#[cfg(windows)]
+fn attach_fullscreen_handler(app: AppHandle, wv: tauri::Webview) {
+    let app_cb = app.clone();
+    let result = wv.with_webview(move |platform| {
+        use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2;
+        use webview2_com::ContainsFullScreenElementChangedEventHandler;
+
+        let controller = platform.controller();
+        let core = match unsafe { controller.CoreWebView2() } {
+            Ok(c) => c,
+            Err(e) => {
+                log::warn!("browser fullscreen: CoreWebView2 failed: {e}");
+                return;
+            }
+        };
+        let app_inner = app_cb.clone();
+        let handler = ContainsFullScreenElementChangedEventHandler::create(Box::new(
+            move |sender: Option<ICoreWebView2>, _args| {
+                let Some(sender) = sender else {
+                    return Ok(());
+                };
+                let mut is_fs = windows::core::BOOL(0);
+                if unsafe { sender.ContainsFullScreenElement(&mut is_fs) }.is_err() {
+                    return Ok(());
+                }
+                let fullscreen = is_fs.as_bool();
+                let app3 = app_inner.clone();
+                let _ = app3.clone().run_on_main_thread(move || {
+                    apply_page_fullscreen(&app3, fullscreen);
+                });
+                Ok(())
+            },
+        ));
+        let mut token = 0i64;
+        if let Err(e) = unsafe { core.add_ContainsFullScreenElementChanged(&handler, &mut token) }
+        {
+            log::warn!("browser fullscreen handler attach failed: {e}");
+        } else {
+            log::info!("browser fullscreen handler attached (token={token})");
+        }
+    });
+    if let Err(e) = result {
+        log::warn!("browser with_webview for fullscreen failed: {e}");
+    }
+}
+
+#[cfg(not(windows))]
+fn attach_fullscreen_handler(_app: AppHandle, _wv: tauri::Webview) {}
+
+fn apply_page_fullscreen(app: &AppHandle, fullscreen: bool) {
+    let Some(state) = app.try_state::<BrowserState>() else {
+        return;
+    };
+    state
+        .page_fullscreen
+        .store(fullscreen, Ordering::SeqCst);
+    let Some(wv) = app.get_webview(LABEL) else {
+        return;
+    };
+    if fullscreen {
+        let fill = window_fill_bounds(app);
+        if let Err(e) = apply_bounds(&wv, &fill, true) {
+            log::warn!("browser fullscreen expand failed: {e}");
+        } else {
+            log::info!(
+                "browser page fullscreen ON — embed expanded to {}x{}",
+                fill.width,
+                fill.height
+            );
+        }
+        let _ = app.emit(
+            "browser-page-fullscreen",
+            json!({ "fullscreen": true }),
+        );
+    } else {
+        let restore = state
+            .last_bounds
+            .lock()
+            .ok()
+            .and_then(|g| g.clone())
+            .unwrap_or_else(|| default_rail_bounds(app));
+        let b = clamp_bounds(&restore);
+        if let Err(e) = apply_bounds(&wv, &b, embed_may_show(state.inner())) {
+            log::warn!("browser fullscreen restore failed: {e}");
+        } else {
+            log::info!("browser page fullscreen OFF — rail bounds restored");
+        }
+        let _ = app.emit(
+            "browser-page-fullscreen",
+            json!({ "fullscreen": false }),
+        );
+    }
+}
+
 fn destroy_embed(app: &AppHandle) {
     // Child webview (embedded)
+    if let Some(state) = app.try_state::<BrowserState>() {
+        state.page_fullscreen.store(false, Ordering::SeqCst);
+    }
     if let Some(wv) = app.get_webview(LABEL) {
         let _ = wv.hide();
         let _ = wv.close();
@@ -818,8 +960,13 @@ pub fn browser_set_bounds(
     bounds: BrowserBounds,
 ) -> Result<(), String> {
     let b = clamp_bounds(&bounds);
+    // Always remember rail bounds so we can restore after video fullscreen.
     if let Ok(mut g) = state.last_bounds.lock() {
         *g = Some(b.clone());
+    }
+    // While HTML/video fullscreen is active, do not shrink the embed back to the rail.
+    if state.page_fullscreen.load(Ordering::SeqCst) {
+        return Ok(());
     }
     let may_show = embed_may_show(state.inner());
     if let Some(wv) = app.get_webview(LABEL) {
@@ -1000,6 +1147,7 @@ pub fn navigate_embed(
             let _ = wv.eval(SAME_WINDOW_OAUTH_JS);
             // Scrollbars only (no zoom / chrome overrides)
             let _ = wv.eval(RAIL_LAYOUT_JS);
+            let _ = wv.eval(FULLSCREEN_CSS_JS);
             // Mobile mode: ensure viewport meta so sites scale correctly
             if let Some(st) = app_for_load.try_state::<BrowserState>() {
                 if !st.desktop_site.load(Ordering::SeqCst) {
@@ -1013,6 +1161,7 @@ pub fn navigate_embed(
             std::thread::spawn(move || {
                 std::thread::sleep(std::time::Duration::from_millis(800));
                 let _ = wv2.eval(RAIL_LAYOUT_JS);
+                let _ = wv2.eval(FULLSCREEN_CSS_JS);
             });
         });
 
@@ -1029,6 +1178,9 @@ pub fn navigate_embed(
                 "embed browser failed: {e}. Try ↗ system browser, or reinstall WebView2 Runtime."
             )
         })?;
+
+    // Video fullscreen: expand child WebView2 to the app window on request.
+    attach_fullscreen_handler(app.clone(), wv.clone());
 
     if may_show {
         let _ = wv.show();
