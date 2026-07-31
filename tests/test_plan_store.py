@@ -130,6 +130,9 @@ def test_plan_mode_tool_names_exclude_shell():
     assert "web_search" in PLAN_MODE_TOOL_NAMES
     assert "media_read" in PLAN_MODE_TOOL_NAMES
     assert "vision_describe" in PLAN_MODE_TOOL_NAMES
+    # F1 manuals always readable in Plan (same as Build)
+    assert "help_list" in PLAN_MODE_TOOL_NAMES
+    assert "help_read" in PLAN_MODE_TOOL_NAMES
     # High-impact / mutating tools must stay out
     for blocked in (
         "skill_run",
@@ -137,9 +140,12 @@ def test_plan_mode_tool_names_exclude_shell():
         "mission_start",
         "comfyui",
         "apply_patch",
+        "computer_click",
+        "computer_type",
     ):
         assert blocked not in PLAN_MODE_TOOL_NAMES
     assert "Approve" in PLAN_MODE_SYSTEM_ADDENDUM or "plan_save" in PLAN_MODE_SYSTEM_ADDENDUM
+    assert "Build" in PLAN_MODE_SYSTEM_ADDENDUM or "Ctrl+B" in PLAN_MODE_SYSTEM_ADDENDUM
 
 
 def test_update_step_status_by_id_and_index(tmp_path: Path):

@@ -15,6 +15,8 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
   “Desktop host not connected” on page_text/click).
 - Browser **screenshot** tries WebView PrintWindow / rail crop even when the
   in-process host_connected flag is stale (CLI soak no longer forces full desktop).
+- **Plan mode:** `help_list` / `help_read` allowlisted; system addendum documents
+  computer observe vs input tools; blocked computer tools suggest Build (Ctrl+B).
 
 ## [0.20.0] - 2026-07-30
 
