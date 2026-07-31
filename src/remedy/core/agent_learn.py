@@ -13,7 +13,9 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 # Meta tools alone do not count toward a "real work" multi-tool turn.
-_META_TOOLS = frozenset({"skill_search", "skill_activate", "local_discover"})
+_META_TOOLS = frozenset(
+    {"skill_search", "skill_activate", "skill_reload", "local_discover"}
+)
 
 
 def _skill_title_from_steps(message: str, steps: list[dict[str, Any]]) -> str:

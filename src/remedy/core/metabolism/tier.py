@@ -143,7 +143,8 @@ _L2_AGENCY = re.compile(
     r"\bwhat files\b|"
     # Skill progressive disclosure — need skill_activate tool (not prose "activating…")
     # "load …" alone is too broad (load balancer chat); require skill suffix.
-    r"skill_activate|skill_search|skill_run|"
+    r"skill_activate|skill_search|skill_run|skill_reload|"
+    r"\b(reload|rescan|refresh)\s+(all\s+)?(my\s+|the\s+)?skills?\b|"
     r"\b(activate|enable)\s+(the |a |this )?[\w.-]{2,48}(\s+skill)?\b|"
     r"\bload\s+(the |a |this )?[\w.-]{2,48}\s+skill\b|"
     r"\b(use|follow|run)\s+(the |a |this )?[\w.-]{2,48}\s+skill\b|"

@@ -267,17 +267,39 @@ class SkillRegistry:
 
         from remedy.bundled_skills import bundled_skills_dir
 
-        # 1) Always load shipped defaults so a fresh install is useful.
+        # Collect curated source roots (later names win on collision until user home).
+        # Package install alone may lag git; REMEDY_DEV_ROOT / monorepo fills the gap
+        # so dogfood skills ship into ~/.remedy/skills without waiting for a PyPI bump.
+        seed_roots: list[Path] = []
         bundled = bundled_skills_dir()
         if bundled.is_dir():
-            self.discover(bundled, recurse=True)
+            seed_roots.append(bundled)
 
-        # 2) Dev tree skills/
-        cwd_skills = Path.cwd() / "skills"
-        if cwd_skills.is_dir():
-            self.discover(cwd_skills, recurse=True)
+        def _maybe_add(p: Path) -> None:
+            if p.is_dir() and p not in seed_roots:
+                seed_roots.append(p)
 
-        # 3) User home skills (custom + seeded)
+        # Editable / monorepo: package dir may already be source; also scan DEV_ROOT.
+        dev_root = (os.environ.get("REMEDY_DEV_ROOT") or "").strip()
+        if dev_root:
+            root = Path(dev_root).expanduser()
+            _maybe_add(root / "src" / "remedy" / "bundled_skills")
+            _maybe_add(root / "skills")
+        # cwd when agent works inside the repo
+        _maybe_add(Path.cwd() / "skills")
+        _maybe_add(Path.cwd() / "src" / "remedy" / "bundled_skills")
+        # Walk up a few levels for "serve from desktop/" etc.
+        here = Path.cwd().resolve()
+        for parent in [here, *list(here.parents)[:4]]:
+            _maybe_add(parent / "skills")
+            _maybe_add(parent / "src" / "remedy" / "bundled_skills")
+            if (parent / "pyproject.toml").is_file() and (parent / "src" / "remedy").is_dir():
+                break
+
+        for root in seed_roots:
+            self.discover(root, recurse=True)
+
+        # User home skills (custom + seeded)
         if home_dir is not None:
             user_skills = Path(home_dir).expanduser() / "skills"
         else:
@@ -288,13 +310,15 @@ class SkillRegistry:
                 else Path("~/.remedy/skills").expanduser()
             )
         user_skills.mkdir(parents=True, exist_ok=True)
-        # Seed missing bundled skills into user dir.
-        # Upgrades: if bundled frontmatter ``version`` is newer than the seeded
+        # Seed missing curated skills into user dir from every seed root.
+        # Upgrades: if source frontmatter ``version`` is newer than the seeded
         # copy, refresh SKILL.md + scripts (skip when ``.user_locked`` exists).
-        # Also merge ``local:`` discovery into older copies that only lack that key.
-        if bundled.is_dir():
-            for child in bundled.iterdir():
+        for seed in seed_roots:
+            for child in seed.iterdir():
                 if not child.is_dir() or not (child / "SKILL.md").is_file():
+                    continue
+                # Skip junk / learned-looking dirs under monorepo skills noise
+                if child.name.startswith("."):
                     continue
                 dest = user_skills / child.name
                 if not dest.exists():

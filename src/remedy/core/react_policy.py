@@ -246,7 +246,7 @@ _TOOL_HINT_RE = re.compile(
     r"audit|"
     # Skill progressive disclosure (session: "activate change-safety" with tools=[]
     # → model only wrote "Activating skill now" with zero skill_activate calls)
-    r"skill_activate|skill_search|skill_run|activate|skill|"
+    r"skill_activate|skill_search|skill_run|skill_reload|activate|skill|"
     r"run|execute|shell|bash|command|terminal|install|build|test|"
     r"implement|implemen\w*|refactor|debug|fix(?:es)?|bug|error|stack|trace|"
     r"patch|apply|ship|deploy|"
