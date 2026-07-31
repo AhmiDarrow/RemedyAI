@@ -135,6 +135,8 @@ export function BrowserSlide() {
   const [bmOpen, setBmOpen] = useState(false)
   const bmPanelRef = useRef<HTMLDivElement | null>(null)
   const [shieldOn, setShieldOn] = useState(true)
+  /** false = mobile UA (default, better in narrow rail); true = desktop site */
+  const [desktopSite, setDesktopSite] = useState(false)
 
   // Privacy Shield status (desktop)
   useEffect(() => {
@@ -147,6 +149,29 @@ export function BrowserSlide() {
       .catch(() => {})
     return () => {
       cancelled = true
+    }
+  }, [])
+
+  // Mobile / desktop view mode (persisted in ~/.remedy/browser_rail.json)
+  useEffect(() => {
+    if (!isTauri()) return
+    let cancelled = false
+    void tauriInvoke<{ desktop_site?: boolean }>('browser_view_mode')
+      .then((s) => {
+        if (!cancelled) setDesktopSite(Boolean(s?.desktop_site))
+      })
+      .catch(() => {})
+    let unlisten: (() => void) | undefined
+    void tauriListen<{ desktop_site?: boolean }>('browser-view-mode', (ev) => {
+      setDesktopSite(Boolean(ev.payload?.desktop_site))
+    })
+      .then((u) => {
+        unlisten = u
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+      unlisten?.()
     }
   }, [])
 
@@ -729,6 +754,44 @@ export function BrowserSlide() {
             </div>
           )}
         </div>
+        <button
+          type="button"
+          className="px-1.5 py-1 rounded font-medium"
+          style={{
+            border: '1px solid var(--border)',
+            color: desktopSite ? 'var(--accent)' : 'var(--text-secondary)',
+            background: desktopSite ? 'var(--bg-primary)' : 'transparent',
+            minWidth: 28,
+          }}
+          title={
+            desktopSite
+              ? 'Desktop site on — click for mobile view (better in this rail)'
+              : 'Mobile view (default) — click to request desktop site'
+          }
+          onClick={() => {
+            if (!isTauri()) return
+            const next = !desktopSite
+            void tauriInvoke<{ desktop_site?: boolean }>('browser_set_desktop_site', {
+              enabled: next,
+            })
+              .then((s) => {
+                const on = Boolean(s?.desktop_site ?? next)
+                setDesktopSite(on)
+                setLoaded(false)
+                setStatus(on ? 'Desktop site — reloading…' : 'Mobile view — reloading…')
+                // Recreate embed with new UA + reload current URL
+                const target = activeUrl || url || home
+                window.setTimeout(() => {
+                  void goRef.current(target)
+                }, 80)
+              })
+              .catch((e: unknown) => {
+                setStatus(e instanceof Error ? e.message : String(e))
+              })
+          }}
+        >
+          {desktopSite ? '🖥' : '📱'}
+        </button>
         <button
           type="button"
           className="px-1.5 py-1 rounded"
