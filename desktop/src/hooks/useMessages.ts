@@ -74,6 +74,8 @@ export function useMessages(sessionId: string | null) {
   /** True when streaming but no SSE activity for a while (provider may be stuck). */
   const [streamStalled, setStreamStalled] = useState(false)
   const [stallSeconds, setStallSeconds] = useState(0)
+  /** User hid the quiet banner for this turn (does not stop the stream). */
+  const [stallBannerDismissed, setStallBannerDismissed] = useState(false)
   const streamingRef = useRef(false)
   const sendLockRef = useRef(false)
   /** Last token / tool / progress activity (ms) for stall detection. */
@@ -911,15 +913,18 @@ export function useMessages(sessionId: string | null) {
     if (streaming) prevStreamingForDetachRef.current = true
   }, [streaming])
 
-  // Stall watchdog: no SSE activity while streaming → surface "provider stuck".
-  // DeepSeek-class models can hang mid-think/DSML without closing the stream.
+  // Stall watchdog: no SSE activity while streaming → optional quiet banner.
+  // Long-think models (DeepSeek, o-series, etc.) often go 1–3+ min without tokens;
+  // keep the gate high so we don't cry wolf, and allow dismiss without stopping.
   useEffect(() => {
     if (!streaming) {
       setStreamStalled(false)
       setStallSeconds(0)
+      setStallBannerDismissed(false)
       return
     }
-    const STALL_WARN_MS = 90_000
+    // 3 minutes — true hangs are rare; long chain-of-thought is common.
+    const STALL_WARN_MS = 180_000
     const id = window.setInterval(() => {
       if (!streamingRef.current) return
       const idle = Date.now() - (lastStreamActivityRef.current || Date.now())
@@ -929,6 +934,10 @@ export function useMessages(sessionId: string | null) {
     }, 2000)
     return () => window.clearInterval(id)
   }, [streaming])
+
+  const dismissStallBanner = useCallback(() => {
+    setStallBannerDismissed(true)
+  }, [])
 
   const stop = useCallback(() => {
     const sid = sessionIdRef.current
@@ -1149,6 +1158,8 @@ export function useMessages(sessionId: string | null) {
     streaming,
     streamStalled,
     stallSeconds,
+    stallBannerDismissed,
+    dismissStallBanner,
     partialText,
     partialThinking,
     activeTools,
