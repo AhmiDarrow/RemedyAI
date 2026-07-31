@@ -507,10 +507,13 @@ fn computer_host_loop(app: AppHandle) {
             }
         }
 
-        // Claim navigate leftovers + snapshot (SPA may also claim snapshot;
-        // only one wins). Snapshot via eval-callback is fast and reliable.
+        // Claim navigate leftovers + DOM jobs (SPA may also claim; only one wins).
+        // page_text/ready must be claimable by Rust — SPA alone is not enough when
+        // the React host is busy or mid-bootstrap after navigate.
         if let Ok(resp) = agent
-            .get("http://127.0.0.1:7400/api/computer/jobs/next?only=navigate,snapshot")
+            .get(
+                "http://127.0.0.1:7400/api/computer/jobs/next?only=navigate,snapshot,a11y,page_text,ready,click",
+            )
             .call()
         {
             if let Ok(v) = resp.into_json::<serde_json::Value>() {
@@ -530,9 +533,23 @@ fn computer_host_loop(app: AppHandle) {
                             "computer-host: re-claim navigate {jid} after prior complete — navigating again"
                         );
                     }
-                    handle_job(&app, &agent, job);
-                    if action == "navigate" && !jid.is_empty() {
-                        last_completed_nav = jid;
+                    // DOM jobs can take several seconds (page load + eval).
+                    // Run them off the poller thread so navigate stays snappy.
+                    if matches!(
+                        action,
+                        "snapshot" | "a11y" | "page_text" | "ready" | "click"
+                    ) {
+                        let app2 = app.clone();
+                        let agent2 = agent.clone();
+                        let job2 = job.clone();
+                        let _ = std::thread::Builder::new()
+                            .name("computer-dom".into())
+                            .spawn(move || handle_job(&app2, &agent2, &job2));
+                    } else {
+                        handle_job(&app, &agent, job);
+                        if action == "navigate" && !jid.is_empty() {
+                            last_completed_nav = jid;
+                        }
                     }
                 }
             }
@@ -669,22 +686,10 @@ fn handle_job(app: &AppHandle, agent: &ureq::Agent, job: &serde_json::Value) {
     }
 
     if action == "snapshot" || action == "a11y" {
-        // Eval-with-callback on poller thread (do not nest run_on_main_thread —
-        // that deadlocks waiting for the eval callback).
-        match browser_agent_action(
-            app.clone(),
-            "snapshot".into(),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            Some(id.clone()),
-            None,
-        ) {
+        // Optimistic navigate completes before paint; wait for ready then
+        // retry snapshot — WebView2 eval hangs mid-navigation until load ends.
+        let _ = wait_page_ready(app, 4);
+        match run_snapshot_with_retry(app, &id, 2) {
             Ok(raw) => log::info!("computer-host snapshot job {id} ok len={}", raw.len()),
             Err(e) => {
                 log::warn!("computer-host snapshot job {id}: {e}");
@@ -699,8 +704,288 @@ fn handle_job(app: &AppHandle, agent: &ureq::Agent, job: &serde_json::Value) {
         return;
     }
 
-    // click/type left for SPA poller
+    if action == "page_text" {
+        let _ = wait_page_ready(app, 4);
+        match run_page_text_with_retry(app, 2) {
+            Ok(raw) => {
+                let parsed = parse_page_text_raw(&raw);
+                let text = parsed
+                    .get("text")
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                complete_job(
+                    agent,
+                    &id,
+                    true,
+                    json!({
+                        "ok": true,
+                        "target": "browser",
+                        "action": "page_text",
+                        "message": format!("Page text {} chars", text.len()),
+                        "via": "rust-host",
+                        "title": parsed.get("title").cloned().unwrap_or(json!("")),
+                        "url": parsed.get("url").cloned().unwrap_or(json!("")),
+                        "text": text,
+                    }),
+                    None,
+                );
+            }
+            Err(e) => {
+                log::warn!("computer-host page_text job {id}: {e}");
+                complete_job(agent, &id, false, json!({}), Some(e));
+            }
+        }
+        let _ = agent
+            .post(&format!(
+                "http://127.0.0.1:7400/api/computer/ui/command/ack?job_id={id}"
+            ))
+            .call();
+        return;
+    }
+
+    if action == "ready" {
+        match browser_agent_action(
+            app.clone(),
+            "ready".into(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ) {
+            Ok(raw) => {
+                let parsed: serde_json::Value =
+                    serde_json::from_str(&raw).unwrap_or_else(|_| json!({ "raw": raw }));
+                complete_job(
+                    agent,
+                    &id,
+                    true,
+                    json!({
+                        "ok": true,
+                        "target": "browser",
+                        "action": "ready",
+                        "message": "page ready probe",
+                        "via": "rust-host",
+                        "ready": parsed,
+                    }),
+                    None,
+                );
+            }
+            Err(e) => complete_job(agent, &id, false, json!({}), Some(e)),
+        }
+        return;
+    }
+
+    if action == "click" {
+        let text = payload
+            .get("text")
+            .and_then(|t| t.as_str())
+            .map(|s| s.to_string());
+        let r#ref = payload
+            .get("ref")
+            .and_then(|t| t.as_str())
+            .map(|s| s.to_string());
+        let x = payload.get("x").and_then(|v| v.as_f64());
+        let y = payload.get("y").and_then(|v| v.as_f64());
+        let button = payload
+            .get("button")
+            .and_then(|t| t.as_str())
+            .map(|s| s.to_string());
+        let click_text = payload
+            .get("click_text")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+            || (text.as_ref().map(|s| !s.is_empty()).unwrap_or(false)
+                && r#ref.as_ref().map(|s| s.is_empty()).unwrap_or(true)
+                && x.is_none());
+        let act = if click_text {
+            "click_text".to_string()
+        } else if r#ref.as_ref().map(|s| !s.is_empty()).unwrap_or(false) {
+            "click_ref".to_string()
+        } else {
+            "click".to_string()
+        };
+        match browser_agent_action(
+            app.clone(),
+            act,
+            x,
+            y,
+            None,
+            None,
+            text,
+            None,
+            button,
+            None,
+            None,
+            r#ref.clone(),
+        ) {
+            Ok(raw) => {
+                let ok = !raw.starts_with("no-match")
+                    && !raw.starts_with("missing-ref")
+                    && !raw.starts_with("missing-text");
+                complete_job(
+                    agent,
+                    &id,
+                    ok,
+                    json!({
+                        "ok": ok,
+                        "target": "browser",
+                        "action": "click",
+                        "message": if ok {
+                            format!("Clicked ({raw})")
+                        } else {
+                            format!("click failed: {raw}")
+                        },
+                        "detail": raw,
+                        "ref": r#ref,
+                        "via": "rust-host",
+                    }),
+                    if ok { None } else { Some(format!("click failed")) },
+                );
+            }
+            Err(e) => complete_job(agent, &id, false, json!({}), Some(e)),
+        }
+        let _ = agent
+            .post(&format!(
+                "http://127.0.0.1:7400/api/computer/ui/command/ack?job_id={id}"
+            ))
+            .call();
+        return;
+    }
+
+    // type/key/scroll left for SPA poller
     log::info!("computer-host: job {id} action={action} left for SPA or next tick");
+}
+
+/// Poll document.readyState briefly so snapshot/page_text do not eval mid-nav.
+fn wait_page_ready(app: &AppHandle, attempts: u32) -> bool {
+    for i in 0..attempts {
+        match browser_agent_action(
+            app.clone(),
+            "ready".into(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ) {
+            Ok(raw) => {
+                if raw.contains("\"ok\":true")
+                    || raw.contains("\"complete\"")
+                    || raw.contains("\"interactive\"")
+                {
+                    return true;
+                }
+            }
+            Err(_) => {
+                // WebView may not exist yet right after open_browser.
+                if i == 0 {
+                    std::thread::sleep(Duration::from_millis(250));
+                }
+            }
+        }
+        std::thread::sleep(Duration::from_millis(200 + i as u64 * 100));
+    }
+    false
+}
+
+fn run_snapshot_with_retry(app: &AppHandle, job_id: &str, attempts: u32) -> Result<String, String> {
+    let mut last_err = "snapshot failed".to_string();
+    for i in 0..attempts {
+        match browser_agent_action(
+            app.clone(),
+            "snapshot".into(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(job_id.to_string()),
+            None,
+        ) {
+            Ok(raw) => return Ok(raw),
+            Err(e) => {
+                last_err = e;
+                log::warn!(
+                    "computer-host snapshot attempt {}/{}: {}",
+                    i + 1,
+                    attempts,
+                    last_err
+                );
+                std::thread::sleep(Duration::from_millis(350 + i as u64 * 200));
+            }
+        }
+    }
+    Err(last_err)
+}
+
+fn run_page_text_with_retry(app: &AppHandle, attempts: u32) -> Result<String, String> {
+    let mut last_err = "page_text failed".to_string();
+    for i in 0..attempts {
+        match browser_agent_action(
+            app.clone(),
+            "page_text".into(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ) {
+            Ok(raw) => return Ok(raw),
+            Err(e) => {
+                last_err = e;
+                std::thread::sleep(Duration::from_millis(300 + i as u64 * 150));
+            }
+        }
+    }
+    Err(last_err)
+}
+
+/// WebView2 may return either a JSON object string or a double-encoded JSON
+/// string (because page_text JS uses JSON.stringify and the host serializes again).
+fn parse_page_text_raw(raw: &str) -> serde_json::Value {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return json!({ "text": "" });
+    }
+    let mut val: serde_json::Value = match serde_json::from_str(trimmed) {
+        Ok(v) => v,
+        Err(_) => return json!({ "text": trimmed }),
+    };
+    // Double-encoded: "\"{...}\"" or "\"plain text\""
+    if let Some(s) = val.as_str() {
+        if let Ok(inner) = serde_json::from_str::<serde_json::Value>(s) {
+            val = inner;
+        } else {
+            return json!({ "text": s });
+        }
+    }
+    if val.is_object() {
+        return val;
+    }
+    if let Some(s) = val.as_str() {
+        return json!({ "text": s });
+    }
+    json!({ "text": trimmed })
 }
 
 /// Schedule embed navigate on the UI thread without blocking the poller.
@@ -1012,19 +1297,23 @@ pub fn browser_agent_action(
   try{{ best.focus({{preventScroll:true}}); }}catch(e){{}}
   const r=best.getBoundingClientRect();
   const x=r.x+r.width/2, y=r.y+r.height/2;
-  const opts={{bubbles:true,cancelable:true,clientX:x,clientY:y,view:window,button:0}};
-  best.dispatchEvent(new MouseEvent('mousedown', opts));
-  best.dispatchEvent(new MouseEvent('mouseup', opts));
-  best.dispatchEvent(new MouseEvent('click', opts));
-  if(typeof best.click==='function') try{{ best.click(); }}catch(e){{}}
-  // inputs: select existing value so type replaces
-  if(/^(INPUT|TEXTAREA)$/.test(best.tagName)){{
-    try{{ best.select&&best.select(); }}catch(e){{}}
-  }}
   const name=(best.getAttribute('aria-label')||best.innerText||best.placeholder||best.tagName||'').trim().replace(/\s+/g,' ').slice(0,80);
   const tag=(best.tagName||'').toLowerCase();
   const itype=(best.type||'').toLowerCase();
-  return 'ok:'+bestS.toFixed(0)+':'+tag+':'+itype+':'+name;
+  const out='ok:'+bestS.toFixed(0)+':'+tag+':'+itype+':'+name;
+  // Defer click — navigating <a> would tear down the document before return,
+  // so eval_with_callback never fires (host timeout).
+  setTimeout(function(){{
+    const opts={{bubbles:true,cancelable:true,clientX:x,clientY:y,view:window,button:0}};
+    try{{ best.dispatchEvent(new MouseEvent('mousedown', opts)); }}catch(e){{}}
+    try{{ best.dispatchEvent(new MouseEvent('mouseup', opts)); }}catch(e){{}}
+    try{{ best.dispatchEvent(new MouseEvent('click', opts)); }}catch(e){{}}
+    if(typeof best.click==='function') try{{ best.click(); }}catch(e){{}}
+    if(/^(INPUT|TEXTAREA)$/.test(best.tagName)){{
+      try{{ best.select&&best.select(); }}catch(e){{}}
+    }}
+  }}, 0);
+  return out;
 }})()"#
             )
         }
@@ -1043,12 +1332,16 @@ pub fn browser_agent_action(
   try{{ el.focus({{preventScroll:true}}); }}catch(e){{}}
   const r=el.getBoundingClientRect();
   const x=r.x+r.width/2, y=r.y+r.height/2;
-  const opts={{bubbles:true,cancelable:true,clientX:x,clientY:y,view:window,button:0}};
-  el.dispatchEvent(new MouseEvent('mousedown', opts));
-  el.dispatchEvent(new MouseEvent('mouseup', opts));
-  el.dispatchEvent(new MouseEvent('click', opts));
-  if(typeof el.click==='function') try{{ el.click(); }}catch(e){{}}
-  return 'ok:'+ref+':'+(el.tagName||'?');
+  const out='ok:'+ref+':'+(el.tagName||'?');
+  // Defer — navigating links destroy the document before return.
+  setTimeout(function(){{
+    const opts={{bubbles:true,cancelable:true,clientX:x,clientY:y,view:window,button:0}};
+    try{{ el.dispatchEvent(new MouseEvent('mousedown', opts)); }}catch(e){{}}
+    try{{ el.dispatchEvent(new MouseEvent('mouseup', opts)); }}catch(e){{}}
+    try{{ el.dispatchEvent(new MouseEvent('click', opts)); }}catch(e){{}}
+    if(typeof el.click==='function') try{{ el.click(); }}catch(e){{}}
+  }}, 0);
+  return out;
 }})()"#
             )
         }
@@ -1065,12 +1358,15 @@ pub fn browser_agent_action(
   try{{ el.focus({{preventScroll:true}}); }}catch(e){{}}
   const r=el.getBoundingClientRect();
   const x=r.x+r.width/2, y=r.y+r.height/2;
-  const opts={{bubbles:true,cancelable:true,clientX:x,clientY:y,view:window,button:0}};
-  el.dispatchEvent(new MouseEvent('mousedown', opts));
-  el.dispatchEvent(new MouseEvent('mouseup', opts));
-  el.dispatchEvent(new MouseEvent('click', opts));
-  if(typeof el.click==='function') try{{ el.click(); }}catch(e){{}}
-  return 'ok:'+ref;
+  const out='ok:'+ref;
+  setTimeout(function(){{
+    const opts={{bubbles:true,cancelable:true,clientX:x,clientY:y,view:window,button:0}};
+    try{{ el.dispatchEvent(new MouseEvent('mousedown', opts)); }}catch(e){{}}
+    try{{ el.dispatchEvent(new MouseEvent('mouseup', opts)); }}catch(e){{}}
+    try{{ el.dispatchEvent(new MouseEvent('click', opts)); }}catch(e){{}}
+    if(typeof el.click==='function') try{{ el.click(); }}catch(e){{}}
+  }}, 0);
+  return out;
 }})()"#
                 )
             } else {
@@ -1088,11 +1384,14 @@ pub fn browser_agent_action(
   const el=document.elementFromPoint(x,y)||document.body;
   if(!el) return 'no element';
   try{{ el.focus({{preventScroll:true}}); }}catch(e){{}}
-  const opts={{bubbles:true,cancelable:true,clientX:x,clientY:y,view:window,button:{btn_code}}};
-  el.dispatchEvent(new MouseEvent('mousedown', opts));
-  el.dispatchEvent(new MouseEvent('mouseup', opts));
-  el.dispatchEvent(new MouseEvent('{js_btn}', opts));
-  return 'ok:'+ (el.tagName||'?');
+  const out='ok:'+(el.tagName||'?');
+  setTimeout(function(){{
+    const opts={{bubbles:true,cancelable:true,clientX:x,clientY:y,view:window,button:{btn_code}}};
+    try{{ el.dispatchEvent(new MouseEvent('mousedown', opts)); }}catch(e){{}}
+    try{{ el.dispatchEvent(new MouseEvent('mouseup', opts)); }}catch(e){{}}
+    try{{ el.dispatchEvent(new MouseEvent('{js_btn}', opts)); }}catch(e){{}}
+  }}, 0);
+  return out;
 }})()"#,
                 cx = cx,
                 cy = cy,
@@ -1185,14 +1484,26 @@ pub fn browser_agent_action(
 
     // Prefer eval_with_callback so snapshot returns elements in-process
     // (no HTTPS→localhost fetch). Other actions also get real JS return values.
+    // Snapshot/page_text need a longer budget: after fire-and-forget navigate the
+    // WebView2 may still be loading and eval callbacks stall until the load settles.
+    let eval_timeout_s: u64 = match act.as_str() {
+        // Keep under executor wait (~12–14s) with at most 2 attempts + ready poll.
+        "snapshot" | "a11y" | "page_text" => 5,
+        "click" | "click_ref" | "click_text" | "type" | "type_text" | "key" | "scroll"
+        | "drag" => 6,
+        "ready" => 2,
+        _ => 4,
+    };
     let (tx, rx) = std::sync::mpsc::channel::<String>();
     wv.eval_with_callback(js, move |result| {
         let _ = tx.send(result);
     })
     .map_err(|e| format!("browser agent action: {e}"))?;
     let raw = rx
-        .recv_timeout(Duration::from_secs(3))
-        .map_err(|_| "browser agent action timed out on webview".to_string())?;
+        .recv_timeout(Duration::from_secs(eval_timeout_s))
+        .map_err(|_| {
+            format!("browser agent action timed out on webview ({eval_timeout_s}s / {act})")
+        })?;
 
     if act == "snapshot" || act == "a11y" {
         // raw is JSON array of elements (or null/error string)
@@ -1239,8 +1550,20 @@ pub fn browser_agent_action(
     }
 
     if act == "page_text" {
-        log::info!("browser agent page_text len={}", raw.len());
-        return Ok(raw);
+        // Normalize double-encoded JSON.stringify results so callers always
+        // get a JSON object string with title/url/text fields.
+        let parsed = parse_page_text_raw(&raw);
+        let normalized = parsed.to_string();
+        log::info!(
+            "browser agent page_text len={} text_len={}",
+            normalized.len(),
+            parsed
+                .get("text")
+                .and_then(|t| t.as_str())
+                .map(|s| s.len())
+                .unwrap_or(0)
+        );
+        return Ok(normalized);
     }
 
     log::info!("browser agent action {act} → {raw}");

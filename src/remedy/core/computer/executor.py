@@ -593,7 +593,10 @@ class ComputerExecutor:
             except Exception:
                 pass
 
-        # Non-navigate without host: screenshots can still use OS capture
+        # Non-navigate without host: screenshots can still use OS capture.
+        # DOM jobs (snapshot/page_text/ready/click/type) still enqueue — the
+        # Desktop Rust poller claims from disk even when this process's
+        # in-memory host_connected flag is stale (CLI / after mark_host_dead).
         if not self.bridge.host_connected() and act is not ComputerAction.NAVIGATE:
             if act is ComputerAction.SCREENSHOT:
                 r = self._run_desktop(ComputerAction.SCREENSHOT)
@@ -605,10 +608,19 @@ class ComputerExecutor:
                 return r
             if act is ComputerAction.WINDOWS:
                 return self._run_desktop(act, **kwargs)
-            if act is ComputerAction.SNAPSHOT:
-                # fall through to enqueue briefly, then desktop snapshot fallback
+            if act in (
+                ComputerAction.SNAPSHOT,
+                ComputerAction.PAGE_TEXT,
+                ComputerAction.FIND,
+                ComputerAction.CLICK,
+                ComputerAction.TYPE,
+                ComputerAction.KEY,
+                ComputerAction.SCROLL,
+                ComputerAction.ACT,
+            ):
+                # Optimistic enqueue — host poller may still be alive on disk.
                 pass
-            elif act not in (ComputerAction.NAVIGATE, ComputerAction.SNAPSHOT):
+            else:
                 return public_result(
                     ok=False,
                     target="browser",
@@ -730,61 +742,84 @@ class ComputerExecutor:
                 extra={"seconds": sec},
             )
 
-        # Snapshot: settle after navigate, then eval-callback
+        # Snapshot: settle after navigate, then eval-callback (host retries mid-load).
         if act is ComputerAction.SNAPSHOT:
-            slept = self.bridge.settle_after_navigate(min_s=0.4, max_s=1.0)
+            slept = self.bridge.settle_after_navigate(min_s=0.7, max_s=1.8)
             query = str(kwargs.get("hint") or kwargs.get("query") or "").strip()
-            unclaimed = 2.0
-            total_wait = float(kwargs.get("timeout_s") or 4.0)
-            job = self._enqueue(act.value, payload)
-            finished = self.bridge.wait(
-                job.id,
-                timeout_s=total_wait,
-                poll_s=0.04,
-                abort_check=self._abort_check,
-                unclaimed_timeout_s=unclaimed,
-                grace_s=0.2,
-            )
-            if finished.status == "done" and finished.result:
-                out = dict(finished.result)
-                out.setdefault("ok", True)
-                out.setdefault("target", "browser")
-                out.setdefault("action", "snapshot")
-                elements = list(out.get("elements") or [])
-                if elements:
-                    self.bridge.set_last_elements(elements, target="browser")
-                from remedy.core.computer.elements import (
-                    find_best_elements,
-                    format_som_list,
+            unclaimed = 6.0
+            # Host may wait for page ready + up to 2×5s eval retries.
+            total_wait = float(kwargs.get("timeout_s") or 14.0)
+            last_err = ""
+            last_job_id = ""
+            for attempt in range(2):
+                job = self._enqueue(act.value, payload)
+                last_job_id = job.id
+                finished = self.bridge.wait(
+                    job.id,
+                    timeout_s=total_wait,
+                    poll_s=0.05,
+                    abort_check=self._abort_check,
+                    unclaimed_timeout_s=unclaimed,
+                    grace_s=0.5,
                 )
+                if finished.status == "done" and finished.result:
+                    out = dict(finished.result)
+                    # Host may complete with ok:false + error string
+                    if out.get("ok") is False and not out.get("elements"):
+                        last_err = str(
+                            out.get("message") or finished.error or "snapshot failed"
+                        )
+                        time.sleep(0.45)
+                        continue
+                    out.setdefault("ok", True)
+                    out.setdefault("target", "browser")
+                    out.setdefault("action", "snapshot")
+                    elements = list(out.get("elements") or [])
+                    if elements:
+                        self.bridge.set_last_elements(elements, target="browser")
+                    from remedy.core.computer.elements import (
+                        find_best_elements,
+                        format_som_list,
+                    )
 
-                # Set-of-Mark list for the model (OSWorld / SoM practice)
-                out["som"] = format_som_list(
-                    elements, limit=int(kwargs.get("limit") or 40), query=query
-                )
-                if query and elements:
-                    matches = find_best_elements(elements, query, top_k=6)
-                    out["matches"] = matches
-                    out["query"] = query
-                # Prefer SoM text as the primary message the model reads
-                out["message"] = out.get("som") or out.get("message") or (
-                    f"{len(elements)} interactive elements"
-                )
-                if slept:
-                    out["settled_s"] = round(slept, 2)
-                return out
-            err = finished.error or finished.status
+                    # Set-of-Mark list for the model (OSWorld / SoM practice)
+                    out["som"] = format_som_list(
+                        elements, limit=int(kwargs.get("limit") or 40), query=query
+                    )
+                    if query and elements:
+                        matches = find_best_elements(elements, query, top_k=6)
+                        out["matches"] = matches
+                        out["query"] = query
+                    # Prefer SoM text as the primary message the model reads
+                    out["message"] = out.get("som") or out.get("message") or (
+                        f"{len(elements)} interactive elements"
+                    )
+                    if slept:
+                        out["settled_s"] = round(slept, 2)
+                    if attempt:
+                        out["attempt"] = attempt + 1
+                    return out
+                last_err = str(finished.error or finished.status or "snapshot failed")
+                # Retry once on webview eval timeout / mid-load races
+                if attempt == 0 and (
+                    "timed out" in last_err.lower()
+                    or "timeout" in last_err.lower()
+                    or "not open" in last_err.lower()
+                ):
+                    time.sleep(0.55)
+                    continue
+                break
             return public_result(
                 ok=False,
                 target="browser",
                 action="snapshot",
                 message=(
-                    f"Browser rail snapshot failed ({err}). "
+                    f"Browser rail snapshot failed ({last_err}). "
                     "Open/navigate the page in the Browser rail first, then retry "
                     "computer_snapshot. Prefer snapshot+click ref/text — do not use "
                     "screenshot+vision as the primary path (slow and often wrong)."
                 ),
-                extra={"job_id": job.id},
+                extra={"job_id": last_job_id},
             )
 
         unclaimed = 3.0
@@ -818,31 +853,44 @@ class ComputerExecutor:
         )
 
     def _browser_snapshot_now(self, kwargs: dict[str, Any]) -> dict[str, Any]:
-        self.bridge.settle_after_navigate(min_s=0.35, max_s=0.9)
+        self.bridge.settle_after_navigate(min_s=0.6, max_s=1.5)
         payload: dict[str, Any] = {"ui": {"open_browser": True}}
-        job = self._enqueue("snapshot", payload)
-        finished = self.bridge.wait(
-            job.id,
-            timeout_s=4.0,
-            poll_s=0.04,
-            abort_check=self._abort_check,
-            unclaimed_timeout_s=2.0,
-            grace_s=0.2,
-        )
-        if finished.status == "done" and finished.result:
-            out = dict(finished.result)
-            out.setdefault("ok", True)
-            if out.get("elements"):
-                self.bridge.set_last_elements(
-                    list(out.get("elements") or []), target="browser"
-                )
-            return out
+        last_err = "snapshot failed"
+        last_job_id = ""
+        for attempt in range(2):
+            job = self._enqueue("snapshot", payload)
+            last_job_id = job.id
+            finished = self.bridge.wait(
+                job.id,
+                timeout_s=14.0,
+                poll_s=0.05,
+                abort_check=self._abort_check,
+                unclaimed_timeout_s=5.0,
+                grace_s=0.8,
+            )
+            if finished.status == "done" and finished.result:
+                out = dict(finished.result)
+                if out.get("ok") is False and not out.get("elements"):
+                    last_err = str(out.get("message") or finished.error or last_err)
+                    time.sleep(0.4)
+                    continue
+                out.setdefault("ok", True)
+                if out.get("elements"):
+                    self.bridge.set_last_elements(
+                        list(out.get("elements") or []), target="browser"
+                    )
+                return out
+            last_err = finished.error or finished.status or last_err
+            if attempt == 0 and "timeout" in str(last_err).lower():
+                time.sleep(0.5)
+                continue
+            break
         return public_result(
             ok=False,
             target="browser",
             action="snapshot",
-            message=finished.error or "snapshot failed",
-            extra={"job_id": job.id},
+            message=last_err,
+            extra={"job_id": last_job_id},
         )
 
     def _browser_click_text(self, text_q: str, kwargs: dict[str, Any]) -> dict[str, Any]:
@@ -1038,31 +1086,48 @@ class ComputerExecutor:
         )
 
     def _browser_page_text(self) -> dict[str, Any]:
-        self.bridge.settle_after_navigate(min_s=0.3, max_s=0.8)
-        job = self._enqueue(
-            "click",
-            {"ui": {"open_browser": True}, "browser_action": "page_text"},
-        )
-        finished = self.bridge.wait(
-            job.id,
-            timeout_s=4.0,
-            poll_s=0.05,
-            abort_check=self._abort_check,
-            unclaimed_timeout_s=2.0,
-            grace_s=0.15,
-        )
-        if finished.status == "done" and finished.result:
-            out = dict(finished.result)
-            out.setdefault("ok", True)
-            out.setdefault("action", "page_text")
-            out.setdefault("target", "browser")
-            return out
+        self.bridge.settle_after_navigate(min_s=0.6, max_s=1.5)
+        # Prefer dedicated action so Rust host can claim (only=…page_text).
+        # Legacy SPA path still handles payload.browser_action on click jobs.
+        last_err = "page_text failed — open a page in the rail first"
+        last_job_id = ""
+        for attempt, action in enumerate(("page_text", "page_text")):
+            job = self._enqueue(
+                action,
+                {"ui": {"open_browser": True}, "browser_action": "page_text"},
+            )
+            last_job_id = job.id
+            finished = self.bridge.wait(
+                job.id,
+                timeout_s=14.0,
+                poll_s=0.05,
+                abort_check=self._abort_check,
+                unclaimed_timeout_s=5.0,
+                grace_s=0.8,
+            )
+            if finished.status == "done" and finished.result:
+                out = dict(finished.result)
+                if out.get("ok") is False and not (
+                    out.get("text") or out.get("title")
+                ):
+                    last_err = str(out.get("message") or finished.error or last_err)
+                    time.sleep(0.4)
+                    continue
+                out.setdefault("ok", True)
+                out.setdefault("action", "page_text")
+                out.setdefault("target", "browser")
+                return out
+            last_err = finished.error or finished.status or last_err
+            if attempt == 0:
+                time.sleep(0.45)
+                continue
+            break
         return public_result(
             ok=False,
             target="browser",
             action="page_text",
-            message=finished.error or "page_text failed — open a page in the rail first",
-            extra={"job_id": job.id},
+            message=last_err,
+            extra={"job_id": last_job_id},
         )
 
     def _navigate_rail_fast(
