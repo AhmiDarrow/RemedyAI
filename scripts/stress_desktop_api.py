@@ -16,6 +16,13 @@ import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+
+import sys
+from pathlib import Path as _PathForToken
+_SCRIPTS = _PathForToken(__file__).resolve().parent
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+from lib_local_token import resolve_local_api_token
 from typing import Any
 
 HOME = Path(os.environ.get("REMEDY_HOME", Path.home() / ".remedy"))
@@ -42,9 +49,10 @@ class Fail(Exception):
 
 
 def load_token() -> str:
-    if not TOKEN_PATH.is_file():
-        raise Fail(f"missing token {TOKEN_PATH}")
-    return TOKEN_PATH.read_text(encoding="utf-8").strip()
+    try:
+        return resolve_local_api_token(home=HOME, base=BASE)
+    except Exception as e:
+        raise Fail(f"token resolve failed ({TOKEN_PATH}): {e}") from e
 
 
 def req(

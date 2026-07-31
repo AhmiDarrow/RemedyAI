@@ -1,0 +1,10 @@
+Traceback (most recent call last):
+  File "C:\Users\Administrator\RemedyAI\scripts\live_full_product_e2e.py", line 790, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "C:\Users\Administrator\RemedyAI\scripts\live_full_product_e2e.py", line 171, in main
+    sid_setup = new_session("E2E self-setup")
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\RemedyAI\scripts\live_full_product_e2e.py", line 116, in new_session
+    raise RuntimeError(f"session create failed {code} {sess}")
+RuntimeError: session create failed 0 {'error': 'Invalid header value b\'Bearer {\\n  "v": 2,\\n  "dpapi": "AQAAANCMnd8BFdERjHoAwE/Cl+sBAAAA83/RxabUmUq6Lb2d4lGwqgAAAAAqAAAAUgBlAG0AZQBkAHkAIABwAHIAbwB2AGkAZABlAHIAIABrAGUAeQBzAAAAEGYAAAABAAAgAAAANaI0eNZM0f0j0C3ob/2dO+xN4Qb/b9ZseBxorRXq7V8AAAAADoAAAAACAAAgAAAAWmuau16+YAxA49Yg/5M+anH7tVYCD1dGZdbtGRjV7L0wAAAAmgpa8BjFAv2J/4Gckf3dCe4TjSoHFWaZXGXQZj4YVUQ+Eq430Q+d3zo6baT9pKoVQAAAAE5Dt3OLOkmd1oWhw3eGFoGtbXTDfqn6NvAzOJASQdp2AmAh1D03n4uJRCXqYL/M5SIYxUFh1UBSwlTktR4bk+g=",\\n  "updated_at": 1785454955.8604991\\n}\''}

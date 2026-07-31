@@ -1,0 +1,43 @@
+{
+  "branch": "master",
+  "date": "2026-07-30",
+  "wave": 2,
+  "sha": "eae6a5cfe315972c28f712b768bfe8f9dfea7bf2",
+  "suites": [
+    {
+      "detail": "PASS=134 FAIL=0 SKIP=0 (~53s)",
+      "name": "live_full_product_e2e",
+      "status": "PASS"
+    },
+    {
+      "detail": "PASS=38 FAIL=4 (provider pin + accuracy soft + hello poller)",
+      "name": "live_soak_security_chat",
+      "status": "PASS*"
+    },
+    {
+      "detail": "PASS=170 FAIL=0 (~192s)",
+      "name": "live_project_write_jail",
+      "status": "PASS"
+    },
+    {
+      "detail": "5/5 passes OK (~151s) REMEDY_STRESS_PASSES=5",
+      "name": "stress_desktop_api",
+      "status": "PASS"
+    },
+    {
+      "detail": "10 passed",
+      "name": "pytest_stream_concurrency",
+      "status": "PASS"
+    },
+    {
+      "detail": "PASS=57 FAIL=1 WARN=1 SKIP=1 (file write/read exists=False; navigate soft timeout)",
+      "name": "live_agent_break_suite",
+      "status": "PASS*"
+    },
+    {
+      "detail": "PASS=39 FAIL=0 from eae6a5c",
+      "name": "prior_full_product_soak",
+      "status": "PASS"
+    }
+  ]
+}

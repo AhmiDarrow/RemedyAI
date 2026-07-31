@@ -25,9 +25,16 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+import sys
+from pathlib import Path as _PathForToken
+_SCRIPTS = _PathForToken(__file__).resolve().parent
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+from lib_local_token import resolve_local_api_token
+
 BASE = os.environ.get("REMEDY_API", "http://127.0.0.1:7400").rstrip("/")
 HOME = Path(os.environ.get("REMEDY_HOME", Path.home() / ".remedy")).expanduser()
-TOKEN = (HOME / "auth" / "local_api_token").read_text(encoding="utf-8").strip()
+TOKEN = resolve_local_api_token(home=HOME, base=BASE)
 REPO = Path(__file__).resolve().parents[1]
 ROUNDS = int(os.environ.get("JAIL_ROUNDS", "10"))
 RUN_LIVE = os.environ.get("JAIL_LIVE", "1") != "0"

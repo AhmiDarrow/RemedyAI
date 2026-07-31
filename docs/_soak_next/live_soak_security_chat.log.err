@@ -1,0 +1,34 @@
+Traceback (most recent call last):
+  File "C:\Users\Administrator\RemedyAI\scripts\live_soak_security_chat.py", line 458, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "C:\Users\Administrator\RemedyAI\scripts\live_soak_security_chat.py", line 183, in main
+    code, st = req("GET", "/api/status", auth=True)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\RemedyAI\scripts\live_soak_security_chat.py", line 48, in req
+    with urllib.request.urlopen(r, timeout=timeout) as resp:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\AppData\Roaming\uv\python\cpython-3.12-windows-x86_64-none\Lib\urllib\request.py", line 215, in urlopen
+    return opener.open(url, data, timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\AppData\Roaming\uv\python\cpython-3.12-windows-x86_64-none\Lib\urllib\request.py", line 515, in open
+    response = self._open(req, data)
+               ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\AppData\Roaming\uv\python\cpython-3.12-windows-x86_64-none\Lib\urllib\request.py", line 532, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\AppData\Roaming\uv\python\cpython-3.12-windows-x86_64-none\Lib\urllib\request.py", line 492, in _call_chain
+    result = func(*args)
+             ^^^^^^^^^^^
+  File "C:\Users\Administrator\AppData\Roaming\uv\python\cpython-3.12-windows-x86_64-none\Lib\urllib\request.py", line 1373, in http_open
+    return self.do_open(http.client.HTTPConnection, req)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\AppData\Roaming\uv\python\cpython-3.12-windows-x86_64-none\Lib\urllib\request.py", line 1344, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+  File "C:\Users\Administrator\AppData\Roaming\uv\python\cpython-3.12-windows-x86_64-none\Lib\http\client.py", line 1338, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+  File "C:\Users\Administrator\AppData\Roaming\uv\python\cpython-3.12-windows-x86_64-none\Lib\http\client.py", line 1379, in _send_request
+    self.putheader(hdr, value)
+  File "C:\Users\Administrator\AppData\Roaming\uv\python\cpython-3.12-windows-x86_64-none\Lib\http\client.py", line 1316, in putheader
+    raise ValueError('Invalid header value %r' % (values[i],))
+ValueError: Invalid header value b'Bearer {\n  "v": 2,\n  "dpapi": "AQAAANCMnd8BFdERjHoAwE/Cl+sBAAAA83/RxabUmUq6Lb2d4lGwqgAAAAAqAAAAUgBlAG0AZQBkAHkAIABwAHIAbwB2AGkAZABlAHIAIABrAGUAeQBzAAAAEGYAAAABAAAgAAAANaI0eNZM0f0j0C3ob/2dO+xN4Qb/b9ZseBxorRXq7V8AAAAADoAAAAACAAAgAAAAWmuau16+YAxA49Yg/5M+anH7tVYCD1dGZdbtGRjV7L0wAAAAmgpa8BjFAv2J/4Gckf3dCe4TjSoHFWaZXGXQZj4YVUQ+Eq430Q+d3zo6baT9pKoVQAAAAE5Dt3OLOkmd1oWhw3eGFoGtbXTDfqn6NvAzOJASQdp2AmAh1D03n4uJRCXqYL/M5SIYxUFh1UBSwlTktR4bk+g=",\n  "updated_at": 1785454955.8604991\n}'
