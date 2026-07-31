@@ -11,14 +11,16 @@ Current series: **v0.20.0**.
 ## 0.20.0 - Partner metabolism + always-ready
 
 The “so” leap: a **Partner Metabolism OS** under one voice, plus desktop chrome that
-stays ready on this PC. Full detail: [19-metabolism](19-metabolism) · `CHANGELOG.md`.
+stays ready on this PC. Full detail: [19-metabolism](19-metabolism) · `CHANGELOG.md` ·
+PyPI **`remedy-ai==0.20.0`** · GitHub tag **v0.20.0**.
 
 - **Turn tiers L0–L3** — L0 instant local answers (model / skills / version / whoami);
   L1 lean chat; L2 full tools (review, implement, files, shell, computer); L3 deep /
   work-alone + force-spread.
 - **Evidence + decisions** — tool facts get IDs; waste scoring; mid-turn delta inject.
 - **Shadow + write jail** — high-blast dry-run on top of project write roots; shell
-  cannot mutate `~/.remedy/auth` even under home scope.
+  cannot mutate `~/.remedy/auth` even under home scope; global package installs outside
+  write roots are blocked.
 - **Agency that actually runs tools** — “review project” keeps tools on; if the model
   only *says* “activating skill”, Remedy re-arms tools and demands real function calls.
 - **Skills** — progressive disclosure; review injects change-safety procedure when useful;
@@ -26,11 +28,18 @@ stays ready on this PC. Full detail: [19-metabolism](19-metabolism) · `CHANGELO
 - **Desktop always-ready** — **✕ / Alt+F4 always hides to the system tray** (local API
   stays up). Full stop only from tray **Quit**. Multi-tab stream paint, abort UX, and
   session-scoped partner status.
-- **Computer use** — host jobs, shot TTL, multi-tab cancel, open_app protocol/UNC harden.
-- **Security** — web_fetch SSRF (userinfo, CGNAT, redirects), DPAPI local API token,
-  identity export HMAC + rate limits, MCP residual purge, plugin path-required load.
-- **Docs** — owner’s manual + README refreshed for metabolism, agency, and tray behavior
-  (F1 wiki includes architecture diagram).
+- **Privacy mode (opt-in)** — status bar + Simple settings; redacts secret-shaped content
+  on the provider path when on; **zero cost when off**.
+- **Browser rail** — video **fullscreen stays inside the rail** (not full-app); Mobile /
+  Desktop site toggle; same-window OAuth for major IdPs; chat attachment / Comfy images
+  load with Bearer media auth; double-click chat links open in-rail.
+- **Computer use** — host jobs require Bearer; shot TTL; multi-tab cancel; open_app
+  protocol/UNC harden; host reliability (snapshot / page_text / click).
+- **Security** — web_fetch SSRF (userinfo, CGNAT, redirects), Teams JWKS RS256, DPAPI
+  local API token, identity export HMAC + rate limits, MCP residual purge, plugin
+  path-required load.
+- **Docs** — owner’s manual + README: About + What’s new near the top; architecture
+  diagram in F1 overview.
 
 ## 0.19.0 - Parallel multi-provider + background turns
 

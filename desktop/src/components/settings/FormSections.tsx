@@ -1925,6 +1925,26 @@ export function SettingsFormSections(p: SettingsFormProps): ReactNode {
             <SettingsSection
               {...sectionProps('about')}
             >
+              <div className="flex items-center gap-3 mb-3">
+                <img
+                  src="/icon.png"
+                  alt=""
+                  draggable={false}
+                  style={{ height: 36, width: 36, objectFit: 'contain', borderRadius: 8 }}
+                />
+                <img
+                  src="/logo.png"
+                  alt="Remedy"
+                  draggable={false}
+                  style={{ height: 28, width: 'auto', maxWidth: 180, objectFit: 'contain' }}
+                />
+              </div>
+              <div className="text-xs mb-3 leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+                Personal AI partner on this machine — chat, files, terminal, browser rail,
+                computer use. Continuity under{' '}
+                <code style={{ fontSize: '0.65rem' }}>~/.remedy</code>; your model keys stay yours.
+                Not a medical product.
+              </div>
               <div
                 className="rounded-lg px-3 py-2 mb-3 text-xs leading-relaxed"
                 style={{
@@ -1953,6 +1973,16 @@ export function SettingsFormSections(p: SettingsFormProps): ReactNode {
                   <span style={{ fontFamily: 'monospace', fontSize: '0.65rem' }}>~/.remedy/config.toml</span>
                 </div>
               </div>
+              {onOpenHelp && (
+                <button
+                  type="button"
+                  className="mt-2 text-xs underline"
+                  style={{ color: 'var(--accent)', background: 'none', border: 0, padding: 0 }}
+                  onClick={() => onOpenHelp('13-whats-new')}
+                >
+                  What&apos;s new in this release →
+                </button>
+              )}
 
               <div className="mt-3 pt-3 border-t space-y-1.5" style={{ borderColor: 'var(--border)' }}>
                 <button
