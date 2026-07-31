@@ -56,8 +56,9 @@ Machine results: `docs/_soak_probe_results.json` (PASS=22 FAIL=0 SKIP=4 on first
 
 | Item | Result | Evidence |
 |------|--------|----------|
-| snapshot/screenshot/navigate/monitors allowed | **SKIP** | Plan not toggled |
-| click/type blocked in Plan | **SKIP** | Plan not toggled |
+| snapshot/screenshot/navigate/monitors allowed | **PASS** | Plan mode: monitors/snapshot/screenshot/navigate execute (not PLAN_MODE_BLOCKED) |
+| click/type blocked in Plan | **PASS** | computer_click/type/key/scroll/act/app → PLAN_MODE_BLOCKED + Build suggestion |
+| F1 help in Plan | **PASS** | help_list + help_read(computer-use-soak) allowed |
 
 ## Provider-agnostic
 
@@ -78,7 +79,8 @@ Machine results: `docs/_soak_probe_results.json` (PASS=22 FAIL=0 SKIP=4 on first
 1. ~~Browser DOM snapshot / page_text / click timeouts~~ — fixed (prior commit `901abf8`).
 2. ~~UIA / comtypes~~ — fixed.
 3. ~~Browser screenshot full-desktop fallback when poller flag stale~~ — fixed (try PrintWindow before offline desktop shot).
-4. Still open: Plan-mode matrix, multi-provider, forced offline fallbacks, concurrent sessions, Stop mid-type keystroke race.
+4. ~~Plan-mode matrix~~ — fixed (help + computer observe allow / input block; live soak PASS).
+5. Still open: multi-provider, forced offline fallbacks, concurrent sessions, Stop mid-type keystroke race.
 
 ## Rebuild + re-soak notes
 

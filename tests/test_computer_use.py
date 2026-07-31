@@ -346,13 +346,25 @@ def test_plan_mode_includes_read_computer_tools():
     assert "computer_screenshot" in PLAN_MODE_TOOL_NAMES
     assert "computer_navigate" in PLAN_MODE_TOOL_NAMES
     assert "computer_windows" in PLAN_MODE_TOOL_NAMES
+    assert "computer_monitors" in PLAN_MODE_TOOL_NAMES
+    assert "computer_snapshot" in PLAN_MODE_TOOL_NAMES
+    assert "computer_page_text" in PLAN_MODE_TOOL_NAMES
+    assert "computer_find" in PLAN_MODE_TOOL_NAMES
+    assert "computer_wait" in PLAN_MODE_TOOL_NAMES
     assert "computer_click" not in PLAN_MODE_TOOL_NAMES
     assert "computer_type" not in PLAN_MODE_TOOL_NAMES
+    assert "computer_key" not in PLAN_MODE_TOOL_NAMES
+    assert "computer_scroll" not in PLAN_MODE_TOOL_NAMES
+    assert "computer_drag" not in PLAN_MODE_TOOL_NAMES
     # Multi-step act can click/type — must stay Build-only (aligned with COMPUTER_PLAN_MODE_TOOLS)
     assert "computer_act" not in PLAN_MODE_TOOL_NAMES
     assert "computer_app" not in PLAN_MODE_TOOL_NAMES
     assert COMPUTER_PLAN_MODE_TOOLS <= COMPUTER_TOOL_NAMES
     assert COMPUTER_PLAN_MODE_TOOLS <= PLAN_MODE_TOOL_NAMES
+    # Every computer tool is either plan-allowed or explicitly blocked
+    assert COMPUTER_TOOL_NAMES == COMPUTER_PLAN_MODE_TOOLS | (
+        COMPUTER_TOOL_NAMES - COMPUTER_PLAN_MODE_TOOLS
+    )
 
 
 def test_host_bridge_enqueue_claim_complete(tmp_path: Path):

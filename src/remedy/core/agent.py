@@ -475,6 +475,16 @@ class BasicRuntime(AgentRuntime):
             from remedy.core.plan_store import PLAN_MODE_TOOL_NAMES
 
             if name not in PLAN_MODE_TOOL_NAMES:
+                if str(name).startswith("computer_"):
+                    suggestion = (
+                        "Switch to Build mode (Ctrl+B) for click/type/scroll/act. "
+                        "Plan mode allows computer observe tools only "
+                        "(snapshot, screenshot, navigate, monitors, page_text, find, wait)."
+                    )
+                else:
+                    suggestion = (
+                        "Switch to Build mode (Ctrl+B) to run shell/file tools."
+                    )
                 return ToolResult(
                     call_id=tool_call.id,
                     success=False,
@@ -482,7 +492,7 @@ class BasicRuntime(AgentRuntime):
                         f"Tool '{name}' blocked in Plan mode",
                         code="PLAN_MODE_BLOCKED",
                         tool_name=name,
-                        suggestion="Switch to Build mode (Ctrl+B) to run shell/file tools.",
+                        suggestion=suggestion,
                     ),
                 )
         default_registry.counter("remedy_tool_calls_total", tool=name).inc()
