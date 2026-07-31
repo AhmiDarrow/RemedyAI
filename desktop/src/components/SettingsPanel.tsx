@@ -134,7 +134,8 @@ export function SettingsPanel({
   const [accessScope, setAccessScope] = useState('project')
   const [launchAtLogin, setLaunchAtLogin] = useState(false)
   const [startInTray, setStartInTray] = useState(false)
-  const [closeToTray, setCloseToTray] = useState(false)
+  // Always true — title-bar ✕ hides to tray (not a user opt-out).
+  const [closeToTray, setCloseToTray] = useState(true)
   const [skipQuitWarn, setSkipQuitWarn] = useState(false)
   const [webToolsEnabled, setWebToolsEnabled] = useState(false)
   const [httpBootstrap, setHttpBootstrap] = useState(true)
@@ -623,7 +624,8 @@ export function SettingsPanel({
       access_scope: accessScope,
       launch_at_login: launchAtLogin,
       start_in_tray: startInTray,
-      close_to_tray: closeToTray,
+      // Title-bar ✕ always hides to tray (product rule).
+      close_to_tray: true,
       harness_mode: harnessMode,
       harness_min_context_pct: harnessMinPct,
       harness_max_context_pct: Math.max(harnessMaxPct, harnessMinPct + 0.01),
@@ -664,7 +666,7 @@ export function SettingsPanel({
       }
       try {
         await invoke('set_desktop_prefs', {
-          close_to_tray: closeToTray,
+          close_to_tray: true,
           start_in_tray: startInTray,
           skip_quit_server_warning: skipQuitWarn,
         })

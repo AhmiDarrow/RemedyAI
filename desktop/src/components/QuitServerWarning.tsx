@@ -57,7 +57,8 @@ export function QuitServerWarning({ open, onCancel, onConfirmQuit }: QuitServerW
             that hides the desktop window to the tray and leaves the server running.
           </p>
           <p style={{ color: 'var(--text-muted)' }}>
-            Closing the window with “hide to tray” enabled also keeps the server up.
+            Closing the window (✕) always hides to the tray and keeps the server up.
+            Use tray <strong>Quit</strong> when you want a full stop.
           </p>
         </div>
         <label className="flex items-start gap-2 mb-4 cursor-pointer text-xs">

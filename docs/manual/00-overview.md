@@ -1,10 +1,14 @@
 # Remedy — Owner’s Manual Overview
 
-**Remedy** is your personal AI partner for knowledge, design, code, and get-it-done work on **your machine**. It is **not** a medical product.
+![Remedy wordmark](assets/hero_logo_color_on_dark.png)
 
-**Feel of the product:** easy, sleek, beautiful, familiar, and powerful — simple by default, full power when you want it (Simple / Advanced on the bottom bar and in Settings).
+**Remedy** is your personal AI partner for knowledge, design, code, computer use, and get-it-done work on **your machine**. One continuous voice — **not** a multi-agent farm, **not** a thin chat wrapper, **not** a medical product.
 
-Offline Help: **F1** or **Ctrl+/**.
+**Feel of the product:** easy, sleek, familiar, and powerful — Simple UI by default, Advanced when you want full rails, metabolism, and process detail.
+
+Offline Help: **F1** or **Ctrl+/** · Same chapters live in the repo under `docs/manual/`.
+
+![How Remedy fits together](assets/remedy-partner-architecture.jpg)
 
 ---
 
@@ -13,8 +17,10 @@ Offline Help: **F1** or **Ctrl+/**.
 | | Topic |
 |--|--------|
 | [What you get](#what-you-get) | Product at a glance |
-| [Workspace tools](#workspace-tools) | Files, Terminal, Browser, Scratch |
-| [Local brain](#local-brain) | Qwen on this PC |
+| [Workspace tools](#workspace-tools) | Files, Terminal, Browser, Scratch, Computer |
+| [Local brain](#local-brain) | SmolVLM2 on this PC |
+| [Partner metabolism](#partner-metabolism) | L0–L3 speed / accuracy / trust |
+| [Always ready](#always-ready-desktop) | Close → tray, local API |
 | [Quick start](#quick-start-60-seconds) | First hour |
 | [How pieces fit](#how-the-pieces-fit) | Architecture sketch |
 | [Manual map](#manual-map) | All chapters |
@@ -27,17 +33,18 @@ Offline Help: **F1** or **Ctrl+/**.
 
 | Area | Meaning |
 |------|---------|
-| **Chat partner** | Streaming chat, Plan/Build, attachments, image markup |
-| **Workspace** | **Files** · **Terminal** · **Browser** · **Scratch** beside chat |
-| **Local brain** | **SmolVLM2 2.2B** (Apache 2.0) on this PC — vision briefs + local assist (not a second persona) |
-| **Continuity** | Session Brief, memory, skills, silent workers (nano swarm) |
-| **Messengers** | Telegram and modular connectors in **Settings → Messengers** |
-| **Skills** | Bundled + learned + **Library** (signed catalog) |
-| **Memory** | Durable store · Progress snapshots · plans |
-| **Safety** | Loopback API, approvals, scope, quarantine until Trust |
-| **Web UI** | Same app in the browser at `http://127.0.0.1:7400/` |
+| **Chat partner** | Streaming markdown, Plan/Build, multi-provider tabs, attachments, image markup |
+| **Workspace** | **Files** · **Terminal** · **Browser** · **Scratch** · **Computer use** rails beside chat |
+| **Local brain** | **SmolVLM2 2.2B** on this PC — vision briefs + harness assist (not a second persona) |
+| **Continuity** | Session Brief, partner memory, skills, silent nano swarm |
+| **Metabolism** | Turn tiers L0–L3, evidence ledger, shadow, Action IR, governor, portable identity |
+| **Messengers** | Telegram (live) + modular Discord / Slack / Mattermost / Matrix / WhatsApp / Teams / Google Chat / Signal |
+| **Skills** | Bundled + learned + **Library** (signed catalog); progressive disclosure (`skill_activate`) |
+| **Agency** | `file_edit`, repo search, shell (write jail), missions, `spread_run`, `web_search` / `web_fetch` |
+| **Safety** | Loopback API + Bearer token, approvals, access scope, SSRF, secret redaction, quarantine until Trust |
+| **Web UI** | Same SPA at `http://127.0.0.1:7400/` (Switch to WebUI keeps the server alive in the tray) |
 
-No Remedy cloud account for core use. Your chat model is yours (xAI, OpenAI, Ollama, …).
+No Remedy cloud account for core use. Your **chat model** is yours (xAI, OpenAI, Anthropic, Google, DeepSeek, Groq, Mistral, OpenRouter, Ollama, Custom). Continuity and vision weights stay under `~/.remedy`.
 
 ---
 
@@ -51,6 +58,7 @@ Icon rails open real tools on this PC — not separate apps to juggle.
 | **Terminal** | In-app PowerShell (ConPTY) |
 | **Browser** | Embedded Chromium (WebView2); **↗** for full system browser |
 | **Scratch** | Session-linked notes |
+| **Computer** | Optional desktop/computer-use path (navigate, click, type) with host bridge + safety |
 
 Sessions, Settings, and these tools live on the left/right rails. See [Chat & sessions](05-chat-and-sessions).
 
@@ -69,12 +77,40 @@ Details: [Local model (SmolVLM2)](14-visual-decoder) · Workers: [Continuity wor
 
 ---
 
+## Partner metabolism
+
+Silent local “partner OS” so any frontier model acts faster, leaner, and safer — still **one voice**.
+
+| Tier | When | Behavior |
+|------|------|----------|
+| **L0** | “What model…?”, skills list, version, whoami | Instant **local** answer — no provider tokens |
+| **L1** | Pure chat | Lean context; tools off unless the message needs them |
+| **L2** | Review / implement / files / shell / browse | Full tools, evidence ledger, shadow on high-blast |
+| **L3** | Work alone / full suite / partitionable work | Deep agency + force-spread muscle |
+
+Also: evidence/decision currency, machine map, Action IR, Time Crystal, skill genome, quality governor, portable encrypted identity export. Operator: `/harness` · **F1 → Partner Metabolism** · [19-metabolism](19-metabolism).
+
+---
+
+## Always-ready desktop
+
+| Action | Result |
+|--------|--------|
+| **✕ / Alt+F4** | **Always hides to the system tray** — local API stays up (Web UI + continuity warm) |
+| **Tray → Show** (or click tray icon) | Restores the window |
+| **Tray → Quit** | Full exit — stops the local server (browser WebUI dies). Warning dialog unless you opted out |
+
+You cannot turn “close kills the app” back on for the title-bar ✕ — full stop is intentionally **Quit only**. See [Desktop notes](../DESKTOP.md).
+
+---
+
 ## Quick start (60 seconds)
 
 1. Install from [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases/latest).  
 2. Setup wizard: provider + workspace; install local model when prompted.  
-3. Chat, or try `/help`.  
-4. **F1** anytime for this wiki. Bottom bar: **Simple UI** / **Advanced UI**.
+3. Chat — try **“what model am I using?”** (L0) or **“review project”** (tools + agency).  
+4. **F1** anytime for this wiki. Bottom bar: **Simple UI** / **Advanced UI**.  
+5. Close with ✕ to tray when you step away; **Quit** from the tray only when you want a full stop.
 
 ---
 

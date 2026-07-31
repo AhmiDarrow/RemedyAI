@@ -13,6 +13,45 @@ import {
 import { openReportIssue } from '../utils/reportIssue'
 import { browserStackHold } from '../utils/browserStack'
 
+/** Wiki-relative images: `assets/foo.png` → bundled under `help/assets/`. */
+const HELP_ASSET_URLS = import.meta.glob('../help/assets/**/*', {
+  eager: true,
+  query: '?url',
+  import: 'default',
+}) as Record<string, string>
+
+function resolveHelpImageSrc(src: string | undefined): string | undefined {
+  if (!src) return undefined
+  if (/^(https?:|data:|blob:)/i.test(src)) return src
+  const clean = src.replace(/^\.\//, '').replace(/^\/+/, '')
+  // markdown: assets/hero.png or assets/previews/x.png
+  const candidates = [
+    `../help/${clean}`,
+    `../help/assets/${clean.replace(/^assets\//, '')}`,
+    `../help/${clean.startsWith('assets/') ? clean : `assets/${clean}`}`,
+  ]
+  for (const key of Object.keys(HELP_ASSET_URLS)) {
+    const norm = key.replace(/\\/g, '/')
+    if (
+      candidates.some(
+        (c) =>
+          norm.endsWith(c.replace('../help/', ''))
+          || norm.endsWith(clean)
+          || norm.endsWith(clean.replace(/^assets\//, '')),
+      )
+      || norm.includes(clean.replace(/^assets\//, ''))
+    ) {
+      return HELP_ASSET_URLS[key]
+    }
+  }
+  // exact basename match fallback
+  const base = clean.split('/').pop() || clean
+  for (const [key, url] of Object.entries(HELP_ASSET_URLS)) {
+    if (key.replace(/\\/g, '/').endsWith(`/${base}`)) return url
+  }
+  return src
+}
+
 export interface HelpPanelProps {
   open: boolean
   onClose: () => void
@@ -394,6 +433,21 @@ export function HelpPanel({ open, onClose, initialArticleId, version }: HelpPane
                   strong: ({ children }) => (
                     <strong style={{ color: 'var(--text-primary)' }}>{children}</strong>
                   ),
+                  img: ({ src, alt }) => {
+                    const resolved = resolveHelpImageSrc(src)
+                    return (
+                      <img
+                        src={resolved}
+                        alt={alt || ''}
+                        className="max-w-full h-auto rounded-md my-3"
+                        style={{
+                          border: '1px solid var(--border)',
+                          background: 'var(--bg-tertiary)',
+                        }}
+                        loading="lazy"
+                      />
+                    )
+                  },
                 }}
               >
                 {article.body}

@@ -1,19 +1,23 @@
 # Remedy
 
+![Remedy](assets/previews/hero_logo_color_on_dark.png)
+
 **Your personal AI partner — on your machine.**
 
-Knowledge, design, code, and get-it-done work. One continuous partner — not a thin chat wrapper, not a farm of bots.  
+Knowledge, design, code, computer use, and get-it-done work. **One continuous partner** —
+not a thin chat wrapper, not a farm of bots. Local continuity + your choice of frontier model.
+
 **Not** a medical product; the name means unsticking problems and finishing requests.
 
-**[Download latest for Windows](https://github.com/AhmiDarrow/RemedyAI/releases/latest)** · **[Owner’s manual (GitHub)](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/00-overview.md)** · **F1** in-app
+**[Download latest for Windows](https://github.com/AhmiDarrow/RemedyAI/releases/latest)** · **[Owner’s manual](docs/manual/00-overview.md)** · **F1** in-app
 
 ---
 
 ## Contents
 
 1. [What you get](#what-you-get) — product at a glance  
-2. [Why it’s different](#why-its-different) — local continuity  
-3. [Workspace on your PC](#workspace-on-your-pc) — files, terminal, browser, scratch  
+2. [Why it’s different](#why-its-different) — local continuity + metabolism  
+3. [Workspace on your PC](#workspace-on-your-pc) — files, terminal, browser, computer  
 4. [Local brain (SmolVLM2)](#local-brain-smolvlm2) — vision + efficiency without a second persona  
 5. [Continuity workers](#continuity-workers) — silent nano swarm  
 6. [Messengers](#messengers) — chat where you already are  
@@ -51,14 +55,16 @@ One desktop app. One local API. Your data under `~/.remedy`.
 
 | | Capability |
 |--|------------|
-| **Chat partner** | Streaming markdown, Plan/Build, attachments, image markup, stick-to-bottom feed |
-| **Workspace** | **Files** · **Terminal** (PowerShell) · **Browser** (embedded WebView2) · **Scratch** pad — rails beside chat |
+| **Chat partner** | Streaming markdown, Plan/Build, multi-provider parallel tabs, attachments, image markup |
+| **Workspace** | **Files** · **Terminal** · **Browser** · **Scratch** · **Computer use** — rails beside chat |
 | **Local brain** | **SmolVLM2 2.2B** on this PC — visual decoder + harness assist (optional download) |
-| **Continuity** | Session Brief, memory, skills, context budget — silent workers, one voice |
+| **Continuity** | Session Brief, partner memory, skills, context budget — silent workers, one voice |
+| **Metabolism** | L0–L3 turn tiers, evidence ledger, shadow, governor, portable identity ([manual](docs/manual/19-metabolism.md)) |
 | **Messengers** | Telegram, Discord, Slack, Mattermost, Matrix, WhatsApp, Teams, Google Chat, Signal (Settings) |
-| **Skills** | Learn from real work · **Installed \| Library** · signed community catalog |
+| **Skills** | Progressive disclosure · Installed \| Library · signed community catalog |
 | **Memory** | Durable facts · Progress snapshots · plans — calm UI, not scare-logs |
-| **Agency** | `file_edit`, repo search, missions, approvals (Ask default / Auto when you want) |
+| **Agency** | `file_edit`, repo search, shell write jail, missions, `spread_run`, `web_search` / `web_fetch`, approvals |
+| **Always ready** | Title-bar **✕ → tray** (API stays up); **tray Quit** for full stop |
 | **Web UI** | Same SPA at `http://127.0.0.1:7400/` (Switch to WebUI → tray) |
 | **Updates** | Minisign-signed auto-update from GitHub Releases |
 

@@ -47,6 +47,10 @@ Optional default **project folder** — working directory for tools, shell, and 
 - Optional **Keep Remedy ready (Start with Windows)**  
 - **Start Chatting** saves settings and closes the wizard  
 
+**Always-ready after first run:** the title-bar **✕** hides Remedy to the **system tray**
+and keeps the local API running. Use **tray → Quit** for a full stop (stops the server).
+Optional: **Start hidden in tray** (Settings) if you want only a tray icon at login.
+
 ## Skip setup
 
 Skip marks setup complete without a provider. Chat stays offline until you configure **Settings → Provider**. Use Skip if you want to explore the UI first.
