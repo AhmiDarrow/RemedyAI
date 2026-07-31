@@ -51,6 +51,7 @@ SETTABLE_KEYS = frozenset(
         "vision_force_decode",
         "web_tools_enabled",
         "http_bootstrap",
+        "privacy_mode",
         "allow_skill_creation",
         "auto_approve_threshold",
         "log_level",
@@ -147,6 +148,7 @@ def public_settings_snapshot(cfg: dict[str, Any] | None = None) -> dict[str, Any
         "tool_process": normalize_tool_process(raw),
         "web_tools_enabled": bool(raw.get("web_tools_enabled", False)),
         "http_bootstrap": bool(raw.get("http_bootstrap", True)),
+        "privacy_mode": bool(raw.get("privacy_mode", False)),
         "allow_skill_creation": bool(raw.get("allow_skill_creation", True)),
         "auto_approve_threshold": float(raw.get("auto_approve_threshold", 0.8)),
         "log_level": str(raw.get("log_level") or "INFO").upper(),
@@ -337,6 +339,15 @@ async def apply_settings_update(
     if "http_bootstrap" in patch and patch["http_bootstrap"] is not None:
         patch["http_bootstrap"] = _as_bool(patch["http_bootstrap"])
 
+    if "privacy_mode" in patch and patch["privacy_mode"] is not None:
+        patch["privacy_mode"] = _as_bool(patch["privacy_mode"])
+        try:
+            from remedy.core.provider_sanitize import clear_privacy_mode_cache
+
+            clear_privacy_mode_cache()
+        except Exception:
+            pass
+
     if "browser_home_url" in patch and patch["browser_home_url"] is not None:
         patch["browser_home_url"] = normalize_browser_home_url(patch["browser_home_url"])
 
@@ -517,6 +528,7 @@ async def apply_settings_update(
         for attr in (
             "web_tools_enabled",
             "http_bootstrap",
+            "privacy_mode",
             "tool_process",
             "sarcasm_mode",
             "allow_skill_creation",
@@ -561,6 +573,7 @@ async def apply_settings_update(
         "tool_process",
         "web_tools_enabled",
         "http_bootstrap",
+        "privacy_mode",
         "vision_enabled",
         "vision_model_id",
         "vision_force_decode",
@@ -605,6 +618,9 @@ SETUP_ALIASES: dict[str, dict[str, Any]] = {
     "force decode": {"vision_force_decode": True},
     "http bootstrap": {"http_bootstrap": True},
     "browser bootstrap": {"http_bootstrap": True},
+    "privacy mode": {"privacy_mode": True},
+    "privacy mode on": {"privacy_mode": True},
+    "privacy mode off": {"privacy_mode": False},
     "thinking low": {"thinking_level": "low"},
     "thinking medium": {"thinking_level": "medium"},
     "thinking high": {"thinking_level": "high"},

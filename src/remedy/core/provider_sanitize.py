@@ -13,16 +13,95 @@ from typing import Any
 
 # Max characters for a single tool/function message content when sending upstream.
 TOOL_CONTENT_MAX = 6_000
+# Privacy mode: tighter tool caps (opt-in; default path unchanged for speed).
+TOOL_CONTENT_MAX_PRIVACY = 2_500
 # Tool *call* arguments must stay valid JSON — never mid-string clip (providers
 # return HTTP 400 "EOF while parsing a string at column ~6000" if we truncate).
 TOOL_ARGS_MAX = 48_000
 # Nested string values inside tool-call JSON (after parse).
 TOOL_ARGS_VALUE_MAX = 8_000
+TOOL_ARGS_VALUE_MAX_PRIVACY = 2_000
 # file_write content may be large; keep more for *in-turn* fidelity when small,
 # but summarize past full-body dumps so history does not look half-written.
 FILE_WRITE_CONTENT_HISTORY_MAX = 1_200
 # Max for normal user/assistant text (already bounded in practice).
 TEXT_CONTENT_MAX = 100_000
+TEXT_CONTENT_MAX_PRIVACY = 40_000
+
+# PII-ish patterns used only when privacy_mode is on (avoid cost on default path).
+_EMAIL_RE = re.compile(
+    r"(?i)\b[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}\b"
+)
+_PHONE_RE = re.compile(
+    r"(?<!\d)(?:\+?\d{1,3}[\s\-.]?)?(?:\(?\d{3}\)?[\s\-.]?)\d{3}[\s\-.]?\d{4}(?!\d)"
+)
+_SSN_RE = re.compile(r"\b\d{3}-\d{2}-\d{4}\b")
+# Tools whose results often carry personal content when privacy mode is on.
+_PRIVACY_HEAVY_TOOLS = frozenset(
+    {
+        "gmail_search",
+        "gmail_read",
+        "gmail_get",
+        "calendar_list",
+        "calendar_get",
+        "web_fetch",
+        "computer_snapshot",
+        "computer_page_text",
+        "computer_a11y",
+        "page_text",
+        "snapshot",
+        "browser_snapshot",
+        "memory_search",
+        "memory_get",
+    }
+)
+
+
+# Tiny TTL cache so ReAct multi-round calls do not re-read config every POST.
+_PRIVACY_CACHE: tuple[float, bool] | None = None
+_PRIVACY_CACHE_TTL = 5.0  # seconds — settings changes apply quickly, still cheap
+
+
+def privacy_mode_enabled() -> bool:
+    """Whether outbound provider scrubbing should use privacy-mode rules.
+
+    Priority: ``REMEDY_PRIVACY_MODE`` env → config.toml ``privacy_mode`` → False.
+    Default **off** keeps the lightning path (secret scrub only, larger tool caps).
+    Result is cached ~5s so multi-tool turns stay fast.
+    """
+    import os
+    import time
+
+    global _PRIVACY_CACHE
+    now = time.monotonic()
+    if _PRIVACY_CACHE is not None:
+        ts, val = _PRIVACY_CACHE
+        if now - ts < _PRIVACY_CACHE_TTL:
+            return val
+
+    flag = str(os.environ.get("REMEDY_PRIVACY_MODE", "")).strip().lower()
+    if flag in ("1", "true", "yes", "on", "enable", "enabled"):
+        val = True
+    elif flag in ("0", "false", "no", "off", "disable", "disabled"):
+        val = False
+    else:
+        val = False
+        try:
+            from remedy.interfaces.config import load_config
+
+            cfg = load_config() or {}
+            if "privacy_mode" in cfg:
+                val = bool(cfg.get("privacy_mode"))
+        except Exception:
+            val = False
+    _PRIVACY_CACHE = (now, val)
+    return val
+
+
+def clear_privacy_mode_cache() -> None:
+    """Test helper: drop privacy-mode TTL cache."""
+    global _PRIVACY_CACHE
+    _PRIVACY_CACHE = None
 
 # Tools whose large string args should be summarized in provider history
 # (full bodies mislead the model after 8k value caps).
@@ -67,11 +146,19 @@ def _clip(s: str, max_len: int) -> str:
     return s[: max(0, max_len - 1)] + "…"
 
 
-def _scrub_text(text: str, *, max_len: int) -> str:
+def _scrub_text(
+    text: str,
+    *,
+    max_len: int,
+    privacy: bool | None = None,
+) -> str:
     """Redact secret-shaped substrings then size-cap for provider HTTP.
 
     Prefer shared metabolism redaction (broader patterns: PEM, DB URLs,
     Discord webhooks, …) so outbound chat matches ledger/IR fail-closed policy.
+
+    When *privacy* is True (or privacy_mode is on), also strip email/phone/SSN
+    shapes. Default path skips those regexes for speed.
     """
     raw = text or ""
     try:
@@ -80,6 +167,12 @@ def _scrub_text(text: str, *, max_len: int) -> str:
         t = redact_text(raw)
     except Exception:
         t = _SECRET_VALUE_RE.sub("[redacted]", raw)
+    if privacy is None:
+        privacy = privacy_mode_enabled()
+    if privacy:
+        t = _EMAIL_RE.sub("[email]", t)
+        t = _PHONE_RE.sub("[phone]", t)
+        t = _SSN_RE.sub("[ssn]", t)
     return _clip(t, max_len)
 
 
@@ -321,14 +414,29 @@ def sanitize_tool_arguments(args: Any, *, tool_name: str = "") -> str:
         )
 
 
-def sanitize_message(msg: dict[str, Any]) -> dict[str, Any]:
+def sanitize_message(
+    msg: dict[str, Any],
+    *,
+    privacy: bool | None = None,
+) -> dict[str, Any]:
     """Return a sanitized copy of one chat message (does not mutate input).
 
     Fast path: shallow copy + string scrub for common role/content messages.
     Deepcopy only when nested tool_calls or non-string content need isolation.
+
+    *privacy*: when True, tighter tool caps + email/phone scrub. Default reads
+    :func:`privacy_mode_enabled` once per call when None (still cheap).
     """
+    if privacy is None:
+        privacy = privacy_mode_enabled()
+    tool_max = TOOL_CONTENT_MAX_PRIVACY if privacy else TOOL_CONTENT_MAX
+    text_max = TEXT_CONTENT_MAX_PRIVACY if privacy else TEXT_CONTENT_MAX
+
     if not isinstance(msg, dict):
-        return {"role": "user", "content": _scrub_text(str(msg), max_len=TEXT_CONTENT_MAX)}
+        return {
+            "role": "user",
+            "content": _scrub_text(str(msg), max_len=text_max, privacy=privacy),
+        }
 
     role = str(msg.get("role") or "")
     content = msg.get("content")
@@ -342,12 +450,16 @@ def sanitize_message(msg: dict[str, Any]) -> dict[str, Any]:
         m = dict(msg)
 
     if role in ("tool", "function"):
+        tool_name = str(m.get("name") or "").strip().lower()
+        cap = tool_max
+        if privacy and tool_name in _PRIVACY_HEAVY_TOOLS:
+            cap = min(cap, 1_800)
         if isinstance(content, str):
-            m["content"] = _scrub_text(content, max_len=TOOL_CONTENT_MAX)
+            m["content"] = _scrub_text(content, max_len=cap, privacy=privacy)
         elif content is not None:
             m["content"] = _scrub_obj(content)
     elif isinstance(content, str):
-        m["content"] = _scrub_text(content, max_len=TEXT_CONTENT_MAX)
+        m["content"] = _scrub_text(content, max_len=text_max, privacy=privacy)
     elif isinstance(content, list):
         # Multimodal parts
         parts = []
@@ -357,7 +469,7 @@ def sanitize_message(msg: dict[str, Any]) -> dict[str, Any]:
                 continue
             q = dict(p)
             if q.get("type") == "text" and isinstance(q.get("text"), str):
-                q["text"] = _scrub_text(q["text"], max_len=TEXT_CONTENT_MAX)
+                q["text"] = _scrub_text(q["text"], max_len=text_max, privacy=privacy)
             # Do not forward raw base64 blobs larger than needed — leave image_url as-is
             # (vision path usually uses decode brief as text already).
             parts.append(q)
@@ -397,14 +509,32 @@ def sanitize_message(msg: dict[str, Any]) -> dict[str, Any]:
 
 def sanitize_messages_for_provider(
     messages: list[dict[str, Any]] | None,
+    *,
+    privacy: bool | None = None,
 ) -> list[dict[str, Any]]:
-    """Sanitize a full messages array for outbound provider HTTP."""
-    return [sanitize_message(m) for m in (messages or []) if isinstance(m, dict)]
+    """Sanitize a full messages array for outbound provider HTTP.
+
+    Resolves privacy mode **once** for the batch (config/env) so the hot path
+    does not re-read config per message.
+    """
+    if privacy is None:
+        privacy = privacy_mode_enabled()
+    return [
+        sanitize_message(m, privacy=privacy)
+        for m in (messages or [])
+        if isinstance(m, dict)
+    ]
 
 
-def sanitize_chat_body(body: dict[str, Any]) -> dict[str, Any]:
+def sanitize_chat_body(
+    body: dict[str, Any],
+    *,
+    privacy: bool | None = None,
+) -> dict[str, Any]:
     """Copy body and sanitize messages (does not mutate input)."""
     out = dict(body)
     if "messages" in out:
-        out["messages"] = sanitize_messages_for_provider(out.get("messages"))
+        out["messages"] = sanitize_messages_for_provider(
+            out.get("messages"), privacy=privacy
+        )
     return out
