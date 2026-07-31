@@ -792,15 +792,30 @@ def markdown_for_image(
     caption: str = "",
     *,
     embed_data_uri: bool = True,
-    max_embed_bytes: int = 900_000,
+    max_embed_bytes: int = 2_500_000,
 ) -> str:
-    """Markdown for chat: session URL + optional data-URI so the bubble always shows."""
+    """Markdown for chat: data-URI and/or absolute path + session URL.
+
+    Prefer paths the desktop chat media resolver can load with Bearer (absolute
+    disk path or loopback attachment URL). Keep a blank line after the image
+    block so following prose does not glue to the link.
+    """
     import base64
 
     url = meta.get("view_url") or ""
     path = meta.get("path") or ""
     name = meta.get("name") or "image.png"
-    cap = (caption or name).replace("\n", " ")[:120]
+    # Avoid ] ( and newlines breaking markdown image alts
+    cap = (
+        (caption or name)
+        .replace("\n", " ")
+        .replace("]", "")
+        .replace("[", "")
+        .replace("(", "")
+        .replace(")", "")[:120]
+        .strip()
+        or name
+    )
     lines: list[str] = []
     # Prefer inlined data URI for WebView reliability (CSP allows data:).
     if embed_data_uri and path and Path(path).is_file():
@@ -812,11 +827,19 @@ def markdown_for_image(
                 lines.append(f"![{cap}](data:{mime};base64,{b64})")
         except OSError:
             pass
+    # Absolute path — desktop /api/media resolves under ~/.remedy
+    if not lines and path:
+        safe_path = str(path).replace("\\", "/")
+        if " " in safe_path or "(" in safe_path:
+            lines.append(f"![{cap}](<{safe_path}>)")
+        else:
+            lines.append(f"![{cap}]({safe_path})")
     if not lines and url:
         lines.append(f"![{cap}]({url})")
     lines.append(f"**{cap}**")
     if path:
         lines.append(f"Saved: `{path}`")
     if url:
-        lines.append(f"[Open in session]({url})")
-    return "\n\n".join(lines)
+        lines.append(f"[Open in Browser rail]({url})")
+    # Trailing blank line so model prose does not glue onto the link
+    return "\n\n".join(lines) + "\n\n"

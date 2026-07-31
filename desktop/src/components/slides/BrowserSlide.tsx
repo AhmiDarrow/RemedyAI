@@ -472,16 +472,22 @@ export function BrowserSlide() {
     }
   }, [])
 
-  // Sync address bar when agent/Rust navigates (does not reload the page).
+  // Agent / chat double-click: set URL and navigate the embed (not address-bar only).
   useEffect(() => {
     const onSetUrl = (ev: Event) => {
-      const u = (ev as CustomEvent<{ url?: string }>).detail?.url
+      const detail = (ev as CustomEvent<{ url?: string; navigate?: boolean }>).detail
+      const u = (detail?.url || '').trim()
       if (!u) return
       applyLiveUrl(u)
-      setLoaded(true)
-      setStatus(`Loaded ${u}`)
       autoStarted.current = true
-      void pushBounds()
+      // Default: navigate. Pass navigate:false to only sync the omnibox.
+      if (detail?.navigate === false) {
+        setLoaded(true)
+        setStatus(`URL ${u}`)
+        void pushBounds()
+        return
+      }
+      void goRef.current(u)
     }
     window.addEventListener('remedy:browser-set-url', onSetUrl)
     return () => window.removeEventListener('remedy:browser-set-url', onSetUrl)
@@ -851,35 +857,45 @@ export function BrowserSlide() {
               return
             }
             const next = !desktopSite
-            // Optimistic UI so the click always feels live
+            const prev = desktopSite
+            // Optimistic UI
             setDesktopSite(next)
+            setBusy(true)
             setStatus(next ? 'Desktop site — reloading…' : 'Mobile view — reloading…')
-            void tauriInvoke<{ desktop_site?: boolean; recreate?: boolean }>(
-              'browser_set_desktop_site',
-              { enabled: next },
-            )
+            const b = readBounds(hostRef.current)
+            const target = activeUrl || url || home
+            void tauriInvoke<{
+              desktop_site?: boolean
+              method?: string
+              recreate?: boolean
+            }>('browser_set_desktop_site', {
+              enabled: next,
+              url: target,
+              bounds: b ?? undefined,
+            })
               .then((s) => {
                 const on = Boolean(s?.desktop_site ?? next)
                 setDesktopSite(on)
-                setLoaded(false)
-                // Recreate embed with new UA + reload current URL (destroy already ran)
-                const target = activeUrl || url || home
-                window.setTimeout(() => {
-                  void goRef.current(target).finally(() => {
-                    setStatus(on ? 'Desktop site' : 'Mobile view')
-                  })
-                }, 120)
+                setLoaded(true)
+                const how = s?.method ? ` (${s.method})` : ''
+                setStatus(on ? `Desktop site${how}` : `Mobile view${how}`)
+                // Ensure host bounds + paint after reload
+                window.requestAnimationFrame(() => void pushBounds())
+                window.setTimeout(() => void pushBounds(), 100)
+                window.setTimeout(() => void pushBounds(), 400)
               })
               .catch((e: unknown) => {
-                // Roll back optimistic toggle
-                setDesktopSite(!next)
+                setDesktopSite(prev)
                 const msg = e instanceof Error ? e.message : String(e)
                 setStatus(
                   msg.includes('not allowed') || msg.includes('Forbidden')
                     ? 'View mode blocked — rebuild Desktop with browser permissions'
-                    : msg,
+                    : `View mode failed: ${msg}`,
                 )
+                // Last-resort SPA path: try full navigate with stored flag
+                void goRef.current(target).catch(() => {})
               })
+              .finally(() => setBusy(false))
           }}
         >
           {desktopSite ? '🖥 Desktop' : '📱 Mobile'}

@@ -64,6 +64,9 @@ describe('browserUrl', () => {
     expect(resolveBrowserHome(null)).toBe(DEFAULT_BROWSER_HOME)
     expect(resolveBrowserHome('javascript:x')).toBe(DEFAULT_BROWSER_HOME)
     expect(resolveBrowserHome('docs.example.com')).toBe('https://docs.example.com')
+    // Soak/placeholder must not stick as homepage
+    expect(resolveBrowserHome('https://example.com')).toBe(DEFAULT_BROWSER_HOME)
+    expect(resolveBrowserHome('https://example.com/')).toBe(DEFAULT_BROWSER_HOME)
   })
 
   it('omnibox: bare hosts stay URLs; prose becomes DuckDuckGo search', () => {
