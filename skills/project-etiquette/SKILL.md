@@ -148,3 +148,8 @@ Use when `cwd` is the RemedyAI tree (or user says “this project”).
 
 Also respect root **`AGENTS.md`** (installer naming, version surfaces, smoke matrix).
 For end-of-session continuity use skill **`session-handoff`**.
+
+When **developing Remedy itself** (dogfood + gauntlet + soak + stress), activate
+**`self-dev-loop`** first — it sequences **dogfood-isolated**, **gauntlet-security**,
+**soak-product**, **stress-suite**, and this ship chain.
+
