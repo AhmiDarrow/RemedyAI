@@ -125,19 +125,53 @@ async function runBrowserJob(job: ComputerJob): Promise<Record<string, unknown>>
   if (action === 'snapshot' || action === 'a11y') {
     // eval_with_callback returns the elements JSON directly (no page→localhost
     // fetch — that timed out on HTTPS sites like Patreon/Gmail).
-    const res = await tauriInvoke<string>('browser_agent_action', {
-      action: 'snapshot',
-      job_id: job.id,
-      x: null,
-      y: null,
-      x2: null,
-      y2: null,
-      text: null,
-      key: null,
-      button: null,
-      dy: null,
-      ref: null,
-    })
+    // After optimistic navigate, WebView2 may still be loading — retry once.
+    let res = ''
+    let lastErr: unknown = null
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        if (attempt > 0) {
+          await new Promise((r) => window.setTimeout(r, 400 + attempt * 200))
+          try {
+            await tauriInvoke<string>('browser_agent_action', {
+              action: 'ready',
+              job_id: null,
+              x: null,
+              y: null,
+              x2: null,
+              y2: null,
+              text: null,
+              key: null,
+              button: null,
+              dy: null,
+              ref: null,
+            })
+          } catch {
+            /* ready probe best-effort */
+          }
+        }
+        res = await tauriInvoke<string>('browser_agent_action', {
+          action: 'snapshot',
+          job_id: job.id,
+          x: null,
+          y: null,
+          x2: null,
+          y2: null,
+          text: null,
+          key: null,
+          button: null,
+          dy: null,
+          ref: null,
+        })
+        lastErr = null
+        break
+      } catch (e) {
+        lastErr = e
+      }
+    }
+    if (lastErr && !res) {
+      throw lastErr instanceof Error ? lastErr : new Error(String(lastErr))
+    }
     let elements: unknown[] = []
     try {
       const parsed = JSON.parse(res || '[]') as unknown
@@ -160,24 +194,57 @@ async function runBrowserJob(job: ComputerJob): Promise<Record<string, unknown>>
     }
   }
 
-  // page_text via click-job payload (executor enqueues action=click + browser_action)
-  if (p.browser_action === 'page_text' || p.page_text) {
-    const res = await tauriInvoke<string>('browser_agent_action', {
-      action: 'page_text',
-      job_id: null,
-      x: null,
-      y: null,
-      x2: null,
-      y2: null,
-      text: null,
-      key: null,
-      button: null,
-      dy: null,
-      ref: null,
-    })
+  // page_text: dedicated action or legacy click+browser_action payload
+  if (
+    action === 'page_text' ||
+    p.browser_action === 'page_text' ||
+    p.page_text
+  ) {
+    let res = ''
+    let lastErr: unknown = null
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        if (attempt > 0) {
+          await new Promise((r) => window.setTimeout(r, 350 + attempt * 150))
+        }
+        res = await tauriInvoke<string>('browser_agent_action', {
+          action: 'page_text',
+          job_id: null,
+          x: null,
+          y: null,
+          x2: null,
+          y2: null,
+          text: null,
+          key: null,
+          button: null,
+          dy: null,
+          ref: null,
+        })
+        lastErr = null
+        break
+      } catch (e) {
+        lastErr = e
+      }
+    }
+    if (lastErr && !res) {
+      throw lastErr instanceof Error ? lastErr : new Error(String(lastErr))
+    }
     let parsed: Record<string, unknown> = {}
     try {
-      parsed = JSON.parse(res || '{}') as Record<string, unknown>
+      let v: unknown = JSON.parse(res || '{}')
+      // Double-encoded: JSON.stringify inside eval + host string serialization
+      if (typeof v === 'string') {
+        try {
+          v = JSON.parse(v)
+        } catch {
+          v = { text: v }
+        }
+      }
+      if (v && typeof v === 'object' && !Array.isArray(v)) {
+        parsed = v as Record<string, unknown>
+      } else {
+        parsed = { text: String(v ?? res ?? '') }
+      }
     } catch {
       parsed = { text: res }
     }

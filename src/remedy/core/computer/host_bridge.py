@@ -528,9 +528,16 @@ class ComputerHostBridge:
             self._write(job)
         # Always request rail open for browser actions (Desktop pops panel like Settings)
         ui = pl.get("ui") if isinstance(pl.get("ui"), dict) else {}
-        if action in ("navigate", "snapshot", "click", "type", "screenshot") or ui.get(
-            "open_browser"
-        ):
+        if action in (
+            "navigate",
+            "snapshot",
+            "a11y",
+            "page_text",
+            "ready",
+            "click",
+            "type",
+            "screenshot",
+        ) or ui.get("open_browser"):
             self.set_ui_command(
                 {
                     "action": "open_browser",
@@ -911,10 +918,22 @@ class ComputerHostBridge:
                 # Re-apply scrub from current (may hold typed secrets)
                 job.payload = _scrub_retained_payload(cur.payload)
                 self._write(job)
-                # Do NOT mark host dead for navigate — host often still alive
-                # and will complete a moment later; mark_host_dead caused
-                # false "offline" cascades.
-                if job.action != "navigate":
+                # Do NOT mark host dead for navigate / DOM jobs — host is often
+                # still alive and mid-load (eval timeout ≠ offline). mark_host_dead
+                # caused false "Desktop host not connected" cascades on page_text.
+                act = (job.action or "").lower()
+                if act not in (
+                    "navigate",
+                    "snapshot",
+                    "a11y",
+                    "page_text",
+                    "ready",
+                    "click",
+                    "type",
+                    "key",
+                    "scroll",
+                    "find",
+                ):
                     self.mark_host_dead()
         return job
 
