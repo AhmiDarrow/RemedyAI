@@ -24,12 +24,13 @@ import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-
-import sys
 from pathlib import Path as _PathForToken
+
 _SCRIPTS = _PathForToken(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
+import contextlib
+
 from lib_local_token import resolve_local_api_token
 
 BASE = os.environ.get("REMEDY_API", "http://127.0.0.1:7400").rstrip("/")
@@ -114,16 +115,16 @@ def extract_text(resp: object) -> str:
 
 def layer_a_deterministic(rounds: int) -> None:
     section(f"A. Deterministic dual-runtime write jail ({rounds}× deepseek+grok)")
-    from remedy.core.errors import SecurityError
+    import asyncio
+    from types import SimpleNamespace
+
+    from remedy.core.agent_workspace_tools import register_workspace_tools
     from remedy.core.workspace import (
         allowed_roots_for_scope,
         resolve_under_roots,
         write_roots_for_scope,
     )
     from remedy.skills.tool_registry import ToolRegistry
-    from remedy.core.agent_workspace_tools import register_workspace_tools
-    from types import SimpleNamespace
-    import asyncio
 
     tmp = Path(tempfile.mkdtemp(prefix="remedy_jail_a_"))
     try:
@@ -410,10 +411,8 @@ def layer_b_live(rounds: int) -> None:
                     )
                 )
                 if outside.exists():
-                    try:
+                    with contextlib.suppress(OSError):
                         outside.unlink()
-                    except OSError:
-                        pass
                 # 2) Write inside project
                 msg2 = (
                     f"JAIL TEST round {n} inside write. Use tools only (must call file_write).\n"
@@ -474,10 +473,8 @@ def layer_b_live(rounds: int) -> None:
     finally:
         # Restore settings
         api("PUT", "/api/settings", restore)
-        try:
+        with contextlib.suppress(OSError):
             research.unlink(missing_ok=True)
-        except OSError:
-            pass
         shutil.rmtree(tmp, ignore_errors=True)
         mark("settings restored", True, str(restore.get("access_scope")))
 

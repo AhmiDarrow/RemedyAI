@@ -11,21 +11,22 @@ from __future__ import annotations
 import base64
 import json
 import os
-import re
+import sys
 import time
 import traceback
 import urllib.error
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
-
-import sys
 from pathlib import Path as _PathForToken
+
 _SCRIPTS = _PathForToken(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
+import contextlib
+
 from lib_local_token import resolve_local_api_token
 
 BASE = os.environ.get("REMEDY_API", "http://127.0.0.1:7400").rstrip("/")
@@ -130,12 +131,14 @@ def main() -> int:
     print(f"started={datetime.now(UTC).isoformat()}")
 
     # Computer host sim so navigate/path exercises real host_connected path
-    stop_host_poller = lambda: None  # type: ignore
+    def stop_host_poller():
+        return None  # type: ignore
     try:
         import sys
 
         sys.path.insert(0, str(REPO / "scripts"))
-        from lib_host_poller import start_host_poller, stop_host_poller as _stop
+        from lib_host_poller import start_host_poller
+        from lib_host_poller import stop_host_poller as _stop
 
         stop_host_poller = _stop
         start_host_poller()
@@ -679,10 +682,8 @@ def main() -> int:
         time.sleep(0.6)
         code, ab = api("POST", f"/api/sessions/{sid2}/abort")
         mark("abort generation", code == 200, str(ab)[:80])
-        try:
+        with contextlib.suppress(Exception):
             fut.result(timeout=30)
-        except Exception:
-            pass
 
     # ------------------------------------------------------------------
     section("18. Parallel multi-tab turns")
@@ -770,10 +771,8 @@ def main() -> int:
     mark("delete main session", code in (200, 204))
     for s in sids + [sid2]:
         api("DELETE", f"/api/sessions/{s}")
-    try:
+    with contextlib.suppress(Exception):
         stop_host_poller()
-    except Exception:
-        pass
 
     # Summary
     print(f"\n{'='*60}")

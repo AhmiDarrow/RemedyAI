@@ -7,7 +7,7 @@ import json
 import logging
 import threading
 from contextlib import suppress
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +18,6 @@ from remedy.memory.partner_state.models import (
     Subgoal,
     ToolTxn,
     WriteEntry,
-    _id,
     _now,
 )
 
@@ -45,7 +44,7 @@ _READ_TOOLS = frozenset(
     }
 )
 
-_registry: dict[str, "PartnerState"] = {}
+_registry: dict[str, PartnerState] = {}
 _registry_lock = threading.Lock()
 
 

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -16,9 +15,8 @@ from remedy.core.shell_write_jail import (
 )
 from remedy.core.workspace import (
     allowed_roots_for_scope,
-    resolve_under_roots,
-    write_roots_for_scope,
     workspace_context_block,
+    write_roots_for_scope,
 )
 
 
@@ -26,9 +24,15 @@ def _make_runtime(proj: Path, *, scope: str = "project", home: Path | None = Non
     """Minimal runtime-shaped object with real resolve/write roots."""
     from remedy.core.workspace import (
         allowed_roots_for_scope as _ar,
-        write_roots_for_scope as _wr,
-        resolve_under_roots as _ru,
+    )
+    from remedy.core.workspace import (
         effective_access_scope,
+    )
+    from remedy.core.workspace import (
+        resolve_under_roots as _ru,
+    )
+    from remedy.core.workspace import (
+        write_roots_for_scope as _wr,
     )
 
     home = home or (proj.parent / "homeuser")

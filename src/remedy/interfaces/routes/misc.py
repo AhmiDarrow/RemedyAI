@@ -4,7 +4,6 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
-from pathlib import Path
 
 import yaml
 from fastapi import FastAPI, HTTPException, Query, Response

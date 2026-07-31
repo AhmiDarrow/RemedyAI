@@ -1395,7 +1395,6 @@ def _cmd_serve(args) -> None:
     from remedy.interfaces.api import create_app
     from remedy.interfaces.instance_lock import (
         heartbeat_serve_lock,
-        release_serve_lock,
         try_acquire_serve_lock,
     )
     from remedy.memory.store import MemoryStore
@@ -1696,7 +1695,7 @@ def _cmd_chat(args) -> None:
         llm_ready = bool(agent_config.llm_api_key)
         model = agent_config.llm_model or "none"
         computer_line = (
-            f"[green]CLI host on[/green] (system browser + desktop)"
+            "[green]CLI host on[/green] (system browser + desktop)"
             if computer_host_on
             else (
                 "[dim]off[/dim] (desktop tools only; use --computer-host or Desktop app)"

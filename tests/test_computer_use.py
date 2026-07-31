@@ -287,9 +287,10 @@ def test_desktop_navigate_refuses_system_browser_without_explicit_ask(
 ):
     """Mis-routed desktop navigate must not open OS browser by surprise."""
     import json
+
+    from remedy.core.computer import host_bridge as hb
     from remedy.core.computer.executor import ComputerExecutor
     from remedy.core.computer.types import ComputerAction
-    from remedy.core.computer import host_bridge as hb
 
     monkeypatch.setattr(hb, "_bridge", None)
     opened: list[str] = []
@@ -665,9 +666,10 @@ def test_find_recent_success(tmp_path: Path):
 def test_navigate_rail_fast_optimistic_when_host_alive(tmp_path: Path, monkeypatch):
     """Open-url must return SUCCESS quickly even if host is slow to complete."""
     import json
+
+    from remedy.core.computer import host_bridge as hb
     from remedy.core.computer.executor import ComputerExecutor
     from remedy.core.computer.types import ComputerAction
-    from remedy.core.computer import host_bridge as hb
 
     # Force singleton to use tmp home
     monkeypatch.setattr(hb, "_bridge", None)
@@ -718,18 +720,16 @@ def test_computer_api_and_tools_registered(tmp_path: Path, monkeypatch):
     assert r2.json()["job"] is None
 
     # Enqueue via bridge used by tools
-    from remedy.core.computer.host_bridge import get_host_bridge
-
     # Fresh bridge for tmp home — create_app may use different singleton; claim uses route bridge
     # Route uses runtime home_dir; enqueue there
-    from remedy.core.computer.host_bridge import ComputerHostBridge
+    from remedy.core.computer.host_bridge import ComputerHostBridge, get_host_bridge
 
-    bridge = ComputerHostBridge(home_dir=tmp_path)
+    ComputerHostBridge(home_dir=tmp_path)
     # The route's get_host_bridge may be a process singleton — force enqueue through API path
     # by using the same get_host_bridge after setting home via complete flow:
     b = get_host_bridge(tmp_path)
     # If singleton already pointed elsewhere, still test complete path with claim on that bridge
-    job = b.enqueue("navigate", {"url": "https://example.com/x"})
+    b.enqueue("navigate", {"url": "https://example.com/x"})
     r3 = client.get("/api/computer/jobs/next")
     # May or may not see job depending on singleton home; assert API shape
     assert r3.status_code == 200

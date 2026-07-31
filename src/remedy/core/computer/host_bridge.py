@@ -7,6 +7,7 @@ use this queue (they run in-process via Win32).
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 import threading
@@ -119,9 +120,7 @@ def _element_looks_like_secret_field(el: dict[str, Any]) -> bool:
     ):
         return True
     # bare "pass" / "token" as whole-ish name tokens
-    if _SECRET_FIELD_TOKEN_RE.search(blob):
-        return True
-    return False
+    return bool(_SECRET_FIELD_TOKEN_RE.search(blob))
 
 
 def _scrub_elements(els: Any) -> list[Any]:
@@ -135,7 +134,7 @@ def _scrub_elements(els: Any) -> list[Any]:
             continue
         e = dict(el)
         tag = str(e.get("tag") or "").lower()
-        itype = str(
+        str(
             e.get("type") or e.get("input_type") or e.get("itype") or ""
         ).lower()
         is_password = _element_looks_like_secret_field(e) or bool(
@@ -389,9 +388,7 @@ class ComputerHostBridge:
         if self._last_poll_at > 0 and (now - self._last_poll_at) <= float(max_age_s):
             return True
         # A claim is also proof the host is working the queue.
-        if self._last_claim_at > 0 and (now - self._last_claim_at) <= float(max_age_s):
-            return True
-        return False
+        return bool(self._last_claim_at > 0 and now - self._last_claim_at <= float(max_age_s))
 
     def set_browser_bounds(
         self,
@@ -450,12 +447,10 @@ class ComputerHostBridge:
         cmd.setdefault("ts", _now())
         with self._lock:
             self._ui_command = cmd
-            try:
+            with contextlib.suppress(OSError):
                 self._ui_path.write_text(
                     json.dumps(cmd, indent=2), encoding="utf-8"
                 )
-            except OSError:
-                pass
 
     def peek_ui_command(self) -> dict[str, Any] | None:
         with self._lock:
@@ -527,7 +522,8 @@ class ComputerHostBridge:
         with self._lock:
             self._write(job)
         # Always request rail open for browser actions (Desktop pops panel like Settings)
-        ui = pl.get("ui") if isinstance(pl.get("ui"), dict) else {}
+        raw_ui = pl.get("ui")
+        ui: dict[str, Any] = raw_ui if isinstance(raw_ui, dict) else {}
         if action in (
             "navigate",
             "snapshot",
@@ -622,10 +618,8 @@ class ComputerHostBridge:
             self._write(job)
             # Opportunistic cleanup so page_text / snapshots do not linger on disk.
             if job.status in ("done", "error", "cancelled"):
-                try:
+                with contextlib.suppress(Exception):
                     self.purge_old(max_age_s=900.0)
-                except Exception:
-                    pass
             return job
 
     def find_recent_success(

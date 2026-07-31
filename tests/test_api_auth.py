@@ -183,8 +183,8 @@ def test_gateway_serve_api_enables_auth(auth_on, tmp_path, monkeypatch):
     """``remedy gateway serve`` must not open the loopback API without Bearer."""
     import types
 
-    from remedy.gateway import cli as gateway_cli
     import remedy.interfaces.api as api_mod
+    from remedy.gateway import cli as gateway_cli
 
     monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
     db = tmp_path / "memory.db"

@@ -5,9 +5,9 @@ Macros are local procedure hints (not multi-agent). Secrets never stored.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
-import re
 import tempfile
 import threading
 import time
@@ -35,10 +35,7 @@ def _sanitize_url(val: str) -> str:
         p = urlparse(raw)
         # Drop credentials
         host = p.hostname or ""
-        if p.port:
-            netloc = f"{host}:{p.port}"
-        else:
-            netloc = host
+        netloc = f"{host}:{p.port}" if p.port else host
         # Keep path; drop query/fragment (tokens often live there)
         cleaned = urlunparse((p.scheme or "https", netloc, p.path or "", "", "", ""))
         # If input had no scheme and we added https, strip it back only when original lacked it
@@ -98,7 +95,8 @@ class CuaMacroStore:
         clean_steps: list[dict[str, Any]] = []
         for s in comp[:MAX_CUA_MACRO_STEPS]:
             tool = str(s.get("tool") or "")
-            args = s.get("args") if isinstance(s.get("args"), dict) else {}
+            raw_args = s.get("args")
+            args: dict[str, Any] = raw_args if isinstance(raw_args, dict) else {}
             safe_args: dict[str, Any] = {}
             for k in ("url", "ref", "monitor", "button", "key"):
                 if k in args and args[k] is not None:
@@ -179,10 +177,8 @@ class CuaMacroStore:
                     os.fsync(fh.fileno())
                 os.replace(tmp_name, path)
             except Exception:
-                try:
+                with contextlib.suppress(Exception):
                     Path(tmp_name).unlink(missing_ok=True)
-                except Exception:
-                    pass
                 raise
             return path
         except Exception:

@@ -6,6 +6,7 @@ a few seconds whenever the port is down.
 """
 from __future__ import annotations
 
+import contextlib
 import os
 import subprocess
 import sys
@@ -98,10 +99,8 @@ def main() -> int:
                     child.terminate()
                     child.wait(timeout=3)
                 except Exception:
-                    try:
+                    with contextlib.suppress(Exception):
                         child.kill()
-                    except Exception:
-                        pass
             child = spawn_serve()
             # Wait for health
             for i in range(40):

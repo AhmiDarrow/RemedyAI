@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import subprocess
 import sys
@@ -121,10 +122,8 @@ def mid_type_live() -> None:
             str(r)[:160],
         )
     finally:
-        try:
+        with contextlib.suppress(Exception):
             tc.end_turn("soak-midtype", *toks)
-        except Exception:
-            pass
 
 
 async def provider_tool_smoke() -> None:

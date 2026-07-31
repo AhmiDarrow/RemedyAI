@@ -190,8 +190,8 @@ def _fake_jwt(payload: dict) -> str:
 def test_teams_jwt_fail_closed_requires_aud_and_exp(monkeypatch):
     import time
 
-    from remedy.gateway.channels import teams as teams_mod
     from remedy.gateway.channels import jwt_rs256 as jwks_mod
+    from remedy.gateway.channels import teams as teams_mod
 
     monkeypatch.delenv("REMEDY_TEAMS_SKIP_JWT", raising=False)
     # Structure-only path for claim tests (signature covered separately)

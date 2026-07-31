@@ -76,7 +76,7 @@ def register_settings_tools(runtime: Any) -> None:
         enabled_channels: list | str | None = None,
         assistant: dict | None = None,
         messengers: dict | None = None,
-        **extra: object,
+        **extra: Any,
     ) -> str:
         """Apply Remedy settings for the user. Use when they ask to set/configure/enable anything.
 

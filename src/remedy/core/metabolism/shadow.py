@@ -78,14 +78,7 @@ def should_shadow(
     if name in _HIGH_BLAST_TOOLS:
         return True
     # Strict mode (governor): also shadow navigate / skill_run / job_run
-    if strict and name in (
-        "computer_navigate",
-        "skill_run",
-        "job_run",
-        "bash_exec",
-    ):
-        return True
-    return False
+    return bool(strict and name in ("computer_navigate", "skill_run", "job_run", "bash_exec"))
 
 
 def rehearse(

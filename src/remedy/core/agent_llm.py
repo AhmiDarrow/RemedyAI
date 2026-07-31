@@ -58,7 +58,6 @@ async def post_chat(
     and the turn binding after a successful OAuth refresh.
     """
     from remedy.core.llm_binding import LlmBinding, get_llm_binding, set_llm_binding
-
     from remedy.core.provider_sanitize import sanitize_chat_body
 
     bind = get_llm_binding(runtime)

@@ -16,6 +16,8 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
 
+import contextlib
+
 from remedy.core.computer import desktop_win as win
 
 HOME = Path.home() / ".remedy"
@@ -152,10 +154,8 @@ def main() -> int:
     marker = f"UI_PROBE_{int(time.time())}"
     print("marker", marker)
     # DPI
-    try:
+    with contextlib.suppress(Exception):
         user32.SetProcessDPIAware()
-    except Exception:
-        pass
     dpi = user32.GetDpiForSystem() if hasattr(user32, "GetDpiForSystem") else 96
     print("dpi", dpi)
 

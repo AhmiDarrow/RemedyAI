@@ -6,6 +6,7 @@ No noisy auto-learn of new skill bodies here — only rank signals.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import threading
 import time
@@ -149,10 +150,8 @@ class SkillGenome:
                     os.fsync(fh.fileno())
                 os.replace(tmp_name, path)
             except Exception:
-                try:
+                with contextlib.suppress(Exception):
                     Path(tmp_name).unlink(missing_ok=True)
-                except Exception:
-                    pass
                 raise
             return path
         except Exception:

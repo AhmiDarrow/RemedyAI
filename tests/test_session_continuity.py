@@ -9,7 +9,7 @@ from remedy.core.session_continuity import (
     session_isolation_system_line,
 )
 from remedy.memory.harness.brief import SessionBrief
-from remedy.memory.partner_state.state import PartnerState, ensure_partner_state
+from remedy.memory.partner_state.state import ensure_partner_state
 
 
 def test_partner_state_rejects_foreign_session(tmp_path):

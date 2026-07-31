@@ -258,11 +258,7 @@ def _is_remedy_pyproject(text: str) -> bool:
     if 'name = "remedy-ai"' in text or "name = 'remedy-ai'" in text:
         return True
     # Pre-rename checkouts still used name = "remedy" with our description keywords.
-    if ('name = "remedy"' in text or "name = 'remedy'" in text) and (
-        "coding agent" in text.lower() or "remedy-ai" in text or "Ahmi" in text
-    ):
-        return True
-    return False
+    return bool(('name = "remedy"' in text or "name = 'remedy'" in text) and ("coding agent" in text.lower() or "remedy-ai" in text or "Ahmi" in text))
 
 
 def _find_project_root() -> Path | None:
