@@ -165,34 +165,46 @@ def test_full_scope_with_project_still_blocks_write_outside(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_file_write_tool_blocks_desktop(tmp_path: Path):
+async def test_file_write_tool_blocks_desktop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from remedy.core.agent_workspace_tools import register_workspace_tools
+    from remedy.core.approvals import APPROVALS
     from remedy.skills.tool_registry import ToolRegistry
 
-    home = tmp_path / "home"
-    desk = home / "Desktop"
-    desk.mkdir(parents=True)
-    proj = tmp_path / "proj"
-    proj.mkdir()
-
-    rt = _make_runtime(proj, scope="project", home=home)
-    reg = ToolRegistry()
-    # Attach registry + config-like attrs expected by tools
-    rt.tool_registry = reg  # type: ignore[attr-defined]
-    rt.config = SimpleNamespace(home_dir=str(tmp_path / "remedy_home"))  # type: ignore[attr-defined]
-    rt._session_id = "test-session"  # type: ignore[attr-defined]
-    register_workspace_tools(rt)
-
-    result = await reg.execute(
-        "file_write", path=str(desk / "escape_jail.txt"), content="nope"
+    # Isolate from host ~/.remedy approval_mode (CI is ask; local may be auto).
+    monkeypatch.setattr(
+        "remedy.interfaces.api_support.load_config",
+        lambda: {"approval_mode": "auto", "access_scope": "project"},
     )
-    assert "PATH_DENIED" in result or "path not allowed" in result.lower()
-    assert not (desk / "escape_jail.txt").exists()
+    prev = APPROVALS._mode  # noqa: SLF001
+    APPROVALS.set_mode("auto")
+    try:
+        home = tmp_path / "home"
+        desk = home / "Desktop"
+        desk.mkdir(parents=True)
+        proj = tmp_path / "proj"
+        proj.mkdir()
 
-    # Inside project still works
-    ok = await reg.execute("file_write", path="inside.txt", content="yes")
-    assert "PATH_DENIED" not in ok
-    assert (proj / "inside.txt").read_text(encoding="utf-8") == "yes"
+        rt = _make_runtime(proj, scope="project", home=home)
+        reg = ToolRegistry()
+        # Attach registry + config-like attrs expected by tools
+        rt.tool_registry = reg  # type: ignore[attr-defined]
+        rt.config = SimpleNamespace(home_dir=str(tmp_path / "remedy_home"))  # type: ignore[attr-defined]
+        rt._session_id = "test-session"  # type: ignore[attr-defined]
+        register_workspace_tools(rt)
+
+        result = await reg.execute(
+            "file_write", path=str(desk / "escape_jail.txt"), content="nope"
+        )
+        assert "PATH_DENIED" in result or "path not allowed" in result.lower()
+        assert not (desk / "escape_jail.txt").exists()
+
+        # Inside project still works
+        ok = await reg.execute("file_write", path="inside.txt", content="yes")
+        assert "PATH_DENIED" not in ok
+        assert "APPROVAL_REQUIRED" not in ok
+        assert (proj / "inside.txt").read_text(encoding="utf-8") == "yes"
+    finally:
+        APPROVALS.set_mode(prev)
 
 
 @pytest.mark.asyncio
@@ -221,37 +233,48 @@ async def test_file_read_tool_allows_desktop(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_file_edit_tool_blocks_desktop(tmp_path: Path):
+async def test_file_edit_tool_blocks_desktop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from remedy.core.agent_workspace_tools import register_workspace_tools
+    from remedy.core.approvals import APPROVALS
     from remedy.skills.tool_registry import ToolRegistry
 
-    home = tmp_path / "home"
-    desk = home / "Desktop"
-    desk.mkdir(parents=True)
-    note = desk / "research.txt"
-    note.write_text("alpha", encoding="utf-8")
-    proj = tmp_path / "proj"
-    proj.mkdir()
-    (proj / "local.txt").write_text("alpha", encoding="utf-8")
-
-    rt = _make_runtime(proj, scope="project", home=home)
-    reg = ToolRegistry()
-    rt.tool_registry = reg  # type: ignore[attr-defined]
-    rt.config = SimpleNamespace(home_dir=str(tmp_path / "remedy_home"))  # type: ignore[attr-defined]
-    rt._session_id = "test-session"  # type: ignore[attr-defined]
-    register_workspace_tools(rt)
-
-    denied = await reg.execute(
-        "file_edit", path=str(note), old_string="alpha", new_string="beta"
+    monkeypatch.setattr(
+        "remedy.interfaces.api_support.load_config",
+        lambda: {"approval_mode": "auto", "access_scope": "project"},
     )
-    assert "PATH_DENIED" in denied or "path not allowed" in denied.lower()
-    assert note.read_text(encoding="utf-8") == "alpha"
+    prev = APPROVALS._mode  # noqa: SLF001
+    APPROVALS.set_mode("auto")
+    try:
+        home = tmp_path / "home"
+        desk = home / "Desktop"
+        desk.mkdir(parents=True)
+        note = desk / "research.txt"
+        note.write_text("alpha", encoding="utf-8")
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        (proj / "local.txt").write_text("alpha", encoding="utf-8")
 
-    ok = await reg.execute(
-        "file_edit", path="local.txt", old_string="alpha", new_string="beta"
-    )
-    assert "PATH_DENIED" not in ok
-    assert (proj / "local.txt").read_text(encoding="utf-8") == "beta"
+        rt = _make_runtime(proj, scope="project", home=home)
+        reg = ToolRegistry()
+        rt.tool_registry = reg  # type: ignore[attr-defined]
+        rt.config = SimpleNamespace(home_dir=str(tmp_path / "remedy_home"))  # type: ignore[attr-defined]
+        rt._session_id = "test-session"  # type: ignore[attr-defined]
+        register_workspace_tools(rt)
+
+        denied = await reg.execute(
+            "file_edit", path=str(note), old_string="alpha", new_string="beta"
+        )
+        assert "PATH_DENIED" in denied or "path not allowed" in denied.lower()
+        assert note.read_text(encoding="utf-8") == "alpha"
+
+        ok = await reg.execute(
+            "file_edit", path="local.txt", old_string="alpha", new_string="beta"
+        )
+        assert "PATH_DENIED" not in ok
+        assert "APPROVAL_REQUIRED" not in ok
+        assert (proj / "local.txt").read_text(encoding="utf-8") == "beta"
+    finally:
+        APPROVALS.set_mode(prev)
 
 
 def test_workspace_context_mentions_write_jail(tmp_path: Path):
