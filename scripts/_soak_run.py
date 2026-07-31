@@ -250,9 +250,65 @@ def main() -> int:
         "navigate used browser target + host complete",
     )
     mark("host offline fallbacks", None, "not forced this run")
-    mark("Plan mode allow/block matrix", None, "Plan not toggled this run")
     mark("multi-provider", None, "single provider session")
     mark("concurrent turns / session switch", None, "single session")
+
+    print()
+    print("=== PLAN MODE MATRIX ===")
+    try:
+        import asyncio
+
+        from remedy.core.agent import BasicRuntime
+        from remedy.core.computer.types import COMPUTER_PLAN_MODE_TOOLS, COMPUTER_TOOL_NAMES
+        from remedy.core.plan_store import PLAN_MODE_TOOL_NAMES
+        from remedy.models import AgentConfig, ToolCall
+
+        async def plan_matrix() -> None:
+            rt = BasicRuntime(
+                AgentConfig(name="soak-plan", llm_api_key="x", home_dir="~/.remedy")
+            )
+            rt._plan_mode = True
+            mark(
+                "plan: help_list/help_read allowlisted",
+                "help_list" in PLAN_MODE_TOOL_NAMES
+                and "help_read" in PLAN_MODE_TOOL_NAMES,
+                "",
+            )
+
+            async def call(name: str, **args):
+                return await rt.call_tool(ToolCall(tool_name=name, arguments=args))
+
+            def is_plan_block(res) -> bool:
+                err = res.error or ""
+                return (not res.success) and (
+                    "PLAN_MODE" in err or "Plan mode" in err
+                )
+
+            # Observe allowed (must not be plan-blocked)
+            for name, args in (
+                ("computer_monitors", {}),
+                ("computer_snapshot", {"target": "desktop", "limit": 5}),
+                ("help_read", {"id": "computer-use-soak"}),
+            ):
+                res = await call(name, **args)
+                mark(
+                    f"plan allow {name}",
+                    not is_plan_block(res),
+                    f"ok={res.success} err={(res.error or '')[:60]}",
+                )
+
+            # Input blocked
+            for name in sorted(COMPUTER_TOOL_NAMES - COMPUTER_PLAN_MODE_TOOLS):
+                res = await call(name, **{})
+                mark(
+                    f"plan block {name}",
+                    is_plan_block(res),
+                    (res.error or "")[:80],
+                )
+
+        asyncio.run(plan_matrix())
+    except Exception as e:
+        mark("Plan mode allow/block matrix", False, str(e))
 
     tmp = ROOT / "scripts" / "_soak_reg_probe.txt"
     tmp.write_text("soak-reg-v1\n", encoding="utf-8")

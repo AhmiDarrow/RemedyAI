@@ -393,6 +393,9 @@ def _plan_mode_tool_names() -> frozenset[str]:
         "web_search",
         "media_read",
         "vision_describe",
+        # F1 / owner's manual — always readable (never "out of scope" in Plan).
+        "help_list",
+        "help_read",
     }
     try:
         from remedy.core.computer.types import COMPUTER_PLAN_MODE_TOOLS
@@ -421,11 +424,19 @@ PLAN_MODE_SYSTEM_ADDENDUM = """
 
 You are in **Plan mode** — research and design only.
 
-**Allowed:** read files, list directories, search the repo, fetch web docs, memory/skills lookup, save plans.
-**Blocked:** shell, file write/edit, installs, git mutations, and other side-effect tools.
+**Allowed:**
+- Read files, list dirs, repo/web search, memory/skills lookup, `plan_save`
+- F1 help: `help_list` / `help_read` (owner's manuals, soak checklists)
+- Computer **observe / navigate only**: `computer_monitors`, `computer_screenshot`,
+  `computer_snapshot`, `computer_windows`, `computer_navigate`, `computer_page_text`,
+  `computer_find`, `computer_wait`
+
+**Blocked:** shell, file write/edit, installs, git mutations, and computer
+**input** tools (`computer_click`, `computer_type`, `computer_key`, `computer_scroll`,
+`computer_drag`, `computer_act`, `computer_app`). Switch to **Build** (Ctrl+B) to act.
 
 Process:
-1. Research the codebase / docs as needed.
+1. Research the codebase / docs / screen as needed (no clicking or typing).
 2. Ask clarifying questions when requirements are ambiguous.
 3. Produce a clear structured plan (goal, numbered steps, risks, files/tools).
 4. Call `plan_save` with that structure.
