@@ -254,6 +254,57 @@ const SAME_WINDOW_OAUTH_JS: &str = r#"(function(){
   window.addEventListener('load', function(){ setTimeout(bounceHomeIfStuck, 600); });
 })();"#;
 
+/// Visible scrollbars + fit desktop sites in a narrow Browser rail.
+/// Gmail/Docs use internal scroll regions; filter CSS + missing scrollbar gutters
+/// made panes look “cut off” with no way to scroll.
+const RAIL_LAYOUT_JS: &str = r#"(function(){
+  if (window.__remedyRailLayout) return;
+  window.__remedyRailLayout = true;
+  try {
+    var s = document.getElementById('remedy-rail-layout-css');
+    if (!s) {
+      s = document.createElement('style');
+      s.id = 'remedy-rail-layout-css';
+      (document.documentElement || document.head || document.body).appendChild(s);
+    }
+    // Always-visible scrollbar gutters (WebView2 overlay bars are easy to miss)
+    s.textContent = [
+      'html{scrollbar-gutter:stable both-edges;}',
+      '::-webkit-scrollbar{width:12px;height:12px;}',
+      '::-webkit-scrollbar-track{background:rgba(127,127,127,0.15);}',
+      '::-webkit-scrollbar-thumb{background:rgba(127,127,127,0.55);border-radius:6px;}',
+      '::-webkit-scrollbar-thumb:hover{background:rgba(127,127,127,0.75);}',
+      /* If the document itself overflows, allow page scroll (many marketing sites) */
+      'html.remedy-doc-scroll,html.remedy-doc-scroll body{overflow:auto!important;}'
+    ].join('');
+  } catch(e) {}
+
+  function applyFit(){
+    try {
+      var w = window.innerWidth || document.documentElement.clientWidth || 0;
+      var h = window.innerHeight || document.documentElement.clientHeight || 0;
+      // Mild zoom-out in narrow rail so multi-column apps (Gmail) fit better
+      var z = 1;
+      if (w > 0 && w < 520) z = 0.82;
+      else if (w > 0 && w < 640) z = 0.88;
+      else if (w > 0 && w < 780) z = 0.92;
+      try { document.documentElement.style.zoom = String(z); } catch(e) {}
+      // Document-level scroll when content is taller than the viewport
+      var sh = Math.max(
+        document.documentElement ? document.documentElement.scrollHeight : 0,
+        document.body ? document.body.scrollHeight : 0
+      );
+      if (sh > h + 48) {
+        document.documentElement.classList.add('remedy-doc-scroll');
+      }
+    } catch(e) {}
+  }
+  applyFit();
+  window.addEventListener('resize', applyFit);
+  setTimeout(applyFit, 300);
+  setTimeout(applyFit, 1200);
+})();"#;
+
 /// Rewrite OAuth navigations that cannot complete inside a single WebView.
 /// - `storagerelay://…` / Android `intent:` → real https
 /// - Google GIS `ux_mode=popup` → `ux_mode=redirect` (popup handshake needs opener)
@@ -781,10 +832,19 @@ pub fn navigate_embed(
             let _ = app_for_load.emit("browser-url-changed", json!({ "url": u }));
             // Same-window OAuth: window.open → location.assign (no popup surface).
             let _ = wv.eval(SAME_WINDOW_OAUTH_JS);
+            // Scrollbars + mild zoom so narrow-rail desktop sites stay usable
+            let _ = wv.eval(RAIL_LAYOUT_JS);
             // Phase 1 cosmetic: hide ad/tracker elements via EasyList CSS
+            // (skipped on Gmail/Docs/etc. — those lists break scroll panes)
             if let Some(js) = crate::privacy_shield::cosmetic_inject_js(&u) {
                 let _ = wv.eval(&js);
             }
+            // Re-fit after SPA chrome mounts
+            let wv2 = wv.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(800));
+                let _ = wv2.eval(RAIL_LAYOUT_JS);
+            });
         });
 
     // add_child already runs builder on main thread internally
