@@ -254,60 +254,31 @@ const SAME_WINDOW_OAUTH_JS: &str = r#"(function(){
   window.addEventListener('load', function(){ setTimeout(bounceHomeIfStuck, 600); });
 })();"#;
 
-/// Rail-wide layout helpers (all sites, not host-specific).
-/// - Visible scrollbars
-/// - Repair toolbar/action icons that adblock hide rules leave invisible-but-clickable
-/// - Never use CSS zoom (breaks SVG/mask icons across web apps)
+/// Minimal rail helpers only — no zoom, no aggressive !important chrome overrides.
+/// (Those made icons invisible-but-clickable on Gmail and other SPAs.)
 const RAIL_LAYOUT_JS: &str = r#"(function(){
   if (window.__remedyRailLayout) return;
   window.__remedyRailLayout = true;
   try {
-    // Clear any prior zoom experiments that made icons invisible but clickable
     try { document.documentElement.style.zoom = ''; } catch(e) {}
-    try { document.body && (document.body.style.zoom = ''); } catch(e) {}
+    try { if (document.body) document.body.style.zoom = ''; } catch(e) {}
+    // Remove prior experimental styles if a long-lived page kept them
+    var old = document.getElementById('remedy-rail-layout-css');
+    if (old) old.remove();
+    var oldShield = document.getElementById('remedy-privacy-shield-css');
+    if (oldShield) oldShield.remove();
 
-    var s = document.getElementById('remedy-rail-layout-css');
-    if (!s) {
-      s = document.createElement('style');
-      s.id = 'remedy-rail-layout-css';
-      (document.documentElement || document.head || document.body).appendChild(s);
-    }
+    var s = document.createElement('style');
+    s.id = 'remedy-rail-layout-css';
+    (document.documentElement || document.head || document.body).appendChild(s);
+    // Scrollbars only — do not touch color/fill/transform/display of app chrome
     s.textContent = [
       'html{scrollbar-gutter:stable both-edges;}',
       '::-webkit-scrollbar{width:12px;height:12px;}',
       '::-webkit-scrollbar-track{background:rgba(127,127,127,0.15);}',
       '::-webkit-scrollbar-thumb{background:rgba(127,127,127,0.55);border-radius:6px;}',
       '::-webkit-scrollbar-thumb:hover{background:rgba(127,127,127,0.75);}',
-      'html.remedy-doc-scroll,html.remedy-doc-scroll body{overflow:auto!important;}',
-      /* Undo accidental cosmetic hide on real app chrome (all sites).
-         Invisible-but-clickable toolbars = display/visibility/opacity/height nuked
-         while pointer-events still work. */
-      '[role="toolbar"],[role="toolbar"] *,',
-      '[role="menubar"],[role="menubar"] *,',
-      '[role="navigation"] button,[role="navigation"] [role="button"],',
-      'header button,header [role="button"],header a[aria-label],',
-      'nav button,nav [role="button"],',
-      '[class*="toolbar" i] button,[class*="toolbar" i] [role="button"],',
-      '[class*="Toolbar"] button,[class*="Toolbar"] [role="button"],',
-      '[class*="actionbar" i],[class*="action-bar" i],[class*="ActionBar"],',
-      '[class*="actionbar" i] *,[class*="action-bar" i] *,[class*="ActionBar"] *,',
-      'button[aria-label],div[role="button"][aria-label],',
-      '[role="button"][data-tooltip],[role="button"][data-tooltip-text],',
-      'div[gh] button,div[gh] [role="button"]{',
-      '  display:revert!important;visibility:visible!important;opacity:1!important;',
-      '  height:auto!important;max-height:none!important;width:auto!important;',
-      '  max-width:none!important;overflow:visible!important;clip:auto!important;',
-      '  clip-path:none!important;pointer-events:auto!important;',
-      '  color:inherit!important;fill:currentColor!important;',
-      '  filter:none!important;transform:none!important;',
-      '}',
-      /* SVG icons inside those controls */
-      '[role="toolbar"] svg,[role="menubar"] svg,button[aria-label] svg,',
-      '[role="button"][aria-label] svg,[class*="toolbar" i] svg{',
-      '  display:inline-block!important;visibility:visible!important;opacity:1!important;',
-      '  width:auto!important;height:auto!important;fill:currentColor!important;',
-      '  filter:none!important;',
-      '}'
+      'html.remedy-doc-scroll,html.remedy-doc-scroll body{overflow:auto!important;}'
     ].join('');
   } catch(e) {}
 
@@ -326,21 +297,7 @@ const RAIL_LAYOUT_JS: &str = r#"(function(){
   }
   applyFit();
   window.addEventListener('resize', applyFit);
-  // Re-apply after SPA toolbars mount (and after privacy cosmetic style if any)
-  setTimeout(applyFit, 300);
-  setTimeout(applyFit, 1200);
-  setTimeout(function(){
-    try {
-      var fix = document.getElementById('remedy-rail-layout-css');
-      if (fix && fix.parentNode) fix.parentNode.appendChild(fix); // restack after ad CSS
-    } catch(e) {}
-  }, 500);
-  setTimeout(function(){
-    try {
-      var fix = document.getElementById('remedy-rail-layout-css');
-      if (fix && fix.parentNode) fix.parentNode.appendChild(fix);
-    } catch(e) {}
-  }, 2000);
+  setTimeout(applyFit, 400);
 })();"#;
 
 /// Rewrite OAuth navigations that cannot complete inside a single WebView.
