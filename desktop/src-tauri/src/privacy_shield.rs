@@ -520,12 +520,47 @@ pub fn should_block_navigation(url: &str) -> bool {
     }
 }
 
+/// Heavy web apps where EasyList hide-selectors break layout/scroll (Gmail, Docs, …).
+fn skip_cosmetic_for_host(page_url: &str) -> bool {
+    let Ok(u) = url::Url::parse(page_url) else {
+        return false;
+    };
+    let host = u.host_str().unwrap_or("").to_lowercase();
+    // Mail / office / chat SPAs — filter CSS often hides scroll containers or panes.
+    const SKIP: &[&str] = &[
+        "mail.google.com",
+        "docs.google.com",
+        "sheets.google.com",
+        "slides.google.com",
+        "drive.google.com",
+        "calendar.google.com",
+        "outlook.live.com",
+        "outlook.office.com",
+        "outlook.office365.com",
+        "teams.microsoft.com",
+        "www.notion.so",
+        "notion.so",
+        "app.slack.com",
+        "discord.com",
+        "web.whatsapp.com",
+        "www.figma.com",
+        "figma.com",
+        "github.com",
+        "gitlab.com",
+    ];
+    SKIP.iter().any(|h| host == *h || host.ends_with(&format!(".{h}")))
+}
+
 /// CSS + optional scriptlet for the page (cosmetic phase).
 pub fn cosmetic_inject_js(page_url: &str) -> Option<String> {
     if !is_enabled() {
         return None;
     }
     if page_url.starts_with("about:") {
+        return None;
+    }
+    // Prefer working scroll/layout over ad-hiding on complex SPAs.
+    if skip_cosmetic_for_host(page_url) {
         return None;
     }
     let g = global();

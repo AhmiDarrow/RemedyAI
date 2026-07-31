@@ -754,16 +754,19 @@ export function BrowserSlide() {
         </button>
       </form>
 
-      {/* Host rect ONLY: native WebView2 is positioned over this box — never the popout chrome */}
+      {/* Host rect ONLY: native WebView2 is positioned over this box — never the popout chrome.
+          overflow:hidden clips the *host* (native HWND is separate); keep min-h so bounds stay tall. */}
       <div
         ref={hostRef}
-        className="flex-1 min-h-0 relative w-full overflow-hidden"
+        className="flex-1 min-h-0 relative w-full"
         style={{
           // Match app chrome — white flash/border around WebView was distracting
           background: 'var(--bg-primary)',
-          minHeight: 120,
+          minHeight: 160,
           zIndex: 1,
           isolation: 'isolate',
+          // Let the native child own scrolling; don't clip hit-testing oddly
+          overflow: 'visible',
         }}
         data-browser-embed-host
       >
