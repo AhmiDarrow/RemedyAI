@@ -599,16 +599,11 @@ class ComputerExecutor:
         # in-memory host_connected flag is stale (CLI / after mark_host_dead).
         if not self.bridge.host_connected() and act is not ComputerAction.NAVIGATE:
             if act is ComputerAction.SCREENSHOT:
-                r = self._run_desktop(ComputerAction.SCREENSHOT)
-                r["note"] = (
-                    "desktop host offline — full desktop screenshot "
-                    "(start Remedy Desktop for in-rail browser shots)"
-                )
-                r["target"] = "desktop"
-                return r
-            if act is ComputerAction.WINDOWS:
+                # Fall through — PrintWindow / rail crop work without poller hello.
+                pass
+            elif act is ComputerAction.WINDOWS:
                 return self._run_desktop(act, **kwargs)
-            if act in (
+            elif act in (
                 ComputerAction.SNAPSHOT,
                 ComputerAction.PAGE_TEXT,
                 ComputerAction.FIND,
