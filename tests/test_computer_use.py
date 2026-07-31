@@ -399,8 +399,11 @@ def test_enqueue_sets_ui_command_for_rail(tmp_path: Path):
     assert b.take_ui_command() is None
 
 
-def test_computer_host_routes_loopback_no_auth(tmp_path: Path):
-    """Desktop poller must claim jobs without waiting on SPA token bootstrap."""
+def test_computer_host_routes_require_bearer(tmp_path: Path):
+    """Host/jobs/ui need Bearer (S-AUTH-04). Rust poller loads DPAPI token; SPA sends auth.
+
+    a11y push remains loopback-exempt (job_id capability secret).
+    """
 
     class Cfg:
         home_dir = str(tmp_path)
@@ -413,13 +416,26 @@ def test_computer_host_routes_loopback_no_auth(tmp_path: Path):
 
     app = create_app(runtime=RT(), api_key="secret-test-key")
     client = TestClient(app)
-    # No Authorization header
+    # No Authorization header → 401 (no longer loopback-open)
     r = client.post("/api/computer/host/hello", json={"client": "desktop"})
-    assert r.status_code == 200, r.text
-    assert r.json().get("ok") is True
+    assert r.status_code == 401, r.text
     r2 = client.get("/api/computer/jobs/next")
-    assert r2.status_code == 200, r2.text
-    assert "job" in r2.json()
+    assert r2.status_code == 401, r2.text
+    # With Bearer — host works
+    headers = {"Authorization": "Bearer secret-test-key"}
+    r3 = client.post(
+        "/api/computer/host/hello",
+        json={"client": "desktop"},
+        headers=headers,
+    )
+    assert r3.status_code == 200, r3.text
+    assert r3.json().get("ok") is True
+    r4 = client.get("/api/computer/jobs/next", headers=headers)
+    assert r4.status_code == 200, r4.text
+    assert "job" in r4.json()
+    # a11y still loopback-open (invalid short id → 400, not 401)
+    r5 = client.post("/api/computer/a11y/push", json={"job_id": "short", "elements": []})
+    assert r5.status_code == 400, r5.text
 
 
 def test_wait_fails_fast_when_unclaimed(tmp_path: Path):

@@ -1,0 +1,423 @@
+{
+  "base": "http://127.0.0.1:7400",
+  "ts": 1785469745.445341,
+  "counts": {
+    "blocked": 40,
+    "open": 1,
+    "info": 8,
+    "error": 0
+  },
+  "findings": [
+    {
+      "id": "A-NOAUTH-_api_sessions",
+      "title": "No-auth GET /api/sessions",
+      "severity": "High",
+      "status": "blocked",
+      "detail": "HTTP 401",
+      "evidence": {
+        "status": 401
+      }
+    },
+    {
+      "id": "A-NOAUTH-_api_settings",
+      "title": "No-auth GET /api/settings",
+      "severity": "High",
+      "status": "blocked",
+      "detail": "HTTP 401",
+      "evidence": {
+        "status": 401
+      }
+    },
+    {
+      "id": "A-NOAUTH-_api_providers",
+      "title": "No-auth GET /api/providers",
+      "severity": "High",
+      "status": "blocked",
+      "detail": "HTTP 401",
+      "evidence": {
+        "status": 401
+      }
+    },
+    {
+      "id": "A-NOAUTH-_api_files",
+      "title": "No-auth GET /api/files?path=C:/Windows/System32/drivers/etc/hosts",
+      "severity": "High",
+      "status": "blocked",
+      "detail": "HTTP 401",
+      "evidence": {
+        "status": 401
+      }
+    },
+    {
+      "id": "A-NOAUTH-_api_workspace",
+      "title": "No-auth GET /api/workspace",
+      "severity": "High",
+      "status": "blocked",
+      "detail": "HTTP 401",
+      "evidence": {
+        "status": 401
+      }
+    },
+    {
+      "id": "A-PUBLIC-_api_status",
+      "title": "Public GET /api/status",
+      "severity": "Info",
+      "status": "info",
+      "detail": "HTTP 200 (public surface)",
+      "evidence": {
+        "status": 200
+      }
+    },
+    {
+      "id": "A-PUBLIC-_api_ping",
+      "title": "Public GET /api/ping",
+      "severity": "Info",
+      "status": "info",
+      "detail": "HTTP 200 (public surface)",
+      "evidence": {
+        "status": 200
+      }
+    },
+    {
+      "id": "A-PUBLIC-_api_auth_local-bootstrap",
+      "title": "Public GET /api/auth/local-bootstrap",
+      "severity": "Info",
+      "status": "info",
+      "detail": "HTTP 200 (public surface)",
+      "evidence": {
+        "status": 200
+      }
+    },
+    {
+      "id": "A-BOOTSTRAP",
+      "title": "HTTP local-bootstrap issues Bearer",
+      "severity": "Med",
+      "status": "open",
+      "detail": "Any same-user loopback client can mint API token (owner-boundary)",
+      "evidence": {
+        "auth_required": true,
+        "token_len": 43
+      }
+    },
+    {
+      "id": "A-BAD-TOKEN",
+      "title": "Invalid Bearer rejected",
+      "severity": "High",
+      "status": "blocked",
+      "detail": "401",
+      "evidence": null
+    },
+    {
+      "id": "A-SHORT-TOKEN",
+      "title": "Short Bearer safe 401",
+      "severity": "Low",
+      "status": "blocked",
+      "detail": "401",
+      "evidence": null
+    },
+    {
+      "id": "B-HOST-_api_computer_host_status",
+      "title": "Unauth GET /api/computer/host/status",
+      "severity": "High",
+      "status": "blocked",
+      "detail": "HTTP 401 (Bearer required on host/jobs/ui)",
+      "evidence": null
+    },
+    {
+      "id": "B-HOST-_api_computer_host_hello",
+      "title": "Unauth POST /api/computer/host/hello",
+      "severity": "High",
+      "status": "blocked",
+      "detail": "HTTP 401 (Bearer required on host/jobs/ui)",
+      "evidence": null
+    },
+    {
+      "id": "B-HOST-_api_computer_jobs_next",
+      "title": "Unauth GET /api/computer/jobs/next",
+      "severity": "High",
+      "status": "blocked",
+      "detail": "HTTP 401 (Bearer required on host/jobs/ui)",
+      "evidence": null
+    },
+    {
+      "id": "B-HOST-_api_computer_ui_command",
+      "title": "Unauth GET /api/computer/ui/command",
+      "severity": "High",
+      "status": "blocked",
+      "detail": "HTTP 401 (Bearer required on host/jobs/ui)",
+      "evidence": null
+    },
+    {
+      "id": "B-CAPTURE-NOAUTH",
+      "title": "Unauth capture blocked",
+      "severity": "High",
+      "status": "blocked",
+      "detail": "HTTP 401",
+      "evidence": null
+    },
+    {
+      "id": "B-XFF-NOAUTH",
+      "title": "X-Forwarded-For does not bypass API auth",
+      "severity": "High",
+      "status": "blocked",
+      "detail": "401 without Bearer even with XFF",
+      "evidence": null
+    },
+    {
+      "id": "C-PATH-provider_keys.json",
+      "title": "files path jail: C:\\Users\\Administrator\\.remedy\\auth\\provider_keys.json",
+      "severity": "High",
+      "status": "blocked",
+      "detail": "HTTP 200",
+      "evidence": "{'files': [], 'path': 'C:\\\\Users\\\\Administrator\\\\.remedy\\\\auth\\\\provider_keys.json', 'error': 'path outside allowed directory', 'root': 'C:\\\\Users\\\\Administrato"
+    },
+    {
+      "id": "C-PATH-local_api_token",
+      "title": "files path jail: C:\\Users\\Administrator\\.remedy\\auth\\local_api_token",
+      "severity": "High",
+      "status": "blocked",
+      "detail": "HTTP 200",
+      "evidence": "{'files': [], 'path': 'C:\\\\Users\\\\Administrator\\\\.remedy\\\\auth\\\\local_api_token', 'error': 'path outside allowed directory', 'root': 'C:\\\\Users\\\\Administrator\\\\"
+    },
+    {
+      "id": "C-PATH-SAM",
+      "title": "files path jail: C:\\Windows\\System32\\config\\SAM",
+      "severity": "High",
+      "status": "blocked",
+      "detail": "HTTP 200",
+      "evidence": "{'files': [], 'path': 'C:\\\\Windows\\\\System32\\\\config\\\\SAM', 'error': 'path outside allowed directory', 'root': 'C:\\\\Users\\\\Administrator\\\\SecretSticky'}"
+    },
+    {
+      "id": "C-PATH-win.ini",
+      "title": "files path jail: C:\\Users\\Administrator\\Desktop\\..\\..\\Windows\\win.ini",
+      "severity": "High",
+      "status": "blocked",
+      "detail": "HTTP 200",
+      "evidence": "{'files': [], 'path': 'C:\\\\Users\\\\Administrator\\\\Desktop\\\\..\\\\..\\\\Windows\\\\win.ini', 'error': 'path outside allowed directory', 'root': 'C:\\\\Users\\\\Administrato"
+    },
+    {
+      "id": "C-PATH-NTUSER.DAT",
+      "title": "files path jail: C:\\Users\\Administrator\\NTUSER.DAT",
+      "severity": "High",
+      "status": "blocked",
+      "detail": "HTTP 200",
+      "evidence": "{'files': [], 'path': 'C:\\\\Users\\\\Administrator\\\\NTUSER.DAT', 'error': 'path outside allowed directory', 'root': 'C:\\\\Users\\\\Administrator\\\\SecretSticky'}"
+    },
+    {
+      "id": "C-PATH-hosts",
+      "title": "files path jail: ../../../Windows/System32/drivers/etc/hosts",
+      "severity": "High",
+      "status": "blocked",
+      "detail": "HTTP 200",
+      "evidence": "{'files': [], 'path': '../../../Windows/System32/drivers/etc/hosts', 'error': 'path outside allowed directory', 'root': 'C:\\\\Users\\\\Administrator\\\\SecretSticky'"
+    },
+    {
+      "id": "C-SCAN-AUTH",
+      "title": "project scan of ~/.remedy/auth blocked",
+      "severity": "High",
+      "status": "blocked",
+      "detail": "HTTP 400",
+      "evidence": "{'detail': 'Path not allowed: Path is a protected Remedy secrets location (auth/)'}"
+    },
+    {
+      "id": "D-SETTINGS-LEAK",
+      "title": "Settings GET no raw secrets spotted",
+      "severity": "High",
+      "status": "blocked",
+      "detail": "fingerprint/bool style payload",
+      "evidence": null
+    },
+    {
+      "id": "D-PROVIDERS-LEAK",
+      "title": "Providers list no raw key material",
+      "severity": "High",
+      "status": "blocked",
+      "detail": "HTTP 200",
+      "evidence": null
+    },
+    {
+      "id": "E-WH-teams",
+      "title": "Webhook /api/webhooks/teams",
+      "severity": "Info",
+      "status": "info",
+      "detail": "HTTP 503",
+      "evidence": "{'detail': 'Teams channel not active'}"
+    },
+    {
+      "id": "E-WH-whatsapp",
+      "title": "Webhook /api/webhooks/whatsapp",
+      "severity": "Info",
+      "status": "info",
+      "detail": "HTTP 503",
+      "evidence": "{'detail': 'WhatsApp channel not active'}"
+    },
+    {
+      "id": "E-WH-google_chat",
+      "title": "Webhook /api/webhooks/google_chat",
+      "severity": "Info",
+      "status": "info",
+      "detail": "HTTP 503",
+      "evidence": "{'detail': 'Google Chat channel not active'}"
+    },
+    {
+      "id": "F-SSRF-HOST-127.0.0.1",
+      "title": "SSRF host block 127.0.0.1",
+      "severity": "High",
+      "status": "blocked",
+      "detail": "blocked",
+      "evidence": null
+    },
+    {
+      "id": "F-SSRF-HOST-localhost",
+      "title": "SSRF host block localhost",
+      "severity": "High",
+      "status": "blocked",
+      "detail": "blocked",
+      "evidence": null
+    },
+    {
+      "id": "F-SSRF-HOST-169.254.169.254",
+      "title": "SSRF host block 169.254.169.254",
+      "severity": "High",
+      "status": "blocked",
+      "detail": "blocked",
+      "evidence": null
+    },
+    {
+      "id": "F-SSRF-HOST-0.0.0.0",
+      "title": "SSRF host block 0.0.0.0",
+      "severity": "High",
+      "status": "blocked",
+      "detail": "blocked",
+      "evidence": null
+    },
+    {
+      "id": "F-SSRF-HOST-::1",
+      "title": "SSRF host block ::1",
+      "severity": "High",
+      "status": "blocked",
+      "detail": "blocked",
+      "evidence": null
+    },
+    {
+      "id": "F-SSRF-HOST-10.0.0.1",
+      "title": "SSRF host block 10.0.0.1",
+      "severity": "High",
+      "status": "blocked",
+      "detail": "blocked",
+      "evidence": null
+    },
+    {
+      "id": "F-SSRF-HOST-192.168.1.1",
+      "title": "SSRF host block 192.168.1.1",
+      "severity": "High",
+      "status": "blocked",
+      "detail": "blocked",
+      "evidence": null
+    },
+    {
+      "id": "F-SSRF-HOST-example.com",
+      "title": "Public host allowed example.com",
+      "severity": "Info",
+      "status": "info",
+      "detail": "not blocked at host gate",
+      "evidence": null
+    },
+    {
+      "id": "F-SSRF-PIN-LOOPBACK",
+      "title": "pinned_fetch blocks loopback API",
+      "severity": "High",
+      "status": "blocked",
+      "detail": "SSRF_BLOCKED",
+      "evidence": null
+    },
+    {
+      "id": "F-SSRF-USERINFO",
+      "title": "userinfo URL blocked",
+      "severity": "Med",
+      "status": "blocked",
+      "detail": "URL_USERINFO_BLOCKED",
+      "evidence": null
+    },
+    {
+      "id": "F-SHELL-0",
+      "title": "Shell write jail blocks escape",
+      "severity": "High",
+      "status": "blocked",
+      "detail": "shell write jail: mutation targets path outside project write roots: C:\\Users\\Administrator\\Desktop\\remedy_redteam_pwn.t",
+      "evidence": null
+    },
+    {
+      "id": "F-SHELL-1",
+      "title": "Shell write jail blocks escape",
+      "severity": "High",
+      "status": "blocked",
+      "detail": "shell write jail: mutation targets path outside project write roots: C:\\Users\\Administrator\\Documents\\remedy_redteam_pwn",
+      "evidence": null
+    },
+    {
+      "id": "F-SHELL-2",
+      "title": "Shell write jail blocks escape",
+      "severity": "High",
+      "status": "blocked",
+      "detail": "shell write jail: mutation targets path outside project write roots: C:\\Users\\Public\\redteam_pwn.txt. Allowed write root",
+      "evidence": null
+    },
+    {
+      "id": "F-SHELL-3",
+      "title": "Shell write jail blocks escape",
+      "severity": "High",
+      "status": "blocked",
+      "detail": "shell write jail: encoded/archive/decode mutation cannot be proven under write roots [C:\\Users\\Administrator\\RemedyAI]. ",
+      "evidence": null
+    },
+    {
+      "id": "F-SHELL-4",
+      "title": "Shell write jail blocks escape",
+      "severity": "High",
+      "status": "blocked",
+      "detail": "shell write jail: mutation targets path outside project write roots: C:\\Users\\Administrator\\Desktop\\stolen_readme.md. Al",
+      "evidence": null
+    },
+    {
+      "id": "F-AUTH-RESOLVE",
+      "title": "auth path blocked even under full",
+      "severity": "High",
+      "status": "blocked",
+      "detail": "Path is a protected Remedy secrets location (auth/)",
+      "evidence": null
+    },
+    {
+      "id": "F-AUTH-REFUSE",
+      "title": "refuse_protected_secret_path blocks auth",
+      "severity": "High",
+      "status": "blocked",
+      "detail": "Path is a protected Remedy secrets location (auth/)",
+      "evidence": null
+    },
+    {
+      "id": "G-CORS-STAR",
+      "title": "CORS * not open",
+      "severity": "Med",
+      "status": "blocked",
+      "detail": "ACAO=None OPTIONS=400",
+      "evidence": null
+    },
+    {
+      "id": "H-MEMORY-DB",
+      "title": "memory.db present (plaintext SQLite expected)",
+      "severity": "Med",
+      "status": "info",
+      "detail": "size=14536704",
+      "evidence": null
+    },
+    {
+      "id": "H-TOKEN-SEAL",
+      "title": "local_api_token appears sealed/JSON",
+      "severity": "Med",
+      "status": "blocked",
+      "detail": "DPAPI-style envelope",
+      "evidence": null
+    }
+  ]
+}

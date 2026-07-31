@@ -98,6 +98,16 @@ _OPAQUE_MUTATION_RE = re.compile(
     r"|\binvoke-expression\b|\biex\b"
     r"|\bstart-process\b[^\n]*-argumentlist\b"
     r"|\badd-type\b[^\n]*-typedefinition\b"
+    # Global package installs write outside project write roots (red-team 2026-07-30)
+    r"|\bnpm\s+(?:install|i|add)\b[^\n]*?(?:^|[\s])(?:-g|--global)(?:[\s]|$)"
+    r"|\bnpm\s+(?:-g|--global)\s+(?:install|i|add)\b"
+    r"|\byarn\s+global\s+add\b"
+    r"|\bpnpm\s+add\s+-g\b|\bpnpm\s+add\s+--global\b"
+    r"|\bcargo\s+install\b"
+    r"|\bgem\s+install\b"
+    r"|\bgo\s+install\b"
+    r"|\bpip(?:3)?\s+install\b[^\n]*\s--user\b"
+    r"|\bpython(?:3)?\s+-m\s+pip\s+install\b[^\n]*\s--user\b"
     # .NET download / write helpers that hide destinations
     r"|\b(?:system\.)?net\.webclient\b|\bnew-object\b[^\n]*webclient\b"
     r"|\bdownloadfile\b|\bdownloadstring\b|\bdownloaddata\b"

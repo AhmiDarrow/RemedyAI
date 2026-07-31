@@ -20,7 +20,7 @@
 | **Tool / path jail** | **B−** | Strong **file** write jail when project bound; **shell can still write outside** |
 | **SSRF / web_fetch** | **A−** | Opt-in, pin-on-resolve, fail-closed DNS, redirect recheck |
 | **Skills / zip** | **A−** | Signed catalog, checksum, Zip-Slip/bomb limits, quarantine until Trust |
-| **Computer-use** | **C+** | Loopback host unauthenticated by design; page/shot content → cloud LLM risk |
+| **Computer-use** | **B−** | Host/jobs/ui require Bearer (2026-07-30); a11y still job_id loopback; page/shot → LLM risk |
 | **Messengers** | **B−** | Allowlists fail-closed; WhatsApp HMAC solid; **Teams JWT not signature-verified** |
 | **Desktop shell / CSP / update** | **B** | Minisign updates; no Authenticode on first download; CSP connect-src broad |
 | **Data → cloud LLM** | **C+** | Secret-pattern sanitize + caps; **not** full PII/mail/page redaction |
@@ -120,7 +120,7 @@ Severity key: **Critical** remote unauth compromise · **High** significant data
 |----|-----|---------|---------|----------------|
 | **S-AUTH-02** | Med | Bootstrap | HTTP `local-bootstrap` **defaults ON** — any same-user loopback client can obtain Bearer. | Default off for desktop-only; keep IPC; explicit enable for WebUI. |
 | **S-AUTH-03** | Med | Token file | `local_api_token` plaintext + ACL only (unlike provider DPAPI). | DPAPI-seal like other secrets. |
-| **S-AUTH-04** | Med | Computer host | `/api/computer/host|jobs|ui|a11y/*` skip Bearer on loopback. | Optional host shared secret; document multi-user machines. |
+| **S-AUTH-04** | Med → **Fixed 2026-07-30** | Computer host | **Was:** host/jobs/ui unauth on loopback (job theft). **Now:** Bearer required; Rust poller DPAPI-loads token; a11y remains job_id loopback-only. | See `REDTEAM_2026-07-30.md`. |
 | **S-COMP-01** | Med | a11y | a11y push loopback-exempt + permissive CORS/PNA patterns; `job_id` as weak shared secret. | Bearer or one-time nonce; tighten CORS; higher entropy job ids. |
 | **S-PROV-01** | Med | Cloud LLM | Sanitize redacts key-like secrets and caps sizes; **does not** systematically redact mail/page/file PII before provider POST. | Privacy mode: aggressive tool-role strip; local-only models for sensitive tools. |
 | **S-WS-02** | Med | Scope | No project path → **effective `full`** access (power default). | Surface “full machine” in UI; confirm on first use. |
