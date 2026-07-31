@@ -143,6 +143,8 @@ export default function App() {
     streaming,
     streamStalled,
     stallSeconds,
+    stallBannerDismissed,
+    dismissStallBanner,
     partialText,
     partialThinking,
     activeTools,
@@ -2238,20 +2240,34 @@ export default function App() {
                 </button>
               </div>
             )}
-            {streaming && streamStalled && (
+            {streaming && streamStalled && !stallBannerDismissed && (
               <div
                 className="mx-3 mb-2 rounded-lg border px-3 py-2 text-xs flex flex-wrap items-center gap-2"
                 style={{
-                  borderColor: 'var(--warning, #d97706)',
-                  background: 'rgba(217, 119, 6, 0.1)',
-                  color: 'var(--text-primary)',
+                  borderColor: 'var(--border)',
+                  background: 'var(--bg-tertiary)',
+                  color: 'var(--text-secondary)',
                 }}
                 role="status"
               >
                 <span className="flex-1 min-w-[12rem]">
-                  Provider quiet for {stallSeconds}s (long think or stalled stream).
-                  Stream may be stuck.
+                  Quiet for {stallSeconds}s — model may still be thinking. You can keep waiting
+                  or stop if nothing new arrives.
                 </span>
+                <button
+                  type="button"
+                  className="px-2 py-1 rounded font-medium"
+                  style={{
+                    background: 'transparent',
+                    color: 'var(--text-muted)',
+                    border: '1px solid var(--border)',
+                    cursor: 'pointer',
+                  }}
+                  onClick={() => dismissStallBanner()}
+                  title="Hide this notice for the rest of this turn"
+                >
+                  Hide
+                </button>
                 <button
                   type="button"
                   className="px-2 py-1 rounded font-semibold"
