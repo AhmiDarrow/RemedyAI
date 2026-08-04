@@ -24,7 +24,7 @@ def test_bundled_skills_exist():
     assert "change-safety" in names
     # Self-dev / dogfood quality loop (Remedy on Remedy)
     for self_dev in (
-        "dogfood-isolated",
+        "self-inject",
         "gauntlet-security",
         "soak-product",
         "stress-suite",
@@ -63,7 +63,7 @@ def test_discover_defaults_loads_bundled(tmp_path: Path):
     assert reg.get("project-etiquette") is not None
     assert reg.get("change-safety") is not None
     assert reg.get("self-dev-loop") is not None
-    assert reg.get("dogfood-isolated") is not None
+    assert reg.get("self-inject") is not None
     assert reg.get("gauntlet-security") is not None
     assert reg.get("soak-product") is not None
     assert reg.get("stress-suite") is not None

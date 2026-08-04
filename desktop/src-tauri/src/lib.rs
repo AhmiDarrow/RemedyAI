@@ -17,7 +17,7 @@ use std::os::windows::process::CommandExt;
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 /// Sidecar / user-data home.
-/// - `REMEDY_HOME` when set (isolated dev: e.g. `%USERPROFILE%\.remedy-dev`)
+/// - `REMEDY_HOME` when set
 /// - else `%USERPROFILE%\.remedy` / `~/.remedy`
 fn remedy_home() -> PathBuf {
     if let Ok(h) = env::var("REMEDY_HOME") {
@@ -34,7 +34,7 @@ fn remedy_home() -> PathBuf {
     PathBuf::from(home).join(".remedy")
 }
 
-/// Local API port (default 7400). Isolated dev uses e.g. `REMEDY_API_PORT=7410`.
+/// Local API port (default 7400).
 fn api_port() -> u16 {
     env::var("REMEDY_API_PORT")
         .ok()
@@ -51,24 +51,8 @@ fn api_base_url() -> String {
     format!("http://127.0.0.1:{}", api_port())
 }
 
-/// True when this process is an isolated dogfood profile (not the default release port/home).
-fn is_isolated_profile() -> bool {
-    api_port() != 7400
-        || env::var("REMEDY_PROFILE")
-            .map(|s| s.eq_ignore_ascii_case("dev") || s.eq_ignore_ascii_case("isolated"))
-            .unwrap_or(false)
-        || env::var("REMEDY_HOME").map(|h| {
-            let h = h.replace('\\', "/").to_lowercase();
-            h.contains(".remedy-dev") || h.ends_with("remedy-dev")
-        }).unwrap_or(false)
-}
-
 fn window_title() -> String {
-    if is_isolated_profile() {
-        format!("Remedy Desktop (dev · :{})", api_port())
-    } else {
-        "Remedy Desktop".to_string()
-    }
+    "Remedy Desktop".to_string()
 }
 
 struct DesktopPrefs {
@@ -253,12 +237,41 @@ fn find_remedy() -> (String, String) {
         }
     };
 
-    // Dev builds: prefer PATH `remedy` (current 0.19 source install) over a
-    // stale packaged sidecar sitting next to target/debug/app.exe (often 0.14.x).
+    // Dev builds: run the *live source* sidecar, not a stale packaged binary.
+    // The repo's own venv launcher (`.venv/Scripts/remedy.exe`) runs current
+    // `src/remedy`, while `remedy-desktop.exe` next to target/debug may be a
+    // stale frozen build that predates provider/LLM fixes.  Prefer the venv
+    // when it exists (checked relative to cwd, then the repo root).
     if cfg!(debug_assertions) {
+        if let Ok(cwd) = env::current_dir() {
+            for venv_rel in [
+                ".venv/Scripts/remedy.exe",
+                "../.venv/Scripts/remedy.exe",
+                "../../.venv/Scripts/remedy.exe",
+            ] {
+                let cand = cwd.join(venv_rel);
+                if cand.is_file() {
+                    log::info!(
+                        "Dev build: using repo venv remedy (live source): {}",
+                        cand.display()
+                    );
+                    return (cand.to_string_lossy().to_string(), String::new());
+                }
+            }
+        }
+        // Fall back to a plausible (>1 MB) PATH `remedy` before the stale
+        // packaged sidecar.  Skip tiny Python wrapper scripts (108 KB
+        // `Scripts\remedy.exe`) — they need `uv run` and fail when spawned
+        // directly by the Rust sidecar.
         if let Ok(path) = which_remedy_on_path() {
-            log::info!("Dev build: using PATH remedy for sidecar: {}", path);
-            return (path, String::new());
+            if is_plausible_sidecar(Path::new(&path)) {
+                log::info!("Dev build: using plausible PATH remedy for sidecar: {}", path);
+                return (path, String::new());
+            }
+            log::info!(
+                "Dev build: PATH remedy is a stub/wrapper ({}), checking dev bin paths",
+                path
+            );
         }
     }
 
@@ -723,21 +736,10 @@ fn force_stop_vision_processes() {
 
 /// Force-stop processes that block *this* instance's API port / install files.
 ///
-/// **Isolated dogfood** (`REMEDY_API_PORT` / `REMEDY_HOME` / `REMEDY_PROFILE=dev`):
-/// only frees **our** TCP port — never kills release `remedy-desktop.exe` or `:7400`.
-///
 /// **Default install:** also kills packaged sidecar images + CLI serve by name
 /// (needed for NSIS update / Take over on the default port).
 #[cfg(target_os = "windows")]
 fn force_stop_remedy_processes() {
-    if is_isolated_profile() {
-        log::info!(
-            "Isolated profile: freeing only API port {} (leaving release alone)",
-            api_port()
-        );
-        kill_api_port_windows();
-        return;
-    }
     let images = [
         "remedy-desktop.exe",
         "remedy-desktop-x86_64-pc-windows-msvc.exe",
@@ -3404,12 +3406,7 @@ fn acquire_desktop_single_instance() -> bool {
     const ERROR_ALREADY_EXISTS: u32 = 183;
     const SW_RESTORE: i32 = 9;
 
-    // Separate mutex per profile so release (:7400) and isolated dev (:7410) coexist.
-    let mutex_name = if is_isolated_profile() {
-        format!("Local\\RemedyDesktop-SingleInstance-p{}", api_port())
-    } else {
-        "Local\\RemedyDesktop-SingleInstance".to_string()
-    };
+    let mutex_name = "Local\\RemedyDesktop-SingleInstance".to_string();
     let name: Vec<u16> = OsStr::new(&mutex_name)
         .encode_wide()
         .chain(std::iter::once(0))
@@ -3436,15 +3433,7 @@ fn acquire_desktop_single_instance() -> bool {
                 CloseHandle(handle);
                 return false;
             }
-            // Mutex held but no window — zombie. Isolated profile never kills
-            // app.exe (would murder release tauri:dev / other shells).
-            if is_isolated_profile() {
-                log::warn!(
-                    "Isolated single-instance mutex held with no window; continuing without reclaim kill"
-                );
-                CloseHandle(handle);
-                return true;
-            }
+            // Mutex held but no window — zombie. Reclaim by killing orphan app.exe.
             log::warn!(
                 "Single-instance mutex held but no Remedy Desktop window; \
                  reclaiming (killing orphan app.exe)"
@@ -3553,15 +3542,13 @@ pub fn run() {
             privacy_shield::privacy_shield_refresh_lists,
         ])
         .setup(|app| {
-            // Dual-instance dogfood: title shows port when not default :7400
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.set_title(&window_title());
             }
             log::info!(
-                "profile home={} api_port={} isolated={}",
+                "profile home={} api_port={}",
                 remedy_home().display(),
-                api_port(),
-                is_isolated_profile()
+                api_port()
             );
             let _shell = app.handle().plugin(tauri_plugin_shell::init())?;
             let _updater = app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;

@@ -9,7 +9,7 @@ declare global {
 
 /**
  * Local API origin (no trailing slash, no `/api` suffix).
- * - `VITE_REMEDY_API` for isolated dogfood (`http://127.0.0.1:7410`)
+ * - `VITE_REMEDY_API` override
  * - `window.__REMEDY_API_ORIGIN__` optional inject
  * - default release: `http://127.0.0.1:7400`
  */

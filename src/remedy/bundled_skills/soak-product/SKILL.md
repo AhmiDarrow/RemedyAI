@@ -101,7 +101,7 @@ Update or create `docs/full-product-soak-signoff.md` (or dated note):
 
 ## Related skills
 
-- **dogfood-isolated** — which port/home to soak  
+- **self-inject** — test-gated auto-improve (draft → gate → apply/rollback)  
 - **gauntlet-security** — security-focused gate  
 - **stress-suite** — higher load after soak is green  
 - **self-dev-loop** — sequence  
