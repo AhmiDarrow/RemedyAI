@@ -1359,6 +1359,12 @@ def register_workspace_tools(runtime: Any) -> None:
     except Exception:
         pass
     try:
+        from remedy.core.agent_self_inject_tools import register_self_inject_tools
+
+        register_self_inject_tools(runtime)
+    except Exception:
+        pass
+    try:
         from remedy.core.agent_assistant_tools import register_assistant_tools
 
         register_assistant_tools(runtime)
@@ -1366,6 +1372,7 @@ def register_workspace_tools(runtime: Any) -> None:
         pass
     try:
         from remedy.core.agent_settings_tools import register_settings_tools
+
 
         register_settings_tools(runtime)
     except Exception:

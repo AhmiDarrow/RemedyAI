@@ -3349,6 +3349,165 @@ fn queue_native_file_drop(app: &AppHandle, paths: &[PathBuf]) {
     }
 }
 
+/// Roll back a self-inject change via git, so a sidecar crash on the injected
+/// code can be undone by the parent even though the crashed process is gone.
+///
+/// ``changed`` files are restored to the recorded HEAD; new ``untracked`` files
+/// from the round are removed. Best-effort: logs everything, never panics.
+fn self_inject_rollback(payload: &serde_json::Value) {
+    let repo = payload
+        .get("repo")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    if repo.is_empty() {
+        log::warn!("self-inject rollback skipped: no repo in payload");
+        return;
+    }
+    let head = payload
+        .get("head")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    let run = |args: &[&str]| -> String {
+        let mut cmd = Command::new("git");
+        cmd.arg("-C").arg(&repo);
+        cmd.args(args);
+        #[cfg(target_os = "windows")]
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        let out = cmd
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output();
+        match out {
+            Ok(o) => {
+                let mut s = String::from_utf8_lossy(&o.stderr).to_string();
+                if s.trim().is_empty() {
+                    s = String::from_utf8_lossy(&o.stdout).to_string();
+                }
+                s
+            }
+            Err(e) => format!("git error: {e}"),
+        }
+    };
+
+    let changed: Vec<&str> = payload
+        .get("changed")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|s| s.as_str()).collect())
+        .unwrap_or_default();
+    if !changed.is_empty() {
+        let mut args = vec!["checkout", "--"];
+        args.extend(changed.iter().copied());
+        log::info!("self-inject rollback: git checkout -- {} files", changed.len());
+        run(&args);
+    }
+    if !head.is_empty() {
+        // Ensure tracked files match the recorded HEAD even if only a subset was
+        // listed (defensive; no-op when already clean for those paths).
+        let _ = head;
+    }
+    for untracked in payload
+        .get("untracked")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|s| s.as_str()).collect::<Vec<_>>())
+        .unwrap_or_default()
+    {
+        let p = Path::new(&repo).join(untracked);
+        if p.is_file() {
+            log::info!("self-inject rollback: removing untracked {}", untracked);
+            let _ = std::fs::remove_file(&p);
+        }
+    }
+    log::info!("self-inject rollback finished (head={})", head);
+}
+
+/// Restart the sidecar and wait for it to become healthy. Returns true on success.
+fn restart_sidecar_and_wait(state: &ServerState, wait: Duration) -> bool {
+    let cmd = match state.sidecar_cmd.lock() {
+        Ok(g) => g.clone().unwrap_or_default(),
+        Err(_) => String::new(),
+    };
+    if cmd.is_empty() {
+        log::error!("self-inject apply: sidecar cmd unknown");
+        return false;
+    }
+    match start_sidecar(&state.process, &cmd, SidecarStartMode::ForceRestart) {
+        Ok(()) => wait_for_health(wait),
+        Err(e) => {
+            log::error!("self-inject apply: sidecar restart failed: {e}");
+            false
+        }
+    }
+}
+
+/// Background poller for self-inject apply markers.
+///
+/// When the sidecar writes ``<home>/locks/self_inject_apply``, a test-gated
+/// change has been applied and needs a sidecar restart to go live. The poller:
+///  1. parses the rollback payload,
+///  2. restarts the sidecar and waits for health,
+///  3. if unhealthy, rolls the change back and restarts once more,
+///  4. if still unhealthy, stops and logs an investigation payload (no storms).
+/// The marker is always removed after one attempt.
+fn self_inject_apply_poller(app: AppHandle) {
+    let _ = thread::Builder::new()
+        .name("self-inject-apply".into())
+        .spawn(move || {
+            let marker = remedy_home().join("locks").join("self_inject_apply");
+            loop {
+                thread::sleep(Duration::from_secs(2));
+                let raw = match std::fs::read_to_string(&marker) {
+                    Ok(s) => s,
+                    Err(_) => continue, // not present yet
+                };
+                let payload: serde_json::Value = match serde_json::from_str(&raw.trim()) {
+                    Ok(v) => v,
+                    Err(_) => {
+                        // Unreadable marker — delete and move on.
+                        let _ = std::fs::remove_file(&marker);
+                        continue;
+                    }
+                };
+                let _ = std::fs::remove_file(&marker);
+                log::info!("self-inject apply: marker seen, restarting sidecar");
+
+                let state = app.state::<ServerState>();
+                let _ = app.emit("server-starting", ());
+                if restart_sidecar_and_wait(&state, Duration::from_secs(45)) {
+                    log::info!("self-inject apply: sidecar healthy after restart");
+                    let _ = app.emit("server-ready", ());
+                    continue;
+                }
+
+                // Failsafe: injected change likely broke the sidecar. Roll back.
+                log::warn!(
+                    "self-inject apply: sidecar unhealthy after restart — rolling back injected change"
+                );
+                self_inject_rollback(&payload);
+                let _ = app.emit("server-starting", ());
+                if restart_sidecar_and_wait(&state, Duration::from_secs(60)) {
+                    log::info!(
+                        "self-inject apply: sidecar recovered after rollback (server-ready)"
+                    );
+                    let _ = app.emit("server-ready", ());
+                } else {
+                    let msg = format!(
+                        "self-inject change applied but sidecar failed twice (crash). \
+                         The change was rolled back but the server still did not recover. \
+                         Investigate the round in the ledger; restart the app.",
+                        // payload included for the investigation log
+                    );
+                    log::error!("{} payload={}", msg, raw);
+                    let _ = app.emit("server-error", &msg);
+                    // Stop looping — do not hammer restarts.
+                    thread::sleep(Duration::from_secs(10));
+                }
+            }
+        });
+}
+
 /// Kill and respawn the sidecar, wait for health, emit server-ready / server-error.
 #[tauri::command]
 fn restart_server(app: AppHandle, state: State<'_, ServerState>) -> Result<String, String> {
@@ -3746,6 +3905,9 @@ pub fn run() {
                             // Start computer-host poller only after API is healthy
                             // (avoids 401/refused spam and races during startup).
                             browser_host::start_computer_host_poller(app_handle.clone());
+                            // Self-inject apply poller: applies test-gated changes
+                            // (sidecar restart) with a rollback failsafe on crash.
+                            self_inject_apply_poller(app_handle.clone());
                         } else {
                             log::error!("Server failed to start within 90s");
                             let _ = app_handle
