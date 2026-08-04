@@ -178,7 +178,6 @@ loaded**:
 | Surface | How it gets UI code |
 |---------|---------------------|
 | **Tauri desktop (`tauri:dev`)** | Vite dev server (HMR) — always latest `desktop/src` |
-| **Dogfood (release + WIP)** | Release on `:7400` + `~/.remedy`; WIP via `cd desktop && npm run tauri:dev:isolated` (`:7410` + `~/.remedy-dev`) — see `docs/DESKTOP.md` |
 | **WebUI** `http://127.0.0.1:7400/` | Static files from a built SPA directory mounted by the local API |
 
 ### Where WebUI assets come from

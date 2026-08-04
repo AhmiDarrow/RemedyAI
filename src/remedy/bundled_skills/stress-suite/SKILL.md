@@ -112,5 +112,5 @@ Call out **repro steps** for any FAIL (session id, provider, last request).
 
 - **soak-product** — functional green before load  
 - **gauntlet-security** — auth/jail first  
-- **dogfood-isolated** — correct port/home  
+- **self-inject** — test-gated auto-improve  
 - **self-dev-loop** — orchestration  

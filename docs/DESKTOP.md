@@ -7,30 +7,15 @@ partner for knowledge, design, code, computer use, and get-it-done work (not a
 medical or clinical product). Current package series: **0.20.x** (see root
 `CHANGELOG.md`).
 
-### Dual instance: release + isolated dev (dogfood)
+### Dev workflow (single build)
 
-Run the **installed release** as your daily partner on the project while **`tauri:dev`**
-tests WIP code — without fighting over port **7400** or `~/.remedy`.
+**One dev build** on the default ports (`127.0.0.1:7400`, `~/.remedy`, Vite
+`localhost:5173`). Run `cd desktop && npm run tauri:dev`.
 
-| Profile | How | API | Home | Vite |
-|---------|-----|-----|------|------|
-| **Release (partner)** | Installer / start menu | `127.0.0.1:7400` | `~/.remedy` | n/a |
-| **Isolated dev** | `cd desktop && npm run tauri:dev:isolated` | `127.0.0.1:7410` | `~/.remedy-dev` | `localhost:5174` |
-
-Env set by the isolated script: `REMEDY_HOME`, `REMEDY_API_PORT`, `REMEDY_PROFILE=dev`,
-`VITE_REMEDY_API`, `VITE_PORT`, `REMEDY_DEV_ROOT`.
-
-**Rules**
-
-- Isolated shutdown **only frees :7410** — it does **not** kill release or `:7400`.
-- Separate home → separate serve lock, sessions, DPAPI token (safe SQLite).
-- Enable messengers (Telegram, etc.) on **one** profile only (usually release).
-- Window title: `Remedy Desktop (dev · :7410)`.
-- Optional: copy provider keys from `~/.remedy/config.toml` into `~/.remedy-dev` once;
-  do not share live messenger poll locks.
-
-Plain `npm run tauri:dev` still uses default **7400** + `~/.remedy` (conflicts with a
-running install — prefer **`:isolated`** for dogfood).
+The dev build runs the **live Python sidecar** (repo `.venv/Scripts/remedy.exe`,
+current `src/remedy`), never a stale packaged `remedy-desktop.exe`. If you also
+have the installed release running, quit it first (they share port `7400` and
+`~/.remedy`).
 
 ### Always-ready window (close → tray) — **0.20.0+**
 
