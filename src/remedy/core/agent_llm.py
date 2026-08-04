@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,28 @@ from typing import Any
 import aiohttp
 
 logger = logging.getLogger(__name__)
+
+# Shared session for LLM API calls — avoids per-call TLS handshake overhead.
+_shared_session: aiohttp.ClientSession | None = None
+
+
+def _get_shared_session() -> aiohttp.ClientSession:
+    """Return a shared aiohttp session, creating it lazily if needed."""
+    global _shared_session
+    if _shared_session is None or _shared_session.closed:
+        _shared_session = aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=60),
+        )
+    return _shared_session
+
+
+def close_shared_session() -> None:
+    """Close the shared session (call on shutdown)."""
+    global _shared_session
+    if _shared_session is not None and not _shared_session.closed:
+        with contextlib.suppress(Exception):
+            pass  # aiohttp.ClientSession.close() is async; caller should await
+    _shared_session = None
 
 
 def openai_tools_payload(tool_registry: Any) -> list[dict[str, Any]]:
@@ -66,8 +89,8 @@ async def post_chat(
     endpoint = adapter.chat_endpoint(bind.base_url)
     safe_body = sanitize_chat_body(body if isinstance(body, dict) else {})
 
+    session = _get_shared_session()
     async with (
-        aiohttp.ClientSession() as session,
         session.post(
             endpoint,
             headers=headers,

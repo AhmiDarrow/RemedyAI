@@ -40,6 +40,9 @@ class PendingApproval:
 class ApprovalQueue:
     """Process-local approval queue (desktop + CLI session)."""
 
+    _MAX_APPROVED_FP = 1000
+    _MAX_SESSIONS = 48
+
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._items: dict[str, PendingApproval] = {}
@@ -47,6 +50,7 @@ class ApprovalQueue:
         self._approved_fps: set[str] = set()
         # Session-scoped approvals
         self._session_fps: dict[str, set[str]] = {}
+        self._session_order: list[str] = []
         # ask (default) | auto — status-bar thumbs toggle
         self._mode: str = "ask"
 
@@ -73,7 +77,7 @@ class ApprovalQueue:
                     if item.status == "pending":
                         item.status = "approved"
                         sid = item.session_id or "default"
-                        self._session_fps.setdefault(sid, set()).add(item.fingerprint)
+                        self._add_session_fp(sid, item.fingerprint)
             return self._mode
 
     def sync_from_config(self, cfg: dict[str, Any] | None = None) -> str:
@@ -105,6 +109,20 @@ class ApprovalQueue:
     @staticmethod
     def fingerprint(tool_name: str, command: str) -> str:
         return f"{tool_name}::{(command or '').strip()}"
+
+    def _add_session_fp(self, session_id: str, fp: str) -> None:
+        """Add a fingerprint to a session, evicting oldest sessions when over capacity."""
+        self._session_fps.setdefault(session_id, set()).add(fp)
+        if session_id not in self._session_order:
+            self._session_order.append(session_id)
+        while len(self._session_fps) > self._MAX_SESSIONS:
+            old_sid = self._session_order.pop(0)
+            self._session_fps.pop(old_sid, None)
+
+    def _trim_approved_fps(self) -> None:
+        """Evict oldest approved fingerprints when over capacity."""
+        while len(self._approved_fps) > self._MAX_APPROVED_FP:
+            self._approved_fps.pop()
 
     # Tools that always require approval in ``ask`` mode (not only pattern match).
     # ``auto`` mode skips these on trusted scopes so "work until done" has full power.
@@ -258,9 +276,10 @@ class ApprovalQueue:
             if approve:
                 if scope == "always":
                     self._approved_fps.add(item.fingerprint)
+                    self._trim_approved_fps()
                 else:
                     sid = item.session_id or "default"
-                    self._session_fps.setdefault(sid, set()).add(item.fingerprint)
+                    self._add_session_fp(sid, item.fingerprint)
             return item
 
     def to_public(self, item: PendingApproval) -> dict[str, Any]:

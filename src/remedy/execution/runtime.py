@@ -84,12 +84,19 @@ class ToolRuntime:
 
         self._handlers: dict[str, Callable] = {}  # tool_name → handler
         self._history: list[ExecutionRecord] = []
+        self._history_max = 500
 
     # -- handler registration -------------------------------------------------
 
     def register_handler(self, tool_name: str, handler: Callable) -> None:
         """Register a direct handler for a tool (bypasses sandbox)."""
         self._handlers[tool_name] = handler
+
+    def _record(self, record: ExecutionRecord) -> None:
+        """Append a record, evicting oldest when over capacity."""
+        self._history.append(record)
+        if len(self._history) > self._history_max:
+            self._history = self._history[-self._history_max:]
 
     # -- execution pipeline ---------------------------------------------------
 
@@ -119,7 +126,7 @@ class ToolRuntime:
             record.ended_at = time.monotonic()
             record.success = False
             record.stderr = decision.reason
-            self._history.append(record)
+            self._record(record)
             return ToolResult(
                 call_id=tool_call.id,
                 success=False,
@@ -130,7 +137,7 @@ class ToolRuntime:
             record.ended_at = time.monotonic()
             record.success = False
             record.stderr = "Requires approval"
-            self._history.append(record)
+            self._record(record)
             return ToolResult(
                 call_id=tool_call.id,
                 success=False,
@@ -170,7 +177,7 @@ class ToolRuntime:
         record.success = result.success
         record.exit_code = result.exit_code if hasattr(result, "exit_code") else (0 if result.success else 1)
 
-        self._history.append(record)
+        self._record(record)
 
         # 4. Update registry stats
         if self.tool_registry:

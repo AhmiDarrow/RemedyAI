@@ -13,10 +13,13 @@ from typing import Any
 class GoalNanobot:
     """Per-session open goals + lightweight progress against tool steps."""
 
+    _MAX_SESSIONS = 48
+
     def __init__(self) -> None:
         self._lock = threading.Lock()
         # session_id -> {titles, last_tool, tool_steps_since_goal, completed}
         self._sessions: dict[str, dict[str, Any]] = {}
+        self._session_order: list[str] = []
         self.updates = 0
 
     def _key(self, session_id: str | None) -> str:
@@ -34,6 +37,16 @@ class GoalNanobot:
                     "last_goal_touch": 0.0,
                     "stale": False,
                 }
+                self._session_order.append(k)
+                # Evict oldest when over capacity
+                while len(self._sessions) > self._MAX_SESSIONS:
+                    old_key = self._session_order.pop(0)
+                    self._sessions.pop(old_key, None)
+            else:
+                # Touch: move to end of order list
+                if k in self._session_order:
+                    self._session_order.remove(k)
+                self._session_order.append(k)
             return self._sessions[k]
 
     def sync_from_brief(
@@ -106,7 +119,10 @@ class GoalNanobot:
         """Drop per-session goal state (session delete / full reset)."""
         key = self._key(session_id)
         with self._lock:
-            return self._sessions.pop(key, None) is not None
+            removed = self._sessions.pop(key, None) is not None
+            if removed and key in self._session_order:
+                self._session_order.remove(key)
+            return removed
 
     def system_hint(self, session_id: str | None = None) -> str:
         snap = self.snapshot(session_id)

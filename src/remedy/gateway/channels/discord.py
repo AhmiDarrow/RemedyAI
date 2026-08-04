@@ -46,6 +46,7 @@ class DiscordChannel(HttpSessionMixin, ChannelAdapter):
         self._heartbeat_ms = 41250
         self._heartbeat_task: asyncio.Task | None = None
         self._session_id: str | None = None
+        self._typing_tasks: set[asyncio.Task] = set()
 
     async def start(self) -> None:
         await super().start()
@@ -56,6 +57,9 @@ class DiscordChannel(HttpSessionMixin, ChannelAdapter):
         self._ws_task = asyncio.create_task(self._gateway_loop())
 
     async def stop(self) -> None:
+        for t in self._typing_tasks:
+            t.cancel()
+        self._typing_tasks.clear()
         if self._heartbeat_task:
             self._heartbeat_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -185,7 +189,9 @@ class DiscordChannel(HttpSessionMixin, ChannelAdapter):
             channel="discord",
         ):
             return
-        asyncio.create_task(self.send_typing(ch_id))
+        task = asyncio.create_task(self.send_typing(ch_id))
+        self._typing_tasks.add(task)
+        task.add_done_callback(self._typing_tasks.discard)
         await emit_message(
             self.gateway,
             ChannelKind.DISCORD,
