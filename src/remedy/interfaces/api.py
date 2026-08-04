@@ -133,9 +133,88 @@ def create_app(
             loop.run_in_executor(None, _bg_autostart)
         except Exception:
             logger.debug("Local model auto-start schedule skipped", exc_info=True)
+
+        # Self-inject idle scheduler: when enabled + idle, auto-run improvement rounds.
+        # This is the auto-trigger; the on-command path (self_inject_round tool / skill)
+        # always works regardless. Runs independently of any single turn.
+        _self_inject_task: Any = None
+        try:
+            from remedy.core.self_inject import should_run_now
+
+            _self_inject_enabled = bool(should_run_now()) if runtime is not None else False
+
+            async def _self_inject_idle_loop() -> None:
+                while True:
+                    try:
+                        await asyncio.sleep(60)
+                        if runtime is None:
+                            continue
+                        if not should_run_now():
+                            continue
+                        # Run one round on the python tree (live-source sidecar).
+                        try:
+                            from remedy.core.self_inject import (
+                                SelfInjectRound,
+                                apply_or_rollback,
+                                git_capture,
+                                run_gate,
+                            )
+
+                            repo = _self_inject_repo()
+                            round_ = SelfInjectRound(tree="python")
+                            snap = await git_capture(repo)
+                            round_ = await run_gate(round_, repo)
+                            if round_.status == "green":
+                                round_ = await apply_or_rollback(
+                                    round_, repo, snap
+                                )
+                            else:
+                                await apply_or_rollback(round_, repo, snap)
+                            from remedy.core.self_inject import append_ledger
+
+                            append_ledger(
+                                round_, getattr(runtime, "home_dir", None)
+                            )
+                            logger.info(
+                                "self-inject idle round %s status=%s outcome=%s",
+                                round_.round_id,
+                                round_.status,
+                                round_.outcome,
+                            )
+                        except Exception:
+                            logger.exception("self-inject idle round failed")
+                    except Exception:
+                        logger.debug("self-inject idle loop error", exc_info=True)
+
+            def _self_inject_repo() -> Path:
+                from pathlib import Path
+
+                import remedy as _pkg
+
+                cand = Path(_pkg.__file__).resolve().parent.parent.parent
+                for _ in range(6):
+                    if (cand / "pyproject.toml").is_file():
+                        return cand
+                    cand = cand.parent
+                return Path.cwd()
+
+            if _self_inject_enabled and runtime is not None:
+                try:
+                    _self_inject_task = asyncio.create_task(_self_inject_idle_loop())
+                    logger.info("self-inject idle scheduler started")
+                except Exception:
+                    logger.debug("self-inject idle scheduler start skipped", exc_info=True)
+        except Exception:
+            logger.debug("self-inject scheduler setup skipped", exc_info=True)
+
         try:
             yield
         finally:
+            if _self_inject_task is not None:
+                try:
+                    _self_inject_task.cancel()
+                except Exception:
+                    pass
             if gateway is not None and getattr(gateway, "running", False):
                 try:
                     await gateway.stop()
