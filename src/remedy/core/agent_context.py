@@ -291,7 +291,7 @@ async def build_turn_context(runtime: Any) -> str:
                 ):
                     preferred = [
                         "self-dev-loop",
-                        "dogfood-isolated",
+                        "self-inject",
                         "gauntlet-security",
                         "soak-product",
                         "stress-suite",
