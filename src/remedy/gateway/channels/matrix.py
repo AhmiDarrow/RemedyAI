@@ -39,6 +39,7 @@ class MatrixChannel(HttpSessionMixin, ChannelAdapter):
         self._sync_task: asyncio.Task | None = None
         self._since: str | None = None
         self._http_timeout_s = 90.0
+        self._typing_tasks: set[asyncio.Task] = set()
 
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self.access_token}"}
@@ -52,6 +53,9 @@ class MatrixChannel(HttpSessionMixin, ChannelAdapter):
         self._sync_task = asyncio.create_task(self._sync_loop())
 
     async def stop(self) -> None:
+        for t in self._typing_tasks:
+            t.cancel()
+        self._typing_tasks.clear()
         if self._sync_task:
             self._sync_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -150,7 +154,9 @@ class MatrixChannel(HttpSessionMixin, ChannelAdapter):
                     channel="matrix",
                 ):
                     continue
-                asyncio.create_task(self.send_typing(room_id))
+                task = asyncio.create_task(self.send_typing(room_id))
+                self._typing_tasks.add(task)
+                task.add_done_callback(self._typing_tasks.discard)
                 await emit_message(
                     self.gateway,
                     ChannelKind.MATRIX,

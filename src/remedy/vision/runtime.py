@@ -237,6 +237,13 @@ _idle_thread_started = False
 _idle_lock = threading.Lock()
 
 
+def reset_idle_watcher() -> None:
+    """Reset the idle watcher flag so it can be re-created after stop/restart."""
+    global _idle_thread_started
+    with _idle_lock:
+        _idle_thread_started = False
+
+
 def ensure_idle_watcher(home_dir: str | Path | None = None) -> None:
     """Background poller: stop server after idle_stop_s. Safe to call often."""
     global _idle_thread_started

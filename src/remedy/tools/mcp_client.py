@@ -34,7 +34,9 @@ class MCPClient:
         self._processes: dict[str, asyncio.subprocess.Process] = {}
         self._readers: dict[str, asyncio.Task] = {}
         self._pending: dict[int, asyncio.Future] = {}
+        self._pending_times: dict[int, float] = {}
         self._next_id: int = 1
+        self._STALE_PENDING_SECONDS = 60.0
 
     # -- server management ---------------------------------------------------
 
@@ -112,6 +114,7 @@ class MCPClient:
         n = 0
         for rid, fut in list(self._pending.items()):
             self._pending.pop(rid, None)
+            self._pending_times.pop(rid, None)
             if fut is not None and not fut.done():
                 try:
                     fut.set_exception(ConnectionError(reason))
@@ -119,6 +122,28 @@ class MCPClient:
                     with contextlib.suppress(Exception):
                         fut.cancel()
                 n += 1
+        return n
+
+    def _sweep_stale_pending(self) -> int:
+        """Fail futures older than _STALE_PENDING_SECONDS (hung server defense)."""
+        import time as _time
+
+        now = _time.monotonic()
+        n = 0
+        for rid in list(self._pending.keys()):
+            created = self._pending_times.get(rid)
+            if created is not None and (now - created) > self._STALE_PENDING_SECONDS:
+                fut = self._pending.pop(rid, None)
+                self._pending_times.pop(rid, None)
+                if fut is not None and not fut.done():
+                    try:
+                        fut.set_exception(
+                            ConnectionError(f"MCP request {rid} stale after {self._STALE_PENDING_SECONDS}s")
+                        )
+                    except Exception:
+                        with contextlib.suppress(Exception):
+                            fut.cancel()
+                    n += 1
         return n
 
     async def disconnect(self, server_name: str) -> None:
@@ -333,6 +358,11 @@ class MCPClient:
         params: dict[str, Any],
         timeout: float = 10.0,
     ) -> dict[str, Any]:
+        # Sweep stale pending futures before creating new ones
+        self._sweep_stale_pending()
+
+        import time as _time
+
         request_id = self._next_id
         self._next_id += 1
 
@@ -349,22 +379,27 @@ class MCPClient:
 
         fut: asyncio.Future = asyncio.get_event_loop().create_future()
         self._pending[request_id] = fut
+        self._pending_times[request_id] = _time.monotonic()
 
         try:
             proc.stdin.write(message.encode("utf-8"))
             await proc.stdin.drain()
         except Exception as e:
             self._pending.pop(request_id, None)
+            self._pending_times.pop(request_id, None)
             return {"error": str(e)}
 
         try:
             message = await asyncio.wait_for(fut, timeout=timeout)
+            self._pending_times.pop(request_id, None)
             return self._unwrap_jsonrpc(message)
         except TimeoutError:
             self._pending.pop(request_id, None)
+            self._pending_times.pop(request_id, None)
             return {"error": f"Request timed out after {timeout}s"}
         except Exception as e:
             self._pending.pop(request_id, None)
+            self._pending_times.pop(request_id, None)
             return {"error": str(e)}
 
     @staticmethod
@@ -401,6 +436,7 @@ class MCPClient:
                 msg_id = data.get("id")
                 if msg_id is not None and msg_id in self._pending:
                     fut = self._pending.pop(msg_id)
+                    self._pending_times.pop(msg_id, None)
                     if not fut.done():
                         fut.set_result(data)
         except asyncio.CancelledError:

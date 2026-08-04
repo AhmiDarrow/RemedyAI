@@ -110,9 +110,12 @@ class _SessionPattern:
 class PatternNanobot:
     """Session-keyed pattern windows; reuses lifecycle policy for gates."""
 
+    _MAX_SESSIONS = 48
+
     def __init__(self, window: int = 12) -> None:
         self.window = window
         self._sessions: dict[str, _SessionPattern] = {}
+        self._session_order: list[str] = []
         self._lock = threading.Lock()
 
     def _key(self, session_id: str | None) -> str:
@@ -123,6 +126,16 @@ class PatternNanobot:
         with self._lock:
             if key not in self._sessions:
                 self._sessions[key] = _SessionPattern(window=self.window)
+                self._session_order.append(key)
+                # Evict oldest when over capacity
+                while len(self._sessions) > self._MAX_SESSIONS:
+                    old_key = self._session_order.pop(0)
+                    self._sessions.pop(old_key, None)
+            else:
+                # Touch: move to end of order list
+                if key in self._session_order:
+                    self._session_order.remove(key)
+                self._session_order.append(key)
             return self._sessions[key]
 
     def on_tool_step(
@@ -161,6 +174,8 @@ class PatternNanobot:
         key = self._key(session_id)
         with self._lock:
             self._sessions.pop(key, None)
+            if key in self._session_order:
+                self._session_order.remove(key)
 
     # Back-compat: expose aggregate steps for status / single-session agents
     @property
