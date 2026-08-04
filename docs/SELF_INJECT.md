@@ -78,33 +78,51 @@ Pure-Python orchestrator with no dependency on the desktop shell.
 - `should_run()` → true if the last run is older than the idle threshold (default 300s)
   and the product is otherwise idle.
 
-### 2. Sidecar auto-restart (Python change goes live)
+### 2. Sidecar auto-restart + crash failsafe (implemented)
 
-- Add a **restart-self** path. Two options, prefer the lower-risk one:
-  - **(a)** `self_inject.py` returns an IPC signal (`restart_requested`) that the desktop
-    layer picks up and calls existing `shutdown_sidecar()` + `spawn_remedy()`
-    (`desktop/src-tauri/src/lib.rs:699,468`).
-  - **(b)** enable uvicorn `reload=True` in `cli.py:1632` **only** under a dev/self-inject
-    flag — but AGENTS.md forbids dual pollers/locks; a supervised restart is safer than
-    hot reload. Prefer (a).
-- Guard: restart only after a **green** gate; never mid-messenger-poll (respect
-  `instance_lock` single-process rule).
+Python changes run *inside* the sidecar, which cannot cleanly kill-and-respawn its
+own process. So the apply path is **marker-file + parent poller**:
 
-### 3. Desktop rebuild + relaunch (full auto)
+1. On a green Python gate, `self_inject.py` writes
+   `<home>/locks/self_inject_apply` containing a **full rollback payload**
+   (`repo`, `head`, `changed` files, `untracked` files, `round_id`).
+2. The Rust desktop polls for that marker (`self_inject_apply_poller` in
+   `desktop/src-tauri/src/lib.rs`), removes it, and restarts the sidecar via the
+   existing `start_sidecar` + `wait_for_health`.
+3. **Failsafe:** if the restarted sidecar is unhealthy after `~45s` (the injected
+   change crashed it), the poller rolls the change back with git
+   (`checkout -- <changed>` + delete `untracked`) using the payload that survived
+   on disk, then restarts once more. If still unhealthy, it **stops** (no restart
+   storm) and logs the payload for investigation.
 
-- After a green desktop gate: `cd desktop && npm run build` (writes `desktop/dist`),
-  then signal the desktop shell to reload the SPA. In Tauri dev the SPA is served by the
-  Vite dev server (HMR), so a TS change is already live; a **rebuild is required only
-  when the change must also reach the WebUI** (`find_webui_dir` / `_mount_web_ui`). Stage:
-  rebuild dist → re-resolve `find_webui_dir` (serve restart) → hard-refresh.
-- This is the "harder" path the user flagged; gate it behind the same green test gate.
+The marker survives a sidecar crash by design — the crashed process cannot roll
+itself back, so the rollback payload lives on disk before the restart is requested.
+This satisfies "relaunch after an injected change crashes → rollback → investigate
+→ move forward".
+
+Guard: restart only after a **green** gate; the poller never restarts the sidecar
+unless the marker (written only on green) is present.
+
+### 3. Desktop rebuild + relaunch (implemented for SPA rebuild)
+
+- After a green desktop gate, `apply_or_rollback` runs `cd desktop && npm run build`
+  to write `desktop/dist` so the static WebUI reflects the change. **A build failure
+  is treated as red and rolls back** (shipping a broken frontend is worse than not
+  applying).
+- In Tauri dev the SPA is served by the Vite dev server (HMR), so a TS change is
+  already live in the desktop window; the rebuild matters when the change must also
+  reach the WebUI (`find_webui_dir` / `_mount_web_ui`). Re-resolve + hard-refresh
+  still applies on serve restart (see the AGENTS.md WebUI parity section).
 
 ### 4. Idle trigger (5-minute)
 
 - A lightweight scheduler in the sidecar that, when no user turn has arrived for `N`
-  seconds (default 300) and `REMEDY_SELF_INJECT` is enabled, invokes `SelfInjectRound`.
-- On-command path: a dedicated tool / skill (`skill_activate(skill="self-inject")`) the
-  agent calls to run one round explicitly.
+  seconds (default 300) and self-inject is enabled, invokes `SelfInjectRound`.
+  `self_inject.should_run_now()` gates on `REMEDY_SELF_INJECT` (or config
+  `self_inject.enabled`) + the idle window; `REMEDY_SELF_INJECT_FORCE=1` bypasses
+  the idle check.
+- On-command path: the `self_inject_round` / `self_inject_status` tools registered by
+  `agent_self_inject_tools.py`, and `skill_activate(skill="self-inject")`.
 
 ### 5. `self-inject` skill (new, replaces `dogfood-isolated`)
 
@@ -127,9 +145,10 @@ record → continue. This supersedes the dead `dogfood-isolated` skill (remove i
 
 ## Open decisions / risks
 
-- **How the desktop shell learns a Python restart is needed.** Prefer an IPC signal the
-  Tauri layer already watches, rather than the sidecar killing itself (which could drop
-  in-flight turns). See §2.
+- **Sidecar restart is parent-mediated.** Implemented via a marker file + Rust poller
+  (the sidecar never kills itself, so in-flight turns are not dropped). The marker
+  carries the rollback payload so a crash on the injected code is recoverable by the
+  parent. See §2.
 - **WebUI vs desktop parity after a TS rebuild.** Same `find_webui_dir` desync pitfall
   already documented in `AGENTS.md`; the rebuild+restart procedure must re-resolve and
   hard-refresh.
