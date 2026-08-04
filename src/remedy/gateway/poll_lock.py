@@ -13,6 +13,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +79,14 @@ _PROCESS_HOLDERS: dict[str, MessengerPollLock] = {}
 
 
 class MessengerPollLock:
-    """Non-blocking exclusive lock for one messenger channel poller."""
+    """Non-blocking exclusive lock for one messenger channel poller.
+
+    Use as a context manager for safe cleanup::
+
+        with MessengerPollLock(home, "telegram") as lock:
+            if lock.held:
+                ... poll ...
+    """
 
     def __init__(self, home: Path | str | None, channel: str = "telegram") -> None:
         base = Path(home).expanduser() if home else Path.home() / ".remedy"
@@ -86,6 +94,16 @@ class MessengerPollLock:
         self.channel = channel
         self._fh = None  # keep open so Windows exclusive share holds
         self.held = False
+
+    def __enter__(self) -> MessengerPollLock:
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        self.release()
+
+    def __del__(self) -> None:
+        with contextlib.suppress(Exception):
+            self.release()
 
     def _key(self) -> str:
         try:

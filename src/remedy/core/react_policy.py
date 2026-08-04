@@ -600,11 +600,9 @@ def looks_like_leaked_scratchpad(text: str) -> bool:
     if any(m in low for m in _LEAKED_SCRATCHPAD_MARKERS):
         return True
     # Short self-talk after status strip
-    if len(cleaned) < 480 and re.search(
+    return len(cleaned) < 480 and bool(re.search(
         r"\b(the user wants|i should|from context)\b", low
-    ):
-        return True
-    return False
+    ))
 
 
 def post_tools_user_summary_nudge() -> dict[str, str]:

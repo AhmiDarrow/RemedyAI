@@ -58,6 +58,7 @@ class TelegramChannel(ChannelAdapter):
         self._conflict_until = 0.0
         self._last_err_log = 0.0
         self._last_heartbeat = 0.0
+        self._typing_tasks: set[asyncio.Task] = set()
 
     async def _ensure_session(self):
         import aiohttp
@@ -156,6 +157,9 @@ class TelegramChannel(ChannelAdapter):
                 logger.exception("Telegram poll lock retry failed")
 
     async def stop(self) -> None:
+        for t in self._typing_tasks:
+            t.cancel()
+        self._typing_tasks.clear()
         if self._lock_retry_task is not None:
             self._lock_retry_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -358,7 +362,9 @@ class TelegramChannel(ChannelAdapter):
             return
 
         # UX: show typing while agent works
-        asyncio.create_task(self.send_typing(chat_id))
+        task = asyncio.create_task(self.send_typing(chat_id))
+        self._typing_tasks.add(task)
+        task.add_done_callback(self._typing_tasks.discard)
 
         event = GatewayEvent(
             kind=EventKind.MESSAGE,
