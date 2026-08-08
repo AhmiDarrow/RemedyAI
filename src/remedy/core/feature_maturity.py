@@ -14,8 +14,9 @@ Maturity = Literal["stable", "advanced", "experimental"]
 
 # Defaults: stable on, experimental off, advanced opt-in for heavy build tools.
 _DEFAULTS: dict[str, bool] = {
-    # Soul Field (personhood / dream / residual) — experimental
-    "soul_field_enabled": False,
+    # Soul Field (personhood / dream / residual) — on by default so the
+    # organism actually lives; owners can still set soul_field_enabled=false.
+    "soul_field_enabled": True,
     # Build engine core (scout→verify) stays on when build intent is detected;
     # advanced A–H frontiers (mutants, gate tower, symbol patch, TDD-as-OS) opt-in.
     "build_os_advanced": False,
@@ -75,7 +76,8 @@ def maturity_snapshot(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     raw = cfg if isinstance(cfg, dict) else _load_cfg()
     return {
         "soul_field_enabled": soul_field_enabled(raw),
-        "soul_field_maturity": "experimental",
+        # Personhood is core product; flag remains opt-out for edge installs.
+        "soul_field_maturity": "stable",
         "build_os_advanced": build_os_advanced_enabled(raw),
         "build_os_advanced_maturity": "advanced",
         "rmb_enabled": rmb_enabled(raw),
