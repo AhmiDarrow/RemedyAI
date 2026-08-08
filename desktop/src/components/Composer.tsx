@@ -364,6 +364,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     armDragOver,
     dragDepth,
     flashAttached,
+    inflightDropKeysRef,
   } = useComposerAttachments({
     ensureSessionId: resolveSession,
     disabled,
