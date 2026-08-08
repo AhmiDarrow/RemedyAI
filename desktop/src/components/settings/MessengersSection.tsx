@@ -201,12 +201,7 @@ export function MessengersSection({
                               : f.placeholder || ''
                           }
                           onChange={(e) => patch(m.id, f.key, e.target.value)}
-                          className="w-full rounded px-2 py-1 text-xs outline-none"
-                          style={{
-                            background: 'var(--bg-secondary)',
-                            color: 'var(--text-primary)',
-                            border: '1px solid var(--border)',
-                          }}
+                          className="ui-input"
                           autoComplete="off"
                         />
                         {f.help && (
