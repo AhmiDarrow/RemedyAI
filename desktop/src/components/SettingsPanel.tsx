@@ -319,9 +319,13 @@ export function SettingsPanel({
       if (s.enabled_providers !== undefined) {
         setEnabledProviders(s.enabled_providers)
       }
-      if (s.enabled_models && typeof s.enabled_models === 'object') {
-        setEnabledModels(s.enabled_models as Record<string, string[]>)
-      }
+      // Always apply (including {}) so clearing the allowlist on the server
+      // is visible after reload / multi-client saves.
+      setEnabledModels(
+        s.enabled_models && typeof s.enabled_models === 'object'
+          ? (s.enabled_models as Record<string, string[]>)
+          : {},
+      )
       if (s.skills_active_budget) setSkillsBudget(s.skills_active_budget)
       setSettings(s)
       const prov = s.llm_provider || 'openai'
@@ -689,9 +693,9 @@ export function SettingsPanel({
         : ['demo', ...enabledProviders]
       updates.enabled_providers = ep
     }
-    if (Object.keys(enabledModels).length > 0) {
-      updates.enabled_models = enabledModels
-    }
+    // Always send — empty object clears a prior per-provider allowlist so
+    // re-enabling all models actually persists (not only when non-empty).
+    updates.enabled_models = enabledModels
     if (apiKey) {
       updates.llm_api_key = apiKey
     }
@@ -926,7 +930,19 @@ export function SettingsPanel({
                               attribution: ps.attribution || '',
                             })
                           })
-                          .catch(() => {})
+                          .catch((e) => {
+                            setPrivacyShield((prev) =>
+                              prev
+                                ? {
+                                    ...prev,
+                                    message:
+                                      e instanceof Error
+                                        ? e.message
+                                        : 'Privacy Shield update failed',
+                                  }
+                                : prev,
+                            )
+                          })
                           .finally(() => setPrivacyShieldBusy(false))
                       },
                       onRefresh: () => {
@@ -945,7 +961,19 @@ export function SettingsPanel({
                               attribution: ps.attribution || '',
                             })
                           })
-                          .catch(() => {})
+                          .catch((e) => {
+                            setPrivacyShield((prev) =>
+                              prev
+                                ? {
+                                    ...prev,
+                                    message:
+                                      e instanceof Error
+                                        ? e.message
+                                        : 'Privacy Shield refresh failed',
+                                  }
+                                : prev,
+                            )
+                          })
                           .finally(() => setPrivacyShieldBusy(false))
                       },
                     }

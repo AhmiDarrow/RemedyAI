@@ -34,25 +34,28 @@ class RetentionPolicy:
         raw = cfg if isinstance(cfg, dict) else {}
         nested = raw.get("retention") if isinstance(raw.get("retention"), dict) else {}
 
-        def _days(key: str, default: int) -> int:
-            for src in (nested, raw):
-                if key in src and src.get(key) is not None:
-                    try:
-                        n = int(src.get(key))
-                    except (TypeError, ValueError):
-                        n = default
-                    return max(_MIN_DAYS, min(_MAX_DAYS, n))
+        def _days(*keys: str, default: int) -> int:
+            """First present key wins (nested then flat). 0 is a valid disable."""
+            for key in keys:
+                for src in (nested, raw):
+                    if key in src and src.get(key) is not None:
+                        try:
+                            n = int(src.get(key))
+                        except (TypeError, ValueError):
+                            n = default
+                        return max(_MIN_DAYS, min(_MAX_DAYS, n))
             return default
 
         return cls(
-            session_days=_days("session_days", 0)
-            or _days("retention_session_days", 0),
-            attachment_days=_days("attachment_days", 0)
-            or _days("retention_attachment_days", 0),
-            computer_shot_days=_days("computer_shot_days", 14)
-            or _days("retention_computer_shot_days", 14),
-            undo_days=_days("undo_days", 30) or _days("retention_undo_days", 30),
-            log_days=_days("log_days", 30) or _days("retention_log_days", 30),
+            session_days=_days("session_days", "retention_session_days", default=0),
+            attachment_days=_days(
+                "attachment_days", "retention_attachment_days", default=0
+            ),
+            computer_shot_days=_days(
+                "computer_shot_days", "retention_computer_shot_days", default=14
+            ),
+            undo_days=_days("undo_days", "retention_undo_days", default=30),
+            log_days=_days("log_days", "retention_log_days", default=30),
         )
 
 

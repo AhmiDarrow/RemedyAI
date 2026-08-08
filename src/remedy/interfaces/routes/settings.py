@@ -169,6 +169,14 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             ),
             "name": cfg.get("name", "Remedy"),
             "user_name": str(cfg.get("user_name") or "").strip(),
+            "agent_gender": (
+                g
+                if (
+                    g := str(cfg.get("agent_gender") or "female").strip().lower()
+                )
+                in ("female", "male", "neutral")
+                else "female"
+            ),
             "persona": cfg.get("persona", "default"),
             "project_path": cfg.get("project_path")
             or (
