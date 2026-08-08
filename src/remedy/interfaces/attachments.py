@@ -224,6 +224,40 @@ def save_upload(
     }
 
 
+def chat_media_display_path(
+    path: str | Path,
+    *,
+    home_dir: str | Path | None = None,
+) -> str:
+    """Stable markdown ``src`` for chat images.
+
+    Prefer ``attachments/<session>/<file>`` under ``~/.remedy`` so the desktop
+    ``/api/media?path=…`` endpoint resolves without absolute Windows paths
+    (WebView cannot load bare filesystem URLs, and drive-letter paths often
+    fail after home_dir remaps).
+    """
+    raw = str(path or "").strip()
+    if not raw:
+        return ""
+    try:
+        candidate = Path(raw).expanduser().resolve(strict=False)
+    except (OSError, RuntimeError, ValueError):
+        return raw.replace("\\", "/")
+
+    homes: list[Path] = []
+    if home_dir is not None:
+        homes.append(Path(home_dir).expanduser())
+    homes.append(Path.home() / ".remedy")
+    for home in homes:
+        try:
+            root = (home / "attachments").resolve()
+            rel = candidate.relative_to(root)
+            return f"attachments/{rel.as_posix()}"
+        except (ValueError, OSError):
+            continue
+    return candidate.as_posix() if candidate.is_absolute() else raw.replace("\\", "/")
+
+
 def markdown_image_embed(name: str, path: str) -> str:
     """Markdown image for chat display (provider-agnostic).
 
@@ -239,11 +273,16 @@ def markdown_image_embed(name: str, path: str) -> str:
     return f"![{alt}]({p})"
 
 
-def build_attachment_prompt_block(attachments: list[dict[str, Any]]) -> str:
+def build_attachment_prompt_block(
+    attachments: list[dict[str, Any]],
+    *,
+    home_dir: str | Path | None = None,
+) -> str:
     """Human-readable block appended to the user message for history + tools.
 
     Images are embedded as markdown ``![…](path)`` so the chat UI renders them
-    for **every** model (display is independent of provider vision).
+    for **every** model (display is independent of provider vision). Prefer
+    home-relative ``attachments/…`` srcs for reliable desktop media serving.
     """
     if not attachments:
         return ""
@@ -254,7 +293,8 @@ def build_attachment_prompt_block(attachments: list[dict[str, Any]]) -> str:
         path = str(a.get("path") or "")
         mime = str(a.get("mime") or "unknown")
         if path and (a.get("is_image") or is_image(mime)):
-            emb = markdown_image_embed(name, path)
+            display = chat_media_display_path(path, home_dir=home_dir)
+            emb = markdown_image_embed(name, display)
             if emb:
                 lines.append(emb)
     lines.append("Attached files (saved for this session):")

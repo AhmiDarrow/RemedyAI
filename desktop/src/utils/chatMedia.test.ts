@@ -8,6 +8,7 @@ import {
 } from './chatMedia'
 
 describe('chatMedia path helpers', () => {
+  // resolveChatMediaUrl needs fetch — path helpers only here
   it('detects remote and data urls', () => {
     expect(isRemoteOrDataUrl('https://x.com/a.png')).toBe(true)
     expect(isRemoteOrDataUrl('data:image/png;base64,xx')).toBe(true)

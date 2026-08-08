@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   isAuthenticatedApiUrl,
   isLocalMediaPath,
@@ -10,14 +10,9 @@ interface ChatImageProps {
   src?: string
   alt?: string
   onOpen?: (src: string, alt?: string) => void
-  onAttachMarkup?: (file: File) => void | Promise<void>
 }
 
 const IMG_MAX_H = 360
-/** Placeholder height while decoding — reduces sticky-scroll fights. */
-const IMG_SLOT_H = 180
-/** After scroll settles this long, paint images again. */
-const SCROLL_SETTLE_MS = 140
 
 function needsAuthResolve(src: string): boolean {
   const s = (src || '').trim().replace(/^<|>$/g, '')
@@ -28,75 +23,14 @@ function needsAuthResolve(src: string): boolean {
 }
 
 /**
- * While the chat scroller moves, hide the *bitmap* (visibility:hidden) but keep the
- * reserved slot — avoids paint thrash / sticky reflow without collapsing layout.
- * Images start reserved + deferred until first paint after settle.
- */
-function useScrollBitmapDefer(wrapRef: RefObject<HTMLElement | null>) {
-  const [deferPaint, setDeferPaint] = useState(true)
-  const settleTimer = useRef<number | null>(null)
-
-  useEffect(() => {
-    const wrap = wrapRef.current
-    if (!wrap) return
-
-    let scroller: HTMLElement | null = wrap.parentElement
-    while (scroller) {
-      const st = getComputedStyle(scroller)
-      const oy = st.overflowY
-      if (
-        (oy === 'auto' || oy === 'scroll' || oy === 'overlay')
-        && scroller.scrollHeight > scroller.clientHeight + 8
-      ) {
-        break
-      }
-      scroller = scroller.parentElement
-    }
-    if (!scroller) {
-      // No scroller yet — allow paint after a frame
-      const t = window.setTimeout(() => setDeferPaint(false), 48)
-      return () => window.clearTimeout(t)
-    }
-
-    const markMoving = () => {
-      setDeferPaint(true)
-      if (settleTimer.current != null) window.clearTimeout(settleTimer.current)
-      settleTimer.current = window.setTimeout(() => {
-        settleTimer.current = null
-        setDeferPaint(false)
-      }, SCROLL_SETTLE_MS)
-    }
-
-    // Initial: wait one settle window so first decode doesn't fight stick-to-bottom
-    settleTimer.current = window.setTimeout(() => {
-      settleTimer.current = null
-      setDeferPaint(false)
-    }, SCROLL_SETTLE_MS)
-
-    scroller.addEventListener('scroll', markMoving, { passive: true })
-    scroller.addEventListener('wheel', markMoving, { passive: true })
-    scroller.addEventListener('touchmove', markMoving, { passive: true })
-    return () => {
-      scroller.removeEventListener('scroll', markMoving)
-      scroller.removeEventListener('wheel', markMoving)
-      scroller.removeEventListener('touchmove', markMoving)
-      if (settleTimer.current != null) window.clearTimeout(settleTimer.current)
-    }
-  }, [wrapRef])
-
-  return deferPaint
-}
-
-/**
  * Chat markdown image. Local paths + loopback /api/* attachments are fetched
  * with Bearer into blob: URLs (bare img src would 401). Public https/data pass through.
  *
- * Smoothness: reserved slot + hide bitmap during scroll (not display:none).
+ * Prefer home-relative ``attachments/…`` srcs (server embeds those now). Absolute
+ * Windows paths still work via /api/media.
  */
 export function ChatImage({ src, alt, onOpen }: ChatImageProps) {
   const raw = (src || '').trim().replace(/^<|>$/g, '')
-  const wrapRef = useRef<HTMLDivElement | null>(null)
-  const deferPaint = useScrollBitmapDefer(wrapRef)
   const [resolved, setResolved] = useState<string | null>(() => {
     if (!raw) return null
     if (needsAuthResolve(raw)) return null
@@ -105,7 +39,6 @@ export function ChatImage({ src, alt, onOpen }: ChatImageProps) {
   })
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
-  const [slotH, setSlotH] = useState(IMG_SLOT_H)
 
   useEffect(() => {
     let cancelled = false
@@ -192,18 +125,23 @@ export function ChatImage({ src, alt, onOpen }: ChatImageProps) {
     }
   }, [resolved, alt])
 
+  const label = alt || raw.split(/[/\\]/).pop() || 'image'
+
+  // Failed load → quiet attachment chip (not a scary error wall).
   if (error && !resolved) {
     return (
       <span
-        className="chat-img-error text-xs block my-1 px-2 py-1 rounded"
+        className="chat-img-chip inline-flex items-center gap-1.5 my-1 px-2.5 py-1 rounded-lg text-xs max-w-full"
         style={{
-          color: 'var(--warning)',
+          color: 'var(--text-secondary)',
           background: 'var(--bg-tertiary)',
           border: '1px solid var(--border)',
         }}
         title={error}
       >
-        Image unavailable: {alt || raw || 'file'}
+        <span aria-hidden>📎</span>
+        <span className="truncate">{label}</span>
+        <span className="opacity-60">· not previewed</span>
       </span>
     )
   }
@@ -211,66 +149,47 @@ export function ChatImage({ src, alt, onOpen }: ChatImageProps) {
   if (!resolved) {
     return (
       <div
-        ref={wrapRef}
-        className="chat-img-loading my-1 rounded-lg"
+        className="chat-img-loading my-1 rounded-lg flex items-center gap-2 px-3"
         style={{
-          minHeight: IMG_SLOT_H,
+          minHeight: 72,
           maxHeight: IMG_MAX_H,
           width: '100%',
-          maxWidth: '100%',
+          maxWidth: 420,
           background: 'var(--bg-tertiary)',
           border: '1px solid var(--border)',
-          contentVisibility: 'auto',
-          containIntrinsicSize: `auto ${IMG_SLOT_H}px`,
-          overflowAnchor: 'none',
         }}
         aria-busy="true"
       >
-        <span className="text-xs block px-2 py-2" style={{ color: 'var(--text-muted)' }}>
-          Loading image…
+        <span
+          className="inline-block w-3.5 h-3.5 rounded-full shrink-0"
+          style={{
+            border: '2px solid color-mix(in srgb, var(--accent) 35%, transparent)',
+            borderTopColor: 'var(--accent)',
+            animation: 'remedy-spin 0.7s linear infinite',
+          }}
+        />
+        <span className="text-xs truncate" style={{ color: 'var(--text-muted)' }}>
+          Loading {label}…
         </span>
       </div>
     )
   }
 
-  // Hide bitmap while scrolling; keep reserved box so layout does not thrash.
-  const hideBitmap = deferPaint
-
   return (
-    <div
-      ref={wrapRef}
-      className="chat-img-wrap group/img relative inline-block max-w-full my-1"
-      style={{
-        overflowAnchor: 'none',
-        minHeight: Math.min(slotH, IMG_MAX_H),
-        maxHeight: IMG_MAX_H,
-        contentVisibility: 'auto',
-        containIntrinsicSize: `auto ${Math.min(slotH, IMG_MAX_H)}px`,
-      }}
-    >
+    <div className="chat-img-wrap group/img relative inline-block max-w-full my-1">
       <button
         type="button"
         className="chat-img-btn block p-0 m-0 border-0 bg-transparent cursor-zoom-in w-full text-left"
         onClick={() => onOpen?.(resolved, alt)}
         title="Click to edit / expand"
-        style={{ minHeight: Math.min(slotH, IMG_MAX_H) }}
       >
         <img
           src={resolved}
           alt={alt || 'image'}
           className="chat-img"
-          // Eager fetch; paint is gated by visibility during scroll
-          loading="eager"
+          loading="lazy"
           decoding="async"
           draggable={false}
-          onLoad={(e) => {
-            const el = e.currentTarget
-            if (el.naturalHeight > 0) {
-              const w = el.clientWidth || el.naturalWidth
-              const h = Math.round((el.naturalHeight / el.naturalWidth) * w)
-              if (h > 0) setSlotH(Math.min(Math.max(h, 48), IMG_MAX_H))
-            }
-          }}
           style={{
             maxWidth: '100%',
             maxHeight: IMG_MAX_H,
@@ -279,9 +198,11 @@ export function ChatImage({ src, alt, onOpen }: ChatImageProps) {
             objectFit: 'contain',
             borderRadius: 8,
             display: 'block',
-            overflowAnchor: 'none',
-            // Keep layout; only skip painting during scroll
-            visibility: hideBitmap ? 'hidden' : 'visible',
+            border: '1px solid color-mix(in srgb, var(--border) 70%, transparent)',
+          }}
+          onError={() => {
+            setError('decode failed')
+            setResolved(null)
           }}
         />
       </button>
@@ -291,9 +212,6 @@ export function ChatImage({ src, alt, onOpen }: ChatImageProps) {
           background: 'color-mix(in srgb, var(--bg-primary) 92%, transparent)',
           border: '1px solid var(--border)',
           boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
-          // Don't show chrome while bitmap is deferred
-          pointerEvents: hideBitmap ? 'none' : undefined,
-          visibility: hideBitmap ? 'hidden' : undefined,
         }}
       >
         <button

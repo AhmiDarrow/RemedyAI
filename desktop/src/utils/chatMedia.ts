@@ -215,8 +215,14 @@ export async function resolveChatMediaUrl(src: string): Promise<string> {
 
   if (!isLocalMediaPath(raw)) return ''
 
-  const path = normalizeLocalMediaPath(raw)
+  let path = normalizeLocalMediaPath(raw)
   if (!path) return ''
+
+  // Collapse absolute …/.remedy/attachments/… to attachments/… for /api/media
+  const att = path.match(/(?:^|[\\/])\.remedy[\\/]attachments[\\/](.+)$/i)
+  if (att) {
+    path = `attachments/${att[1]!.replace(/\\/g, '/')}`
+  }
 
   const hit = cacheGet(path)
   if (hit) return hit

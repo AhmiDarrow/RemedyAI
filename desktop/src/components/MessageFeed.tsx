@@ -465,14 +465,16 @@ const MessageBubble = memo(function MessageBubble({
                       if (!src) {
                         return (
                           <span
-                            className="chat-img-error text-xs block my-1 px-2 py-1 rounded"
+                            className="chat-img-chip inline-flex items-center gap-1.5 my-1 px-2.5 py-1 rounded-lg text-xs"
                             style={{
-                              color: 'var(--warning)',
+                              color: 'var(--text-secondary)',
                               background: 'var(--bg-tertiary)',
                               border: '1px solid var(--border)',
                             }}
                           >
-                            Image unavailable{alt ? `: ${alt}` : ''}
+                            <span aria-hidden>📎</span>
+                            {alt || 'attachment'}
+                            <span className="opacity-60">· not previewed</span>
                           </span>
                         )
                       }
