@@ -28,13 +28,23 @@ _DEFAULT_SYSTEM_BODY = (
     "systems end-to-end with tools; use soul_recall / soul_status for continuity.\n"
     "Style: warm-professional by default; concise, decisive, high-signal. "
     "Match the user's energy. Prefer action over narration.\n"
-    "Do not monologue about plans before tool calls; just call tools, then answer.\n"
+    "**Default for any task (work to do, not pure chat):** RESEARCH → PLAN → BUILD.\n"
+    "1) **RESEARCH** — tools first: list_dir / file_read / repo_search / memory_search "
+    "/ web as needed; gather facts before inventing.\n"
+    "2) **PLAN** — short concrete steps (Session Brief / open tasks / mission checklist). "
+    "Keep the plan machine-side; do not dump a long essay unless the user asked for a "
+    "plan-only deliverable.\n"
+    "3) **BUILD** — implement with tools, verify, repair until done. Never claim finished "
+    "without a real tool result or verify signal.\n"
+    "Pure chat (greetings, definitions, opinions): answer without tools.\n"
+    "Do not monologue a multi-step plan in chat and stop — research and build with tools.\n"
     "**Latest message wins:** only do what the **most recent** user message asks. "
     "Do not resume earlier navigates, wikis, goals, or unfinished side-quests unless "
     "the latest message clearly continues them — or Soul/Brief mark them still open. "
     "When that request is done, stop.\n\n"
     "Scope of help:\n"
     "- Chat and knowledge: answer clearly; use memory/context when present.\n"
+    "- Tasks (default): research → plan → build until done.\n"
     "- Research and writing: structure findings; note uncertainty.\n"
     "- Design and product: critique, specs, trade-offs.\n"
     "- Code and projects: implement, debug, review with workspace tools.\n"
@@ -57,7 +67,8 @@ _DEFAULT_SYSTEM_BODY = (
     "the user prompt. Do not pass a free-form `name` that collides with the tool id.\n"
     "- **[Library] tips**: if continuity mentions a not-installed library pack, do not "
     "pretend it is installed or invent its procedure — invite Install → Trust in Skills.\n"
-    "- Project work (review, files, shell, debug, implement): use the function-calling API.\n"
+    "- Project / task work (review, files, shell, debug, implement): "
+    "RESEARCH → PLAN → BUILD via the function-calling API.\n"
     "- Local apps/services (ComfyUI, Ollama, skill deps): use **local_discover** "
     "(scan / one) or the dedicated tool (e.g. comfyui). "
     "NEVER thrash list_dir on C:\\ or / or run where/dir /s to find installs — "
@@ -333,16 +344,20 @@ _ACTION_KICK_RE = re.compile(
 # Model narrates progress without calling tools (false "I'm working on it").
 _FALSE_PROGRESS_RE = re.compile(
     r"(?:"
-    r"\b(?:i(?:'m| am)|i'?ll|let\s+me|now)\s+"
+    r"\b(?:i(?:'m| am)|i'?ll|let\s+me|let'?s|now)\s+"
     r"(?:process|processing|check|checking|work|working|pick(?:ing)?\s+up|"
     r"start|starting|do(?:ing)?|handle|handling|run|running|"
     r"try|trying|open|opening|navigate|navigating|bring|bringing|"
     r"load|loading|pull|pulling|launch|launching|"
-    r"activate|activating|"
+    r"activate|activating|create|creating|build|building|guide|"
+    r"walk\s+you|show\s+you|"
     # Coding/long-task narration without tool_calls (parity with review)
     r"implement|implementing|debug|debugging|fix|fixing|"
     r"refactor|refactoring|edit|editing|patch|patching|"
     r"test|testing|apply|applying)\b|"
+    r"\b(?:sleek|simple)\s+calculator\b|"
+    r"\bstep\s+1\s*:\s*set\s+up\b|"
+    r"\bi'?ll\s+guide\s+you\b|"
     r"\bprocessing\b|"
     r"\bworking\s+on\s+it\b|"
     r"\bpicking\s+up\b|"
@@ -735,6 +750,14 @@ def looks_like_pseudo_tools(text: str) -> bool:
     """True when the model faked tool calls in natural language or DSML markup."""
     if not text:
         return False
+    # Qwen/local: tool intent as JSON in content (```json {"name":"file_write"...})
+    if re.search(
+        r'(?is)(?:```\s*json\s*)?\{\s*"name"\s*:\s*"[a-z0-9_]+"\s*,\s*"arguments"\s*:',
+        text,
+    ):
+        return True
+    if re.search(r"(?is)<\s*response\s*>\s*\{[^}]*\"name\"\s*:", text):
+        return True
     # Cheap reject: ordinary prose has no tool markup / call shape
     if (
         "(" not in text
@@ -742,6 +765,7 @@ def looks_like_pseudo_tools(text: str) -> bool:
         and "&&" not in text
         and "｜" not in text
         and "DSML" not in text
+        and "{" not in text
     ):
         low = text.lower()
         if (
@@ -1039,6 +1063,97 @@ def _parse_dsml_tool_calls(text: str) -> list[dict[str, Any]]:
     return out
 
 
+def _parse_json_tool_blobs(text: str) -> list[dict[str, Any]]:
+    """Recover Qwen/local tool intents emitted as JSON in assistant content.
+
+    llama.cpp + some chat templates leave tool calls as prose/JSON instead of
+    native ``tool_calls``. Shapes seen in the wild::
+
+        ```json
+        {"name": "file_write", "arguments": {"path": "...", "content": "..."}}
+        ```
+
+        <response>
+          {"name": "file_write", "arguments": {...}}
+        </response>
+    """
+    if not text:
+        return []
+    out: list[dict[str, Any]] = []
+    blobs: list[str] = []
+    # fenced json
+    for m in re.finditer(r"(?is)```(?:json)?\s*(\{[\s\S]*?\})\s*```", text):
+        blobs.append(m.group(1))
+    # <response> ... </response>
+    for m in re.finditer(r"(?is)<\s*response\s*>\s*(\{[\s\S]*?\})\s*</\s*response\s*>", text):
+        blobs.append(m.group(1))
+    # bare single-object JSON with name+arguments (first balanced-ish object)
+    if not blobs:
+        for m in re.finditer(
+            r'\{\s*"name"\s*:\s*"[a-zA-Z0-9_]+"\s*,\s*"arguments"\s*:\s*\{',
+            text,
+        ):
+            start = m.start()
+            # brace scan
+            depth = 0
+            end = -1
+            for i, ch in enumerate(text[start:], start):
+                if ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        end = i + 1
+                        break
+            if end > start:
+                blobs.append(text[start:end])
+            if len(blobs) >= MAX_PARALLEL_TOOLS:
+                break
+
+    for i, raw in enumerate(blobs):
+        try:
+            obj = json.loads(raw)
+        except Exception:
+            # trailing prose / truncated — try common fixes
+            try:
+                cleaned = raw.strip().rstrip(",").strip()
+                obj = json.loads(cleaned)
+            except Exception:
+                continue
+        if not isinstance(obj, dict):
+            continue
+        # OpenAI-ish single call
+        name = str(obj.get("name") or "").strip()
+        args = obj.get("arguments")
+        if not name and isinstance(obj.get("function"), dict):
+            name = str(obj["function"].get("name") or "").strip()
+            args = obj["function"].get("arguments")
+        if not name:
+            continue
+        if isinstance(args, str):
+            try:
+                args_obj = json.loads(args)
+            except Exception:
+                args_obj = {"value": args}
+        elif isinstance(args, dict):
+            args_obj = args
+        else:
+            args_obj = {}
+        out.append(
+            {
+                "id": f"pseudo_json_{i}_{uuid4().hex[:8]}",
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "arguments": json.dumps(args_obj, ensure_ascii=False),
+                },
+            }
+        )
+        if len(out) >= MAX_PARALLEL_TOOLS:
+            break
+    return out
+
+
 def parse_pseudo_tool_calls(text: str) -> list[dict[str, Any]]:
     """Best-effort parse of text-faked tools into OpenAI-style tool_call dicts.
 
@@ -1050,16 +1165,13 @@ def parse_pseudo_tool_calls(text: str) -> list[dict[str, Any]]:
         return []
     out: list[dict[str, Any]] = []
 
+    # 0) JSON-in-content (Qwen2.5-Coder / local RMB common failure mode)
+    out.extend(_parse_json_tool_blobs(text))
+
     # 1) DSML / XML-ish dumps first (the ComfyUI failure mode)
     out.extend(_parse_dsml_tool_calls(text))
 
     # 2) Classic function-call-as-text
-    re.compile(
-        r"\b(file_read|file_write|list_dir|bash_exec|comfyui)\s*\(\s*"
-        r"(?:[\"']([^\"']*)[\"']|(action|prompt|path|command)\s*=\s*[\"']([^\"']*)[\"'])"
-        r"(?:\s*,\s*(?:[\"']([^\"']*)[\"']|(\w+)\s*=\s*[\"']([^\"']*)[\"']))?\s*\)",
-        re.IGNORECASE,
-    )
     # Simpler reliable pattern for positional forms
     pat_simple = re.compile(
         r"\b(file_read|file_write|list_dir|bash_exec)\s*\(\s*[\"']([^\"']+)[\"']"

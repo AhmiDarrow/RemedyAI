@@ -395,21 +395,46 @@ async def prepare_turn_preamble(
         home_dir=home_att,
         session_id=sid_att,
     )
+    _bind0 = get_llm_binding(runtime)
     messages: list[dict[str, Any]] = [
         {
             "role": "system",
             "content": build_runtime_system_block(
                 system_prompt=runtime._system_prompt,
-                provider=get_llm_binding(runtime).provider,
-                model=get_llm_binding(runtime).model,
-                base_url=get_llm_binding(runtime).base_url,
+                provider=_bind0.provider,
+                model=_bind0.model,
+                base_url=_bind0.base_url,
                 max_steps=runtime._max_react_steps,
                 context=context,
+                user_message=str(message or ""),
             ),
         },
         *history,
         {"role": "user", "content": user_content},
     ]
+    # Local create/build: tool-first contract + full power approvals
+    with suppress(Exception):
+        from remedy.core.local_agent_optimize import (
+            ensure_local_power_approvals,
+            inject_local_messages,
+            is_local_binding,
+            message_wants_implement,
+        )
+
+        if is_local_binding(_bind0.provider, _bind0.model, _bind0.base_url):
+            if message_wants_implement(str(message or "")):
+                ensure_local_power_approvals()
+            _proj = ""
+            with suppress(Exception):
+                _proj = str(runtime.effective_project_path() or "")
+            messages = inject_local_messages(
+                messages,
+                user_message=str(message or ""),
+                provider=_bind0.provider,
+                model=_bind0.model,
+                base_url=_bind0.base_url,
+                project_path=_proj,
+            )
     with suppress(Exception):
         proto = getattr(runtime, "_build_protocol_pending", None)
         if proto:
@@ -454,6 +479,19 @@ async def prepare_turn_preamble(
         all_tools=all_tools,
         browse=browse,
     )
+    # Local implement: first-turn tools are write-first (no bash skip-write)
+    with suppress(Exception):
+        from remedy.core.local_agent_optimize import (
+            filter_tools_write_first,
+            is_local_binding,
+        )
+
+        if is_local_binding(_bind0.provider, _bind0.model, _bind0.base_url) and tools:
+            tools = filter_tools_write_first(
+                tools, user_message=str(message or ""), step_index=0
+            )
+            # Keep all_tools full for later re-arm; only arm write-first now
+            # (rearm still uses all_tools when needed after a write succeeds)
 
     apply_metabolism_injects(
         runtime,

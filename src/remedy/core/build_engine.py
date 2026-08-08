@@ -29,12 +29,16 @@ from typing import Any
 
 _BUILD_RE = re.compile(
     r"(?i)\b("
-    r"implement|build|ship|scaffold|create\s+(an?\s+)?(app|api|service|module|package|feature|cli|library|tool)|"
-    r"write\s+(a\s+)?(script|module|service|test|app)|"
+    r"implement|build|ship|scaffold|create\s+(an?\s+)?(app|api|service|module|package|feature|cli|library|tool|file)|"
+    r"write\s+(a\s+)?(script|module|service|test|app|file|program)|"
     r"add\s+(a\s+)?(feature|endpoint|command|test)|"
     r"fix\s+(the\s+)?(bug|build|tests?|ci|error)|"
     r"refactor|wire\s+up|make\s+(it|me)|develop|"
-    r"end[- ]to[- ]end|from\s+scratch|green\s+tests|pytest|npm\s+test"
+    r"end[- ]to[- ]end|from\s+scratch|green\s+tests|pytest|npm\s+test|"
+    # Broader task verbs — default research → plan → build loop
+    r"review|audit|investigate|research|debug|set\s*up|setup|"
+    r"migrate|upgrade|replace|prototype|design\s+(the\s+)?(system|api|feature)|"
+    r"calculator|todo\s+app|cli\b"
     r")\b"
 )
 
@@ -141,15 +145,36 @@ class BuildTurnState:
 
 
 def looks_like_build_request(message: str) -> bool:
+    """True when the user message is a *task* (research → plan → build default)."""
     msg = (message or "").strip()
     if not msg:
+        return False
+    # Pure social / meta — never force the build engine
+    low = msg.lower().rstrip("!.?")
+    if low in {
+        "hi", "hey", "hello", "thanks", "thank you", "ok", "okay", "yes", "no",
+        "yep", "nope", "cool", "bye", "good morning", "good night",
+    }:
         return False
     if _BUILD_RE.search(msg):
         return True
     # Long multi-line specs are almost always build work
     if len(msg) > 280 and ("```" in msg or msg.count("\n") >= 4):
         return True
+    # Imperative short tasks with path/file cues
+    if len(msg) > 24 and any(
+        x in low
+        for x in (
+            ".py", ".ts", ".js", ".rs", ".go", "src/", "test", "please ",
+            "need you to", "can you", "could you",
+        )
+    ):
+        return True
     return False
+
+
+# Alias — product language is research → plan → build (tasks, not only “builds”)
+looks_like_task_request = looks_like_build_request
 
 
 def begin_build_turn(
@@ -158,7 +183,7 @@ def begin_build_turn(
     *,
     force: bool = False,
 ) -> BuildTurnState | None:
-    """Start machine supervision when this looks like a build + capable muscle."""
+    """Start machine supervision for task work (research → plan → build)."""
     from remedy.core.muscle_profile import muscle_from_runtime
 
     muscle = muscle_from_runtime(runtime)
@@ -249,17 +274,18 @@ def build_protocol_block(state: BuildTurnState) -> str:
     )
     resume = " [RESUMED from build ledger]" if state.resumed else ""
     return (
-        "[Build engine — machine protocol · hard rule]"
+        "[Task loop — RESEARCH → PLAN → BUILD · hard rule]"
         f"{resume}\n"
         f"Goal: {state.goal or '(user request)'}\n"
         f"{oracle}\n"
-        "You are the muscle; the machine owns the schedule:\n"
-        "1) SCOUT: batch many file_read/list_dir/repo_search in ONE step (4–12).\n"
-        "2) IMPLEMENT: file_write for new files, file_edit multi-hunk for changes.\n"
-        "3) VERIFY: machine may AUTO-RUN tests after writes; also bash_exec / "
-        "job_run kind=verify / mission_verify.\n"
-        "4) REPAIR: build_repair_queue → hop/edit targets → gate tower until green.\n"
-        "5) DONE: verify green + prefer mutant kill (build_mutant_score). No oracle = no DONE.\n"
+        "Default schedule (do not skip to monologue):\n"
+        "1) RESEARCH (scout): batch file_read/list_dir/repo_search/memory_search "
+        "in ONE step (4–12). Gather facts before inventing.\n"
+        "2) PLAN: short checklist via open tasks / mission_start — machine-side, "
+        "not a long essay unless the user asked plan-only.\n"
+        "3) BUILD (implement): file_write for new files, file_edit multi-hunk for "
+        "changes; then VERIFY (bash_exec / job_run kind=verify / mission_verify); "
+        "REPAIR until green → DONE.\n"
         "Machine path: build_tdd / build_compile_spec → hops → build_gate_tower → "
         "build_mutant_score. Never claim shipped without a verify signal. "
         "Never monologue a plan without tool_calls. "
@@ -489,18 +515,22 @@ def next_machine_nudge(state: BuildTurnState) -> dict[str, str] | None:
 
 
 def monologue_block_nudge(state: BuildTurnState | None) -> dict[str, str] | None:
-    """When build is active and model monologued without tools."""
+    """When build is active and model monologued without tools.
+
+    Allow up to 3 blocks — local 7B often re-essays after a single nudge.
+    """
     if state is None or not state.active:
         return None
-    if "monologue_block" in state.nudges_emitted:
+    n = sum(1 for x in state.nudges_emitted if str(x).startswith("monologue_block"))
+    if n >= 3:
         return None
-    state.nudges_emitted.append("monologue_block")
+    state.nudges_emitted.append(f"monologue_block{n + 1}" if n else "monologue_block")
     return {
         "role": "user",
         "content": (
-            "[Build engine · NO MONOLOGUE] This is a build turn. "
-            "Emit native tool_calls now (file_read/list_dir/repo_search batch, "
-            "then file_edit/file_write). Do not answer with only a plan."
+            "[Task loop · NO MONOLOGUE] Stop writing plans in chat. "
+            "Emit native tool_calls **now** (list_dir / file_read batch, then "
+            "file_write / file_edit). Do not answer with only a RESEARCH/PLAN/BUILD essay."
         ),
     }
 

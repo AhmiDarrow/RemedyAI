@@ -1,8 +1,32 @@
 # Small local models & long code sessions — context handling
 
-**Status:** research + first implementation landed
-**Date:** 2026-08-04
-**Applies to:** Remedy core context pipeline (`remedy.nanoswarm.token_nanobot`, `remedy.core.agent_context`, `remedy.memory.harness.send_policy`)
+**Status:** research + **endless local plane landed** (`remedy.core.endless_context`)
+**Date:** 2026-08-04 · **Update:** 2026-08-08
+**Applies to:** Remedy core context pipeline (`endless_context`, `token_nanobot`,
+`agent_context`, `send_policy`, `LlamaCppProvider` / `RmbProvider.build_body`)
+
+### 2026-08-08 — Endless build under fixed n_ctx (e.g. 32k)
+
+Root failure from live export (Qwen2.5-Coder-7B via RMB):
+
+> `request (11494 tokens) exceeds the available context size (8192 tokens)`
+
+Short chats worked; **build** turns died because system head + full tool schemas
++ skill bodies already exceeded the *physical* window before history grew.
+
+**Answer (no bigger model required):** treat n_ctx as a **rolling workspace**.
+
+| Layer | Behavior |
+|-------|----------|
+| **Authoritative window** | `rmb.json` `ctx_size` (e.g. 32768) + live cache — not cloud 128k |
+| **Hard fit** | `fit_local_request` runs in every local `build_body` before HTTP |
+| **Cascade** | slim tools → coding pack → offload tool bodies → shrink head → collapse history → name-only tools → emergency tail |
+| **Coding pack** | Prefer `file_*` / `bash_exec` / `repo_search` / missions over 80 full schemas |
+| **Harness** | Earlier soft/strong gates on local/RMB (and sub-16k even earlier) |
+| **Head** | Local skill auto-bodies capped (~700 chars); head ≤ ~28% of window |
+
+Invariant tested: fat 80-tool + multi-turn history **always** fits ≤ prompt budget
+on 8k and 32k (`tests/test_endless_context.py`).
 
 ---
 

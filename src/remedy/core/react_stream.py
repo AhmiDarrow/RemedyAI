@@ -175,7 +175,27 @@ def build_runtime_system_block(
     base_url: str,
     max_steps: int,
     context: str,
+    user_message: str = "",
 ) -> str:
+    # Local/RMB: auto-slim — cloud-length system prompts cause monologue + OOC
+    try:
+        from remedy.core.local_agent_optimize import (
+            is_local_binding,
+            slim_system_for_local,
+        )
+
+        if is_local_binding(provider, model, base_url):
+            return slim_system_for_local(
+                system_prompt,
+                context,
+                provider=provider,
+                model=model,
+                base_url=base_url,
+                max_steps=max_steps,
+                user_message=user_message or "",
+            )
+    except Exception:
+        pass
     runtime_info = (
         f"Connected provider: {provider}\n"
         f"Connected model: {model}\n"

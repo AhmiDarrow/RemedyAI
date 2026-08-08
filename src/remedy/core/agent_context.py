@@ -411,7 +411,21 @@ async def build_turn_context(runtime: Any) -> str:
                 ):
                     preferred = ["change-safety", "refactor-safe"]
                 # Cap keeps one skill from dominating (change-safety ~3.5k).
+                # Local/RMB windows cannot afford multi-k procedure bodies — the
+                # model should skill_activate on demand; endless_context drops
+                # these first when still over budget.
                 _PROC_CAP = 4_000
+                try:
+                    from remedy.core.llm_binding import get_llm_binding as _glb
+                    from remedy.nanoswarm.token_nanobot import is_local_model as _is_loc
+
+                    _b_loc = _glb(runtime)
+                    if _is_loc(
+                        _b_loc.provider, _b_loc.model, base_url=_b_loc.base_url
+                    ):
+                        _PROC_CAP = 700
+                except Exception:
+                    pass
                 _GENERIC_MIN = 0.48
                 _PREFERRED_MIN = 0.18
                 pick_skill = None
@@ -514,13 +528,24 @@ async def build_turn_context(runtime: Any) -> str:
         # 128k window before; with a real 4–6k window, 35% keeps tools alive).
         from remedy.nanoswarm.token_nanobot import is_local_model
 
-        head_frac = (
-            0.35
-            if is_local_model(bind.provider, bind.model, base_url=bind.base_url)
-            else 0.45
-        )
+        # Local: head must leave room for tool schemas + completion.
+        # 0.28 of 32k ≈ 9k head max; coding tools still need ~2–6k.
+        _local = is_local_model(bind.provider, bind.model, base_url=bind.base_url)
+        head_frac = 0.28 if _local else 0.45
         budget = int(window * head_frac)
-        if budget >= 512 and budget < len("\n\n".join(parts)):
+        # Prefer token estimate when available (chars was too loose for catalogs).
+        try:
+            from remedy.nanoswarm.token_nanobot import estimate_text_tokens
+
+            joined_est = estimate_text_tokens(
+                "\n\n".join(parts),
+                provider=bind.provider,
+                model=bind.model,
+            )
+            over = budget >= 512 and joined_est > budget
+        except Exception:
+            over = budget >= 512 and budget < len("\n\n".join(parts))
+        if over:
             parts = _trim_context_parts(
                 parts, budget, provider=bind.provider, model=bind.model
             )

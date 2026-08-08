@@ -526,6 +526,12 @@ class BasicRuntime(AgentRuntime):
                         lo, hi = harness_pcts_for_local_agent()
                         self._harness_min_pct = lo
                         self._harness_max_pct = hi
+                    # Keep endless-context budget on the live configured n_ctx
+                    with suppress(Exception):
+                        from remedy.runtime.rmb.config import load_rmb_json, merge_state
+                        from remedy.runtime.rmb.service import sync_context_window_cache
+
+                        sync_context_window_cache(merge_state(load_rmb_json()))
                 elif harness_min_context_pct is None and harness_max_context_pct is None:
                     self._harness_min_pct = float(
                         getattr(self.config, "harness_min_context_pct", None) or 0.75

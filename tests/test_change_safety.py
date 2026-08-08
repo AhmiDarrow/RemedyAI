@@ -20,12 +20,12 @@ def test_tool_policy_includes_change_safety():
     assert pack.get("change_safety") is True
     block = format_policy_block(pack)
     assert "Change-safety" in block or "change-safety" in block
-    # Tool pack still tagged for fix/debug wording
+    # Fix/debug wording → task loop (research → plan → build) with change-safety
     tool = policy_for_intent("chat", user_text="please fix the login bug")
-    assert tool["id"] == "tool"
+    assert tool["id"] in ("task", "tool", "build")
     assert tool.get("change_safety") is True
     tool_block = format_policy_block(tool)
-    assert "skill_activate" in tool_block
+    assert "RESEARCH" in tool_block or "skill_activate" in tool_block or "file_edit" in tool_block
 
 
 def test_autonomous_policy_includes_change_safety():

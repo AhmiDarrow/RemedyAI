@@ -54,6 +54,19 @@ export interface RmbStatus {
     silent_context?: boolean
     note?: string
   }
+  /** Present after PATCH /rmb/settings — confirms live process apply */
+  live_apply?: {
+    live?: boolean
+    restarted?: boolean
+    started?: boolean
+    stopped?: boolean
+    process_keys_changed?: string[]
+    ctx_size_config?: number
+    ctx_size_live?: number | null
+    live_error?: string | null
+  }
+  live_note?: string
+  runtime_applied?: boolean
   error?: string
 }
 
