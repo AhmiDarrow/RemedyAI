@@ -22,6 +22,10 @@ from remedy.interfaces.api_models import (
     SessionLlmRequest,
     UpdateSessionRequest,
 )
+from remedy.interfaces.routes.sessions.stream_tokens import (
+    parse_tool_call_token,
+    sse_event,
+)
 from remedy.interfaces.api_support import (
     _sse_stream_text,
     _sync_runtime_llm_from_config,
@@ -252,30 +256,15 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                         )
                         break
                     if token.startswith("@@tool_call:"):
-                        raw = token[len("@@tool_call:") :]
-                        tool_name = raw
-                        args: dict = {}
-                        try:
-                            if raw.strip().startswith("{"):
-                                obj = json.loads(raw)
-                                tool_name = str(obj.get("name") or "tool")
-                                a = obj.get("args")
-                                if isinstance(a, dict):
-                                    args = a
-                        except Exception:
-                            tool_name = raw.split("|", 1)[0].strip() or "tool"
-                        collected_tool_calls.append({"name": tool_name, "args": args})
-                        yield (
-                            "event: tool_call\ndata: "
-                            + json.dumps(
-                                {
-                                    "type": "tool_call",
-                                    "name": tool_name,
-                                    "args": args,
-                                },
-                                default=str,
-                            )
-                            + "\n\n"
+                        parsed = parse_tool_call_token(token)
+                        collected_tool_calls.append(parsed)
+                        yield sse_event(
+                            "tool_call",
+                            {
+                                "type": "tool_call",
+                                "name": parsed["name"],
+                                "args": parsed.get("args") or {},
+                            },
                         )
                     elif token.startswith("@@tool_result:"):
                         raw = token[len("@@tool_result:") :]
