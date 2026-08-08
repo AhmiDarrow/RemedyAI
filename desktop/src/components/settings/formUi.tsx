@@ -115,8 +115,8 @@ export function FormToggle({
 }: {
   checked: boolean
   onChange: (v: boolean) => void
-  label: string
-  description?: string
+  label: ReactNode
+  description?: ReactNode
   disabled?: boolean
 }) {
   return (

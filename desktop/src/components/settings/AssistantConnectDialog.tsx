@@ -1,10 +1,11 @@
-import { getServerUrl } from '../../api/client'
 /** Modal: privacy + optional app OAuth setup + Connect — keeps Settings lean. */
 
 import { useState, type ReactNode } from 'react'
+import { getServerUrl } from '../../api/client'
 import { saveGoogleApp } from '../../api/assistant'
 import { updateSettings } from '../../api/settings'
 import { RemedyLogo } from '../RemedyLogo'
+import { FormActionButton, FormLinkButton, FormToggle } from './formUi'
 
 const REDIRECT = () => getServerUrl() + '/api/assistant/google/callback'
 
@@ -113,14 +114,9 @@ export function AssistantConnectDialog({
             'Tokens stay on this PC. Chat may send tool results (not tokens) to your chosen AI provider.'}
         </p>
 
-        <button
-          type="button"
-          className="text-[11px] p-0 border-0 bg-transparent underline cursor-pointer mb-2"
-          style={{ color: 'var(--accent)' }}
-          onClick={() => setShowFull((v) => !v)}
-        >
+        <FormLinkButton accent onClick={() => setShowFull((v) => !v)}>
           {showFull ? 'Less' : 'Privacy details'}
-        </button>
+        </FormLinkButton>
         {showFull ? (
           <pre
             className="m-0 mb-3 whitespace-pre-wrap font-sans text-[10px] max-h-36 overflow-y-auto rounded-lg p-2"
@@ -133,32 +129,22 @@ export function AssistantConnectDialog({
           </pre>
         ) : null}
 
-        <label className="flex items-start gap-2 cursor-pointer mb-2 text-[11px]">
-          <input
-            type="checkbox"
-            className="mt-0.5"
-            checked={privacyAi}
-            onChange={(e) => setPrivacyAi(e.target.checked)}
-            style={{ accentColor: 'var(--accent)' }}
-          />
-          <span>
-            {notices?.privacy_ai_checkbox ||
-              'I understand Remedy is an AI assistant; tokens stay local; tool results may go to my AI provider.'}
-          </span>
-        </label>
-        <label className="flex items-start gap-2 cursor-pointer mb-3 text-[11px]">
-          <input
-            type="checkbox"
-            className="mt-0.5"
-            checked={accountAccess}
-            onChange={(e) => setAccountAccess(e.target.checked)}
-            style={{ accentColor: 'var(--accent)' }}
-          />
-          <span>
-            {notices?.account_connect_checkbox ||
-              'Allow official OAuth for mail/calendar tools (Disconnect anytime).'}
-          </span>
-        </label>
+        <FormToggle
+          checked={privacyAi}
+          onChange={setPrivacyAi}
+          label={
+            notices?.privacy_ai_checkbox ||
+            'I understand Remedy is an AI assistant; tokens stay local; tool results may go to my AI provider.'
+          }
+        />
+        <FormToggle
+          checked={accountAccess}
+          onChange={setAccountAccess}
+          label={
+            notices?.account_connect_checkbox ||
+            'Allow official OAuth for mail/calendar tools (Disconnect anytime).'
+          }
+        />
 
         {!signInReady && (
           <div className="mb-3 space-y-1.5">
@@ -192,24 +178,18 @@ export function AssistantConnectDialog({
         ) : null}
 
         <div className="flex gap-2 justify-end">
-          <button
-            type="button"
-            disabled={working || busy}
-            className="ui-btn ui-btn-secondary"
-            onClick={onClose}
-          >
+          <FormActionButton disabled={working || busy} onClick={onClose}>
             Cancel
-          </button>
-          <button
-            type="button"
+          </FormActionButton>
+          <FormActionButton
+            variant="primary"
             disabled={!canContinue || working || busy}
-            className="ui-btn ui-btn-primary"
             onClick={() => {
               void submit()
             }}
           >
             {working || busy ? 'Working…' : 'Continue'}
-          </button>
+          </FormActionButton>
         </div>
       </div>
     </div>

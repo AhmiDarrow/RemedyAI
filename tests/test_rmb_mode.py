@@ -17,14 +17,34 @@ from remedy.runtime.rmb.mode import (
 from remedy.runtime.rmb.service import stop_rmb_server
 
 
-def test_llamacpp_is_not_rmb_without_8787():
+def test_llamacpp_is_not_rmb_without_8787(tmp_path, monkeypatch):
+    # Isolate from host ~/.remedy rmb.json + any live RMB process left by other tests.
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    monkeypatch.setattr(
+        "remedy.runtime.rmb.service.is_starting", lambda: False, raising=False
+    )
+    monkeypatch.setattr(
+        "remedy.runtime.rmb.service.managed_process_alive", lambda: False, raising=False
+    )
+    monkeypatch.setattr(
+        "remedy.runtime.rmb.mode.rmb_server_running", lambda home_dir=None: False
+    )
+    home = str(tmp_path)
     assert is_rmb_provider("llamacpp") is False
     assert is_rmb_provider("llamacpp", "http://127.0.0.1:8740/v1") is False
     assert is_local_agent_mode(
-        {"llm_provider": "llamacpp", "llm_base_url": "http://127.0.0.1:8740/v1"}
+        {
+            "home_dir": home,
+            "llm_provider": "llamacpp",
+            "llm_base_url": "http://127.0.0.1:8740/v1",
+        }
     ) is False
     assert should_skip_vision_stack(
-        {"llm_provider": "llamacpp", "llm_base_url": "http://127.0.0.1:8740/v1"}
+        {
+            "home_dir": home,
+            "llm_provider": "llamacpp",
+            "llm_base_url": "http://127.0.0.1:8740/v1",
+        }
     ) is False
 
 
@@ -49,8 +69,18 @@ def test_silent_context_rmb_only():
     assert silent_context_for_local_agent({"llm_provider": "llamacpp"}) is False
 
 
-def test_vision_suspended_skips_stack():
+def test_vision_suspended_skips_stack(monkeypatch):
     home = tempfile.mkdtemp(prefix="rmb-mode-")
+    monkeypatch.setenv("REMEDY_HOME", home)
+    monkeypatch.setattr(
+        "remedy.runtime.rmb.service.is_starting", lambda: False, raising=False
+    )
+    monkeypatch.setattr(
+        "remedy.runtime.rmb.service.managed_process_alive", lambda: False, raising=False
+    )
+    monkeypatch.setattr(
+        "remedy.runtime.rmb.mode.rmb_server_running", lambda home_dir=None: False
+    )
     st = merge_state(load_rmb_json(home))
     st["vision_suspended"] = True
     save_rmb_json(st, home)
