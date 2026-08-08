@@ -38,7 +38,7 @@
 | **Who it’s for** | Owners who want power without multi-agent theater — chat, files, shell, browser rail, computer use |
 | **What stays local** | Memory, Session Brief, skills, approvals, DPAPI secrets, optional SmolVLM2 vision |
 | **What you bring** | Your API keys / local Ollama — no Remedy cloud account for core use |
-| **Current** | **v0.21.1** on [PyPI](https://pypi.org/project/remedy-ai/) · [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases) |
+| **Current** | **v0.22.0** on [PyPI](https://pypi.org/project/remedy-ai/) · [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases) |
 
 From the creator: *My name is Ahmi, I hope you enjoy my Remedy.*  
 In-app: title-bar / tray → **About Remedy** · **Settings → About**.
@@ -47,7 +47,7 @@ In-app: title-bar / tray → **About Remedy** · **Settings → About**.
 
 ## What’s new
 
-**Latest: [v0.21.1](https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.21.1)** — Continuity isolation, self-inject safety, person-like memory.
+**Latest: [v0.22.0](https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.22.0)** — Living organism, continuity steering, builder verify, multi-tab.
 
 <p align="center">
   <img src="docs/manual/assets/remedy-partner-architecture.jpg" alt="How Remedy fits together" width="640" />
@@ -113,7 +113,7 @@ One desktop app. One local API. Your data under `~/.remedy`.
 | **Workspace** | **Files** · **Terminal** · **Browser** · **Scratch** · **Computer use** — rails beside chat |
 | **Local brain** | **SmolVLM2 2.2B** on this PC — visual decoder + harness assist (optional download) |
 | **Continuity** | Session Brief, partner memory, skills, context budget — silent workers, one voice |
-| **Metabolism** | **0.21.1+** L0–L3 turn tiers, evidence ledger, shadow, governor, portable identity ([manual](docs/manual/19-metabolism.md)) |
+| **Metabolism** | **0.22.0+** Soul Field + organism pulse, L0–L3 tiers, evidence, governor ([manual](docs/manual/19-metabolism.md)) |
 | **Messengers** | Telegram, Discord, Slack, Mattermost, Matrix, WhatsApp, Teams, Google Chat, Signal (Settings) |
 | **Skills** | Progressive disclosure · Installed \| Library · signed community catalog |
 | **Memory** | Durable facts · Progress snapshots · plans — calm UI, not scare-logs |
@@ -318,7 +318,7 @@ WebUI is the **same SPA** as desktop (`desktop/dist`). After UI changes:
 ```bash
 git clone https://github.com/AhmiDarrow/RemedyAI.git && cd RemedyAI
 uv sync --group dev
-uv run pytest -q          # 560+ tests; currently ~1577
+uv run pytest -q          # 560+ tests; currently ~1639
 cd desktop && npm test && npm run build
 python scripts/check_docs.py
 cd desktop && npm run tauri:dev   # full shell (set REMEDY_DEV_ROOT to repo)

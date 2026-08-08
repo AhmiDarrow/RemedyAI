@@ -4,18 +4,19 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
-### Continuity · builder · organism · retention (advance 1–6)
+## [0.22.0] - 2026-08-08
 
-- **Continuity steering:** open tasks, constraints, soul threads, and mid-ship
-  build resume inject every turn so models do not monologue past unfinished work.
-- **Builder loop:** stronger false-done verify (claim shipped without tools);
-  build ledger resume hints name the next phase (scout/plan/build/verify).
-- **Multi-tab:** stream client aborts + retries once on HTTP 409 (same-session busy).
-- **Chat media / computer:** prior image path + session-scoped job cancel retained.
-- **Honest defaults:** session retention **180d**, attachments **90d** (0 still disables);
-  Soul Field default on + Settings toggle; encrypt status honesty retained.
-- **Messengers:** post-turn soul/soma continuity after remote replies; messenger
-  surface inject (“same partner”, concise tools-capable replies).
+### Continuity · builder · organism · retention
+
+- **Soul Field default on** — personhood inject + residue; Settings toggle to opt out.
+- **Organism pulse** — mood/bond + forge + immune + metabolism on L1+ turns.
+- **Continuity steering:** open tasks, constraints, soul threads, mid-ship resume.
+- **Builder loop:** false-done verify (claim shipped without tools); ledger phase next-steps.
+- **Multi-tab:** stream 409 abort+retry; send locks/queue drain isolation; emit throttle.
+- **Chat images:** home-relative `attachments/…` media paths; simpler ChatImage.
+- **Honest defaults:** retention sessions **180d** / attachments **90d**; encrypt status honesty.
+- **Messengers:** post-turn continuity; same-partner surface inject.
+- Agent recovery: soft-fail body rebuild, non-stream tool parse, length/rearm caps.
 
 ### UI polish batch (1–10 backlog)
 
