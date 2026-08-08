@@ -11,6 +11,7 @@ from typing import Any
 
 from rich.panel import Panel
 
+from remedy import __version__
 from remedy.interfaces.cli.util import console
 from remedy.interfaces.config import config_to_agent_config, resolve_config
 from remedy.interfaces.wizard import ensure_setup_before_launch
