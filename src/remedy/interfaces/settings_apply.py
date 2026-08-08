@@ -251,30 +251,38 @@ async def apply_settings_update(
     if "llm_api_key" in patch and not patch["llm_api_key"]:
         del patch["llm_api_key"]
 
-    merged = {**cfg, **patch}
-    # Snap garbage / cross-provider model ids before persist (never store junk).
-    provider, model, base_url = normalize_llm_settings(
-        merged.get("llm_provider"),
-        merged.get("llm_model"),
-        merged.get("llm_base_url"),
+    # Only snap/write LLM fields when the client touched them (or API key).
+    # Unrelated patches (project_path, harness, …) must not re-normalize models.
+    llm_touched = any(
+        k in clean_in
+        for k in ("llm_provider", "llm_model", "llm_base_url", "llm_api_key")
     )
-    # Closed catalogs: if client sent an explicit invalid model, still snap
-    # even when normalize kept a native-looking prefix incorrectly.
-    if "llm_model" in clean_in or "llm_provider" in clean_in:
-        try:
-            from remedy.interfaces.config import validate_provider_model
+    if llm_touched:
+        merged = {**cfg, **patch}
+        provider, model, base_url = normalize_llm_settings(
+            merged.get("llm_provider"),
+            merged.get("llm_model"),
+            merged.get("llm_base_url"),
+        )
+        # Closed catalogs: if client sent an explicit invalid model, still snap.
+        if "llm_model" in clean_in or "llm_provider" in clean_in:
+            try:
+                from remedy.interfaces.config import validate_provider_model
 
-            model = validate_provider_model(provider, model)
-        except ValueError:
-            # Fall back to normalize default for this provider
-            provider, model, base_url = normalize_llm_settings(
-                provider, None, base_url
-            )
-    patch["llm_provider"] = provider
-    patch["llm_model"] = model
-    patch["llm_base_url"] = base_url
-    if prev_provider and prev_provider != provider:
-        patch["last_llm_provider"] = prev_provider
+                model = validate_provider_model(provider, model)
+            except ValueError:
+                provider, model, base_url = normalize_llm_settings(
+                    provider, None, base_url
+                )
+        patch["llm_provider"] = provider
+        patch["llm_model"] = model
+        patch["llm_base_url"] = base_url
+        if prev_provider and prev_provider != provider:
+            patch["last_llm_provider"] = prev_provider
+    else:
+        provider = prev_provider or "openai"
+        model = str(cfg.get("llm_model") or "")
+        base_url = str(cfg.get("llm_base_url") or "")
 
     if "custom_llm_name" in patch and patch["custom_llm_name"] is not None:
         name = str(patch["custom_llm_name"]).strip()[:80]

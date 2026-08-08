@@ -1,7 +1,7 @@
 /** Shared props for Settings form sections. */
 import type { Dispatch, SetStateAction } from 'react'
 import type { Settings, MessengerInfo } from '../../api/settings'
-import type { VisionStatus, NanoSwarmStatus } from '../../api/vision'
+import type { VisionStatus } from '../../api/vision'
 import type { RmbStatus } from '../../api/rmb'
 import type { XaiAuthStatus } from '../../api/auth'
 import type { ProviderInfo, ConnectedProvider } from '../../api/providers'
@@ -62,8 +62,6 @@ export interface SettingsFormProps {
   setLaunchAtLogin: Dispatch<SetStateAction<boolean>>
   startInTray: boolean
   setStartInTray: Dispatch<SetStateAction<boolean>>
-  closeToTray: boolean
-  setCloseToTray: Dispatch<SetStateAction<boolean>>
   skipQuitWarn: boolean
   setSkipQuitWarn: Dispatch<SetStateAction<boolean>>
   webToolsEnabled: boolean
@@ -104,7 +102,6 @@ export interface SettingsFormProps {
   handleXaiSignIn: () => void
   handleXaiLogout: () => void
   vision: VisionStatus | null
-  swarm: NanoSwarmStatus | null
   visionBusy: boolean
   setVisionBusy: Dispatch<SetStateAction<boolean>>
   visionMsg: string
