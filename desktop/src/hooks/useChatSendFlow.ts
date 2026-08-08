@@ -186,7 +186,7 @@ export function useChatSendFlow(opts: {
           // Instant empty feed — stay on this session id (no jump to /new).
           clearLocalHistory()
           try {
-            const { clearChatMediaCache } = await import('./utils/chatMedia')
+            const { clearChatMediaCache } = await import('../utils/chatMedia')
             clearChatMediaCache()
           } catch {
             /* ignore */
