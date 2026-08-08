@@ -37,3 +37,19 @@ def test_wrong_model_for_host_is_fatal() -> None:
         'or deepseek-v4-flash, but you passed grok-4.5."}}'
     )
     assert _is_fatal_llm_api_error(400, body) is True
+
+
+def test_generic_invalid_request_400_not_fatal() -> None:
+    """Context / tools / messages 400s must soft-recover, not hard-stop."""
+    body = (
+        '{"error":{"type":"invalid_request_error","message":'
+        '"This model\'s maximum context length is 128000 tokens."}}'
+    )
+    assert _is_fatal_llm_api_error(400, body) is False
+    assert (
+        _is_fatal_llm_api_error(
+            400,
+            '{"error":{"type":"invalid_request_error","message":"Invalid tools schema"}}',
+        )
+        is False
+    )

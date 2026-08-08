@@ -10,7 +10,6 @@ import {
 import {
   getVisionStatus,
   type VisionStatus,
-  type NanoSwarmStatus,
 } from '../api/vision'
 import { getRmbStatus, type RmbStatus } from '../api/rmb'
 import {
@@ -140,11 +139,10 @@ export function SettingsPanel({
   const [accessScope, setAccessScope] = useState('project')
   const [launchAtLogin, setLaunchAtLogin] = useState(false)
   const [startInTray, setStartInTray] = useState(false)
-  // Always true — title-bar ✕ hides to tray (not a user opt-out).
-  const [closeToTray, setCloseToTray] = useState(true)
   const [skipQuitWarn, setSkipQuitWarn] = useState(false)
   const [webToolsEnabled, setWebToolsEnabled] = useState(false)
-  const [httpBootstrap, setHttpBootstrap] = useState(true)
+  // Desktop default is off (IPC-only); GET /settings overwrites with effective value.
+  const [httpBootstrap, setHttpBootstrap] = useState(false)
   const [privacyMode, setPrivacyMode] = useState(false)
   const [approvalMode, setApprovalMode] = useState<'ask' | 'auto'>('ask')
   const [harnessMode, setHarnessMode] = useState('auto')
@@ -172,7 +170,7 @@ export function SettingsPanel({
   const [xaiLoginMsg, setXaiLoginMsg] = useState('')
   const xaiPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [vision, setVision] = useState<VisionStatus | null>(null)
-  const [swarm, setSwarm] = useState<NanoSwarmStatus | null>(null)
+
   const [visionBusy, setVisionBusy] = useState(false)
   const [visionMsg, setVisionMsg] = useState('')
   const visionPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -271,7 +269,6 @@ export function SettingsPanel({
     try {
       const vs = await getVisionStatus()
       setVision(vs)
-      setSwarm(null)
       return vs
     } catch {
       return null
@@ -351,7 +348,6 @@ export function SettingsPanel({
       setLaunchAtLogin(Boolean(s.launch_at_login))
       // Prefer shell desktop.json for tray prefs (authoritative at launch).
       setStartInTray(Boolean(s.start_in_tray))
-      setCloseToTray(Boolean(s.close_to_tray))
       setBrowserHomeUrl(
         (s.browser_home_url || '').trim() || 'https://github.com/AhmiDarrow/RemedyAI',
       )
@@ -427,13 +423,12 @@ export function SettingsPanel({
       } else {
         setXaiAuth(null)
       }
-      // Show the form immediately after settings — secondary work in parallel.
-      setLoading(false)
+      // Merge shell prefs before unlocking the form so a fast Save cannot
+      // persist pre-secondary tray/login values.
       console.debug(
         `[remedy:settings] core loaded in ${Math.round(performance.now() - t0)}ms`,
       )
-
-      void Promise.allSettled([
+      await Promise.allSettled([
         (async () => {
           try {
             const prefs = await invoke<{
@@ -446,9 +441,7 @@ export function SettingsPanel({
             if (typeof prefs?.start_in_tray === 'boolean') {
               setStartInTray(prefs.start_in_tray)
             }
-            if (typeof prefs?.close_to_tray === 'boolean') {
-              setCloseToTray(prefs.close_to_tray)
-            }
+            // close_to_tray is product-forced true on save; ignore shell opt-out.
           } catch {
             try {
               setSkipQuitWarn(localStorage.getItem('remedy.skipQuitServerWarning') === '1')
@@ -465,11 +458,11 @@ export function SettingsPanel({
             /* browser / missing permission */
           }
         })(),
-      ]).then(() => {
-        console.debug(
-          `[remedy:settings] secondary loaded in ${Math.round(performance.now() - t0)}ms`,
-        )
-      })
+      ])
+      console.debug(
+        `[remedy:settings] secondary loaded in ${Math.round(performance.now() - t0)}ms`,
+      )
+      setLoading(false)
     } catch (e) {
       console.warn('[remedy:settings] load failed', e)
       // server not ready
@@ -993,8 +986,6 @@ export function SettingsPanel({
               setLaunchAtLogin={setLaunchAtLogin}
               startInTray={startInTray}
               setStartInTray={setStartInTray}
-              closeToTray={closeToTray}
-              setCloseToTray={setCloseToTray}
               skipQuitWarn={skipQuitWarn}
               setSkipQuitWarn={setSkipQuitWarn}
               webToolsEnabled={webToolsEnabled}
@@ -1035,7 +1026,6 @@ export function SettingsPanel({
               handleXaiSignIn={() => { void handleXaiSignIn() }}
               handleXaiLogout={() => { void handleXaiLogout() }}
               vision={vision}
-              swarm={swarm}
               visionBusy={visionBusy}
               setVisionBusy={setVisionBusy}
               visionMsg={visionMsg}

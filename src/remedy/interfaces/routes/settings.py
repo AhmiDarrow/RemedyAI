@@ -245,27 +245,25 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             out["enabled_channels"] = ["cli"]
             out["messengers"] = []
         # Personal assistant (local store + planned OAuth providers)
+        # Read-only on GET: never write the assistant store from a settings fetch
+        # (stale config.toml must not clobber store-only prefs).
         try:
             from remedy.assistant.store import get_assistant_store
 
             astore = get_assistant_store(home_path)
-            # Merge light flags from config.toml if present
+            pub = astore.public_status()
+            # Display-only overlay of config.toml flags (does not persist).
             acfg = cfg.get("assistant") if isinstance(cfg.get("assistant"), dict) else {}
             if acfg:
-                astore.patch_prefs(
-                    **{
-                        k: acfg[k]
-                        for k in (
-                            "enabled",
-                            "timezone",
-                            "money_disclaimer_accepted",
-                        )
-                        if k in acfg
-                    }
-                )
-                if isinstance(acfg.get("brief"), dict):
-                    astore.patch_prefs(brief=acfg["brief"])
-            out["assistant"] = astore.public_status()
+                if "enabled" in acfg:
+                    pub["enabled"] = bool(acfg["enabled"])
+                if "timezone" in acfg and acfg["timezone"] is not None:
+                    pub["timezone"] = str(acfg["timezone"])
+                if "money_disclaimer_accepted" in acfg:
+                    pub["money_disclaimer_accepted"] = bool(
+                        acfg["money_disclaimer_accepted"]
+                    )
+            out["assistant"] = pub
         except Exception as exc:
             logger.debug("settings assistant: %s", exc)
             out["assistant"] = {
