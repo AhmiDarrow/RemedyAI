@@ -4,7 +4,7 @@
  * WebView cannot load those as bare paths. Loopback `/api/...` attachment
  * URLs also need Bearer auth (raw <img src> gets 401).
  */
-import { ensureApiToken, getApiBase, authHeaders, SERVER_URL } from '../api/client'
+import { ensureApiToken, getApiBase, authHeaders, getServerUrl } from '../api/client'
 
 /** LRU-ish blob URL cache (path → object URL). Cap avoids unbounded memory. */
 const BLOB_CACHE_MAX = 96
@@ -167,7 +167,7 @@ export async function resolveChatMediaUrl(src: string): Promise<string> {
     if (raw.startsWith('/api/')) {
       // Prefer same API base the app already uses
       const base = getApiBase().replace(/\/api\/?$/, '')
-      absolute = `${base || SERVER_URL}${raw}`
+      absolute = `${base || getServerUrl()}${raw}`
     }
     try {
       return await fetchAuthedBlob(absolute, `api:${absolute}`)

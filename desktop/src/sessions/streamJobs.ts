@@ -139,10 +139,18 @@ export function registerStreamJob(
   return job
 }
 
+/** Throttle App-wide emits — every-token emit re-rendered the whole tree. */
+const _lastTouchEmitAt = new Map<string, number>()
+const TOUCH_EMIT_MIN_MS = 500
+
 export function touchStreamJob(sessionId: string) {
   const j = jobs.get(sessionId)
   if (!j || j.status !== 'running') return
   j.lastActivityAt = Date.now()
+  const now = Date.now()
+  const last = _lastTouchEmitAt.get(sessionId) || 0
+  if (now - last < TOUCH_EMIT_MIN_MS) return
+  _lastTouchEmitAt.set(sessionId, now)
   emit({ type: 'update', job: { ...j } })
 }
 

@@ -23,6 +23,31 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_BROWSER_HOME_URL = "https://github.com/AhmiDarrow/RemedyAI"
 
+
+def _memory_encrypt_status_public(raw: dict[str, Any]) -> str:
+    """Return off | sqlcipher | unavailable for Settings honesty."""
+    if not bool(raw.get("memory_encrypt", False)):
+        return "off"
+    cached = str(raw.get("_memory_encrypt_status") or "").strip().lower()
+    if cached in ("sqlcipher", "unavailable", "off"):
+        return cached if cached != "off" else "unavailable"
+    # Probe stock sqlite for SQLCipher (cipher_version).
+    try:
+        import sqlite3
+
+        conn = sqlite3.connect(":memory:")
+        try:
+            row = conn.execute("PRAGMA cipher_version").fetchone()
+            if row and row[0]:
+                return "sqlcipher"
+        except Exception:
+            pass
+        finally:
+            conn.close()
+    except Exception:
+        pass
+    return "unavailable"
+
 # Flat keys the agent may set (mirrors SettingsUpdateRequest; no nested bags here).
 SETTABLE_KEYS = frozenset(
     {
@@ -182,6 +207,8 @@ def public_settings_snapshot(cfg: dict[str, Any] | None = None) -> dict[str, Any
             raw.get("retention_log_days") if raw.get("retention_log_days") is not None else 30
         ),
         "memory_encrypt": bool(raw.get("memory_encrypt", False)),
+        # Honesty: requested flag vs actual SQLCipher availability.
+        "memory_encrypt_status": _memory_encrypt_status_public(raw),
         "allow_skill_creation": bool(raw.get("allow_skill_creation", True)),
         "auto_approve_threshold": float(raw.get("auto_approve_threshold", 0.8)),
         "log_level": str(raw.get("log_level") or "INFO").upper(),

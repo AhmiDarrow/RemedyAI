@@ -362,15 +362,47 @@ export function useMessages(sessionId: string | null) {
    * Drain the next queued send for a session.
    * Prefer items for `forSid` (the turn that just finished / focused tab);
    * never jump to another session's queue while this one still has work.
+   * Busy state is per-session (job registry) — not global sendLock/streaming.
    */
   const drainQueue = useCallback(async (forSid?: string | null) => {
-    if (drainingRef.current || streamingRef.current || sendLockRef.current) return
+    if (drainingRef.current) return
     const preferred = forSid || sessionIdRef.current
+    // Session-scoped busy: only block drain for a sid that still has a live job.
+    if (preferred && getStreamJob(preferred)?.status === 'running') return
     const idx = queueRef.current.findIndex(
       (q) => !preferred || !q.sid || q.sid === preferred,
     )
-    if (idx < 0) return
+    if (idx < 0) {
+      // Preferred session empty — try any idle session that has queue items.
+      const otherIdx = queueRef.current.findIndex((q) => {
+        const sid = q.sid || preferred
+        return sid && getStreamJob(sid)?.status !== 'running'
+      })
+      if (otherIdx < 0) return
+      const nextOther = queueRef.current[otherIdx]
+      drainingRef.current = true
+      setQueue((q) => q.filter((_, i) => i !== otherIdx))
+      queueRef.current = queueRef.current.filter((_, i) => i !== otherIdx)
+      try {
+        const fn = sendTurnRef.current
+        if (fn) {
+          await fn(
+            nextOther.text,
+            nextOther.model,
+            nextOther.sid || undefined,
+            nextOther.attachments,
+            nextOther.planMode,
+            nextOther.provider,
+          )
+        }
+      } finally {
+        drainingRef.current = false
+      }
+      return
+    }
     const next = queueRef.current[idx]
+    const nextSid = next.sid || preferred
+    if (nextSid && getStreamJob(nextSid)?.status === 'running') return
     drainingRef.current = true
     setQueue((q) => q.filter((_, i) => i !== idx))
     queueRef.current = queueRef.current.filter((_, i) => i !== idx)
@@ -403,9 +435,13 @@ export function useMessages(sessionId: string | null) {
       const targetId = sid || sessionId
       const hasAtt = Boolean(attachments?.length)
       if (!targetId || (!text.trim() && !hasAtt)) return
-      if (sendLockRef.current || streamingRef.current) return
-      sendLockRef.current = true
-      streamingRef.current = true
+      // Per-session busy — other tabs may stream concurrently.
+      if (getStreamJob(targetId)?.status === 'running') return
+      const isFocusedStart = sessionIdRef.current === targetId
+      if (isFocusedStart) {
+        sendLockRef.current = true
+        streamingRef.current = true
+      }
 
       // Match server-side attachment display: markdown images so ChatImage renders.
       let display = text.trim()
@@ -546,6 +582,8 @@ export function useMessages(sessionId: string | null) {
           if (wasAborted) markJobUiCommitted(targetId)
         }
         completeStreamJob(targetId, wasAborted ? 'aborted' : 'done')
+        // Always clear focused chrome locks when the focused job ends; if this
+        // was a background job, leave focused locks alone (other tab may stream).
         if (isFocusedTurn()) {
           setStreaming(false)
           setStreamStalled(false)
@@ -816,8 +854,11 @@ export function useMessages(sessionId: string | null) {
       )
 
       registerStreamJob(targetId, ctrl, model)
-      streamCtrlRef.current = ctrl
-      setStreamCtrl(ctrl)
+      // Only bind focused chrome AbortController to this job.
+      if (isFocusedTurn()) {
+        streamCtrlRef.current = ctrl
+        setStreamCtrl(ctrl)
+      }
     },
     [
       sessionId,
@@ -848,8 +889,12 @@ export function useMessages(sessionId: string | null) {
       if (!targetId) return
       const provider = opts?.provider
 
-      // Busy: queue for after current turn, or interrupt now.
-      if (streamingRef.current || sendLockRef.current) {
+      // Busy only if *this* session has a live job (or focused chrome is streaming it).
+      const targetBusy =
+        getStreamJob(targetId)?.status === 'running' ||
+        (sessionIdRef.current === targetId &&
+          (streamingRef.current || sendLockRef.current))
+      if (targetBusy) {
         const mode = opts?.mode === 'interrupt' ? 'interrupt' : 'after'
         const item: QueuedSend = {
           id: crypto.randomUUID(),
@@ -863,7 +908,7 @@ export function useMessages(sessionId: string | null) {
         }
         if (mode === 'interrupt') {
           // Stop current stream + server turn, then send this first (ahead of after-queue).
-          const sidAbort = sessionIdRef.current
+          const sidAbort = targetId || sessionIdRef.current
           resetStreamBuffers()
           // Prefer job paint (background / concurrent) over focused partial state.
           const paint = sidAbort ? getJobPaint(sidAbort) : null
@@ -876,7 +921,11 @@ export function useMessages(sessionId: string | null) {
               ? paint.partialText
               : streamAccumRef.current) || ''
           if (sidAbort) {
-            void stopStreamJob(sidAbort).catch(() => {})
+            try {
+              await stopStreamJob(sidAbort)
+            } catch {
+              /* */
+            }
           } else {
             streamCtrlRef.current?.abort()
           }
@@ -920,9 +969,10 @@ export function useMessages(sessionId: string | null) {
           // Put interrupt item at front
           setQueue((q) => [item, ...q.filter((x) => x.id !== item.id)])
           queueRef.current = [item, ...queueRef.current.filter((x) => x.id !== item.id)]
+          // Server abort awaited above — short tick for client cleanup only.
           window.setTimeout(() => {
             void drainQueue(targetId)
-          }, 50)
+          }, 40)
           return
         }
         setQueue((q) => [...q, item])
@@ -1035,10 +1085,16 @@ export function useMessages(sessionId: string | null) {
   /** Stop the stuck turn and re-send the same prompt (provider reconnect). */
   const stopAndRetry = useCallback(() => {
     const pending = lastSentPromptRef.current
-    stop()
-    if (!pending?.text?.trim() && !pending?.attachments?.length) return
-    window.setTimeout(() => {
-      void send(
+    const sid = pending?.sid || sessionIdRef.current
+    void (async () => {
+      try {
+        if (sid) await stopStreamJob(sid)
+      } catch {
+        /* */
+      }
+      stop()
+      if (!pending?.text?.trim() && !pending?.attachments?.length) return
+      await send(
         pending.text,
         pending.model,
         pending.sid,
@@ -1047,7 +1103,7 @@ export function useMessages(sessionId: string | null) {
         // Preserve session LLM bind — without provider, multi-tab retry hits global.
         retrySendOptions(pending),
       )
-    }, 80)
+    })()
   }, [stop, send])
 
   const cancelQueued = useCallback((id: string) => {

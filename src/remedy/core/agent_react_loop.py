@@ -203,7 +203,8 @@ async def call_llm_stream(runtime, message: str,
         )
         # Auto-continue after finish_reason=length / max_tokens until complete.
         # No artificial short-answer wall — keep going until the model finishes.
-        max_length_continuations = 10_000
+        # Cap length continuations — unbounded 10k burned huge token budgets.
+        max_length_continuations = 16
         length_continuations = 0
         # Retry once after repairing DeepSeek reasoning_content on tool turns.
         reasoning_repair_done = False
@@ -223,6 +224,11 @@ async def call_llm_stream(runtime, message: str,
         # Empty-answer recovery (model thought but sent no content).
         empty_answer_retries = 0
         max_empty_answer_retries = 8
+        # Cap agency re-arms / green-gate re-opens (token burn safety).
+        agency_rearm_count = 0
+        max_agency_rearms = 6
+        green_gate_reopen_count = 0
+        max_green_gate_reopens = 6
         # One OAuth/API re-auth attempt per turn (xAI 401 → refresh token).
         auth_refresh_done = False
         # Multi-epoch: soft walls compact; absolute total is safety only.
@@ -1066,7 +1072,10 @@ async def call_llm_stream(runtime, message: str,
                                 refresh_if_needed(home)
                                 new_token = resolve_bearer(home)
                                 if new_token and new_token != _bind.api_key:
-                                    runtime._llm_api_key = new_token
+                                    # Prefer turn binding; avoid racing other tabs on
+                                    # runtime._llm_api_key. Persist only as fallback.
+                                    with suppress(Exception):
+                                        runtime._llm_api_key = new_token
                                     _bind = LlmBinding(
                                         provider=_bind.provider,
                                         model=_bind.model,
@@ -1115,6 +1124,8 @@ async def call_llm_stream(runtime, message: str,
                                     "@@status:Restored thinking-mode reasoning "
                                     "for tool turns; continuing…\n"
                                 )
+                                body = dict(body) if isinstance(body, dict) else {}
+                                body["messages"] = messages
                                 continue
                         # Truncated / invalid tool-call JSON in history (often after
                         # a long plan_save or max_tokens mid-arguments stream).
@@ -1138,6 +1149,8 @@ async def call_llm_stream(runtime, message: str,
                                     "\n[provider fix] Repaired incomplete tool "
                                     "arguments; continuing…\n"
                                 )
+                                body = dict(body) if isinstance(body, dict) else {}
+                                body["messages"] = messages
                                 continue
                             except Exception as repair_exc:
                                 logger.debug(
@@ -1160,7 +1173,12 @@ async def call_llm_stream(runtime, message: str,
                                 # Prefer finishing from context rather than more tools
                                 # that re-inflate huge argument payloads.
                                 tools = []
+                                step_tools = None
                                 force_answer_sticky = True
+                                body = dict(body) if isinstance(body, dict) else {}
+                                body["messages"] = messages
+                                body.pop("tools", None)
+                                body.pop("tool_choice", None)
                                 continue
                             except Exception as strip_exc:
                                 logger.debug(
@@ -1181,8 +1199,19 @@ async def call_llm_stream(runtime, message: str,
                                 "This is not a tool-budget limit.\n"
                             )
                             return
-                        # Already forced a no-tool answer and API still failed → stop.
-                        if force_answer_sticky or force_answer_api_fail_once:
+                        # Force-answer rebuild already attempted and still failed → stop.
+                        if force_answer_api_fail_once:
+                            yield (
+                                f"\n[LLM ERROR — HTTP {resp.status}]\n"
+                                f"{safe_err[:500]}\n[END LLM ERROR]\n\n"
+                                "Stopped after repeated provider errors. "
+                                "Check model/API key in Settings and try again "
+                                "(or say **continue** after switching models).\n"
+                            )
+                            return
+                        # Sticky force-answer attempt (tools cleared) failed → stop.
+                        if force_answer_sticky:
+                            force_answer_api_fail_once = True
                             yield (
                                 f"\n[LLM ERROR — HTTP {resp.status}]\n"
                                 f"{safe_err[:500]}\n[END LLM ERROR]\n\n"
@@ -1192,7 +1221,7 @@ async def call_llm_stream(runtime, message: str,
                             )
                             return
                         api_soft_failures += 1
-                        # Transient path: one force-answer attempt from any tool context.
+                        # Transient path: rebuild no-tool body and POST force-answer.
                         if api_soft_failures <= max_api_soft_failures:
                             yield (
                                 f"\n[LLM notice — HTTP {resp.status}; "
@@ -1201,8 +1230,9 @@ async def call_llm_stream(runtime, message: str,
                                 f"{safe_err[:200]}\n"
                             )
                             tools = []
+                            step_tools = None
                             force_answer_sticky = True
-                            force_answer_api_fail_once = True
+                            # Do NOT set force_answer_api_fail_once until this attempt fails.
                             messages.append(
                                 {
                                     "role": "user",
@@ -1214,6 +1244,53 @@ async def call_llm_stream(runtime, message: str,
                                     ),
                                 }
                             )
+                            try:
+                                _think_r = getattr(runtime, "_thinking_level", "high")
+                                with suppress(Exception):
+                                    from remedy.core.local_agent_optimize import (
+                                        is_local_binding as _ilb,
+                                    )
+                                    if _ilb(
+                                        _bind.provider, _bind.model, _bind.base_url
+                                    ):
+                                        _think_r = "low"
+                                body = _adapter.build_body(
+                                    model=_bind.model,
+                                    messages=messages,
+                                    tools=None,
+                                    stream=use_openai_sse,
+                                    thinking_level=_think_r,
+                                )
+                                with suppress(Exception):
+                                    from remedy.core.local_agent_optimize import (
+                                        apply_local_body_optimize as _alo,
+                                    )
+                                    body = _alo(
+                                        body if isinstance(body, dict) else {},
+                                        provider=_bind.provider,
+                                        model=_bind.model,
+                                        base_url=_bind.base_url,
+                                        user_message=str(message or ""),
+                                        step_index=int(step),
+                                    )
+                                _local_agent = False
+                                with suppress(Exception):
+                                    from remedy.runtime.rmb.mode import is_rmb_provider
+                                    _local_agent = is_rmb_provider(
+                                        _bind.provider,
+                                        getattr(_bind, "base_url", None),
+                                    ) or str(_bind.provider or "").lower() in (
+                                        "ollama",
+                                        "llamacpp",
+                                    )
+                                body = sanitize_chat_body(
+                                    body if isinstance(body, dict) else {},
+                                    local_agent=_local_agent,
+                                )
+                            except Exception as _rb_exc:
+                                logger.warning(
+                                    "force-answer body rebuild failed: %s", _rb_exc
+                                )
                             continue
                         yield (
                             f"\n[LLM ERROR — HTTP {resp.status}]\n"
@@ -1249,8 +1326,13 @@ async def call_llm_stream(runtime, message: str,
                         or ""
                     ).lower()
                     # Prefer real response type; DeepSeek/OpenRouter return event-stream.
+                    # Local/RMB tool rounds force stream=False — parse as JSON message
+                    # (apply_openai_sse_chunk only reads delta, not message).
                     is_event_stream = "event-stream" in content_type
-                    if use_openai_sse or is_event_stream:
+                    _want_stream = bool(
+                        (body.get("stream", True) if isinstance(body, dict) else True)
+                    )
+                    if _want_stream and (use_openai_sse or is_event_stream):
                         content_iter = resp.content.__aiter__()
                         # DeepSeek can pause a while mid-thought, but multi-minute
                         # dead air usually means a stuck provider — cut the round
@@ -1363,11 +1445,15 @@ async def call_llm_stream(runtime, message: str,
                     reasoning_parts = round_state.reasoning_parts
 
                    # Successful HTTP round — leave the local retry loop
+                   _http_round_ok = True
                    break
                   else:
                     # for-loop exhausted without break (both attempts failed status)
-                    pass
-                  _http_round_ok = True
+                    yield (
+                        "\n[LLM ERROR] Provider request failed after retries.\n"
+                        "Check model/API key in Settings and try again.\n"
+                    )
+                    return
                  except Exception as _stream_exc:
                   if (
                     is_disconnect_error(_stream_exc)
@@ -1428,12 +1514,18 @@ async def call_llm_stream(runtime, message: str,
                             from remedy.core.session_quality import get_session_quality
 
                             get_session_quality(
-                                str(getattr(runtime, "_session_id", "") or "")
+                                str(
+                                    getattr(turn, "session_id", None)
+                                    or getattr(runtime, "_session_id", "")
+                                    or ""
+                                )
                             ).record_turn(prompt_tokens=pt, completion_tokens=ct)
                         with suppress(Exception):
                             record_usage_event(
                                 session_id=str(
-                                    getattr(runtime, "_session_id", "") or ""
+                                    getattr(turn, "session_id", None)
+                                    or getattr(runtime, "_session_id", "")
+                                    or ""
                                 )
                                 or None,
                                 provider=prov,
@@ -1661,13 +1753,17 @@ async def call_llm_stream(runtime, message: str,
                         and not force_answer_sticky
                         and not is_final_step
                         and agency_tool_promise_claim(text_out, reasoning_out)
+                        and agency_rearm_count < max_agency_rearms
                     ):
+                        agency_rearm_count += 1
                         _rearm_agency_tools()
                         force_answer_sticky = False
                         messages.append(agency_rearm_nudge_message())
                         logger.info(
-                            "Agency re-arm after tool-promise prose (step %d)",
+                            "Agency re-arm after tool-promise prose (step %d, %d/%d)",
                             step + 1,
+                            agency_rearm_count,
+                            max_agency_rearms,
                         )
                         continue
                     # Build engine: monologue without tools is illegal mid-build —
@@ -1714,17 +1810,27 @@ async def call_llm_stream(runtime, message: str,
 
                             bst_g = get_build_state(runtime)
                             if build_blocks_final_answer(bst_g) and bst_g is not None:
-                                if "green_gate" not in bst_g.nudges_emitted:
-                                    bst_g.nudges_emitted.append("green_gate")
-                                _rearm_agency_tools()
-                                force_answer_sticky = False
-                                messages.append(unfinished_green_gate_message(bst_g))
-                                logger.info(
-                                    "Build green-gate blocked final (step %d phase=%s)",
-                                    step + 1,
-                                    bst_g.phase,
-                                )
-                                continue
+                                if green_gate_reopen_count >= max_green_gate_reopens:
+                                    logger.warning(
+                                        "Build green-gate cap (%d) — allowing final",
+                                        max_green_gate_reopens,
+                                    )
+                                else:
+                                    green_gate_reopen_count += 1
+                                    if "green_gate" not in bst_g.nudges_emitted:
+                                        bst_g.nudges_emitted.append("green_gate")
+                                    _rearm_agency_tools()
+                                    force_answer_sticky = False
+                                    messages.append(unfinished_green_gate_message(bst_g))
+                                    logger.info(
+                                        "Build green-gate blocked final "
+                                        "(step %d phase=%s %d/%d)",
+                                        step + 1,
+                                        bst_g.phase,
+                                        green_gate_reopen_count,
+                                        max_green_gate_reopens,
+                                    )
+                                    continue
                     # Narrating "I'm processing…" without tools looks stuck in the UI.
                     # Never accept a status-only line as the final answer while tools
                     # are available (session bug 2026-07-28: short snippet then stop).
@@ -1889,13 +1995,17 @@ async def call_llm_stream(runtime, message: str,
                     and not force_answer_sticky
                     and not is_final_step
                     and agency_tool_promise_claim(text_out, reasoning_out)
+                    and agency_rearm_count < max_agency_rearms
                 ):
+                    agency_rearm_count += 1
                     _rearm_agency_tools()
                     force_answer_sticky = False
                     messages.append(agency_rearm_nudge_message())
                     logger.info(
-                        "Agency re-arm after tool-promise prose (step %d)",
+                        "Agency re-arm after tool-promise prose (step %d, %d/%d)",
                         step + 1,
+                        agency_rearm_count,
+                        max_agency_rearms,
                     )
                     continue
 

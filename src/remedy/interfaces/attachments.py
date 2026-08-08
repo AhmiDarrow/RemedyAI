@@ -16,8 +16,10 @@ from uuid import uuid4
 # Per-file cap; total batch should stay under ~25 MiB for API sanity.
 MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024
 MAX_IMAGE_VISION_BYTES = 4 * 1024 * 1024
-# Prefer full attachments; only emergency OOM guard if ever needed.
-MAX_TEXT_INJECT_CHARS = 0  # 0 = no inject truncation
+# Cap text inject into prompts (full file still on disk via tools).
+# 0 would inject up to MAX_ATTACHMENT_BYTES per file — multi-MiB prompt blowups.
+MAX_TEXT_INJECT_CHARS = 48 * 1024
+MAX_TEXT_INJECT_TOTAL_CHARS = 200 * 1024
 
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9._\- ()\[\]]+")
 
@@ -282,9 +284,16 @@ def inject_text_file_snippets(
     Only reads paths under the attachments tree (path jail).
     """
     chunks: list[str] = []
+    total = 0
     for a in filter_jailed_attachments(
         attachments, home_dir=home_dir, session_id=session_id
     ):
+        if total >= MAX_TEXT_INJECT_TOTAL_CHARS:
+            chunks.append(
+                "\n…[additional text attachments omitted for context size; "
+                "use file_read on paths above]\n"
+            )
+            break
         path = Path(str(a.get("path") or ""))
         if not path.is_file():
             continue
@@ -299,9 +308,14 @@ def inject_text_file_snippets(
         if not text.strip():
             continue
         if MAX_TEXT_INJECT_CHARS > 0 and len(text) > MAX_TEXT_INJECT_CHARS:
-            text = text[:MAX_TEXT_INJECT_CHARS] + "\n…[truncated]"
+            text = text[:MAX_TEXT_INJECT_CHARS] + "\n…[truncated for context; full file on disk]"
+        remain = MAX_TEXT_INJECT_TOTAL_CHARS - total
+        if len(text) > remain:
+            text = text[:remain] + "\n…[truncated for total inject budget]"
         lang = path.suffix.lstrip(".") or "text"
-        chunks.append(f"\n### Attached: {name}\n```{lang}\n{text}\n```\n")
+        block = f"\n### Attached: {name}\n```{lang}\n{text}\n```\n"
+        chunks.append(block)
+        total += len(block)
     return "".join(chunks)
 
 
