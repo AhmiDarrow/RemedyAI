@@ -9,6 +9,7 @@ import {
   type UsageSummary,
 } from '../api/usage'
 import { formatCost, formatTokens } from '../utils/tokenCost'
+import { EmptyState } from './EmptyState'
 
 interface UsageDashboardProps {
   open: boolean
@@ -36,9 +37,11 @@ function BarChart({
   const max = Math.max(1, ...byDay.map(([, v]) => v))
   if (byDay.length === 0) {
     return (
-      <div className="text-xs py-4 text-center" style={{ color: 'var(--text-muted)' }}>
-        No usage data yet — send a few messages and costs will appear here.
-      </div>
+      <EmptyState
+        compact
+        title="No usage data yet"
+        description="Send a few messages and costs will appear here."
+      />
     )
   }
 
@@ -108,39 +111,29 @@ export function UsageDashboard({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: 'rgba(0,0,0,0.45)' }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 ui-overlay"
       onClick={onClose}
       role="presentation"
     >
       <div
-        className="w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col rounded-lg shadow-xl"
-        style={{
-          background: 'var(--bg-primary)',
-          border: '1px solid var(--border)',
-          color: 'var(--text-primary)',
-        }}
+        className="ui-surface w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col"
+        style={{ color: 'var(--text-primary)', background: 'var(--bg-primary)' }}
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-label="Usage and continuity dashboard"
       >
         <div
           className="flex items-center justify-between px-4 py-3 border-b"
-          style={{ borderColor: 'var(--border)' }}
+          style={{ borderColor: 'color-mix(in srgb, var(--border) 80%, transparent)' }}
         >
           <div>
-            <div className="text-sm font-semibold">Usage & Continuity</div>
+            <div className="text-sm font-semibold tracking-tight">Usage & Continuity</div>
             <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
               NanoToken multiprovider accounting · harness quality
               {provider ? ` · active ${provider}/${model || '…'}` : ''}
             </div>
           </div>
-          <button
-            type="button"
-            className="text-xs px-2 py-1 rounded"
-            style={{ background: 'var(--bg-tertiary)' }}
-            onClick={onClose}
-          >
+          <button type="button" className="ui-btn ui-btn-ghost" onClick={onClose}>
             Close
           </button>
         </div>
@@ -150,11 +143,7 @@ export function UsageDashboard({
             <button
               key={t}
               type="button"
-              className="text-xs px-3 py-1.5 rounded capitalize"
-              style={{
-                background: tab === t ? 'var(--accent)' : 'var(--bg-tertiary)',
-                color: tab === t ? '#fff' : 'var(--text-primary)',
-              }}
+              className={`seg-btn capitalize${tab === t ? ' is-active' : ''}`}
               onClick={() => setTab(t)}
             >
               {t === 'usage' ? 'Usage & cost' : 'Harness'}

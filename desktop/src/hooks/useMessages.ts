@@ -348,7 +348,8 @@ export function useMessages(sessionId: string | null) {
         }
       }
     }
-  }, [load])
+    // sessionId is intentional: every tab switch must rebind paint / history.
+  }, [load, sessionId])
 
   useEffect(() => {
     queueRef.current = queue

@@ -332,27 +332,17 @@ export function Sidebar({
 
   return (
     <div
-      className="flex flex-col min-h-0 h-full"
+      className="sidebar-root flex flex-col min-h-0 h-full"
       style={{
         width: embedded ? '100%' : 270,
-        background: 'var(--bg-secondary)',
         borderColor: 'var(--border)',
         borderRight: embedded ? undefined : '1px solid var(--border)',
       }}
     >
       {/* Sticky chrome: stays visible while session list scrolls */}
-      <div
-        className="p-3 border-b space-y-2 shrink-0 sticky top-0 z-10"
-        style={{ borderColor: 'var(--border)', background: 'var(--bg-secondary)' }}
-      >
-        <button
-          onClick={onNew}
-          className="w-full text-left px-3 py-2 rounded-md text-sm font-medium transition-colors"
-          style={{ background: 'var(--accent)', color: '#fff' }}
-          onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--accent-hover)')}
-          onMouseLeave={(e) => (e.currentTarget.style.background = 'var(--accent)')}
-        >
-          + New Session
+      <div className="sidebar-chrome p-3 space-y-2 shrink-0 sticky top-0 z-10">
+        <button type="button" onClick={onNew} className="sidebar-new-btn">
+          + New session
         </button>
         {(onExport || onImport) && (
           <div className="flex gap-1.5">
@@ -360,10 +350,10 @@ export function Sidebar({
               <button
                 type="button"
                 onClick={onImport}
-                className="flex-1 px-2 py-1.5 rounded-md text-xs font-medium"
+                className="flex-1 px-2 py-1.5 rounded-lg text-xs font-medium"
                 style={{
-                  background: 'var(--bg-primary)',
-                  border: '1px solid var(--border)',
+                  background: 'color-mix(in srgb, var(--bg-primary) 88%, transparent)',
+                  border: '1px solid color-mix(in srgb, var(--border) 85%, transparent)',
                   color: 'var(--text-secondary)',
                 }}
               >
@@ -375,10 +365,10 @@ export function Sidebar({
                 type="button"
                 onClick={() => activeId && onExport(activeId)}
                 disabled={!activeId}
-                className="flex-1 px-2 py-1.5 rounded-md text-xs font-medium disabled:opacity-40"
+                className="flex-1 px-2 py-1.5 rounded-lg text-xs font-medium disabled:opacity-40"
                 style={{
-                  background: 'var(--bg-primary)',
-                  border: '1px solid var(--border)',
+                  background: 'color-mix(in srgb, var(--bg-primary) 88%, transparent)',
+                  border: '1px solid color-mix(in srgb, var(--border) 85%, transparent)',
                   color: 'var(--text-secondary)',
                 }}
               >
@@ -391,12 +381,7 @@ export function Sidebar({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search sessions, projects…"
-          className="w-full rounded-md px-2.5 py-1.5 text-xs outline-none"
-          style={{
-            background: 'var(--bg-primary)',
-            border: '1px solid var(--border)',
-            color: 'var(--text-primary)',
-          }}
+          className="sidebar-search"
           aria-label="Search sessions"
         />
         <div className="flex flex-wrap gap-1">
@@ -803,7 +788,7 @@ function ProjectSection({
   return (
     <div className="mb-0.5">
       <div
-        className="group/header flex items-center gap-1 px-2 py-1.5 mx-1 rounded-md cursor-pointer select-none"
+        className="sidebar-project-header group/header flex items-center gap-1 px-2 py-1.5 mx-1 cursor-pointer select-none"
         style={{
           background: dropHover
             ? 'color-mix(in srgb, var(--accent) 28%, transparent)'
@@ -921,16 +906,12 @@ function ProjectSection({
                 key={s.id}
                 // Drag-to-folder is unreliable in Tauri WebView — reorder via ↑↓.
                 draggable={false}
-                className="group flex flex-col px-2 cursor-pointer text-sm relative"
+                className={`sidebar-session-row group flex flex-col px-2 cursor-pointer text-sm relative${
+                  s.id === activeId ? ' is-active' : ''
+                }${isSel ? ' is-selected' : ''}`}
                 style={{
-                  background: isSel
-                    ? 'color-mix(in srgb, var(--accent) 18%, var(--bg-tertiary))'
-                    : s.id === activeId
-                      ? 'var(--bg-tertiary)'
-                      : 'transparent',
+                  background: 'transparent',
                   color: s.id === activeId ? 'var(--text-primary)' : 'var(--text-secondary)',
-                  borderLeft:
-                    s.id === activeId ? '3px solid var(--accent)' : '3px solid transparent',
                   paddingTop: 'var(--sidebar-row-py)',
                   paddingBottom: 'var(--sidebar-row-py)',
                   marginLeft: isNone ? 0 : 4,
@@ -1225,12 +1206,8 @@ function FilterChip({
     <button
       type="button"
       onClick={onClick}
-      className="text-[10px] px-1.5 py-0.5 rounded-full"
-      style={{
-        background: active ? 'var(--accent)' : 'var(--bg-tertiary)',
-        color: active ? '#fff' : 'var(--text-muted)',
-        border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
-      }}
+      className={`sidebar-filter-chip${active ? ' is-active' : ''}`}
+      aria-pressed={active}
     >
       {label}
     </button>

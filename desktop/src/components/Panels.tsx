@@ -78,24 +78,28 @@ export function Panel({ open, onClose, title, children, toolbar }: PanelProps) {
       data-keep-focus
       className="flex flex-col border-l overflow-hidden fixed right-0 z-[80]"
       style={{
+        background: 'color-mix(in srgb, var(--bg-secondary) 96%, var(--bg-primary))',
+        borderColor: 'color-mix(in srgb, var(--border) 85%, transparent)',
         top: TITLEBAR_H,
         bottom: STATUSBAR_H,
         width: 300,
-        background: 'var(--bg-secondary)',
-        borderColor: 'var(--border)',
-        boxShadow: '-8px 0 24px rgba(0,0,0,0.25)',
+        boxShadow: '-8px 0 24px rgba(0,0,0,0.22)',
       }}
     >
       <div
-        className="flex items-center justify-between px-3 py-2 border-b text-xs font-medium flex-shrink-0"
-        style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}
+        className="flex items-center justify-between px-3 py-2.5 border-b text-xs font-semibold tracking-tight flex-shrink-0"
+        style={{
+          borderColor: 'color-mix(in srgb, var(--border) 80%, transparent)',
+          color: 'var(--text-primary)',
+        }}
       >
         <span>{title}</span>
         <button
           ref={closeRef}
+          type="button"
           onClick={onClose}
-          className="px-1 rounded text-base leading-none"
-          style={{ color: 'var(--text-muted)' }}
+          className="ui-btn ui-btn-ghost text-base leading-none"
+          style={{ padding: '0.15rem 0.4rem' }}
           aria-label={`Close ${title}`}
         >
           {'\u00D7'}

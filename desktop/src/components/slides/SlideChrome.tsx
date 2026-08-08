@@ -13,15 +13,14 @@ export function SlideRail({
 }) {
   return (
     <div
-      className="flex flex-col items-center gap-0.5 py-1 border-r shrink-0"
+      className="slide-rail flex flex-col items-center border-r shrink-0"
       style={{
         width: 36,
-        background: 'var(--bg-tertiary)',
-        borderColor: 'var(--border)',
         borderRightWidth: side === 'left' ? 1 : 0,
         borderLeftWidth: side === 'right' ? 1 : 0,
         borderLeftStyle: 'solid',
         borderRightStyle: 'solid',
+        borderColor: 'var(--border)',
       }}
     >
       {ALL_SLIDES.map((id) => {
@@ -32,10 +31,15 @@ export function SlideRail({
             key={id}
             type="button"
             title={m.label}
-            className="w-8 h-8 rounded text-sm flex items-center justify-center"
+            aria-pressed={on}
+            className={`slide-rail-btn flex items-center justify-center${on ? ' is-active' : ''}`}
+            data-label={m.label}
+            aria-label={m.label}
             style={{
-              background: on ? 'var(--accent)' : 'transparent',
-              color: on ? '#fff' : 'var(--text-secondary)',
+              background: 'transparent',
+              color: on ? undefined : 'var(--text-secondary)',
+              border: 'none',
+              cursor: 'pointer',
             }}
             onClick={() => onSelect(id)}
           >
@@ -84,8 +88,8 @@ export function SlideFrame({
         }}
       >
         <div
-          className="flex items-center gap-1 px-2 py-1 border-b shrink-0 text-xs font-semibold"
-          style={{ borderColor: 'var(--border)', color: 'var(--text-primary)' }}
+          className="slide-frame-chrome flex items-center gap-1 px-2 py-1.5 shrink-0 text-xs font-semibold"
+          style={{ color: 'var(--text-primary)' }}
         >
           <span className="truncate flex-1">{meta.label}</span>
           {meta.popout && onPopout && (
@@ -126,8 +130,8 @@ export function SlideFrame({
       )}
       {onWidth && (
         <div
-          className="w-1 cursor-col-resize shrink-0 hover:bg-[var(--accent)]"
-          style={{ background: 'transparent' }}
+          className="slide-resize-handle"
+          title="Drag to resize panel"
           onMouseDown={(e) => {
             e.preventDefault()
             const startX = e.clientX

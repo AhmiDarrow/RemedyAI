@@ -50,33 +50,40 @@ export function SettingsSection({
 
   return (
     <section
-      className="rounded-lg overflow-hidden"
-      style={{ border: '1px solid var(--border)' }}
+      className="rounded-xl overflow-hidden"
+      style={{
+        border: '1px solid color-mix(in srgb, var(--border) 88%, transparent)',
+        background: open
+          ? 'color-mix(in srgb, var(--bg-secondary) 70%, transparent)'
+          : 'transparent',
+      }}
       data-section={id}
       data-keywords={`${title} ${summary || ''} ${keywords}`.toLowerCase()}
     >
       <button
         type="button"
         onClick={toggle}
-        className="w-full flex items-center gap-2 px-2.5 py-2 text-left transition-colors"
+        className="w-full flex items-center gap-2 px-3 py-2.5 text-left transition-colors"
         style={{
-          background: open ? 'var(--bg-tertiary)' : 'transparent',
+          background: open
+            ? 'color-mix(in srgb, var(--accent) 6%, var(--bg-tertiary))'
+            : 'transparent',
           color: 'var(--text-primary)',
         }}
         aria-expanded={open}
       >
         <span
           className="inline-flex w-4 justify-center text-[10px] flex-shrink-0"
-          style={{ color: 'var(--text-muted)' }}
+          style={{ color: open ? 'var(--accent)' : 'var(--text-muted)' }}
           aria-hidden
         >
-          {open ? '▼' : '▶'}
+          {open ? '▾' : '▸'}
         </span>
         <span className="flex-1 min-w-0">
-          <span className="block font-semibold text-xs">{title}</span>
+          <span className="block font-semibold text-xs tracking-tight">{title}</span>
           {!open && summary ? (
             <span
-              className="block text-[10px] truncate mt-0.5"
+              className="block text-[10px] truncate mt-0.5 leading-snug"
               style={{ color: 'var(--text-muted)' }}
             >
               {summary}
@@ -86,8 +93,10 @@ export function SettingsSection({
       </button>
       {open && (
         <div
-          className="px-2.5 pb-3 pt-1 space-y-2 text-xs"
-          style={{ borderTop: '1px solid var(--border)' }}
+          className="px-3 pb-3.5 pt-1.5 space-y-2 text-xs"
+          style={{
+            borderTop: '1px solid color-mix(in srgb, var(--border) 80%, transparent)',
+          }}
         >
           {children}
         </div>

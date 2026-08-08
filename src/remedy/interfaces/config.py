@@ -1175,7 +1175,21 @@ sarcasm_mode = false
 # thinking_level = "high"   # off | low | medium | high
 # tool_process = "off"      # off | medium | full
 # web_tools_enabled = false # opt-in public web_fetch (SSRF-guarded)
+# http_bootstrap — omit for auto: False on desktop sidecar, True on plain serve.
 # http_bootstrap = true     # browser loopback token; desktop prefers IPC
+
+# Maturity gates (experimental / advanced organs — default off / honest)
+# soul_field_enabled = false   # experimental personhood inject + soul_* tools
+# build_os_advanced = false    # Build OS frontiers A–H tools
+# rmb_enabled = true           # RMB local agent host allowed when configured
+
+# Retention (days; 0 = never auto-purge). Soft defaults: shots 14d, undo/logs 30d
+# retention_session_days = 0
+# retention_attachment_days = 0
+# retention_computer_shot_days = 14
+# retention_undo_days = 30
+# retention_log_days = 30
+# memory_encrypt = false       # SQLCipher when a cipher-linked sqlite is installed
 
 # Memory harness (chat compression)
 # harness_mode = "auto"     # off | manual | auto

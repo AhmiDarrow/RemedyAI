@@ -116,29 +116,29 @@ export function PlanBanner({
 
   return (
     <div
-      className="mx-3 mt-2 mb-1 rounded-lg border px-3 py-2 text-xs shrink-0"
-      style={{
-        background: 'color-mix(in srgb, var(--accent) 10%, var(--bg-secondary))',
-        borderColor: 'var(--accent)',
-        color: 'var(--text-primary)',
-      }}
+      className="ui-banner ui-banner-plan mx-3 mt-2 mb-1 text-xs shrink-0"
+      style={{ color: 'var(--text-primary)' }}
       data-plan-banner
       data-plan-mode={planMode ? 'true' : 'false'}
       data-plan-status={status}
     >
-      <div className="flex items-center gap-2 mb-1">
-        <span className="font-semibold" style={{ color: 'var(--accent)' }}>
+      <div className="flex items-center gap-2 mb-1.5">
+        <span
+          className="font-semibold uppercase tracking-wide text-[0.68rem]"
+          style={{ color: 'var(--accent)' }}
+        >
           {headerLabel}
         </span>
         {plan?.title && (
           <span className="truncate font-medium">{plan.title}</span>
         )}
         {plan?.status && (
-          <span className="opacity-70">· {plan.status}</span>
+          <span className="opacity-70 text-[0.7rem]">· {plan.status}</span>
         )}
         <button
           type="button"
-          className="ml-auto opacity-70 hover:opacity-100"
+          className="ml-auto ui-btn ui-btn-ghost"
+          style={{ padding: '0.15rem 0.4rem', fontSize: '0.7rem' }}
           title="Refresh plan"
           onClick={() => void refresh()}
           disabled={loading || busy}
@@ -147,12 +147,12 @@ export function PlanBanner({
         </button>
       </div>
       {plan?.goal && (
-        <div className="mb-1 opacity-90" style={{ color: 'var(--text-secondary)' }}>
+        <div className="mb-1.5 opacity-90" style={{ color: 'var(--text-secondary)' }}>
           Goal: {plan.goal}
         </div>
       )}
       {steps.length > 0 && (
-        <ol className="list-decimal ml-4 mb-2 space-y-0.5" style={{ color: 'var(--text-secondary)' }}>
+        <ol className="list-decimal ml-4 mb-2.5 space-y-0.5" style={{ color: 'var(--text-secondary)' }}>
           {steps.slice(0, 8).map((s) => (
             <li key={s.id}>{s.title}</li>
           ))}
@@ -160,7 +160,7 @@ export function PlanBanner({
         </ol>
       )}
       {!plan && planMode && (
-        <div className="mb-2" style={{ color: 'var(--text-muted)' }}>
+        <div className="mb-2.5" style={{ color: 'var(--text-muted)' }}>
           {loading
             ? 'Loading plan…'
             : 'No plan for this session yet. Research with read-only tools, then save a plan. Ask questions if anything is unclear.'}
@@ -175,12 +175,7 @@ export function PlanBanner({
         {showApprove && (
           <button
             type="button"
-            className="px-2 py-1 rounded font-semibold"
-            style={{
-              background: 'var(--accent)',
-              color: '#fff',
-              opacity: busy || (!plan && planMode) ? 0.6 : 1,
-            }}
+            className="ui-btn ui-btn-primary"
             onClick={() => void handleApprove()}
             title={
               midBuild
@@ -195,12 +190,7 @@ export function PlanBanner({
         {planMode && (
           <button
             type="button"
-            className="px-2 py-1 rounded"
-            style={{
-              background: 'var(--bg-primary)',
-              border: '1px solid var(--border)',
-              color: 'var(--text-secondary)',
-            }}
+            className="ui-btn ui-btn-secondary"
             onClick={() =>
               onRequestChanges(
                 plan
@@ -215,12 +205,7 @@ export function PlanBanner({
         )}
         <button
           type="button"
-          className="px-2 py-1 rounded font-medium"
-          style={{
-            background: 'var(--bg-primary)',
-            border: '1px solid var(--border)',
-            color: 'var(--error, #e55)',
-          }}
+          className="ui-btn ui-btn-danger"
           onClick={() => void handleCancel()}
           title={
             plan?.id

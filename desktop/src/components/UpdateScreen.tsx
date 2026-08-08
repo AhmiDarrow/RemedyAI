@@ -100,15 +100,13 @@ export function UpdateScreen({ info, onClose, autoStart = true }: UpdateScreenPr
   return (
     <div
       className="flex items-center justify-center h-full w-full"
-      style={{ background: 'var(--bg-primary)', color: 'var(--text-primary)' }}
+      style={{
+        background:
+          'radial-gradient(90% 50% at 50% 0%, color-mix(in srgb, var(--accent) 10%, transparent), var(--bg-primary) 55%)',
+        color: 'var(--text-primary)',
+      }}
     >
-      <div
-        className="rounded-xl shadow-2xl p-8 w-full max-w-md mx-4"
-        style={{
-          background: 'var(--bg-secondary)',
-          border: '1px solid var(--border)',
-        }}
-      >
+      <div className="ui-surface w-full max-w-md mx-4 p-7">
         <div className="text-center mb-6">
           <img
             src={logoSrc}
@@ -119,12 +117,12 @@ export function UpdateScreen({ info, onClose, autoStart = true }: UpdateScreenPr
               width: 'auto',
               maxWidth: 220,
               objectFit: 'contain',
-              margin: '0 auto 12px',
+              margin: '0 auto 14px',
               display: 'block',
               imageRendering: 'auto',
             }}
           />
-          <div className="text-2xl font-bold mb-1" style={{ color: 'var(--accent)' }}>
+          <div className="text-xl font-bold mb-1 tracking-tight" style={{ color: 'var(--accent)' }}>
             Remedy Update
           </div>
           <div className="text-sm" style={{ color: 'var(--text-muted)' }}>
@@ -138,21 +136,24 @@ export function UpdateScreen({ info, onClose, autoStart = true }: UpdateScreenPr
         </div>
 
         <div
-          className="rounded-lg px-4 py-3 mb-5 text-sm flex justify-between items-center"
-          style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}
+          className="rounded-xl px-4 py-3 mb-5 text-sm flex justify-between items-center"
+          style={{
+            background: 'color-mix(in srgb, var(--bg-tertiary) 80%, transparent)',
+            border: '1px solid color-mix(in srgb, var(--border) 85%, transparent)',
+          }}
         >
           <span style={{ color: 'var(--text-muted)' }}>Version</span>
-          <span className="font-medium">
-            v{from} {'->'} <span style={{ color: 'var(--accent)' }}>v{to}</span>
+          <span className="font-medium tabular-nums">
+            v{from} → <span style={{ color: 'var(--accent)' }}>v{to}</span>
           </span>
         </div>
 
         {info.release_notes && phase === 'ready' && (
           <div
-            className="mb-5 text-xs max-h-28 overflow-y-auto rounded p-3"
+            className="mb-5 text-xs max-h-28 overflow-y-auto rounded-xl p-3"
             style={{
-              background: 'var(--bg-primary)',
-              border: '1px solid var(--border)',
+              background: 'color-mix(in srgb, var(--bg-primary) 80%, transparent)',
+              border: '1px solid color-mix(in srgb, var(--border) 85%, transparent)',
               color: 'var(--text-secondary)',
               whiteSpace: 'pre-wrap',
             }}
@@ -165,13 +166,14 @@ export function UpdateScreen({ info, onClose, autoStart = true }: UpdateScreenPr
           <div className="mb-5">
             <div
               className="h-2 rounded-full overflow-hidden mb-2"
-              style={{ background: 'var(--bg-tertiary)' }}
+              style={{ background: 'color-mix(in srgb, var(--bg-tertiary) 90%, transparent)' }}
             >
               <div
                 className="h-full rounded-full transition-all duration-300"
                 style={{
                   width: `${Math.min(100, Math.max(0, percent))}%`,
                   background: 'var(--accent)',
+                  boxShadow: '0 0 12px color-mix(in srgb, var(--accent) 45%, transparent)',
                 }}
               />
             </div>
@@ -183,11 +185,11 @@ export function UpdateScreen({ info, onClose, autoStart = true }: UpdateScreenPr
 
         {phase === 'error' && (
           <div
-            className="mb-5 px-3 py-2 rounded text-xs"
+            className="mb-5 px-3 py-2.5 rounded-xl text-xs"
             style={{
-              background: 'var(--error-bg, rgba(239,68,68,0.1))',
+              background: 'color-mix(in srgb, var(--error) 12%, var(--bg-secondary))',
               color: 'var(--error)',
-              border: '1px solid var(--error)',
+              border: '1px solid color-mix(in srgb, var(--error) 45%, var(--border))',
             }}
           >
             {error || 'Something went wrong.'}
@@ -200,12 +202,8 @@ export function UpdateScreen({ info, onClose, autoStart = true }: UpdateScreenPr
               <button
                 type="button"
                 onClick={onClose}
-                className="flex-1 py-2.5 rounded text-sm font-medium"
-                style={{
-                  background: 'var(--bg-tertiary)',
-                  color: 'var(--text-secondary)',
-                  border: '1px solid var(--border)',
-                }}
+                className="ui-btn ui-btn-secondary flex-1"
+                style={{ padding: '0.65rem 0.75rem', fontSize: '0.85rem' }}
               >
                 Later
               </button>
@@ -213,8 +211,8 @@ export function UpdateScreen({ info, onClose, autoStart = true }: UpdateScreenPr
                 type="button"
                 onClick={() => void begin()}
                 disabled={busy || !info.download_url}
-                className="flex-1 py-2.5 rounded text-sm font-medium"
-                style={{ background: 'var(--accent)', color: '#fff' }}
+                className="ui-btn ui-btn-primary flex-1"
+                style={{ padding: '0.65rem 0.75rem', fontSize: '0.85rem' }}
               >
                 Update & Relaunch
               </button>
@@ -225,20 +223,16 @@ export function UpdateScreen({ info, onClose, autoStart = true }: UpdateScreenPr
               <button
                 type="button"
                 onClick={onClose}
-                className="flex-1 py-2.5 rounded text-sm font-medium"
-                style={{
-                  background: 'var(--bg-tertiary)',
-                  color: 'var(--text-secondary)',
-                  border: '1px solid var(--border)',
-                }}
+                className="ui-btn ui-btn-secondary flex-1"
+                style={{ padding: '0.65rem 0.75rem', fontSize: '0.85rem' }}
               >
                 Close
               </button>
               <button
                 type="button"
                 onClick={() => void begin()}
-                className="flex-1 py-2.5 rounded text-sm font-medium"
-                style={{ background: 'var(--accent)', color: '#fff' }}
+                className="ui-btn ui-btn-primary flex-1"
+                style={{ padding: '0.65rem 0.75rem', fontSize: '0.85rem' }}
               >
                 Retry
               </button>

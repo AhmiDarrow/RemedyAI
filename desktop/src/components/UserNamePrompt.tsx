@@ -21,27 +21,19 @@ export function UserNamePrompt({ open, initial = '', onSave, onSkip }: UserNameP
 
   return (
     <div
-      className="fixed inset-0 z-[90] flex items-center justify-center p-4"
-      style={{ background: 'rgba(0,0,0,0.55)' }}
+      className="fixed inset-0 z-[90] flex items-center justify-center p-4 ui-overlay"
       role="dialog"
       aria-modal="true"
       aria-labelledby="user-name-title"
     >
-      <div
-        className="w-full max-w-sm rounded-xl p-5 shadow-2xl"
-        style={{
-          background: 'var(--bg-secondary)',
-          border: '1px solid var(--border)',
-          color: 'var(--text-primary)',
-        }}
-      >
-        <div className="flex items-center gap-3 mb-3">
-          <RemedyLogo size={32} framed />
-          <div>
-            <div id="user-name-title" className="font-semibold text-sm">
+      <div className="ui-surface w-full max-w-sm p-5" style={{ color: 'var(--text-primary)' }}>
+        <div className="flex items-center gap-3 mb-4">
+          <RemedyLogo size={36} framed />
+          <div className="min-w-0">
+            <div id="user-name-title" className="font-semibold text-sm tracking-tight">
               What should Remedy call you?
             </div>
-            <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+            <div className="text-[11px] mt-0.5 leading-snug" style={{ color: 'var(--text-muted)' }}>
               Used in chat and memory — change anytime in Settings.
             </div>
           </div>
@@ -54,36 +46,18 @@ export function UserNamePrompt({ open, initial = '', onSave, onSkip }: UserNameP
             if (e.key === 'Enter') submit()
           }}
           placeholder="Your name"
-          className="w-full rounded-lg px-3 py-2 text-sm outline-none mb-3"
-          style={{
-            background: 'var(--bg-primary)',
-            border: '1px solid var(--border)',
-            color: 'var(--text-primary)',
-          }}
+          className="ui-input mb-4 text-sm"
+          style={{ padding: '0.55rem 0.75rem', fontSize: '0.875rem' }}
         />
         <div className="flex gap-2 justify-end">
           {onSkip && (
-            <button
-              type="button"
-              className="px-3 py-1.5 rounded-lg text-xs"
-              style={{
-                background: 'var(--bg-tertiary)',
-                color: 'var(--text-secondary)',
-                border: '1px solid var(--border)',
-              }}
-              onClick={onSkip}
-            >
+            <button type="button" className="ui-btn ui-btn-secondary" onClick={onSkip}>
               Later
             </button>
           )}
           <button
             type="button"
-            className="px-3 py-1.5 rounded-lg text-xs font-medium"
-            style={{
-              background: name.trim() ? 'var(--accent)' : 'var(--bg-tertiary)',
-              color: name.trim() ? '#fff' : 'var(--text-muted)',
-              cursor: name.trim() ? 'pointer' : 'not-allowed',
-            }}
+            className="ui-btn ui-btn-primary"
             disabled={!name.trim()}
             onClick={submit}
           >

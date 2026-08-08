@@ -1,0 +1,493 @@
+"""Turn preamble for ReAct — distill, context, vision, tools selection.
+
+Extracted from ``call_llm_stream`` so the epoch loop stays readable and
+preamble pieces can be unit-tested independently.
+"""
+
+from __future__ import annotations
+
+import re
+from collections.abc import AsyncIterator
+from contextlib import suppress
+from dataclasses import dataclass, field
+from typing import Any
+
+from remedy.core.provider_sanitize import sanitize_chat_body  # noqa: F401 — re-export habit
+from remedy.core.react_policy import TOOL_RESULT_CHAR_CAP as _TOOL_RESULT_CHAR_CAP
+from remedy.core.react_stream import (
+    build_runtime_system_block,
+    should_enable_tools,
+)
+
+
+@dataclass
+class BrowseIntentFlags:
+    browse_pre_url: str | None = None
+    clear_goals_only: bool = False
+    pure_action_kick: bool = False
+    open_only_browse: bool = False
+    page_interaction: bool = False
+
+
+@dataclass
+class TurnPreamble:
+    """Everything prepared before the multi-epoch LLM loop."""
+
+    context: str
+    history: list[dict[str, Any]]
+    messages: list[dict[str, Any]]
+    all_tools: list[dict[str, Any]]
+    tools: list[dict[str, Any]] | None
+    browse: BrowseIntentFlags = field(default_factory=BrowseIntentFlags)
+    vision_mode: str = "native"
+    decode_brief: str | None = None
+    early_reply: str | None = None  # L0 instant — caller should yield and return
+    status_events: list[str] = field(default_factory=list)
+    library_suggest_json: str | None = None
+    pure_action_kick: bool = False
+    clear_goals_only: bool = False
+
+
+async def distill_user_message(
+    runtime: Any,
+    message: str,
+    session_id: str | None,
+) -> None:
+    """Partner-memory distill before tools/LLM (explicit remember is awaited)."""
+    with suppress(Exception):
+        runtime._last_user_text = (message or "")[:4000]
+    with suppress(Exception):
+        from remedy.core.agent_post_turn import distill_user_message_now
+        from remedy.memory.partner_memory import distill_user_text, is_explicit_remember_intent
+
+        msg0 = message or ""
+        if is_explicit_remember_intent(msg0) and getattr(runtime, "memory", None) is not None:
+            project_path = str(
+                getattr(getattr(runtime, "config", None), "project_path", None)
+                or getattr(runtime, "_project_path", None)
+                or ""
+            ) or None
+            await distill_user_text(
+                runtime.memory,
+                msg0,
+                brief=getattr(runtime, "_session_brief", None),
+                session_id=session_id,
+                project_path=project_path,
+            )
+            distill_user_message_now(runtime, msg0, session_id=session_id)
+        else:
+            distill_user_message_now(runtime, msg0, session_id=session_id)
+
+
+def parse_browse_intent(message: str) -> BrowseIntentFlags:
+    flags = BrowseIntentFlags()
+    with suppress(Exception):
+        from remedy.core.computer.browse_intent import (
+            is_clear_goals_intent,
+            is_open_only_browse,
+            is_pure_action_kick,
+            parse_browse_navigate_url,
+            wants_page_interaction,
+        )
+
+        flags.browse_pre_url = parse_browse_navigate_url(message or "")
+        flags.clear_goals_only = is_clear_goals_intent(message or "")
+        flags.pure_action_kick = is_pure_action_kick(message or "")
+        flags.open_only_browse = is_open_only_browse(message or "")
+        flags.page_interaction = wants_page_interaction(message or "")
+    return flags
+
+
+def append_plan_and_computer_addenda(
+    context: str,
+    *,
+    session_id: str | None,
+    plan_mode: bool,
+    runtime: Any,
+) -> str:
+    with suppress(Exception):
+        from pathlib import Path
+
+        from remedy.core.plan_store import PlanStore
+
+        home = getattr(runtime.config, "home_dir", None) or (Path.home() / ".remedy")
+        store = PlanStore(home)
+        plan = store.latest_for_session(session_id)
+        if plan is not None:
+            context = (context or "") + "\n\n## Active task plan\n" + plan.summary_markdown()
+        if plan_mode:
+            from remedy.core.plan_store import PLAN_MODE_SYSTEM_ADDENDUM
+
+            context = (context or "") + "\n\n" + PLAN_MODE_SYSTEM_ADDENDUM
+        else:
+            with suppress(Exception):
+                from remedy.core.plan_store import BUILD_MODE_SYSTEM_ADDENDUM
+
+                context = (context or "") + "\n\n" + BUILD_MODE_SYSTEM_ADDENDUM
+        with suppress(Exception):
+            from remedy.core.computer.guidance import COMPUTER_USE_SYSTEM_ADDENDUM
+
+            context = (context or "") + "\n\n" + COMPUTER_USE_SYSTEM_ADDENDUM
+    return context or ""
+
+
+def try_early_l0(
+    runtime: Any,
+    message: str,
+    *,
+    session_id: str | None,
+    plan_mode: bool,
+    attachments: list[dict[str, Any]] | None,
+) -> str | None:
+    if plan_mode or attachments:
+        return None
+    with suppress(Exception):
+        from remedy.core.metabolism.l0 import try_l0_system_reply
+        from remedy.core.metabolism.tier import TurnTier, classify_turn_tier
+
+        if classify_turn_tier(message or "", tools_enabled=False) == TurnTier.L0_INSTANT:
+            l0_early = try_l0_system_reply(runtime, message or "", preclassified=True)
+            if l0_early:
+                with suppress(Exception):
+                    from remedy.core.session_quality import get_session_quality
+
+                    get_session_quality(
+                        str(session_id or getattr(runtime, "_session_id", "") or "")
+                    ).record_metabolism(tier=0)
+                return l0_early
+    return None
+
+
+def run_vision_decode(
+    runtime: Any,
+    attachments: list[dict[str, Any]] | None,
+) -> tuple[str, str | None, list[str]]:
+    """Returns (vision_mode, decode_brief, status_events)."""
+    from remedy.core.llm_binding import get_llm_binding
+
+    vision_mode = "native"
+    decode_brief: str | None = None
+    events: list[str] = []
+    with suppress(Exception):
+        from remedy.vision.service import decode_for_turn
+
+        cfg_for_vision: dict[str, Any] = {}
+        with suppress(Exception):
+            from remedy.interfaces.config import load_config
+
+            cfg_for_vision = load_config() or {}
+        _b = get_llm_binding(runtime)
+        vres = decode_for_turn(
+            attachments,
+            provider=_b.provider,
+            model=_b.model,
+            cfg=cfg_for_vision,
+        )
+        mode = str(vres.get("mode") or "native")
+        if mode in ("decode", "text_only") and vres.get("combined"):
+            vision_mode = "decode"
+            decode_brief = str(vres.get("combined") or "")
+            for ev in vres.get("events") or []:
+                events.append(f"@@status:{ev}\n")
+        elif mode == "text_only" and vres.get("briefs"):
+            vision_mode = "decode"
+            briefs = vres.get("briefs") or []
+            decode_brief = "\n".join(str(b) for b in briefs if b)
+            for ev in vres.get("events") or []:
+                events.append(f"@@status:{ev}\n")
+        elif mode == "unavailable" and vres.get("hint"):
+            vision_mode = "decode"
+            decode_brief = (
+                f"[Visual decoder unavailable] {vres.get('hint')}\n"
+                "Image files are attached by path only."
+            )
+            events.append(
+                "@@status:Visual decoder unavailable — "
+                "enable in Settings for local image understanding\n"
+            )
+    return vision_mode, decode_brief, events
+
+
+def select_tools_for_turn(
+    runtime: Any,
+    message: str,
+    *,
+    plan_mode: bool,
+    attachments: list[dict[str, Any]] | None,
+    history: list[dict[str, Any]],
+    all_tools: list[dict[str, Any]],
+    browse: BrowseIntentFlags,
+) -> list[dict[str, Any]] | None:
+    if plan_mode:
+        from remedy.core.plan_store import PLAN_MODE_TOOL_NAMES
+
+        return [
+            t
+            for t in all_tools
+            if ((t.get("function") or {}).get("name") or "") in PLAN_MODE_TOOL_NAMES
+        ]
+    open_tasks: list[str] = []
+    with suppress(Exception):
+        brief = getattr(runtime, "_session_brief", None)
+        if brief is not None:
+            open_tasks = list(getattr(brief, "open_tasks", None) or [])
+    tools: list[dict[str, Any]] | None = (
+        all_tools
+        if should_enable_tools(
+            message,
+            all_tools,
+            has_attachments=bool(attachments),
+            history=history,
+            open_tasks=open_tasks or None,
+        )
+        or bool(
+            re.search(
+                r"\b(comfy|image|picture|nebula|spacey|generate|draw|illustrat|logo|asset|png)\b",
+                message or "",
+                re.I,
+            )
+        )
+        else []
+    )
+    if (browse.browse_pre_url or browse.page_interaction) and all_tools and not plan_mode:
+        tools = all_tools
+    return tools
+
+
+def apply_metabolism_injects(
+    runtime: Any,
+    messages: list[dict[str, Any]],
+    message: str,
+    *,
+    session_id: str | None,
+    plan_mode: bool,
+    attachments: list[dict[str, Any]] | None,
+    all_tools: list[dict[str, Any]],
+    browse: BrowseIntentFlags,
+    pure_action_kick: bool,
+) -> None:
+    with suppress(Exception):
+        from remedy.core.metabolism.turn import begin_turn_metabolism
+
+        sid_m = str(getattr(runtime, "_session_id", "") or session_id or "")
+        intent_m = "chat"
+        with suppress(Exception):
+            snap = getattr(runtime, "_last_context_snapshot", None)
+            if snap is not None:
+                intent_m = str(getattr(snap, "intent", None) or "chat")
+        roots_m: list[str] = []
+        with suppress(Exception):
+            roots_m = list(getattr(runtime, "_work_roots", None) or [])
+        pre_tier_m = None
+        with suppress(Exception):
+            raw_pt = getattr(runtime, "_turn_tier_preclassified", None)
+            if raw_pt is None:
+                raw_pt = getattr(runtime, "_turn_tier", None)
+            if raw_pt is not None:
+                pre_tier_m = int(raw_pt)
+        meta = begin_turn_metabolism(
+            session_id=sid_m,
+            user_text=message or "",
+            intent=intent_m,
+            plan_mode=bool(plan_mode),
+            has_attachments=bool(attachments),
+            tools_enabled=bool(all_tools),
+            pure_action=bool(pure_action_kick),
+            browse=bool(browse.browse_pre_url or browse.page_interaction),
+            project_path=str(getattr(runtime, "_project_path", "") or ""),
+            work_roots=roots_m or None,
+            brief_head=(message or "")[:200],
+            pre_tier=pre_tier_m,
+        )
+        runtime._turn_tier = int(meta.get("tier") or 1)
+        runtime._turn_tier_label = str(meta.get("tier_label") or "")
+        runtime._force_spread = bool(meta.get("force_spread"))
+        runtime._action_ir = meta.get("action_ir")
+        runtime._metabolism_allow_verify = bool(meta.get("allow_critical_verify"))
+        runtime._shadow_strict = bool(
+            (meta.get("policy") or {}).get("shadow_high_blast")
+            and int(meta.get("tier") or 0) >= 2
+        )
+        with suppress(Exception):
+            from remedy.core.metabolism.governor import get_governor
+
+            if get_governor(sid_m).shadow_strict:
+                runtime._shadow_strict = True
+        injects = list(meta.get("injects") or [])
+        with suppress(Exception):
+            pending = getattr(runtime, "_pending_verify_remedy", None)
+            if pending:
+                injects.append(str(pending))
+                runtime._pending_verify_remedy = None
+        if injects:
+            messages.insert(
+                -1,
+                {
+                    "role": "system",
+                    "content": "\n\n".join(str(x) for x in injects if x),
+                },
+            )
+
+
+async def prepare_turn_preamble(
+    runtime: Any,
+    message: str,
+    session_id: str | None,
+    attachments: list[dict[str, Any]] | None,
+    *,
+    plan_mode: bool = False,
+) -> TurnPreamble:
+    """Build context, history, messages, tools; may set early_reply for L0."""
+    from remedy.core.llm_binding import get_llm_binding
+    from remedy.interfaces.attachments import build_multimodal_user_content
+
+    await distill_user_message(runtime, message, session_id)
+    context = await runtime._build_context()
+    context = append_plan_and_computer_addenda(
+        context, session_id=session_id, plan_mode=plan_mode, runtime=runtime
+    )
+    history = await runtime._load_session_history(session_id, message)
+
+    early = try_early_l0(
+        runtime,
+        message,
+        session_id=session_id,
+        plan_mode=plan_mode,
+        attachments=attachments,
+    )
+    if early:
+        return TurnPreamble(
+            context=context,
+            history=history,
+            messages=[],
+            all_tools=[],
+            tools=None,
+            early_reply=early,
+        )
+
+    browse = parse_browse_intent(message or "")
+    runtime._turn_browse = bool(browse.browse_pre_url or browse.page_interaction)
+    runtime._turn_pure_action = bool(browse.pure_action_kick)
+    runtime._turn_has_attachments = bool(attachments)
+
+    with suppress(Exception):
+        from remedy.memory.harness.pruner import prune_messages_for_send
+
+        mode = str(getattr(runtime, "_harness_mode", "auto") or "auto").lower()
+        if mode == "manual":
+            history = prune_messages_for_send(
+                history,
+                max_tool_chars=_TOOL_RESULT_CHAR_CAP,
+                dedupe_tools=True,
+            )
+
+    vision_mode, decode_brief, status_events = run_vision_decode(runtime, attachments)
+
+    home_att = None
+    with suppress(Exception):
+        home_att = getattr(getattr(runtime, "config", None), "home_dir", None)
+    sid_att = str(session_id or getattr(runtime, "_session_id", None) or "") or None
+    user_content = build_multimodal_user_content(
+        message,
+        attachments,
+        vision_mode=vision_mode,
+        decode_brief=decode_brief,
+        home_dir=home_att,
+        session_id=sid_att,
+    )
+    messages: list[dict[str, Any]] = [
+        {
+            "role": "system",
+            "content": build_runtime_system_block(
+                system_prompt=runtime._system_prompt,
+                provider=get_llm_binding(runtime).provider,
+                model=get_llm_binding(runtime).model,
+                base_url=get_llm_binding(runtime).base_url,
+                max_steps=runtime._max_react_steps,
+                context=context,
+            ),
+        },
+        *history,
+        {"role": "user", "content": user_content},
+    ]
+    with suppress(Exception):
+        proto = getattr(runtime, "_build_protocol_pending", None)
+        if proto:
+            messages.append({"role": "system", "content": str(proto)})
+            runtime._build_protocol_pending = None
+
+    library_suggest_json: str | None = None
+    with suppress(Exception):
+        if runtime._harness_mode == "auto":
+            from remedy.memory.harness.send_policy import apply_auto_harness_send_policy
+
+            sid = str(getattr(runtime, "_session_id", "") or session_id or "")
+            messages, _hmeta = apply_auto_harness_send_policy(
+                runtime,
+                messages,
+                user_text=message or "",
+                session_id=sid,
+                tool_result_char_cap=int(_TOOL_RESULT_CHAR_CAP or 0),
+            )
+            with suppress(Exception):
+                snap = getattr(runtime, "_last_context_snapshot", None)
+                lib = (getattr(snap, "signals", None) or {}).get("library_suggest")
+                if isinstance(lib, dict) and lib.get("id"):
+                    import json as _json
+
+                    library_suggest_json = _json.dumps(
+                        lib, default=str, separators=(",", ":")
+                    )
+
+    all_tools = runtime._openai_tools()
+    with suppress(Exception):
+        from remedy.core.agent_llm import tools_for_binding
+
+        all_tools = tools_for_binding(all_tools, runtime) or all_tools
+
+    tools = select_tools_for_turn(
+        runtime,
+        message,
+        plan_mode=plan_mode,
+        attachments=attachments,
+        history=history,
+        all_tools=all_tools,
+        browse=browse,
+    )
+
+    apply_metabolism_injects(
+        runtime,
+        messages,
+        message,
+        session_id=session_id,
+        plan_mode=plan_mode,
+        attachments=attachments,
+        all_tools=all_tools,
+        browse=browse,
+        pure_action_kick=browse.pure_action_kick,
+    )
+    if (browse.browse_pre_url or browse.page_interaction) and all_tools and not plan_mode:
+        tools = all_tools
+
+    return TurnPreamble(
+        context=context,
+        history=history,
+        messages=messages,
+        all_tools=all_tools,
+        tools=tools,
+        browse=browse,
+        vision_mode=vision_mode,
+        decode_brief=decode_brief,
+        status_events=status_events,
+        library_suggest_json=library_suggest_json,
+        pure_action_kick=browse.pure_action_kick,
+        clear_goals_only=browse.clear_goals_only,
+    )
+
+
+async def yield_preamble_events(prep: TurnPreamble) -> AsyncIterator[str]:
+    """Yield status / library_suggest events from preamble."""
+    for ev in prep.status_events:
+        yield ev
+    if prep.library_suggest_json:
+        yield "@@library_suggest:" + prep.library_suggest_json + "\n"

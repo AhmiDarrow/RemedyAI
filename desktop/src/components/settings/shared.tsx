@@ -31,21 +31,19 @@ export function Field({
   password?: boolean
 }) {
   return (
-    <div className="mb-2">
-      <label className="block mb-0.5" style={{ color: 'var(--text-muted)' }}>{label}</label>
+    <div className="mb-2.5">
+      <label
+        className="block mb-1 text-[0.68rem] font-semibold uppercase tracking-wide"
+        style={{ color: 'var(--text-muted)' }}
+      >
+        {label}
+      </label>
       <input
         type={password ? 'password' : 'text'}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="w-full rounded px-2 py-1 text-xs outline-none"
-        style={{
-          background: 'var(--bg-tertiary)',
-          color: 'var(--text-primary)',
-          border: '1px solid var(--border)',
-        }}
-        onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--accent)')}
-        onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--border)')}
+        className="ui-input"
       />
     </div>
   )

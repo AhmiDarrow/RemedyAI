@@ -73,6 +73,8 @@ interface MessageFeedProps {
   hasOlder?: boolean
   loadingOlder?: boolean
   onLoadOlder?: () => void
+  /** Active project path for empty-state context. */
+  projectPath?: string | null
 }
 
 /** Initials for avatar: "Alex" → A, "Mary Jane" → MJ */
@@ -99,8 +101,8 @@ const STARTERS = [
     text: 'Scan the open project and summarize structure, stack, and what I should know first.',
   },
   {
-    label: 'Fix something',
-    text: 'Help me fix a bug: ',
+    label: 'Review recent changes',
+    text: 'Review recent git changes and flag risks or follow-ups.',
   },
   {
     label: 'Plan a task',
@@ -347,7 +349,7 @@ const MessageBubble = memo(function MessageBubble({
 
   return (
     <div
-      className={`group chat-row flex w-full px-3 flex-col ${
+      className={`group chat-row flex w-full flex-col ${
         isUser ? 'items-end' : isSystem ? 'items-center' : 'items-start'
       }`}
       style={{ paddingTop: 'var(--chat-pad-y)', paddingBottom: 'var(--chat-pad-y)' }}
@@ -399,124 +401,118 @@ const MessageBubble = memo(function MessageBubble({
             />
           )}
 
-          <div className="message-body chat-bubble-body">
+          <div
+            className={`message-body chat-bubble-body${
+              isStreamingPartial && !isUser && !isSystem ? ' stream-md' : ''
+            }`}
+          >
             {displayText ? (
               <>
-                {/* Plain text while streaming — markdown only after finalize (snappier). */}
-                {isStreamingPartial && !isUser && !isSystem ? (
-                  <div className="stream-plain whitespace-pre-wrap break-words">
-                    {displayText}
-                    <span className="stream-caret" aria-hidden>
-                      ▍
-                    </span>
-                  </div>
-                ) : (
-                  <ReactMarkdown
-                    remarkPlugins={[remarkGfm]}
-                    // Default strip data:/Windows paths → blank images in chat.
-                    urlTransform={chatMarkdownUrlTransform}
-                    components={{
-                      pre({ children }) {
-                        return <>{children}</>
-                      },
-                      a({ href, children }) {
-                        const h = (href || '').trim()
-                        // Only allow safe navigable schemes in chat markdown.
-                        if (!h || !/^(https?:|mailto:)/i.test(h)) {
-                          return <span>{children}</span>
-                        }
-                        if (/^mailto:/i.test(h)) {
-                          return (
-                            <a href={h} rel="noopener noreferrer">
-                              {children}
-                            </a>
-                          )
-                        }
-                        // Double-click → in-rail Browser. Ctrl/Cmd+click → system browser.
+                {/* Live markdown while streaming for smoother final morph. */}
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  urlTransform={chatMarkdownUrlTransform}
+                  components={{
+                    pre({ children }) {
+                      return <>{children}</>
+                    },
+                    a({ href, children }) {
+                      const h = (href || '').trim()
+                      if (!h || !/^(https?:|mailto:)/i.test(h)) {
+                        return <span>{children}</span>
+                      }
+                      if (/^mailto:/i.test(h)) {
                         return (
-                          <a
-                            href={h}
-                            className="chat-rail-link"
-                            title="Double-click: open in Browser rail · Ctrl+click: system browser"
-                            onClick={(e) => {
-                              // Prevent accidental leave of the app on single click
-                              if (!e.ctrlKey && !e.metaKey) {
-                                e.preventDefault()
-                              }
-                            }}
-                            onDoubleClick={(e) => {
-                              e.preventDefault()
-                              e.stopPropagation()
-                              try {
-                                window.dispatchEvent(
-                                  new CustomEvent('remedy:computer-ui', {
-                                    detail: { openBrowser: true },
-                                  }),
-                                )
-                                window.dispatchEvent(
-                                  new CustomEvent('remedy:browser-set-url', {
-                                    detail: { url: h, navigate: true },
-                                  }),
-                                )
-                              } catch {
-                                window.open(h, '_blank', 'noopener,noreferrer')
-                              }
-                            }}
-                          >
+                          <a href={h} rel="noopener noreferrer">
                             {children}
                           </a>
                         )
-                      },
-                      img({ src, alt }) {
-                        if (!src) {
-                          return (
-                            <span
-                              className="chat-img-error text-xs block my-1 px-2 py-1 rounded"
-                              style={{
-                                color: 'var(--warning)',
-                                background: 'var(--bg-tertiary)',
-                                border: '1px solid var(--border)',
-                              }}
-                            >
-                              Image unavailable{alt ? `: ${alt}` : ''}
-                            </span>
-                          )
-                        }
-                        // Stable key: remounting re-fetches media and flickers.
-                        // data: URIs are huge — key on length+prefix only.
-                        const imgKey =
-                          src.length > 96
-                            ? `img-${alt || 'x'}-${src.length}-${src.slice(0, 48)}`
-                            : `img-${src}`
+                      }
+                      return (
+                        <a
+                          href={h}
+                          className="chat-rail-link"
+                          title="Double-click: open in Browser rail · Ctrl+click: system browser"
+                          onClick={(e) => {
+                            if (!e.ctrlKey && !e.metaKey) {
+                              e.preventDefault()
+                            }
+                          }}
+                          onDoubleClick={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            try {
+                              window.dispatchEvent(
+                                new CustomEvent('remedy:computer-ui', {
+                                  detail: { openBrowser: true },
+                                }),
+                              )
+                              window.dispatchEvent(
+                                new CustomEvent('remedy:browser-set-url', {
+                                  detail: { url: h, navigate: true },
+                                }),
+                              )
+                            } catch {
+                              window.open(h, '_blank', 'noopener,noreferrer')
+                            }
+                          }}
+                        >
+                          {children}
+                        </a>
+                      )
+                    },
+                    img({ src, alt }) {
+                      if (!src) {
                         return (
-                          <ChatImage
-                            key={imgKey}
-                            src={src}
-                            alt={alt}
-                            onOpen={(url, a) => onOpenImage?.(url, a)}
-                          />
+                          <span
+                            className="chat-img-error text-xs block my-1 px-2 py-1 rounded"
+                            style={{
+                              color: 'var(--warning)',
+                              background: 'var(--bg-tertiary)',
+                              border: '1px solid var(--border)',
+                            }}
+                          >
+                            Image unavailable{alt ? `: ${alt}` : ''}
+                          </span>
                         )
-                      },
-                      code({ children, className }) {
-                        const inline = !className
-                        if (inline) {
-                          return (
-                            <code className={isUser ? 'chat-inline-code user' : 'chat-inline-code'}>
-                              {children}
-                            </code>
-                          )
-                        }
+                      }
+                      const imgKey =
+                        src.length > 96
+                          ? `img-${alt || 'x'}-${src.length}-${src.slice(0, 48)}`
+                          : `img-${src}`
+                      return (
+                        <ChatImage
+                          key={imgKey}
+                          src={src}
+                          alt={alt}
+                          onOpen={(url, a) => onOpenImage?.(url, a)}
+                        />
+                      )
+                    },
+                    code({ children, className }) {
+                      const inline = !className
+                      if (inline) {
                         return (
-                          <CodeBlock className={className} isUser={isUser}>
+                          <code className={isUser ? 'chat-inline-code user' : 'chat-inline-code'}>
                             {children}
-                          </CodeBlock>
+                          </code>
                         )
-                      },
-                    }}
-                  >
-                    {displayText}
-                  </ReactMarkdown>
-                )}
+                      }
+                      return (
+                        <CodeBlock className={className} isUser={isUser}>
+                          {children}
+                        </CodeBlock>
+                      )
+                    },
+                  }}
+                >
+                  {displayText}
+                </ReactMarkdown>
+                {isStreamingPartial && !isUser && !isSystem ? (
+                  <span className="stream-caret" aria-hidden>
+                    ▍
+                  </span>
+                ) : null}
               </>
             ) : (
               <span className="chat-empty-placeholder">
@@ -545,11 +541,14 @@ const MessageBubble = memo(function MessageBubble({
 
           {!isSystem && !isStreamingPartial && text && (
             <div
-              className="chat-actions mt-1.5 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity"
-              style={{ justifyContent: isUser ? 'flex-end' : 'flex-start' }}
+              className="chat-actions mt-1.5 flex items-center transition-opacity"
+              style={{
+                justifyContent: isUser ? 'flex-end' : 'flex-start',
+                marginLeft: isUser ? 'auto' : undefined,
+              }}
             >
               <IconBtn
-                title={copied ? 'Copied' : 'Copy'}
+                title={copied ? 'Copied' : 'Copy message'}
                 onClick={() => void copyMsg()}
                 active={copied}
               >
@@ -557,14 +556,14 @@ const MessageBubble = memo(function MessageBubble({
               </IconBtn>
               {showEdit && (
                 <IconBtn
-                  title="Edit"
+                  title="Edit & resend"
                   onClick={() => onEditUserMessage?.(msg.id, msg.content ?? '')}
                 >
                   <IconEdit size={13} />
                 </IconBtn>
               )}
               {!isUser && onRegenerate && !streaming && (
-                <IconBtn title="Regenerate" onClick={() => onRegenerate(msg.id)}>
+                <IconBtn title="Regenerate reply" onClick={() => onRegenerate(msg.id)}>
                   <IconRefresh size={13} />
                 </IconBtn>
               )}
@@ -613,6 +612,7 @@ export function MessageFeed({
   hasOlder = false,
   loadingOlder = false,
   onLoadOlder,
+  projectPath = null,
 }: MessageFeedProps) {
   const [lightbox, setLightbox] = useState<{ src: string; alt?: string } | null>(null)
 
@@ -693,27 +693,36 @@ export function MessageFeed({
       <div ref={setContent} className="message-feed-content min-h-full flex flex-col">
       {planMode && (
         <div
-          className="mx-4 mt-2 mb-2 px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-2"
+          className="mt-2 mb-2 px-3 py-2 rounded-xl text-xs font-medium flex items-center gap-2"
           style={{
-            background: 'color-mix(in srgb, var(--accent) 12%, var(--bg-tertiary))',
-            border: '1px solid var(--accent)',
+            background: 'color-mix(in srgb, var(--accent) 10%, var(--bg-secondary))',
+            border: '1px solid color-mix(in srgb, var(--accent) 40%, var(--border))',
             color: 'var(--accent)',
           }}
         >
-          <span>{'\u{1F9E0}'}</span>
-          Plan mode active — explore and save a structured plan; shell/file tools blocked until Build (Ctrl+B)
+          <span aria-hidden>◇</span>
+          <span>
+            <strong>Plan mode</strong>
+            {' — '}explore and save a structured plan; shell/file tools unlock in Build
+            {' '}
+            <kbd style={{ opacity: 0.85 }}>Ctrl+B</kbd>
+          </span>
         </div>
       )}
 
       {loading && visible.length === 0 && (
-        <div className="px-4 py-8 text-center" style={{ color: 'var(--text-muted)' }}>
-          Loading messages...
+        <div className="chat-skeleton" aria-busy="true" aria-label="Loading conversation">
+          <div className="chat-skeleton-row is-user" />
+          <div className="chat-skeleton-row is-assistant" />
+          <div className="chat-skeleton-row is-assistant" style={{ width: '48%' }} />
+          <div className="chat-skeleton-row is-user" style={{ width: '40%' }} />
+          <div className="chat-skeleton-row is-assistant" style={{ width: '65%' }} />
         </div>
       )}
 
       {loadError && !loading && (
         <div
-          className="mx-4 mt-3 mb-2 px-3 py-2 rounded-md text-xs"
+          className="mt-3 mb-2 px-3 py-2 rounded-xl text-xs"
           style={{
             background: 'color-mix(in srgb, var(--error) 12%, var(--bg-tertiary))',
             border: '1px solid var(--error)',
@@ -726,19 +735,12 @@ export function MessageFeed({
       )}
 
       {hasOlder && !loading && (
-        <div className="flex justify-center px-4 py-2">
+        <div className="flex justify-center py-2">
           <button
             type="button"
             disabled={loadingOlder}
             onClick={() => onLoadOlder?.()}
-            className="text-xs px-3 py-1.5 rounded-full border"
-            style={{
-              color: 'var(--text-muted)',
-              borderColor: 'var(--border)',
-              background: 'var(--bg-tertiary)',
-              opacity: loadingOlder ? 0.6 : 1,
-              cursor: loadingOlder ? 'wait' : 'pointer',
-            }}
+            className="chat-load-pill"
           >
             {loadingOlder ? 'Loading earlier…' : 'Load earlier messages'}
           </button>
@@ -746,15 +748,10 @@ export function MessageFeed({
       )}
 
       {hiddenCount > 0 && (
-        <div className="px-4 py-2 text-center">
+        <div className="flex justify-center py-2">
           <button
             type="button"
-            className="text-xs px-3 py-1 rounded"
-            style={{
-              border: '1px solid var(--border)',
-              color: 'var(--text-secondary)',
-              background: 'var(--bg-tertiary)',
-            }}
+            className="chat-load-pill"
             onClick={() => setShowAll(true)}
           >
             Show {hiddenCount} earlier messages
@@ -765,15 +762,8 @@ export function MessageFeed({
       {feedItems.map((item) => {
         if (item.type === 'day') {
           return (
-            <div
-              key={`day-${item.key}`}
-              className="flex items-center gap-3 px-6 py-2"
-            >
-              <div className="flex-1 h-px" style={{ background: 'var(--border)' }} />
-              <span className="text-[10px] font-medium uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
-                {item.label}
-              </span>
-              <div className="flex-1 h-px" style={{ background: 'var(--border)' }} />
+            <div key={`day-${item.key}`} className="chat-day-divider">
+              <span className="chat-day-label">{item.label}</span>
             </div>
           )
         }
@@ -826,33 +816,14 @@ export function MessageFeed({
 
       {/* Live thinking + answer always docked at the visual bottom of the feed. */}
       {streaming && (
-        <div
-          className="sticky bottom-0 z-20 pt-1 pb-2"
-          style={{
-            background:
-              'linear-gradient(180deg, transparent 0%, var(--bg-primary) 18%, var(--bg-primary) 100%)',
-          }}
-        >
-          <div
-            className="mx-2 rounded-xl border"
-            style={{
-              borderColor: 'var(--border)',
-              background: 'var(--bg-secondary)',
-              boxShadow: '0 -6px 24px color-mix(in srgb, var(--bg-primary) 70%, transparent)',
-            }}
-          >
-            <div
-              className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wide flex items-center gap-1.5"
-              style={{ color: 'var(--accent)', borderBottom: '1px solid var(--border)' }}
-            >
-              <span
-                className="inline-block w-1.5 h-1.5 rounded-full"
-                style={{
-                  background: 'var(--accent)',
-                  animation: 'pulse 1.2s ease infinite',
-                }}
-              />
-              Live · thinking & answer
+        <div className="live-stream-dock">
+          <div className="live-stream-card">
+            <div className="live-stream-header">
+              <span className="live-stream-dot" aria-hidden />
+              <span>Live</span>
+              <span style={{ color: 'var(--text-muted)', fontWeight: 500, letterSpacing: 0 }}>
+                · thinking & answer
+              </span>
             </div>
             <MessageBubble
               msg={{
@@ -880,34 +851,30 @@ export function MessageFeed({
       )}
 
       {!loading && visible.length === 0 && !streaming && (
-        <div
-          className="flex flex-col items-center justify-center gap-3 px-6 text-center"
-          style={{
-            color: 'var(--text-muted)',
-            minHeight: 'min(100%, 22rem)',
-            flex: 1,
-            paddingTop: '3rem',
-            paddingBottom: '3rem',
-          }}
-        >
-          {/* Monogram only — no rounded plate; ~20% larger than prior 77px. */}
-          <RemedyLogo size={92} variant="auto" title="Remedy" />
-          <div
-            className="text-lg font-semibold tracking-tight"
-            style={{ color: 'var(--text-primary)' }}
-          >
+        <div className="chat-empty-hero">
+          <RemedyLogo size={88} variant="auto" title="Remedy" />
+          <div className="chat-empty-title">
             {userName?.trim()
               ? `Ready when you are, ${firstName(userName)}`
               : 'Your partner is ready'}
           </div>
-          <div className="text-xs max-w-sm leading-relaxed">
-            Ask anything, plan, research, or open a project to build.{' '}
-            <code style={{ color: 'var(--accent)' }}>/help</code> lists commands ·{' '}
-            <code style={{ color: 'var(--accent)' }}>F1</code> opens the Help wiki.
+          <div className="chat-empty-sub">
+            {projectPath ? (
+              <>
+                Project folder attached — ask to explore, review, or implement.
+                <br />
+                <code className="text-[0.7em] break-all">{projectPath}</code>
+              </>
+            ) : (
+              <>
+                Ask anything, plan, research, or open a project to build.{' '}
+                <code>/help</code> lists commands · <code>F1</code> opens the Help wiki.
+              </>
+            )}
           </div>
           {onQuickPrompt && (
             <div
-              className="flex flex-wrap justify-center gap-2 mt-1 max-w-lg"
+              className="flex flex-wrap justify-center gap-2 mt-2 max-w-lg"
               role="group"
               aria-label="Starter prompts"
             >
@@ -923,21 +890,9 @@ export function MessageFeed({
               ))}
             </div>
           )}
-          <div
-            className="text-[0.7rem] max-w-sm leading-relaxed mt-1"
-            style={{ color: 'var(--text-muted)' }}
-          >
-            <code style={{ color: 'var(--accent)' }}>Enter</code> send ·{' '}
-            <code style={{ color: 'var(--accent)' }}>Shift+Enter</code> new line ·{' '}
-            <code style={{ color: 'var(--accent)' }}>@</code> files ·{' '}
-            <code style={{ color: 'var(--accent)' }}>/</code> commands ·{' '}
-            <code style={{ color: 'var(--accent)' }}>Shift+Tab</code> Plan/Build
-          </div>
-          <div
-            className="text-[0.7rem] max-w-sm leading-relaxed italic"
-            style={{ color: 'var(--text-muted)', opacity: 0.9 }}
-          >
-            My name is Ahmi — I hope you enjoy my Remedy.
+          <div className="chat-empty-sub mt-0.5" style={{ maxWidth: '26rem', opacity: 0.85 }}>
+            <code>Enter</code> send · <code>Shift+Enter</code> new line ·{' '}
+            <code>@</code> files · <code>/</code> commands · <code>Shift+Tab</code> Plan/Build
           </div>
         </div>
       )}

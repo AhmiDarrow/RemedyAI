@@ -133,31 +133,33 @@ export function HelpPanel({ open, onClose, initialArticleId, version }: HelpPane
       role="dialog"
       aria-modal="true"
       aria-label="Help — Owner's Manual"
-      className="fixed inset-0 z-[200] flex items-stretch justify-center p-3 sm:p-6"
-      style={{ background: 'rgba(0,0,0,0.55)' }}
+      className="fixed inset-0 z-[200] flex items-stretch justify-center p-3 sm:p-6 ui-overlay"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose()
       }}
     >
       <div
-        className="flex w-full max-w-5xl overflow-hidden rounded-xl shadow-2xl"
+        className="ui-surface flex w-full max-w-5xl overflow-hidden"
         style={{
           background: 'var(--bg-primary)',
-          border: '1px solid var(--border)',
           maxHeight: 'min(920px, calc(100vh - 2rem))',
           minHeight: 'min(640px, calc(100vh - 2rem))',
+          borderRadius: '1rem',
         }}
       >
         {/* Sidebar */}
         <aside
           className="flex w-[240px] shrink-0 flex-col border-r"
           style={{
-            background: 'var(--bg-secondary)',
-            borderColor: 'var(--border)',
+            background: 'color-mix(in srgb, var(--bg-secondary) 94%, transparent)',
+            borderColor: 'color-mix(in srgb, var(--border) 85%, transparent)',
           }}
         >
-          <div className="border-b px-3 py-2.5" style={{ borderColor: 'var(--border)' }}>
-            <div className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>
+          <div
+            className="border-b px-3 py-3"
+            style={{ borderColor: 'color-mix(in srgb, var(--border) 80%, transparent)' }}
+          >
+            <div className="text-xs font-semibold tracking-tight" style={{ color: 'var(--text-primary)' }}>
               Owner&apos;s Manual
             </div>
             <div className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
@@ -168,12 +170,7 @@ export function HelpPanel({ open, onClose, initialArticleId, version }: HelpPane
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search help…"
-              className="mt-2 w-full rounded px-2 py-1.5 text-xs outline-none"
-              style={{
-                background: 'var(--bg-primary)',
-                border: '1px solid var(--border)',
-                color: 'var(--text-primary)',
-              }}
+              className="ui-input mt-2.5"
               aria-label="Search help articles"
             />
           </div>
@@ -224,18 +221,13 @@ export function HelpPanel({ open, onClose, initialArticleId, version }: HelpPane
           </nav>
 
           <div
-            className="border-t px-2 py-2 flex gap-1"
-            style={{ borderColor: 'var(--border)' }}
+            className="border-t px-2 py-2 flex gap-1.5"
+            style={{ borderColor: 'color-mix(in srgb, var(--border) 80%, transparent)' }}
           >
             <button
               type="button"
-              className="flex-1 rounded px-2 py-1.5 text-[11px]"
-              style={{
-                background: 'var(--bg-tertiary)',
-                color: history.length > 1 ? 'var(--text-primary)' : 'var(--text-muted)',
-                border: '1px solid var(--border)',
-                cursor: history.length > 1 ? 'pointer' : 'default',
-              }}
+              className="ui-btn ui-btn-secondary flex-1"
+              style={{ padding: '0.35rem 0.5rem', fontSize: '0.7rem' }}
               disabled={history.length <= 1}
               onClick={goBack}
             >
@@ -243,12 +235,8 @@ export function HelpPanel({ open, onClose, initialArticleId, version }: HelpPane
             </button>
             <button
               type="button"
-              className="flex-1 rounded px-2 py-1.5 text-[11px]"
-              style={{
-                background: 'var(--bg-tertiary)',
-                color: 'var(--text-primary)',
-                border: '1px solid var(--border)',
-              }}
+              className="ui-btn ui-btn-secondary flex-1"
+              style={{ padding: '0.35rem 0.5rem', fontSize: '0.7rem' }}
               onClick={() => navigate(getDefaultArticleId())}
             >
               Home
@@ -259,18 +247,21 @@ export function HelpPanel({ open, onClose, initialArticleId, version }: HelpPane
         {/* Article */}
         <section className="flex min-w-0 flex-1 flex-col">
           <header
-            className="flex items-start justify-between gap-3 border-b px-4 py-2.5"
-            style={{ borderColor: 'var(--border)', background: 'var(--bg-secondary)' }}
+            className="flex items-start justify-between gap-3 border-b px-4 py-3"
+            style={{
+              borderColor: 'color-mix(in srgb, var(--border) 80%, transparent)',
+              background: 'color-mix(in srgb, var(--bg-secondary) 90%, transparent)',
+            }}
           >
             <div className="min-w-0">
-              <div className="text-[10px] uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+              <div className="text-[10px] uppercase tracking-wide font-semibold" style={{ color: 'var(--text-muted)' }}>
                 {article?.category}
               </div>
-              <h1 className="text-sm font-semibold truncate" style={{ color: 'var(--text-primary)' }}>
+              <h1 className="text-sm font-semibold truncate tracking-tight" style={{ color: 'var(--text-primary)' }}>
                 {article?.title || 'Help'}
               </h1>
               {article?.summary && (
-                <p className="text-[11px] mt-0.5 line-clamp-2" style={{ color: 'var(--text-muted)' }}>
+                <p className="text-[11px] mt-0.5 line-clamp-2 leading-snug" style={{ color: 'var(--text-muted)' }}>
                   {article.summary}
                 </p>
               )}
@@ -278,8 +269,8 @@ export function HelpPanel({ open, onClose, initialArticleId, version }: HelpPane
             <button
               type="button"
               onClick={onClose}
-              className="shrink-0 rounded px-2 py-1 text-sm"
-              style={{ color: 'var(--text-muted)', border: '1px solid var(--border)' }}
+              className="ui-btn ui-btn-ghost shrink-0"
+              style={{ padding: '0.25rem 0.55rem', fontSize: '0.9rem' }}
               aria-label="Close help"
               title="Close (Esc)"
             >
@@ -518,16 +509,20 @@ function TocButton({
     <button
       type="button"
       onClick={onClick}
-      className="w-full text-left rounded px-2 py-1.5 transition-colors"
+      className="w-full text-left rounded-lg px-2 py-1.5 transition-colors"
       style={{
-        background: active ? 'var(--accent-subtle, rgba(108,140,255,0.15))' : 'transparent',
+        background: active
+          ? 'color-mix(in srgb, var(--accent) 14%, transparent)'
+          : 'transparent',
         color: active ? 'var(--accent)' : 'var(--text-secondary)',
-        border: active ? '1px solid var(--accent)' : '1px solid transparent',
+        border: active
+          ? '1px solid color-mix(in srgb, var(--accent) 40%, transparent)'
+          : '1px solid transparent',
       }}
     >
-      <div className="font-medium leading-snug">{title}</div>
+      <div className="font-medium leading-snug text-[0.78rem]">{title}</div>
       {subtitle && (
-        <div className="text-[10px] mt-0.5 line-clamp-2" style={{ color: 'var(--text-muted)' }}>
+        <div className="text-[10px] mt-0.5 line-clamp-2 leading-snug" style={{ color: 'var(--text-muted)' }}>
           {subtitle}
         </div>
       )}

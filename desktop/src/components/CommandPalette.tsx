@@ -18,6 +18,7 @@ export function CommandPalette({ open, onClose, commands }: CommandPaletteProps)
   const [query, setQuery] = useState('')
   const [idx, setIdx] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
 
   const filtered = query
     ? commands.filter(
@@ -39,6 +40,11 @@ export function CommandPalette({ open, onClose, commands }: CommandPaletteProps)
   useEffect(() => {
     setIdx(0)
   }, [query])
+
+  useEffect(() => {
+    const el = listRef.current?.querySelector<HTMLElement>(`[data-cmd-idx="${idx}"]`)
+    el?.scrollIntoView({ block: 'nearest' })
+  }, [idx])
 
   const execute = useCallback(
     (item: CommandItem) => {
@@ -70,49 +76,61 @@ export function CommandPalette({ open, onClose, commands }: CommandPaletteProps)
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh]"
-      style={{ background: 'rgba(0,0,0,0.5)' }}
+      className="fixed inset-0 z-50 flex items-start justify-center pt-[14vh] px-4 ui-overlay"
       onClick={onClose}
     >
       <div
-        className="w-[560px] max-h-[60vh] rounded-xl overflow-hidden shadow-2xl flex flex-col"
-        style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}
+        className="command-palette ui-surface w-full max-w-[560px] max-h-[62vh] overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Command palette"
       >
-        <div className="px-4 py-3 flex items-center gap-2" style={{ borderBottom: '1px solid var(--border)' }}>
-          <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>{'>'}</span>
+        <div
+          className="px-3.5 py-3 flex items-center gap-2.5"
+          style={{ borderBottom: '1px solid color-mix(in srgb, var(--border) 85%, transparent)' }}
+        >
+          <span
+            className="text-sm font-semibold tabular-nums"
+            style={{ color: 'var(--accent)' }}
+            aria-hidden
+          >
+            ⌘
+          </span>
           <input
             ref={inputRef}
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Search commands, sessions, agents..."
-            className="flex-1 outline-none text-sm"
-            style={{ background: 'transparent', color: 'var(--text-primary)' }}
+            placeholder="Search commands, sessions, agents…"
+            className="flex-1 outline-none text-sm bg-transparent"
+            style={{ color: 'var(--text-primary)' }}
+            aria-label="Search commands"
           />
           <kbd
-            className="text-xs px-1.5 py-0.5 rounded"
-            style={{ background: 'var(--bg-tertiary)', color: 'var(--text-muted)', fontSize: '0.65rem' }}
+            className="text-[0.65rem] px-1.5 py-0.5 rounded-md font-mono"
+            style={{
+              background: 'var(--bg-tertiary)',
+              color: 'var(--text-muted)',
+              border: '1px solid color-mix(in srgb, var(--border) 80%, transparent)',
+            }}
           >
-            ESC
+            Esc
           </kbd>
         </div>
 
-        <div className="overflow-y-auto flex-1">
+        <div ref={listRef} className="overflow-y-auto flex-1 py-1">
           {filtered.length === 0 ? (
-            <div className="px-4 py-8 text-center text-sm" style={{ color: 'var(--text-muted)' }}>
+            <div className="px-4 py-10 text-center text-sm" style={{ color: 'var(--text-muted)' }}>
               No matching commands
             </div>
           ) : (
             filtered.slice(0, 30).map((item, i) => (
               <div
                 key={item.id}
-                className="flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors text-sm"
-                style={{
-                  background: i === idx ? 'var(--bg-tertiary)' : 'transparent',
-                  borderLeft: i === idx ? '2px solid var(--accent)' : '2px solid transparent',
-                }}
+                data-cmd-idx={i}
+                className={`command-palette-row text-sm${i === idx ? ' is-active' : ''}`}
                 onMouseEnter={() => setIdx(i)}
                 onMouseDown={(e) => {
                   e.preventDefault()
@@ -120,15 +138,22 @@ export function CommandPalette({ open, onClose, commands }: CommandPaletteProps)
                 }}
               >
                 <span
-                  className="text-xs px-1.5 py-0.5 rounded flex-shrink-0"
-                  style={{ background: 'var(--bg-primary)', color: 'var(--text-muted)', fontSize: '0.65rem' }}
+                  className="text-[0.62rem] px-1.5 py-0.5 rounded-md flex-shrink-0 uppercase tracking-wide font-semibold"
+                  style={{
+                    background: 'color-mix(in srgb, var(--bg-primary) 80%, transparent)',
+                    color: 'var(--text-muted)',
+                    border: '1px solid color-mix(in srgb, var(--border) 70%, transparent)',
+                  }}
                 >
                   {item.category}
                 </span>
-                <span className="flex-1" style={{ color: 'var(--text-primary)' }}>
+                <span className="flex-1 font-medium truncate" style={{ color: 'var(--text-primary)' }}>
                   {item.label}
                 </span>
-                <span className="text-xs flex-shrink-0 truncate max-w-[200px]" style={{ color: 'var(--text-muted)' }}>
+                <span
+                  className="text-xs flex-shrink-0 truncate max-w-[200px]"
+                  style={{ color: 'var(--text-muted)' }}
+                >
                   {item.description}
                 </span>
               </div>
@@ -137,12 +162,22 @@ export function CommandPalette({ open, onClose, commands }: CommandPaletteProps)
         </div>
 
         <div
-          className="px-4 py-1.5 text-xs flex gap-3"
-          style={{ borderTop: '1px solid var(--border)', color: 'var(--text-muted)' }}
+          className="px-4 py-2 text-[0.65rem] flex flex-wrap gap-x-4 gap-y-1"
+          style={{
+            borderTop: '1px solid color-mix(in srgb, var(--border) 85%, transparent)',
+            color: 'var(--text-muted)',
+            background: 'color-mix(in srgb, var(--bg-tertiary) 40%, transparent)',
+          }}
         >
-          <span><kbd style={{ background: 'var(--bg-tertiary)', padding: '0 4px', borderRadius: 3, fontSize: '0.6rem' }}>↑↓</kbd> Navigate</span>
-          <span><kbd style={{ background: 'var(--bg-tertiary)', padding: '0 4px', borderRadius: 3, fontSize: '0.6rem' }}>↵</kbd> Select</span>
-          <span><kbd style={{ background: 'var(--bg-tertiary)', padding: '0 4px', borderRadius: 3, fontSize: '0.6rem' }}>ESC</kbd> Dismiss</span>
+          <span>
+            <kbd className="font-mono opacity-80">↑↓</kbd> navigate
+          </span>
+          <span>
+            <kbd className="font-mono opacity-80">↵</kbd> select
+          </span>
+          <span>
+            <kbd className="font-mono opacity-80">Esc</kbd> dismiss
+          </span>
         </div>
       </div>
     </div>

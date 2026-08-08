@@ -28,35 +28,38 @@ async def build_turn_context(runtime: Any) -> str:
         if iso:
             parts.append(iso)
 
-    # Soul Field — provider-invariant personhood (muscle vs soul).
-    # Inject early so every provider animates the same continuous partner.
+    # Soul Field — experimental personhood (opt-in maturity gate).
+    # When disabled, still apply muscle profile for tool parallelism / builder addendum.
     with suppress(Exception):
+        from remedy.core.feature_maturity import soul_field_enabled
         from remedy.core.llm_binding import get_llm_binding
         from remedy.core.muscle_profile import (
             apply_muscle_to_runtime,
             builder_system_addendum,
         )
-        from remedy.memory.soul.inject import build_soul_context_block
 
         home = getattr(getattr(runtime, "config", None), "home_dir", None)
         bind = get_llm_binding(runtime)
         muscle = apply_muscle_to_runtime(runtime)
-        user_name = ""
-        with suppress(Exception):
-            from remedy.interfaces.config import load_config
+        if soul_field_enabled():
+            from remedy.memory.soul.inject import build_soul_context_block
 
-            user_name = str(load_config().get("user_name") or "").strip()
-        soul_budget = 1800 if muscle.dense_memory else 1200
-        soul = build_soul_context_block(
-            home=home,
-            include_contract=True,
-            provider=str(getattr(bind, "provider", "") or ""),
-            model=str(getattr(bind, "model", "") or ""),
-            user_name=user_name,
-            max_chars=soul_budget,
-        )
-        if soul:
-            parts.append(soul)
+            user_name = ""
+            with suppress(Exception):
+                from remedy.interfaces.config import load_config
+
+                user_name = str(load_config().get("user_name") or "").strip()
+            soul_budget = 1800 if muscle.dense_memory else 1200
+            soul = build_soul_context_block(
+                home=home,
+                include_contract=True,
+                provider=str(getattr(bind, "provider", "") or ""),
+                model=str(getattr(bind, "model", "") or ""),
+                user_name=user_name,
+                max_chars=soul_budget,
+            )
+            if soul:
+                parts.append(soul)
         # Capable muscle (Grok/Claude/GPT/…) — full builder organism contract
         build_add = builder_system_addendum(muscle)
         if build_add:

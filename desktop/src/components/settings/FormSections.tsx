@@ -17,7 +17,7 @@ import {
   startRmb,
   stopRmb,
   patchRmbSettings,
-  useRmbAsProvider,
+  applyRmbAsProvider,
   type RmbStatus,
 } from '../../api/rmb'
 import type { XaiAuthStatus } from '../../api/auth'
@@ -1287,7 +1287,7 @@ export function SettingsFormSections(p: SettingsFormProps): ReactNode {
                     setRmbBusy(true)
                     setRmbMsg('Switching chat to RMB…')
                     try {
-                      const r = (await useRmbAsProvider()) as {
+                      const r = (await applyRmbAsProvider()) as {
                         start?: { ok?: boolean; error?: string }
                       }
                       setRmbMsg(
