@@ -247,6 +247,7 @@ export function useComposerAttachments(opts: {
     attachments,
     setAttachments,
     attachmentsRef,
+    inflightDropKeysRef,
     dragOver,
     setDragOver,
     uploading,

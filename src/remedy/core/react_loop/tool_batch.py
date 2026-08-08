@@ -58,27 +58,26 @@ async def apply_build_engine_after_batch(
     rearm_agency: Any,
 ) -> AsyncIterator[str]:
     """Run syntax/import gates, auto-verify, machine nudges. Yields @@status lines."""
-    try:
-        # Machine build engine: syntax gate + auto-verify + force nudges
-        with suppress(Exception):
-            from remedy.core.build_engine import (
-                get_build_state,
-                next_machine_nudge,
-                observe_tool_batch,
-            )
-            from remedy.core.build_ledger import merge_turn_into_ledger
-            from remedy.core.build_oracle import (
-                format_auto_verify_message,
-                run_auto_verify,
-                should_auto_verify,
-            )
-            from remedy.core.build_syntax import (
-                check_paths_syntax,
-                format_syntax_gate_message,
-            )
-            from remedy.core.turn_context import turn_session_id
+    # Machine build engine: syntax gate + auto-verify + force nudges
+    with suppress(Exception):
+        from remedy.core.build_engine import (
+            get_build_state,
+            next_machine_nudge,
+            observe_tool_batch,
+        )
+        from remedy.core.build_ledger import merge_turn_into_ledger
+        from remedy.core.build_oracle import (
+            format_auto_verify_message,
+            run_auto_verify,
+            should_auto_verify,
+        )
+        from remedy.core.build_syntax import (
+            check_paths_syntax,
+            format_syntax_gate_message,
+        )
+        from remedy.core.turn_context import turn_session_id
 
-            bst = get_build_state(runtime)
+        bst = get_build_state(runtime)
         if bst is not None and bst.active:
             observe_tool_batch(bst, fresh_calls, batch_tool_msgs)
             # Post-write syntax gate (py/json) before full suite
@@ -90,7 +89,7 @@ async def apply_build_engine_after_batch(
                     sm = format_syntax_gate_message(syn)
                     if sm is not None:
                         messages.append(sm)
-                        _rearm_agency_tools()
+                        rearm_agency()
                         yield "@@status:Build syntax gate red\n"
                 # Import-graph dry-run (faster than pytest for .py)
                 if not bad:
@@ -115,7 +114,7 @@ async def apply_build_engine_after_batch(
                             if imsg is not None:
                                 bst.syntax_ok = False  # block suite
                                 messages.append(imsg)
-                                _rearm_agency_tools()
+                                rearm_agency()
                                 yield "@@status:Build import dry-run red\n"
                             else:
                                 # mutation score for next scoped verify
@@ -216,7 +215,7 @@ async def apply_build_engine_after_batch(
                         av.get("command"),
                         av.get("scoped"),
                     )
-                _rearm_agency_tools()
+                rearm_agency()
                 yield (
                     f"@@status:Build auto-verify "
                     f"{'green' if av.get('ok') else ('cap' if av.get('capped') else 'red')}"
@@ -228,7 +227,7 @@ async def apply_build_engine_after_batch(
                 mnudge = next_machine_nudge(bst)
                 if mnudge is not None:
                     messages.append(mnudge)
-                    _rearm_agency_tools()
+                    rearm_agency()
                     logger.info(
                         "Build engine nudge phase=%s explore=%d write=%d verify=%d",
                         bst.phase,
@@ -252,7 +251,3 @@ async def apply_build_engine_after_batch(
                     session_id=str(turn_session_id(runtime) or ""),
                     home=home_b,
                 )
-
-    except Exception:
-        logger.debug("build engine after batch failed", exc_info=True)
-        return
