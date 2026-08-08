@@ -25,6 +25,11 @@ from remedy.core.react_loop.recovery import (
     soft_retry_notice,
 )
 from remedy.core.react_loop.stream_consume import consume_llm_http_response
+from remedy.core.react_loop.tool_batch import (
+    apply_build_engine_after_batch,
+    inject_phase_nudge,
+    record_tool_batch_stats,
+)
 
 __all__ = [
     "call_llm_stream",
@@ -38,4 +43,7 @@ __all__ = [
     "soft_retry_notice",
     "build_step_request_body",
     "consume_llm_http_response",
+    "record_tool_batch_stats",
+    "inject_phase_nudge",
+    "apply_build_engine_after_batch",
 ]

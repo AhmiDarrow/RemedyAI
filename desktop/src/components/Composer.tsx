@@ -8,6 +8,7 @@ import {
 } from 'react'
 import { searchFiles, listCommands } from '../api/messages'
 import type { CommandDefinition } from '../types'
+import { useComposerAttachments } from '../hooks/useComposerAttachments'
 import {
   uploadAttachment,
   uploadDroppedPayload,
@@ -216,11 +217,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       cancelled = true
     }
   }, [slashCommandsProp])
-  const [attachments, setAttachments] = useState<AttachmentMeta[]>([])
-  const [dragOver, setDragOver] = useState(false)
-  const [uploading, setUploading] = useState(false)
-  const [uploadError, setUploadError] = useState('')
-  const [attachNotice, setAttachNotice] = useState('')
   /** When set, Enter/send updates this queue item instead of enqueueing a new one. */
   const [editingQueueId, setEditingQueueId] = useState<string | null>(null)
   const hasImageAttachments = attachments.some((a) => a.is_image)
@@ -382,6 +378,21 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     if (ensureSession) return ensureSession()
     return null
   }, [sessionId, ensureSession])
+
+  const {
+    attachments,
+    setAttachments,
+    dragOver,
+    setDragOver,
+    uploading,
+    setUploading,
+    uploadError,
+    setUploadError,
+    attachNotice,
+    setAttachNotice,
+  } = useComposerAttachments({
+    ensureSessionId: resolveSession,
+  })
 
   const addFiles = useCallback(
     async (files: FileList | File[]) => {

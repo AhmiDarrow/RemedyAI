@@ -31,25 +31,14 @@ import type { ThemeId } from '../themes'
 import type { UpdateInfo } from '../api/updates'
 import type { ModelInfo } from '../App'
 import type { Density } from '../utils/chatPrefs'
-import {
-  loadSettingsMode,
-  saveSettingsMode,
-  isSectionVisibleInMode,
-  type SettingsMode,
-} from '../utils/settingsMode'
+import type { SettingsMode } from '../utils/settingsMode'
 import {
   normalizeToolProcess,
 
   type ToolProcessMode,
 } from '../utils/toolLabels'
 import { demoModelOptions } from '../utils/demoModels'
-import { sectionMatchesSearch } from './SettingsSection'
-import {
-  SETTINGS_SECTION_META,
-  loadLastSettingsSection,
-  saveLastSettingsSection,
-  type SettingsSectionId,
-} from '../utils/settingsSearch'
+import type { SettingsSectionId } from '../utils/settingsSearch'
 import { PERSONAS, pickProjectFolder } from './settings/shared'
 import { SettingsFormSections } from './settings/FormSections'
 import {
@@ -58,6 +47,7 @@ import {
   type MessengerDraftMap,
 } from '../utils/messengerDrafts'
 import type { AssistantDraft } from './settings/AssistantSection'
+import { useSettingsPanelState } from '../hooks/useSettingsPanelState'
 
 interface SettingsPanelProps {
   open: boolean
@@ -157,10 +147,6 @@ export function SettingsPanel({
   const [autoApproveThreshold, setAutoApproveThreshold] = useState(0.8)
   const [logLevel, setLogLevel] = useState('INFO')
   const [sarcasmMode, setSarcasmMode] = useState(false)
-  const [settingsSearch, setSettingsSearch] = useState('')
-  const [forceSection, setForceSection] = useState<string | null>(null)
-  const [visionSectionOpen, setVisionSectionOpen] = useState(false)
-  const [rmbSectionOpen, setRmbSectionOpen] = useState(false)
   const [toolProcess, setToolProcess] = useState<ToolProcessMode>(
     () => toolProcessMode || 'off',
   )
@@ -190,7 +176,21 @@ export function SettingsPanel({
   const [messengers, setMessengers] = useState<MessengerInfo[]>([])
   const [messengerDrafts, setMessengerDrafts] = useState<MessengerDraftMap>({})
   const [assistantDraft, setAssistantDraft] = useState<AssistantDraft>({})
-  const [settingsMode, setSettingsMode] = useState<SettingsMode>(() => loadSettingsMode())
+  const {
+    settingsSearch,
+    setSettingsSearch,
+    forceSection,
+    setForceSection,
+    visionSectionOpen,
+    setVisionSectionOpen,
+    rmbSectionOpen,
+    setRmbSectionOpen,
+    settingsMode,
+    setSettingsMode,
+    matchSec,
+    sectionProps,
+    onPanelOpenChange,
+  } = useSettingsPanelState()
   const [customName, setCustomName] = useState('')
 
   const primaryProviders = useMemo(
@@ -494,17 +494,14 @@ export function SettingsPanel({
       setXaiUserCode('')
       setXaiVerifyUrl('')
       // Deep-link / remember last section
-      const last = loadLastSettingsSection()
-      if (last) setForceSection(last)
+      onPanelOpenChange(true)
     } else {
       stopXaiPoll()
       setXaiLoginBusy(false)
-      setVisionSectionOpen(false)
-      setRmbSectionOpen(false)
-      setSettingsSearch('')
+      onPanelOpenChange(false)
     }
     return () => stopXaiPoll()
-  }, [open, load, stopXaiPoll])
+  }, [open, load, stopXaiPoll, onPanelOpenChange])
 
   // Lazy-load vision status only when Local vision is expanded (faster Settings open).
   useEffect(() => {
@@ -517,45 +514,6 @@ export function SettingsPanel({
     if (!open || !rmbSectionOpen) return
     void refreshRmb()
   }, [open, rmbSectionOpen, refreshRmb])
-
-  const matchSec = useCallback(
-    (id: SettingsSectionId) => {
-      const meta = SETTINGS_SECTION_META[id]
-      return sectionMatchesSearch(
-        settingsSearch,
-        meta.title,
-        meta.summary,
-        meta.keywords,
-      )
-    },
-    [settingsSearch],
-  )
-
-  const sectionProps = useCallback(
-    (id: SettingsSectionId) => {
-      const modeHidden = !isSectionVisibleInMode(id, settingsMode)
-      const searchHidden = settingsSearch.trim().length > 0 && !matchSec(id)
-      return {
-        id,
-        title: SETTINGS_SECTION_META[id].title,
-        summary: SETTINGS_SECTION_META[id].summary,
-        keywords: SETTINGS_SECTION_META[id].keywords,
-        forceOpen:
-          forceSection === id
-          || (settingsSearch.trim().length > 0 && matchSec(id) && !modeHidden),
-        hidden: modeHidden || searchHidden,
-        onOpenChange: (isOpen: boolean) => {
-          if (isOpen) {
-            setForceSection(id)
-            saveLastSettingsSection(id)
-            if (id === 'vision') setVisionSectionOpen(true)
-            if (id === 'rmb') setRmbSectionOpen(true)
-          }
-        },
-      }
-    },
-    [forceSection, matchSec, settingsSearch, settingsMode],
-  )
 
   const handleXaiSignIn = async () => {
     setXaiLoginBusy(true)
@@ -830,8 +788,7 @@ export function SettingsPanel({
               type="button"
               onClick={() => {
                 setSettingsMode(m)
-                saveSettingsMode(m)
-                if (m === 'advanced') setShowAdvanced(true)
+                                if (m === 'advanced') setShowAdvanced(true)
               }}
               className="flex-1 rounded-lg px-2 py-1 text-[10px] font-semibold capitalize"
               style={{
