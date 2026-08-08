@@ -339,11 +339,22 @@ export function StatusBar({
             const bits: string[] = []
             if (p.pending_approvals > 0) bits.push(`${p.pending_approvals} approve`)
             if (p.open_goals > 0) bits.push(`${p.open_goals} goals`)
-            // Somatic / organism mood (Soul Field)
+            // Somatic / organism mood (Soul Field) + lean metabolism
             const soma = p.soma
             if (soma?.label) {
               const emoji = soma.emoji ? `${soma.emoji} ` : ''
               bits.push(`${emoji}${soma.label}`)
+            }
+            const meta = p.metabolism
+            if (meta && typeof meta === 'object') {
+              const eu = Number((meta as { evidence_units?: number }).evidence_units || 0)
+              const du = Number((meta as { decision_units?: number }).decision_units || 0)
+              const tier = (meta as { tier_label?: string; tier?: number }).tier_label
+                || ((meta as { tier?: number }).tier != null
+                  ? `L${(meta as { tier?: number }).tier}`
+                  : '')
+              if (tier) bits.push(String(tier))
+              if (eu > 0 || du > 0) bits.push(`EU ${eu}·DU ${du}`)
             }
             setAlerts(bits.join(' · '))
             setAccessScope(String(p.access_scope || ''))

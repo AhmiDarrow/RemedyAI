@@ -23,14 +23,16 @@ from remedy.core.retention import (
 from remedy.interfaces.local_auth import http_bootstrap_enabled
 
 
-def test_maturity_defaults_experimental_off() -> None:
+def test_maturity_defaults() -> None:
     cfg: dict = {}
-    assert soul_field_enabled(cfg) is False
+    # Soul Field is on by default so the organism lives; opt-out still works.
+    assert soul_field_enabled(cfg) is True
     assert build_os_advanced_enabled(cfg) is False
     assert rmb_enabled(cfg) is True
     snap = maturity_snapshot(cfg)
-    assert snap["soul_field_maturity"] == "experimental"
+    assert snap["soul_field_maturity"] == "stable"
     assert snap["build_os_advanced_maturity"] == "advanced"
+    assert soul_field_enabled({"soul_field_enabled": False}) is False
 
 
 def test_maturity_opt_in() -> None:

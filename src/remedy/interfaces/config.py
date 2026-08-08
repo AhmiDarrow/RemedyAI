@@ -1179,7 +1179,7 @@ sarcasm_mode = false
 # http_bootstrap = true     # browser loopback token; desktop prefers IPC
 
 # Maturity gates (experimental / advanced organs — default off / honest)
-# soul_field_enabled = false   # experimental personhood inject + soul_* tools
+# soul_field_enabled = true    # personhood / Soul Field (default on; set false to opt out)
 # build_os_advanced = false    # Build OS frontiers A–H tools
 # rmb_enabled = true           # RMB local agent host allowed when configured
 

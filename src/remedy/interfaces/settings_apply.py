@@ -190,7 +190,11 @@ def public_settings_snapshot(cfg: dict[str, Any] | None = None) -> dict[str, Any
         "web_tools_enabled": bool(raw.get("web_tools_enabled", False)),
         "http_bootstrap": bool(raw.get("http_bootstrap", True)),
         "privacy_mode": bool(raw.get("privacy_mode", False)),
-        "soul_field_enabled": bool(raw.get("soul_field_enabled", False)),
+        "soul_field_enabled": bool(
+            raw.get("soul_field_enabled")
+            if "soul_field_enabled" in raw
+            else True
+        ),
         "build_os_advanced": bool(raw.get("build_os_advanced", False)),
         "rmb_enabled": bool(raw.get("rmb_enabled", True)),
         "retention_session_days": int(raw.get("retention_session_days") or 0),

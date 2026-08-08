@@ -89,38 +89,56 @@ def schedule_post_turn_prep(
                 get_skill_genome().persist(home)
             runtime._action_ir = None
             # Soul Field micro-update — personhood residue across providers
+            soul_on = True
             with suppress(Exception):
-                from remedy.core.llm_binding import get_llm_binding
-                from remedy.core.turn_context import turn_session_id
-                from remedy.memory.soul.update import update_soul_after_turn
+                from remedy.core.feature_maturity import soul_field_enabled
 
-                bind = get_llm_binding(runtime)
-                update_soul_after_turn(
-                    user_text=message or "",
-                    assistant_text=asst,
-                    session_id=str(
-                        turn_session_id(runtime) or sid or ""
-                    ),
-                    provider=str(getattr(bind, "provider", "") or ""),
-                    model=str(getattr(bind, "model", "") or ""),
-                    brief=getattr(runtime, "_session_brief", None),
-                    project_path=project_path or "",
-                    home=home,
-                )
-            # Occasional dream densification (cooldown inside dream_cycle)
-            with suppress(Exception):
-                from remedy.memory.soul.dream import dream_cycle, should_dream
-                from remedy.memory.soul.field import load_soul_field
+                soul_on = bool(soul_field_enabled())
+            if soul_on:
+                with suppress(Exception):
+                    from remedy.core.llm_binding import get_llm_binding
+                    from remedy.core.turn_context import turn_session_id
+                    from remedy.memory.soul.update import update_soul_after_turn
 
-                # Dream after enough life has been lived this process
-                sf = load_soul_field(home)
-                if len(sf.episodes) >= 4 and should_dream(home):
-                    dream_cycle(
+                    bind = get_llm_binding(runtime)
+                    update_soul_after_turn(
+                        user_text=message or "",
+                        assistant_text=asst,
+                        session_id=str(
+                            turn_session_id(runtime) or sid or ""
+                        ),
+                        provider=str(getattr(bind, "provider", "") or ""),
+                        model=str(getattr(bind, "model", "") or ""),
+                        brief=getattr(runtime, "_session_brief", None),
+                        project_path=project_path or "",
                         home=home,
-                        memory=getattr(runtime, "memory", None),
-                        field=sf,
                     )
-            # Always refresh somatic signal for tray / status bar
+                # Occasional dream densification (cooldown inside dream_cycle)
+                with suppress(Exception):
+                    from remedy.memory.soul.dream import dream_cycle, should_dream
+                    from remedy.memory.soul.field import load_soul_field
+
+                    sf = load_soul_field(home)
+                    if len(sf.episodes) >= 4 and should_dream(home):
+                        dream_cycle(
+                            home=home,
+                            memory=getattr(runtime, "memory", None),
+                            field=sf,
+                        )
+                # Soft arm mission from soul when idle-ish (no active mission)
+                with suppress(Exception):
+                    from remedy.memory.soul.field import load_soul_field
+                    from remedy.memory.soul.missions_bridge import arm_soul_missions
+
+                    sf2 = load_soul_field(home)
+                    if (
+                        sf2.relational.turns_together > 0
+                        and sf2.relational.turns_together % 8 == 0
+                    ):
+                        arm_soul_missions(
+                            runtime, home=home, max_new=1, auto=True
+                        )
+            # Always refresh somatic signal for tray / status bar (organism visible)
             with suppress(Exception):
                 from remedy.core.muscle_profile import muscle_from_runtime
                 from remedy.memory.soul.somatic import refresh_soma
@@ -131,16 +149,6 @@ def schedule_post_turn_prep(
                     muscle_label=m.label,
                     muscle_provider=m.provider,
                 )
-            # Soft arm mission from soul when idle-ish (no active mission)
-            with suppress(Exception):
-                from remedy.memory.soul.missions_bridge import arm_soul_missions
-
-                # Only every ~8 turns of bond to avoid mission spam
-                from remedy.memory.soul.field import load_soul_field
-
-                sf2 = load_soul_field(home)
-                if sf2.relational.turns_together > 0 and sf2.relational.turns_together % 8 == 0:
-                    arm_soul_missions(runtime, home=home, max_new=1, auto=True)
             runtime._last_assistant_text = ""
 
 
