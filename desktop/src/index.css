@@ -1515,7 +1515,8 @@ body {
 [data-remedy-status-bar] select:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--accent) 35%, var(--border)) !important;
 }
-[data-remedy-status-bar] .seg-btn {
+/* Segmented control — global (settings FormSegmented, status bar, theme, usage) */
+.seg-btn {
   border-radius: 0.4rem;
   padding: 0.2rem 0.5rem;
   font-size: 0.72rem;
@@ -1527,15 +1528,19 @@ body {
   transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
   cursor: pointer;
 }
-[data-remedy-status-bar] .seg-btn:hover {
+.seg-btn:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
   color: var(--text-primary);
 }
-[data-remedy-status-bar] .seg-btn.is-active {
+.seg-btn.is-active {
   background: color-mix(in srgb, var(--accent) 20%, var(--bg-secondary));
   border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
   color: var(--accent);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.seg-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 /* Workspace icon rails */
@@ -1640,15 +1645,24 @@ body {
   border-color: color-mix(in srgb, var(--border) 80%, transparent);
   color: var(--text-muted);
 }
+.ui-btn-ghost:hover:not(:disabled) {
+  color: var(--text-primary);
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+}
+/* Compact actions used in settings FormActionButton rows */
+.ui-btn-sm {
+  font-size: 0.7rem;
+  padding: 0.35rem 0.65rem;
+}
 .ui-select {
-  border-radius: 0.4rem;
-  padding: 0.2rem 0.45rem;
+  border-radius: 0.5rem;
+  padding: 0.35rem 0.55rem;
   font-size: 0.75rem;
   outline: none;
-  background: color-mix(in srgb, var(--bg-tertiary) 85%, transparent);
+  background: color-mix(in srgb, var(--bg-tertiary) 80%, transparent);
   color: var(--text-primary);
   border: 1px solid color-mix(in srgb, var(--border) 90%, transparent);
-  transition: border-color 0.12s ease;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
   max-width: 100%;
 }
 .ui-select:hover:not(:disabled) {
@@ -1660,6 +1674,12 @@ body {
 }
 .ui-select:disabled {
   opacity: 0.6;
+}
+/* Compact selects inside dense settings rows (RMB / catalog) */
+.ui-select-sm {
+  padding: 0.25rem 0.45rem;
+  font-size: 0.68rem;
+  border-radius: 0.4rem;
 }
 .ui-empty-state {
   color: var(--text-muted);
@@ -1763,9 +1783,33 @@ body {
   border: 1px solid color-mix(in srgb, var(--border) 90%, transparent);
   transition: border-color 0.12s ease, box-shadow 0.12s ease;
 }
-.ui-input:focus {
+.ui-input:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+}
+.ui-input:focus,
+.ui-input:focus-visible {
   border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.ui-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.ui-input-sm {
+  padding: 0.3rem 0.5rem;
+  font-size: 0.68rem;
+  border-radius: 0.4rem;
+}
+/* Settings form section stack rhythm */
+.settings-form-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.settings-form-sections .form-range {
+  width: 100%;
+  margin-bottom: 0.5rem;
+  accent-color: var(--accent);
 }
 .ui-banner {
   border-radius: 0.75rem;

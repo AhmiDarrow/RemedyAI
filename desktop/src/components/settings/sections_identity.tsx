@@ -337,36 +337,19 @@ export function SettingsSections_identity(p: SettingsFormProps): ReactNode {
           when you say so. Hard wipe/privilege blocks stay on for everyone.
         </FormHint>
               <div className="mb-2">
-                <div className="text-xs font-medium mb-1" style={{ color: 'var(--text-primary)' }}>
-                  Approvals
-                </div>
-                <div className="flex gap-1 mb-1">
-                  {(
-                    [
-                      { id: 'ask' as const, label: 'Ask', hint: 'Safe default — confirm shell/write/skills' },
-                      {
-                        id: 'auto' as const,
-                        label: 'Auto',
-                        hint: 'Work until done — full owner power on trusted scope',
-                      },
-                    ] as const
-                  ).map((m) => (
-                    <button
-                      key={m.id}
-                      type="button"
-                      onClick={() => setApprovalMode(m.id)}
-                      className="flex-1 py-1.5 rounded text-xs font-medium"
-                      title={m.hint}
-                      style={{
-                        background: approvalMode === m.id ? 'var(--accent)' : 'var(--bg-tertiary)',
-                        color: approvalMode === m.id ? '#fff' : 'var(--text-secondary)',
-                        border: '1px solid var(--border)',
-                      }}
-                    >
-                      {m.label}
-                    </button>
-                  ))}
-                </div>
+                <FormLabel>Approvals</FormLabel>
+                <FormSegmented
+                  value={approvalMode}
+                  onChange={setApprovalMode}
+                  options={[
+                    { id: 'ask', label: 'Ask', title: 'Safe default — confirm shell/write/skills' },
+                    {
+                      id: 'auto',
+                      label: 'Auto',
+                      title: 'Work until done — full owner power on trusted scope',
+                    },
+                  ]}
+                />
                 <FormHint>
                   {approvalMode === 'auto'
                     ? 'Auto: shell, write, edit, and skills run without prompts (except Untrusted scope). Use when you want Remedy to finish the job.'
@@ -374,142 +357,91 @@ export function SettingsSections_identity(p: SettingsFormProps): ReactNode {
                 </FormHint>
               </div>
               <div className="mb-2">
-                <div className="text-xs font-medium mb-1" style={{ color: 'var(--text-primary)' }}>
-                  Thinking level
-                </div>
-                <div className="flex gap-1 mb-1 flex-wrap">
-                  {(['off', 'low', 'medium', 'high'] as const).map((lvl) => (
-                    <button
-                      key={lvl}
-                      type="button"
-                      onClick={() => setThinkingLevel(lvl)}
-                      className="flex-1 min-w-[3rem] py-1.5 rounded text-xs font-medium capitalize"
-                      style={{
-                        background: thinkingLevel === lvl ? 'var(--accent)' : 'var(--bg-tertiary)',
-                        color: thinkingLevel === lvl ? '#fff' : 'var(--text-secondary)',
-                        border: '1px solid var(--border)',
-                      }}
-                    >
-                      {lvl}
-                    </button>
-                  ))}
-                </div>
+                <FormLabel>Thinking level</FormLabel>
+                <FormSegmented
+                  value={thinkingLevel}
+                  onChange={setThinkingLevel}
+                  options={[
+                    { id: 'off', label: 'Off' },
+                    { id: 'low', label: 'Low' },
+                    { id: 'medium', label: 'Medium' },
+                    { id: 'high', label: 'High' },
+                  ]}
+                />
                 <FormHint>
                   Also on the status bar. High = more deliberation when the model supports it.
                 </FormHint>
               </div>
               <FormToggle
-          checked={privacyMode}
-          onChange={setPrivacyMode}
-          label="Privacy mode (tighter model egress)"
-        />
-              <div className="text-[10px] leading-snug mb-1.5 pl-6" style={{ color: 'var(--text-muted)' }}>
-                Same control as the Privacy section / status bar. Off by default so Remedy stays fast.
-              </div>
+                checked={privacyMode}
+                onChange={setPrivacyMode}
+                label="Privacy mode (tighter model egress)"
+                description="Same control as the Privacy section / status bar. Off by default so Remedy stays fast."
+              />
               <FormToggle
-          checked={webToolsEnabled}
-          onChange={setWebToolsEnabled}
-          label="Enable web_fetch (public HTTP only)"
-        />
-              <div className="text-[10px] leading-snug mb-1.5 pl-6" style={{ color: 'var(--text-muted)' }}>
-                Opt-in. Private/localhost/metadata hosts are blocked (SSRF + DNS pin). Public web stays available.
-              </div>
+                checked={webToolsEnabled}
+                onChange={setWebToolsEnabled}
+                label="Enable web_fetch (public HTTP only)"
+                description="Opt-in. Private/localhost/metadata hosts are blocked (SSRF + DNS pin). Public web stays available."
+              />
               <FormToggle
-          checked={httpBootstrap}
-          onChange={setHttpBootstrap}
-          label="Allow browser token bootstrap"
-        />
-              <div className="text-[10px] leading-snug pl-6" style={{ color: 'var(--text-muted)' }}>
-                On (default): browser Web UI can get the local token on loopback. Off: desktop IPC only
-                (still full power in the app). Override anytime with{' '}
-                <code className="text-[10px]">REMEDY_HTTP_BOOTSTRAP</code>.
-              </div>
+                checked={httpBootstrap}
+                onChange={setHttpBootstrap}
+                label="Allow browser token bootstrap"
+                description="On (default): browser Web UI can get the local token on loopback. Off: desktop IPC only (still full power in the app). Override anytime with REMEDY_HTTP_BOOTSTRAP."
+              />
             </SettingsSection>
 
-            {/* Always ready */}
-            <SettingsSection
-              {...sectionProps('always-ready')}
-            >
+      {/* Always ready */}
+      <SettingsSection {...sectionProps('always-ready')}>
               <FormToggle
-          checked={launchAtLogin}
-          onChange={setLaunchAtLogin}
-          label="Start with Windows"
-        />
+                checked={launchAtLogin}
+                onChange={setLaunchAtLogin}
+                label="Start with Windows"
+              />
               <FormToggle
-          checked={startInTray}
-          onChange={setStartInTray}
-          label="Start hidden in tray"
-        />
-              <div className="text-[10px] leading-snug mb-1.5 pl-6" style={{ color: 'var(--text-muted)' }}>
-                Off = window opens normally (recommended). On = only a tray icon until you click it.
-                Independent of “Start with Windows”.
-              </div>
-              <label className="flex items-center gap-2 mb-1" style={{ opacity: 0.95 }}>
-                <input
-                  type="checkbox"
-                  checked
-                  disabled
-                  readOnly
-                  style={{ accentColor: 'var(--accent)' }}
-                  aria-label="Close window always hides to tray"
-                />
-                <span style={{ color: 'var(--text-primary)' }}>
-                  Close window (✕) always hides to tray
-                </span>
-              </label>
-              <div className="text-[10px] leading-snug mb-1.5 pl-6" style={{ color: 'var(--text-muted)' }}>
-                Always on for the always-ready partner: the OS ✕ / Alt+F4 hides Remedy to the
-                system tray and keeps the local API running (Web UI and chat stay warm).
-                Fully stop Remedy only from the tray menu <strong>Quit</strong> (or app menu Quit) —
-                that stops the local server.
-              </div>
+                checked={startInTray}
+                onChange={setStartInTray}
+                label="Start hidden in tray"
+                description='Off = window opens normally (recommended). On = only a tray icon until you click it. Independent of "Start with Windows".'
+              />
               <FormToggle
-          checked={skipQuitWarn}
-          onChange={setSkipQuitWarn}
-          label="Don&apos;t warn when quitting (server stops)"
-        />
-              <FormHint>
-                Opt-in only. Uses the Windows <strong>Startup folder</strong> (Settings → Apps → Startup) —
-                not the registry Run key. Quit fully stops the local API (browser WebUI dies);
-                use <strong>Switch to WebUI</strong> or hide-to-tray to keep the server running.
-              </FormHint>
-            </SettingsSection>
+                checked
+                disabled
+                onChange={() => {}}
+                label="Close window (✕) always hides to tray"
+                description="Always on for the always-ready partner: the OS ✕ / Alt+F4 hides Remedy to the system tray and keeps the local API running. Fully stop only from tray Quit."
+              />
+              <FormToggle
+                checked={skipQuitWarn}
+                onChange={setSkipQuitWarn}
+                label="Don't warn when quitting (server stops)"
+                description="Opt-in only. Uses the Windows Startup folder (Settings → Apps → Startup) — not the registry Run key. Quit fully stops the local API; use Switch to WebUI or hide-to-tray to keep the server running."
+              />
+      </SettingsSection>
 
-            {/* Tool process visibility */}
-            <SettingsSection
-              {...sectionProps('tool-process')}
-            >
-              <FormHint>
-                How much <em>Process</em> detail to show under replies — same list, more depth.
-                The chat answer is always complete (never truncated by this setting).
-              </FormHint>
-              <div className="flex gap-1 mb-1 flex-wrap">
-                {TOOL_PROCESS_MODES.map((m) => (
-                  <button
-                    key={m.id}
-                    type="button"
-                    onClick={() => {
-                      setToolProcess(m.id)
-                      onToolProcessChange?.(m.id)
-                    }}
-                    className="flex-1 min-w-[3.5rem] py-1.5 rounded text-xs font-medium"
-                    title={m.hint}
-                    style={{
-                      background: toolProcess === m.id ? 'var(--accent)' : 'var(--bg-tertiary)',
-                      color: toolProcess === m.id ? '#fff' : 'var(--text-secondary)',
-                      border: '1px solid var(--border)',
-                    }}
-                  >
-                    {m.label}
-                  </button>
-                ))}
-              </div>
-              <FormHint>
-                {TOOL_PROCESS_MODES.find((m) => m.id === toolProcess)?.hint}
-              </FormHint>
-            </SettingsSection>
-
-            {/* RMB — local agent host (llama.cpp, coding + tools) */}
+      {/* Tool process visibility */}
+      <SettingsSection {...sectionProps('tool-process')}>
+        <FormHint>
+          How much <em>Process</em> detail to show under replies — same list, more depth.
+          The chat answer is always complete (never truncated by this setting).
+        </FormHint>
+        <FormSegmented
+          value={toolProcess}
+          onChange={(id) => {
+            setToolProcess(id)
+            onToolProcessChange?.(id)
+          }}
+          options={TOOL_PROCESS_MODES.map((m) => ({
+            id: m.id,
+            label: m.label,
+            title: m.hint,
+          }))}
+        />
+        <FormHint>
+          {TOOL_PROCESS_MODES.find((m) => m.id === toolProcess)?.hint}
+        </FormHint>
+      </SettingsSection>
     </>
   )
 }

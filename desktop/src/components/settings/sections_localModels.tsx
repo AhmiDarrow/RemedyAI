@@ -206,7 +206,7 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
                 Catalog model
               </FormLabel>
               <select
-                className="ui-select w-full mb-2 text-[10px]"
+                className="ui-select ui-select-sm w-full mb-2"
                 disabled={rmbBusy}
                 value={rmb?.model_id || rmb?.catalog?.default_model_id || ''}
                 onChange={async (e) => {
@@ -238,7 +238,7 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
                 Discovered GGUF
               </FormLabel>
               <select
-                className="ui-select w-full mb-2 text-[10px] font-mono"
+                className="ui-select ui-select-sm w-full mb-2 font-mono"
                 disabled={rmbBusy}
                 value={rmb?.model_path || ''}
                 onChange={async (e) => {
@@ -271,7 +271,7 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
             </FormLabel>
             <input
               type="text"
-              className="ui-input mb-2 text-[10px] font-mono"
+              className="ui-input ui-input-sm mb-2 font-mono"
               disabled={rmbBusy}
               defaultValue={rmb?.model_path || ''}
               key={rmb?.model_path || 'rmb-path'}
@@ -301,7 +301,7 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
                 Context size
               </FormLabel>
               <select
-                className="ui-select w-full mb-2 text-[10px]"
+                className="ui-select ui-select-sm w-full mb-2"
                 disabled={rmbBusy}
                 value={String(rmb?.ctx_size ?? 8192)}
                 onChange={async (e) => {
@@ -331,7 +331,7 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
               </FormLabel>
               <input
                 type="number"
-                className="ui-input mb-2 text-[10px]"
+                className="ui-input ui-input-sm mb-2"
                 disabled={rmbBusy}
                 defaultValue={
                   rmb?.n_gpu_layers != null ? String(rmb.n_gpu_layers) : '-1'

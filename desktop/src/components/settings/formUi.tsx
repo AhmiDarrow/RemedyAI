@@ -1,10 +1,13 @@
-/** Polished form controls for Settings FormSections. */
+/** Cohesive form controls for Settings — pairs with ui-* / seg-btn design tokens. */
 
-import type { ReactNode } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 
-export function FormHint({ children }: { children: ReactNode }) {
+export function FormHint({ children, className = '' }: { children: ReactNode; className?: string }) {
   return (
-    <div className="text-[10px] mb-2 leading-snug" style={{ color: 'var(--text-muted)' }}>
+    <div
+      className={`text-[10px] mb-2 leading-snug ${className}`.trim()}
+      style={{ color: 'var(--text-muted)' }}
+    >
       {children}
     </div>
   )
@@ -41,6 +44,7 @@ export function FormInput({
   id,
   spellCheck,
   mono,
+  size = 'md',
 }: {
   value: string
   onChange: (v: string) => void
@@ -52,6 +56,7 @@ export function FormInput({
   id?: string
   spellCheck?: boolean
   mono?: boolean
+  size?: 'md' | 'sm'
 }) {
   return (
     <input
@@ -63,7 +68,7 @@ export function FormInput({
       placeholder={placeholder}
       spellCheck={spellCheck}
       onChange={(e) => onChange(e.target.value)}
-      className={`ui-input ${mono ? 'font-mono' : ''} ${className}`.trim()}
+      className={`ui-input ${size === 'sm' ? 'ui-input-sm' : ''} ${mono ? 'font-mono' : ''} ${className}`.trim()}
     />
   )
 }
@@ -76,6 +81,7 @@ export function FormSelect({
   disabled,
   title,
   id,
+  size = 'md',
 }: {
   value: string
   onChange: (v: string) => void
@@ -84,6 +90,7 @@ export function FormSelect({
   disabled?: boolean
   title?: string
   id?: string
+  size?: 'md' | 'sm'
 }) {
   return (
     <select
@@ -92,7 +99,7 @@ export function FormSelect({
       disabled={disabled}
       title={title}
       onChange={(e) => onChange(e.target.value)}
-      className={`ui-select w-full ${className}`.trim()}
+      className={`ui-select w-full ${size === 'sm' ? 'ui-select-sm' : ''} ${className}`.trim()}
     >
       {children}
     </select>
@@ -142,9 +149,11 @@ export function FormToggle({
 export function FormNotice({
   children,
   tone = 'muted',
+  className = '',
 }: {
   children: ReactNode
   tone?: 'muted' | 'accent' | 'warn' | 'error'
+  className?: string
 }) {
   const border =
     tone === 'accent'
@@ -170,7 +179,7 @@ export function FormNotice({
         : 'var(--text-muted)'
   return (
     <div
-      className="text-[10px] rounded-lg px-2.5 py-1.5 mb-2 leading-snug"
+      className={`text-[10px] rounded-lg px-2.5 py-1.5 mb-2 leading-snug ${className}`.trim()}
       style={{ color, border: `1px solid ${border}`, background: bg }}
     >
       {children}
@@ -182,15 +191,17 @@ export function FormLinkButton({
   children,
   onClick,
   accent,
+  className = '',
 }: {
   children: ReactNode
   onClick: () => void
   accent?: boolean
+  className?: string
 }) {
   return (
     <button
       type="button"
-      className="mb-2 text-[10px] underline block bg-transparent border-0 p-0 cursor-pointer"
+      className={`mb-2 text-[10px] underline block bg-transparent border-0 p-0 cursor-pointer ${className}`.trim()}
       style={{ color: accent ? 'var(--accent)' : 'var(--text-muted)' }}
       onClick={onClick}
     >
@@ -205,12 +216,14 @@ export function FormActionButton({
   disabled,
   variant = 'secondary',
   className = '',
+  title,
 }: {
   children: ReactNode
-  onClick?: () => void
+  onClick?: () => void | Promise<void>
   disabled?: boolean
   variant?: 'primary' | 'secondary' | 'danger' | 'ghost'
   className?: string
+  title?: string
 }) {
   const v =
     variant === 'primary'
@@ -224,9 +237,12 @@ export function FormActionButton({
     <button
       type="button"
       disabled={disabled}
-      onClick={onClick}
-      className={`ui-btn ${v} ${className}`.trim()}
-      style={{ fontSize: '0.7rem', padding: '0.35rem 0.65rem' }}
+      title={title}
+      onClick={() => {
+        if (!onClick) return
+        void onClick()
+      }}
+      className={`ui-btn ui-btn-sm ${v} ${className}`.trim()}
     >
       {children}
     </button>
@@ -237,17 +253,23 @@ export function FormSegmented<T extends string>({
   value,
   options,
   onChange,
+  disabled,
+  className = '',
 }: {
   value: T
-  options: { id: T; label: string }[]
+  options: { id: T; label: string; title?: string }[]
   onChange: (v: T) => void
+  disabled?: boolean
+  className?: string
 }) {
   return (
-    <div className="flex flex-wrap gap-1 mb-2">
+    <div className={`flex flex-wrap gap-1 mb-2 ${className}`.trim()} role="group">
       {options.map((o) => (
         <button
           key={o.id}
           type="button"
+          disabled={disabled}
+          title={o.title}
           className={`seg-btn${value === o.id ? ' is-active' : ''}`}
           aria-pressed={value === o.id}
           onClick={() => onChange(o.id)}
@@ -259,20 +281,57 @@ export function FormSegmented<T extends string>({
   )
 }
 
-export function FormRow({ children }: { children: ReactNode }) {
-  return <div className="flex flex-wrap items-center gap-1.5 mb-2">{children}</div>
+export function FormRow({ children, className = '' }: { children: ReactNode; className?: string }) {
+  return <div className={`flex flex-wrap items-center gap-1.5 mb-2 ${className}`.trim()}>{children}</div>
+}
+
+export function FormRange({
+  value,
+  onChange,
+  min,
+  max,
+  step = 1,
+  className = '',
+  disabled,
+  id,
+}: {
+  value: number
+  onChange: (v: number) => void
+  min: number
+  max: number
+  step?: number
+  className?: string
+  disabled?: boolean
+  id?: string
+}) {
+  return (
+    <input
+      id={id}
+      type="range"
+      min={min}
+      max={max}
+      step={step}
+      value={value}
+      disabled={disabled}
+      onChange={(e) => onChange(Number(e.target.value))}
+      className={`form-range ${className}`.trim()}
+    />
+  )
 }
 
 /** Compact key/value status surface for RMB / vision panels. */
 export function FormStatusCard({ children }: { children: ReactNode }) {
   return (
     <div
-      className="rounded-md px-2 py-1.5 mb-2 text-[10px] space-y-0.5"
-      style={{
-        background: 'var(--bg-tertiary)',
-        border: '1px solid var(--border)',
-        color: 'var(--text-secondary)',
-      }}
+      className="rounded-md px-2 py-1.5 mb-2 text-[10px] space-y-0.5 ui-surface"
+      style={
+        {
+          borderRadius: '0.5rem',
+          boxShadow: 'none',
+          background: 'var(--bg-tertiary)',
+          color: 'var(--text-secondary)',
+        } as CSSProperties
+      }
     >
       {children}
     </div>
