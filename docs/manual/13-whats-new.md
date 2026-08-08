@@ -2,11 +2,27 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current series: **v0.21.1**.
+Current series: **v0.22.0**.
 
 ## Contents
 
-- [0.21.1](#0211---continuity--self-inject-safety) · [0.20.0](#0200---partner-metabolism--always-ready) · [0.19.0](#0190---parallel-multi-provider--background-turns) · [0.18.6](#0186---os-chrome--browser-embed) · older below
+- [0.22.0](#0220---living-organism--builder-continuity) · [0.21.1](#0211---continuity--self-inject-safety) · [0.20.0](#0200---partner-metabolism--always-ready) · [0.19.0](#0190---parallel-multi-provider--background-turns) · older below
+
+## 0.22.0 - Living organism + builder continuity
+
+One continuous partner that *stays* mid-work — Soul Field on by default, organism
+pulse, continuity steering, and stricter done/verify. Full detail: `CHANGELOG.md` ·
+PyPI **`remedy-ai==0.22.0`** · GitHub tag **v0.22.0**.
+
+- **Soul Field default on** — bond, open threads, organism mood on the status bar;
+  Settings → Identity to opt out.
+- **Organism pulse** — mood + forge (builder) + immune (false-done) + EU/DU on each
+  real work turn.
+- **Continuity steering** — open tasks and mid-ship resume inject so models do not
+  monologue past unfinished work.
+- **Multi-tab + messengers** — safer concurrent streams; remote chats get the same
+  post-turn continuity as desktop.
+- **Retention defaults** — sessions 180 days, attachments 90 days (set 0 to keep forever).
 
 ## 0.21.1 - Continuity + self-inject safety
 
