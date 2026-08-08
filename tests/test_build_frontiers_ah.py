@@ -215,8 +215,14 @@ def test_tdd_bootstrap(tmp_path):
     assert (res.get("tdd") or {}).get("written")
 
 
-def test_build_tools_ah_registered(tmp_path):
+def test_build_tools_ah_registered(tmp_path, monkeypatch):
     from remedy.core.agent_build_tools import register_build_tools
+
+    # A–H frontiers stay behind maturity gate — enable for registration test
+    monkeypatch.setattr(
+        "remedy.core.feature_maturity.build_os_advanced_enabled",
+        lambda cfg=None: True,
+    )
 
     handlers: dict[str, object] = {}
 
