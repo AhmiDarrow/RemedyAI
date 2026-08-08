@@ -7,6 +7,7 @@ import {
   FormActionButton,
   FormHint,
   FormLabel,
+  FormRange,
   FormSegmented,
   FormSelect,
   FormToggle,
@@ -78,28 +79,34 @@ export function SettingsSections_rest(p: SettingsFormProps): ReactNode {
         <FormLabel>
           Auto min context % ({Math.round(harnessMinPct * 100)}%)
         </FormLabel>
-        <input
-          type="range"
+        <FormRange
           min={5}
           max={90}
           step={1}
           value={Math.round(harnessMinPct * 100)}
-          onChange={(e) => setHarnessMinPct(Number(e.target.value) / 100)}
-          className="w-full mb-2"
-          style={{ accentColor: 'var(--accent)' }}
+          onChange={(pct) => {
+            const next = pct / 100
+            setHarnessMinPct(next)
+            if (next >= harnessMaxPct) {
+              setHarnessMaxPct(Math.min(0.99, next + 0.02))
+            }
+          }}
         />
         <FormLabel>
           Auto max context % ({Math.round(harnessMaxPct * 100)}%)
         </FormLabel>
-        <input
-          type="range"
+        <FormRange
           min={10}
           max={99}
           step={1}
           value={Math.round(harnessMaxPct * 100)}
-          onChange={(e) => setHarnessMaxPct(Number(e.target.value) / 100)}
-          className="w-full mb-1"
-          style={{ accentColor: 'var(--accent)' }}
+          onChange={(pct) => {
+            const next = pct / 100
+            setHarnessMaxPct(next)
+            if (next <= harnessMinPct) {
+              setHarnessMinPct(Math.max(0.05, next - 0.02))
+            }
+          }}
         />
         <FormHint>
           In Auto mode, prune starts near min and compress is nudged by max. Defaults 75% / 92%.
@@ -118,15 +125,12 @@ export function SettingsSections_rest(p: SettingsFormProps): ReactNode {
         <FormLabel>
           Learning auto-approve threshold ({autoApproveThreshold.toFixed(2)})
         </FormLabel>
-        <input
-          type="range"
+        <FormRange
           min={0}
           max={100}
           step={5}
           value={Math.round(autoApproveThreshold * 100)}
-          onChange={(e) => setAutoApproveThreshold(Number(e.target.value) / 100)}
-          className="w-full mb-2"
-          style={{ accentColor: 'var(--accent)' }}
+          onChange={(pct) => setAutoApproveThreshold(pct / 100)}
         />
         <FormLabel>Log level</FormLabel>
         <FormSelect value={logLevel} onChange={setLogLevel}>
