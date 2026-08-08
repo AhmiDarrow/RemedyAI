@@ -172,6 +172,8 @@ export function ProcessTrace({
     deps: [stepSig, mode, collapsed, full, showAllMin],
   })
 
+  // steps already changes identity when the stream updates; stepSig is only
+  // for stick-to-bottom follow deps, not this memo.
   const formattedArgs = useMemo(() => {
     const prior = new Map<string, string>()
     const map = new Map<string, ReturnType<typeof formatToolArgsDisplay>>()
@@ -179,7 +181,7 @@ export function ProcessTrace({
       map.set(s.id, formatToolArgsDisplay(s.name, s.argsText, prior))
     }
     return map
-  }, [steps, stepSig])
+  }, [steps])
 
   if (steps.length === 0) return null
 
@@ -224,18 +226,22 @@ export function ProcessTrace({
 
   return (
     <div
-      className="process-trace rounded-lg overflow-hidden text-[11px] my-1 relative w-full"
+      className="process-trace rounded-xl overflow-hidden text-[11px] my-1 relative w-full"
       style={{
-        border: '1px solid var(--border)',
-        background: 'var(--bg-primary)',
+        border: '1px solid color-mix(in srgb, var(--border) 88%, transparent)',
+        background: 'color-mix(in srgb, var(--bg-primary) 88%, var(--bg-secondary))',
         maxWidth: 'min(var(--chat-max-width), 100%)',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
       }}
       data-process-mode={mode}
     >
       <button
         type="button"
         className="w-full flex items-center justify-between gap-2 px-2.5 py-1.5 text-left"
-        style={{ color: 'var(--text-muted)', background: 'var(--bg-tertiary)' }}
+        style={{
+          color: 'var(--text-muted)',
+          background: 'color-mix(in srgb, var(--bg-tertiary) 75%, transparent)',
+        }}
         onClick={() => setCollapsed((c) => !c)}
         aria-expanded={!collapsed}
       >

@@ -50,37 +50,29 @@ export function ApprovalBanner({ sessionId, onResolved }: ApprovalBannerProps) {
 
   return (
     <div
-      className="mx-4 mt-2 mb-1 space-y-2"
+      className="mx-3 mt-2 mb-1 space-y-2"
       style={{ color: 'var(--text-primary)' }}
       role="region"
       aria-label="Pending tool approvals"
     >
       {items.map((item) => (
-        <div
-          key={item.id}
-          className="rounded-lg px-3 py-2.5 text-xs shadow-sm"
-          style={{
-            background:
-              'color-mix(in srgb, var(--warning) 8%, var(--bg-secondary))',
-            border: '1px solid color-mix(in srgb, var(--warning) 55%, var(--border))',
-          }}
-        >
+        <div key={item.id} className="ui-banner ui-banner-warn">
           <div
-            className="font-semibold mb-1 flex items-center gap-1.5"
+            className="font-semibold mb-1.5 flex items-center gap-1.5 text-[0.72rem] uppercase tracking-wide"
             style={{ color: 'var(--warning)' }}
           >
             <span aria-hidden>⚠</span>
             Approval required
           </div>
-          <div className="mb-1" style={{ color: 'var(--text-secondary)' }}>
+          <div className="mb-1.5 text-xs" style={{ color: 'var(--text-secondary)' }}>
             {item.reason}
           </div>
           <code
-            className="block mb-2 px-2 py-1 rounded break-all"
+            className="block mb-2.5 px-2.5 py-1.5 rounded-lg break-all text-[0.7rem] font-mono"
             style={{
-              background: 'var(--bg-tertiary)',
+              background: 'color-mix(in srgb, var(--bg-tertiary) 85%, transparent)',
               color: 'var(--text-primary)',
-              border: '1px solid var(--border)',
+              border: '1px solid color-mix(in srgb, var(--border) 85%, transparent)',
             }}
           >
             {item.command}
@@ -90,12 +82,7 @@ export function ApprovalBanner({ sessionId, onResolved }: ApprovalBannerProps) {
               type="button"
               disabled={busyId === item.id}
               onClick={() => void act(item, true)}
-              className="px-3 py-1.5 rounded font-medium transition-opacity"
-              style={{
-                background: 'var(--accent)',
-                color: '#fff',
-                opacity: busyId === item.id ? 0.7 : 1,
-              }}
+              className="ui-btn ui-btn-primary"
             >
               {busyId === item.id ? 'Working…' : 'Approve once'}
             </button>
@@ -103,12 +90,7 @@ export function ApprovalBanner({ sessionId, onResolved }: ApprovalBannerProps) {
               type="button"
               disabled={busyId === item.id}
               onClick={() => void act(item, false)}
-              className="px-3 py-1.5 rounded font-medium"
-              style={{
-                background: 'var(--bg-tertiary)',
-                color: 'var(--text-primary)',
-                border: '1px solid var(--border)',
-              }}
+              className="ui-btn ui-btn-secondary"
             >
               Deny
             </button>
@@ -116,7 +98,7 @@ export function ApprovalBanner({ sessionId, onResolved }: ApprovalBannerProps) {
         </div>
       ))}
       {message && (
-        <div className="text-xs px-1" style={{ color: 'var(--success)' }}>
+        <div className="text-xs px-1 font-medium" style={{ color: 'var(--success)' }}>
           {message}
         </div>
       )}

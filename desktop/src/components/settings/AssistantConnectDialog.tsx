@@ -82,16 +82,9 @@ export function AssistantConnectDialog({
     }
   }
 
-  const inputStyle = {
-    background: 'var(--bg-primary)',
-    border: '1px solid var(--border)',
-    color: 'var(--text-primary)',
-  } as const
-
   return (
     <div
-      className="fixed inset-0 z-[200] flex items-center justify-center p-4"
-      style={{ background: 'rgba(0,0,0,0.55)' }}
+      className="fixed inset-0 z-[200] flex items-center justify-center p-4 ui-overlay"
       role="dialog"
       aria-modal="true"
       aria-labelledby="pa-connect-title"
@@ -100,12 +93,8 @@ export function AssistantConnectDialog({
       }}
     >
       <div
-        className="w-full max-w-md rounded-xl p-5 shadow-2xl max-h-[90vh] overflow-y-auto"
-        style={{
-          background: 'var(--bg-secondary)',
-          border: '1px solid var(--border)',
-          color: 'var(--text-primary)',
-        }}
+        className="ui-surface w-full max-w-md p-5 max-h-[90vh] overflow-y-auto"
+        style={{ color: 'var(--text-primary)' }}
       >
         <div className="flex items-center gap-3 mb-3">
           <RemedyLogo size={32} framed />
@@ -182,8 +171,7 @@ export function AssistantConnectDialog({
               placeholder="Client ID"
               value={clientId}
               onChange={(e) => setClientId(e.target.value)}
-              className="w-full rounded-lg px-3 py-2 text-xs outline-none"
-              style={inputStyle}
+              className="ui-input"
               autoComplete="off"
             />
             <input
@@ -191,15 +179,14 @@ export function AssistantConnectDialog({
               placeholder="Client secret (if any)"
               value={clientSecret}
               onChange={(e) => setClientSecret(e.target.value)}
-              className="w-full rounded-lg px-3 py-2 text-xs outline-none"
-              style={inputStyle}
+              className="ui-input"
               autoComplete="off"
             />
           </div>
         )}
 
         {err ? (
-          <div className="text-[11px] mb-2" style={{ color: 'var(--error, #e66)' }}>
+          <div className="text-[11px] mb-2" style={{ color: 'var(--error)' }}>
             {err}
           </div>
         ) : null}
@@ -208,12 +195,7 @@ export function AssistantConnectDialog({
           <button
             type="button"
             disabled={working || busy}
-            className="px-3 py-1.5 rounded-lg text-xs"
-            style={{
-              background: 'var(--bg-tertiary)',
-              color: 'var(--text-secondary)',
-              border: '1px solid var(--border)',
-            }}
+            className="ui-btn ui-btn-secondary"
             onClick={onClose}
           >
             Cancel
@@ -221,12 +203,7 @@ export function AssistantConnectDialog({
           <button
             type="button"
             disabled={!canContinue || working || busy}
-            className="px-3 py-1.5 rounded-lg text-xs font-medium"
-            style={{
-              background: 'var(--accent)',
-              color: 'var(--accent-fg, #fff)',
-              opacity: !canContinue || working || busy ? 0.55 : 1,
-            }}
+            className="ui-btn ui-btn-primary"
             onClick={() => {
               void submit()
             }}

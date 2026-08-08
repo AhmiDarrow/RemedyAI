@@ -110,6 +110,10 @@ export function SettingsPanel({
   const [settings, setSettings] = useState<Settings | null>(null)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [saveToast, setSaveToast] = useState<{ kind: 'ok' | 'err'; text: string } | null>(
+    null,
+  )
+  const scrollBodyRef = useRef<HTMLDivElement>(null)
   const [saved, setSaved] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
 
@@ -739,17 +743,20 @@ export function SettingsPanel({
       const projectChanged =
         (projectPath || '').trim() !== prevProject
           && (projectPath || '').trim() !== ''
-      setStatusMessage(
-        projectChanged
-          ? 'Settings saved · Project loaded · Remedy reloaded'
-          : 'Settings saved · Remedy reloaded',
-      )
+      const okMsg = projectChanged
+        ? 'Settings saved · Project loaded · Remedy reloaded'
+        : 'Settings saved · Remedy reloaded'
+      setStatusMessage(okMsg)
+      setSaveToast({ kind: 'ok', text: okMsg })
+      window.setTimeout(() => setSaveToast(null), 3200)
       await load()
       onSettingsSaved?.()
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e)
       setSaved(false)
       setErrorMessage(msg || 'Failed to save settings')
+      setSaveToast({ kind: 'err', text: msg || 'Failed to save settings' })
+      window.setTimeout(() => setSaveToast(null), 4200)
       console.warn('Settings save failed:', msg)
     } finally {
       setSaving(false)
@@ -774,28 +781,36 @@ export function SettingsPanel({
         width: embedded ? '100%' : 300,
         minWidth: embedded ? 0 : 300,
         maxWidth: embedded ? '100%' : 300,
-        background: 'var(--bg-secondary)',
-        borderColor: 'var(--border)',
+        background: 'color-mix(in srgb, var(--bg-secondary) 96%, var(--bg-primary))',
+        borderColor: 'color-mix(in srgb, var(--border) 85%, transparent)',
       }}
     >
       {/* Workspace slide already has a "Settings" header when embedded */}
       {!embedded && (
         <div
-          className="flex items-center justify-between px-3 py-2 border-b text-xs font-medium shrink-0"
-          style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}
+          className="flex items-center justify-between px-3 py-2.5 border-b text-xs font-semibold shrink-0 tracking-tight"
+          style={{
+            borderColor: 'color-mix(in srgb, var(--border) 80%, transparent)',
+            color: 'var(--text-primary)',
+          }}
         >
           <span>Settings</span>
           <button
+            type="button"
             onClick={onClose}
-            className="px-1 rounded"
-            style={{ color: 'var(--text-muted)' }}
+            className="ui-btn ui-btn-ghost"
+            style={{ padding: '0.15rem 0.4rem' }}
+            aria-label="Close settings"
           >
             {'\u00D7'}
           </button>
         </div>
       )}
 
-      <div className="px-3 pt-2 pb-1 border-b shrink-0 space-y-1.5" style={{ borderColor: 'var(--border)' }}>
+      <div
+        className="px-3 pt-2.5 pb-1.5 border-b shrink-0 space-y-1.5"
+        style={{ borderColor: 'color-mix(in srgb, var(--border) 80%, transparent)' }}
+      >
         <div className="flex items-center gap-1" title="How many settings sections are listed">
           {(['simple', 'advanced'] as const).map((m) => (
             <button
@@ -806,14 +821,18 @@ export function SettingsPanel({
                 saveSettingsMode(m)
                 if (m === 'advanced') setShowAdvanced(true)
               }}
-              className="flex-1 rounded px-2 py-1 text-[10px] font-medium"
+              className="flex-1 rounded-lg px-2 py-1 text-[10px] font-semibold capitalize"
               style={{
                 background:
                   settingsMode === m
-                    ? 'color-mix(in srgb, var(--accent) 22%, transparent)'
-                    : 'var(--bg-tertiary)',
+                    ? 'color-mix(in srgb, var(--accent) 16%, transparent)'
+                    : 'color-mix(in srgb, var(--bg-tertiary) 80%, transparent)',
                 color: settingsMode === m ? 'var(--accent)' : 'var(--text-muted)',
-                border: `1px solid ${settingsMode === m ? 'var(--accent)' : 'var(--border)'}`,
+                border: `1px solid ${
+                  settingsMode === m
+                    ? 'color-mix(in srgb, var(--accent) 45%, var(--border))'
+                    : 'color-mix(in srgb, var(--border) 85%, transparent)'
+                }`,
               }}
             >
               {m === 'simple' ? 'Simple settings' : 'Advanced settings'}
@@ -823,21 +842,50 @@ export function SettingsPanel({
         <input
           type="search"
           value={settingsSearch}
-          onChange={(e) => setSettingsSearch(e.target.value)}
-          placeholder="Search settings…"
-          className="w-full rounded px-2 py-1 text-xs outline-none"
-          style={{
-            background: 'var(--bg-tertiary)',
-            color: 'var(--text-primary)',
-            border: '1px solid var(--border)',
+          onChange={(e) => {
+            const q = e.target.value
+            setSettingsSearch(q)
+            // Jump to first matching section after expand paints.
+            if (q.trim()) {
+              window.requestAnimationFrame(() => {
+                const root = scrollBodyRef.current
+                const hit = root?.querySelector<HTMLElement>(
+                  '[data-section]:not([hidden])',
+                )
+                // Prefer visible sections that aren't mode-hidden
+                const all = root?.querySelectorAll<HTMLElement>('[data-section]')
+                if (all) {
+                  for (const el of all) {
+                    if (el.offsetParent !== null) {
+                      el.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+                      break
+                    }
+                  }
+                } else {
+                  hit?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+                }
+              })
+            }
           }}
+          placeholder="Search settings…"
+          className="ui-input"
           aria-label="Search settings"
         />
+        {settingsMode === 'simple' ? (
+          <div className="text-[10px] leading-snug" style={{ color: 'var(--text-muted)' }}>
+            Simple shows essentials. Switch to <strong>Advanced</strong> for messengers,
+            vision, power tools, and logs.
+          </div>
+        ) : (
+          <div className="text-[10px] leading-snug" style={{ color: 'var(--text-muted)' }}>
+            Advanced lists every section. Use search to jump.
+          </div>
+        )}
       </div>
 
-      <div className="flex-1 overflow-y-auto p-3 text-xs space-y-4">
+      <div ref={scrollBodyRef} className="flex-1 overflow-y-auto p-3 text-xs space-y-4">
         {loading ? (
-          <div style={{ color: 'var(--text-muted)' }}>Loading...</div>
+          <div style={{ color: 'var(--text-muted)' }}>Loading…</div>
         ) : (
             <SettingsFormSections
               sectionProps={sectionProps}
@@ -1021,18 +1069,15 @@ export function SettingsPanel({
         )}
       </div>
 
-      {/* Save */}
-      <div
-        className="px-3 py-2 border-t flex flex-col gap-2"
-        style={{ borderColor: 'var(--border)' }}
-      >
+      {/* Sticky save bar — always reachable at bottom of settings */}
+      <div className="settings-sticky-save flex flex-col gap-2">
         {errorMessage && (
           <div
-            className="px-2 py-1.5 rounded text-xs"
+            className="px-2 py-1.5 rounded-lg text-xs"
             style={{
-              background: 'var(--error-bg, rgba(239,68,68,0.1))',
+              background: 'color-mix(in srgb, var(--error) 12%, var(--bg-secondary))',
               color: 'var(--error)',
-              border: '1px solid var(--error)',
+              border: '1px solid color-mix(in srgb, var(--error) 40%, var(--border))',
             }}
           >
             {errorMessage}
@@ -1040,11 +1085,11 @@ export function SettingsPanel({
         )}
         {statusMessage && !errorMessage && (
           <div
-            className="px-2 py-1.5 rounded text-xs"
+            className="px-2 py-1.5 rounded-lg text-xs"
             style={{
-              background: 'var(--bg-tertiary)',
+              background: 'color-mix(in srgb, var(--success) 12%, var(--bg-secondary))',
               color: 'var(--success)',
-              border: '1px solid var(--border)',
+              border: '1px solid color-mix(in srgb, var(--success) 35%, var(--border))',
             }}
           >
             {statusMessage}
@@ -1052,23 +1097,29 @@ export function SettingsPanel({
         )}
         <div className="flex items-center gap-2">
           <button
-            onClick={handleSave}
+            type="button"
+            onClick={() => void handleSave()}
             disabled={saving}
-            className="flex-1 py-1.5 rounded text-xs font-medium transition-colors"
-            style={{
-              background: saving ? 'var(--bg-tertiary)' : 'var(--accent)',
-              color: saving ? 'var(--text-muted)' : '#fff',
-            }}
+            className="ui-btn ui-btn-primary flex-1"
+            style={{ padding: '0.55rem 0.75rem' }}
           >
-            {saving ? 'Saving & reloading…' : 'Save Settings'}
+            {saving ? 'Saving & reloading…' : 'Save settings'}
           </button>
           {saved && !errorMessage && !statusMessage && (
-            <span className="text-xs" style={{ color: 'var(--success)' }}>
+            <span className="text-xs font-semibold" style={{ color: 'var(--success)' }}>
               Saved
             </span>
           )}
         </div>
       </div>
+      {saveToast && (
+        <div
+          className={`ui-toast ${saveToast.kind === 'ok' ? 'ui-toast-success' : 'ui-toast-error'}`}
+          role="status"
+        >
+          {saveToast.text}
+        </div>
+      )}
     </div>
   )
 }

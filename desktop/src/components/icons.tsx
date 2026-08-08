@@ -111,10 +111,10 @@ export function IconBtn({
       title={title}
       aria-label={title}
       onClick={onClick}
-      className="inline-flex items-center justify-center rounded"
+      className="inline-flex items-center justify-center rounded-md"
       style={{
-        width: 22,
-        height: 22,
+        width: 24,
+        height: 24,
         padding: 0,
         background: active ? 'color-mix(in srgb, var(--accent) 18%, transparent)' : 'transparent',
         color: muted
@@ -124,6 +124,7 @@ export function IconBtn({
             : 'var(--text-secondary)',
         border: '1px solid transparent',
         cursor: 'pointer',
+        transition: 'background 0.1s ease, border-color 0.1s ease, color 0.1s ease',
       }}
       onMouseEnter={(e) => {
         e.currentTarget.style.borderColor = 'var(--border)'

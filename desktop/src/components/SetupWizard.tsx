@@ -112,8 +112,12 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
   useEffect(() => () => stopXaiPoll(), [stopXaiPoll])
 
   useEffect(() => {
+    // Capture the ref value for cleanup — reading .current in the cleanup alone
+    // can see a later interval if the effect re-ran (oxlint exhaustive-deps).
+    const ref = visionPollRef
     return () => {
-      if (visionPollRef.current) clearInterval(visionPollRef.current)
+      const id = ref.current
+      if (id) clearInterval(id)
     }
   }, [])
 
@@ -579,12 +583,9 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
   }
 
   return (
-    <div
-      className="flex items-center justify-center h-full p-4"
-      style={{ background: 'var(--bg-primary)' }}
-    >
+    <div className="setup-wizard-root flex items-center justify-center h-full p-4">
       <div
-        className="rounded-2xl shadow-2xl overflow-hidden w-full"
+        className="setup-wizard-card ui-surface overflow-hidden w-full"
         style={{ maxWidth: 520, ...cardStyles }}
       >
         <div className="px-7 pt-7 pb-3 text-center">

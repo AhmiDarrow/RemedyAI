@@ -109,18 +109,19 @@ export function TokenCostTicker({
 
   const shellStyle: import('react').CSSProperties = isSidebar
     ? {
-        background: 'var(--bg-secondary)',
-        borderColor: 'var(--border)',
+        background: 'color-mix(in srgb, var(--bg-secondary) 94%, transparent)',
+        borderColor: 'color-mix(in srgb, var(--border) 80%, transparent)',
         color: 'var(--text-secondary)',
         fontSize: 11,
       }
     : {
-        background: 'var(--bg-secondary)',
-        border: '1px solid var(--border)',
-        borderRadius: 10,
-        boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
+        background: 'color-mix(in srgb, var(--bg-secondary) 96%, transparent)',
+        border: '1px solid color-mix(in srgb, var(--border) 85%, transparent)',
+        borderRadius: 12,
+        boxShadow: '0 6px 20px rgba(0,0,0,0.22)',
         color: 'var(--text-secondary)',
         fontSize: 11,
+        backdropFilter: 'blur(8px)',
       }
 
   return (

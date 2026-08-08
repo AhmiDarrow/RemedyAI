@@ -109,6 +109,18 @@ _OPAQUE_MUTATION_RE = re.compile(
     r"|\bgo\s+install\b"
     r"|\bpip(?:3)?\s+install\b[^\n]*\s--user\b"
     r"|\bpython(?:3)?\s+-m\s+pip\s+install\b[^\n]*\s--user\b"
+    r"|\bdotnet\s+tool\s+install\b[^\n]*?(?:^|[\s])(?:-g|--global)(?:[\s]|$)"
+    r"|\bdotnet\s+tool\s+install\s+--global\b"
+    # Privilege / machine-wide mutation (opaque — not a project file write)
+    r"|\bschtasks\b[^\n]*/create\b"
+    r"|\bnet\s+user\b"
+    r"|\breg\s+add\b|\breg\s+delete\b|\breg\s+import\b"
+    r"|\btakeown\b|\bicacls\b"
+    # Nested shells carrying privilege / write payloads (fail closed)
+    r"|\b(?:bash|sh|zsh)\s+(?:-c|-lc)\b[^\n]*"
+    r"(?:reg\s+add|net\s+user|schtasks|/create|set-content|out-file|>)"
+    r"|\b(?:powershell|pwsh)(?:\.exe)?[^\n]*-(?:command|c)\b[^\n]*"
+    r"(?:reg\s+add|net\s+user|schtasks|set-content|out-file)"
     # .NET download / write helpers that hide destinations
     r"|\b(?:system\.)?net\.webclient\b|\bnew-object\b[^\n]*webclient\b"
     r"|\bdownloadfile\b|\bdownloadstring\b|\bdownloaddata\b"

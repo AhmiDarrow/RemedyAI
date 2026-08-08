@@ -129,9 +129,9 @@ export function SplashScreen({ onReady, onError }: SplashScreenProps) {
 
   return (
     <div
-      className="flex flex-col items-center justify-center h-full gap-6"
+      className="flex flex-col items-center justify-center h-full gap-5"
       style={{
-        background: SPLASH_BG,
+        background: `radial-gradient(80% 55% at 50% 20%, ${SPLASH_ACCENT}22 0%, ${SPLASH_BG} 55%)`,
         color: SPLASH_FG,
         opacity: fading ? 0 : 1,
         transition: `opacity ${FADE_MS}ms ease`,
@@ -140,44 +140,47 @@ export function SplashScreen({ onReady, onError }: SplashScreenProps) {
       <img
         src={logoSrc}
         alt="Remedy"
-        className="w-[256px] h-auto"
+        className="w-[240px] h-auto"
         draggable={false}
         style={{
-          // Smooth LANCZOS assets (not pixel art) — keep alpha edges crisp.
           imageRendering: 'auto',
           objectFit: 'contain',
           animation: 'splash-in 0.5s ease both',
         }}
       />
-      <div className="text-sm tracking-wide" style={{ color: SPLASH_MUTED }}>
+      <div
+        className="text-sm tracking-wide font-medium"
+        style={{ color: status === 'error' ? '#f87171' : SPLASH_MUTED }}
+      >
         {status === 'starting' && `Starting Remedy${dots}`}
         {status === 'connecting' && `Connecting to local server${dots}`}
         {status === 'ready' && `Ready${dots}`}
-        {status === 'error' && (
-          <span style={{ color: '#f87171' }}>
-            Server connection failed. Is Remedy installed?
-          </span>
-        )}
+        {status === 'error' && 'Server connection failed. Is Remedy installed?'}
       </div>
       {status !== 'ready' && status !== 'error' && (
-        <div className="flex gap-1 mt-2">
-          {[0, 1, 2].map((i) => (
-            <div
-              key={i}
-              className="w-2 h-2 rounded-full animate-pulse"
-              style={{
-                background: SPLASH_ACCENT,
-                animationDelay: `${i * 150}ms`,
-                opacity: 0.5 + i * 0.2,
-              }}
-            />
-          ))}
+        <div
+          className="w-36 h-1 rounded-full overflow-hidden mt-1"
+          style={{ background: `${SPLASH_ACCENT}33` }}
+          aria-hidden
+        >
+          <div
+            className="h-full rounded-full"
+            style={{
+              width: '40%',
+              background: SPLASH_ACCENT,
+              animation: 'splash-bar 1.1s ease-in-out infinite',
+            }}
+          />
         </div>
       )}
       <style>{`
         @keyframes splash-in {
           from { opacity: 0; transform: scale(0.96); }
           to { opacity: 1; transform: scale(1); }
+        }
+        @keyframes splash-bar {
+          0% { transform: translateX(-120%); }
+          100% { transform: translateX(280%); }
         }
       `}</style>
     </div>

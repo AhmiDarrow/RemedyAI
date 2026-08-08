@@ -81,9 +81,9 @@ export function ThemeSwitcher({ currentId, onChange }: ThemeSwitcherProps) {
     <div className="relative">
       <button
         ref={btnRef}
+        type="button"
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-1 px-2 py-0.5 rounded text-xs transition-colors"
-        style={{ background: 'var(--bg-tertiary)', color: 'var(--text-secondary)' }}
+        className="seg-btn flex items-center gap-1.5"
         title="Change theme"
         aria-haspopup="listbox"
         aria-expanded={open}
@@ -100,16 +100,19 @@ export function ThemeSwitcher({ currentId, onChange }: ThemeSwitcherProps) {
           aria-label="Themes"
           aria-activedescendant={`theme-opt-${THEME_LIST[focusIdx]?.id}`}
           onKeyDown={onListKey}
-          className="absolute bottom-full mb-1 right-0 z-20 rounded-lg p-1.5 flex flex-col gap-0.5 min-w-[170px] max-h-[min(70vh,420px)] overflow-y-auto outline-none"
+          className="absolute bottom-full mb-1.5 right-0 z-20 rounded-xl p-1.5 flex flex-col gap-0.5 min-w-[180px] max-h-[min(70vh,420px)] overflow-y-auto outline-none"
           style={{
-            background: 'var(--bg-secondary)',
-            border: '1px solid var(--border)',
-            boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
+            background: 'color-mix(in srgb, var(--bg-secondary) 96%, var(--bg-primary))',
+            border: '1px solid color-mix(in srgb, var(--border) 85%, transparent)',
+            boxShadow:
+              '0 12px 32px rgba(0,0,0,0.35), 0 0 0 1px color-mix(in srgb, var(--accent) 6%, transparent)',
+            backdropFilter: 'blur(12px)',
           }}
         >
           {THEME_LIST.map((t, i) => (
             <button
               key={t.id}
+              type="button"
               id={`theme-opt-${t.id}`}
               role="option"
               aria-selected={t.id === currentId}
@@ -119,12 +122,17 @@ export function ThemeSwitcher({ currentId, onChange }: ThemeSwitcherProps) {
                 btnRef.current?.focus()
               }}
               onMouseEnter={() => setFocusIdx(i)}
-              className="flex items-center gap-2 px-3 py-1.5 rounded text-xs text-left transition-colors"
+              className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-left transition-colors"
               style={{
                 background:
-                  i === focusIdx || t.id === currentId ? 'var(--bg-tertiary)' : 'transparent',
+                  i === focusIdx || t.id === currentId
+                    ? 'color-mix(in srgb, var(--accent) 12%, var(--bg-tertiary))'
+                    : 'transparent',
                 color: 'var(--text-primary)',
-                outline: i === focusIdx ? '1px solid var(--accent)' : 'none',
+                outline:
+                  i === focusIdx
+                    ? '1px solid color-mix(in srgb, var(--accent) 45%, transparent)'
+                    : 'none',
               }}
             >
               <ThemeColorDot themeId={t.id} />

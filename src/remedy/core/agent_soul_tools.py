@@ -6,7 +6,14 @@ from typing import Any
 
 
 def register_soul_tools(runtime: Any) -> None:
-    """Register Soul Field tools on the runtime registry."""
+    """Register Soul Field tools on the runtime registry.
+
+    Experimental: only registered when ``soul_field_enabled`` is true.
+    """
+    from remedy.core.feature_maturity import soul_field_enabled
+
+    if not soul_field_enabled():
+        return
 
     def _home():
         return getattr(getattr(runtime, "config", None), "home_dir", None) or getattr(

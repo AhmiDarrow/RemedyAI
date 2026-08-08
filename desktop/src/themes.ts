@@ -63,8 +63,8 @@ export interface ThemeColors {
 
 /** Shared chat geometry (colors differ per theme). */
 const CHAT_GEOMETRY = {
-  '--chat-bubble-radius': '0.65rem',
-  '--chat-max-width': '72%',
+  '--chat-bubble-radius': '0.85rem',
+  '--chat-max-width': 'min(46rem, 94%)',
 } as const
 
 function chatFromPalette(

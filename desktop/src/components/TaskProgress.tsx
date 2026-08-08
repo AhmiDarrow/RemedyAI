@@ -81,6 +81,13 @@ export function TaskProgress({
     return { pct: null as number | null, determinate: false as const }
   }, [progress, totalTools, doneCount, running.length])
 
+  // Stable key so we restart the timer when the active tool set changes,
+  // without putting an expression in the deps array (oxlint exhaustive-deps).
+  const runningKey = useMemo(
+    () => running.map((t) => t.name).join(','),
+    [running],
+  )
+
   useEffect(() => {
     if (!streaming) {
       setElapsed(0)
@@ -91,7 +98,7 @@ export function TaskProgress({
       setElapsed(Math.floor((Date.now() - t0) / 1000))
     }, 400)
     return () => window.clearInterval(id)
-  }, [streaming, running.map((t) => t.name).join(',')])
+  }, [streaming, runningKey])
 
   if (!streaming) return null
 

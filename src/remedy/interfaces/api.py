@@ -112,6 +112,19 @@ def create_app(
             except Exception:
                 logger.exception("Gateway start on lifespan failed")
 
+        # Retention pass (attachments / shots / undo / logs / optional sessions)
+        try:
+            from remedy.core.retention import run_retention_pass
+
+            _cfg_ret = load_config()
+            _mem = getattr(runtime, "memory", None) if runtime is not None else None
+            run_retention_pass(
+                _cfg_ret if isinstance(_cfg_ret, dict) else None,
+                store=_mem,
+            )
+        except Exception:
+            logger.debug("retention pass skipped", exc_info=True)
+
         # Local model starts with Remedy when installed + enabled (vision + nano).
         try:
             import asyncio
@@ -131,7 +144,13 @@ def create_app(
                         cfg0.get("home_dir") if isinstance(cfg0, dict) else None
                     )
                     st = merge_state(load_rmb_json(home0))
-                    rmb_wanted = bool(st.get("enabled") and st.get("auto_start", True))
+                    from remedy.core.feature_maturity import rmb_enabled
+
+                    rmb_wanted = bool(
+                        rmb_enabled(cfg0 if isinstance(cfg0, dict) else None)
+                        and st.get("enabled")
+                        and st.get("auto_start", True)
+                    )
                     if rmb_wanted:
                         rr = start_rmb_server(home_dir=home0, wait_s=120.0)
                         rmb_ok = bool(rr.get("ok"))

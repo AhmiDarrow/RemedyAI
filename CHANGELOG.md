@@ -4,6 +4,68 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### UI polish batch (1–10 backlog)
+
+- Design system primitives expanded (`.ui-select`, toast, empty state, sticky save).
+- About dialog extracted; Settings sticky save + toast + search jump + mode hints.
+- Chat: live markdown streaming, skeleton history load, project-aware empty state.
+- Rails: hover labels, resize handle; Files empty/error states.
+- Setup wizard / PA connect / Usage / Time Travel / Memory·Skills panels polished.
+- A11y: focus rings, reduced-motion for toast/live, keyboard-visible chat actions.
+
+### Desktop UI surfaces polish
+
+- Shared primitives: `.ui-btn`, `.ui-input`, `.ui-banner`, `.ui-overlay`, `.ui-surface`.
+- Command palette: glass overlay, clearer rows, scroll-into-view, footer hints.
+- Plan / approval banners and concurrent-turn dialog use the new button system.
+- Settings `Field` inputs + theme picker menu refined; usage ticker softer.
+- Help wiki, quit warning, name prompt, library chip, settings accordion on shared chrome.
+
+### Desktop UI chrome polish
+
+- Sidebar: softer surface, primary **New session** button, focusable search,
+  filter chips, active session inset accent, project header hover.
+- Status bar: glass dock, refined segment buttons, cleaner selects.
+- Workspace rails: quiet icon buttons with active outline (not solid fill).
+- Title bar menu: blurred panel, rounded items, monospace shortcuts.
+- Global antialiased text; shared focus/selection already theme-aware.
+
+### Chat session window polish
+
+- Centered reading column, softer session wash, roomier cozy density.
+- Refined bubbles (radius, hover, assistant inset highlight, system pills).
+- Day dividers as chips; live stream dock + status banners redesigned.
+- Empty session hero + starter chips; elevated floating composer shell.
+- Plan banner and load-older controls cleaned up.
+- **Session header** strip: title, partner, provider/model, Live/Plan|Build chips.
+- Composer keyboard hint row; message action rail on hover.
+
+### Desktop UI debug & bundle optimization
+
+- Fixed oxlint **rules-of-hooks** false positive: `useRmbAsProvider` →
+  `applyRmbAsProvider` (API helper is not a React hook).
+- Hook deps hygiene: `useMessages` session rebind includes `sessionId`;
+  TaskProgress / ProcessTrace / Composer / App palette shortcuts cleaned.
+- **Code-split** Settings / Help / Setup / Update / Usage / TimeTravel /
+  Memory+Skills panels; vendor chunks for codemirror / markdown / xterm.
+- Main JS chunk **~1.31 MB → ~495 KB** (gzip ~375 KB → ~147 KB) on prod build.
+
+### Hardening & maintainability (review follow-through)
+
+- **ReAct preamble extract:** `agent_react_preamble.py` owns distill / context /
+  vision / tools / metabolism inject; `call_llm_stream` is the epoch loop only.
+- **Desktop:** quit/tray warning flow moved to `hooks/useQuitFlow.ts`.
+- **Retention:** startup pass for attachments / computer shots / undo / logs /
+  optional session TTL; config keys `retention_*_days` + `memory_encrypt`
+  (SQLCipher when linked; otherwise honest unavailable).
+- **Safer bootstrap:** packaged / `REMEDY_DESKTOP_SIDECAR` defaults
+  `http_bootstrap` **off** (IPC); plain `remedy serve` still defaults on.
+- **Maturity gates:** `soul_field_enabled` (experimental, default off),
+  `build_os_advanced` (A–H tools, default off), `rmb_enabled` (default on).
+- **Shell jail fuzz CI:** `tests/test_shell_jail_fuzz.py` + privilege/nested /
+  `dotnet tool install -g` blocks in `shell_write_jail`.
+- Log redaction already applied in structured formatters (retained).
+
 ## [0.21.1] - 2026-08-07
 
 Continuity isolation, self-inject safety, webhook auth, and person-like memory depth.
