@@ -21,10 +21,14 @@ _MAX_DAYS = 3650
 
 @dataclass
 class RetentionPolicy:
-    """Days to keep; 0 means never auto-purge that category."""
+    """Days to keep; 0 means never auto-purge that category.
 
-    session_days: int = 0
-    attachment_days: int = 0
+    Defaults keep owner power but stop unbounded growth on long-lived installs:
+    sessions 180d, attachments 90d, shots 14d, undo/logs 30d.
+    """
+
+    session_days: int = 180
+    attachment_days: int = 90
     computer_shot_days: int = 14  # soft default: drop stale CUA screenshots
     undo_days: int = 30
     log_days: int = 30
@@ -47,9 +51,9 @@ class RetentionPolicy:
             return default
 
         return cls(
-            session_days=_days("session_days", "retention_session_days", default=0),
+            session_days=_days("session_days", "retention_session_days", default=180),
             attachment_days=_days(
-                "attachment_days", "retention_attachment_days", default=0
+                "attachment_days", "retention_attachment_days", default=90
             ),
             computer_shot_days=_days(
                 "computer_shot_days", "retention_computer_shot_days", default=14

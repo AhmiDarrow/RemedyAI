@@ -27,6 +27,15 @@ _PLAN_DONE = re.compile(
     r"mission (complete|done|verified)"
     r")\b"
 )
+# False completion prose without tool proof (builder loop)
+_CLAIM_SHIPPED = re.compile(
+    r"(?i)\b("
+    r"(?:all )?(?:done|finished|complete|shipped|implemented|fixed)|"
+    r"ready to (?:merge|ship|deploy)|"
+    r"should work now|you(?:'re| are) good to go|"
+    r"that(?:'s| is) (?:it|everything)"
+    r")\b"
+)
 
 
 
@@ -108,6 +117,25 @@ def verify_critical(
                     "[Verify] Before claiming done, run mission_verify or tests and confirm evidence."
                 ),
             )
+
+    # Shipped/done claims with no tool activity in this turn → push verify
+    asst = assistant_text or ""
+    if (
+        _CLAIM_SHIPPED.search(asst)
+        and len(asst) < 1200
+        and not (recent_tool_texts or [])
+        and "tests" not in kinds
+    ):
+        return VerifyResult(
+            ok=False,
+            kind="done_without_tools",
+            message="Done/shipped claim without tool evidence this turn",
+            silent_remedy=(
+                "[Verify · builder] You claimed done without running tools. "
+                "If work remains, use file_read/file_edit/bash_exec and verify "
+                "(tests or mission_verify). Do not restate completion."
+            ),
+        )
 
     if not kinds:
         return VerifyResult(ok=True, kind="none", message="no_triggers")

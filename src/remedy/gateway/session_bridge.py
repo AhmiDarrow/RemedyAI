@@ -303,6 +303,23 @@ async def handle_messenger_event(
             await persist_assistant_message(
                 memory, session, full, model=model, agent=agent
             )
+    # Same continuity post-turn as desktop (soul residue, soma, brief warm)
+    if session is not None:
+        with suppress(Exception):
+            from remedy.core.agent_post_turn import schedule_post_turn_prep
+
+            # Keep origin on runtime for next inject (messenger partner surface)
+            with suppress(Exception):
+                runtime._origin_channel = channel  # type: ignore[attr-defined]
+                runtime._session_id = session.id  # type: ignore[attr-defined]
+            if full:
+                with suppress(Exception):
+                    runtime._last_assistant_text = full[-12000:]  # type: ignore[attr-defined]
+            schedule_post_turn_prep(
+                runtime,
+                message=message or "",
+                session_id=str(session.id),
+            )
 
 
 def outbound_chunks(text: str, channel: str | ChannelKind) -> list[str]:

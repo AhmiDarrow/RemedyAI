@@ -202,6 +202,10 @@ def resume_hint(project_path: str | Path | None = None, *, home: str | Path | No
         return ""
     if entry.phase == "done" and entry.last_verify_ok is True:
         return ""
+    # Stale ledger with no writes and ancient ts — skip noise
+    age_h = (time.time() - float(entry.updated_ts or 0)) / 3600.0
+    if age_h > 72 and int(entry.write_steps or 0) <= 0:
+        return ""
     lines = [
         "[Build ledger — resume mid-ship]",
         f"phase={entry.phase} goal={entry.goal[:160] or '—'}",
@@ -219,5 +223,24 @@ def resume_hint(project_path: str | Path | None = None, *, home: str | Path | No
             f"last_hop: unit={last.get('unit_id') or last.get('path')} "
             f"ok={last.get('ok')}"
         )
-    lines.append("Continue from this state — do not restart the whole build.")
+    # Explicit next action by phase
+    phase = (entry.phase or "").lower()
+    if phase in ("scout", "explore", "research"):
+        lines.append(
+            "Next: batch-read key paths, then PLAN a short checklist, then BUILD."
+        )
+    elif phase in ("plan",):
+        lines.append("Next: BUILD with file_write/file_edit — no more explore-only turns.")
+    elif phase in ("build", "repair", "write"):
+        lines.append(
+            "Next: finish remaining writes, then VERIFY (oracle/tests). "
+            "Do not claim done until last_verify_ok is true."
+        )
+    elif phase in ("verify",):
+        if entry.last_verify_ok is False:
+            lines.append("Next: REPAIR failing verify, then re-run verify.")
+        else:
+            lines.append("Next: run verify_command if not green; only then mark done.")
+    else:
+        lines.append("Continue from this state — do not restart the whole build.")
     return "\n".join(lines)

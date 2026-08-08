@@ -152,6 +152,21 @@ export function streamMessage(
         await reAuth()
         res = await doFetch()
       }
+      // Same-session already streaming (double-submit / race) — abort prior, retry once.
+      if (res.status === 409 && !controller.signal.aborted) {
+        try {
+          await fetch(`${getApiBase()}/sessions/${sessionId}/abort`, {
+            method: 'POST',
+            headers: { ...authHeaders(), Accept: 'application/json' },
+          })
+        } catch {
+          /* best effort */
+        }
+        await new Promise((r) => setTimeout(r, 80))
+        if (!controller.signal.aborted) {
+          res = await doFetch()
+        }
+      }
 
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))
