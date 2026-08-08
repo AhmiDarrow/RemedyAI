@@ -6,7 +6,7 @@ Mirrors scripts/sync_version.py: one command to **check** (CI gate) or **sync**
 Canonical sources (do not invent second homes for these):
   - Version numbers     → pyproject.toml          (sync_version.py)
   - Help chapter bodies → docs/manual/*.md        (sync_help_manual.py)
-  - Slash commands      → src/remedy/interfaces/api_support.py  _BUILTIN_COMMANDS
+  - Slash commands      → src/remedy/interfaces/slash_commands.py  _BUILTIN_COMMANDS
   - Keyboard shortcuts  → desktop/src/hotkeys.ts  HOTKEYS
   - Help catalog ids    → docs/manual chapter files ↔ catalog.ts META
 
@@ -217,7 +217,7 @@ def check_slash_commands() -> CheckResult:
         bad == 0,
         msgs,
         "Update docs/manual/11-reference-commands.md and README slash table "
-        "to match _BUILTIN_COMMANDS in api_support.py",
+        "to match _BUILTIN_COMMANDS in slash_commands.py",
     )
 
 

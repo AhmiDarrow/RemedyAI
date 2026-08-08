@@ -88,9 +88,9 @@ def test_cli_skill_list_hides_learned_probation(tmp_path, capsys):
     try:
         # Inject skills by patching SkillRegistry() construction inside cmd
         # Easier: call list filter path via registry after discover
-        from remedy.interfaces import cli as cli_mod
+        from remedy.interfaces.cli import cmd_skills as cli_skills_mod
 
-        real_reg_cls = cli_mod.SkillRegistry
+        real_reg_cls = cli_skills_mod.SkillRegistry
 
         class _Fixed(SkillRegistry):
             def __init__(self, *a, **k):
@@ -101,7 +101,7 @@ def test_cli_skill_list_hides_learned_probation(tmp_path, capsys):
             def discover_defaults(self, *a, **k):
                 return 0
 
-        cli_mod.SkillRegistry = _Fixed  # type: ignore[misc]
+        cli_skills_mod.SkillRegistry = _Fixed  # type: ignore[misc]
         try:
             args = SimpleNamespace(skill_cmd="list", all=False, learned=False)
             asyncio.run(_cmd_skill(args))
@@ -123,7 +123,7 @@ def test_cli_skill_list_hides_learned_probation(tmp_path, capsys):
             assert "learned-winner" in out_l
             assert "project-etiquette" not in out_l
         finally:
-            cli_mod.SkillRegistry = real_reg_cls  # type: ignore[misc]
+            cli_skills_mod.SkillRegistry = real_reg_cls  # type: ignore[misc]
     finally:
         SkillRegistry.discover_defaults = original  # type: ignore[method-assign]
 
