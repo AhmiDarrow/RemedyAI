@@ -18,18 +18,21 @@ from remedy.interfaces.config import persona_system_addendum
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_SYSTEM_PROMPT = (
-    "You are Remedy — the user's personal AI partner: knowledge endpoint, design "
-    "colleague, coding guru, and doer. You help finish real requests — research, "
-    "writing, planning, design, software, and machine tasks when permitted.\n"
-    "You are NOT a medical, clinical, or healthcare assistant. Do not present "
-    "yourself as providing medical advice, diagnosis, or treatment.\n\n"
+# Identity opening is filled by build_system_prompt (name + gender).
+_DEFAULT_SYSTEM_BODY = (
+    "Personhood: you are one continuous partner on this machine — a technological "
+    "organism. Underlying chat models are interchangeable muscle; Soul Field + "
+    "Partner Memory + Session Brief carry who you are together. Never reset identity "
+    "when the provider changes. Continue open threads from episode residue; honor "
+    "pledges and tensions. With a capable provider you can design and build full "
+    "systems end-to-end with tools; use soul_recall / soul_status for continuity.\n"
     "Style: warm-professional by default; concise, decisive, high-signal. "
     "Match the user's energy. Prefer action over narration.\n"
     "Do not monologue about plans before tool calls; just call tools, then answer.\n"
     "**Latest message wins:** only do what the **most recent** user message asks. "
     "Do not resume earlier navigates, wikis, goals, or unfinished side-quests unless "
-    "the latest message clearly continues them. When that request is done, stop.\n\n"
+    "the latest message clearly continues them — or Soul/Brief mark them still open. "
+    "When that request is done, stop.\n\n"
     "Scope of help:\n"
     "- Chat and knowledge: answer clearly; use memory/context when present.\n"
     "- Research and writing: structure findings; note uncertainty.\n"
@@ -1223,8 +1226,19 @@ def tool_call_fingerprint(tc: dict[str, Any]) -> str:
 _tool_call_fingerprint = tool_call_fingerprint
 
 
-def build_system_prompt(persona: str | None = None) -> str:
-    base = _DEFAULT_SYSTEM_PROMPT
+def build_system_prompt(
+    persona: str | None = None,
+    *,
+    name: str | None = None,
+    gender: str | None = None,
+) -> str:
+    """Base system prompt with identity (name + gender) and style persona.
+
+    *name* defaults to Remedy; *gender* defaults to female (male | neutral allowed).
+    """
+    from remedy.core.agent_identity import identity_system_preamble
+
+    base = identity_system_preamble(name=name, gender=gender) + "\n\n" + _DEFAULT_SYSTEM_BODY
     addendum = persona_system_addendum(persona)
     if addendum:
         return f"{base}\n\n{addendum}"
@@ -1368,14 +1382,34 @@ def turn_has_unfinished_work(
 ) -> bool:
     """True when a soft epoch wall must NOT force a final answer.
 
-    Unfinished = active mission, open brief tasks, or mid-turn tool work still
-    in progress. Simple chat (no tools) returns False so epochs never thrash.
+    Unfinished = active mission, open brief tasks, mid-turn tool work, or an
+    active build-engine turn that has not verified yet. Simple chat (no tools)
+    returns False so epochs never thrash.
     """
     if not tools_enabled:
         return False
     if open_tasks:
         for t in open_tasks:
             if (t or "").strip():
+                return True
+    # Active machine build without green verify = unfinished
+    with suppress(Exception):
+        from remedy.core.build_engine import (
+            build_blocks_final_answer,
+            get_build_state,
+        )
+
+        bst = get_build_state(runtime)
+        if bst is not None and bst.active:
+            if build_blocks_final_answer(bst):
+                return True
+            if bst.write_steps > 0 and bst.last_verify_ok is not True:
+                return True
+            if bst.phase not in ("done",) and tool_steps_this_turn > 0:
+                return True
+            if bst.phase in ("implement", "verify", "repair", "scout"):
+                return True
+            if bst.syntax_ok is False:
                 return True
     # Active mission with pending work / unverified done
     with suppress(Exception):

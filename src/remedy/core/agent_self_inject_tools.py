@@ -84,27 +84,53 @@ def register_self_inject_tools(runtime: Any) -> None:
         *,
         apply: bool = True,
         timeout: float = 900.0,
+        focus: str = "auto",
     ) -> str:
         """Run ONE self-inject round on the Remedy codebase.
 
         tree=python | desktop | both. Snapshots the git diff, gates with tests
         only (pytest / npm test), applies on green (restart sidecar / rebuild
         SPA) or rolls back on red, and records the round in the audit ledger.
+
+        focus=auto (default) picks a continuity-gap target (soul/memory paths)
+        when continuity score is weak; focus=code leaves free-form agent edits;
+        focus=continuity forces continuity-module targeting notes into the round.
         """
         repo = _repo_root(runtime)
+        home = getattr(runtime, "home_dir", None) or getattr(
+            getattr(runtime, "config", None), "home_dir", None
+        )
         round_ = SelfInjectRound(tree=tree)
+        focus_n = (focus or "auto").strip().lower()
+        # Continuity-targeted self-improvement (organism densifying its own memory)
+        with __import__("contextlib").suppress(Exception):
+            from remedy.memory.soul.continuity_metrics import primary_self_inject_focus
+
+            cont = primary_self_inject_focus(home)
+            if focus_n in ("auto", "continuity") and cont.get("overall", 1.0) < 0.72:
+                tgt = cont.get("focus") or {}
+                round_.summary = str(cont.get("summary") or "")[:240]
+                round_.detail["continuity_focus"] = tgt
+                round_.detail["continuity_score"] = cont.get("score")
+                # Soft note for ledger / agent: which path to improve
+                if tgt.get("path"):
+                    round_.detail["suggested_path"] = tgt["path"]
+                    round_.detail["suggested_why"] = tgt.get("why") or ""
+            elif focus_n == "continuity":
+                round_.detail["continuity_focus"] = cont.get("focus")
+                round_.summary = str(cont.get("summary") or "continuity focus")[:240]
         try:
             snapshot = await git_capture(repo)
             round_.detail["head"] = snapshot.get("head")
             round_ = await run_gate(round_, repo, timeout=timeout)
             if apply:
                 round_ = await apply_or_rollback(
-                    round_, repo, snapshot, home=getattr(runtime, "home_dir", None)
+                    round_, repo, snapshot, home=home
                 )
             else:
                 round_.status = "gated_only"
                 round_.outcome = "noop"
-            append_ledger(round_, getattr(runtime, "home_dir", None))
+            append_ledger(round_, home)
         except Exception as e:  # noqa: BLE001
             round_.status = "error"
             round_.summary = f"round failed: {e}"
@@ -112,7 +138,7 @@ def register_self_inject_tools(runtime: Any) -> None:
                 "remedy.core.self_inject", fromlist=["_now_utc"]
             )._now_utc()
             with __import__("contextlib").suppress(Exception):
-                append_ledger(round_, getattr(runtime, "home_dir", None))
+                append_ledger(round_, home)
             return f"self-inject round error: {e}"
 
         return json.dumps(round_.to_ledger(), indent=2, ensure_ascii=False)
@@ -137,8 +163,9 @@ def register_self_inject_tools(runtime: Any) -> None:
         "self_inject_round",
         "Run ONE test-gated self-improvement round on the Remedy codebase: "
         "snapshot -> pytest/npm test gate -> apply (restart sidecar / rebuild SPA) "
-        "on green or roll back on red -> record in the audit ledger. Use when "
-        "asked to improve/self-inject/fix Remedy's own code.",
+        "on green or roll back on red -> record in the audit ledger. "
+        "focus=auto targets continuity/soul gaps when personhood score is weak. "
+        "Use when asked to improve/self-inject/fix Remedy's own code or memory.",
         tool_self_inject_round,
         {
             "type": "object",
@@ -155,6 +182,11 @@ def register_self_inject_tools(runtime: Any) -> None:
                 "timeout": {
                     "type": "number",
                     "description": "Per-command timeout seconds (default 900).",
+                },
+                "focus": {
+                    "type": "string",
+                    "enum": ["auto", "continuity", "code"],
+                    "description": "auto=continuity if weak; continuity=force; code=skip.",
                 },
             },
         },

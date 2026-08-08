@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 # Per-process caches so switching tabs restores the right brief/work roots
 # without wiping the previous tab's in-memory continuity permanently.
 _brief_by_session: dict[str, Any] = {}
+_partner_by_session: dict[str, Any] = {}
 _work_roots_by_session: dict[str, list[str]] = {}
 _MAX_CACHED_SESSIONS = 48
 
@@ -32,10 +33,22 @@ def _trim_cache(cache: dict[str, Any]) -> None:
         cache.pop(k, None)
 
 
+def _live_session_id(runtime: Any) -> str:
+    """Read the process-live session id (not turn ContextVar)."""
+    d = getattr(runtime, "__dict__", None) or {}
+    if "_session_id_live" in d:
+        return str(d.get("_session_id_live") or "").strip()
+    return str(getattr(runtime, "_session_id", "") or "").strip()
+
+
 def bind_session_continuity(runtime: Any, session_id: str | None) -> dict[str, Any]:
-    """Rebind live continuity slots to *session_id*. Returns meta for logs/tests."""
+    """Rebind live continuity slots to *session_id*. Returns meta for logs/tests.
+
+    Live mirrors are still updated (legacy tools / post-turn code). Concurrent
+    streams freeze the rebound objects into turn ContextVars via ``begin_turn``.
+    """
     sid = str(session_id or "").strip()
-    prev = str(getattr(runtime, "_session_id", "") or "").strip()
+    prev = _live_session_id(runtime)
     meta: dict[str, Any] = {
         "session_id": sid,
         "previous_session_id": prev or None,
@@ -46,16 +59,40 @@ def bind_session_continuity(runtime: Any, session_id: str | None) -> dict[str, A
         "work_roots_bound": False,
     }
 
-    # Stash outgoing tab state before switch
+    # Stash outgoing tab state before switch (prefer live stores).
+    def _brief_live() -> Any:
+        d = getattr(runtime, "__dict__", None) or {}
+        if "_session_brief_live" in d:
+            return d.get("_session_brief_live")
+        return getattr(runtime, "_session_brief", None)
+
+    def _partner_live() -> Any:
+        d = getattr(runtime, "__dict__", None) or {}
+        if "_partner_state_live" in d:
+            return d.get("_partner_state_live")
+        return getattr(runtime, "_partner_state", None)
+
+    def _roots_live() -> list[str]:
+        d = getattr(runtime, "__dict__", None) or {}
+        if "_work_roots_live" in d:
+            return list(d.get("_work_roots_live") or [])
+        return list(getattr(runtime, "_work_roots", None) or [])
+
     if prev and prev != sid:
         with suppress(Exception):
-            brief = getattr(runtime, "_session_brief", None)
+            brief = _brief_live()
             if brief is not None:
                 bsid = str(getattr(brief, "session_id", "") or prev)
                 if bsid:
                     _brief_by_session[bsid] = brief
         with suppress(Exception):
-            roots = list(getattr(runtime, "_work_roots", None) or [])
+            partner = _partner_live()
+            if partner is not None:
+                psid = str(getattr(partner, "session_id", "") or prev)
+                if psid:
+                    _partner_by_session[psid] = partner
+        with suppress(Exception):
+            roots = _roots_live()
             if roots:
                 _work_roots_by_session[prev] = roots
         with suppress(Exception):
@@ -63,13 +100,14 @@ def bind_session_continuity(runtime: Any, session_id: str | None) -> dict[str, A
             runtime._partner_state = None
         meta["cleared_orphan"] = True
         _trim_cache(_brief_by_session)
+        _trim_cache(_partner_by_session)
         _trim_cache(_work_roots_by_session)
 
     if sid:
         runtime._session_id = sid
 
     # --- Session Brief ---
-    brief = getattr(runtime, "_session_brief", None)
+    brief = _brief_live()
     brief_sid = str(getattr(brief, "session_id", "") or "") if brief is not None else ""
     if not sid:
         # Anonymous turn: keep brief only if it has no foreign session stamp
@@ -108,17 +146,25 @@ def bind_session_continuity(runtime: Any, session_id: str | None) -> dict[str, A
         from remedy.memory.partner_state.state import ensure_partner_state
 
         # Force rebind path
-        existing = getattr(runtime, "_partner_state", None)
+        existing = _partner_live()
         if existing is not None:
             esid = str(getattr(existing, "session_id", "") or "")
             if sid and esid and esid != sid:
                 runtime._partner_state = None
+            elif sid and esid == sid:
+                # Reuse stashed object if registry would recreate
+                runtime._partner_state = existing
+        cached_p = _partner_by_session.get(sid) if sid else None
+        if cached_p is not None and getattr(runtime, "_partner_state", None) is None:
+            runtime._partner_state = cached_p
         st = ensure_partner_state(runtime)
         # Double-check key
         if sid and str(getattr(st, "session_id", "") or "") not in (sid, f"anon-{id(runtime)}"):
             if str(st.session_id) != sid:
                 runtime._partner_state = None
                 st = ensure_partner_state(runtime)
+        if sid and st is not None:
+            _partner_by_session[sid] = st
         meta["partner_bound"] = True
         meta["partner_session_id"] = getattr(st, "session_id", None)
 
@@ -183,18 +229,26 @@ def drop_session_continuity_cache(session_id: str | None) -> None:
     if not sid:
         return
     _brief_by_session.pop(sid, None)
+    _partner_by_session.pop(sid, None)
     _work_roots_by_session.pop(sid, None)
 
 
 def clear_all_continuity_caches() -> None:
     """Test/helper: wipe in-process continuity caches."""
     _brief_by_session.clear()
+    _partner_by_session.clear()
     _work_roots_by_session.clear()
 
 
 def session_isolation_system_line(runtime: Any) -> str:
     """Hard system reminder: only this session's project/context is in play."""
-    sid = str(getattr(runtime, "_session_id", "") or "").strip()
+    sid = ""
+    with suppress(Exception):
+        from remedy.core.turn_context import turn_session_id
+
+        sid = str(turn_session_id(runtime) or "").strip()
+    if not sid:
+        sid = _live_session_id(runtime)
     proj = ""
     with suppress(Exception):
         proj = str(runtime.effective_project_path() or "")

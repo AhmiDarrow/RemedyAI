@@ -74,8 +74,17 @@ def register_webhook_routes(app: FastAPI, *, gateway=None, **_kw) -> None:
             raise HTTPException(400, "invalid json") from exc
         if not isinstance(data, dict):
             raise HTTPException(400, "invalid body")
-        # Chat verification handshake — only when channel is configured.
-        if data.get("type") == "URL_VERIFICATION" or data.get("challenge"):
+        # Chat verification handshake — only for explicit platform verification
+        # shapes. Do NOT skip auth merely because a MESSAGE body includes a
+        # truthy ``challenge`` key (unauthenticated reachability / probe surface).
+        etype = str(data.get("type") or data.get("eventType") or "").strip().upper()
+        is_url_verification = etype in ("URL_VERIFICATION", "URL_VERIFICATION_EVENT")
+        is_challenge_only = (
+            not data.get("message")
+            and data.get("challenge") is not None
+            and etype in ("", "CHALLENGE", "URL_VERIFICATION", "URL_VERIFICATION_EVENT")
+        )
+        if is_url_verification or is_challenge_only:
             return {"challenge": data.get("challenge") or data.get("token") or "ok"}
         auth = request.headers.get("Authorization")
         if hasattr(ch, "verify_inbound_auth") and not ch.verify_inbound_auth(auth):

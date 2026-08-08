@@ -72,6 +72,7 @@ def build_identity_payload(
     project_profiles: list[dict[str, Any]] | None = None,
     time_crystal: list[dict[str, Any]] | None = None,
     display_name: str = "",
+    soul: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Assemble redacted portable payload (no secrets fields)."""
 
@@ -112,7 +113,7 @@ def build_identity_payload(
             out.append(clean)
         return out
 
-    return {
+    out: dict[str, Any] = {
         "version": EXPORT_VERSION,
         "exported_at": time.time(),
         "display_name": (display_name or "")[:80],
@@ -128,6 +129,17 @@ def build_identity_payload(
             "provider_credentials",
         ],
     }
+    # Soul Field (personhood) — opt-in portable identity tissue
+    if isinstance(soul, dict) and soul:
+        # Drop secret-shaped free text inside soul dump
+        try:
+            text = json.dumps(soul, default=str)
+            if not looks_like_secret_text(text):
+                out["soul"] = soul
+                out["format_hint"] = "includes_soul_field"
+        except Exception:
+            pass
+    return out
 
 
 def export_identity(
@@ -284,10 +296,22 @@ def collect_default_payload(home: Path | str | None = None) -> dict[str, Any]:
     except Exception:
         pass
 
+    soul: dict[str, Any] | None = None
+    try:
+        from remedy.memory.soul.portable import soul_export_payload
+
+        pack = soul_export_payload(home)
+        soul = pack.get("soul") if isinstance(pack, dict) else None
+        if not display_name and isinstance(soul, dict):
+            display_name = str(soul.get("identity_name") or "")[:80]
+    except Exception:
+        soul = None
+
     return build_identity_payload(
         partner_memory=partner_memory[:80],
         skill_ranks=skill_ranks,
         project_profiles=project_profiles,
         time_crystal=time_crystal,
         display_name=display_name,
+        soul=soul if isinstance(soul, dict) else None,
     )

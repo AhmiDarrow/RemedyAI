@@ -3508,6 +3508,22 @@ fn self_inject_apply_poller(app: AppHandle) {
         });
 }
 
+/// Update system tray tooltip (somatic / organism mood from partner status).
+#[tauri::command]
+fn set_tray_tooltip(app: AppHandle, tooltip: String) -> Result<(), String> {
+    let text = tooltip.trim();
+    if text.is_empty() {
+        return Ok(());
+    }
+    // OS tooltip length soft-cap
+    let capped: String = text.chars().take(120).collect();
+    if let Some(tray) = app.tray_by_id("main") {
+        tray.set_tooltip(Some(capped.as_str()))
+            .map_err(|e| format!("set_tooltip: {e}"))?;
+    }
+    Ok(())
+}
+
 /// Kill and respawn the sidecar, wait for health, emit server-ready / server-error.
 #[tauri::command]
 fn restart_server(app: AppHandle, state: State<'_, ServerState>) -> Result<String, String> {
@@ -3671,6 +3687,7 @@ pub fn run() {
             quit_app,
             request_quit_app,
             restart_server,
+            set_tray_tooltip,
             check_desktop_update,
             start_desktop_update,
             get_local_api_token,

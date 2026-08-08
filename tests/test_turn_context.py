@@ -26,7 +26,7 @@ from remedy.core.turn_context import (
 
 @pytest.mark.asyncio
 async def test_abort_sets_event_and_clears_registry():
-    tok_s, tok_a, tok_w, tok_p, tok_t = begin_turn(
+    toks = begin_turn(
         "sess-1", project_raw=None, active_path="/tmp/ws"
     )
     try:
@@ -36,7 +36,7 @@ async def test_abort_sets_event_and_clears_registry():
         assert n == 1
         assert is_turn_aborted()
     finally:
-        end_turn("sess-1", tok_s, tok_a, tok_w, tok_p, tok_t)
+        end_turn("sess-1", *toks)
     assert not is_session_streaming("sess-1")
 
 
@@ -105,6 +105,55 @@ def test_plan_mode_and_tool_steps_isolated_per_turn():
         assert current_turn_tool_steps() == []
     finally:
         end_turn("build-sess", *t_build)
+
+
+def test_continuity_objects_isolated_per_turn():
+    """Session brief / partner / work roots freeze per turn ContextVar."""
+    from remedy.core.turn_context import (
+        turn_partner_state,
+        turn_session_brief,
+        turn_work_roots,
+    )
+
+    brief_a = MagicMock(name="brief-a", session_id="iso-a")
+    partner_a = MagicMock(name="partner-a", session_id="iso-a")
+    t_a = begin_turn(
+        "iso-a",
+        project_raw=None,
+        active_path=".",
+        session_brief=brief_a,
+        partner_state=partner_a,
+        work_roots=["/proj-a"],
+    )
+    try:
+        assert turn_session_brief() is brief_a
+        assert turn_partner_state() is partner_a
+        assert turn_work_roots() == ["/proj-a"]
+        assert turn_session_id() == "iso-a"
+
+        brief_b = MagicMock(name="brief-b", session_id="iso-b")
+        t_b = begin_turn(
+            "iso-b",
+            project_raw=None,
+            active_path=".",
+            session_brief=brief_b,
+            partner_state=None,
+            work_roots=["/proj-b"],
+        )
+        try:
+            # Nested context (same task) sees B; after end, A restored.
+            assert turn_session_brief() is brief_b
+            assert turn_work_roots() == ["/proj-b"]
+            assert turn_session_id() == "iso-b"
+        finally:
+            end_turn("iso-b", *t_b)
+
+        assert turn_session_brief() is brief_a
+        assert turn_partner_state() is partner_a
+        assert turn_work_roots() == ["/proj-a"]
+        assert turn_session_id() == "iso-a"
+    finally:
+        end_turn("iso-a", *t_a)
 
 
 @pytest.mark.asyncio

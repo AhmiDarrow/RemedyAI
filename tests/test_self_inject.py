@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from remedy.core.self_inject import (
     SelfInjectRound,
     append_ledger,
@@ -88,3 +90,49 @@ def test_request_sidecar_restart_no_snapshot(tmp_path):
     assert payload["changed"] == []
     assert payload["untracked"] == []
     assert payload["head"] == ""
+
+
+@pytest.mark.asyncio
+async def test_git_restore_preserves_pre_round_dirty(tmp_path):
+    """Rollback must re-apply the snapshot diff (not wipe unrelated dirt)."""
+    import subprocess
+
+    from remedy.core.self_inject import git_capture, git_restore
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "t@example.com"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "t"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    tracked = repo / "keep.txt"
+    tracked.write_text("base\n", encoding="utf-8")
+    subprocess.run(["git", "add", "keep.txt"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "init"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    # Pre-round unrelated dirty work
+    tracked.write_text("base\nowner-wip\n", encoding="utf-8")
+    snap = await git_capture(repo)
+    assert "owner-wip" in snap["diff"]
+    # Round mutates further + adds noise untracked
+    tracked.write_text("base\nowner-wip\nround-bad\n", encoding="utf-8")
+    (repo / "round_noise.txt").write_text("tmp\n", encoding="utf-8")
+    err = await git_restore(repo, snap)
+    assert err == "" or "error" not in err.lower()
+    text = tracked.read_text(encoding="utf-8")
+    assert "owner-wip" in text
+    assert "round-bad" not in text
+    assert not (repo / "round_noise.txt").exists()

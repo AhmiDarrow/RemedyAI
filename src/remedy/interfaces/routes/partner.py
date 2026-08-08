@@ -403,6 +403,24 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
         except Exception:
             metabolism = {}
 
+        # Somatic signals — organism mood for status bar / tray tooltip
+        soma: dict = {}
+        try:
+            from remedy.core.muscle_profile import muscle_from_runtime
+            from remedy.memory.soul.somatic import refresh_soma
+
+            home = None
+            if runtime is not None:
+                home = getattr(getattr(runtime, "config", None), "home_dir", None)
+            muscle = muscle_from_runtime(runtime)
+            soma = refresh_soma(
+                home,
+                muscle_label=muscle.label,
+                muscle_provider=muscle.provider,
+            )
+        except Exception:
+            soma = {}
+
         return {
             "pending_approvals": len(pending),
             "approval_mode": APPROVALS.mode,
@@ -417,6 +435,7 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
             "session_quality": quality,
             "provider_health": health_pub,
             "metabolism": metabolism,
+            "soma": soma,
         }
 
     @app.get("/api/partner/metabolism")
@@ -505,8 +524,10 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
                 "partner_memory": len(payload.get("partner_memory") or []),
                 "project_profiles": len(payload.get("project_profiles") or []),
                 "time_crystal": len(payload.get("time_crystal") or []),
+                "soul": 1 if payload.get("soul") else 0,
             },
-            "hint": "Store the passphrase separately. Keys and OAuth tokens are never exported.",
+            "hint": "Store the passphrase separately. Keys and OAuth tokens are never exported. "
+            "Soul Field (personhood) is included when present.",
         }
 
     @app.post("/api/partner/identity/import")
@@ -538,6 +559,7 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
         # Merge Time Crystal + Partner Memory facts (safe, no credentials)
         merged = 0
         mem_merged = 0
+        soul_merged = 0
         tc = get_time_crystal("_import")
         for fact in payload.get("time_crystal") or []:
             if isinstance(fact, dict) and fact.get("text"):
@@ -547,6 +569,20 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
                     source="import",
                 ):
                     merged += 1
+        # Soul Field personhood merge
+        if isinstance(payload.get("soul"), dict):
+            try:
+                from remedy.memory.soul.portable import import_soul_payload
+
+                home = None
+                if runtime is not None:
+                    home = getattr(getattr(runtime, "config", None), "home_dir", None)
+                res = import_soul_payload(
+                    {"soul": payload["soul"]}, home=home, merge=True
+                )
+                soul_merged = int(res.get("episodes") or 0) or 1
+            except Exception:
+                soul_merged = 0
         # Partner memory rows → life crystal + optional profile upsert
         for row in payload.get("partner_memory") or []:
             if not isinstance(row, dict):
@@ -609,9 +645,10 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
             "project_profiles_count": len(payload.get("project_profiles") or []),
             "project_profiles_merged": proj_merged,
             "time_crystal_merged": merged,
+            "soul_merged": soul_merged,
             "excludes": payload.get("excludes") or [],
             "hint": (
-                "Partner facts + crystal + project stats merged locally. "
-                "Review /whoami. Secrets were never in the package."
+                "Partner facts + crystal + project stats + Soul Field merged locally. "
+                "Review /whoami and soul_status. Secrets were never in the package."
             ),
         }

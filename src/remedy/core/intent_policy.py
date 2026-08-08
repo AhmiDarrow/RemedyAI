@@ -19,11 +19,52 @@ _PACKS: dict[str, dict[str, Any]] = {
         "id": "memory",
         "system": (
             "[Continuity] User is asking about durable knowledge or recall. "
-            "Prefer memory_search / profile facts already in context before guessing. "
-            "If unknown, say so and offer to remember."
+            "Prefer soul_recall (unified Soul + Crystal + Partner Memory), then "
+            "memory_search / profile facts already in context before guessing. "
+            "If unknown, say so and offer to remember. soul_status for personhood state."
         ),
         "prefer_tools": True,
-        "suggest_tools": ["memory_search"],
+        "suggest_tools": ["soul_recall", "soul_status", "memory_search"],
+    },
+    "build": {
+        "id": "build",
+        "system": (
+            "[Continuity · Build engine] User wants software built or shipped. "
+            "Machine schedule: SCOUT (parallel file_read/list_dir/repo_search in ONE "
+            "step) → IMPLEMENT (file_write / multi-hunk file_edit) → VERIFY "
+            "(bash_exec tests / job_run kind=verify / mission_verify) → REPAIR until "
+            "green → DONE. Never monologue a plan without tool_calls. Never claim "
+            "done without verify. spread_run for multi-module surveys; mission_start "
+            "for unattended end-to-end; subgoal_open for phases. Soul keeps identity."
+        ),
+        "prefer_tools": True,
+        "suggest_tools": [
+            "file_edit",
+            "file_write",
+            "repo_search",
+            "file_read",
+            "list_dir",
+            "bash_exec",
+            "job_run",
+            "spread_run",
+            "subgoal_open",
+            "mission_start",
+            "mission_verify",
+            "build_status",
+            "build_unit_hop",
+            "build_live_project",
+            "build_mutation_score",
+            "build_mutant_score",
+            "build_compile_spec",
+            "build_tdd",
+            "build_gate_tower",
+            "build_repair_queue",
+            "build_snapshot",
+            "build_symbol_index",
+            "build_resume",
+            "soul_recall",
+        ],
+        "change_safety": True,
     },
     "skill": {
         "id": "skill",
@@ -147,17 +188,32 @@ def policy_for_intent(intent: str, *, user_text: str = "") -> dict[str, Any]:
             w in ut
             for w in (
                 "implement",
+                "build",
+                "ship",
+                "scaffold",
+                "create app",
+                "create a",
+                "write a",
+                "make me",
+                "develop",
+            )
+        ):
+            return dict(_PACKS["build"])
+        if any(
+            w in ut
+            for w in (
                 "fix",
                 "debug",
                 "run ",
                 "create file",
-                "write a",
                 "edit ",
                 "refactor",
             )
         ):
             return dict(_PACKS["tool"])
-    if key == "tool" and any(
+        if any(w in ut for w in ("soul", "who are you", "what do you remember feeling")):
+            return dict(_PACKS["memory"])
+    if key in ("tool", "build") and any(
         p in ut for p in ("alone", "on your own", "without me", "end-to-end", "end to end")
     ):
         return dict(_PACKS["autonomous"])
