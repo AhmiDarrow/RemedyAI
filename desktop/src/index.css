@@ -1720,21 +1720,187 @@ body {
   backdrop-filter: blur(10px);
   box-shadow: 0 -6px 16px rgba(0, 0, 0, 0.08);
 }
-/* Design-system helpers for large forms still on inline styles */
+/* ------------------------------------------------------------------ */
+/* Remedy shell — Setup wizard + Autoupdate share one visual language */
+/* ------------------------------------------------------------------ */
+.remedy-shell,
 .setup-wizard-root {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 1rem;
+  box-sizing: border-box;
+  color: var(--text-primary);
   background:
     radial-gradient(
-      90% 50% at 50% 0%,
-      color-mix(in srgb, var(--accent) 10%, transparent),
-      var(--bg-primary) 55%
+      90% 55% at 50% 0%,
+      color-mix(in srgb, var(--accent) 12%, transparent),
+      var(--bg-primary) 58%
     );
 }
+.remedy-shell-card,
 .setup-wizard-card {
+  width: 100%;
+  background: color-mix(in srgb, var(--bg-secondary) 96%, var(--bg-primary));
   border-radius: 1rem !important;
   border: 1px solid color-mix(in srgb, var(--border) 85%, transparent) !important;
   box-shadow:
     0 18px 50px rgba(0, 0, 0, 0.28),
-    0 0 0 1px color-mix(in srgb, var(--accent) 6%, transparent) !important;
+    0 0 0 1px color-mix(in srgb, var(--accent) 8%, transparent) !important;
+  overflow: hidden;
+}
+.remedy-shell-logo {
+  height: 40px;
+  width: auto;
+  max-width: 240px;
+  object-fit: contain;
+  display: block;
+  margin: 0 auto 12px;
+  image-rendering: auto;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+.remedy-shell-title {
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  color: var(--text-primary);
+  text-align: center;
+  margin: 0 0 0.2rem;
+}
+.remedy-shell-title--accent {
+  color: var(--accent);
+}
+.remedy-shell-subtitle {
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  text-align: center;
+  margin: 0;
+}
+.remedy-shell-progress-track {
+  height: 0.4rem;
+  border-radius: 999px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--bg-tertiary) 90%, transparent);
+}
+.remedy-shell-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 45%, transparent);
+  transition: width 0.3s ease;
+}
+.remedy-shell-step-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.35rem;
+  margin-top: 0.65rem;
+}
+.remedy-shell-step-chip {
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--bg-tertiary) 70%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.remedy-shell-step-chip.is-done,
+.remedy-shell-step-chip.is-active {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-secondary));
+}
+.remedy-shell-step-chip.is-active {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+.remedy-shell-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  border-radius: 0.75rem;
+  padding: 0.75rem 1rem;
+  font-size: 0.875rem;
+  background: color-mix(in srgb, var(--bg-tertiary) 80%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+}
+.remedy-shell-choice {
+  width: 100%;
+  text-align: left;
+  border-radius: 0.75rem;
+  padding: 0.85rem 1rem;
+  transition: border-color 0.12s ease, background 0.12s ease;
+  border: 1px solid var(--border);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.remedy-shell-choice:hover {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+.remedy-shell-choice.is-selected {
+  border: 1.5px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-primary));
+}
+.remedy-shell-input {
+  width: 100%;
+  border-radius: 0.5rem;
+  padding: 0.65rem 0.75rem;
+  font-size: 0.95rem;
+  outline: none;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+  box-sizing: border-box;
+}
+.remedy-shell-input:focus {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.remedy-shell-label {
+  display: block;
+  margin-bottom: 0.4rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.remedy-shell-muted {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+.remedy-shell-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+.remedy-shell-actions.flex-col {
+  flex-direction: column;
+}
+.remedy-shell-actions .ui-btn {
+  flex: 1;
+  padding: 0.7rem 0.85rem;
+  font-size: 0.9rem;
+  border-radius: 0.55rem;
+}
+.remedy-shell-actions .ui-btn.w-full {
+  width: 100%;
+}
+.remedy-shell-error {
+  border-radius: 0.75rem;
+  padding: 0.65rem 0.85rem;
+  font-size: 0.8rem;
+  background: color-mix(in srgb, var(--error) 12%, var(--bg-secondary));
+  color: var(--error);
+  border: 1px solid color-mix(in srgb, var(--error) 45%, var(--border));
+  white-space: pre-wrap;
 }
 .slide-rail-btn[data-label]:hover::after {
   content: attr(data-label);
