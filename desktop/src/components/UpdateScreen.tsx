@@ -15,7 +15,7 @@ type Phase = 'ready' | 'downloading' | 'closing' | 'installing' | 'relaunch' | '
 
 /**
  * In-app update UI: download + brief "restarting" handoff.
- * Install continues after exit; keep copy calm (no triple "closing / popup" spam).
+ * Visual language matches SetupWizard (remedy-shell tokens).
  */
 export function UpdateScreen({ info, onClose, autoStart = true }: UpdateScreenProps) {
   const [phase, setPhase] = useState<Phase>(autoStart && info.download_url ? 'downloading' : 'ready')
@@ -68,7 +68,7 @@ export function UpdateScreen({ info, onClose, autoStart = true }: UpdateScreenPr
     setBusy(true)
     setError('')
     setPhase('downloading')
-    setMessage('Starting download...')
+    setMessage('Starting download…')
     setPercent(0)
     try {
       await startDesktopUpdate(info.download_url)
@@ -97,53 +97,29 @@ export function UpdateScreen({ info, onClose, autoStart = true }: UpdateScreenPr
   const from = info.current_version
   const to = info.latest_version
 
+  const subtitle =
+    phase === 'ready'
+      ? 'A new version is ready'
+      : phase === 'downloading'
+        ? 'Downloading update…'
+        : phase === 'closing' || phase === 'installing'
+          ? 'Finishing — Remedy will restart shortly'
+          : phase === 'relaunch'
+            ? 'Starting Remedy…'
+            : 'Update failed'
+
   return (
-    <div
-      className="flex items-center justify-center h-full w-full"
-      style={{
-        background:
-          'radial-gradient(90% 50% at 50% 0%, color-mix(in srgb, var(--accent) 10%, transparent), var(--bg-primary) 55%)',
-        color: 'var(--text-primary)',
-      }}
-    >
-      <div className="ui-surface w-full max-w-md mx-4 p-7">
-        <div className="text-center mb-6">
-          <img
-            src={logoSrc}
-            alt="Remedy"
-            draggable={false}
-            style={{
-              height: 36,
-              width: 'auto',
-              maxWidth: 220,
-              objectFit: 'contain',
-              margin: '0 auto 14px',
-              display: 'block',
-              imageRendering: 'auto',
-            }}
-          />
-          <div className="text-xl font-bold mb-1 tracking-tight" style={{ color: 'var(--accent)' }}>
-            Remedy Update
-          </div>
-          <div className="text-sm" style={{ color: 'var(--text-muted)' }}>
-            {phase === 'ready' && 'A new version is ready'}
-            {phase === 'downloading' && 'Downloading update…'}
-            {phase === 'closing' && 'Finishing — Remedy will restart shortly'}
-            {phase === 'installing' && 'Installing…'}
-            {phase === 'relaunch' && 'Starting Remedy…'}
-            {phase === 'error' && 'Update failed'}
-          </div>
+    <div className="remedy-shell">
+      <div className="remedy-shell-card" style={{ maxWidth: 420, padding: '1.75rem 1.75rem 1.5rem' }}>
+        <div className="text-center mb-5">
+          <img src={logoSrc} alt="Remedy" className="remedy-shell-logo" draggable={false} />
+          <h1 className="remedy-shell-title remedy-shell-title--accent">Remedy Update</h1>
+          <p className="remedy-shell-subtitle">{subtitle}</p>
         </div>
 
-        <div
-          className="rounded-xl px-4 py-3 mb-5 text-sm flex justify-between items-center"
-          style={{
-            background: 'color-mix(in srgb, var(--bg-tertiary) 80%, transparent)',
-            border: '1px solid color-mix(in srgb, var(--border) 85%, transparent)',
-          }}
-        >
-          <span style={{ color: 'var(--text-muted)' }}>Version</span>
-          <span className="font-medium tabular-nums">
+        <div className="remedy-shell-meta mb-5">
+          <span className="remedy-shell-muted">Version</span>
+          <span className="font-medium tabular-nums" style={{ color: 'var(--text-primary)' }}>
             v{from} → <span style={{ color: 'var(--accent)' }}>v{to}</span>
           </span>
         </div>
@@ -164,46 +140,31 @@ export function UpdateScreen({ info, onClose, autoStart = true }: UpdateScreenPr
 
         {(phase === 'downloading' || phase === 'closing' || phase === 'installing' || phase === 'relaunch') && (
           <div className="mb-5">
-            <div
-              className="h-2 rounded-full overflow-hidden mb-2"
-              style={{ background: 'color-mix(in srgb, var(--bg-tertiary) 90%, transparent)' }}
-            >
+            <div className="remedy-shell-progress-track mb-2" style={{ height: '0.5rem' }}>
               <div
-                className="h-full rounded-full transition-all duration-300"
-                style={{
-                  width: `${Math.min(100, Math.max(0, percent))}%`,
-                  background: 'var(--accent)',
-                  boxShadow: '0 0 12px color-mix(in srgb, var(--accent) 45%, transparent)',
-                }}
+                className="remedy-shell-progress-fill"
+                style={{ width: `${Math.min(100, Math.max(0, percent))}%` }}
               />
             </div>
-            <div className="text-xs text-center" style={{ color: 'var(--text-muted)' }}>
+            <div className="text-xs text-center remedy-shell-muted">
               {message || `${percent}%`}
             </div>
           </div>
         )}
 
         {phase === 'error' && (
-          <div
-            className="mb-5 px-3 py-2.5 rounded-xl text-xs"
-            style={{
-              background: 'color-mix(in srgb, var(--error) 12%, var(--bg-secondary))',
-              color: 'var(--error)',
-              border: '1px solid color-mix(in srgb, var(--error) 45%, var(--border))',
-            }}
-          >
+          <div className="remedy-shell-error mb-5">
             {error || 'Something went wrong.'}
           </div>
         )}
 
-        <div className="flex gap-2">
+        <div className="remedy-shell-actions">
           {phase === 'ready' && (
             <>
               <button
                 type="button"
                 onClick={onClose}
-                className="ui-btn ui-btn-secondary flex-1"
-                style={{ padding: '0.65rem 0.75rem', fontSize: '0.85rem' }}
+                className="ui-btn ui-btn-secondary"
               >
                 Later
               </button>
@@ -211,8 +172,7 @@ export function UpdateScreen({ info, onClose, autoStart = true }: UpdateScreenPr
                 type="button"
                 onClick={() => void begin()}
                 disabled={busy || !info.download_url}
-                className="ui-btn ui-btn-primary flex-1"
-                style={{ padding: '0.65rem 0.75rem', fontSize: '0.85rem' }}
+                className="ui-btn ui-btn-primary"
               >
                 Update & Relaunch
               </button>
@@ -223,16 +183,14 @@ export function UpdateScreen({ info, onClose, autoStart = true }: UpdateScreenPr
               <button
                 type="button"
                 onClick={onClose}
-                className="ui-btn ui-btn-secondary flex-1"
-                style={{ padding: '0.65rem 0.75rem', fontSize: '0.85rem' }}
+                className="ui-btn ui-btn-secondary"
               >
                 Close
               </button>
               <button
                 type="button"
                 onClick={() => void begin()}
-                className="ui-btn ui-btn-primary flex-1"
-                style={{ padding: '0.65rem 0.75rem', fontSize: '0.85rem' }}
+                className="ui-btn ui-btn-primary"
               >
                 Retry
               </button>
@@ -240,8 +198,7 @@ export function UpdateScreen({ info, onClose, autoStart = true }: UpdateScreenPr
           )}
           {(phase === 'downloading' || phase === 'closing' || phase === 'relaunch') && (
             <div
-              className="flex-1 py-2.5 text-center text-sm"
-              style={{ color: 'var(--text-muted)' }}
+              className="flex-1 py-2.5 text-center text-sm remedy-shell-muted"
             >
               {phase === 'downloading'
                 ? 'Please wait…'

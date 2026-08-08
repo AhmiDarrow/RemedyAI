@@ -202,13 +202,17 @@ def bind_session_continuity(runtime: Any, session_id: str | None) -> dict[str, A
                     val.clear()
                 else:
                     setattr(runtime, attr, None if val is not None else val)
-            # One-shot mid-turn flags must not bleed across tabs either
+            # One-shot mid-turn flags must not bleed across tabs either.
+            # Prefer per-session maps; TurnState holds live-turn values.
             for attr, default in (
                 ("_mission_gate_nudge_done", False),
                 ("_evidence_inject_eu", -1),
             ):
                 if hasattr(runtime, attr):
                     setattr(runtime, attr, default)
+            eu_map = getattr(runtime, "_evidence_inject_eu_by_session", None)
+            if isinstance(eu_map, dict) and sid:
+                eu_map.pop(str(sid), None)
             meta["turn_scratch_cleared"] = True
 
     if meta["switched"]:

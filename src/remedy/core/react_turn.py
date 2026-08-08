@@ -79,6 +79,10 @@ class TurnState:
     # Inject budget (avoid user-role inject spam)
     inject_count: int = 0
     max_injects: int = 24
+    # Per-turn isolation (must not live on shared runtime under parallel tabs)
+    fingerprint_loop_hits: int = 0
+    evidence_inject_eu: int = -1
+    mission_gate_nudge_done: bool = False
 
     def tools_armed(self) -> bool:
         """True when tool schemas will actually be sent this step."""
@@ -187,6 +191,34 @@ class TurnState:
 
     def note_disconnect_retry(self) -> None:
         self.disconnect_retries += 1
+
+    def note_fingerprint_loop(self) -> int:
+        """Increment fingerprint-loop hits; return new count."""
+        self.fingerprint_loop_hits += 1
+        return self.fingerprint_loop_hits
+
+
+def soft_api_recovery_action(
+    *,
+    force_answer_api_fail_once: bool,
+    force_answer_sticky: bool,
+    api_soft_failures: int,
+    max_api_soft_failures: int = 3,
+) -> str:
+    """Decide next step after a non-fatal LLM HTTP error.
+
+    Returns:
+      ``stop`` — hard stop with user-facing error
+      ``force_answer_rebuild`` — rebuild no-tool body and POST again
+    """
+    if force_answer_api_fail_once:
+        return "stop"
+    # Sticky means we already rebuilt for a force-answer attempt.
+    if force_answer_sticky:
+        return "stop"
+    if int(api_soft_failures) < int(max_api_soft_failures):
+        return "force_answer_rebuild"
+    return "stop"
 
 
 def resolve_tools(

@@ -556,11 +556,6 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
 
   if (!open) return null
 
-  const cardStyles = {
-    background: 'var(--bg-secondary)',
-    border: '1px solid var(--border)',
-  } as const
-
   const inputStyles = {
     background: 'var(--bg-tertiary)',
     color: 'var(--text-primary)',
@@ -583,57 +578,30 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
   }
 
   return (
-    <div className="setup-wizard-root flex items-center justify-center h-full p-4">
-      <div
-        className="setup-wizard-card ui-surface overflow-hidden w-full"
-        style={{ maxWidth: 520, ...cardStyles }}
-      >
+    <div className="remedy-shell setup-wizard-root">
+      <div className="remedy-shell-card setup-wizard-card" style={{ maxWidth: 520 }}>
         <div className="px-7 pt-7 pb-3 text-center">
-          <img
-            src="/logo.png"
-            alt="Remedy"
-            draggable={false}
-            style={{
-              height: 40,
-              width: 'auto',
-              maxWidth: 240,
-              objectFit: 'contain',
-              margin: '0 auto 10px',
-              display: 'block',
-            }}
-          />
-          <div
-            className="text-2xl font-bold tracking-tight mb-1"
-            style={{ color: 'var(--text-primary)' }}
-          >
-            Remedy
-          </div>
-          <div className="text-sm" style={mutedStyles}>
-            Your local AI partner
-          </div>
+          <img src="/logo.png" alt="Remedy" className="remedy-shell-logo" draggable={false} />
+          <h1 className="remedy-shell-title">Remedy</h1>
+          <p className="remedy-shell-subtitle">Your local AI partner</p>
         </div>
 
         <div className="px-7 pb-2">
-          <div
-            className="h-1.5 rounded-full overflow-hidden"
-            style={{ background: 'var(--bg-tertiary)' }}
-          >
+          <div className="remedy-shell-progress-track">
             <div
-              className="h-full rounded-full transition-all duration-300"
-              style={{
-                width: `${progressPct}%`,
-                background: 'var(--accent)',
-              }}
+              className="remedy-shell-progress-fill"
+              style={{ width: `${progressPct}%` }}
             />
           </div>
-          <div
-            className="flex justify-between mt-2 text-[11px] font-medium tracking-wide"
-            style={mutedStyles}
-          >
+          <div className="remedy-shell-step-row" aria-label="Setup steps">
             {STEPS.map((s, i) => (
               <span
                 key={s}
-                style={i <= stepIndex ? { color: 'var(--accent)' } : undefined}
+                className={
+                  'remedy-shell-step-chip'
+                  + (i === stepIndex ? ' is-active' : '')
+                  + (i < stepIndex ? ' is-done' : '')
+                }
               >
                 {stepLabels[s]}
               </span>
@@ -651,23 +619,26 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
               >
                 Set up a provider and start chatting. Takes about a minute.
               </p>
-              <button
-                onClick={handleNext}
-                disabled={saving}
-                className="w-full py-3 rounded-lg text-base font-semibold transition-colors"
-                style={{ background: 'var(--accent)', color: '#fff' }}
-              >
-                Get Started
-              </button>
-              <button
-                onClick={handleSkip}
-                disabled={saving}
-                className="w-full py-2 rounded text-sm transition-colors"
-                style={{ background: 'transparent', color: 'var(--text-muted)' }}
-                title="Skip setup for now — won't show again on next launch"
-              >
-                {saving ? 'Saving…' : 'Skip for now'}
-              </button>
+              <div className="remedy-shell-actions flex-col">
+                <button
+                  type="button"
+                  onClick={handleNext}
+                  disabled={saving}
+                  className="ui-btn ui-btn-primary w-full"
+                  style={{ padding: '0.8rem 1rem', fontSize: '1rem' }}
+                >
+                  Get Started
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSkip}
+                  disabled={saving}
+                  className="ui-btn ui-btn-ghost w-full"
+                  title="Skip setup for now — won't show again on next launch"
+                >
+                  {saving ? 'Saving…' : 'Skip for now'}
+                </button>
+              </div>
             </div>
           )}
 
@@ -682,44 +653,20 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                   <button
                     type="button"
                     onClick={() => handleProviderChange('demo')}
-                    className="w-full text-left rounded-xl px-3.5 py-3 transition-colors"
-                    style={{
-                      border:
-                        provider === 'demo'
-                          ? '1.5px solid var(--accent)'
-                          : '1px solid var(--border)',
-                      background:
-                        provider === 'demo'
-                          ? 'color-mix(in srgb, var(--accent) 12%, var(--bg-primary))'
-                          : 'var(--bg-tertiary)',
-                    }}
+                    className={`remedy-shell-choice${provider === 'demo' ? ' is-selected' : ''}`}
                   >
-                    <div className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
-                      Demo · no signup
-                    </div>
-                    <div className="text-xs mt-0.5" style={mutedStyles}>
+                    <div className="text-sm font-semibold">Demo · no signup</div>
+                    <div className="remedy-shell-muted mt-0.5">
                       Chat immediately on a rate-limited free gateway. Switch later in Settings.
                     </div>
                   </button>
                   <button
                     type="button"
                     onClick={() => handleProviderChange('ollama')}
-                    className="w-full text-left rounded-xl px-3.5 py-3 transition-colors"
-                    style={{
-                      border:
-                        provider === 'ollama'
-                          ? '1.5px solid var(--accent)'
-                          : '1px solid var(--border)',
-                      background:
-                        provider === 'ollama'
-                          ? 'color-mix(in srgb, var(--accent) 12%, var(--bg-primary))'
-                          : 'var(--bg-tertiary)',
-                    }}
+                    className={`remedy-shell-choice${provider === 'ollama' ? ' is-selected' : ''}`}
                   >
-                    <div className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
-                      Ollama · free & private on this PC
-                    </div>
-                    <div className="text-xs mt-0.5" style={mutedStyles}>
+                    <div className="text-sm font-semibold">Ollama · free & private on this PC</div>
+                    <div className="remedy-shell-muted mt-0.5">
                       {ollamaHint
                         || 'Requires Ollama installed locally. No cloud API key.'}
                     </div>
@@ -1161,15 +1108,11 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                       SmolVLM2 downloads once — progress stays visible (not frozen).
                     </p>
                   </div>
-                  <div
-                    className="h-2.5 rounded-full overflow-hidden"
-                    style={{ background: 'var(--bg-tertiary)' }}
-                  >
+                  <div className="remedy-shell-progress-track" style={{ height: '0.55rem' }}>
                     <div
-                      className="h-full rounded-full transition-all duration-300"
+                      className="remedy-shell-progress-fill"
                       style={{
                         width: `${Math.min(100, Math.max(2, visionInstallPct ?? (visionInstalling ? 8 : 2)))}%`,
-                        background: 'var(--accent)',
                       }}
                     />
                   </div>
@@ -1195,10 +1138,10 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
               ) : (
                 <>
                   <div className="text-center space-y-2">
-                    <div className="text-2xl font-semibold" style={{ color: 'var(--accent)' }}>
+                    <h2 className="remedy-shell-title remedy-shell-title--accent">
                       You&apos;re ready
-                    </div>
-                    <p className="text-sm" style={mutedStyles}>
+                    </h2>
+                    <p className="remedy-shell-subtitle">
                       Enter to send · F1 for help
                       {enableVision
                         ? visionStatus?.installed
@@ -1235,72 +1178,63 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                       </span>
                     </span>
                   </label>
-                  <button
-                    onClick={() => void handleFinish()}
-                    disabled={saving}
-                    className="w-full py-3 rounded-lg text-base font-semibold transition-colors"
-                    style={{
-                      background: saving ? 'var(--bg-tertiary)' : 'var(--accent)',
-                      color: saving ? 'var(--text-muted)' : '#fff',
-                      cursor: saving ? 'not-allowed' : 'pointer',
-                    }}
-                  >
-                    {saving ? 'Working…' : 'Start Chatting'}
-                  </button>
-                  {enableVision && !visionStatus?.installed ? (
+                  <div className="remedy-shell-actions flex-col">
                     <button
                       type="button"
-                      onClick={() => void handleUseAppNow()}
+                      onClick={() => void handleFinish()}
                       disabled={saving}
-                      className="w-full py-2 rounded-lg text-sm"
-                      style={{ color: 'var(--text-muted)' }}
+                      className="ui-btn ui-btn-primary w-full"
+                      style={{ padding: '0.8rem 1rem', fontSize: '1rem' }}
                     >
-                      Use app now — download model in background
+                      {saving ? 'Working…' : 'Start Chatting'}
                     </button>
-                  ) : null}
+                    {enableVision && !visionStatus?.installed ? (
+                      <button
+                        type="button"
+                        onClick={() => void handleUseAppNow()}
+                        disabled={saving}
+                        className="ui-btn ui-btn-ghost w-full"
+                      >
+                        Use app now — download model in background
+                      </button>
+                    ) : null}
+                  </div>
                 </>
               )}
             </div>
           )}
 
           {error && (
-            <div
-              className="px-3 py-2.5 rounded-lg text-sm"
-              style={{
-                background: 'var(--error-bg, rgba(239,68,68,0.1))',
-                color: 'var(--error)',
-                border: '1px solid var(--error)',
-              }}
-            >
+            <div className="remedy-shell-error" role="alert">
               {error}
             </div>
           )}
 
           {step !== 'welcome' && step !== 'finish' && (
             <div className="space-y-2 pt-1">
-              <div className="flex gap-2">
+              <div className="remedy-shell-actions">
                 <button
+                  type="button"
                   onClick={handleBack}
                   disabled={saving}
-                  className="flex-1 py-2.5 rounded-lg text-base font-medium transition-colors"
-                  style={{ background: 'var(--bg-tertiary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+                  className="ui-btn ui-btn-secondary"
                 >
                   Back
                 </button>
                 <button
+                  type="button"
                   onClick={handleNext}
                   disabled={saving}
-                  className="flex-1 py-2.5 rounded-lg text-base font-semibold transition-colors"
-                  style={{ background: 'var(--accent)', color: '#fff' }}
+                  className="ui-btn ui-btn-primary"
                 >
                   Next
                 </button>
               </div>
               <button
+                type="button"
                 onClick={handleSkip}
                 disabled={saving}
-                className="w-full py-2 rounded text-sm transition-colors"
-                style={{ background: 'transparent', color: 'var(--text-muted)' }}
+                className="ui-btn ui-btn-ghost w-full"
                 title="Skip remaining setup — won't show again on next launch"
               >
                 {saving ? 'Saving…' : 'Skip remaining'}
