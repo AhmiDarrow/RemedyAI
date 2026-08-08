@@ -82,6 +82,10 @@ export async function patchRmbSettings(
   })
 }
 
-export async function useRmbAsProvider(): Promise<Record<string, unknown>> {
+/** Switch chat provider to RMB (API call — not a React hook). */
+export async function applyRmbAsProvider(): Promise<Record<string, unknown>> {
   return apiFetch('/rmb/use', { method: 'POST' })
 }
+
+/** @deprecated Prefer applyRmbAsProvider — name looked like a React hook to linters. */
+export const useRmbAsProvider = applyRmbAsProvider

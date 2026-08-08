@@ -502,10 +502,8 @@ export function StatusBar({
   return (
     <div
       data-remedy-status-bar
-      className="flex flex-col border-t"
+      className="flex flex-col"
       style={{
-        background: 'var(--bg-secondary)',
-        borderColor: 'var(--border)',
         color: 'var(--text-muted)',
       }}
     >
@@ -513,8 +511,8 @@ export function StatusBar({
       <div
         className="flex items-center gap-3 px-3 py-1.5 text-xs border-b"
         style={{
-          borderColor: 'var(--border)',
-          background: 'var(--bg-tertiary)',
+          borderColor: 'color-mix(in srgb, var(--border) 80%, transparent)',
+          background: 'color-mix(in srgb, var(--bg-tertiary) 70%, transparent)',
           minHeight: 32,
         }}
       >
@@ -812,7 +810,7 @@ export function StatusBar({
                     nextModel || (pid === 'demo' ? DEMO_DEFAULT_MODEL : ''),
                   )
                 }}
-                className="text-xs rounded px-1.5 py-0.5 outline-none"
+                className="ui-select"
                 title={streaming ? 'Stop generation to switch provider' : 'Active provider'}
                 style={{
                   background: 'var(--bg-tertiary)',
@@ -839,7 +837,7 @@ export function StatusBar({
                 onChange={(e) =>
                   onProviderModelChange(effectiveProvider || provider || '', e.target.value)
                 }
-                className="text-xs rounded px-1.5 py-0.5 outline-none"
+                className="ui-select"
                 title={streaming ? 'Stop generation to switch model' : 'Active model'}
                 style={{
                   background: 'var(--bg-tertiary)',
@@ -866,7 +864,7 @@ export function StatusBar({
               onChange={(e) => onModelChange(
                 provider === 'demo' ? coerceDemoModel(e.target.value) : e.target.value,
               )}
-              className="text-xs rounded px-1.5 py-0.5 outline-none"
+              className="ui-select"
               title="Active model"
               style={{
                 background: 'var(--bg-tertiary)',
@@ -894,7 +892,7 @@ export function StatusBar({
               <select
                 value={thinkingLevel}
                 onChange={(e) => onThinkingLevelChange?.(e.target.value as ThinkingLevel)}
-                className="text-xs rounded px-1.5 py-0.5 outline-none"
+                className="ui-select"
                 title="Thinking level"
                 style={{
                   background: 'var(--bg-tertiary)',
@@ -994,17 +992,7 @@ function SegButton({
       onClick={onClick}
       title={title}
       aria-pressed={active}
-      className="px-2 py-0.5 rounded text-xs font-medium transition-colors"
-      style={{
-        background: active
-          ? 'var(--accent)'
-          : 'var(--bg-tertiary)',
-        color: active ? '#fff' : 'var(--text-secondary)',
-        border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
-        boxShadow: active
-          ? '0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent)'
-          : 'none',
-      }}
+      className={`seg-btn${active ? ' is-active' : ''}`}
     >
       {children}
     </button>

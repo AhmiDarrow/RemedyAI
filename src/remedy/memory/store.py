@@ -239,6 +239,12 @@ class MemoryStore:
         with self._lock:
             self._db = sqlite3.connect(str(self._db_path), check_same_thread=False)
             self._db.row_factory = sqlite3.Row
+            # Optional SQLCipher (memory_encrypt) — no-op when unavailable / off
+            with contextlib.suppress(Exception):
+                from remedy.core.retention import apply_memory_encryption_pragma
+                from remedy.interfaces.config import load_config
+
+                apply_memory_encryption_pragma(self._db, load_config() or {})
             # Speed-oriented pragmas (safe for single-writer desktop agent use).
             self._db.execute("PRAGMA journal_mode=WAL")
             self._db.execute("PRAGMA synchronous=NORMAL")
@@ -1003,6 +1009,38 @@ class MemoryStore:
             )
             db.commit()
             return cursor.rowcount > 0
+
+    def purge_sessions_older_than_days(self, max_age_days: int) -> int:
+        """Delete chat sessions whose updated_at is older than *max_age_days*.
+
+        Synchronous for startup retention. Cascades messages. Returns count removed.
+        """
+        if max_age_days <= 0:
+            return 0
+        from datetime import timedelta
+
+        cutoff = (datetime.now(UTC) - timedelta(days=int(max_age_days))).isoformat()
+        removed = 0
+        with self._locked():
+            db = self._ensure_db()
+            rows = db.execute(
+                "SELECT id FROM chat_sessions WHERE updated_at < ? OR "
+                "(updated_at IS NULL AND created_at < ?)",
+                (cutoff, cutoff),
+            ).fetchall()
+            for row in rows:
+                sid = row[0] if not isinstance(row, sqlite3.Row) else row["id"]
+                db.execute("DELETE FROM chat_messages WHERE session_id = ?", (sid,))
+                with contextlib.suppress(sqlite3.Error):
+                    db.execute(
+                        "DELETE FROM session_summaries WHERE session_id = ?", (sid,)
+                    )
+                cur = db.execute("DELETE FROM chat_sessions WHERE id = ?", (sid,))
+                if cur.rowcount:
+                    removed += 1
+            if removed:
+                db.commit()
+        return removed
 
     async def clear_chat_messages(self, session_id: str) -> int:
         """Delete all messages in a session but keep the session row (in-place reset).

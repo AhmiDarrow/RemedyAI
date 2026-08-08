@@ -196,6 +196,17 @@ class SettingsUpdateRequest(BaseModel):
     http_bootstrap: bool | None = None
     # Opt-in: tighter tool caps + email/phone scrub before cloud LLM (default off = fast)
     privacy_mode: bool | None = None
+    # Maturity gates (experimental / advanced organs)
+    soul_field_enabled: bool | None = None  # experimental personhood inject + tools
+    build_os_advanced: bool | None = None  # Build OS frontiers A–H tools
+    rmb_enabled: bool | None = None  # RMB local agent host allowed
+    # Retention (days; 0 = never auto-purge that category). Nested or flat.
+    retention_session_days: int | None = None
+    retention_attachment_days: int | None = None
+    retention_computer_shot_days: int | None = None
+    retention_undo_days: int | None = None
+    retention_log_days: int | None = None
+    memory_encrypt: bool | None = None  # SQLCipher when available
     # Learning / advanced (safe defaults; never strips owner power)
     allow_skill_creation: bool | None = None
     # Bounds clamped in PUT handler (0..1) so partial/bulk saves never 422

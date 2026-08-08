@@ -89,27 +89,28 @@ export function LibrarySuggestChip({
 
   return (
     <div
-      className="flex flex-col gap-1 px-3 py-1.5 mx-2 mb-1 text-xs rounded-lg border"
+      className="ui-banner flex flex-col gap-1.5 mx-3 mb-1.5 text-xs"
       style={{
-        background: 'var(--surface-2, var(--bg-elevated, #1a1a22))',
-        borderColor: 'var(--border, #333)',
-        color: 'var(--text, #e8e8ef)',
+        background: 'color-mix(in srgb, var(--accent) 8%, var(--bg-secondary))',
+        borderColor: 'color-mix(in srgb, var(--accent) 28%, var(--border))',
+        color: 'var(--text-primary)',
+        padding: '0.55rem 0.7rem',
       }}
       role="status"
     >
       <div className="flex items-center gap-2">
-        <span style={{ opacity: 0.85, flex: 1, minWidth: 0 }}>
-          <strong style={{ color: 'var(--accent, #7c9cff)' }}>Library</strong>
+        <span className="flex-1 min-w-0 leading-snug" style={{ color: 'var(--text-secondary)' }}>
+          <strong style={{ color: 'var(--accent)' }}>Library</strong>
           {' · '}
-          <span className="font-medium">{suggestion.name}</span>
-          {short ? (
-            <span style={{ opacity: 0.75 }}> — {short}</span>
-          ) : null}
+          <span className="font-medium" style={{ color: 'var(--text-primary)' }}>
+            {suggestion.name}
+          </span>
+          {short ? <span style={{ opacity: 0.85 }}> — {short}</span> : null}
         </span>
         <button
           type="button"
-          className="shrink-0 px-2 py-0.5 rounded font-semibold disabled:opacity-50"
-          style={{ background: 'var(--accent, #7c9cff)', color: '#fff' }}
+          className="ui-btn ui-btn-primary shrink-0"
+          style={{ padding: '0.25rem 0.55rem', fontSize: '0.68rem' }}
           disabled={busy || Boolean(doneMsg)}
           onClick={() => void install()}
           title="Download pack and Trust so Remedy can use it now"
@@ -118,12 +119,8 @@ export function LibrarySuggestChip({
         </button>
         <button
           type="button"
-          className="shrink-0 px-2 py-0.5 rounded font-medium border disabled:opacity-50"
-          style={{
-            borderColor: 'var(--border, #444)',
-            background: 'transparent',
-            color: 'var(--text, #e8e8ef)',
-          }}
+          className="ui-btn ui-btn-secondary shrink-0"
+          style={{ padding: '0.25rem 0.55rem', fontSize: '0.68rem' }}
           disabled={busy}
           onClick={() => onOpenLibrary?.(suggestion.id, suggestion.name)}
           title="Browse in Skills → Library"
@@ -132,7 +129,8 @@ export function LibrarySuggestChip({
         </button>
         <button
           type="button"
-          className="shrink-0 px-1.5 py-0.5 rounded opacity-70 hover:opacity-100"
+          className="ui-btn ui-btn-ghost shrink-0"
+          style={{ padding: '0.2rem 0.4rem', fontSize: '0.75rem' }}
           aria-label="Dismiss library suggestion"
           disabled={busy}
           onClick={() => void dismiss()}
@@ -141,10 +139,10 @@ export function LibrarySuggestChip({
         </button>
       </div>
       {error ? (
-        <div style={{ color: 'var(--danger, #f66)', opacity: 0.95 }}>{error}</div>
+        <div style={{ color: 'var(--error)' }}>{error}</div>
       ) : null}
       {doneMsg ? (
-        <div style={{ color: 'var(--success, #6d6)', opacity: 0.95 }}>{doneMsg}</div>
+        <div style={{ color: 'var(--success)' }}>{doneMsg}</div>
       ) : null}
     </div>
   )

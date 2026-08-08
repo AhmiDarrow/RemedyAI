@@ -530,6 +530,13 @@ def register_build_tools(runtime: Any) -> None:
         build_mutation_score,
         {"type": "object", "properties": {}},
     )
+    # Advanced frontiers A–H (spec compiler, mutants, gate tower, TDD-as-OS, …)
+    # stay behind maturity gate so default agency keeps core build tools only.
+    from remedy.core.feature_maturity import build_os_advanced_enabled
+
+    if not build_os_advanced_enabled():
+        return
+
     runtime.tool_registry.register_builtin_handler(
         "build_compile_spec",
         "B: Compile goal into locked BuildSpec DAG (declare/requires/tests). "

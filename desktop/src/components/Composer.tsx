@@ -422,7 +422,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         setUploading(false)
       }
     },
-    [disabled, resolveSession, flashAttached, clearDragOver],
+    [disabled, resolveSession, flashAttached],
   )
 
   useImperativeHandle(
@@ -543,7 +543,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         setUploading(false)
       }
     },
-    [disabled, resolveSession, flashAttached],
+    [disabled, resolveSession, flashAttached, clearDragOver],
   )
 
   // Primary: poll Rust pending queue. Secondary: events only for drag highlight.
@@ -1060,8 +1060,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   return (
     <div
       ref={composerRootRef}
-      className="p-3 border-t flex flex-col relative"
-      style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border)' }}
+      className="composer-root flex flex-col relative"
       onDragEnter={onDragEnter}
       onDragLeave={onDragLeave}
       onDragOver={onDragOver}
@@ -1450,6 +1449,16 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         </div>
       )}
 
+      <div
+        className="composer-shell"
+        data-drag={dragOver ? '1' : undefined}
+        data-attach={attachments.length ? '1' : undefined}
+        style={
+          dragOver || attachments.length
+            ? { borderColor: 'color-mix(in srgb, var(--accent) 55%, var(--border))' }
+            : undefined
+        }
+      >
       <div className="flex items-end gap-2">
         <input
           ref={fileInputRef}
@@ -1500,10 +1509,12 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           }}
           className="relative flex items-center justify-center rounded-xl flex-shrink-0"
           style={{
-            width: 40,
-            height: 40,
-            background: attachments.length ? 'var(--accent)' : 'var(--bg-tertiary)',
-            border: '1px solid var(--border)',
+            width: 38,
+            height: 38,
+            background: attachments.length
+              ? 'var(--accent)'
+              : 'color-mix(in srgb, var(--bg-tertiary) 80%, transparent)',
+            border: '1px solid color-mix(in srgb, var(--border) 80%, transparent)',
             color: attachments.length ? '#fff' : 'var(--text-secondary)',
             opacity: disabled || uploading ? 0.5 : 1,
           }}
@@ -1545,14 +1556,10 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                 : undefined
           }
           rows={1}
-          className="composer-input flex-1 resize-none rounded-xl px-3 py-2.5 text-sm outline-none transition-colors"
+          className="composer-input flex-1 resize-none text-sm outline-none"
           style={{
-            background: 'var(--bg-primary)',
-            border: `1px solid ${dragOver || attachments.length ? 'var(--accent)' : 'var(--border)'}`,
-            color: 'var(--text-primary)',
             minHeight: COMPOSER_MIN_HEIGHT,
             maxHeight: COMPOSER_MAX_HEIGHT,
-            lineHeight: '1.45',
             overflowY: 'hidden',
             wordBreak: 'break-word',
             whiteSpace: 'pre-wrap',
@@ -1609,6 +1616,29 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         >
           <IconStop size={14} />
         </button>
+      </div>
+      <div className="composer-hint-row">
+        <span className="truncate min-w-0">
+          {planMode ? (
+            <>
+              Plan · research only · <kbd>Shift+Tab</kbd> Build
+            </>
+          ) : streaming ? (
+            <>
+              <kbd>Enter</kbd> queue · <kbd>Ctrl+Enter</kbd> interrupt
+            </>
+          ) : (
+            <>
+              <kbd>Enter</kbd> send · <kbd>/</kbd> commands · <kbd>@</kbd> files
+            </>
+          )}
+        </span>
+        {planMode ? (
+          <span style={{ color: 'var(--accent)', fontWeight: 600 }}>Plan</span>
+        ) : streaming ? (
+          <span style={{ color: 'var(--accent)', fontWeight: 600 }}>Streaming</span>
+        ) : null}
+      </div>
       </div>
 
       <ImageLightbox

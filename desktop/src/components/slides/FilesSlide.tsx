@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { apiFetch } from '../../api/client'
 import { isTauri, tauriInvoke } from '../../api/tauri'
+import { EmptyState } from '../EmptyState'
 
 type Entry = { name: string; path: string; is_dir: boolean }
 
@@ -168,9 +169,25 @@ export function FilesSlide({
           </div>
         )}
         {error && (
-          <div className="px-2 py-2" style={{ color: 'var(--warning)' }}>
-            {error}
-          </div>
+          <EmptyState
+            compact
+            tone="error"
+            title="Could not list files"
+            description={error}
+            actionLabel="Retry"
+            onAction={() => void load(path || '.')}
+          />
+        )}
+        {!loading && !error && files.length === 0 && (
+          <EmptyState
+            compact
+            title="No files here"
+            description={
+              root
+                ? 'This folder is empty, or the project path is not set.'
+                : 'Attach a project to this session to browse files.'
+            }
+          />
         )}
         {!loading &&
           files.map((f) => (

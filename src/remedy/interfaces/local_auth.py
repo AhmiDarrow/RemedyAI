@@ -46,6 +46,27 @@ def _env_truthy(name: str) -> bool | None:
     return None
 
 
+def _desktop_sidecar_context() -> bool:
+    """True when running as packaged/desktop sidecar (IPC preferred over HTTP bootstrap)."""
+    import sys
+
+    if str(os.environ.get("REMEDY_DESKTOP_SIDECAR", "")).strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    ):
+        return True
+    if str(os.environ.get("REMEDY_DESKTOP", "")).strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    ):
+        return True
+    return bool(getattr(sys, "frozen", False))
+
+
 def http_bootstrap_enabled() -> bool:
     """Whether loopback HTTP may hand out the local API token.
 
@@ -55,10 +76,10 @@ def http_bootstrap_enabled() -> bool:
     Priority:
       1. ``REMEDY_HTTP_BOOTSTRAP`` env (explicit override, full owner control)
       2. ``http_bootstrap`` in config.toml (Settings toggle)
-      3. Default **True** so Switch-to-WebUI and browser access keep working
+      3. Default **False** for packaged / desktop sidecar (safer IPC-only)
+      4. Default **True** for plain ``remedy serve`` (Web UI / curl still work)
 
-    Set env ``0`` or Settings → disable browser token bootstrap for IPC-only
-    (safer against lesser local processes; does not reduce desktop power).
+    Switch-to-WebUI can flip Settings ``http_bootstrap`` on, or set the env.
     """
     env = _env_truthy("REMEDY_HTTP_BOOTSTRAP")
     if env is not None:
@@ -71,7 +92,9 @@ def http_bootstrap_enabled() -> bool:
             return bool(cfg.get("http_bootstrap"))
     except Exception:
         pass
-    # Default: allow loopback bootstrap (Web UI power preserved).
+    # Packaged desktop: safer default (IPC). Dev CLI serve: WebUI convenience.
+    if _desktop_sidecar_context():
+        return False
     return True
 
 

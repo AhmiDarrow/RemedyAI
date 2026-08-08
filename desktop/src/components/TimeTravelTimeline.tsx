@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { apiFetch } from '../api/client'
+import { EmptyState } from './EmptyState'
 
 export type TimelineStep = {
   step: number
@@ -92,45 +93,50 @@ export function TimeTravelTimeline({
       style={{
         width: 300,
         minWidth: 300,
-        background: 'var(--bg-secondary)',
-        borderColor: 'var(--border)',
+        background: 'color-mix(in srgb, var(--bg-secondary) 96%, var(--bg-primary))',
+        borderColor: 'color-mix(in srgb, var(--border) 85%, transparent)',
       }}
       role="complementary"
       aria-label="Time travel timeline"
     >
       <div
-        className="flex items-center justify-between px-3 py-2 border-b text-xs font-medium"
-        style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}
+        className="flex items-center justify-between px-3 py-2.5 border-b text-xs font-semibold tracking-tight"
+        style={{
+          borderColor: 'color-mix(in srgb, var(--border) 80%, transparent)',
+          color: 'var(--text-primary)',
+        }}
       >
         <span>Time Travel</span>
         <button
           type="button"
           onClick={onClose}
-          className="px-1 rounded"
-          style={{ color: 'var(--text-muted)' }}
+          className="ui-btn ui-btn-ghost"
+          style={{ padding: '0.15rem 0.4rem' }}
           aria-label="Close timeline"
         >
           ×
         </button>
       </div>
-      <div className="px-3 py-2 text-[10px]" style={{ color: 'var(--text-muted)' }}>
+      <div className="px-3 py-2 text-[10px] leading-snug" style={{ color: 'var(--text-muted)' }}>
         Click a step to roll back chat history, best-effort workspace file
         writes, and mid-task checkpoints to that moment.
       </div>
       {error && (
-        <div className="mx-3 mb-2 text-[11px]" style={{ color: 'var(--danger, #f66)' }}>
+        <div className="mx-3 mb-2 text-[11px]" style={{ color: 'var(--error)' }}>
           {error}
         </div>
       )}
       <div className="flex-1 overflow-y-auto px-3 pb-3">
         {!sessionId ? (
-          <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>No session</div>
+          <EmptyState compact title="No session" description="Open a chat to browse its timeline." />
         ) : loading ? (
           <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>Loading…</div>
         ) : userSteps.length === 0 ? (
-          <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>
-            No steps yet — send a message to build the timeline.
-          </div>
+          <EmptyState
+            compact
+            title="No steps yet"
+            description="Send a message to build the timeline."
+          />
         ) : (
           <div className="relative pl-4">
             <div

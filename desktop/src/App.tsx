@@ -1,11 +1,9 @@
-import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
+import { useState, useCallback, useEffect, useMemo, useRef, lazy, Suspense } from 'react'
 import { Sidebar } from './components/Sidebar'
 import { ApprovalBanner } from './components/ApprovalBanner'
 import { MessageFeed } from './components/MessageFeed'
 import { Composer, type ComposerHandle } from './components/Composer'
 import { StatusBar, type ThinkingLevel, type ApprovalMode } from './components/StatusBar'
-import { MemoryPanel, SkillsPanel } from './components/Panels'
-import { SettingsPanel } from './components/SettingsPanel'
 import { WorkspaceSide, PopoutOverlay } from './components/slides/WorkspaceSide'
 import { FilesSlide } from './components/slides/FilesSlide'
 import { TerminalSlide } from './components/slides/TerminalSlide'
@@ -20,21 +18,45 @@ import { SLIDE_META, type SlideId } from './workspace/types'
 import { PlanBanner } from './components/PlanBanner'
 import { LibrarySuggestChip } from './components/LibrarySuggestChip'
 import { TokenCostTicker } from './components/TokenCostTicker'
-import { TimeTravelTimeline } from './components/TimeTravelTimeline'
 import {
   estimateCostUsd,
   estimateTokensText,
   liveRunEstimate,
   type UsageSnapshot,
 } from './utils/tokenCost'
-import { HelpPanel } from './components/HelpPanel'
 import { QuitServerWarning } from './components/QuitServerWarning'
 import { SplashScreen } from './components/SplashScreen'
-import { SetupWizard } from './components/SetupWizard'
-import { UpdateScreen } from './components/UpdateScreen'
 import { TitleBar, type AppMenuAction } from './components/TitleBar'
 import { UserNamePrompt } from './components/UserNamePrompt'
 import { CommandPalette, type CommandItem } from './components/CommandPalette'
+import { ChatSessionHeader } from './components/ChatSessionHeader'
+import { AboutDialog } from './components/AboutDialog'
+
+// Heavy / rarely-open surfaces — code-split so first paint stays lean
+const SettingsPanel = lazy(() =>
+  import('./components/SettingsPanel').then((m) => ({ default: m.SettingsPanel })),
+)
+const HelpPanel = lazy(() =>
+  import('./components/HelpPanel').then((m) => ({ default: m.HelpPanel })),
+)
+const SetupWizard = lazy(() =>
+  import('./components/SetupWizard').then((m) => ({ default: m.SetupWizard })),
+)
+const UpdateScreen = lazy(() =>
+  import('./components/UpdateScreen').then((m) => ({ default: m.UpdateScreen })),
+)
+const UsageDashboard = lazy(() =>
+  import('./components/UsageDashboard').then((m) => ({ default: m.UsageDashboard })),
+)
+const TimeTravelTimeline = lazy(() =>
+  import('./components/TimeTravelTimeline').then((m) => ({ default: m.TimeTravelTimeline })),
+)
+const MemoryPanel = lazy(() =>
+  import('./components/Panels').then((m) => ({ default: m.MemoryPanel })),
+)
+const SkillsPanel = lazy(() =>
+  import('./components/Panels').then((m) => ({ default: m.SkillsPanel })),
+)
 import { useSessions } from './hooks/useSessions'
 import { useMessages } from './hooks/useMessages'
 import { useTheme } from './hooks/useTheme'
@@ -43,6 +65,7 @@ import { browserStackSet } from './utils/browserStack'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import { useNotifications } from './hooks/useNotifications'
 import { useUpdateChecker } from './hooks/useUpdateChecker'
+import { useQuitFlow } from './hooks/useQuitFlow'
 import { useComputerHost } from './hooks/useComputerHost'
 import { useSessionStreamJobs } from './sessions/useSessionStreamJobs'
 import { shouldConfirmNewTurn } from './sessions/concurrentTurns'
@@ -56,7 +79,6 @@ import {
   setSessionLlm as applySessionLlm,
   type ConnectedProvider,
 } from './api/providers'
-import { UsageDashboard } from './components/UsageDashboard'
 import { isPlaceholderTitle, titleFromPrompt } from './utils/sessionTitle'
 import { tauriInvoke, tauriListen } from './api/tauri'
 import { normalizeToolProcess, type ToolProcessMode } from './utils/toolLabels'
@@ -106,12 +128,14 @@ function AppShell({
       />
       <div className="flex-1 min-h-0 flex flex-col">{children}</div>
       {onCloseHelp && (
-        <HelpPanel
-          open={Boolean(helpOpen)}
-          onClose={onCloseHelp}
-          initialArticleId={helpArticleId}
-          version={version}
-        />
+        <Suspense fallback={null}>
+          <HelpPanel
+            open={Boolean(helpOpen)}
+            onClose={onCloseHelp}
+            initialArticleId={helpArticleId}
+            version={version}
+          />
+        </Suspense>
       )}
     </div>
   )
@@ -555,89 +579,8 @@ export default function App() {
     setHelpOpen(true)
   }, [])
 
-  const confirmQuitApp = useCallback(async (dontWarnAgain: boolean) => {
-    setQuitWarnOpen(false)
-    if (!isTauri()) {
-      window.close()
-      return
-    }
-    const { tauriInvoke } = await import('./api/tauri')
-    // Must finish writing desktop.json BEFORE quit_app kills the process —
-    // fire-and-forget prefs save was why "Don't show again" never stuck.
-    if (dontWarnAgain) {
-      try {
-        localStorage.setItem('remedy.skipQuitServerWarning', '1')
-      } catch {
-        /* */
-      }
-      try {
-        const prefs = await tauriInvoke<{
-          close_to_tray?: boolean
-          start_in_tray?: boolean
-        }>('get_desktop_prefs')
-        await tauriInvoke('set_desktop_prefs', {
-          close_to_tray: Boolean(prefs?.close_to_tray ?? true),
-          start_in_tray: Boolean(prefs?.start_in_tray ?? false),
-          skip_quit_server_warning: true,
-        })
-      } catch (e) {
-        console.warn('save skip_quit_server_warning:', e)
-      }
-    }
-    try {
-      // Race: if quit_app hangs, still try to leave
-      await Promise.race([
-        tauriInvoke('quit_app'),
-        new Promise<void>((resolve) => window.setTimeout(resolve, 2500)),
-      ])
-    } catch (e) {
-      console.warn('quit_app failed:', e)
-    }
-  }, [])
+  const { confirmQuitApp, requestQuitWithWarning } = useQuitFlow({ setQuitWarnOpen })
 
-  const requestQuitWithWarning = useCallback(async () => {
-    if (!isTauri()) {
-      setQuitWarnOpen(true)
-      return
-    }
-    try {
-      const { tauriInvoke } = await import('./api/tauri')
-      // Fast path: localStorage or disk prefs
-      try {
-        if (localStorage.getItem('remedy.skipQuitServerWarning') === '1') {
-          await tauriInvoke('quit_app')
-          return
-        }
-      } catch {
-        /* */
-      }
-      try {
-        const prefs = await tauriInvoke<{ skip_quit_server_warning?: boolean }>(
-          'get_desktop_prefs',
-        )
-        if (prefs?.skip_quit_server_warning) {
-          try {
-            localStorage.setItem('remedy.skipQuitServerWarning', '1')
-          } catch {
-            /* */
-          }
-          await tauriInvoke('quit_app')
-          return
-        }
-      } catch {
-        /* fall through to confirm path */
-      }
-      const res = await tauriInvoke<{ needs_confirm?: boolean; quitting?: boolean }>(
-        'request_quit_app',
-      )
-      if (res?.needs_confirm) {
-        setQuitWarnOpen(true)
-      }
-      // if already quitting, no dialog
-    } catch {
-      setQuitWarnOpen(true)
-    }
-  }, [])
 
   // Dev / browser review: open wiki with ?help=1 or ?help=09-troubleshooting
   useEffect(() => {
@@ -1145,7 +1088,10 @@ export default function App() {
           filename.endsWith('.txt') || filename.endsWith('.md')
             ? filename
             : `${filename || 'remedy-export'}.txt`
-        ).replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')
+        )
+          .replace(/[<>:"/\\|?*]/g, '_')
+          // Strip C0 controls without a control-class regex (oxlint no-control-regex).
+          .replace(/./g, (ch) => (ch.charCodeAt(0) < 32 ? '_' : ch))
 
         await new Promise<void>((r) => window.requestAnimationFrame(() => r()))
 
@@ -1526,8 +1472,8 @@ export default function App() {
       rename,
       refreshSessions,
       planMode,
+      setPlanMode,
       notify,
-      setLlmProvider,
       runningCount,
       streaming,
       sessionLlmMap,
@@ -1678,12 +1624,12 @@ export default function App() {
     models,
     handleNewSession,
     handleSelect,
-    handleCommand,
     handleExport,
     handleImport,
     activeId,
     openHelp,
     openSettingsInRail,
+    setPlanMode,
   ])
 
   // Wire global shortcuts from hotkeys.ts (single source of truth for labels + keys).
@@ -1729,7 +1675,7 @@ export default function App() {
       })
     }
     return out
-  }, [handleNewSession, openHelp, helpOpen, openSettingsInRail])
+  }, [handleNewSession, openHelp, helpOpen, openSettingsInRail, setPlanMode])
 
   useKeyboardShortcuts(globalShortcuts)
 
@@ -1799,22 +1745,30 @@ export default function App() {
   if (showSetupWizard) {
     return (
       <AppShell {...shellProps}>
-        <SetupWizard
-          open={showSetupWizard}
-          onComplete={() => {
-            setShowSetupWizard(false)
-            void getSettings()
-              .then((s) => {
-                if (s.llm_model) setModel(s.llm_model)
-                if (s.llm_provider) setLlmProvider(s.llm_provider)
-                const un = (s.user_name || '').trim()
-                setUserName(un)
-                if (!un) setAskUserName(true)
-                return refreshModels()
-              })
-              .catch(() => refreshModels())
-          }}
-        />
+        <Suspense
+          fallback={
+            <div className="flex items-center justify-center h-full text-sm" style={{ color: 'var(--text-muted)' }}>
+              Loading setup…
+            </div>
+          }
+        >
+          <SetupWizard
+            open={showSetupWizard}
+            onComplete={() => {
+              setShowSetupWizard(false)
+              void getSettings()
+                .then((s) => {
+                  if (s.llm_model) setModel(s.llm_model)
+                  if (s.llm_provider) setLlmProvider(s.llm_provider)
+                  const un = (s.user_name || '').trim()
+                  setUserName(un)
+                  if (!un) setAskUserName(true)
+                  return refreshModels()
+                })
+                .catch(() => refreshModels())
+            }}
+          />
+        </Suspense>
       </AppShell>
     )
   }
@@ -1919,11 +1873,19 @@ export default function App() {
   if (showUpdateScreen && desktopInfo?.update_available && desktopInfo.download_url) {
     return (
       <AppShell {...shellProps}>
-        <UpdateScreen
-          info={desktopInfo}
-          autoStart
-          onClose={() => setShowUpdateScreen(false)}
-        />
+        <Suspense
+          fallback={
+            <div className="flex items-center justify-center h-full text-sm" style={{ color: 'var(--text-muted)' }}>
+              Loading update…
+            </div>
+          }
+        >
+          <UpdateScreen
+            info={desktopInfo}
+            autoStart
+            onClose={() => setShowUpdateScreen(false)}
+          />
+        </Suspense>
       </AppShell>
     )
   }
@@ -2002,6 +1964,7 @@ export default function App() {
         return sessionsSlide
       case 'settings':
         return (
+          <Suspense fallback={<div className="p-4 text-xs" style={{ color: 'var(--text-muted)' }}>Loading settings…</div>}>
           <SettingsPanel
             open
             embedded
@@ -2066,6 +2029,7 @@ export default function App() {
                 .catch(() => refreshModels())
             }}
           />
+          </Suspense>
         )
       case 'files':
         return <FilesSlide sessionId={activeId} />
@@ -2127,7 +2091,7 @@ export default function App() {
           className="chat-middle"
           style={{
             display: 'grid',
-            gridTemplateRows: 'auto minmax(0, 1fr) auto',
+            gridTemplateRows: 'auto auto minmax(0, 1fr) auto',
             flex: '1 1 0%',
             minWidth: 240,
             minHeight: 0,
@@ -2135,17 +2099,26 @@ export default function App() {
             alignSelf: 'stretch',
             overflow: 'hidden',
             position: 'relative',
-            background: 'var(--bg-primary)',
           }}
         >
-          {planMode && (
-            <div
-              className="absolute top-2 right-2 z-10 px-2 py-0.5 text-xs font-semibold rounded pointer-events-none"
-              style={{ background: 'var(--accent)', color: '#fff', opacity: 0.9 }}
-            >
-              Plan Mode
-            </div>
-          )}
+          <ChatSessionHeader
+            title={
+              (activeId
+                && sessions.find((s) => s.id === activeId)?.title)
+              || 'New chat'
+            }
+            partnerName={partnerName}
+            modelLabel={barModel || model}
+            providerLabel={barProvider || llmProvider}
+            planMode={planMode}
+            streaming={streaming}
+            messageCount={
+              activeId
+                ? sessions.find((s) => s.id === activeId)?.message_count
+                : messages.length
+            }
+            onTogglePlanMode={() => setPlanMode((p) => !p)}
+          />
 
           <div style={{ position: 'relative', zIndex: 6 }}>
             <ApprovalBanner sessionId={activeId} />
@@ -2202,6 +2175,10 @@ export default function App() {
               hasOlder={messagesHasOlder}
               loadingOlder={messagesLoadingOlder}
               onLoadOlder={() => void loadOlderMessages()}
+              projectPath={
+                (activeId && sessions.find((s) => s.id === activeId)?.project_path)
+                || null
+              }
             />
           </div>
 
@@ -2212,28 +2189,14 @@ export default function App() {
             {!streaming
               && activeId
               && getStreamJob(activeId)?.status === 'running' && (
-              <div
-                className="mx-3 mb-2 rounded-lg border px-3 py-2 text-xs flex flex-wrap items-center gap-2"
-                style={{
-                  borderColor: 'var(--accent)',
-                  background: 'color-mix(in srgb, var(--accent) 12%, transparent)',
-                  color: 'var(--text-primary)',
-                }}
-                role="status"
-              >
+              <div className="chat-status-banner chat-status-banner-accent" role="status">
                 <span className="flex-1 min-w-[12rem]">
                   Still working in the background — switch away anytime; Stop
                   ends this session&apos;s turn only.
                 </span>
                 <button
                   type="button"
-                  className="px-2 py-1 rounded font-semibold"
-                  style={{
-                    background: 'var(--error)',
-                    color: '#fff',
-                    border: 'none',
-                    cursor: 'pointer',
-                  }}
+                  className="chat-status-btn chat-status-btn-danger"
                   onClick={() => stop()}
                 >
                   Stop
@@ -2241,28 +2204,14 @@ export default function App() {
               </div>
             )}
             {streaming && streamStalled && !stallBannerDismissed && (
-              <div
-                className="mx-3 mb-2 rounded-lg border px-3 py-2 text-xs flex flex-wrap items-center gap-2"
-                style={{
-                  borderColor: 'var(--border)',
-                  background: 'var(--bg-tertiary)',
-                  color: 'var(--text-secondary)',
-                }}
-                role="status"
-              >
+              <div className="chat-status-banner chat-status-banner-muted" role="status">
                 <span className="flex-1 min-w-[12rem]">
                   Quiet for {stallSeconds}s — model may still be thinking. You can keep waiting
                   or stop if nothing new arrives.
                 </span>
                 <button
                   type="button"
-                  className="px-2 py-1 rounded font-medium"
-                  style={{
-                    background: 'transparent',
-                    color: 'var(--text-muted)',
-                    border: '1px solid var(--border)',
-                    cursor: 'pointer',
-                  }}
+                  className="chat-status-btn chat-status-btn-ghost"
                   onClick={() => dismissStallBanner()}
                   title="Hide this notice for the rest of this turn"
                 >
@@ -2270,26 +2219,14 @@ export default function App() {
                 </button>
                 <button
                   type="button"
-                  className="px-2 py-1 rounded font-semibold"
-                  style={{
-                    background: 'var(--error)',
-                    color: '#fff',
-                    border: 'none',
-                    cursor: 'pointer',
-                  }}
+                  className="chat-status-btn chat-status-btn-danger"
                   onClick={() => stop()}
                 >
                   Stop
                 </button>
                 <button
                   type="button"
-                  className="px-2 py-1 rounded font-semibold"
-                  style={{
-                    background: 'var(--accent)',
-                    color: '#fff',
-                    border: 'none',
-                    cursor: 'pointer',
-                  }}
+                  className="chat-status-btn chat-status-btn-primary"
                   onClick={() => stopAndRetry()}
                   title="Abort this turn and send the same prompt again"
                 >
@@ -2396,6 +2333,7 @@ export default function App() {
       </div>
 
       {/* Overlays outside three-column flex so they never collapse chat feed height */}
+      <Suspense fallback={null}>
       <TimeTravelTimeline
         open={timeTravelOpen}
         onClose={() => setTimeTravelOpen(false)}
@@ -2480,6 +2418,7 @@ export default function App() {
             .catch(() => refreshModels())
         }}
       />
+      </Suspense>
 
       <StatusBar
           sessionId={activeId}
@@ -2621,13 +2560,15 @@ export default function App() {
           onToggleTimeTravel={() => setTimeTravelOpen((v) => !v)}
         />
 
-        <UsageDashboard
-          open={usageOpen}
-          onClose={() => setUsageOpen(false)}
-          sessionId={activeId}
-          provider={barProvider}
-          model={barModel}
-        />
+        <Suspense fallback={null}>
+          <UsageDashboard
+            open={usageOpen}
+            onClose={() => setUsageOpen(false)}
+            sessionId={activeId}
+            provider={barProvider}
+            model={barModel}
+          />
+        </Suspense>
 
         {switchToast && (
           <div
@@ -2688,136 +2629,16 @@ export default function App() {
       }}
     />
 
-    {aboutOpen && (
-      <div
-        className="fixed inset-0 z-[90] flex items-center justify-center p-4"
-        style={{ background: 'rgba(0,0,0,0.55)' }}
-        role="dialog"
-        aria-modal="true"
-        onClick={() => setAboutOpen(false)}
-      >
-        <div
-          className="w-full max-w-sm rounded-xl p-5 shadow-2xl"
-          style={{
-            background: 'var(--bg-secondary)',
-            border: '1px solid var(--border)',
-            color: 'var(--text-primary)',
-          }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="flex items-center gap-3 mb-3">
-            <img
-              src="/icon.png"
-              alt=""
-              draggable={false}
-              style={{
-                height: 40,
-                width: 40,
-                objectFit: 'contain',
-                borderRadius: 8,
-                flexShrink: 0,
-              }}
-            />
-            <img
-              src="/logo.png"
-              alt="Remedy"
-              draggable={false}
-              style={{
-                height: 32,
-                width: 'auto',
-                maxWidth: 200,
-                objectFit: 'contain',
-                display: 'block',
-              }}
-            />
-          </div>
-          <div className="text-sm font-semibold mb-1">About Remedy</div>
-          <div className="text-xs mb-2 leading-relaxed" style={{ color: 'var(--text-muted)' }}>
-            Your personal AI partner on this PC — knowledge, design, code, computer use,
-            and get-it-done. One continuous voice; continuity stays under{' '}
-            <code style={{ fontSize: '0.65rem' }}>~/.remedy</code>. Not a medical product.
-          </div>
-          <div
-            className="text-xs mb-3 leading-relaxed rounded-lg px-3 py-2"
-            style={{
-              background: 'var(--bg-tertiary)',
-              color: 'var(--text-secondary)',
-              border: '1px solid var(--border)',
-            }}
-          >
-            <div className="font-semibold mb-0.5" style={{ color: 'var(--text-primary)' }}>
-              From the creator
-            </div>
-            My name is Ahmi, I hope you enjoy my Remedy.
-          </div>
-          <div className="text-xs space-y-1 mb-4" style={{ color: 'var(--text-secondary)' }}>
-            <div>
-              Version{' '}
-              <span style={{ color: 'var(--accent)' }}>
-                {appVersion || updateInfo?.current_version || desktopInfo?.current_version || '—'}
-              </span>
-              <span style={{ color: 'var(--text-muted)' }}> · Windows desktop + local API</span>
-            </div>
-            {userName && <div>Signed in as {userName}</div>}
-          </div>
-          <div className="flex flex-wrap justify-end gap-2">
-            <button
-              type="button"
-              className="px-3 py-1.5 rounded-lg text-xs"
-              style={{
-                background: 'var(--bg-tertiary)',
-                color: 'var(--text-secondary)',
-                border: '1px solid var(--border)',
-              }}
-              onClick={() => {
-                setAboutOpen(false)
-                openHelp('13-whats-new')
-              }}
-            >
-              What&apos;s new
-            </button>
-            <button
-              type="button"
-              className="px-3 py-1.5 rounded-lg text-xs"
-              style={{
-                background: 'var(--bg-tertiary)',
-                color: 'var(--text-secondary)',
-                border: '1px solid var(--border)',
-              }}
-              onClick={() => {
-                setAboutOpen(false)
-                openHelp('00-overview')
-              }}
-            >
-              Help
-            </button>
-            <button
-              type="button"
-              className="px-3 py-1.5 rounded-lg text-xs"
-              style={{
-                background: 'var(--bg-tertiary)',
-                color: 'var(--text-secondary)',
-                border: '1px solid var(--border)',
-              }}
-              onClick={() => {
-                setAboutOpen(false)
-                openSettingsInRail()
-              }}
-            >
-              Settings
-            </button>
-            <button
-              type="button"
-              className="px-3 py-1.5 rounded-lg text-xs font-medium"
-              style={{ background: 'var(--accent)', color: '#fff' }}
-              onClick={() => setAboutOpen(false)}
-            >
-              Close
-            </button>
-          </div>
-        </div>
-      </div>
-    )}
+    <AboutDialog
+      open={aboutOpen}
+      onClose={() => setAboutOpen(false)}
+      version={
+        appVersion || updateInfo?.current_version || desktopInfo?.current_version || undefined
+      }
+      userName={userName}
+      onOpenHelp={openHelp}
+      onOpenSettings={openSettingsInRail}
+    />
     </AppShell>
   )
 }

@@ -190,6 +190,27 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             "http_bootstrap": _effective_http_bootstrap(cfg),
             # Opt-in: tighter tool caps + email/phone scrub on LLM egress (default off = fast)
             "privacy_mode": bool(cfg.get("privacy_mode", False)),
+            "soul_field_enabled": bool(cfg.get("soul_field_enabled", False)),
+            "build_os_advanced": bool(cfg.get("build_os_advanced", False)),
+            "rmb_enabled": bool(cfg.get("rmb_enabled", True)),
+            "retention_session_days": int(cfg.get("retention_session_days") or 0),
+            "retention_attachment_days": int(cfg.get("retention_attachment_days") or 0),
+            "retention_computer_shot_days": int(
+                cfg.get("retention_computer_shot_days")
+                if cfg.get("retention_computer_shot_days") is not None
+                else 14
+            ),
+            "retention_undo_days": int(
+                cfg.get("retention_undo_days")
+                if cfg.get("retention_undo_days") is not None
+                else 30
+            ),
+            "retention_log_days": int(
+                cfg.get("retention_log_days")
+                if cfg.get("retention_log_days") is not None
+                else 30
+            ),
+            "memory_encrypt": bool(cfg.get("memory_encrypt", False)),
             "allow_skill_creation": bool(cfg.get("allow_skill_creation", True)),
             "auto_approve_threshold": float(cfg.get("auto_approve_threshold", 0.8)),
             "log_level": str(cfg.get("log_level") or "INFO").upper(),

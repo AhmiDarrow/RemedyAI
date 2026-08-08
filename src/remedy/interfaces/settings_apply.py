@@ -54,6 +54,15 @@ SETTABLE_KEYS = frozenset(
         "web_tools_enabled",
         "http_bootstrap",
         "privacy_mode",
+        "soul_field_enabled",
+        "build_os_advanced",
+        "rmb_enabled",
+        "retention_session_days",
+        "retention_attachment_days",
+        "retention_computer_shot_days",
+        "retention_undo_days",
+        "retention_log_days",
+        "memory_encrypt",
         "allow_skill_creation",
         "auto_approve_threshold",
         "log_level",
@@ -156,6 +165,23 @@ def public_settings_snapshot(cfg: dict[str, Any] | None = None) -> dict[str, Any
         "web_tools_enabled": bool(raw.get("web_tools_enabled", False)),
         "http_bootstrap": bool(raw.get("http_bootstrap", True)),
         "privacy_mode": bool(raw.get("privacy_mode", False)),
+        "soul_field_enabled": bool(raw.get("soul_field_enabled", False)),
+        "build_os_advanced": bool(raw.get("build_os_advanced", False)),
+        "rmb_enabled": bool(raw.get("rmb_enabled", True)),
+        "retention_session_days": int(raw.get("retention_session_days") or 0),
+        "retention_attachment_days": int(raw.get("retention_attachment_days") or 0),
+        "retention_computer_shot_days": int(
+            raw.get("retention_computer_shot_days")
+            if raw.get("retention_computer_shot_days") is not None
+            else 14
+        ),
+        "retention_undo_days": int(
+            raw.get("retention_undo_days") if raw.get("retention_undo_days") is not None else 30
+        ),
+        "retention_log_days": int(
+            raw.get("retention_log_days") if raw.get("retention_log_days") is not None else 30
+        ),
+        "memory_encrypt": bool(raw.get("memory_encrypt", False)),
         "allow_skill_creation": bool(raw.get("allow_skill_creation", True)),
         "auto_approve_threshold": float(raw.get("auto_approve_threshold", 0.8)),
         "log_level": str(raw.get("log_level") or "INFO").upper(),
@@ -358,6 +384,28 @@ async def apply_settings_update(
             clear_privacy_mode_cache()
         except Exception:
             pass
+
+    for _flag in (
+        "soul_field_enabled",
+        "build_os_advanced",
+        "rmb_enabled",
+        "memory_encrypt",
+    ):
+        if _flag in patch and patch[_flag] is not None:
+            patch[_flag] = _as_bool(patch[_flag])
+
+    for _days_key in (
+        "retention_session_days",
+        "retention_attachment_days",
+        "retention_computer_shot_days",
+        "retention_undo_days",
+        "retention_log_days",
+    ):
+        if _days_key in patch and patch[_days_key] is not None:
+            try:
+                patch[_days_key] = max(0, min(3650, int(patch[_days_key])))
+            except (TypeError, ValueError):
+                patch.pop(_days_key, None)
 
     if "browser_home_url" in patch and patch["browser_home_url"] is not None:
         patch["browser_home_url"] = normalize_browser_home_url(patch["browser_home_url"])

@@ -121,11 +121,13 @@ export function TitleBar({
           <div
             ref={menuRef}
             role="menu"
-            className="absolute top-full left-0 mt-1 z-[80] min-w-[200px] rounded-lg py-1 shadow-xl"
+            className="absolute top-full left-0 mt-1 z-[80] min-w-[210px] rounded-xl py-1.5"
             style={{
-              background: 'var(--bg-secondary)',
-              border: '1px solid var(--border)',
-              boxShadow: '0 8px 28px rgba(0,0,0,0.35)',
+              background: 'color-mix(in srgb, var(--bg-secondary) 96%, var(--bg-primary))',
+              border: '1px solid color-mix(in srgb, var(--border) 85%, transparent)',
+              boxShadow:
+                '0 12px 36px rgba(0,0,0,0.32), 0 0 0 1px color-mix(in srgb, var(--accent) 6%, transparent)',
+              backdropFilter: 'blur(12px)',
             }}
           >
             <MenuItem label="New session" onClick={() => run('new_session')} shortcut="Ctrl+N" />
@@ -196,15 +198,17 @@ function MenuItem({
     <button
       type="button"
       role="menuitem"
-      className="w-full flex items-center justify-between gap-4 px-3 py-1.5 text-left text-xs"
+      className="w-full flex items-center justify-between gap-4 mx-1 px-2.5 py-1.5 text-left text-xs rounded-md"
       style={{
+        width: 'calc(100% - 0.5rem)',
         background: 'transparent',
         color: danger ? 'var(--error)' : accent ? 'var(--accent)' : 'var(--text-primary)',
         border: 'none',
         cursor: 'pointer',
+        fontWeight: accent || danger ? 600 : 500,
       }}
       onMouseEnter={(e) => {
-        e.currentTarget.style.background = 'var(--bg-tertiary)'
+        e.currentTarget.style.background = 'color-mix(in srgb, var(--bg-tertiary) 90%, transparent)'
       }}
       onMouseLeave={(e) => {
         e.currentTarget.style.background = 'transparent'
@@ -213,7 +217,15 @@ function MenuItem({
     >
       <span>{label}</span>
       {shortcut && (
-        <span style={{ color: 'var(--text-muted)', fontSize: '0.65rem' }}>{shortcut}</span>
+        <span
+          style={{
+            color: 'var(--text-muted)',
+            fontSize: '0.62rem',
+            fontFamily: 'ui-monospace, Cascadia Code, monospace',
+          }}
+        >
+          {shortcut}
+        </span>
       )}
     </button>
   )
