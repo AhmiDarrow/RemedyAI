@@ -7,6 +7,7 @@ export type AppMenuAction =
   | 'memory'
   | 'skills'
   | 'help'
+  | 'diagnostics'
   | 'switch_web_ui'
   | 'check_updates'
   | 'install_update'
@@ -135,6 +136,7 @@ export function TitleBar({
             <MenuItem label="Settings…" onClick={() => run('settings')} shortcut="Ctrl+," />
             <MenuItem label="Memory" onClick={() => run('memory')} />
             <MenuItem label="Skills" onClick={() => run('skills')} />
+            <MenuItem label="Health Diagnostics…" onClick={() => run('diagnostics')} />
             <MenuItem label="Help / Owner's Manual…" onClick={() => run('help')} shortcut="F1" />
             {isTauri() && (
               <MenuItem label="Switch to WebUI…" onClick={() => run('switch_web_ui')} />

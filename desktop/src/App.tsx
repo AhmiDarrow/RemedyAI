@@ -48,6 +48,9 @@ const UpdateScreen = lazy(() =>
 const UsageDashboard = lazy(() =>
   import('./components/UsageDashboard').then((m) => ({ default: m.UsageDashboard })),
 )
+const DiagnosticsPanel = lazy(() =>
+  import('./components/DiagnosticsPanel').then((m) => ({ default: m.DiagnosticsPanel })),
+)
 const TimeTravelTimeline = lazy(() =>
   import('./components/TimeTravelTimeline').then((m) => ({ default: m.TimeTravelTimeline })),
 )
@@ -458,6 +461,7 @@ export default function App() {
   const [quitWarnOpen, setQuitWarnOpen] = useState(false)
   const [timeTravelOpen, setTimeTravelOpen] = useState(false)
   const [usageOpen, setUsageOpen] = useState(false)
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
   const [connectedProviders, setConnectedProviders] = useState<ConnectedProvider[]>([])
   /** Per-session provider/model overrides (tabs stay independent). */
   const [sessionLlmMap, setSessionLlmMap] = useState<
@@ -618,6 +622,9 @@ export default function App() {
           break
         case 'help':
           openHelp()
+          break
+        case 'diagnostics':
+          setDiagnosticsOpen(true)
           break
         case 'switch_web_ui':
           void (async () => {
@@ -1582,6 +1589,13 @@ export default function App() {
         action: () => openHelp(),
       },
       {
+        id: 'diagnostics',
+        label: 'Health Diagnostics',
+        description: 'Remedy server, RMB, hardware, cloud providers',
+        category: 'panel',
+        action: () => setDiagnosticsOpen(true),
+      },
+      {
         id: 'help-troubleshoot',
         label: 'Troubleshooting',
         description: 'Open Help → Troubleshooting',
@@ -1687,6 +1701,7 @@ export default function App() {
     browserStackSet('quit-warn', quitWarnOpen)
     browserStackSet('time-travel', timeTravelOpen)
     browserStackSet('usage', usageOpen)
+    browserStackSet('diagnostics', diagnosticsOpen)
     browserStackSet('concurrent-turn', Boolean(concurrentConfirm))
     browserStackSet('ask-user-name', askUserName)
     return () => {
@@ -1696,6 +1711,7 @@ export default function App() {
       browserStackSet('quit-warn', false)
       browserStackSet('time-travel', false)
       browserStackSet('usage', false)
+      browserStackSet('diagnostics', false)
       browserStackSet('concurrent-turn', false)
       browserStackSet('ask-user-name', false)
     }
@@ -1706,6 +1722,7 @@ export default function App() {
     quitWarnOpen,
     timeTravelOpen,
     usageOpen,
+    diagnosticsOpen,
     concurrentConfirm,
     askUserName,
   ])
@@ -2570,6 +2587,13 @@ export default function App() {
           />
         </Suspense>
 
+        <Suspense fallback={null}>
+          <DiagnosticsPanel
+            open={diagnosticsOpen}
+            onClose={() => setDiagnosticsOpen(false)}
+          />
+        </Suspense>
+
         {switchToast && (
           <div
             className="fixed bottom-16 left-1/2 -translate-x-1/2 z-50 px-3 py-2 rounded-lg text-xs shadow-lg max-w-[90vw]"
@@ -2638,6 +2662,7 @@ export default function App() {
       userName={userName}
       onOpenHelp={openHelp}
       onOpenSettings={openSettingsInRail}
+      onOpenDiagnostics={() => setDiagnosticsOpen(true)}
     />
     </AppShell>
   )
