@@ -146,6 +146,8 @@ export function SettingsPanel({
   // Desktop default is off (IPC-only); GET /settings overwrites with effective value.
   const [httpBootstrap, setHttpBootstrap] = useState(false)
   const [privacyMode, setPrivacyMode] = useState(false)
+  /** Soul Field personhood — default on (matches server maturity default). */
+  const [soulFieldEnabled, setSoulFieldEnabled] = useState(true)
   const [approvalMode, setApprovalMode] = useState<'ask' | 'auto'>('ask')
   const [harnessMode, setHarnessMode] = useState('auto')
   const [harnessMinPct, setHarnessMinPct] = useState(0.75)
@@ -395,6 +397,9 @@ export function SettingsPanel({
       setWebToolsEnabled(Boolean(s.web_tools_enabled))
       setHttpBootstrap(s.http_bootstrap !== false)
       setPrivacyMode(Boolean(s.privacy_mode))
+      setSoulFieldEnabled(
+        s.soul_field_enabled === undefined ? true : Boolean(s.soul_field_enabled),
+      )
       {
         const list = Array.isArray(s.messengers) ? s.messengers : []
         setMessengers(list)
@@ -682,6 +687,7 @@ export function SettingsPanel({
       web_tools_enabled: webToolsEnabled,
       http_bootstrap: httpBootstrap,
       privacy_mode: privacyMode,
+      soul_field_enabled: soulFieldEnabled,
       approval_mode: approvalMode,
       allow_skill_creation: allowSkillCreation,
       auto_approve_threshold: autoApproveThreshold,
@@ -1003,6 +1009,8 @@ export function SettingsPanel({
               setHttpBootstrap={setHttpBootstrap}
               privacyMode={privacyMode}
               setPrivacyMode={setPrivacyMode}
+              soulFieldEnabled={soulFieldEnabled}
+              setSoulFieldEnabled={setSoulFieldEnabled}
               approvalMode={approvalMode}
               setApprovalMode={setApprovalMode}
               harnessMode={harnessMode}

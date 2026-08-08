@@ -403,21 +403,34 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
         except Exception:
             metabolism = {}
 
-        # Somatic signals — organism mood for status bar / tray tooltip
+        # Somatic signals — organism mood for status bar / tray tooltip.
+        # Partner status is polled often: reuse soma.json if fresh (<20s)
+        # so we do not rewrite disk every tick.
         soma: dict = {}
         try:
+            import time as _time
+
             from remedy.core.muscle_profile import muscle_from_runtime
-            from remedy.memory.soul.somatic import refresh_soma
+            from remedy.memory.soul.somatic import load_soma_file, refresh_soma
 
             home = None
             if runtime is not None:
                 home = getattr(getattr(runtime, "config", None), "home_dir", None)
-            muscle = muscle_from_runtime(runtime)
-            soma = refresh_soma(
-                home,
-                muscle_label=muscle.label,
-                muscle_provider=muscle.provider,
+            cached = load_soma_file(home)
+            age = (
+                _time.time() - float(cached.get("ts") or 0)
+                if isinstance(cached, dict)
+                else 1e9
             )
+            if isinstance(cached, dict) and age < 20.0 and cached.get("label"):
+                soma = cached
+            else:
+                muscle = muscle_from_runtime(runtime)
+                soma = refresh_soma(
+                    home,
+                    muscle_label=muscle.label,
+                    muscle_provider=muscle.provider,
+                )
         except Exception:
             soma = {}
 
