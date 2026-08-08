@@ -1,0 +1,133 @@
+"""ReAct turn control — resolve_tools, synthesis, phases, disconnect."""
+
+from __future__ import annotations
+
+from remedy.core.react_policy import REACT_MAX_STALE_EPOCHS
+from remedy.core.react_turn import (
+    LOCAL_MAX_TOOLS_PER_STEP,
+    MAX_PSEUDO_RECOVERIES,
+    TurnState,
+    apply_tools_decision,
+    cap_tools_for_step,
+    effective_stale_epochs,
+    is_disconnect_error,
+    resolve_tools,
+    synthesize_from_tools,
+)
+
+
+def _tool(name: str) -> dict:
+    return {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": name,
+            "parameters": {"type": "object", "properties": {}},
+        },
+    }
+
+
+def test_resolve_tools_never_strips_task():
+    all_t = [_tool("file_write"), _tool("bash_exec"), _tool("list_dir")]
+    d = resolve_tools(
+        message="create a calculator app in the project",
+        all_tools=all_t,
+        turn_tier=1,
+    )
+    assert d.tools is not None
+    assert d.run_until_done is True
+    assert d.reason in ("task", "task_write_first", "message_wants_tools") or "task" in d.reason
+
+
+def test_resolve_tools_l1_strips_pure_chat():
+    all_t = [_tool("file_write")]
+    d = resolve_tools(
+        message="thanks",
+        all_tools=all_t,
+        turn_tier=1,
+    )
+    assert d.tools is None
+    assert d.reason == "l1_pure_chat"
+
+
+def test_resolve_tools_plan_mode():
+    all_t = [_tool("file_write"), _tool("plan_list")]
+    d = resolve_tools(
+        message="implement everything",
+        all_tools=all_t,
+        plan_mode=True,
+    )
+    assert d.pack == "plan" or d.reason.startswith("plan")
+
+
+def test_stale_epochs_default_is_policy_constant():
+    assert effective_stale_epochs(None) == max(1, int(REACT_MAX_STALE_EPOCHS))
+    assert effective_stale_epochs(type("R", (), {"_react_max_stale_epochs": 8})()) == 8
+    # Explicit runtime value wins
+    assert effective_stale_epochs(type("R", (), {"_react_max_stale_epochs": 3})()) == 3
+
+
+def test_tools_armed_is_schemas_sent_not_all_tools():
+    st = TurnState(all_tools=[_tool("a")], tools=None)
+    assert st.tools_armed() is False
+    st.rearm(reason="test")
+    assert st.tools_armed() is True
+
+
+def test_pseudo_recovery_multi_shot():
+    st = TurnState()
+    for _ in range(MAX_PSEUDO_RECOVERIES):
+        assert st.allow_pseudo_recovery()
+        st.note_pseudo_recovery()
+    assert not st.allow_pseudo_recovery()
+
+
+def test_synthesize_from_tools_with_paths():
+    msgs = [
+        {"role": "tool", "name": "file_write", "content": "Wrote C:/proj/a.py ok"},
+        {"role": "tool", "name": "bash_exec", "content": "Error: failed py_compile"},
+    ]
+    text = synthesize_from_tools(msgs, paths_written=["C:/proj/a.py"])
+    assert "Files touched" in text
+    assert "a.py" in text
+    assert "Issues" in text or "failed" in text.lower()
+
+
+def test_synthesize_empty_when_no_tools():
+    text = synthesize_from_tools([])
+    assert "continue" in text.lower()
+
+
+def test_is_disconnect_error():
+    assert is_disconnect_error(Exception("Server disconnected"))
+    assert is_disconnect_error("Connection reset by peer")
+    assert not is_disconnect_error("model_not_found")
+
+
+def test_cap_tools_local():
+    tools = [_tool(f"t{i}") for i in range(20)]
+    capped = cap_tools_for_step(tools, local=True, max_tools=LOCAL_MAX_TOOLS_PER_STEP)
+    assert capped is not None
+    assert len(capped) == LOCAL_MAX_TOOLS_PER_STEP
+    assert cap_tools_for_step(tools, local=False) is tools
+
+
+def test_phase_nudge_research_to_plan():
+    st = TurnState(run_until_done=True, phase="research")
+    st.record_tool_batch(["file_read", "list_dir"])
+    assert st.research_batches >= 1
+    n = st.phase_nudge()
+    assert n is not None
+    assert "PLAN" in n["content"]
+    assert st.plan_seen is True
+
+
+def test_apply_tools_decision_sets_research_phase():
+    st = TurnState()
+    d = resolve_tools(
+        message="fix the login bug please",
+        all_tools=[_tool("file_edit")],
+    )
+    apply_tools_decision(st, d)
+    assert st.run_until_done
+    assert st.phase == "research"

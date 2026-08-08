@@ -2,6 +2,12 @@
 
 Durable facts for coding agents working in this repo. Prefer this file + `docs/` over chat memory when they conflict.
 
+## Project identity
+
+- **This repo (`C:\Users\Administrator\Old-Remedy`) is the active multi-stack RemedyAI product** — FastAPI + Tauri + Vite SPA. **Not frozen.** It is product authority for this line.
+- **`C:\Users\Administrator\Remedy` is a different product** (machine-only / RDNA). Not a branch of this tree; different bios home (`~/.remedyai` vs `~/.remedy` here). Do not treat one as the archive/replacement of the other.
+- See `ARCHIVE.md` for the sibling-path note (filename is historical; content is status, not “frozen archive”).
+
 ## Product feel (UI / UX bar)
 
 Every desktop and settings change should feel:

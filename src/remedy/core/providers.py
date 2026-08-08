@@ -739,6 +739,19 @@ class LlamaCppProvider(OpenAIProvider):
 
     def _window_for_budget(self, model: str | None = None) -> int:
         try:
+            from remedy.core.endless_context import resolve_local_window
+
+            return int(
+                resolve_local_window(
+                    provider=self.provider_name,
+                    model=model,
+                    base_url=getattr(self, "default_base_url", None),
+                )
+                or 8192
+            )
+        except Exception:
+            pass
+        try:
             from remedy.nanoswarm.token_nanobot import (
                 get_cached_context_window,
                 resolve_context_window,
@@ -761,28 +774,85 @@ class LlamaCppProvider(OpenAIProvider):
         max_tokens: int | None = None,
         thinking_level: str | None = None,
     ) -> dict[str, Any]:
-        local_cap = self._local_completion_budget(model)
-        # Clamp to remaining n_ctx so prompt + completion fits
+        # Endless local context: hard-fit messages+tools into fixed n_ctx
+        # *before* estimating completion — tools alone can be multi-k tokens.
         win = self._window_for_budget(model)
-        est = self._estimate_prompt_tokens(messages)
+        fit_msgs = messages
+        fit_tools = tools
+        try:
+            from remedy.core.endless_context import fit_local_request, resolve_local_window
+
+            win = resolve_local_window(
+                provider=self.provider_name,
+                model=model,
+                base_url=getattr(self, "base_url", None)
+                or getattr(self, "default_base_url", None),
+            ) or win
+            fit_msgs, fit_tools, _meta = fit_local_request(
+                messages,
+                tools,
+                window=win,
+                provider=self.provider_name,
+                model=model,
+                coding_bias=True,
+            )
+        except Exception:
+            fit_msgs, fit_tools = messages, tools
+
+        local_cap = self._local_completion_budget(model)
+        # Clamp to remaining n_ctx so prompt + completion fits (post-fit)
+        est = self._estimate_prompt_tokens(fit_msgs)
+        try:
+            from remedy.core.endless_context import estimate_tools_tokens
+
+            est += estimate_tools_tokens(fit_tools)
+        except Exception:
+            pass
         remaining = max(256, win - est - 256)
         local_cap = max(256, min(local_cap, remaining))
         req = local_cap if max_tokens is None else min(int(max_tokens), local_cap)
         body = super().build_body(
             model,
-            messages,
-            tools,
+            fit_msgs,
+            fit_tools,
             stream,
             max_tokens=req,
             thinking_level=thinking_level,
         )
         body["max_tokens"] = req
         body.pop("reasoning_effort", None)
-        if tools:
+        if fit_tools:
             # Structured tool calls: low temp + explicit tool_choice auto
             body["temperature"] = min(float(body.get("temperature") or 0.4), 0.15)
             body.setdefault("tool_choice", "auto")
+        else:
+            body.pop("tools", None)
+            body.pop("tool_choice", None)
         body.setdefault("cache_prompt", True)
+        # Auto-optimize: force tools + smaller n_predict on implement turns
+        try:
+            from remedy.core.local_agent_optimize import apply_local_body_optimize
+
+            um = ""
+            for m in reversed(fit_msgs or []):
+                if isinstance(m, dict) and m.get("role") == "user":
+                    c = m.get("content")
+                    um = c if isinstance(c, str) else str(c or "")
+                    break
+            body = apply_local_body_optimize(
+                body,
+                provider=self.provider_name,
+                model=model,
+                base_url=getattr(self, "default_base_url", None),
+                user_message=um,
+                step_index=int(getattr(self, "_local_step_index", 0) or 0),
+            )
+        except Exception:
+            pass
+        # Local streaming is flaky under tool_choice=required (connection resets).
+        # Prefer non-stream JSON for tool rounds so pseudo/native tools complete.
+        if fit_tools and body.get("tools"):
+            body["stream"] = False
         return body
 
 
@@ -821,6 +891,19 @@ class RmbProvider(LlamaCppProvider):
 
     def _window_for_budget(self, model: str | None = None) -> int:
         try:
+            from remedy.core.endless_context import resolve_local_window
+
+            return int(
+                resolve_local_window(
+                    provider="rmb",
+                    model=model,
+                    base_url=self.default_base_url,
+                )
+                or 8192
+            )
+        except Exception:
+            pass
+        try:
             from remedy.runtime.rmb.config import load_rmb_json, merge_state
 
             st = merge_state(load_rmb_json())
@@ -857,9 +940,15 @@ class RmbProvider(LlamaCppProvider):
             max_tokens=max_tokens,
             thinking_level=thinking_level,
         )
-        if tools:
-            body["temperature"] = 0.1
-            body["tool_choice"] = body.get("tool_choice") or "auto"
+        # super already ran endless fit + local optimize
+        if body.get("tools"):
+            body["temperature"] = min(float(body.get("temperature") or 0.1), 0.1)
+            # Preserve tool_choice=required from local optimize when set
+            if body.get("tool_choice") not in ("required", "any"):
+                body["tool_choice"] = body.get("tool_choice") or "auto"
+        # Strip internal meta so llama-server never sees it
+        body.pop("_remedy_endless", None)
+        body.pop("_remedy_local", None)
         return body
 
 

@@ -13,8 +13,9 @@ from typing import Any
 
 # Max characters for a single tool/function message content when sending upstream.
 TOOL_CONTENT_MAX = 6_000
-# Local/RMB coding: harness already pruned; keep tool fidelity for file contents.
-TOOL_CONTENT_MAX_LOCAL = 120_000
+# Local/RMB coding: enough for a file read/edit turn, not a full 32k dump.
+# Endless context + harness further offload; this is the hard ceiling per message.
+TOOL_CONTENT_MAX_LOCAL = 12_000
 # Privacy mode: tighter tool caps (opt-in; default path unchanged for speed).
 TOOL_CONTENT_MAX_PRIVACY = 2_500
 # Tool *call* arguments must stay valid JSON — never mid-string clip (providers

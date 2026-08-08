@@ -141,6 +141,22 @@ async def call_llm_stream(runtime, message: str,
         if prep.early_reply:
             yield prep.early_reply
             return
+
+        # Local agent bootstrap: finish clear create-jobs without waiting on
+        # a 7B model that monologues instead of calling file_write.
+        with suppress(Exception):
+            from remedy.core.local_agent_optimize import maybe_bootstrap_local_create
+
+            boot = await maybe_bootstrap_local_create(runtime, message or "")
+            if boot:
+                yield boot
+                with suppress(Exception):
+                    from remedy.core.agent_post_turn import schedule_post_turn_prep
+
+                    schedule_post_turn_prep(
+                        runtime, message=message or "", session_id=session_id
+                    )
+                return
         async for _pev in yield_preamble_events(prep):
             yield _pev
         messages = prep.messages
@@ -162,6 +178,8 @@ async def call_llm_stream(runtime, message: str,
         pseudo_nudge_count = 0
         # Nudge once when the model claims progress without native tool_calls.
         false_progress_nudge_count = 0
+        # Local 7B tutorial essays (RPB markdown / pip install / fenced code) — not work.
+        tutorial_monologue_nudge_count = 0
         # Reject monologue finals after a tool-heavy turn (auth/DSML recovery bug).
         scratchpad_nudge_count = 0
         tools_executed_this_turn = 0
@@ -213,9 +231,20 @@ async def call_llm_stream(runtime, message: str,
             16, int(getattr(runtime, "_epoch_react_steps", 256) or 256)
         )
         auto_continue = bool(getattr(runtime, "_react_auto_continue", True))
-        max_stale_epochs = max(
-            1, int(getattr(runtime, "_react_max_stale_epochs", 2) or 2)
+        # Single source of truth (REACT_MAX_STALE_EPOCHS default 8 — not 2)
+        from remedy.core.react_turn import (
+            TurnState,
+            apply_tools_decision,
+            effective_stale_epochs,
+            extract_tool_names,
+            extract_write_paths,
+            is_disconnect_error,
+            mid_turn_fit_messages,
+            resolve_tools,
+            synthesize_from_tools,
         )
+
+        max_stale_epochs = effective_stale_epochs(runtime)
         epoch_index = 1
         productive_in_epoch = 0
         tool_batches_in_epoch = 0
@@ -227,85 +256,77 @@ async def call_llm_stream(runtime, message: str,
             brief = getattr(runtime, "_session_brief", None)
             if brief is not None:
                 open_tasks_for_wall = list(getattr(brief, "open_tasks", None) or [])
-        # Coding / tool-enabled turns: Grok Build style — run until finished.
-        # Pure action kicks ("goto google and search X", "clear goals") must NOT
-        # resume older open_tasks / wiki work from history — latest message only.
-        run_until_done = bool(tools) or bool(all_tools)
+        # Pure action kicks must NOT resume older open_tasks from history
         if pure_action_kick or clear_goals_only or browse_pre_url or page_interaction:
             open_tasks_for_wall = []
-        # Open-only: short path. Interaction (login/type/click): full agent loop.
-        if page_interaction:
-            run_until_done = True
-            if all_tools:
-                tools = all_tools
-        elif pure_action_kick or clear_goals_only or open_only_browse:
-            run_until_done = bool(open_only_browse or clear_goals_only)
 
-        def _rearm_agency_tools() -> None:
-            """Re-enable tool schemas *and* long-task epoch policy.
+        # Shared turn control plane (deep-dive #1)
+        turn = TurnState(
+            message=message or "",
+            session_id=str(session_id or ""),
+            plan_mode=bool(plan_mode),
+            all_tools=list(all_tools or []),
+            tools=tools,
+            run_until_done=bool(tools),
+        )
 
-            Footgun: re-arming ``tools = all_tools`` without flipping
-            ``run_until_done`` let soft epochs force-answer after L1 strip +
-            later agency recovery (review/implement stalls at epoch_size).
-            """
-            nonlocal tools, run_until_done
-            if all_tools:
-                tools = all_tools
-                run_until_done = True
-
-        # Machine build engine — supervise capable-muscle construction turns.
+        # Machine build engine — supervise construction / task turns.
         build_state = None
         with suppress(Exception):
             from remedy.core.build_engine import begin_build_turn, build_protocol_block
 
             build_state = begin_build_turn(runtime, message or "")
-            if build_state is not None and build_state.active and all_tools:
-                tools = all_tools
-                run_until_done = True
-                # Inject machine protocol into the first LLM messages later
+            if build_state is not None and build_state.active:
                 runtime._build_protocol_pending = build_protocol_block(build_state)
 
-        # L1 lean: bias tools off for pure chat — but never strip mid-task
-        # continuity (open brief tasks / recent tool history). That was a
-        # correctness gap: "ok continue" after agency became tool-less.
-        # Also keep tools when the *message itself* wants tools (e.g. "review
-        # project") even if tier heuristic lag behind — fail-open for agency.
-        # Build engine turns never strip tools (machine schedule requires them).
-        if (
-            int(getattr(runtime, "_turn_tier", 1) or 1) == 1
-            and not plan_mode
-            and not pure_action_kick
-            and not browse_pre_url
-            and not page_interaction
-            and not clear_goals_only
-        ):
-            force_build_tools = False
-            with suppress(Exception):
-                from remedy.core.build_engine import should_force_tools_for_build
-
-                force_build_tools = should_force_tools_for_build(
-                    runtime, message or ""
+        def _provider_bits() -> tuple[str, str, str]:
+            try:
+                b = get_llm_binding(runtime)
+                return (
+                    str(b.provider or ""),
+                    str(b.model or ""),
+                    str(getattr(b, "base_url", None) or ""),
                 )
-            open_work = bool(open_tasks_for_wall) or force_build_tools
-            if not open_work:
-                with suppress(Exception):
-                    from remedy.core.react_policy import (
-                        history_suggests_open_work,
-                        message_wants_tools,
-                    )
+            except Exception:
+                return ("", "", "")
 
-                    open_work = history_suggests_open_work(
-                        history, open_tasks=open_tasks_for_wall or None
-                    )
-                    if not open_work and message_wants_tools(message or ""):
-                        open_work = True
-            if not open_work:
-                tools = None  # type: ignore[assignment]
-                run_until_done = False
-            elif force_build_tools and all_tools:
-                tools = all_tools
-                run_until_done = True
-            # Keep all_tools for recovery if model later needs agency
+        def _resolve_and_apply(*, step_index: int = 0) -> None:
+            """Single tool-arming path (deep-dive #2)."""
+            nonlocal tools, run_until_done
+            prov, mod, url = _provider_bits()
+            decision = resolve_tools(
+                message=message or "",
+                all_tools=turn.all_tools,
+                plan_mode=plan_mode,
+                turn_tier=int(getattr(runtime, "_turn_tier", 1) or 1),
+                open_tasks=open_tasks_for_wall or None,
+                history=history,
+                pure_action_kick=bool(pure_action_kick),
+                clear_goals_only=bool(clear_goals_only),
+                browse_pre_url=browse_pre_url,
+                page_interaction=bool(page_interaction),
+                open_only_browse=bool(open_only_browse),
+                build_active=bool(
+                    build_state is not None and getattr(build_state, "active", False)
+                ),
+                step_index=step_index,
+                provider=prov,
+                model=mod,
+                base_url=url,
+                writes_done=turn.write_batches,
+            )
+            apply_tools_decision(turn, decision)
+            tools = turn.tools
+            run_until_done = turn.run_until_done
+
+        _resolve_and_apply(step_index=0)
+
+        def _rearm_agency_tools() -> None:
+            """Re-enable tool schemas *and* long-task epoch policy."""
+            nonlocal tools, run_until_done
+            turn.rearm(reason="rearm_agency")
+            tools = turn.tools
+            run_until_done = turn.run_until_done
 
         # Accumulated assistant text for critical verify at end
         assistant_text_acc: list[str] = []
@@ -626,9 +647,9 @@ async def call_llm_stream(runtime, message: str,
                         tool_steps_this_turn=tool_batches_this_turn,
                         open_tasks=open_tasks_for_wall or None,
                     )
-                    # Active agency: unfinished brief/mission, tools already used,
-                    # or tools still armed (run_until_done coding turns).
-                    tools_armed = bool(tools or all_tools)
+                    # Active agency: schemas actually sent (not merely registered).
+                    # all_tools alone made coding_in_flight always true (deep-dive #7).
+                    tools_armed = turn.tools_armed()  # bool(tools) only
                     coding_in_flight = run_until_done and (
                         unfinished
                         or tool_batches_this_turn > 0
@@ -670,6 +691,7 @@ async def call_llm_stream(runtime, message: str,
                                     yield "@@checkpoint"
                             force_answer_sticky = True
                             tools = []
+                            turn.tools = []
                         elif never_used_tools:
                             # Model is chatting without function calls — re-arm.
                             epoch_index += 1
@@ -754,7 +776,22 @@ async def call_llm_stream(runtime, message: str,
                 force_answer = (
                     is_final_step or not tools or force_answer_sticky
                 )
+                # Re-resolve pack each step (write-first → full after writes)
+                if not force_answer and turn.all_tools:
+                    _resolve_and_apply(step_index=int(step))
                 step_tools = None if force_answer else tools
+                # Mid-turn hard fit for local (deep-dive #6) before POST
+                if step > 0 and step_tools is not None:
+                    prov, mod, url = _provider_bits()
+                    messages[:], step_tools = mid_turn_fit_messages(
+                        messages,
+                        step_tools,
+                        provider=prov,
+                        model=mod,
+                        base_url=url,
+                    )
+                    tools = step_tools
+                    turn.tools = step_tools
 
                 # Session id: prefer ContextVar (concurrent tabs)
                 sid_mm = str(
@@ -828,18 +865,59 @@ async def call_llm_stream(runtime, message: str,
                 # Anthropic currently uses a single JSON response (stream=False).
                 _bind = get_llm_binding(runtime)
                 _adapter = _bind.adapter()
+                # Local auto-optimize uses step index for tool_choice=required
+                with suppress(Exception):
+                    _adapter._local_step_index = int(step)
+                    runtime._local_step_index = int(step)
+                # Early implement steps: write-first tool pack (no bash skip-write)
+                with suppress(Exception):
+                    from remedy.core.local_agent_optimize import (
+                        filter_tools_write_first,
+                        is_local_binding,
+                    )
+
+                    if is_local_binding(
+                        _bind.provider, _bind.model, _bind.base_url
+                    ) and step_tools:
+                        step_tools = filter_tools_write_first(
+                            step_tools,
+                            user_message=str(message or ""),
+                            step_index=int(step),
+                        )
                 headers = _adapter.auth_headers(_bind.api_key)
                 endpoint = _adapter.chat_endpoint(_bind.base_url)
                 use_openai_sse = bool(
                     getattr(_adapter, "uses_openai_sse", True)
                 )
+                # Local: prefer low thinking — high monologue burns n_ctx + disconnects
+                _think = getattr(runtime, "_thinking_level", "high")
+                with suppress(Exception):
+                    from remedy.core.local_agent_optimize import is_local_binding
+
+                    if is_local_binding(
+                        _bind.provider, _bind.model, _bind.base_url
+                    ):
+                        _think = "low"
                 body = _adapter.build_body(
                     model=_bind.model,
                     messages=messages,
                     tools=step_tools,
                     stream=use_openai_sse,
-                    thinking_level=getattr(runtime, "_thinking_level", "high"),
+                    thinking_level=_think,
                 )
+                with suppress(Exception):
+                    from remedy.core.local_agent_optimize import (
+                        apply_local_body_optimize,
+                    )
+
+                    body = apply_local_body_optimize(
+                        body if isinstance(body, dict) else {},
+                        provider=_bind.provider,
+                        model=_bind.model,
+                        base_url=_bind.base_url,
+                        user_message=str(message or ""),
+                        step_index=int(step),
+                    )
                 # Trust boundary: fail closed — never POST unsanitized tool bodies.
                 try:
                     _local_agent = False
@@ -871,9 +949,16 @@ async def call_llm_stream(runtime, message: str,
                 round_state = StreamRoundState()
 
                 _llm_t0 = time.perf_counter()
-                async with http.post(
+                # Local hosts: up to 2 attempts (auto-refit on exceed_context)
+                # + optional non-stream retry on disconnect (deep-dive #4)
+                _local_ctx_retried = False
+                _http_round_ok = False
+                while not _http_round_ok:
+                 try:
+                  for _local_http_attempt in range(2):
+                   async with http.post(
                     endpoint, headers=headers, json=body
-                ) as resp:
+                   ) as resp:
                     _llm_ms = (time.perf_counter() - _llm_t0) * 1000.0
                     if resp.status != 200:
                         text = await resp.text()
@@ -887,6 +972,63 @@ async def call_llm_stream(runtime, message: str,
                         logger.error(
                             "LLM API error %d: %s", resp.status, safe_err[:500]
                         )
+                        # Local: auto-shrink + retry once on exceed_context_size
+                        if (
+                            resp.status == 400
+                            and not _local_ctx_retried
+                            and (
+                                "exceed_context" in (safe_err or "").lower()
+                                or "context size" in (safe_err or "").lower()
+                                or "n_prompt_tokens" in (safe_err or "").lower()
+                            )
+                        ):
+                            _local_ctx_retried = True
+                            refit_ok = False
+                            with suppress(Exception):
+                                from remedy.core.endless_context import (
+                                    fit_local_request,
+                                    resolve_local_window,
+                                )
+
+                                win = resolve_local_window(
+                                    provider=_bind.provider,
+                                    model=_bind.model,
+                                    base_url=_bind.base_url,
+                                )
+                                hard_win = max(4096, int(win * 0.7))
+                                msgs2, tools2, _meta = fit_local_request(
+                                    body.get("messages")
+                                    if isinstance(body.get("messages"), list)
+                                    else messages,
+                                    body.get("tools")
+                                    if isinstance(body.get("tools"), list)
+                                    else step_tools,
+                                    window=hard_win,
+                                    provider=_bind.provider,
+                                    model=_bind.model,
+                                    coding_bias=True,
+                                )
+                                body = dict(body)
+                                body["messages"] = msgs2
+                                if tools2:
+                                    body["tools"] = tools2
+                                    body["tool_choice"] = "required"
+                                else:
+                                    body.pop("tools", None)
+                                    body.pop("tool_choice", None)
+                                body["max_tokens"] = min(
+                                    int(body.get("max_tokens") or 512), 512
+                                )
+                                refit_ok = True
+                                logger.warning(
+                                    "Local context overflow — auto-refit retry "
+                                    "(window~%s est=%s)",
+                                    hard_win,
+                                    _meta.get("est_after"),
+                                )
+                            if refit_ok:
+                                yield "@@status:Context full — compressing and retrying…\n"
+                                continue  # next _local_http_attempt
                         with suppress(Exception):
                             from remedy.nanoswarm import get_swarm
                             from remedy.nanoswarm.events import SwarmEvent
@@ -1220,6 +1362,48 @@ async def call_llm_stream(runtime, message: str,
                     content_parts = round_state.content_parts
                     reasoning_parts = round_state.reasoning_parts
 
+                   # Successful HTTP round — leave the local retry loop
+                   break
+                  else:
+                    # for-loop exhausted without break (both attempts failed status)
+                    pass
+                  _http_round_ok = True
+                 except Exception as _stream_exc:
+                  if (
+                    is_disconnect_error(_stream_exc)
+                    and turn.allow_disconnect_retry()
+                  ):
+                    turn.note_disconnect_retry()
+                    logger.warning(
+                        "LLM stream disconnect — non-stream retry (%s)",
+                        _stream_exc,
+                    )
+                    yield "@@status:Connection dropped — retrying without stream…\n"
+                    body = dict(body)
+                    body["stream"] = False
+                    # Prefer smaller completion + refit
+                    with suppress(Exception):
+                        body["max_tokens"] = min(
+                            int(body.get("max_tokens") or 512), 768
+                        )
+                    prov, mod, url = _provider_bits()
+                    messages[:], _st = mid_turn_fit_messages(
+                        messages,
+                        body.get("tools")
+                        if isinstance(body.get("tools"), list)
+                        else step_tools,
+                        provider=prov,
+                        model=mod,
+                        base_url=url,
+                    )
+                    if _st is not None:
+                        body["tools"] = _st
+                    step_tools = _st if _st is not None else step_tools
+                    collected = {"content": None, "tool_calls": None}
+                    round_state = StreamRoundState()
+                    continue
+                  raise
+
                 # Ledger + stream usage once per LLM HTTP call (not per SSE chunk).
                 _u_final = getattr(round_state, "last_usage", None)
                 if isinstance(_u_final, dict) and (
@@ -1319,12 +1503,13 @@ async def call_llm_stream(runtime, message: str,
                     and raw_round
                     and _looks_like_pseudo_tools(raw_round)
                     and all_tools
-                    and not pseudo_recovery_done
+                    and turn.allow_pseudo_recovery()
                     and not force_answer
                 ):
                     recovered = _parse_pseudo_tool_calls(raw_round)
                     if recovered:
-                        pseudo_recovery_done = True
+                        turn.note_pseudo_recovery()
+                        pseudo_recovery_done = turn.pseudo_recoveries >= 1
                         _rearm_agency_tools()  # schemas + long-task epoch policy
                         recovered = normalize_tool_calls(recovered)
                         yield "@@tool_calls"
@@ -1467,12 +1652,36 @@ async def call_llm_stream(runtime, message: str,
                             }
                         )
                         continue
-                    # Build engine: monologue without tools is illegal mid-build.
+                    # Agency fail-open (content path): "Activating skill now" etc.
+                    # Must run *before* build monologue / false-progress acceptance —
+                    # skill/tool promise claims get a dedicated re-arm nudge.
                     if (
                         not tool_calls_list
                         and all_tools
                         and not force_answer_sticky
                         and not is_final_step
+                        and agency_tool_promise_claim(text_out, reasoning_out)
+                    ):
+                        _rearm_agency_tools()
+                        force_answer_sticky = False
+                        messages.append(agency_rearm_nudge_message())
+                        logger.info(
+                            "Agency re-arm after tool-promise prose (step %d)",
+                            step + 1,
+                        )
+                        continue
+                    # Build engine: monologue without tools is illegal mid-build —
+                    # but after tools already ran, a plain-language summary is OK
+                    # (do not re-block legitimate finals as monologue).
+                    if (
+                        not tool_calls_list
+                        and all_tools
+                        and not force_answer_sticky
+                        and not is_final_step
+                        and (
+                            tools_executed_this_turn <= 0
+                            or looks_like_false_progress(text_out)
+                        )
                     ):
                         with suppress(Exception):
                             from remedy.core.build_engine import (
@@ -1516,25 +1725,6 @@ async def call_llm_stream(runtime, message: str,
                                     bst_g.phase,
                                 )
                                 continue
-                    # Agency fail-open (content path): "Activating skill now" etc.
-                    # Must run *before* false-progress / final-answer acceptance —
-                    # skill/tool promise claims get a dedicated re-arm nudge
-                    # (skill_activate, list_dir, …), not a generic status nudge.
-                    if (
-                        not tool_calls_list
-                        and all_tools
-                        and not force_answer_sticky
-                        and not is_final_step
-                        and agency_tool_promise_claim(text_out, reasoning_out)
-                    ):
-                        _rearm_agency_tools()
-                        force_answer_sticky = False
-                        messages.append(agency_rearm_nudge_message())
-                        logger.info(
-                            "Agency re-arm after tool-promise prose (step %d)",
-                            step + 1,
-                        )
-                        continue
                     # Narrating "I'm processing…" without tools looks stuck in the UI.
                     # Never accept a status-only line as the final answer while tools
                     # are available (session bug 2026-07-28: short snippet then stop).
@@ -1575,6 +1765,63 @@ async def call_llm_stream(runtime, message: str,
                             step + 1,
                         )
                         continue
+                    # Local performance: reject RPB/tutorial essays with zero tools.
+                    # Export 2026-08-08 — create app turns accepted as final with no
+                    # file_write; monologue_block only once was not enough.
+                    if (
+                        not tool_calls_list
+                        and all_tools
+                        and tools_executed_this_turn <= 0
+                        and not force_answer_sticky
+                        and tutorial_monologue_nudge_count < 3
+                        and text_out
+                    ):
+                        _reject_tutorial = False
+                        _proj = None
+                        with suppress(Exception):
+                            from remedy.core.local_agent_optimize import (
+                                is_local_binding,
+                                looks_like_tutorial_monologue,
+                                message_wants_implement,
+                                tutorial_monologue_nudge,
+                            )
+
+                            if is_local_binding(
+                                _bind.provider, _bind.model, _bind.base_url
+                            ) and (
+                                message_wants_implement(message or "")
+                                or looks_like_tutorial_monologue(text_out)
+                            ):
+                                if looks_like_tutorial_monologue(text_out) or (
+                                    message_wants_implement(message or "")
+                                    and len(text_out) > 400
+                                    and "```" in text_out
+                                ):
+                                    _reject_tutorial = True
+                                    with suppress(Exception):
+                                        _proj = runtime.effective_project_path()
+                                    tutorial_monologue_nudge_count += 1
+                                    _rearm_agency_tools()
+                                    force_answer_sticky = False
+                                    messages.append(
+                                        {
+                                            "role": "assistant",
+                                            "content": text_out[:2500],
+                                        }
+                                    )
+                                    messages.append(
+                                        tutorial_monologue_nudge(
+                                            project_path=str(_proj or "") or None
+                                        )
+                                    )
+                                    logger.info(
+                                        "Local tutorial monologue rejected "
+                                        "(%d/3) after step %d",
+                                        tutorial_monologue_nudge_count,
+                                        step + 1,
+                                    )
+                        if _reject_tutorial:
+                            continue
                     if stream_live and produced_user_text:
                         # Hit max_tokens mid-answer → seamless continuation.
                         if (
@@ -1822,8 +2069,17 @@ async def call_llm_stream(runtime, message: str,
                     pass
                 tool_batches_this_turn += 1
                 tool_batches_in_epoch += 1
+                turn.record_tool_batch(
+                    extract_tool_names(fresh_calls),
+                    paths=extract_write_paths(fresh_calls),
+                )
                 if is_productive_tool_batch(batch_tool_msgs):
                     productive_in_epoch += 1
+                # Task-loop phase nudge (RESEARCH → PLAN → BUILD) — deep-dive #10
+                with suppress(Exception):
+                    pn = turn.phase_nudge()
+                    if pn and turn.inject_count <= turn.max_injects:
+                        messages.append(pn)
                 # Machine build engine: syntax gate + auto-verify + force nudges
                 with suppress(Exception):
                     from remedy.core.build_engine import (
@@ -2258,11 +2514,20 @@ async def call_llm_stream(runtime, message: str,
             except Exception:
                 logger.debug("final synthesis failed", exc_info=True)
         if not produced_user_text:
-            yield (
-                "I finished the tool loop but still have no final model text. "
-                "Ask me to **continue** or restate the request and I will resume "
-                "from the context already gathered."
-            )
+            # Deterministic summary when tools ran but model text is empty (#8)
+            if turn.tools_executed > 0 or tool_batches_this_turn > 0:
+                summary = synthesize_from_tools(
+                    messages,
+                    paths_written=turn.paths_written,
+                )
+                produced_user_text = True
+                yield summary
+            else:
+                yield (
+                    "I finished the tool loop but still have no final model text. "
+                    "Ask me to **continue** or restate the request and I will resume "
+                    "from the context already gathered."
+                )
         # Compound learning + speculative warm for next turn
         from remedy.core.agent_post_turn import schedule_post_turn_prep
 
@@ -2275,7 +2540,32 @@ async def call_llm_stream(runtime, message: str,
         )
     except Exception as e:
         logger.exception("LLM stream failed")
-        # Never leave the user with only a stack-looking error — give a path forward.
+        # After tools: prefer synthesis over raw exception as the main answer (#4/#8)
+        try:
+            from remedy.core.react_turn import (
+                is_disconnect_error as _is_disc,
+                synthesize_from_tools as _synth,
+            )
+
+            _turn = turn  # type: ignore[name-defined]
+            _msgs = messages  # type: ignore[name-defined]
+            if _turn.tools_executed > 0 or _turn.tool_batches > 0:
+                yield _synth(
+                    _msgs,
+                    paths_written=_turn.paths_written,
+                )
+                if _is_disc(e):
+                    yield (
+                        "\n\n_(Stream interrupted after tools — summary above; "
+                        "say **continue** to resume.)_"
+                    )
+                else:
+                    yield (
+                        f"\n\n_(Interrupted: {e!s}. Summary above from completed tools.)_"
+                    )
+                return
+        except Exception:
+            pass
         yield (
             f"\n[LLM STREAM EXCEPTION]\n{e}\n[END LLM STREAM EXCEPTION]\n\n"
             "Something went wrong talking to the model mid-turn. "

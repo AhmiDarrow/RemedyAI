@@ -324,12 +324,29 @@ def resolve_context_window(
     m = (model or "").strip()
     ml = m.lower()
     local = is_local_model(p, m, base_url=base_url)
+
+    # RMB managed host: configured ctx_size is the physical window (e.g. 32k).
+    # Prefer it over size heuristics so harness + endless_context budget correctly.
+    if local or p == "rmb":
+        try:
+            from remedy.runtime.rmb.mode import is_rmb_provider
+            from remedy.runtime.rmb.config import load_rmb_json, merge_state
+
+            if p == "rmb" or is_rmb_provider(p, base_url):
+                st = merge_state(load_rmb_json())
+                ctx = int(st.get("ctx_size") or 0)
+                if ctx >= 2048:
+                    url = str(st.get("base_url") or base_url or "")
+                    cache_context_window(url, m or st.get("model_id"), ctx)
+                    return ctx
+        except Exception:
+            pass
+
     if local:
         size = _model_size_window(m)
         if size is not None:
-            # RMB physical ctx is often 3–6k even on a 7B — prefer the lower of
-            # size-heuristic and a local default so the harness compresses early.
-            if ml.endswith(".rmb4") or ml.endswith(".mwi") or "rmb" in ml:
+            # Legacy .rmb4 lattice files often ran 4–8k; keep conservative there.
+            if ml.endswith(".rmb4") or ml.endswith(".mwi"):
                 return min(size, 8_192)
             return size
         if ml.endswith(".rmb4") or ml.endswith(".mwi"):

@@ -20,6 +20,8 @@ def test_detects_build_requests():
     assert looks_like_build_request("implement a REST API for todos")
     assert looks_like_build_request("build me a CLI that greets")
     assert looks_like_build_request("fix the pytest failures in tests/")
+    assert looks_like_build_request("review the auth module and fix bugs")
+    assert looks_like_build_request("please set up a calculator.py in the project")
     assert not looks_like_build_request("thanks")
     assert not looks_like_build_request("what is a monad?")
 
@@ -35,7 +37,10 @@ def test_begin_build_turn_stamps_runtime():
     assert st is not None
     assert st.active
     assert rt._build_turn is st
-    assert "SCOUT" in build_protocol_block(st) or "scout" in build_protocol_block(st).lower()
+    proto = build_protocol_block(st)
+    assert "RESEARCH" in proto
+    assert "PLAN" in proto
+    assert "BUILD" in proto
 
 
 def test_serial_explore_forces_implement():

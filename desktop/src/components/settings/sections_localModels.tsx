@@ -26,6 +26,7 @@ import {
   stopRmb,
   patchRmbSettings,
   applyRmbAsProvider,
+  type RmbStatus,
 } from '../../api/rmb'
 import { updateSettings } from '../../api/settings'
 
@@ -308,8 +309,21 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
                   const ctx_size = parseInt(e.target.value, 10)
                   setRmbBusy(true)
                   try {
-                    await patchRmbSettings({ ctx_size, enabled: true })
-                    setRmbMsg(`Context: ${ctx_size}`)
+                    const res = (await patchRmbSettings({
+                      ctx_size,
+                      enabled: true,
+                    })) as RmbStatus & {
+                      live_note?: string
+                      live_apply?: { restarted?: boolean; ctx_size_live?: number }
+                    }
+                    const live =
+                      res.live_apply?.ctx_size_live ?? res.ctx_size ?? ctx_size
+                    setRmbMsg(
+                      res.live_note ||
+                        (res.live_apply?.restarted
+                          ? `Context live: ${live} (RMB restarted)`
+                          : `Context: ${live}`),
+                    )
                     await refreshRmb()
                   } catch (err) {
                     setRmbMsg(String(err))
