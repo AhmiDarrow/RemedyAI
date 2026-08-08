@@ -20,7 +20,10 @@ from remedy.memory.harness.pruner import prune_messages_for_send
 def test_policy_packs_for_intents():
     assert policy_for_intent("memory")["id"] == "memory"
     assert "memory" in policy_for_intent("memory")["system"].lower() or "Session" in policy_for_intent("memory")["system"]
-    tool = policy_for_intent("chat", user_text="please implement a fix for login")
+    # "implement" maps to build pack; "fix"/"debug" maps to tool pack
+    build = policy_for_intent("chat", user_text="please implement a fix for login")
+    assert build["id"] == "build"
+    tool = policy_for_intent("chat", user_text="please fix the login bug")
     assert tool["id"] == "tool"
 
 
