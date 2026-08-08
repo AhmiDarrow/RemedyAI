@@ -13,6 +13,13 @@ import {
   type VisionStatus,
   type NanoSwarmStatus,
 } from '../../api/vision'
+import {
+  startRmb,
+  stopRmb,
+  patchRmbSettings,
+  useRmbAsProvider,
+  type RmbStatus,
+} from '../../api/rmb'
 import type { XaiAuthStatus } from '../../api/auth'
 import { openExternalUrl } from '../../api/auth'
 import type { ProviderInfo, ConnectedProvider } from '../../api/providers'
@@ -135,6 +142,13 @@ export interface SettingsFormProps {
   setVisionMsg: Dispatch<SetStateAction<string>>
   refreshVision: () => Promise<VisionStatus | null>
   startVisionInstallPoll: () => void
+  rmb: RmbStatus | null
+  rmbBusy: boolean
+  setRmbBusy: Dispatch<SetStateAction<boolean>>
+  rmbMsg: string
+  setRmbMsg: Dispatch<SetStateAction<string>>
+  refreshRmb: () => Promise<RmbStatus | null>
+  onSettingsSaved?: () => void
   connectedList: ConnectedProvider[]
   providerSearch: string
   setProviderSearch: Dispatch<SetStateAction<string>>
@@ -151,6 +165,8 @@ export interface SettingsFormProps {
   activeMeta: ProviderInfo
   showBaseUrl: boolean
   providerModels: Array<{ id: string; name: string; provider?: string }>
+  customName?: string
+  setCustomName?: Dispatch<SetStateAction<string>>
   handleProviderChange: (p: string) => void
   handleBrowseProject: () => void
   themeId: ThemeId
@@ -216,12 +232,16 @@ export function SettingsFormSections(p: SettingsFormProps): ReactNode {
     handleXaiSignIn, handleXaiLogout,
     vision, swarm: _swarm, visionBusy, setVisionBusy, visionMsg, setVisionMsg,
     refreshVision, startVisionInstallPoll,
+    rmb, rmbBusy, setRmbBusy, rmbMsg, setRmbMsg, refreshRmb,
+    onSettingsSaved,
     connectedList, providerSearch, setProviderSearch,
     enabledProviders, setEnabledProviders,
     enabledModels, setEnabledModels,
     catalogExpand, setCatalogExpand,
     skillsBudget, setSkillsBudget,
     primaryProviders, advancedProviders, activeMeta, showBaseUrl, providerModels,
+    customName = '',
+    setCustomName,
     handleProviderChange, handleBrowseProject,
     themeId, onThemeChange, density, onDensityChange,
     customAccent, onCustomAccentChange,
@@ -299,6 +319,14 @@ export function SettingsFormSections(p: SettingsFormProps): ReactNode {
                 </button>
               )}
 
+              {provider === 'custom' && (
+                <Field
+                  label="Name"
+                  value={customName}
+                  onChange={(v) => setCustomName?.(v)}
+                  placeholder="e.g. LM Studio / llama.cpp"
+                />
+              )}
               {showBaseUrl && (
                 <Field label="Base URL" value={baseUrl} onChange={setBaseUrl} />
               )}
@@ -1078,7 +1106,397 @@ export function SettingsFormSections(p: SettingsFormProps): ReactNode {
               </div>
             </SettingsSection>
 
-            {/* Local model — required dependency (Apache 2.0 SmolVLM2) */}
+            {/* RMB — local agent host (llama.cpp, coding + tools) */}
+            <SettingsSection {...sectionProps('rmb')}>
+              <div className="text-[10px] leading-snug mb-2" style={{ color: 'var(--text-muted)' }}>
+                <strong style={{ color: 'var(--text-secondary)' }}>Remedy Muscle Bridge</strong>
+                {' '}— on-device agent host for long coding sessions (llama.cpp). Context is automatic —
+                Session Brief + harness prune/offload; you never manage it. While RMB is running,
+                SmolVLM is <strong>unloaded</strong> until you stop RMB. Drop any GGUF in{' '}
+                <code className="text-[9px]">~/.remedy/rmb/models/</code>.
+              </div>
+              <div
+                className="rounded-md px-2 py-1.5 mb-2 text-[10px] space-y-0.5"
+                style={{
+                  background: 'var(--bg-tertiary)',
+                  border: '1px solid var(--border)',
+                  color: 'var(--text-secondary)',
+                }}
+              >
+                <div className="flex justify-between gap-2">
+                  <span style={{ color: 'var(--text-muted)' }}>Engine</span>
+                  <span>{rmb?.engine || 'llama.cpp'}</span>
+                </div>
+                <div className="flex justify-between gap-2">
+                  <span style={{ color: 'var(--text-muted)' }}>Model</span>
+                  <span className="text-right truncate max-w-[60%]">
+                    {rmb?.model?.name || rmb?.model_id || '—'}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-2">
+                  <span style={{ color: 'var(--text-muted)' }}>Status</span>
+                  <span>
+                    {!rmb
+                      ? '…'
+                      : rmb.ready
+                        ? 'Ready'
+                        : rmb.running
+                          ? 'Starting…'
+                          : rmb.model_present && rmb.runtime_present
+                            ? 'Stopped'
+                            : rmb.not_ready_hint || 'Not ready'}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-2">
+                  <span style={{ color: 'var(--text-muted)' }}>SmolVLM</span>
+                  <span>
+                    {rmb?.vision_suspended || rmb?.running
+                      ? 'Suspended (RMB exclusive)'
+                      : 'Available when RMB stops'}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-2">
+                  <span style={{ color: 'var(--text-muted)' }}>Endpoint</span>
+                  <span className="font-mono text-[9px] truncate max-w-[60%]">
+                    {rmb?.base_url || 'http://127.0.0.1:8787/v1'}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-2">
+                  <span style={{ color: 'var(--text-muted)' }}>Context</span>
+                  <span>
+                    {rmb?.ctx_size ?? 8192} tok · {rmb?.profile || 'agent'}
+                    {rmb?.endless_session?.silent_context ? ' · auto memory' : ''}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-2">
+                  <span style={{ color: 'var(--text-muted)' }}>GPU</span>
+                  <span>{rmb?.nvidia ? 'NVIDIA detected' : 'CPU / no NVIDIA'}</span>
+                </div>
+                {rmb?.model_path ? (
+                  <div className="flex justify-between gap-2">
+                    <span style={{ color: 'var(--text-muted)' }}>GGUF</span>
+                    <span className="truncate max-w-[65%] text-right font-mono text-[9px]" title={rmb.model_path}>
+                      {rmb.model_path.replace(/^.*[\\/]/, '')}
+                    </span>
+                  </div>
+                ) : null}
+              </div>
+              {rmbMsg ? (
+                <div className="text-[10px] mb-2" style={{ color: 'var(--text-secondary)' }}>
+                  {rmbMsg}
+                </div>
+              ) : null}
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                <button
+                  type="button"
+                  className="px-2 py-1 rounded text-[10px] font-medium"
+                  style={{
+                    background: 'var(--accent)',
+                    color: 'var(--accent-fg, #fff)',
+                    opacity: rmbBusy ? 0.6 : 1,
+                  }}
+                  disabled={rmbBusy}
+                  onClick={async () => {
+                    setRmbBusy(true)
+                    setRmbMsg('Starting RMB…')
+                    try {
+                      const r = (await startRmb()) as { ok?: boolean; error?: string }
+                      setRmbMsg(r?.ok ? 'RMB running' : r?.error || 'Start failed')
+                      await refreshRmb()
+                    } catch (e) {
+                      setRmbMsg(String(e))
+                    } finally {
+                      setRmbBusy(false)
+                    }
+                  }}
+                >
+                  Start RMB
+                </button>
+                <button
+                  type="button"
+                  className="px-2 py-1 rounded text-[10px]"
+                  style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
+                  disabled={rmbBusy}
+                  onClick={async () => {
+                    setRmbBusy(true)
+                    try {
+                      await stopRmb()
+                      setRmbMsg('RMB stopped')
+                      await refreshRmb()
+                    } catch (e) {
+                      setRmbMsg(String(e))
+                    } finally {
+                      setRmbBusy(false)
+                    }
+                  }}
+                >
+                  Stop
+                </button>
+                <button
+                  type="button"
+                  className="px-2 py-1 rounded text-[10px] font-medium"
+                  style={{
+                    border: '1px solid var(--accent)',
+                    color: 'var(--accent)',
+                    opacity: rmbBusy ? 0.6 : 1,
+                  }}
+                  disabled={rmbBusy}
+                  onClick={async () => {
+                    setRmbBusy(true)
+                    setRmbMsg('Switching chat to RMB…')
+                    try {
+                      const r = (await useRmbAsProvider()) as {
+                        start?: { ok?: boolean; error?: string }
+                      }
+                      setRmbMsg(
+                        r?.start?.ok
+                          ? 'Chat provider set to RMB — start a new message'
+                          : r?.start?.error || 'Configured; start may still be loading',
+                      )
+                      await refreshRmb()
+                      onSettingsSaved?.()
+                    } catch (e) {
+                      setRmbMsg(String(e))
+                    } finally {
+                      setRmbBusy(false)
+                    }
+                  }}
+                >
+                  Use as chat provider
+                </button>
+                <button
+                  type="button"
+                  className="px-2 py-1 rounded text-[10px]"
+                  style={{ border: '1px solid var(--border)', color: 'var(--text-muted)' }}
+                  disabled={rmbBusy}
+                  onClick={() => void refreshRmb()}
+                >
+                  Refresh
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-1.5 mb-1">
+                {(['agent', 'turbo', 'quality'] as const).map((pid) => (
+                  <button
+                    key={pid}
+                    type="button"
+                    className="px-2 py-0.5 rounded text-[10px] capitalize"
+                    style={{
+                      border: '1px solid var(--border)',
+                      background:
+                        (rmb?.profile || 'agent') === pid
+                          ? 'color-mix(in srgb, var(--accent) 18%, transparent)'
+                          : 'transparent',
+                      color: 'var(--text-secondary)',
+                    }}
+                    disabled={rmbBusy}
+                    onClick={async () => {
+                      setRmbBusy(true)
+                      try {
+                        await patchRmbSettings({ profile: pid, enabled: true })
+                        setRmbMsg(`Profile: ${pid}`)
+                        await refreshRmb()
+                      } catch (e) {
+                        setRmbMsg(String(e))
+                      } finally {
+                        setRmbBusy(false)
+                      }
+                    }}
+                  >
+                    {pid}
+                  </button>
+                ))}
+              </div>
+              {/* Model / GGUF / context — any model path */}
+              <div className="mt-2 mb-1 space-y-1.5">
+                {(rmb?.catalog?.models?.length ?? 0) > 0 ? (
+                  <div>
+                    <label className="block mb-0.5" style={{ color: 'var(--text-muted)' }}>
+                      Catalog model
+                    </label>
+                    <select
+                      className="w-full rounded px-2 py-1 text-[10px] outline-none"
+                      style={{
+                        background: 'var(--bg-tertiary)',
+                        color: 'var(--text-primary)',
+                        border: '1px solid var(--border)',
+                      }}
+                      disabled={rmbBusy}
+                      value={rmb?.model_id || rmb?.catalog?.default_model_id || ''}
+                      onChange={async (e) => {
+                        const model_id = e.target.value
+                        setRmbBusy(true)
+                        try {
+                          await patchRmbSettings({ model_id, enabled: true })
+                          setRmbMsg(`Model: ${model_id}`)
+                          await refreshRmb()
+                        } catch (err) {
+                          setRmbMsg(String(err))
+                        } finally {
+                          setRmbBusy(false)
+                        }
+                      }}
+                    >
+                      {(rmb?.catalog?.models || []).map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.name}
+                          {m.approx_gb != null ? ` (~${m.approx_gb} GB)` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : null}
+                {(rmb?.discovered_ggufs?.length ?? 0) > 0 ? (
+                  <div>
+                    <label className="block mb-0.5" style={{ color: 'var(--text-muted)' }}>
+                      Discovered GGUF
+                    </label>
+                    <select
+                      className="w-full rounded px-2 py-1 text-[10px] outline-none font-mono"
+                      style={{
+                        background: 'var(--bg-tertiary)',
+                        color: 'var(--text-primary)',
+                        border: '1px solid var(--border)',
+                      }}
+                      disabled={rmbBusy}
+                      value={rmb?.model_path || ''}
+                      onChange={async (e) => {
+                        const model_path = e.target.value
+                        setRmbBusy(true)
+                        try {
+                          await patchRmbSettings({ model_path, enabled: true })
+                          setRmbMsg(`GGUF: ${model_path.replace(/^.*[\\/]/, '')}`)
+                          await refreshRmb()
+                        } catch (err) {
+                          setRmbMsg(String(err))
+                        } finally {
+                          setRmbBusy(false)
+                        }
+                      }}
+                    >
+                      <option value="">— pick file —</option>
+                      {(rmb?.discovered_ggufs || []).map((g) => (
+                        <option key={g.path || g.name} value={g.path || ''}>
+                          {g.name}
+                          {g.size_gb != null ? ` (${g.size_gb} GB)` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : null}
+                <div>
+                  <label className="block mb-0.5" style={{ color: 'var(--text-muted)' }}>
+                    Model path (any .gguf)
+                  </label>
+                  <input
+                    type="text"
+                    className="w-full rounded px-2 py-1 text-[10px] outline-none font-mono"
+                    style={{
+                      background: 'var(--bg-tertiary)',
+                      color: 'var(--text-primary)',
+                      border: '1px solid var(--border)',
+                    }}
+                    disabled={rmbBusy}
+                    defaultValue={rmb?.model_path || ''}
+                    key={rmb?.model_path || 'rmb-path'}
+                    placeholder="C:\\…\\model.gguf or leave blank to auto-discover"
+                    onBlur={async (e) => {
+                      const model_path = e.target.value.trim()
+                      if (model_path === (rmb?.model_path || '')) return
+                      setRmbBusy(true)
+                      try {
+                        await patchRmbSettings({
+                          model_path: model_path || '',
+                          enabled: true,
+                        })
+                        setRmbMsg(model_path ? 'Model path saved' : 'Path cleared')
+                        await refreshRmb()
+                      } catch (err) {
+                        setRmbMsg(String(err))
+                      } finally {
+                        setRmbBusy(false)
+                      }
+                    }}
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <div className="flex-1">
+                    <label className="block mb-0.5" style={{ color: 'var(--text-muted)' }}>
+                      Context size
+                    </label>
+                    <select
+                      className="w-full rounded px-2 py-1 text-[10px] outline-none"
+                      style={{
+                        background: 'var(--bg-tertiary)',
+                        color: 'var(--text-primary)',
+                        border: '1px solid var(--border)',
+                      }}
+                      disabled={rmbBusy}
+                      value={String(rmb?.ctx_size ?? 8192)}
+                      onChange={async (e) => {
+                        const ctx_size = parseInt(e.target.value, 10)
+                        setRmbBusy(true)
+                        try {
+                          await patchRmbSettings({ ctx_size, enabled: true })
+                          setRmbMsg(`Context: ${ctx_size}`)
+                          await refreshRmb()
+                        } catch (err) {
+                          setRmbMsg(String(err))
+                        } finally {
+                          setRmbBusy(false)
+                        }
+                      }}
+                    >
+                      {[4096, 8192, 12288, 16384, 32768].map((n) => (
+                        <option key={n} value={n}>
+                          {n}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex-1">
+                    <label className="block mb-0.5" style={{ color: 'var(--text-muted)' }}>
+                      GPU layers (−1 = all)
+                    </label>
+                    <input
+                      type="number"
+                      className="w-full rounded px-2 py-1 text-[10px] outline-none"
+                      style={{
+                        background: 'var(--bg-tertiary)',
+                        color: 'var(--text-primary)',
+                        border: '1px solid var(--border)',
+                      }}
+                      disabled={rmbBusy}
+                      defaultValue={
+                        rmb?.n_gpu_layers != null ? String(rmb.n_gpu_layers) : '-1'
+                      }
+                      key={`ngl-${rmb?.n_gpu_layers ?? -1}`}
+                      onBlur={async (e) => {
+                        const n = parseInt(e.target.value, 10)
+                        if (Number.isNaN(n)) return
+                        setRmbBusy(true)
+                        try {
+                          await patchRmbSettings({ n_gpu_layers: n, enabled: true })
+                          setRmbMsg(`GPU layers: ${n}`)
+                          await refreshRmb()
+                        } catch (err) {
+                          setRmbMsg(String(err))
+                        } finally {
+                          setRmbBusy(false)
+                        }
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+              <div className="text-[10px] leading-snug" style={{ color: 'var(--text-muted)' }}>
+                Put a coding GGUF (e.g. Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf) in{' '}
+                <code className="text-[9px]">~/.remedy/rmb/models/</code> or paste a full path above.
+                Restart RMB after changing model/ctx. Install Local vision once if llama-server is
+                missing (shared runtime).
+              </div>
+            </SettingsSection>
+
+            {/* Local vision — SmolVLM2 image decode */}
             <SettingsSection
               {...sectionProps('vision')}
             >

@@ -12,6 +12,7 @@ import logging
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from typing import Any
+from urllib.parse import urlsplit
 
 logger = logging.getLogger(__name__)
 
@@ -210,9 +211,10 @@ class OpenAIProvider(ProviderAdapter):
         if max_tokens is None:
             max_tokens = provider_cap
         else:
-            # Honor explicit higher requests up to provider cap; never shrink below cap.
-            max_tokens = max(int(max_tokens), provider_cap)
-            max_tokens = min(max_tokens, provider_cap) if provider_cap > 0 else max_tokens
+            # Honor explicit requests up to provider cap (do not force always-cap).
+            max_tokens = max(1, int(max_tokens))
+            if provider_cap > 0:
+                max_tokens = min(max_tokens, provider_cap)
         # Soft system nudge for deliberation (providers without native effort API).
         msgs = list(messages)
         nudge = _thinking_nudge(level)
@@ -676,6 +678,191 @@ class MistralProvider(OpenAIProvider):
     default_base_url = "https://api.mistral.ai/v1"
 
 
+class LlamaCppProvider(OpenAIProvider):
+    """Local OpenAI-compatible host (llama.cpp / Ollama / RMB).
+
+    Local models have a fixed ``n_ctx``. Cloud-scale ``max_tokens`` (128k)
+    causes rejections. Budget completion from the resolved window; never send
+    ``reasoning_effort``. Lower temperature with tools for reliable tool_calls.
+    """
+
+    provider_name = "llamacpp"
+    # Agent coding defaults — enough for a multi-step tool turn or file edit.
+    LOCAL_DEFAULT_MAX_TOKENS = 1024
+    LOCAL_MAX_TOKENS_CEILING = 2048
+    default_base_url = "http://127.0.0.1:8080/v1"
+
+    def provider_max_output_tokens(self, model: str | None = None) -> int:
+        return self._local_completion_budget(model)
+
+    def _local_completion_budget(self, model: str | None = None) -> int:
+        """n_predict: fraction of window for agent work (tool chains + patches)."""
+        try:
+            from remedy.nanoswarm.token_nanobot import (
+                get_cached_context_window,
+                resolve_context_window,
+            )
+
+            win = get_cached_context_window(None, model) or resolve_context_window(
+                self.provider_name, model
+            )
+        except Exception:
+            win = 0
+        if win and win > 0:
+            # ~1/3 of window for completion, floor 512, cap for local hosts.
+            return max(512, min(self.LOCAL_MAX_TOKENS_CEILING, int(win) // 3))
+        return self.LOCAL_DEFAULT_MAX_TOKENS
+
+    def _estimate_prompt_tokens(self, messages: list[dict[str, Any]]) -> int:
+        """Rough prompt size for remaining-context clamp (chars/3 heuristic)."""
+        total = 0
+        for m in messages or []:
+            c = m.get("content")
+            if isinstance(c, str):
+                total += len(c)
+            elif isinstance(c, list):
+                for part in c:
+                    if isinstance(part, dict) and isinstance(part.get("text"), str):
+                        total += len(part["text"])
+                    else:
+                        total += 64
+            else:
+                total += 32
+            tcs = m.get("tool_calls")
+            if isinstance(tcs, list):
+                for tc in tcs:
+                    try:
+                        total += len(str(tc))
+                    except Exception:
+                        total += 64
+        return max(1, total // 3)
+
+    def _window_for_budget(self, model: str | None = None) -> int:
+        try:
+            from remedy.nanoswarm.token_nanobot import (
+                get_cached_context_window,
+                resolve_context_window,
+            )
+
+            win = get_cached_context_window(None, model) or resolve_context_window(
+                self.provider_name, model
+            )
+            return int(win) if win and int(win) > 0 else 8192
+        except Exception:
+            return 8192
+
+    def build_body(
+        self,
+        model: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        stream: bool,
+        *,
+        max_tokens: int | None = None,
+        thinking_level: str | None = None,
+    ) -> dict[str, Any]:
+        local_cap = self._local_completion_budget(model)
+        # Clamp to remaining n_ctx so prompt + completion fits
+        win = self._window_for_budget(model)
+        est = self._estimate_prompt_tokens(messages)
+        remaining = max(256, win - est - 256)
+        local_cap = max(256, min(local_cap, remaining))
+        req = local_cap if max_tokens is None else min(int(max_tokens), local_cap)
+        body = super().build_body(
+            model,
+            messages,
+            tools,
+            stream,
+            max_tokens=req,
+            thinking_level=thinking_level,
+        )
+        body["max_tokens"] = req
+        body.pop("reasoning_effort", None)
+        if tools:
+            # Structured tool calls: low temp + explicit tool_choice auto
+            body["temperature"] = min(float(body.get("temperature") or 0.4), 0.15)
+            body.setdefault("tool_choice", "auto")
+        body.setdefault("cache_prompt", True)
+        return body
+
+
+class RmbProvider(LlamaCppProvider):
+    """RMB — Remedy Muscle Bridge (managed local llama-server for agents).
+
+    UI brand: RMB. Engine: llama.cpp. Port 8787 by default.
+    Optimized for coding + multi-step tools and long sessions (harness + n_ctx).
+    """
+
+    provider_name = "rmb"
+    # Coding agents need headroom for multi-file patches + tool JSON
+    LOCAL_DEFAULT_MAX_TOKENS = 1536
+    LOCAL_MAX_TOKENS_CEILING = 3072
+    default_base_url = "http://127.0.0.1:8787/v1"
+
+    def _local_completion_budget(self, model: str | None = None) -> int:
+        """Prefer live RMB ctx_size when known (endless sessions need accurate fill%)."""
+        try:
+            from remedy.runtime.rmb.config import load_rmb_json, merge_state
+            from remedy.nanoswarm.token_nanobot import (
+                cache_context_window,
+                get_cached_context_window,
+            )
+
+            st = merge_state(load_rmb_json())
+            ctx = int(st.get("ctx_size") or 0)
+            if ctx >= 2048:
+                cache_context_window(st.get("base_url"), model, ctx)
+            hit = get_cached_context_window(st.get("base_url"), model)
+            if hit:
+                return max(512, min(self.LOCAL_MAX_TOKENS_CEILING, int(hit) // 3))
+        except Exception:
+            pass
+        return super()._local_completion_budget(model)
+
+    def _window_for_budget(self, model: str | None = None) -> int:
+        try:
+            from remedy.runtime.rmb.config import load_rmb_json, merge_state
+
+            st = merge_state(load_rmb_json())
+            ctx = int(st.get("ctx_size") or 0)
+            if ctx >= 2048:
+                return ctx
+        except Exception:
+            pass
+        return super()._window_for_budget(model)
+
+    def build_body(
+        self,
+        model: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        stream: bool,
+        *,
+        max_tokens: int | None = None,
+        thinking_level: str | None = None,
+    ) -> dict[str, Any]:
+        # Non-blocking wake — never wait 90s on the chat hot path
+        try:
+            from remedy.runtime.rmb.service import is_running, wake_rmb_async
+
+            if not is_running(require_http=True):
+                wake_rmb_async()
+        except Exception:
+            pass
+        body = super().build_body(
+            model,
+            messages,
+            tools,
+            stream,
+            max_tokens=max_tokens,
+            thinking_level=thinking_level,
+        )
+        if tools:
+            body["temperature"] = 0.1
+            body["tool_choice"] = body.get("tool_choice") or "auto"
+        return body
+
+
 _PROVIDERS: dict[str, type[ProviderAdapter]] = {
     "demo": OpenAIProvider,           # LLM7 guest OpenAI-compatible
     "openai": OpenAIProvider,
@@ -687,7 +874,9 @@ _PROVIDERS: dict[str, type[ProviderAdapter]] = {
     "mistral": MistralProvider,
     "openrouter": OpenAIProvider,     # OpenRouter is OpenAI-compatible
     "poe": OpenAIProvider,            # Poe OpenAI-compatible (api.poe.com/v1)
-    "ollama": OpenAIProvider,         # Ollama is OpenAI-compatible
+    "ollama": LlamaCppProvider,       # Ollama talks llama.cpp OpenAI-compat
+    "llamacpp": LlamaCppProvider,     # bundled llama-server (vision/nano runtime)
+    "rmb": RmbProvider,               # external Remedy Muscle Bridge host
     "custom": OpenAIProvider,         # Unknown custom endpoints default to OpenAI-compatible
 }
 
@@ -701,9 +890,67 @@ def get_provider(provider_name: str) -> ProviderAdapter:
     return cls()
 
 
+def _is_loopback_base_url(url: str) -> bool:
+    """True for local endpoints (localhost / 127.x / [::1]) and KoboldCpp."""
+    try:
+        host = (urlsplit(url).hostname or "").lower()
+    except ValueError:
+        host = ""
+    if "kobold" in url.lower():
+        return True
+    return host in ("localhost", "0.0.0.0", "::1") or host.startswith("127.")
+
+
+def _is_rmb_base_url(url: str) -> bool:
+    """True for Remedy Muscle Bridge host (port 8787 / dedicated hostnames)."""
+    try:
+        from remedy.runtime.rmb.mode import is_rmb_base_url
+
+        return is_rmb_base_url(url)
+    except Exception:
+        u = (url or "").lower()
+        if not u:
+            return False
+        try:
+            port = urlsplit(u).port
+        except ValueError:
+            port = None
+        return port == 8787 or ":8787" in u
+
+
+def select_provider(provider_name: str | None, base_url: str = "") -> ProviderAdapter:
+    """Pick an adapter from a provider name plus its base URL.
+
+    ``custom`` (or unknown names) point at OpenAI-compatible endpoints that
+    could be either cloud proxies or local servers. Local servers (llama.cpp /
+    Ollama / RMB / KoboldCpp) have a small fixed ``n_ctx`` and must not receive
+    a cloud-scale ``max_tokens`` — resolve them to the local adapter via the
+    base URL so completion stays within the physical window.
+    """
+    name = (provider_name or "openai").lower() or "openai"
+    if name == "rmb":
+        return get_provider("rmb")
+    if name == "custom" or name not in _PROVIDERS:
+        if base_url.strip():
+            return get_provider_for_base_url(base_url)
+        return get_provider(name)
+    # Any named provider on loopback → local adapter (avoid cloud max_tokens)
+    if base_url.strip() and _is_loopback_base_url(base_url.lower()):
+        if _is_rmb_base_url(base_url):
+            return get_provider("rmb")
+        if name == "ollama":
+            return get_provider("ollama")
+        return get_provider("llamacpp")
+    return get_provider(name)
+
+
 def get_provider_for_base_url(base_url: str) -> ProviderAdapter:
     """Heuristically detect the provider from the base URL."""
     url_lower = base_url.lower()
+    if _is_rmb_base_url(url_lower):
+        return get_provider("rmb")
+    if _is_loopback_base_url(url_lower):
+        return get_provider("llamacpp")
     if "anthropic" in url_lower:
         return get_provider("anthropic")
     if "deepseek" in url_lower:

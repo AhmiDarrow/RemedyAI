@@ -47,6 +47,52 @@ def test_token_remeasure_on_provider_change():
     assert estimate_text_tokens("abc") > 0
 
 
+def test_local_models_get_conservative_window():
+    """Small local models must never be budgeted like a 128k cloud endpoint."""
+    from remedy.nanoswarm.token_nanobot import (
+        cache_context_window,
+        clear_context_window_cache,
+        is_local_model,
+    )
+
+    clear_context_window_cache()
+    # The old bug: a local deepseek-r1:7b hit the 'deepseek' cloud rule → 128k.
+    assert resolve_context_window("ollama", "deepseek-r1:7b") == 16_384
+    assert resolve_context_window("ollama", "llama3.2") == 8_192
+    assert resolve_context_window("ollama", "qwen2.5:3b") == 8_192
+    assert resolve_context_window("ollama", "qwen2.5:1b") == 4_096
+    # A llama.cpp server behind a custom URL must also get the tight budget.
+    assert resolve_context_window("custom", "qwen2.5:7b") == 16_384
+    # RMB lattices (underscore size + .rmb4) — not 128k.
+    assert is_local_model(
+        "custom", "qwen25_coder_7b.rmb4", base_url="http://127.0.0.1:8787/v1"
+    )
+    rmb_win = resolve_context_window(
+        "custom",
+        "qwen25_coder_7b.rmb4",
+        base_url="http://127.0.0.1:8787/v1",
+    )
+    assert 4_096 <= rmb_win <= 16_384
+    # Live discovery from GET /v1/models overrides heuristics.
+    cache_context_window("http://127.0.0.1:8787/v1", "qwen25_coder_7b.rmb4", 6144)
+    assert (
+        resolve_context_window(
+            "custom",
+            "qwen25_coder_7b.rmb4",
+            base_url="http://127.0.0.1:8787/v1",
+        )
+        == 6144
+    )
+    clear_context_window_cache()
+
+
+def test_cloud_models_keep_big_window():
+    assert resolve_context_window("openai", "gpt-4o") == 128_000
+    assert resolve_context_window("anthropic", "claude-3-5-sonnet") >= 100_000
+    # Cloud serving a local-family model name stays large (e.g. Groq llama 70b).
+    assert resolve_context_window("groq", "llama-3.3-70b-versatile") == 128_000
+
+
 def test_pack_nanobot_aggressive_when_full():
     from remedy.nanoswarm.pack_nanobot import PackNanobot
 

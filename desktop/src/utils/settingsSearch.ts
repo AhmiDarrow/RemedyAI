@@ -10,6 +10,7 @@ export type SettingsSectionId =
   | 'always-ready'
   | 'tool-process'
   | 'vision'
+  | 'rmb'
   | 'memory-harness'
   | 'theme'
   | 'advanced'
@@ -71,9 +72,15 @@ export const SETTINGS_SECTION_META: Record<
     keywords: 'process trail full medium off diagnostics',
   },
   vision: {
-    title: 'Local model',
+    title: 'Local vision',
     summary: 'SmolVLM2 · image decode',
     keywords: 'vision local model smolvlm llama screenshot ocr image dependency',
+  },
+  rmb: {
+    title: 'RMB',
+    summary: 'Local agent · coding + tools',
+    keywords:
+      'rmb remedy muscle bridge local agent llama coding tools gguf qwen coder offline private',
   },
   'memory-harness': {
     title: 'Memory harness',

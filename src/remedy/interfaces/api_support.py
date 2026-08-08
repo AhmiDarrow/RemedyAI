@@ -1064,9 +1064,10 @@ def _sync_runtime_llm_from_config(
         )
     # Local providers: ensure a dummy key so stream path does not fall back.
     if not api_key and (
-        provider.lower() == "ollama" or (base_url and _is_local_url(base_url))
+        provider.lower() in ("ollama", "rmb", "llamacpp", "local")
+        or (base_url and _is_local_url(base_url))
     ):
-        api_key = "local"
+        api_key = "local" if provider.lower() != "rmb" else "rmb"
 
     if llm_only:
         # Chat/messenger turn: only LLM binding (safe under _llm_turn_lock).
@@ -1084,6 +1085,8 @@ def _sync_runtime_llm_from_config(
     if am not in ("ask", "auto"):
         am = "ask"
     scope = cfg.get("access_scope")
+    _hm = cfg.get("harness_min_context_pct")
+    _hx = cfg.get("harness_max_context_pct")
     _apply_llm_to_runtime(
         runtime,
         provider=provider,
@@ -1093,6 +1096,8 @@ def _sync_runtime_llm_from_config(
         project_path=cfg.get("project_path"),
         access_scope=str(scope) if scope is not None else None,
         harness_mode=cfg.get("harness_mode"),
+        harness_min_context_pct=float(_hm) if _hm is not None else None,
+        harness_max_context_pct=float(_hx) if _hx is not None else None,
         thinking_level=cfg.get("thinking_level"),
         approval_mode=am,
     )

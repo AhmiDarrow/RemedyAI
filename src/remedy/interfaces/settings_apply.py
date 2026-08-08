@@ -29,6 +29,7 @@ SETTABLE_KEYS = frozenset(
         "llm_provider",
         "llm_model",
         "llm_base_url",
+        "custom_llm_name",
         "llm_api_key",
         "project_path",
         "name",
@@ -130,6 +131,7 @@ def public_settings_snapshot(cfg: dict[str, Any] | None = None) -> dict[str, Any
         "llm_provider": provider,
         "llm_model": model,
         "llm_base_url": base_url,
+        "custom_llm_name": str(raw.get("custom_llm_name") or "").strip(),
         "llm_api_key_set": bool(key),
         "llm_ready": bool(provider_credentials_ready(raw) or key),
         "name": raw.get("name", "Remedy"),
@@ -242,6 +244,10 @@ async def apply_settings_update(
     patch["llm_base_url"] = base_url
     if prev_provider and prev_provider != provider:
         patch["last_llm_provider"] = prev_provider
+
+    if "custom_llm_name" in patch and patch["custom_llm_name"] is not None:
+        name = str(patch["custom_llm_name"]).strip()[:80]
+        patch["custom_llm_name"] = name
 
     if "project_path" in patch and patch["project_path"] is not None:
         from remedy.core.workspace import ensure_project_dir, resolve_project_path
@@ -562,6 +568,7 @@ async def apply_settings_update(
         "llm_provider",
         "llm_model",
         "llm_base_url",
+        "custom_llm_name",
         "persona",
         "project_path",
         "access_scope",

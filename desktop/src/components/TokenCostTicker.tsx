@@ -133,10 +133,17 @@ export function TokenCostTicker({
       style={shellStyle}
     >
       <div className="flex items-center gap-1.5 px-2.5 py-1.5">
-        <button
-          type="button"
+        <div
+          role="button"
+          tabIndex={0}
           className="flex-1 text-left min-w-0"
           onClick={() => setExpanded((e) => !e)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              setExpanded((v) => !v)
+            }
+          }}
           title="Usage details"
         >
           <div className="flex items-center gap-1.5 flex-wrap">
@@ -194,7 +201,7 @@ export function TokenCostTicker({
               <span style={{ color: 'var(--text-muted)' }}>idle</span>
             )}
           </div>
-        </button>
+        </div>
         <button
           type="button"
           onClick={() => setHidden(true)}

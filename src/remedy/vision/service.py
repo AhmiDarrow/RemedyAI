@@ -253,7 +253,27 @@ def activate_bundle(
 def maybe_autostart_local_model(
     cfg: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """If installed + enabled + auto_start, start llama-server (starts with Remedy)."""
+    """If installed + enabled + auto_start, start llama-server (starts with Remedy).
+
+    Skipped when RMB is the chat provider — vision/nano share the RMB host instead
+    of loading a second SmolVLM llama-server.
+    """
+    try:
+        from remedy.runtime.rmb.mode import should_skip_vision_stack
+
+        if should_skip_vision_stack(cfg if isinstance(cfg, dict) else None):
+            logger.info(
+                "Skipping SmolVLM/vision autostart — RMB local agent mode "
+                "(chat host handles local inference)"
+            )
+            return {
+                "ok": True,
+                "skipped": True,
+                "reason": "rmb_local_agent",
+                "message": "RMB owns local inference; vision SmolVLM not started",
+            }
+    except Exception:
+        pass
     home = _home_from_cfg(cfg)
     vcfg = vision_section_from_config(cfg)
     mid = str(vcfg.get("model_id") or DEFAULT_MODEL_ID)
@@ -390,11 +410,78 @@ def uninstall(
 
 
 def ensure_server(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
+    # RMB local agent: never spin up a second llama-server for SmolVLM
+    try:
+        from remedy.runtime.rmb.mode import should_skip_vision_stack
+
+        if should_skip_vision_stack(cfg if isinstance(cfg, dict) else None):
+            return {
+                "ok": False,
+                "skipped": True,
+                "reason": "rmb_local_agent",
+                "error": "Vision SmolVLM disabled while RMB is the local chat host",
+            }
+    except Exception:
+        pass
+    return _ensure_server_impl(cfg)
+
+
+def _ensure_server_impl(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     home = _home_from_cfg(cfg)
     vcfg = vision_section_from_config(cfg)
     # Wake from idle: starting counts as use
     result = start_server(home_dir=home, n_gpu_layers=int(vcfg.get("n_gpu_layers", -1)))
+
+    if result.get("ok"):
+        # Never spin MDL extra tiers when RMB owns local chat
+        try:
+            from remedy.runtime.rmb.mode import should_skip_vision_stack
+
+            if not should_skip_vision_stack(cfg if isinstance(cfg, dict) else None):
+                _start_mdl_tiers()
+        except Exception:
+            _start_mdl_tiers()
+
     return result
+
+
+def _start_mdl_tiers() -> None:
+    """Start MDL LIGHT tier alongside the main server (best-effort)."""
+    try:
+        from remedy.runtime.mdl import MDL_TIERS
+        from remedy.runtime.mdl_runtime import ensure_tier, is_tier_running
+        from remedy.vision.config import load_vision_json
+        from remedy.vision.install import runtime_binary_path
+
+        vstate = load_vision_json()
+        model_path = vstate.get("model_path")
+        mmproj = vstate.get("mmproj_path")
+        rb = vstate.get("runtime_binary")
+
+        if not model_path or not Path(str(model_path)).is_file():
+            return
+        if not rb or not Path(str(rb)).is_file():
+            rb_path = runtime_binary_path()
+            if rb_path is None:
+                return
+            rb = str(rb_path)
+
+        light = MDL_TIERS.get("light")
+        if light is None:
+            return
+
+        if is_tier_running("light"):
+            return
+
+        ensure_tier(
+            "light",
+            model_path=str(model_path),
+            mmproj_path=str(mmproj) if mmproj else None,
+            runtime_binary=str(rb),
+            n_gpu_layers=light.n_layers,
+        )
+    except Exception:
+        logger.debug("MDL tier startup skipped", exc_info=True)
 
 
 def stop(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -494,6 +581,60 @@ def decode_for_turn(
         }
     """
     atts = list(attachments or [])
+    # RMB exclusive host: path-only images for local RMB chat.
+    # Cloud providers with native vision stay native; only Smol *start* is blocked.
+    try:
+        from remedy.runtime.rmb.mode import (
+            force_path_only_images,
+            should_skip_vision_stack,
+        )
+
+        cfg_d = cfg if isinstance(cfg, dict) else None
+        base_hint = str((cfg_d or {}).get("llm_base_url") or "")
+        if force_path_only_images(cfg_d, provider=provider, base_url=base_hint):
+            paths: list[str] = []
+            for a in atts:
+                mime = str(a.get("mime") or "")
+                if a.get("is_image") or mime.startswith("image/"):
+                    if "svg" in mime.lower():
+                        continue
+                    p = Path(str(a.get("path") or ""))
+                    if p.suffix.lower() == ".svg":
+                        continue
+                    paths.append(str(p))
+            if not paths:
+                return {
+                    "mode": "text_only",
+                    "briefs": [],
+                    "combined": "",
+                    "events": ["RMB local agent: no image attachments"],
+                    "hint": None,
+                }
+            listing = "\n".join(f"- {p}" for p in paths[:12])
+            return {
+                "mode": "text_only",
+                "briefs": [
+                    "[RMB] Image path(s) on disk — use tools "
+                    f"(read/list); SmolVLM is unloaded while RMB runs:\n{listing}"
+                ],
+                "combined": (
+                    "[RMB] Attached image file path(s) available on this machine. "
+                    "Inspect with tools if needed; SmolVLM is not loaded while RMB runs.\n"
+                    + listing
+                ),
+                "events": [
+                    "RMB local agent: skipped SmolVLM — images as local paths"
+                ],
+                "hint": None,
+            }
+        # Exclusive GPU: do not start Smol for cloud chat either — use native
+        if should_skip_vision_stack(cfg_d):
+            # Fall through with decoder treated unavailable; native path later
+            # if chat_has_vision. Mark skip so start_server is not attempted.
+            pass
+    except Exception:
+        pass
+
     # Path jail: only decode images under the attachments tree (forged paths drop).
     with suppress(Exception):
         from remedy.interfaces.attachments import filter_jailed_attachments
@@ -525,6 +666,7 @@ def decode_for_turn(
         }
 
     vcfg = vision_section_from_config(cfg)
+
     prefer_local = bool(force or vcfg.get("force_decode"))
     # Capability of the *chat* model ignoring force_decode (still honors per-model map).
     cfg_no_force = dict(cfg or {})
@@ -588,6 +730,31 @@ def decode_for_turn(
         }
 
     if not is_running(home):
+        # Defense: never start Smol mid-decode if RMB took the GPU
+        try:
+            from remedy.runtime.rmb.mode import should_skip_vision_stack
+
+            if should_skip_vision_stack(cfg if isinstance(cfg, dict) else None):
+                if chat_has_vision:
+                    return {
+                        "mode": "native",
+                        "briefs": [],
+                        "combined": "",
+                        "events": [
+                            "RMB exclusive host — using chat provider vision "
+                            "(SmolVLM not started)"
+                        ],
+                        "hint": None,
+                    }
+                return {
+                    "mode": "unavailable",
+                    "briefs": [],
+                    "combined": "",
+                    "events": ["RMB exclusive host — SmolVLM suspended"],
+                    "hint": "SmolVLM unloaded while RMB is running",
+                }
+        except Exception:
+            pass
         started = start_server(
             home_dir=home,
             n_gpu_layers=int(vcfg.get("n_gpu_layers", -1)),

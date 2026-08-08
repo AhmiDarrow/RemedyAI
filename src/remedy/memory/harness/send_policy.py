@@ -25,35 +25,124 @@ def resolve_context_window_for_runtime(runtime: Any) -> int:
         or getattr(getattr(runtime, "config", None), "llm_model", "")
         or ""
     )
+    base_url = str(
+        getattr(runtime, "_llm_base_url", None)
+        or getattr(getattr(runtime, "config", None), "llm_base_url", "")
+        or ""
+    )
     try:
+        from remedy.core.llm_binding import get_llm_binding
         from remedy.nanoswarm.token_nanobot import resolve_context_window
 
-        return int(resolve_context_window(provider, model))
+        with suppress(Exception):
+            bind = get_llm_binding(runtime)
+            provider = bind.provider or provider
+            model = bind.model or model
+            base_url = bind.base_url or base_url
+        return int(resolve_context_window(provider, model, base_url=base_url))
     except Exception:
         return 128_000
 
 
-def _ensure_session_brief(runtime: Any, session_id: str = "") -> Any:
-    """Create SessionBrief on first auto-compress if missing.
+def _session_brief_store(runtime: Any) -> dict[str, Any]:
+    """Per-session brief map on the shared runtime (concurrent tabs)."""
+    store = getattr(runtime, "_session_briefs", None)
+    if not isinstance(store, dict):
+        store = {}
+        runtime._session_briefs = store
+    return store
 
-    Reject briefs stamped for a different session (shared runtime tabs).
+
+def _ensure_session_brief(runtime: Any, session_id: str = "") -> Any:
+    """Create or restore SessionBrief for this session_id.
+
+    Concurrent tabs share one agent runtime; briefs are keyed by session so
+    tab A compress does not wipe tab B's working memory.
     """
     sid = session_id or str(getattr(runtime, "_session_id", "") or "")
+    store = _session_brief_store(runtime)
+    if sid and sid in store:
+        brief = store[sid]
+        runtime._session_brief = brief
+        return brief
+
     brief = getattr(runtime, "_session_brief", None)
     if brief is not None:
         bsid = str(getattr(brief, "session_id", "") or "")
-        if not sid or not bsid or bsid == sid:
+        if sid and bsid and bsid != sid:
+            # Park foreign brief under its own key; do not destroy it
+            store[bsid] = brief
+            brief = None
+        elif sid and not bsid:
+            with suppress(Exception):
+                brief.session_id = sid
+        elif not sid or not bsid or bsid == sid:
             if sid and brief is not None and not bsid:
                 with suppress(Exception):
                     brief.session_id = sid
+            if sid and brief is not None:
+                store[sid] = brief
             return brief
-        # Foreign brief — drop
-        runtime._session_brief = None
+
     from remedy.memory.harness.brief import SessionBrief
 
     brief = SessionBrief(session_id=sid)
+    if sid:
+        store[sid] = brief
+        # Bound store size (LRU-ish: drop oldest keys)
+        if len(store) > 48:
+            for k in list(store.keys())[: max(0, len(store) - 40)]:
+                if k != sid:
+                    store.pop(k, None)
     runtime._session_brief = brief
     return brief
+
+
+def _safe_insert_before_last(
+    messages: list[dict[str, Any]],
+    content: str | dict[str, Any],
+) -> None:
+    """Insert a system (or raw) message before the final turn; never IndexError."""
+    if isinstance(content, dict):
+        msg = content
+    else:
+        msg = {"role": "system", "content": str(content)}
+    if len(messages) >= 2:
+        messages.insert(-1, msg)
+    elif messages:
+        messages.insert(0, msg)
+    else:
+        messages.append(msg)
+
+
+def _soft_inject_brief_pointer(
+    messages: list[dict[str, Any]],
+    brief: Any,
+    *,
+    silent: bool = False,
+) -> bool:
+    """Inject a compact Session Brief block after soft prune (local/RMB continuity)."""
+    if not _brief_has_substance(brief):
+        return False
+    try:
+        from remedy.memory.harness.brief import brief_to_context_block
+
+        block = brief_to_context_block(brief, max_chars=900)
+    except Exception:
+        block = ""
+    if not (block or "").strip():
+        return False
+    if silent:
+        # No "please compress" language — memory just appears
+        text = "[Working memory]\n" + block.strip()
+    else:
+        text = (
+            "[Memory Harness] Session Brief (auto):\n"
+            + block.strip()
+            + "\nContinue from this state; re-read files if you need raw detail."
+        )
+    _safe_insert_before_last(messages, text)
+    return True
 
 
 def _brief_has_substance(brief: Any) -> bool:
@@ -236,9 +325,8 @@ def apply_auto_harness_send_policy(
     # Metabolism injects (evidence/crystal/CUA) owned by begin_turn_metabolism —
     # do not double-inject here (token waste + lock churn).
     if injects:
-        messages.insert(
-            -1,
-            {"role": "system", "content": "\n\n".join(injects)},
+        _safe_insert_before_last(
+            messages, {"role": "system", "content": "\n\n".join(injects)}
         )
 
     if not level:
@@ -294,10 +382,49 @@ def apply_auto_harness_send_policy(
                 min_chars=8000,
                 keep_recent_tools=keep,
             )
-        messages.insert(
-            -1,
-            compression_nudge_message("soft", tool_chain_active=chain),
-        )
+        # Refresh brief heuristically so soft prune keeps a continuity thread
+        with suppress(Exception):
+            from remedy.memory.harness.compressor import heuristic_merge_from_history
+
+            b = getattr(runtime, "_session_brief", None)
+            if b is not None and pre_prune:
+                runtime._session_brief = heuristic_merge_from_history(
+                    b, pre_prune, intent_hint=user_text
+                )
+
+        # RMB / local agent: silent mechanical compress — no "please compress" chatter
+        _silent = False
+        with suppress(Exception):
+            from remedy.runtime.rmb.mode import silent_context_for_local_agent
+
+            _base = str(
+                getattr(runtime, "_llm_base_url", None)
+                or getattr(cfg, "llm_base_url", "")
+                or ""
+            )
+            _silent = silent_context_for_local_agent(
+                provider=provider,
+                base_url=_base,
+                cfg={
+                    "llm_provider": provider,
+                    "llm_base_url": _base,
+                },
+            )
+        # Soft brief pointer: always when substance (esp. silent local)
+        with suppress(Exception):
+            if _soft_inject_brief_pointer(
+                messages,
+                getattr(runtime, "_session_brief", None),
+                silent=_silent,
+            ):
+                meta["soft_brief_injected"] = True
+        if not _silent:
+            _safe_insert_before_last(
+                messages,
+                compression_nudge_message("soft", tool_chain_active=chain),
+            )
+        else:
+            meta["silent_context"] = True
         with suppress(Exception):
             from remedy.memory.harness.local_brief import schedule_background_brief_update
 
@@ -420,24 +547,54 @@ def apply_auto_harness_send_policy(
                         )
     elif chain_now and quality_ok and score >= 0.65:
         meta["middle_replace_deferred_chain"] = True
-    elif score < 0.5 or not quality_ok:
+    _silent_strong = False
+    with suppress(Exception):
+        from remedy.runtime.rmb.mode import silent_context_for_local_agent
+
+        _base_s = str(
+            getattr(runtime, "_llm_base_url", None)
+            or getattr(cfg, "llm_base_url", "")
+            or ""
+        )
+        _silent_strong = silent_context_for_local_agent(
+            provider=provider,
+            base_url=_base_s,
+            cfg={
+                "llm_provider": provider,
+                "llm_base_url": _base_s,
+            },
+        )
+
+    if not _silent_strong and (score < 0.5 or not quality_ok):
         with suppress(Exception):
-            messages.insert(
-                -1,
+            _safe_insert_before_last(
+                messages,
                 {
                     "role": "system",
                     "content": (
                         "[Memory Harness] Continuity quality is low — "
-                        "prefer re-reading key files over guessing. "
+                        "verify exact facts from history/tools over guessing. "
                         "Session Brief may be incomplete."
                     ),
                 },
             )
 
-    messages.insert(
-        -1,
-        compression_nudge_message("strong", tool_chain_active=chain_now),
-    )
+    if not _silent_strong:
+        _safe_insert_before_last(
+            messages,
+            compression_nudge_message("strong", tool_chain_active=chain_now),
+        )
+    else:
+        meta["silent_context"] = True
+        # Silent strong without middle replace still needs a brief anchor
+        if not meta.get("middle_replaced"):
+            with suppress(Exception):
+                if _soft_inject_brief_pointer(
+                    messages,
+                    getattr(runtime, "_session_brief", None),
+                    silent=True,
+                ):
+                    meta["strong_brief_injected"] = True
 
     local_ok = False
     with suppress(Exception):

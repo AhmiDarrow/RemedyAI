@@ -13,6 +13,8 @@ export interface Settings {
   llm_provider: string
   llm_model: string
   llm_base_url: string
+  /** User-set display name for the custom OpenAI-compatible endpoint */
+  custom_llm_name?: string
   llm_api_key_set: boolean
   name: string
   /** What Remedy calls the human user */
@@ -175,6 +177,8 @@ export interface SettingsUpdate {
   llm_provider?: string
   llm_model?: string
   llm_base_url?: string
+  /** User-set display name for the custom OpenAI-compatible endpoint */
+  custom_llm_name?: string
   llm_api_key?: string
   project_path?: string
   name?: string
@@ -225,6 +229,7 @@ export async function updateSettings(
   llm_provider?: string
   llm_model?: string
   llm_base_url?: string
+  custom_llm_name?: string
 }> {
   return apiFetch('/settings', {
     method: 'PUT',

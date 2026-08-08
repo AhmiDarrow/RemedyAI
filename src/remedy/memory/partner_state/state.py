@@ -377,7 +377,7 @@ class PartnerState:
             f"name={txn.name} outcome={txn.outcome} effect={txn.effect}\n"
             f"artifacts={txn.artifacts}\n"
             f"preview:\n{txn.result_preview}\n"
-            f"(full body not offloaded — re-run tool if needed)"
+            f"(full body retained in session history)"
         )
 
     def unverified_writes(self) -> list[WriteEntry]:

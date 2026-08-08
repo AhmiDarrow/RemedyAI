@@ -255,13 +255,13 @@ class TestEnvBootstrap:
         )
         assert out["llm_provider"] == "openai"
 
-    def test_public_catalog_marks_custom_advanced(self):
+    def test_public_catalog_marks_custom_primary(self):
         from remedy.interfaces.config import public_provider_catalog
 
         items = {p["id"]: p for p in public_provider_catalog()}
         assert items["xai"]["oauth"] is True
         assert items["xai"]["show_base_url"] is False
-        assert items["custom"]["advanced"] is True
+        assert items["custom"]["advanced"] is False
         assert items["custom"]["show_base_url"] is True
         assert "groq" in items
         assert "mistral" in items

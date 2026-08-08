@@ -210,7 +210,7 @@ MAX_PARALLEL_TOOLS = 16
 # Prefer recent turns, but allow very long multi-turn sessions.
 HISTORY_MSG_LIMIT = 400
 # Practical multi-turn budget (tiered). Full mode can raise via env.
-HISTORY_CHAR_BUDGET = 1_500_000
+HISTORY_CHAR_BUDGET = 3_000_000
 # Soft-trim only for very large individual history messages.
 HISTORY_MSG_SOFT_TRIM = 200_000
 # Tiered defaults: keep answers complete while bounding tool bloat.
@@ -229,8 +229,8 @@ if _FULL:
     HISTORY_MSG_LIMIT = 2_000
     HISTORY_MSG_SOFT_TRIM = 0
 else:
-    TOOL_RESULT_CHAR_CAP = 64_000
-    FILE_READ_CHAR_CAP = 128_000
+    TOOL_RESULT_CHAR_CAP = 128_000
+    FILE_READ_CHAR_CAP = 256_000
     # Absolute emergency only (OOM guard).
     HARD_SAFETY_CHARS = 2_000_000
 

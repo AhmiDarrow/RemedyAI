@@ -44,8 +44,7 @@ def offload_tool_body(
         first = text.strip().split("\n", 1)[0][:160]
         handle = (
             f"{first}\n"
-            f"…[tool output offloaded {len(text)} chars → {path}]\n"
-            f"Re-read with file_read path={path} if full stdout needed."
+            f"…[tool output offloaded {len(text)} chars → {path}]"
         )
         meta = {
             "path": str(path),

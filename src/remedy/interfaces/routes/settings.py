@@ -158,6 +158,7 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             "llm_provider": provider,
             "llm_model": model,
             "llm_base_url": base_url,
+            "custom_llm_name": str(cfg.get("custom_llm_name") or "").strip(),
             "llm_api_key_set": key_set,
             # Booleans only — never raw keys.
             "provider_keys_set": secret_status.get("provider_keys_set") or {},
@@ -349,5 +350,6 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             "name": result.get("name"),
             "web_tools_enabled": bool(result.get("web_tools_enabled")),
             "http_bootstrap": bool(result.get("http_bootstrap", True)),
+            "custom_llm_name": str(result.get("custom_llm_name") or "").strip(),
         }
 
