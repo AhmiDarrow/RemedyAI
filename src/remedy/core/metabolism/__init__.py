@@ -14,4 +14,13 @@ __all__ = [
     "TurnTier",
     "classify_turn_tier",
     "tier_policy",
+    "organism_pulse_block",
 ]
+
+
+def __getattr__(name: str):
+    if name == "organism_pulse_block":
+        from remedy.core.metabolism.organism import organism_pulse_block
+
+        return organism_pulse_block
+    raise AttributeError(name)

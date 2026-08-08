@@ -36,6 +36,8 @@ def begin_turn_metabolism(
     work_roots: list[str] | None = None,
     brief_head: str = "",
     pre_tier: int | None = None,
+    runtime: Any = None,
+    home: Any = None,
 ) -> dict[str, Any]:
     """Classify tier, warm map/ledger/governor, return policy + inject notes.
 
@@ -196,6 +198,28 @@ def begin_turn_metabolism(
                 injects.append(
                     f"[Skill genome] Prefer proven skills when relevant: {names}"
                 )
+
+    # Organism pulse — one living surface (soul + forge + immune + metabolism)
+    with suppress(Exception):
+        from remedy.core.metabolism.organism import organism_pulse_block
+
+        home_m = home
+        if home_m is None and runtime is not None:
+            with suppress(Exception):
+                home_m = getattr(
+                    getattr(runtime, "config", None), "home_dir", None
+                )
+        pulse = organism_pulse_block(
+            session_id=sid,
+            tier=int(tier),
+            home=home_m,
+            runtime=runtime,
+            user_text=user_text or "",
+            project_path=project_path or "",
+            max_chars=900 if int(tier) >= 2 else 520,
+        )
+        if pulse:
+            injects.append(pulse)
 
     ir = None
     if policy.record_ir:

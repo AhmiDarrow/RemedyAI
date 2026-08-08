@@ -285,6 +285,9 @@ def apply_metabolism_injects(
                 raw_pt = getattr(runtime, "_turn_tier", None)
             if raw_pt is not None:
                 pre_tier_m = int(raw_pt)
+        home_m = None
+        with suppress(Exception):
+            home_m = getattr(getattr(runtime, "config", None), "home_dir", None)
         meta = begin_turn_metabolism(
             session_id=sid_m,
             user_text=message or "",
@@ -298,6 +301,8 @@ def apply_metabolism_injects(
             work_roots=roots_m or None,
             brief_head=(message or "")[:200],
             pre_tier=pre_tier_m,
+            runtime=runtime,
+            home=home_m,
         )
         runtime._turn_tier = int(meta.get("tier") or 1)
         runtime._turn_tier_label = str(meta.get("tier_label") or "")
