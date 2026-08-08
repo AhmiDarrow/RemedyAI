@@ -46,6 +46,11 @@ from remedy.core.react_policy import (
     turn_has_unfinished_work,
 )
 from remedy.core.react_loop.build_request import build_step_request_body
+from remedy.core.react_loop.tool_batch import (
+    apply_build_engine_after_batch,
+    inject_phase_nudge,
+    record_tool_batch_stats,
+)
 from remedy.core.react_loop.stream_consume import consume_llm_http_response
 from remedy.core.react_loop.recovery import (
     fatal_model_error_message,
@@ -1924,32 +1929,16 @@ async def call_llm_stream(runtime, message: str,
                         messages.append(tool_msg)
                         batch_tool_msgs.append(tool_msg)
 
-                # Hot path: skip per-step debug unless operator asked for DEBUG
-                # (debug.log ring alone must not tax every tool batch).
-                try:
-                    from remedy.core.logging import hot_debug_enabled
-
-                    if hot_debug_enabled():
-                        logger.debug(
-                            "ReAct step %d executed %d tool call(s)",
-                            step + 1,
-                            len(fresh_calls),
-                        )
-                except Exception:
-                    pass
-                tool_batches_this_turn += 1
-                tool_batches_in_epoch += 1
-                turn.record_tool_batch(
-                    extract_tool_names(fresh_calls),
-                    paths=extract_write_paths(fresh_calls),
+                _bdelta, _pdelta = record_tool_batch_stats(
+                    turn=turn,
+                    fresh_calls=fresh_calls,
+                    batch_tool_msgs=batch_tool_msgs,
+                    step=step,
                 )
-                if is_productive_tool_batch(batch_tool_msgs):
-                    productive_in_epoch += 1
-                # Task-loop phase nudge (RESEARCH → PLAN → BUILD) — deep-dive #10
-                with suppress(Exception):
-                    pn = turn.phase_nudge()
-                    if pn and turn.inject_count <= turn.max_injects:
-                        messages.append(pn)
+                tool_batches_this_turn += _bdelta
+                tool_batches_in_epoch += _bdelta
+                productive_in_epoch += _pdelta
+                inject_phase_nudge(turn, messages)
                 # Machine build engine: syntax gate + auto-verify + force nudges
                 with suppress(Exception):
                     from remedy.core.build_engine import (
