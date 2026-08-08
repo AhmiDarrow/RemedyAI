@@ -3,7 +3,14 @@ import type { ReactNode } from 'react'
 import type { ConnectedProvider } from '../../api/providers'
 import type { SettingsFormProps } from './formTypes'
 import { SettingsSection } from '../SettingsSection'
-import { FormHint, FormLabel, FormLinkButton, FormNotice, FormSelect } from './formUi'
+import {
+  FormActionButton,
+  FormHint,
+  FormLabel,
+  FormLinkButton,
+  FormNotice,
+  FormSelect,
+} from './formUi'
 import { Field } from './shared'
 import { openExternalUrl } from '../../api/auth'
 
@@ -133,29 +140,19 @@ export function SettingsSections_provider(p: SettingsFormProps): ReactNode {
                 <span className="text-[11px]" style={{ color: 'var(--success)' }}>
                   Connected ({xaiAuth.auth_method === 'oauth' ? 'OAuth' : 'API key'})
                 </span>
-                <button
-                  type="button"
-                  onClick={() => void handleXaiLogout()}
-                  className="px-2 py-1 rounded text-[11px]"
-                  style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
-                >
+                <FormActionButton onClick={() => void handleXaiLogout()}>
                   Sign out
-                </button>
+                </FormActionButton>
               </div>
             ) : (
-              <button
-                type="button"
-                onClick={() => void handleXaiSignIn()}
+              <FormActionButton
+                variant="primary"
+                className="w-full"
                 disabled={xaiLoginBusy}
-                className="w-full py-1.5 rounded text-xs font-semibold"
-                style={{
-                  background: xaiLoginBusy ? 'var(--bg-secondary)' : 'var(--accent)',
-                  color: '#fff',
-                  cursor: xaiLoginBusy ? 'wait' : 'pointer',
-                }}
+                onClick={() => void handleXaiSignIn()}
               >
                 {xaiLoginBusy ? 'Waiting for approval…' : 'Sign in with xAI'}
-              </button>
+              </FormActionButton>
             )}
             {xaiUserCode && (
               <div className="text-[11px] space-y-1" style={{ color: 'var(--text-secondary)' }}>

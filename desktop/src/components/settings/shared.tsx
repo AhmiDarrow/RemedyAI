@@ -1,6 +1,8 @@
 /** Shared Settings UI primitives and constants. */
 /* oxlint-disable react/only-export-components -- shared constants + helpers for form sections */
 
+import { FormInput, FormLabel } from './formUi'
+
 export const PERSONAS = [
   { id: 'balanced', name: 'Balanced', description: 'Helpful and adaptable to the task' },
   { id: 'efficient', name: 'Efficient', description: 'Concise, code-first, minimal explanation' },
@@ -18,6 +20,7 @@ export async function pickProjectFolder(): Promise<string | null> {
   }
 }
 
+/** Standard labeled text field — uses shared FormLabel + FormInput. */
 export function Field({
   label,
   value,
@@ -33,18 +36,12 @@ export function Field({
 }) {
   return (
     <div className="mb-2.5">
-      <label
-        className="block mb-1 text-[0.68rem] font-semibold uppercase tracking-wide"
-        style={{ color: 'var(--text-muted)' }}
-      >
-        {label}
-      </label>
-      <input
+      <FormLabel>{label}</FormLabel>
+      <FormInput
         type={password ? 'password' : 'text'}
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={onChange}
         placeholder={placeholder}
-        className="ui-input"
       />
     </div>
   )
