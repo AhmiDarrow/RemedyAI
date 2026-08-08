@@ -6,6 +6,7 @@ from pathlib import Path
 
 from remedy.interfaces.attachments import (
     build_attachment_prompt_block,
+    chat_media_display_path,
     build_multimodal_user_content,
     filter_jailed_attachments,
     inject_text_file_snippets,
@@ -21,6 +22,21 @@ from remedy.interfaces.attachments import (
 def test_sanitize_filename():
     assert ".." not in sanitize_filename("../../etc/passwd")
     assert sanitize_filename("ok file.py") == "ok file.py"
+
+
+def test_chat_media_display_path_prefers_attachments_relative(tmp_path: Path):
+    home = tmp_path / "home"
+    abs_path = home / "attachments" / "sess-a" / "shot.png"
+    abs_path.parent.mkdir(parents=True)
+    abs_path.write_bytes(b"x")
+    rel = chat_media_display_path(abs_path, home_dir=home)
+    assert rel == "attachments/sess-a/shot.png"
+    # Outside home → absolute posix-ish path
+    other = tmp_path / "elsewhere" / "x.png"
+    other.parent.mkdir(parents=True)
+    other.write_bytes(b"y")
+    out = chat_media_display_path(other, home_dir=home)
+    assert "elsewhere" in out.replace("\\", "/")
 
 
 def test_save_upload_and_text_inject(tmp_path: Path, monkeypatch):
@@ -101,9 +117,13 @@ def test_attachment_block_embeds_images_for_chat_display(tmp_path: Path):
         content_type="image/png",
         home_dir=home,
     )
-    block = build_attachment_prompt_block([meta])
+    block = build_attachment_prompt_block([meta], home_dir=home)
     assert "![" in block
     assert "dot.png" in block
+    # Prefer stable attachments/… relative src for desktop /api/media
+    assert "attachments/" in block.replace("\\", "/")
+    assert "dot.png" in block
+    # Absolute path still listed for tools/file_read
     assert meta["path"].replace("\\", "/") in block.replace("\\", "/")
 
 

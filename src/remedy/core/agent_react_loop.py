@@ -1422,21 +1422,33 @@ async def call_llm_stream(runtime, message: str,
                                 round_state.last_usage = u
                         except Exception:
                             pass
+                        # Non-stream JSON: prefer message.tool_calls path (not SSE deltas).
+                        from remedy.core.react_stream import (
+                            apply_openai_completion_message,
+                        )
+
+                        apply_openai_completion_message(
+                            round_state, data, stream_live=stream_live
+                        )
+                        # Keep adapter extract for provider-specific shapes + collected.
                         parsed = _adapter.extract_response(data)
-                        content = parsed.get("content")
-                        if content:
-                            round_state.content_parts.append(content)
-                        # Capture provider reasoning for tool-turn replay.
+                        if not round_state.content_parts and parsed.get("content"):
+                            round_state.content_parts.append(parsed["content"])
                         reason = (
                             parsed.get("reasoning_content")
                             or parsed.get("reasoning")
                             or ""
                         )
-                        if isinstance(reason, str) and reason.strip():
+                        if (
+                            isinstance(reason, str)
+                            and reason.strip()
+                            and not round_state.reasoning_parts
+                        ):
                             round_state.reasoning_parts.append(reason.strip())
-                        raw_tcs = parsed.get("tool_calls")
-                        if raw_tcs:
-                            round_state.tool_call_acc = dict(enumerate(raw_tcs))
+                        if not round_state.tool_call_acc and parsed.get("tool_calls"):
+                            raw_tcs = parsed.get("tool_calls")
+                            if isinstance(raw_tcs, list):
+                                round_state.tool_call_acc = dict(enumerate(raw_tcs))
                         collected = {**collected, **parsed}
 
                     content_parts = round_state.content_parts

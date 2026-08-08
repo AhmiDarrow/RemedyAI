@@ -444,13 +444,19 @@ export function useMessages(sessionId: string | null) {
       }
 
       // Match server-side attachment display: markdown images so ChatImage renders.
+      // Prefer home-relative attachments/… srcs (reliable /api/media resolve).
       let display = text.trim()
       if (hasAtt) {
         const imgs: string[] = []
         const lines: string[] = []
         for (const a of attachments || []) {
           const name = a.name || a.path.split(/[/\\]/).pop() || 'file'
-          const path = (a.path || '').replace(/\\/g, '/')
+          let path = (a.path || '').replace(/\\/g, '/')
+          const attRel = path.match(/(?:^|\/)\.remedy\/attachments\/(.+)$/i)
+            || path.match(/(?:^|\/)attachments\/([^/]+\/[^/]+)$/i)
+          if (attRel) {
+            path = `attachments/${attRel[1]!.replace(/^attachments\//i, '')}`
+          }
           if (a.is_image && path) {
             imgs.push(
               /[\s()]/.test(path) ? `![${name}](<${path}>)` : `![${name}](${path})`,

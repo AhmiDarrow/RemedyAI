@@ -598,6 +598,11 @@ button.chat-chip:disabled {
   50%, 100% { opacity: 0; }
 }
 
+@keyframes remedy-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 @keyframes remedy-fade-up {
   from {
     opacity: 0;
