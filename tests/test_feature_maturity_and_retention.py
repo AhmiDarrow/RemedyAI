@@ -55,6 +55,30 @@ def test_retention_policy_from_config() -> None:
     assert memory_encryption_requested({"memory_encrypt": True}) is True
     assert memory_encryption_requested({}) is False
 
+    # Flat retention_* keys must win even when short-key defaults are non-zero
+    p2 = RetentionPolicy.from_config(
+        {
+            "retention_computer_shot_days": 3,
+            "retention_log_days": 5,
+            "retention_undo_days": 9,
+        }
+    )
+    assert p2.computer_shot_days == 3
+    assert p2.log_days == 5
+    assert p2.undo_days == 9
+
+    # Explicit 0 disables that category (must not fall through to defaults)
+    p3 = RetentionPolicy.from_config(
+        {
+            "computer_shot_days": 0,
+            "log_days": 0,
+            "undo_days": 0,
+        }
+    )
+    assert p3.computer_shot_days == 0
+    assert p3.log_days == 0
+    assert p3.undo_days == 0
+
 
 def test_purge_attachments_by_age(tmp_path: Path) -> None:
     home = tmp_path / ".remedy"
