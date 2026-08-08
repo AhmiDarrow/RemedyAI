@@ -2,7 +2,16 @@
 import type { ReactNode } from 'react'
 import type { SettingsFormProps } from './formTypes'
 import { SettingsSection } from '../SettingsSection'
-import { FormHint, FormLabel } from './formUi'
+import {
+  FormActionButton,
+  FormHint,
+  FormLabel,
+  FormNotice,
+  FormSegmented,
+  FormStatusCard,
+  FormStatusRow,
+  FormToggle,
+} from './formUi'
 import {
   activateVisionBundle,
   installVision,
@@ -50,86 +59,55 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
           SmolVLM is <strong>unloaded</strong> until you stop RMB. Drop any GGUF in{' '}
           <code className="text-[9px]">~/.remedy/rmb/models/</code>.
         </FormHint>
-        <div
-          className="rounded-md px-2 py-1.5 mb-2 text-[10px] space-y-0.5"
-          style={{
-            background: 'var(--bg-tertiary)',
-            border: '1px solid var(--border)',
-            color: 'var(--text-secondary)',
-          }}
-        >
-          <div className="flex justify-between gap-2">
-            <span style={{ color: 'var(--text-muted)' }}>Engine</span>
-            <span>{rmb?.engine || 'llama.cpp'}</span>
-          </div>
-          <div className="flex justify-between gap-2">
-            <span style={{ color: 'var(--text-muted)' }}>Model</span>
-            <span className="text-right truncate max-w-[60%]">
-              {rmb?.model?.name || rmb?.model_id || '—'}
-            </span>
-          </div>
-          <div className="flex justify-between gap-2">
-            <span style={{ color: 'var(--text-muted)' }}>Status</span>
-            <span>
-              {!rmb
-                ? '…'
-                : rmb.ready
-                  ? 'Ready'
-                  : rmb.running
-                    ? 'Starting…'
-                    : rmb.model_present && rmb.runtime_present
-                      ? 'Stopped'
-                      : rmb.not_ready_hint || 'Not ready'}
-            </span>
-          </div>
-          <div className="flex justify-between gap-2">
-            <span style={{ color: 'var(--text-muted)' }}>SmolVLM</span>
-            <span>
-              {rmb?.vision_suspended || rmb?.running
-                ? 'Suspended (RMB exclusive)'
-                : 'Available when RMB stops'}
-            </span>
-          </div>
-          <div className="flex justify-between gap-2">
-            <span style={{ color: 'var(--text-muted)' }}>Endpoint</span>
-            <span className="font-mono text-[9px] truncate max-w-[60%]">
+        <FormStatusCard>
+          <FormStatusRow label="Engine">{rmb?.engine || 'llama.cpp'}</FormStatusRow>
+          <FormStatusRow label="Model">
+            {rmb?.model?.name || rmb?.model_id || '—'}
+          </FormStatusRow>
+          <FormStatusRow label="Status">
+            {!rmb
+              ? '…'
+              : rmb.ready
+                ? 'Ready'
+                : rmb.running
+                  ? 'Starting…'
+                  : rmb.model_present && rmb.runtime_present
+                    ? 'Stopped'
+                    : rmb.not_ready_hint || 'Not ready'}
+          </FormStatusRow>
+          <FormStatusRow label="SmolVLM">
+            {rmb?.vision_suspended || rmb?.running
+              ? 'Suspended (RMB exclusive)'
+              : 'Available when RMB stops'}
+          </FormStatusRow>
+          <FormStatusRow label="Endpoint">
+            <span className="font-mono text-[9px]">
               {rmb?.base_url || 'http://127.0.0.1:8787/v1'}
             </span>
-          </div>
-          <div className="flex justify-between gap-2">
-            <span style={{ color: 'var(--text-muted)' }}>Context</span>
-            <span>
-              {rmb?.ctx_size ?? 8192} tok · {rmb?.profile || 'agent'}
-              {rmb?.endless_session?.silent_context ? ' · auto memory' : ''}
-            </span>
-          </div>
-          <div className="flex justify-between gap-2">
-            <span style={{ color: 'var(--text-muted)' }}>GPU</span>
-            <span>{rmb?.nvidia ? 'NVIDIA detected' : 'CPU / no NVIDIA'}</span>
-          </div>
+          </FormStatusRow>
+          <FormStatusRow label="Context">
+            {rmb?.ctx_size ?? 8192} tok · {rmb?.profile || 'agent'}
+            {rmb?.endless_session?.silent_context ? ' · auto memory' : ''}
+          </FormStatusRow>
+          <FormStatusRow label="GPU">
+            {rmb?.nvidia ? 'NVIDIA detected' : 'CPU / no NVIDIA'}
+          </FormStatusRow>
           {rmb?.model_path ? (
-            <div className="flex justify-between gap-2">
-              <span style={{ color: 'var(--text-muted)' }}>GGUF</span>
-              <span className="truncate max-w-[65%] text-right font-mono text-[9px]" title={rmb.model_path}>
+            <FormStatusRow label="GGUF">
+              <span className="font-mono text-[9px]" title={rmb.model_path}>
                 {rmb.model_path.replace(/^.*[\\/]/, '')}
               </span>
-            </div>
+            </FormStatusRow>
           ) : null}
-        </div>
+        </FormStatusCard>
         {rmbMsg ? (
           <div className="text-[10px] mb-2" style={{ color: 'var(--text-secondary)' }}>
             {rmbMsg}
           </div>
         ) : null}
         <div className="flex flex-wrap gap-1.5 mb-2">
-          <button
-            type="button"
-            className="px-2 py-1 rounded text-[10px] font-medium"
-            style={{
-              background: 'var(--accent)',
-              color: 'var(--accent-fg, #fff)',
-              opacity: rmbBusy ? 0.6 : 1,
-            }}
+          <FormActionButton
+            variant="primary"
             disabled={rmbBusy}
             onClick={async () => {
               setRmbBusy(true)
@@ -146,11 +124,8 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
             }}
           >
             Start RMB
-          </button>
-          <button
-            type="button"
-            className="px-2 py-1 rounded text-[10px]"
-            style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
+          </FormActionButton>
+          <FormActionButton
             disabled={rmbBusy}
             onClick={async () => {
               setRmbBusy(true)
@@ -166,15 +141,8 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
             }}
           >
             Stop
-          </button>
-          <button
-            type="button"
-            className="px-2 py-1 rounded text-[10px] font-medium"
-            style={{
-              border: '1px solid var(--accent)',
-              color: 'var(--accent)',
-              opacity: rmbBusy ? 0.6 : 1,
-            }}
+          </FormActionButton>
+          <FormActionButton
             disabled={rmbBusy}
             onClick={async () => {
               setRmbBusy(true)
@@ -198,49 +166,38 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
             }}
           >
             Use as chat provider
-          </button>
-          <button
-            type="button"
-            className="px-2 py-1 rounded text-[10px]"
-            style={{ border: '1px solid var(--border)', color: 'var(--text-muted)' }}
+          </FormActionButton>
+          <FormActionButton
+            variant="ghost"
             disabled={rmbBusy}
             onClick={() => void refreshRmb()}
           >
             Refresh
-          </button>
+          </FormActionButton>
         </div>
-        <div className="flex flex-wrap gap-1.5 mb-1">
-          {(['agent', 'turbo', 'quality'] as const).map((pid) => (
-            <button
-              key={pid}
-              type="button"
-              className="px-2 py-0.5 rounded text-[10px] capitalize"
-              style={{
-                border: '1px solid var(--border)',
-                background:
-                  (rmb?.profile || 'agent') === pid
-                    ? 'color-mix(in srgb, var(--accent) 18%, transparent)'
-                    : 'transparent',
-                color: 'var(--text-secondary)',
-              }}
-              disabled={rmbBusy}
-              onClick={async () => {
-                setRmbBusy(true)
-                try {
-                  await patchRmbSettings({ profile: pid, enabled: true })
-                  setRmbMsg(`Profile: ${pid}`)
-                  await refreshRmb()
-                } catch (e) {
-                  setRmbMsg(String(e))
-                } finally {
-                  setRmbBusy(false)
-                }
-              }}
-            >
-              {pid}
-            </button>
-          ))}
-        </div>
+        <FormSegmented
+          value={((rmb?.profile || 'agent') as 'agent' | 'turbo' | 'quality')}
+          options={[
+            { id: 'agent', label: 'Agent' },
+            { id: 'turbo', label: 'Turbo' },
+            { id: 'quality', label: 'Quality' },
+          ]}
+          onChange={(pid) => {
+            if (rmbBusy) return
+            void (async () => {
+              setRmbBusy(true)
+              try {
+                await patchRmbSettings({ profile: pid, enabled: true })
+                setRmbMsg(`Profile: ${pid}`)
+                await refreshRmb()
+              } catch (e) {
+                setRmbMsg(String(e))
+              } finally {
+                setRmbBusy(false)
+              }
+            })()
+          }}
+        />
         {/* Model / GGUF / context — any model path */}
         <div className="mt-2 mb-1 space-y-1.5">
           {(rmb?.catalog?.models?.length ?? 0) > 0 ? (
@@ -314,7 +271,7 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
             </FormLabel>
             <input
               type="text"
-              className="ui-select w-full mb-2 text-[10px] font-mono"
+              className="ui-input mb-2 text-[10px] font-mono"
               disabled={rmbBusy}
               defaultValue={rmb?.model_path || ''}
               key={rmb?.model_path || 'rmb-path'}
@@ -374,7 +331,7 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
               </FormLabel>
               <input
                 type="number"
-                className="ui-select w-full mb-2 text-[10px]"
+                className="ui-input mb-2 text-[10px]"
                 disabled={rmbBusy}
                 defaultValue={
                   rmb?.n_gpu_layers != null ? String(rmb.n_gpu_layers) : '-1'
@@ -416,81 +373,54 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
           when your chat model is text-only. One-time download (~1.6 GB). Starts with Remedy.
         </FormHint>
         {(vision?.warnings?.length || 0) > 0 && (
-          <div
-            className="rounded-md px-2 py-1.5 mb-2 text-[10px] space-y-1"
-            style={{
-              background: 'color-mix(in srgb, #f59e0b 12%, var(--bg-primary))',
-              border: '1px solid var(--border)',
-              color: 'var(--text-secondary)',
-            }}
-          >
+          <FormNotice tone="warn">
             {(vision?.warnings || []).map((w) => (
               <div key={w.slice(0, 48)}>{w}</div>
             ))}
-          </div>
+          </FormNotice>
         )}
-        <div
-          className="rounded-md px-2 py-1.5 mb-2 text-[10px] space-y-0.5"
-          style={{
-            background: 'var(--bg-tertiary)',
-            border: '1px solid var(--border)',
-            color: 'var(--text-secondary)',
-          }}
-        >
-          <div className="flex justify-between gap-2">
-            <span style={{ color: 'var(--text-muted)' }}>Model</span>
-            <span>{vision?.model?.name || 'SmolVLM2 2.2B'}</span>
-          </div>
-          <div className="flex justify-between gap-2">
-            <span style={{ color: 'var(--text-muted)' }}>Status</span>
-            <span>
-              {!vision
-                ? '…'
-                : vision.ready
-                  ? vision.running
-                    ? 'Ready (running)'
-                    : 'Ready (idle)'
-                  : vision.installed
-                    ? vision.enabled
-                      ? 'Installed'
-                      : 'Installed · disabled'
-                    : vision.progress?.phase === 'downloading' ||
-                        vision.progress?.phase === 'extracting' ||
-                        vision.progress?.phase === 'verifying'
-                      ? `${vision.progress?.resumed ? 'Resuming…' : 'Installing…'} ${vision.progress?.message || ''}`
-                      : vision.progress?.phase === 'cancelled'
-                        ? 'Cancelled (resume available)'
-                        : 'Not installed'}
-            </span>
-          </div>
+        <FormStatusCard>
+          <FormStatusRow label="Model">
+            {vision?.model?.name || 'SmolVLM2 2.2B'}
+          </FormStatusRow>
+          <FormStatusRow label="Status">
+            {!vision
+              ? '…'
+              : vision.ready
+                ? vision.running
+                  ? 'Ready (running)'
+                  : 'Ready (idle)'
+                : vision.installed
+                  ? vision.enabled
+                    ? 'Installed'
+                    : 'Installed · disabled'
+                  : vision.progress?.phase === 'downloading' ||
+                      vision.progress?.phase === 'extracting' ||
+                      vision.progress?.phase === 'verifying'
+                    ? `${vision.progress?.resumed ? 'Resuming…' : 'Installing…'} ${vision.progress?.message || ''}`
+                    : vision.progress?.phase === 'cancelled'
+                      ? 'Cancelled (resume available)'
+                      : 'Not installed'}
+          </FormStatusRow>
           {vision?.runtime_version ? (
-            <div className="flex justify-between gap-2">
-              <span style={{ color: 'var(--text-muted)' }}>llama.cpp</span>
-              <span>{vision.runtime_version}</span>
-            </div>
+            <FormStatusRow label="llama.cpp">{vision.runtime_version}</FormStatusRow>
           ) : null}
           {vision?.health?.cpu_runtime != null ? (
-            <div className="flex justify-between gap-2">
-              <span style={{ color: 'var(--text-muted)' }}>Runtime</span>
-              <span>
-                {vision.health.cpu_runtime ? 'CPU' : 'GPU/CUDA'}
-                {vision.health.nvidia_detected ? ' · NVIDIA seen' : ''}
-              </span>
-            </div>
+            <FormStatusRow label="Runtime">
+              {vision.health.cpu_runtime ? 'CPU' : 'GPU/CUDA'}
+              {vision.health.nvidia_detected ? ' · NVIDIA seen' : ''}
+            </FormStatusRow>
           ) : null}
           {vision?.health?.ram_gb != null || vision?.health?.disk_free_gb != null ? (
-            <div className="flex justify-between gap-2">
-              <span style={{ color: 'var(--text-muted)' }}>Resources</span>
-              <span>
-                {vision.health?.ram_gb != null ? `RAM ~${vision.health.ram_gb} GB` : ''}
-                {vision.health?.ram_gb != null && vision.health?.disk_free_gb != null
-                  ? ' · '
-                  : ''}
-                {vision.health?.disk_free_gb != null
-                  ? `Disk free ~${vision.health.disk_free_gb} GB`
-                  : ''}
-              </span>
-            </div>
+            <FormStatusRow label="Resources">
+              {vision.health?.ram_gb != null ? `RAM ~${vision.health.ram_gb} GB` : ''}
+              {vision.health?.ram_gb != null && vision.health?.disk_free_gb != null
+                ? ' · '
+                : ''}
+              {vision.health?.disk_free_gb != null
+                ? `Disk free ~${vision.health.disk_free_gb} GB`
+                : ''}
+            </FormStatusRow>
           ) : null}
           {(vision?.progress?.bytes_total || 0) > 0 &&
           (vision?.progress?.phase === 'downloading' ||
@@ -523,85 +453,59 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
               </div>
             </div>
           ) : null}
-        </div>
-        <label className="flex items-start gap-2 mb-2 text-xs cursor-pointer">
-          <input
-            type="checkbox"
-            className="mt-0.5"
-            checked={Boolean(vision?.enabled)}
-            disabled={!vision?.installed || visionBusy}
-            onChange={(e) => {
-              const on = e.target.checked
-              void (async () => {
-                setVisionBusy(true)
-                setVisionMsg('')
-                try {
-                  await updateSettings({ vision_enabled: on })
-                  await refreshVision()
-                  setVisionMsg(on ? 'Decoder enabled' : 'Decoder disabled')
-                } catch (err) {
-                  setVisionMsg(err instanceof Error ? err.message : String(err))
-                } finally {
-                  setVisionBusy(false)
-                }
-              })()
-            }}
-          />
-          <span>
-            <span className="block" style={{ color: 'var(--text-primary)' }}>
-              Enable for text-only chat models
-            </span>
-            <span className="block text-[10px]" style={{ color: 'var(--text-muted)' }}>
-              When the provider cannot see images, decode locally into text.
-            </span>
-          </span>
-        </label>
-        <label className="flex items-start gap-2 mb-2 text-xs cursor-pointer">
-          <input
-            type="checkbox"
-            className="mt-0.5"
-            checked={Boolean(vision?.force_decode)}
-            disabled={!vision?.installed || !vision?.enabled || visionBusy}
-            onChange={(e) => {
-              const on = e.target.checked
-              void (async () => {
-                setVisionBusy(true)
-                setVisionMsg('')
-                try {
-                  await updateSettings({ vision_force_decode: on })
-                  await refreshVision()
-                  setVisionMsg(
-                    on
-                      ? 'Prefer local decoder even when the chat model has vision'
-                      : 'Using provider vision when the model supports it',
-                  )
-                } catch (err) {
-                  setVisionMsg(err instanceof Error ? err.message : String(err))
-                } finally {
-                  setVisionBusy(false)
-                }
-              })()
-            }}
-          />
-          <span>
-            <span className="block" style={{ color: 'var(--text-primary)' }}>
-              Prefer local decoder even if chat model has vision
-            </span>
-            <span className="block text-[10px]" style={{ color: 'var(--text-muted)' }}>
-              Sends a short text brief to the provider instead of image pixels — usually
-              fewer tokens and lower cost. Falls back to provider vision if the decoder
-              is not ready.
-            </span>
-          </span>
-        </label>
+        </FormStatusCard>
+        <FormToggle
+          checked={Boolean(vision?.enabled)}
+          disabled={!vision?.installed || visionBusy}
+          label="Enable for text-only chat models"
+          description="When the provider cannot see images, decode locally into text."
+          onChange={(on) => {
+            void (async () => {
+              setVisionBusy(true)
+              setVisionMsg('')
+              try {
+                await updateSettings({ vision_enabled: on })
+                await refreshVision()
+                setVisionMsg(on ? 'Decoder enabled' : 'Decoder disabled')
+              } catch (err) {
+                setVisionMsg(err instanceof Error ? err.message : String(err))
+              } finally {
+                setVisionBusy(false)
+              }
+            })()
+          }}
+        />
+        <FormToggle
+          checked={Boolean(vision?.force_decode)}
+          disabled={!vision?.installed || !vision?.enabled || visionBusy}
+          label="Prefer local decoder even if chat model has vision"
+          description="Sends a short text brief to the provider instead of image pixels."
+          onChange={(on) => {
+            void (async () => {
+              setVisionBusy(true)
+              setVisionMsg('')
+              try {
+                await updateSettings({ vision_force_decode: on })
+                await refreshVision()
+                setVisionMsg(
+                  on
+                    ? 'Prefer local decoder even when the chat model has vision'
+                    : 'Using provider vision when the model supports it',
+                )
+              } catch (err) {
+                setVisionMsg(err instanceof Error ? err.message : String(err))
+              } finally {
+                setVisionBusy(false)
+              }
+            })()
+          }}
+        />
         <div className="flex flex-wrap gap-1.5">
           {!vision?.installed ? (
-                  <>
-              <button
-                type="button"
+            <>
+              <FormActionButton
+                variant="primary"
                 disabled={visionBusy}
-                className="px-2 py-1 rounded text-[10px] font-medium"
-                style={{ background: 'var(--accent)', color: '#fff' }}
                 onClick={() => {
                   void (async () => {
                     setVisionBusy(true)
@@ -632,17 +536,9 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
                 }}
               >
                 Download &amp; install local model
-              </button>
-              <button
-                type="button"
+              </FormActionButton>
+              <FormActionButton
                 disabled={visionBusy}
-                className="px-2 py-1 rounded text-[10px]"
-                style={{
-                  background: 'var(--bg-tertiary)',
-                  color: 'var(--text-muted)',
-                  border: '1px solid var(--border)',
-                }}
-                title="If files already exist under ~/.remedy/vision"
                 onClick={() => {
                   void (async () => {
                     setVisionBusy(true)
@@ -666,18 +562,11 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
                 }}
               >
                 Use existing files
-              </button>
+              </FormActionButton>
               {(vision?.progress?.phase === 'downloading'
                 || vision?.progress?.phase === 'extracting'
                 || vision?.progress?.phase === 'verifying') && (
-                <button
-                  type="button"
-                  className="px-2 py-1 rounded text-[10px]"
-                  style={{
-                    background: 'var(--bg-tertiary)',
-                    color: 'var(--text-primary)',
-                    border: '1px solid var(--border)',
-                  }}
+                <FormActionButton
                   onClick={() => {
                     void (async () => {
                       try {
@@ -691,21 +580,14 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
                   }}
                 >
                   Cancel
-                </button>
+                </FormActionButton>
               )}
-                  </>
-                ) : (
-                  <>
+            </>
+          ) : (
+            <>
               {!vision.running ? (
-                <button
-                  type="button"
+                <FormActionButton
                   disabled={visionBusy}
-                  className="px-2 py-1 rounded text-[10px]"
-                  style={{
-                    background: 'var(--bg-tertiary)',
-                    color: 'var(--text-primary)',
-                    border: '1px solid var(--border)',
-                  }}
                   onClick={() => {
                     void (async () => {
                       setVisionBusy(true)
@@ -723,17 +605,10 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
                   }}
                 >
                   Start server
-                </button>
+                </FormActionButton>
               ) : (
-                <button
-                  type="button"
+                <FormActionButton
                   disabled={visionBusy}
-                  className="px-2 py-1 rounded text-[10px]"
-                  style={{
-                    background: 'var(--bg-tertiary)',
-                    color: 'var(--text-primary)',
-                    border: '1px solid var(--border)',
-                  }}
                   onClick={() => {
                     void (async () => {
                       setVisionBusy(true)
@@ -750,19 +625,11 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
                   }}
                 >
                   Stop server
-                </button>
+                </FormActionButton>
               )}
               {vision.health?.nvidia_detected && vision.health?.cpu_runtime ? (
-                <button
-                  type="button"
+                <FormActionButton
                   disabled={visionBusy}
-                  className="px-2 py-1 rounded text-[10px]"
-                  style={{
-                    background: 'var(--bg-tertiary)',
-                    color: 'var(--text-primary)',
-                    border: '1px solid var(--border)',
-                  }}
-                  title="Use CUDA llama-server (same SmolVLM2 weights)"
                   onClick={() => {
                     void (async () => {
                       setVisionBusy(true)
@@ -778,18 +645,11 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
                   }}
                 >
                   Use CUDA
-                </button>
+                </FormActionButton>
               ) : null}
               {vision.health && !vision.health.cpu_runtime ? (
-                <button
-                  type="button"
+                <FormActionButton
                   disabled={visionBusy}
-                  className="px-2 py-1 rounded text-[10px]"
-                  style={{
-                    background: 'var(--bg-tertiary)',
-                    color: 'var(--text-muted)',
-                    border: '1px solid var(--border)',
-                  }}
                   onClick={() => {
                     void (async () => {
                       setVisionBusy(true)
@@ -805,37 +665,29 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
                   }}
                 >
                   Use CPU
-                </button>
+                </FormActionButton>
               ) : null}
-                  </>
-                )}
-                <button
-                  type="button"
-                  className="px-2 py-1 rounded text-[10px]"
-                  style={{ color: 'var(--text-muted)' }}
-                  onClick={() => void refreshVision()}
-                >
-                  Refresh
-                </button>
-              </div>
-              {visionMsg ? (
-                <div className="text-[10px] mt-1.5" style={{ color: 'var(--text-muted)' }}>
-                  {visionMsg}
-                </div>
-              ) : null}
-              {onOpenHelp ? (
-                <button
-                  type="button"
-                  className="text-[10px] mt-1 underline"
-                  style={{ color: 'var(--accent)' }}
-                  onClick={() => onOpenHelp('14-visual-decoder')}
-                >
-                  Help: local vision
-                </button>
-              ) : null}
-            </SettingsSection>
-
-            {/* Memory Harness */}
+            </>
+          )}
+          <FormActionButton variant="ghost" onClick={() => void refreshVision()}>
+            Refresh
+          </FormActionButton>
+        </div>
+        {visionMsg ? (
+          <div className="text-[10px] mt-1.5" style={{ color: 'var(--text-muted)' }}>
+            {visionMsg}
+          </div>
+        ) : null}
+        {onOpenHelp ? (
+          <FormActionButton
+            variant="ghost"
+            className="mt-1"
+            onClick={() => onOpenHelp('14-visual-decoder')}
+          >
+            Help: local vision
+          </FormActionButton>
+        ) : null}
+      </SettingsSection>
     </>
   )
 }
