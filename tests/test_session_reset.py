@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -274,10 +275,17 @@ async def test_delete_session_api_cascades_disk(
     home.mkdir()
     monkeypatch.setenv("REMEDY_API_AUTH", "0")
     # Point config home at tmp so cascade uses our tree
+    fake_cfg = lambda: {"home_dir": str(home)}  # noqa: E731
     monkeypatch.setattr(
-        "remedy.interfaces.routes.sessions.load_config",
-        lambda: {"home_dir": str(home)},
+        "remedy.interfaces.routes.sessions.crud.load_config",
+        fake_cfg,
     )
+    # Back-compat if package re-exports load_config
+    with contextlib.suppress(Exception):
+        monkeypatch.setattr(
+            "remedy.interfaces.routes.sessions.load_config",
+            fake_cfg,
+        )
     await store.create_chat_session(
         ChatSession(
             id=sid,

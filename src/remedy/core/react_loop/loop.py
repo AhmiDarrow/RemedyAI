@@ -45,6 +45,11 @@ from remedy.core.react_policy import (
     strip_tool_markup,
     turn_has_unfinished_work,
 )
+from remedy.core.react_loop.binding import (
+    provider_bits as _provider_bits_fn,
+    rearm_agency_tools as _rearm_agency_tools_fn,
+    resolve_and_apply_tools as _resolve_and_apply_tools_fn,
+)
 from remedy.core.react_loop.errors import (
     is_fatal_llm_api_error as _is_fatal_llm_api_error,
 )
@@ -244,53 +249,33 @@ async def call_llm_stream(runtime, message: str,
                 runtime._build_protocol_pending = build_protocol_block(build_state)
 
         def _provider_bits() -> tuple[str, str, str]:
-            try:
-                b = get_llm_binding(runtime)
-                return (
-                    str(b.provider or ""),
-                    str(b.model or ""),
-                    str(getattr(b, "base_url", None) or ""),
-                )
-            except Exception:
-                return ("", "", "")
+            return _provider_bits_fn(runtime)
 
         def _resolve_and_apply(*, step_index: int = 0) -> None:
             """Single tool-arming path (deep-dive #2)."""
             nonlocal tools, run_until_done
-            prov, mod, url = _provider_bits()
-            decision = resolve_tools(
+            tools, run_until_done = _resolve_and_apply_tools_fn(
+                runtime=runtime,
+                turn=turn,
                 message=message or "",
-                all_tools=turn.all_tools,
                 plan_mode=plan_mode,
-                turn_tier=int(getattr(runtime, "_turn_tier", 1) or 1),
-                open_tasks=open_tasks_for_wall or None,
                 history=history,
                 pure_action_kick=bool(pure_action_kick),
                 clear_goals_only=bool(clear_goals_only),
                 browse_pre_url=browse_pre_url,
                 page_interaction=bool(page_interaction),
                 open_only_browse=bool(open_only_browse),
-                build_active=bool(
-                    build_state is not None and getattr(build_state, "active", False)
-                ),
+                build_state=build_state,
+                open_tasks_for_wall=open_tasks_for_wall,
                 step_index=step_index,
-                provider=prov,
-                model=mod,
-                base_url=url,
-                writes_done=turn.write_batches,
             )
-            apply_tools_decision(turn, decision)
-            tools = turn.tools
-            run_until_done = turn.run_until_done
 
         _resolve_and_apply(step_index=0)
 
         def _rearm_agency_tools() -> None:
             """Re-enable tool schemas *and* long-task epoch policy."""
             nonlocal tools, run_until_done
-            turn.rearm(reason="rearm_agency")
-            tools = turn.tools
-            run_until_done = turn.run_until_done
+            tools, run_until_done = _rearm_agency_tools_fn(turn)
 
         # Accumulated assistant text for critical verify at end
         assistant_text_acc: list[str] = []
