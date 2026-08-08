@@ -70,6 +70,8 @@ import { useNotifications } from './hooks/useNotifications'
 import { useUpdateChecker } from './hooks/useUpdateChecker'
 import { useQuitFlow } from './hooks/useQuitFlow'
 import { useComputerHost } from './hooks/useComputerHost'
+import { useSessionLlm, type ModelInfo } from './hooks/useSessionLlm'
+import { useAppOverlays } from './hooks/useAppOverlays'
 import { useSessionStreamJobs } from './sessions/useSessionStreamJobs'
 import { shouldConfirmNewTurn } from './sessions/concurrentTurns'
 import { ConcurrentTurnDialog } from './components/ConcurrentTurnDialog'
@@ -77,11 +79,7 @@ import { getStreamJob, subscribeStreamJobs } from './sessions/streamJobs'
 import { listAgents, listCommands, exportSession, importSession } from './api/messages'
 import { apiFetch, getServerUrl } from './api/client'
 import { getSettings, updateSettings } from './api/settings'
-import {
-  listConnectedProviders,
-  setSessionLlm as applySessionLlm,
-  type ConnectedProvider,
-} from './api/providers'
+import { listConnectedProviders, setSessionLlm as applySessionLlm } from './api/providers'
 import { isPlaceholderTitle, titleFromPrompt } from './utils/sessionTitle'
 import { tauriInvoke, tauriListen } from './api/tauri'
 import { normalizeToolProcess, type ToolProcessMode } from './utils/toolLabels'
@@ -89,12 +87,7 @@ import { looksLikeBuildKick } from './utils/buildKick'
 import { HOTKEYS } from './hotkeys'
 import type { ShortcutDef } from './hooks/useKeyboardShortcuts'
 
-export interface ModelInfo {
-  id: string
-  name: string
-  provider: string
-  default: boolean
-}
+export type { ModelInfo }
 
 type ServerState = 'connecting' | 'ready' | 'error'
 
@@ -341,9 +334,26 @@ export default function App() {
     customAccent,
     setCustomAccent,
   } = useTheme()
-  const [model, setModel] = useState('gpt-4o-mini')
-  const [llmProvider, setLlmProvider] = useState('openai')
-  const [models, setModels] = useState<ModelInfo[]>([])
+  const {
+    model,
+    setModel,
+    llmProvider,
+    setLlmProvider,
+    models,
+    setModels,
+    connectedProviders,
+    setConnectedProviders,
+    sessionLlmMap,
+    setSessionBind,
+    barProvider,
+    barModel,
+    switchToast,
+    setSwitchToast,
+    refreshModels,
+    onProviderModelChange,
+    onModelChange,
+  } = useSessionLlm({ activeId, sessions, streaming })
+
   const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>('high')
   const [approvalMode, setApprovalMode] = useState<ApprovalMode>('ask')
   const [privacyMode, setPrivacyMode] = useState(false)
@@ -400,7 +410,6 @@ export default function App() {
   const openTabIds = useMemo(() => [...openTabs], [openTabs])
   const [serverState, setServerState] = useState<ServerState>(isTauri() ? 'connecting' : 'ready')
   const [serverError, setServerError] = useState('')
-  const [paletteOpen, setPaletteOpen] = useState(false)
   const [agentDefs, setAgentDefs] = useState<{ name: string; description: string }[]>([])
   const { notify } = useNotifications()
   const { busyIds, runningCount } = useSessionStreamJobs()
@@ -454,89 +463,26 @@ export default function App() {
   /** Partner display name (settings.name) for assistant avatar initials */
   const [partnerName, setPartnerName] = useState('Remedy')
   const [askUserName, setAskUserName] = useState(false)
-  const [aboutOpen, setAboutOpen] = useState(false)
   const [appVersion, setAppVersion] = useState('')
-  const [helpOpen, setHelpOpen] = useState(false)
-  const [helpArticleId, setHelpArticleId] = useState<string | null>(null)
-  const [quitWarnOpen, setQuitWarnOpen] = useState(false)
-  const [timeTravelOpen, setTimeTravelOpen] = useState(false)
-  const [usageOpen, setUsageOpen] = useState(false)
-  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
-  const [connectedProviders, setConnectedProviders] = useState<ConnectedProvider[]>([])
-  /** Per-session provider/model overrides (tabs stay independent). */
-  const [sessionLlmMap, setSessionLlmMap] = useState<
-    Record<string, { provider: string; model: string }>
-  >({})
-  const [switchToast, setSwitchToast] = useState<string | null>(null)
-  /**
-   * Authoritative per-session LLM binds. Status bar + send() read this only.
-   * Never clobber an existing entry from session-list polls (that caused the
-   * second tab / SecretFolder status bar to flash back to Grok).
-   */
-  const setSessionBind = useCallback(
-    (sessionId: string, provider: string, modelId: string) => {
-      const p = (provider || '').trim()
-      const m = (modelId || '').trim()
-      if (!sessionId || !p || !m) return
-      setSessionLlmMap((prev) => {
-        const cur = prev[sessionId]
-        if (cur?.provider === p && cur?.model === m) return prev
-        return { ...prev, [sessionId]: { provider: p, model: m } }
-      })
-      // Keep legacy state in sync only when this is the active tab.
-      if (sessionId === activeId) {
-        setLlmProvider(p)
-        setModel(m)
-      }
-    },
-    [activeId],
-  )
-
-  // Seed map from server for tabs that have never been bound locally.
-  useEffect(() => {
-    setSessionLlmMap((prev) => {
-      let changed = false
-      const next = { ...prev }
-      for (const s of sessions) {
-        if (!s.llm_provider || !s.model) continue
-        if (next[s.id]?.provider && next[s.id]?.model) continue
-        next[s.id] = { provider: s.llm_provider, model: s.model }
-        changed = true
-      }
-      return changed ? next : prev
-    })
-  }, [sessions])
-
-  // On tab switch only: load that tab's bind into bar state (no poll thrash).
-  useEffect(() => {
-    if (!activeId) return
-    const ov = sessionLlmMap[activeId]
-    if (ov?.provider && ov?.model) {
-      setLlmProvider(ov.provider)
-      setModel(ov.model)
-      return
-    }
-    const sess = sessions.find((s) => s.id === activeId)
-    if (sess?.llm_provider && sess?.model) {
-      setSessionBind(activeId, String(sess.llm_provider), String(sess.model))
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- tab change only
-  }, [activeId])
-
-  /** Status bar display — always the active session map, never global config. */
-  const barProvider = useMemo(() => {
-    if (activeId && sessionLlmMap[activeId]?.provider) {
-      return sessionLlmMap[activeId]!.provider
-    }
-    return llmProvider
-  }, [activeId, sessionLlmMap, llmProvider])
-  const barModel = useMemo(() => {
-    if (activeId && sessionLlmMap[activeId]?.model) {
-      return sessionLlmMap[activeId]!.model
-    }
-    return model
-  }, [activeId, sessionLlmMap, model])
-
+  const {
+    aboutOpen,
+    setAboutOpen,
+    helpOpen,
+    setHelpOpen,
+    helpArticleId,
+    setHelpArticleId,
+    usageOpen,
+    setUsageOpen,
+    diagnosticsOpen,
+    setDiagnosticsOpen,
+    paletteOpen,
+    setPaletteOpen,
+    timeTravelOpen,
+    setTimeTravelOpen,
+    quitWarnOpen,
+    setQuitWarnOpen,
+    openHelp,
+  } = useAppOverlays()
   const sessionUsage: UsageSnapshot = useMemo(() => {
     let prompt = 0
     let completion = 0
@@ -578,25 +524,8 @@ export default function App() {
     [partialText, partialThinking, model, llmProvider, runUsage],
   )
 
-  const openHelp = useCallback((articleId?: string) => {
-    setHelpArticleId(articleId || null)
-    setHelpOpen(true)
-  }, [])
-
   const { confirmQuitApp, requestQuitWithWarning } = useQuitFlow({ setQuitWarnOpen })
 
-
-  // Dev / browser review: open wiki with ?help=1 or ?help=09-troubleshooting
-  useEffect(() => {
-    try {
-      const params = new URLSearchParams(window.location.search)
-      const h = params.get('help')
-      if (h === null) return
-      openHelp(h === '1' || h === '' || h === 'true' ? undefined : h)
-    } catch {
-      /* ignore */
-    }
-  }, [openHelp])
 
   /** Run update check with visible UI (settings About section), not a silent focus. */
   const runUpdateCheckVisible = useCallback(async () => {
@@ -776,65 +705,6 @@ export default function App() {
     }
   }, [runUpdateCheckVisible, openSettingsInRail])
 
-  /** Refresh model list via GET /models[?provider=…] (live endpoint discovery).
-   *  Stable deps (no `model`) so picking a model cannot re-fire boot load loops. */
-  const refreshModels = useCallback(async (opts?: {
-    selectDefault?: boolean
-    /** Discover for this provider without requiring it to be active in config. */
-    provider?: string
-  }) => {
-    try {
-      const q = opts?.provider
-        ? `?provider=${encodeURIComponent(opts.provider)}`
-        : ''
-      const data = await apiFetch<{
-        models: ModelInfo[]
-        default: string
-        provider?: string
-      }>(`/models${q}`)
-      let list = data.models || []
-      const activeProv = (
-        data.provider || opts?.provider || llmProvider || ''
-      ).toLowerCase()
-      if (activeProv === 'demo') {
-        const { demoModelOptions, isDemoModelAllowed, DEMO_DEFAULT_MODEL } =
-          await import('./utils/demoModels')
-        list = demoModelOptions(list).map((m) => ({
-          id: m.id,
-          name: m.name,
-          provider: 'demo',
-          default: Boolean((m as ModelInfo).default),
-        }))
-        setModels(list)
-        if (opts?.selectDefault) {
-          const def =
-            list.find((m) => m.id === data.default && isDemoModelAllowed(m.id))
-            ?? list.find((m) => m.id === DEMO_DEFAULT_MODEL)
-            ?? list[0]
-          if (def) setModel(def.id)
-        }
-        return { ...data, models: list, provider: 'demo' }
-      }
-      // Keep prior models for *other* providers so switching back stays warm;
-      // replace entries for this provider with the live list.
-      setModels((prev) => {
-        const others = prev.filter((m) => m.provider && m.provider !== activeProv)
-        const tagged = list.map((m) => ({
-          ...m,
-          provider: m.provider || activeProv,
-        }))
-        return [...tagged, ...others]
-      })
-      if (opts?.selectDefault) {
-        const def = list.find((m) => m.id === data.default) ?? list[0]
-        if (def) setModel(def.id)
-      }
-      return { ...data, models: list }
-    } catch (e: unknown) {
-      console.warn('Model refresh failed:', e instanceof Error ? e.message : e)
-      return null
-    }
-  }, [llmProvider])
 
   useEffect(() => {
     if (serverState !== 'ready') return
@@ -2449,53 +2319,8 @@ export default function App() {
           }}
           provider={barProvider}
           connectedProviders={connectedProviders}
-          onProviderModelChange={(prov, mid) => {
-            if (streaming) return
-            if (!activeId) {
-              setLlmProvider(prov)
-              setModel(mid)
-              void updateSettings({ llm_provider: prov, llm_model: mid }).catch(
-                () => {},
-              )
-              return
-            }
-            // Sticky per-session bind — status bar reads barProvider from map only.
-            setSessionBind(activeId, prov, mid)
-            void applySessionLlm(activeId, prov, mid, false)
-              .then((r) => {
-                if (r.toast) {
-                  setSwitchToast(r.toast)
-                  window.setTimeout(() => setSwitchToast(null), 4200)
-                }
-              })
-              .catch(() => {})
-            // Warm model list for this provider without writing global active_*.
-            void refreshModels({ provider: prov }).catch(() => {})
-            void listConnectedProviders()
-              .then((conn) => {
-                setConnectedProviders(
-                  conn.picker?.length ? conn.picker : conn.connected || [],
-                )
-              })
-              .catch(() => {})
-          }}
-          onModelChange={(id) => {
-            if (!activeId) {
-              setModel(id)
-              void updateSettings({ llm_model: id }).catch(() => {})
-              return
-            }
-            const prov = barProvider || llmProvider
-            setSessionBind(activeId, prov, id)
-            void applySessionLlm(activeId, prov, id, false)
-              .then((r) => {
-                if (r.toast) {
-                  setSwitchToast(r.toast)
-                  window.setTimeout(() => setSwitchToast(null), 4200)
-                }
-              })
-              .catch(() => {})
-          }}
+          onProviderModelChange={onProviderModelChange}
+          onModelChange={onModelChange}
           onOpenUsage={() => setUsageOpen(true)}
           thinkingLevel={thinkingLevel}
           onThinkingLevelChange={(level) => {
