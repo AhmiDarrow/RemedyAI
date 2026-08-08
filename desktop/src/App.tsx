@@ -72,6 +72,7 @@ import { useQuitFlow } from './hooks/useQuitFlow'
 import { useComputerHost } from './hooks/useComputerHost'
 import { useSessionLlm, type ModelInfo } from './hooks/useSessionLlm'
 import { useAppOverlays } from './hooks/useAppOverlays'
+import { useAppBootstrap } from './hooks/useAppBootstrap'
 import { useSessionStreamJobs } from './sessions/useSessionStreamJobs'
 import { shouldConfirmNewTurn } from './sessions/concurrentTurns'
 import { ConcurrentTurnDialog } from './components/ConcurrentTurnDialog'
@@ -706,129 +707,25 @@ export default function App() {
   }, [runUpdateCheckVisible, openSettingsInRail])
 
 
-  useEffect(() => {
-    if (serverState !== 'ready') return
-    let cancelled = false
-    ;(async () => {
-      // Prefer the token splash already warmed — do not force-clear (extra IPC/HTTP).
-      try {
-        const { ensureApiToken } = await import('./api/client')
-        await ensureApiToken()
-      } catch {
-        /* continue — settings may still work offline later */
-      }
-      if (cancelled) return
-
-      // Settings first: first-run wizard must not depend on models/agents succeeding.
-      // Sessions load in parallel — sidebar should not wait on models.
-      let settings: Awaited<ReturnType<typeof getSettings>> | null = null
-      const sessionsPromise = refreshSessions()
-      try {
-        settings = await getSettings()
-      } catch (e: unknown) {
-        console.warn('getSettings failed, retrying auth:', e)
-        try {
-          const { clearApiToken, ensureApiToken } = await import('./api/client')
-          clearApiToken()
-          await ensureApiToken()
-          settings = await getSettings()
-        } catch (e2: unknown) {
-          console.warn('getSettings retry failed:', e2)
-        }
-      }
-      if (cancelled) return
-      // Wait for session list so activeId is set before the user can send.
-      try {
-        await sessionsPromise
-      } catch {
-        /* refresh already swallows */
-      }
-      if (cancelled) return
-
-      if (!settings) {
-        // Fresh / wiped installs: still open setup so the user is not stuck on
-        // "Failed to load server config" when the API is only partially up.
-        // Open setup + Retry remain available if save still fails.
-        setShowSetupWizard(true)
-        setServerError(
-          'Could not load settings yet — complete setup once the local server is ready. '
-          + 'If save fails, use Retry then Open setup.',
-        )
-        return
-      }
-
-      // True first run: no completed setup → wizard before chat UI
-      const needsWizard =
-        Boolean(settings.needs_setup)
-        || settings.setup_completed === false
-        || settings.config_exists === false
-
-      if (needsWizard) {
-        setShowSetupWizard(true)
-      }
-
-      if (settings) {
-        if (settings.llm_model) setModel(settings.llm_model)
-        if (settings.llm_provider) setLlmProvider(settings.llm_provider)
-        try {
-          const conn = await listConnectedProviders()
-          setConnectedProviders(conn.picker?.length ? conn.picker : conn.connected || [])
-          if (conn.active_provider) setLlmProvider(conn.active_provider)
-          if (conn.active_model) setModel(conn.active_model)
-        } catch {
-          /* picker falls back to models-only */
-        }
-        const tl = String(settings.thinking_level || 'high').toLowerCase()
-        if (tl === 'off' || tl === 'low' || tl === 'medium' || tl === 'high') {
-          setThinkingLevel(tl)
-        }
-        const am = String(settings.approval_mode || 'ask').toLowerCase()
-        if (am === 'ask' || am === 'auto') setApprovalMode(am)
-        setPrivacyMode(Boolean(settings.privacy_mode))
-        setToolProcessMode(normalizeToolProcess(settings.tool_process ?? settings.show_tool_calls))
-        const un = (settings.user_name || '').trim()
-        setUserName(un)
-        const pn = (settings.name || '').trim()
-        if (pn) setPartnerName(pn)
-        if (settings.version) setAppVersion(String(settings.version))
-        if (!needsWizard && !un) {
-          try {
-            const skipped = localStorage.getItem('remedy.userName.skipped')
-            if (!skipped) setAskUserName(true)
-          } catch {
-            setAskUserName(true)
-          }
-        }
-      }
-
-      // Secondary loads — never kill first-run / chat shell if these fail
-      try {
-        const [modelsData, agents] = await Promise.all([
-          refreshModels({ selectDefault: !settings?.llm_model }),
-          listAgents().catch(() => null),
-        ])
-        if (cancelled) return
-        if (agents) {
-          setAgentDefs(Array.isArray(agents) ? agents : (agents as { agents?: typeof agentDefs }).agents || [])
-        }
-        if (!settings?.llm_model && modelsData?.default) {
-          setModel(modelsData.default)
-        }
-        // Prefer settings/provider picker model so first send is not empty-model.
-        if (settings?.llm_model) {
-          setModel(settings.llm_model)
-        }
-        void listCommands().catch(() => null)
-      } catch (e: unknown) {
-        // Settings already loaded (or wizard already open). Models/agents failures
-        // must not block first-run or the chat shell.
-        console.warn('Secondary startup load failed:', e)
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [serverState, refreshModels, refreshSessions])
+  useAppBootstrap({
+    serverState,
+    refreshSessions,
+    refreshModels,
+    setModel,
+    setLlmProvider,
+    setConnectedProviders,
+    setThinkingLevel,
+    setApprovalMode,
+    setPrivacyMode,
+    setToolProcessMode,
+    setUserName,
+    setPartnerName,
+    setAppVersion,
+    setAskUserName,
+    setShowSetupWizard,
+    setServerError,
+    setAgentDefs,
+  })
 
   // Realtime session sync (messenger + multi-surface). Stable subscription —
   // do not re-open SSE when activeId changes (that froze / fought the UI).
