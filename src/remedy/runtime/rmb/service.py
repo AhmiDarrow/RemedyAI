@@ -171,6 +171,9 @@ def _model_search_roots(home_dir: str | Path | None) -> list[Path]:
         models_dir(home_dir),
         Path.home() / ".remedy" / "models",
         Path.home() / ".remedy" / "rmb" / "models",
+        # Common user drop folders (Windows RMB package + Downloads)
+        Path.home() / "Remedy Muscle Bridge" / "models",
+        Path.home() / "Downloads",
     ]
     # Optional extra dirs via env (semicolon-separated on Windows)
     extra = (os.environ.get("REMEDY_RMB_MODEL_DIRS") or "").strip()
@@ -179,7 +182,19 @@ def _model_search_roots(home_dir: str | Path | None) -> list[Path]:
             p = Path(part.strip())
             if p.is_dir():
                 roots.append(p)
-    return roots
+    # De-dupe while preserving order
+    seen: set[str] = set()
+    out: list[Path] = []
+    for r in roots:
+        try:
+            key = str(r.resolve()).lower() if r.exists() else str(r).lower()
+        except OSError:
+            key = str(r).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(r)
+    return out
 
 
 def _find_llama_binary(state: dict[str, Any], home_dir: str | Path | None) -> Path | None:
@@ -247,15 +262,63 @@ def discover_ggufs(home_dir: str | Path | None = None) -> list[dict[str, Any]]:
     return out
 
 
+def _gguf_matches_model_id(path: Path, model_id: str) -> bool:
+    """True when *path* is a plausible GGUF for the catalog *model_id*.
+
+    Sticky model_path must not win when the user selected a different catalog
+    size (e.g. 7B path still set after switching to 14B).
+    """
+    from remedy.runtime.rmb.catalog import RMB_MODELS, catalog_id_from_hint
+    import re
+
+    mid = (model_id or "").strip()
+    if not mid:
+        return True
+    # Free-form / unknown id — accept any existing path
+    if mid not in RMB_MODELS:
+        # Still try stem match via hint (status-bar style ids)
+        hint_id = catalog_id_from_hint(mid)
+        if not hint_id:
+            return True
+        mid = hint_id
+
+    name = path.name.lower()
+    spec = get_model_spec(mid)
+    fn = spec.filename.lower()
+    if name == fn or name.replace(".gguf", "") == fn.replace(".gguf", ""):
+        return True
+    # Path's own catalog id (from filename) matches
+    path_id = catalog_id_from_hint(path.name)
+    if path_id and path_id == mid:
+        return True
+    size = (spec.size_label or "").lower()
+    if size and not re.search(rf"(?:^|[^0-9]){re.escape(size)}(?:[^0-9]|$)", name, re.I):
+        return False
+    wants_coder = "coder" in mid or "coder" in fn
+    has_coder = "coder" in name
+    if wants_coder and not has_coder:
+        return False
+    if not wants_coder and has_coder and "coder" not in mid:
+        # instruct catalog vs coder file
+        return False
+    return bool(size)
+
+
 def _resolve_model_path(state: dict[str, Any], home_dir: str | Path | None) -> Path | None:
-    """Resolve any GGUF for RMB — explicit path first, then catalog, then scan."""
+    """Resolve any GGUF for RMB — catalog-aware sticky path, then scan."""
+    from remedy.runtime.rmb.catalog import catalog_id_from_hint
+
+    mid_raw = str(state.get("model_id") or DEFAULT_RMB_MODEL_ID)
+    mid = catalog_id_from_hint(mid_raw) or mid_raw
     mp = str(state.get("model_path") or "").strip()
-    if mp and Path(mp).is_file():
+    # Sticky path only wins when it matches the selected catalog model.
+    # Otherwise switching 7B→14B left the 7B GGUF loaded forever.
+    if mp and Path(mp).is_file() and _gguf_matches_model_id(Path(mp), mid):
         return Path(mp)
 
-    mid = str(state.get("model_id") or DEFAULT_RMB_MODEL_ID)
     spec = get_model_spec(mid)
     size_tag = (spec.size_label or "7b").upper()  # e.g. 7B, 14B
+    wants_coder = "coder" in mid.lower() or "coder" in spec.filename.lower()
 
     for root in _model_search_roots(home_dir):
         cand = root / spec.filename
@@ -264,32 +327,37 @@ def _resolve_model_path(state: dict[str, Any], home_dir: str | Path | None) -> P
         if not root.is_dir():
             continue
         # Prefer exact-ish catalog tokens (size label, not hardcoded 7B)
-        for p in root.glob(f"*Coder*{size_tag}*.gguf"):
-            if p.is_file():
-                return p
+        if wants_coder:
+            for p in root.glob(f"*Coder*{size_tag}*.gguf"):
+                if p.is_file() and _gguf_matches_model_id(p, mid):
+                    return p
         for p in root.glob(f"*{size_tag}*Q4_K_M*.gguf"):
-            if p.is_file() and ("coder" in p.name.lower() or "instruct" in p.name.lower()):
+            if p.is_file() and _gguf_matches_model_id(p, mid):
+                return p
+        for p in root.glob(f"*{size_tag}*.gguf"):
+            if p.is_file() and _gguf_matches_model_id(p, mid):
                 return p
         # Normalize qwen25 → qwen2.5 style fragments
         frag = mid.replace("_", "-").lower().replace("qwen25", "qwen2.5")
         for p in root.glob("*.gguf"):
             n = p.name.lower().replace("qwen2.5", "qwen25")
             if frag and frag.replace("qwen2.5", "qwen25") in n.replace("qwen2.5", "qwen25"):
-                return p
+                if _gguf_matches_model_id(p, mid):
+                    return p
 
-    # Single GGUF in rmb/models → use it
+    # Single matching GGUF in rmb/models → use it (never wrong-size sticky fallback)
     try:
         rmb_models = sorted(models_dir(home_dir).glob("*.gguf"))
-        if len(rmb_models) == 1 and rmb_models[0].is_file():
-            return rmb_models[0]
-        for p in rmb_models:
-            n = p.name.lower()
-            if "coder" in n:
-                return p
-        for p in rmb_models:
-            if "instruct" in p.name.lower():
-                return p
-        if rmb_models:
+        matches = [p for p in rmb_models if p.is_file() and _gguf_matches_model_id(p, mid)]
+        if len(matches) == 1:
+            return matches[0]
+        if matches:
+            for p in matches:
+                if "coder" in p.name.lower() and wants_coder:
+                    return p
+            return matches[0]
+        # Only when no catalog match: legacy single-file convenience
+        if len(rmb_models) == 1 and rmb_models[0].is_file() and mid == DEFAULT_RMB_MODEL_ID:
             return rmb_models[0]
     except Exception:
         pass
@@ -992,6 +1060,34 @@ def sync_context_window_cache(state: dict[str, Any]) -> int:
     return ctx
 
 
+def apply_rmb_chat_model(
+    model_hint: str | None,
+    *,
+    home_dir: str | Path | None = None,
+    cfg: dict[str, Any] | None = None,
+    live: bool = True,
+    wait_s: float = 120.0,
+) -> dict[str, Any]:
+    """Switch RMB catalog/GGUF from a status-bar or settings model id/stem.
+
+    Used when chat provider is already ``rmb`` and the user picks 7B vs 14B
+    (or any catalog/status-bar id) — updates rmb.json and restarts the host.
+    """
+    from remedy.runtime.rmb.catalog import catalog_id_from_hint
+
+    hint = (model_hint or "").strip()
+    if not hint:
+        return {"ok": False, "error": "empty model"}
+    mid = catalog_id_from_hint(hint) or hint
+    return apply_rmb_settings(
+        {"model_id": mid, "enabled": True},
+        home_dir=home_dir,
+        cfg=cfg,
+        live=live,
+        wait_s=wait_s,
+    )
+
+
 def apply_rmb_settings(
     patch: dict[str, Any],
     *,
@@ -1006,6 +1102,8 @@ def apply_rmb_settings(
     GPU layers, port, …) **restart** the managed llama-server so the next chat
     turn uses the new physical n_ctx — not a stale process still on 8k.
     """
+    from remedy.runtime.rmb.catalog import catalog_id_from_hint
+
     before = merge_state(load_rmb_json(home_dir))
     state = dict(before)
     for key in (
@@ -1046,12 +1144,44 @@ def apply_rmb_settings(
                 continue
         else:
             state[key] = patch[key] if patch[key] is not None else ""
+
+    # Normalize model_id (status-bar stems → catalog ids)
+    if "model_id" in patch and state.get("model_id"):
+        mapped = catalog_id_from_hint(str(state.get("model_id")))
+        if mapped:
+            state["model_id"] = mapped
+
+    # Catalog model change without an explicit new path → drop sticky GGUF so
+    # 7B→14B (etc.) re-resolves instead of reloading the old file forever.
+    old_mid = str(before.get("model_id") or "")
+    new_mid = str(state.get("model_id") or "")
+    if "model_id" in patch and "model_path" not in patch and old_mid != new_mid:
+        state["model_path"] = ""
+
+    # Explicit path may imply a catalog id (Discovered GGUF / free path)
+    if "model_path" in patch and state.get("model_path") and "model_id" not in patch:
+        path_id = catalog_id_from_hint(str(state.get("model_path")))
+        if path_id:
+            state["model_id"] = path_id
+
     if "profile" in patch and patch["profile"] in RMB_PROFILES:
         prof = RMB_PROFILES[str(patch["profile"])]
         if "ctx_size" not in patch:
             state["ctx_size"] = prof.get("ctx_size", state.get("ctx_size"))
         if "n_gpu_layers" not in patch:
             state["n_gpu_layers"] = prof.get("n_gpu_layers", state.get("n_gpu_layers"))
+
+    # Re-resolve path after model_id/path changes so disk + restart load the
+    # correct GGUF (and config mirror gets the right llm_model stem).
+    if "model_id" in patch or "model_path" in patch or not str(state.get("model_path") or "").strip():
+        resolved = _resolve_model_path(state, home_dir)
+        if resolved is not None:
+            state["model_path"] = str(resolved)
+        elif "model_id" in patch and "model_path" not in patch and old_mid != new_mid:
+            # Leave empty — start will fail with a clear "GGUF not found" rather
+            # than silently reusing a mismatched sticky path.
+            state["model_path"] = ""
+
     # Keep base_url in sync with host/port
     host = str(state.get("host") or DEFAULT_HOST)
     try:
