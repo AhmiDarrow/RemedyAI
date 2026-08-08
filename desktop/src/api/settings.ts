@@ -50,6 +50,10 @@ export interface Settings {
    * Default false keeps the lightning path (secret scrub only).
    */
   privacy_mode?: boolean
+  /** Soul Field personhood — default on (organism / continuity). */
+  soul_field_enabled?: boolean
+  build_os_advanced?: boolean
+  rmb_enabled?: boolean
   allow_skill_creation?: boolean
   auto_approve_threshold?: number
   log_level?: string
@@ -201,6 +205,9 @@ export interface SettingsUpdate {
   web_tools_enabled?: boolean
   http_bootstrap?: boolean
   privacy_mode?: boolean
+  soul_field_enabled?: boolean
+  build_os_advanced?: boolean
+  rmb_enabled?: boolean
   allow_skill_creation?: boolean
   auto_approve_threshold?: number
   log_level?: string

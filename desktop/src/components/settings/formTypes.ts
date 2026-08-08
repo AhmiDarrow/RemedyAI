@@ -70,6 +70,8 @@ export interface SettingsFormProps {
   setHttpBootstrap: Dispatch<SetStateAction<boolean>>
   privacyMode: boolean
   setPrivacyMode: Dispatch<SetStateAction<boolean>>
+  soulFieldEnabled: boolean
+  setSoulFieldEnabled: Dispatch<SetStateAction<boolean>>
   approvalMode: 'ask' | 'auto'
   setApprovalMode: Dispatch<SetStateAction<'ask' | 'auto'>>
   harnessMode: string

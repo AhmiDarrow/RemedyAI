@@ -43,6 +43,8 @@ export function SettingsSections_identity(p: SettingsFormProps): ReactNode {
     httpBootstrap,
     setHttpBootstrap,
     privacyMode,
+    soulFieldEnabled,
+    setSoulFieldEnabled,
     setPrivacyMode,
     approvalMode,
     setApprovalMode,
@@ -296,6 +298,53 @@ export function SettingsSections_identity(p: SettingsFormProps): ReactNode {
           Also on the status bar. API keys never leave this PC as model input. Keys stay under{' '}
           <code className="text-[10px]">~/.remedy/auth/</code> (DPAPI on Windows).
         </div>
+
+        <button
+          type="button"
+          role="switch"
+          aria-checked={soulFieldEnabled}
+          onClick={() => setSoulFieldEnabled(!soulFieldEnabled)}
+          className="w-full flex items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left transition-colors mt-2"
+          style={{
+            background: soulFieldEnabled
+              ? 'color-mix(in srgb, var(--accent) 14%, var(--bg-tertiary))'
+              : 'var(--bg-tertiary)',
+            border: `1px solid ${soulFieldEnabled ? 'var(--accent)' : 'var(--border)'}`,
+          }}
+          title={
+            soulFieldEnabled
+              ? 'Soul Field on — continuity, bond, organism pulse'
+              : 'Soul Field off — lean chat without personhood inject'
+          }
+        >
+          <div className="min-w-0">
+            <div
+              className="text-xs font-semibold"
+              style={{ color: soulFieldEnabled ? 'var(--accent)' : 'var(--text-primary)' }}
+            >
+              {soulFieldEnabled ? 'Soul Field on' : 'Soul Field off'}
+            </div>
+            <div className="text-[10px] leading-snug mt-0.5" style={{ color: 'var(--text-muted)' }}>
+              {soulFieldEnabled
+                ? 'Same partner across models — bond, open threads, organism mood on the status bar'
+                : 'Disabled — no soul inject or residue updates (opt-out)'}
+            </div>
+          </div>
+          <span
+            className="flex-shrink-0 relative inline-flex h-6 w-11 rounded-full transition-colors"
+            style={{
+              background: soulFieldEnabled ? 'var(--accent)' : 'var(--border)',
+            }}
+            aria-hidden
+          >
+            <span
+              className="absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform"
+              style={{
+                left: soulFieldEnabled ? 'calc(100% - 1.35rem)' : '0.125rem',
+              }}
+            />
+          </span>
+        </button>
       </SettingsSection>
 
       {/* Access */}

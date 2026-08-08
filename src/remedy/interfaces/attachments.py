@@ -148,20 +148,6 @@ def sanitize_filename(name: str) -> str:
     return base
 
 
-def unique_path(directory: Path, filename: str) -> Path:
-    """Legacy helper: pick a free path with _1, _2… if needed."""
-    name = sanitize_filename(filename)
-    candidate = directory / name
-    if not candidate.exists():
-        return candidate
-    stem, suf = Path(name).stem, Path(name).suffix
-    for i in range(1, 1000):
-        alt = directory / f"{stem}_{i}{suf}"
-        if not alt.exists():
-            return alt
-    return directory / f"{stem}_{uuid4().hex[:8]}{suf}"
-
-
 def storage_path(directory: Path, filename: str) -> tuple[Path, str]:
     """Return (disk_path, display_name).
 
@@ -215,7 +201,7 @@ def save_upload(
     mime = guess_mime(display_name, content_type)
     return {
         "id": uuid4().hex[:12],
-        "name": display_name,  # original name — never notes_3.txt from unique_path
+        "name": display_name,  # original name — overwrite same path on re-upload
         "path": str(path.resolve()),
         "mime": mime,
         "size": len(data),
