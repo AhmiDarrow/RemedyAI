@@ -186,14 +186,25 @@ def test_helper_bot_offline_surface():
 
 
 def test_maybe_autostart_skips_when_not_installed(tmp_path, monkeypatch):
-    monkeypatch.setenv("REMEDY_HOME", str(tmp_path / "h"))
+    home = str(tmp_path / "h")
+    monkeypatch.setenv("REMEDY_HOME", home)
+    # Host RMB process / vision_suspended must not steal this unit path.
+    monkeypatch.setattr(
+        "remedy.runtime.rmb.mode.should_skip_vision_stack",
+        lambda cfg=None: False,
+    )
     from remedy.vision.service import maybe_autostart_local_model
 
     r = maybe_autostart_local_model(
-        {"home_dir": str(tmp_path / "h"), "vision": {"enabled": True, "auto_start": True}}
+        {"home_dir": home, "vision": {"enabled": True, "auto_start": True}}
     )
     assert r.get("skipped") is True
-    assert r.get("reason") in ("not_installed", "disabled", "auto_start_off")
+    assert r.get("reason") in (
+        "not_installed",
+        "disabled",
+        "auto_start_off",
+        "rmb_local_agent",
+    )
 
 
 def test_idle_stop_disabled():
