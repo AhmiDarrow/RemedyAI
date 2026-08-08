@@ -39,6 +39,24 @@ def get_registered_brief(session_id: str) -> Any | None:
 
 
 def _local_base_url() -> str:
+    """Prefer RMB chat host when exclusive local agent; else vision/nano stack."""
+    try:
+        from remedy.interfaces.config import load_config
+
+        cfg = load_config() or {}
+        from remedy.runtime.rmb.mode import (
+            is_local_agent_mode,
+            rmb_chat_base_url,
+            rmb_server_running,
+            should_skip_vision_stack,
+        )
+
+        if is_local_agent_mode(cfg) or should_skip_vision_stack(cfg) or rmb_server_running(
+            cfg.get("home_dir") if isinstance(cfg, dict) else None
+        ):
+            return rmb_chat_base_url(cfg)
+    except Exception:
+        pass
     try:
         from remedy.interfaces.config import load_config
         from remedy.vision.config import load_vision_json, vision_section_from_config
@@ -220,8 +238,45 @@ def schedule_background_brief_update(
     intent_hint: str = "",
     level: str = "soft",
 ) -> bool:
-    """Fire-and-forget local brief job. Returns True if queued."""
+    """Fire-and-forget local brief job. Returns True if queued or updated.
+
+    On RMB / local agent: **heuristic only** — never schedule a second inference
+    on the same llama-server as chat (avoids GPU queue thrash).
+    """
     try:
+        brief = getattr(runtime, "_session_brief", None)
+        if brief is None:
+            return False
+
+        # Exclusive/local chat host: keep Session Brief alive without contending
+        try:
+            from remedy.runtime.rmb.mode import (
+                is_local_agent_mode,
+                silent_context_for_local_agent,
+            )
+
+            prov = str(getattr(runtime, "_llm_provider", "") or "")
+            base = str(getattr(runtime, "_llm_base_url", "") or "")
+            cfg = {
+                "llm_provider": prov,
+                "llm_base_url": base,
+            }
+            if is_local_agent_mode(cfg) or silent_context_for_local_agent(
+                cfg, provider=prov, base_url=base
+            ):
+                from remedy.memory.harness.compressor import heuristic_merge_from_history
+
+                heuristic_merge_from_history(
+                    brief, list(messages or []), intent_hint=intent_hint
+                )
+                logger.debug(
+                    "RMB/local: heuristic brief update (no local infer job) level=%s",
+                    level,
+                )
+                return True
+        except Exception:
+            pass
+
         from remedy.runtime.jobs import LocalJob, default_queue
         from remedy.runtime.local_infer import ensure_handlers_registered
         from remedy.runtime.roles import LocalRole as LR
@@ -231,10 +286,6 @@ def schedule_background_brief_update(
         st = q.status()
         pending = st.get("pending") or []
         if len(pending) > 2:
-            return False
-
-        brief = getattr(runtime, "_session_brief", None)
-        if brief is None:
             return False
 
         sid = str(
@@ -261,7 +312,12 @@ def schedule_background_brief_update(
             priority=1 if level == "strong" else 0,
         )
         q.submit(job, wait=False)
-        logger.debug("Queued local brief_update job %s level=%s sid=%s", job.job_id, level, sid)
+        logger.debug(
+            "Queued local brief_update job %s level=%s sid=%s",
+            job.job_id,
+            level,
+            sid,
+        )
         return True
     except Exception as e:
         logger.debug("schedule_background_brief_update failed: %s", e)

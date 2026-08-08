@@ -13,6 +13,8 @@ from typing import Any
 
 # Max characters for a single tool/function message content when sending upstream.
 TOOL_CONTENT_MAX = 6_000
+# Local/RMB coding: harness already pruned; keep tool fidelity for file contents.
+TOOL_CONTENT_MAX_LOCAL = 120_000
 # Privacy mode: tighter tool caps (opt-in; default path unchanged for speed).
 TOOL_CONTENT_MAX_PRIVACY = 2_500
 # Tool *call* arguments must stay valid JSON — never mid-string clip (providers
@@ -212,7 +214,7 @@ def _summarize_large_string(value: str, *, kind: str = "body") -> str:
     return (
         f"<<NOT_SOURCE_CODE history_stub kind={kind} chars={n} lines~{lines} "
         f"first_line={first!r} "
-        f"DO_NOT_file_write_this_string file_read_the_path_instead>>"
+        f"DO_NOT_file_write_this_string history_stub_only>>"
     )
 
 
@@ -418,6 +420,7 @@ def sanitize_message(
     msg: dict[str, Any],
     *,
     privacy: bool | None = None,
+    tool_content_max: int | None = None,
 ) -> dict[str, Any]:
     """Return a sanitized copy of one chat message (does not mutate input).
 
@@ -426,10 +429,14 @@ def sanitize_message(
 
     *privacy*: when True, tighter tool caps + email/phone scrub. Default reads
     :func:`privacy_mode_enabled` once per call when None (still cheap).
+    *tool_content_max*: override tool body cap (local/RMB uses a higher default).
     """
     if privacy is None:
         privacy = privacy_mode_enabled()
-    tool_max = TOOL_CONTENT_MAX_PRIVACY if privacy else TOOL_CONTENT_MAX
+    if tool_content_max is not None:
+        tool_max = int(tool_content_max)
+    else:
+        tool_max = TOOL_CONTENT_MAX_PRIVACY if privacy else TOOL_CONTENT_MAX
     text_max = TEXT_CONTENT_MAX_PRIVACY if privacy else TEXT_CONTENT_MAX
 
     if not isinstance(msg, dict):
@@ -511,6 +518,7 @@ def sanitize_messages_for_provider(
     messages: list[dict[str, Any]] | None,
     *,
     privacy: bool | None = None,
+    tool_content_max: int | None = None,
 ) -> list[dict[str, Any]]:
     """Sanitize a full messages array for outbound provider HTTP.
 
@@ -520,7 +528,7 @@ def sanitize_messages_for_provider(
     if privacy is None:
         privacy = privacy_mode_enabled()
     return [
-        sanitize_message(m, privacy=privacy)
+        sanitize_message(m, privacy=privacy, tool_content_max=tool_content_max)
         for m in (messages or [])
         if isinstance(m, dict)
     ]
@@ -530,11 +538,19 @@ def sanitize_chat_body(
     body: dict[str, Any],
     *,
     privacy: bool | None = None,
+    local_agent: bool = False,
+    tool_content_max: int | None = None,
 ) -> dict[str, Any]:
-    """Copy body and sanitize messages (does not mutate input)."""
+    """Copy body and sanitize messages (does not mutate input).
+
+    *local_agent*: raise tool body cap so RMB/local coding keeps file contents.
+    """
     out = dict(body)
+    cap = tool_content_max
+    if cap is None and local_agent and not (privacy is True):
+        cap = TOOL_CONTENT_MAX_LOCAL
     if "messages" in out:
         out["messages"] = sanitize_messages_for_provider(
-            out.get("messages"), privacy=privacy
+            out.get("messages"), privacy=privacy, tool_content_max=cap
         )
     return out

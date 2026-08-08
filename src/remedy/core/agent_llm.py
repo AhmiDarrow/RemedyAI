@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -19,10 +20,28 @@ def _get_shared_session() -> aiohttp.ClientSession:
     """Return a shared aiohttp session, creating it lazily if needed."""
     global _shared_session
     if _shared_session is None or _shared_session.closed:
+        # Default 120s: local RMB first tool-prime prefill can exceed 60s.
         _shared_session = aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=60),
+            timeout=aiohttp.ClientTimeout(total=120),
         )
     return _shared_session
+
+
+def _llm_timeout(bind: Any) -> aiohttp.ClientTimeout:
+    """Longer wall for local/RMB (prefill + continuous tool chains)."""
+    total = 120.0
+    try:
+        from remedy.nanoswarm.token_nanobot import is_local_model
+
+        if is_local_model(
+            getattr(bind, "provider", None),
+            getattr(bind, "model", None),
+            base_url=getattr(bind, "base_url", None),
+        ):
+            total = float(os.environ.get("REMEDY_LOCAL_LLM_TIMEOUT", "300"))
+    except Exception:
+        pass
+    return aiohttp.ClientTimeout(total=total, connect=30)
 
 
 def close_shared_session() -> None:
@@ -32,6 +51,41 @@ def close_shared_session() -> None:
         with contextlib.suppress(Exception):
             pass  # aiohttp.ClientSession.close() is async; caller should await
     _shared_session = None
+
+
+# Coding-first tool order when pre-sliming for local/RMB hosts (matches RMB priority).
+_LOCAL_TOOL_PRIORITY = (
+    "list_dir",
+    "file_read",
+    "file_write",
+    "file_edit",
+    "file_edit_batch",
+    "bash_exec",
+    "repo_search",
+    "skill_search",
+    "skill_activate",
+    "skill_run",
+    "skill_reload",
+    "mission_start",
+    "mission_status",
+    "mission_verify",
+    "mission_complete",
+    "memory_search",
+    "memory_write",
+    "memory_list",
+    "partner_remember",
+    "partner_recall",
+    "spread_run",
+    "job_run",
+    "job_status",
+    "help_list",
+    "help_read",
+    "local_discover",
+    "web_fetch",
+    "web_search",
+    "vision_decode",
+    "comfyui",
+)
 
 
 def openai_tools_payload(tool_registry: Any) -> list[dict[str, Any]]:
@@ -70,6 +124,97 @@ def openai_tools_payload(tool_registry: Any) -> list[dict[str, Any]]:
     return tools
 
 
+def slim_tools_for_local(
+    tools: list[dict[str, Any]] | None,
+    *,
+    max_tools: int = 48,
+    desc_chars: int = 200,
+    max_props: int = 14,
+) -> list[dict[str, Any]] | None:
+    """Compact tool schemas for small local windows (RMB / llama.cpp / Ollama).
+
+    Remedy registers 80+ tools with long OpenAPI descriptions. Local 7B hosts
+    cannot prefill that; RMB also slims server-side, but client-side prioritization
+    keeps coding tools first and shrinks wire size before HTTP.
+    """
+    if not tools:
+        return tools
+    max_tools = max(8, int(max_tools))
+    scored: list[tuple[int, int, dict[str, Any]]] = []
+    for i, t in enumerate(tools):
+        if not isinstance(t, dict):
+            continue
+        fn = t.get("function") if isinstance(t.get("function"), dict) else t
+        name = str((fn or {}).get("name") or "")
+        try:
+            pri = _LOCAL_TOOL_PRIORITY.index(name)
+        except ValueError:
+            pri = 500 + i
+        scored.append((pri, i, t))
+    scored.sort(key=lambda x: (x[0], x[1]))
+
+    out: list[dict[str, Any]] = []
+    for _, _, t in scored[:max_tools]:
+        fn = t.get("function") if isinstance(t.get("function"), dict) else None
+        if not isinstance(fn, dict):
+            continue
+        name = str(fn.get("name") or "").strip()
+        if not name:
+            continue
+        desc = str(fn.get("description") or name)[:desc_chars]
+        params = fn.get("parameters") if isinstance(fn.get("parameters"), dict) else {}
+        props_in = (
+            params.get("properties") if isinstance(params.get("properties"), dict) else {}
+        )
+        props: dict[str, Any] = {}
+        for k, v in list(props_in.items())[:max_props]:
+            if isinstance(v, dict):
+                slim: dict[str, Any] = {"type": v.get("type") or "string"}
+                if isinstance(v.get("enum"), list):
+                    slim["enum"] = v["enum"][:16]
+                pd = str(v.get("description") or "")
+                if pd and len(pd) <= 100:
+                    slim["description"] = pd
+                props[str(k)] = slim
+            else:
+                props[str(k)] = {"type": "string"}
+        req = params.get("required") if isinstance(params.get("required"), list) else []
+        out.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": desc,
+                    "parameters": {
+                        "type": "object",
+                        "properties": props,
+                        "required": [str(x) for x in req[:12]],
+                    },
+                },
+            }
+        )
+    return out
+
+
+def tools_for_binding(
+    tools: list[dict[str, Any]] | None,
+    runtime: Any | None = None,
+) -> list[dict[str, Any]] | None:
+    """Return tools, pre-slimmed when the current LLM binding is local/RMB."""
+    if not tools:
+        return tools
+    try:
+        from remedy.core.llm_binding import get_llm_binding
+        from remedy.nanoswarm.token_nanobot import is_local_model
+
+        bind = get_llm_binding(runtime)
+        if is_local_model(bind.provider, bind.model, base_url=bind.base_url):
+            return slim_tools_for_local(tools)
+    except Exception:
+        pass
+    return tools
+
+
 async def post_chat(
     runtime: Any,
     body: dict[str, Any],
@@ -87,15 +232,28 @@ async def post_chat(
     adapter = bind.adapter()
     headers = adapter.auth_headers(bind.api_key)
     endpoint = adapter.chat_endpoint(bind.base_url)
-    safe_body = sanitize_chat_body(body if isinstance(body, dict) else {})
+    _local = False
+    try:
+        from remedy.runtime.rmb.mode import is_rmb_provider
+
+        _local = is_rmb_provider(
+            bind.provider, getattr(bind, "base_url", None)
+        ) or str(bind.provider or "").lower() in ("ollama", "llamacpp")
+    except Exception:
+        pass
+    safe_body = sanitize_chat_body(
+        body if isinstance(body, dict) else {},
+        local_agent=_local,
+    )
 
     session = _get_shared_session()
+    timeout = _llm_timeout(bind)
     async with (
         session.post(
             endpoint,
             headers=headers,
             json=safe_body,
-            timeout=aiohttp.ClientTimeout(total=60),
+            timeout=timeout,
         ) as resp,
     ):
         if resp.status != 200:
@@ -139,7 +297,7 @@ async def post_chat(
                             endpoint,
                             headers=headers,
                             json=safe_body,
-                            timeout=aiohttp.ClientTimeout(total=60),
+                            timeout=timeout,
                         ) as resp2:
                             if resp2.status == 200:
                                 return await resp2.json()

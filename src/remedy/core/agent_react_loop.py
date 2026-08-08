@@ -252,9 +252,16 @@ async def call_llm_stream(runtime, message: str,
                 cfg=cfg_for_vision,
             )
             mode = str(vres.get("mode") or "native")
-            if mode == "decode" and vres.get("combined"):
+            if mode in ("decode", "text_only") and vres.get("combined"):
+                # text_only: RMB exclusive host path briefs (never native multimodal)
                 vision_mode = "decode"
                 decode_brief = str(vres.get("combined") or "")
+                for ev in vres.get("events") or []:
+                    yield f"@@status:{ev}\n"
+            elif mode == "text_only" and vres.get("briefs"):
+                vision_mode = "decode"
+                briefs = vres.get("briefs") or []
+                decode_brief = "\n".join(str(b) for b in briefs if b)
                 for ev in vres.get("events") or []:
                     yield f"@@status:{ev}\n"
             elif mode == "unavailable" and vres.get("hint"):
@@ -326,6 +333,11 @@ async def call_llm_stream(runtime, message: str,
                             + "\n"
                         )
         all_tools = runtime._openai_tools()
+        # Local/RMB: pre-slim schemas so long tool chains fit physical n_ctx.
+        with suppress(Exception):
+            from remedy.core.agent_llm import tools_for_binding
+
+            all_tools = tools_for_binding(all_tools, runtime) or all_tools
         if plan_mode:
             from remedy.core.plan_store import PLAN_MODE_TOOL_NAMES
 
@@ -1095,7 +1107,20 @@ async def call_llm_stream(runtime, message: str,
                 )
                 # Trust boundary: fail closed — never POST unsanitized tool bodies.
                 try:
-                    body = sanitize_chat_body(body if isinstance(body, dict) else {})
+                    _local_agent = False
+                    with suppress(Exception):
+                        from remedy.runtime.rmb.mode import is_rmb_provider
+
+                        _local_agent = is_rmb_provider(
+                            _bind.provider, getattr(_bind, "base_url", None)
+                        ) or str(_bind.provider or "").lower() in (
+                            "ollama",
+                            "llamacpp",
+                        )
+                    body = sanitize_chat_body(
+                        body if isinstance(body, dict) else {},
+                        local_agent=_local_agent,
+                    )
                 except Exception as sanitize_exc:
                     logger.error(
                         "provider sanitize failed (aborting LLM call): %s",
@@ -2176,7 +2201,20 @@ async def call_llm_stream(runtime, message: str,
                 thinking_level=getattr(runtime, "_thinking_level", "high"),
             )
             try:
-                body = sanitize_chat_body(body if isinstance(body, dict) else {})
+                _la = False
+                with suppress(Exception):
+                    from remedy.runtime.rmb.mode import is_rmb_provider
+
+                    _la = is_rmb_provider(
+                        _bind.provider, getattr(_bind, "base_url", None)
+                    ) or str(_bind.provider or "").lower() in (
+                        "ollama",
+                        "llamacpp",
+                    )
+                body = sanitize_chat_body(
+                    body if isinstance(body, dict) else {},
+                    local_agent=_la,
+                )
             except Exception as sanitize_exc:
                 logger.error(
                     "provider sanitize failed (aborting LLM call): %s",

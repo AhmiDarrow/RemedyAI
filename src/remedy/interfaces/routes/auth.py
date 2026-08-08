@@ -74,7 +74,8 @@ def register_auth_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
     @app.get("/api/providers")
     async def list_providers():
         """Known providers with base URL, models, and auth modes."""
-        return {"providers": public_provider_catalog()}
+        cfg = load_config()
+        return {"providers": public_provider_catalog(cfg)}
 
     @app.get("/api/providers/connected")
     async def list_connected_providers():
@@ -92,7 +93,7 @@ def register_auth_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
         from remedy.interfaces.secret_store import public_secret_status
 
         cfg = load_config()
-        catalog = {p["id"]: p for p in public_provider_catalog()}
+        catalog = {p["id"]: p for p in public_provider_catalog(cfg)}
         keys = get_provider_keys(cfg)
         try:
             keys_set = public_secret_status(_home_from_config(cfg)).get(
@@ -153,6 +154,23 @@ def register_auth_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
                     if resolved and resolved not in ("local", "unused"):
                         connected = True
                         reason = "resolved_key"
+            # Custom / local providers (koboldcpp, llama.cpp, LM Studio) are
+            # reachable when their base URL is local — no API key needed.
+            if not connected and pid not in ("demo", "ollama"):
+                try:
+                    from remedy.interfaces.config import provider_credentials_ready
+
+                    cr = provider_credentials_ready(
+                        {
+                            "llm_provider": pid,
+                            "llm_base_url": meta.get("base_url", ""),
+                        }
+                    )
+                    if cr:
+                        connected = True
+                        reason = "local_url"
+                except Exception:
+                    pass
 
             enabled = True if enabled_set is None else (pid in enabled_set)
             # Guest demo must always be switchable when connected (zero-setup path).

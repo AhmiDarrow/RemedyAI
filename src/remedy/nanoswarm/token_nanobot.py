@@ -59,18 +59,159 @@ _FAMILY_DEFAULT_PACK: dict[str, str] = {
     "local": DEFAULT_PACK_ID,
 }
 
-# Default context windows by model pattern (conservative).
+# Default context windows by model pattern (conservative). Cloud providers only —
+# local models (ollama / llama.cpp) are resolved separately by size suffix, since
+# a small local n_ctx (often 4k–8k) is the whole point of the budget.
 _WINDOW_RULES: list[tuple[re.Pattern[str], int]] = [
     (re.compile(r"gpt-4o|gpt-4\.1|o3|o4|o1", re.I), 128_000),
     (re.compile(r"gpt-3\.5", re.I), 16_384),
     (re.compile(r"claude.*(opus|sonnet|haiku)|claude-3|claude-4", re.I), 200_000),
     (re.compile(r"grok-4|grok-3", re.I), 131_072),
-    (re.compile(r"deepseek", re.I), 128_000),
     (re.compile(r"gemini", re.I), 128_000),
-    (re.compile(r"llama|mixtral|mistral|codestral", re.I), 32_768),
-    (re.compile(r"demo|local|ollama", re.I), 32_768),
+    (re.compile(r"llama|mixtral|mistral|codestral", re.I), 128_000),
 ]
+# Cloud models whose local family would otherwise look tiny; the big-window
+# family rules above still apply to them (e.g. Groq llama-3.3-70b → 128k).
 _DEFAULT_WINDOW = 128_000
+
+# Conservative n_ctx for a local model with no size hint. Most small models
+# default to 4k–8k; a guess of 32k is far too optimistic and floods a 4k model.
+_LOCAL_DEFAULT_WINDOW = 8_192
+
+# Size suffix ("qwen2.5:7b-instruct", "llama3.2:3b") → conservative n_ctx.
+# A ~8B local model commonly runs 8k–32k; 1B–3B typically 4k–8k. Budgeting low
+# is safe — the harness compresses earlier instead of overfilling the window.
+_LOCAL_SIZE_WINDOWS: list[tuple[re.Pattern[str], int]] = [
+    (re.compile(r":\s*(?:0?\.5|1(?!\d))\s*b(?!\w)", re.I), 4_096),  # 0.5b / 1b
+    (re.compile(r":\s*(?:2|3|2\.5)\s*b(?!\w)", re.I), 8_192),      # 2b / 2.5b / 3b
+    (re.compile(r":\s*[4-9]\s*b(?!\w)", re.I), 16_384),            # 4b–9b
+    (re.compile(r":\s*1[0-9]\s*b(?!\w)", re.I), 32_768),           # 10b–19b
+]
+
+# Providers that are definitively local (their model runs on-device).
+_LOCAL_PROVIDERS = frozenset({"ollama", "demo", "local", "llamacpp", "rmb", "llama"})
+
+# Cloud providers that may still serve a local-family model name (e.g. Groq).
+# ``custom`` is *not* always cloud — loopback + .rmb4 models are local (below).
+_CLOUD_PROVIDERS = frozenset(
+    {"openai", "anthropic", "google", "deepseek", "xai", "groq", "mistral",
+     "openrouter", "poe"}
+)
+
+# Live discovery cache: key → (monotonic_ts, window). Filled from GET /v1/models
+# (RMB advertises context_window) or env override. Avoids budgeting at 128k
+# against a 4–6k physical host window.
+_WINDOW_CACHE: dict[str, tuple[float, int]] = {}
+_WINDOW_CACHE_TTL_S = 300.0
+_window_cache_lock = threading.Lock()
+
+# Also match underscore / bare size tags used by RMB lattices and HF ids:
+#   qwen25_coder_7b.rmb4, Qwen2.5-7B-Instruct, llama-3.2-3b
+_LOCAL_SIZE_WINDOWS_EXTRA: list[tuple[re.Pattern[str], int]] = [
+    (re.compile(r"(?:^|[^0-9])(?:0?\.5|1(?!\d))\s*b(?:\b|[_-]|\.)", re.I), 4_096),
+    (re.compile(r"(?:^|[^0-9])(?:2|2\.5|3)\s*b(?:\b|[_-]|\.)", re.I), 8_192),
+    (re.compile(r"(?:^|[^0-9])[4-9]\s*b(?:\b|[_-]|\.)", re.I), 16_384),
+    (re.compile(r"(?:^|[^0-9])1[0-9]\s*b(?:\b|[_-]|\.)", re.I), 32_768),
+]
+
+
+def _cache_key(base_url: str | None, model: str | None) -> str:
+    return f"{(base_url or '').rstrip('/').lower()}|{(model or '').strip().lower()}"
+
+
+def cache_context_window(
+    base_url: str | None,
+    model: str | None,
+    window: int,
+    *,
+    ttl_s: float = _WINDOW_CACHE_TTL_S,
+) -> None:
+    """Store a discovered n_ctx (e.g. from RMB GET /v1/models)."""
+    try:
+        w = int(window)
+    except (TypeError, ValueError):
+        return
+    if w < 512:
+        return
+    w = min(w, 1_000_000)
+    key = _cache_key(base_url, model)
+    with _window_cache_lock:
+        _WINDOW_CACHE[key] = (time.monotonic() + float(ttl_s), w)
+        # Also cache by model alone for harness paths that lack base_url.
+        if model:
+            _WINDOW_CACHE[_cache_key("", model)] = (time.monotonic() + float(ttl_s), w)
+
+
+def get_cached_context_window(
+    base_url: str | None = None,
+    model: str | None = None,
+) -> int | None:
+    """Return a non-expired discovered window, or None."""
+    now = time.monotonic()
+    with _window_cache_lock:
+        for key in (_cache_key(base_url, model), _cache_key("", model)):
+            hit = _WINDOW_CACHE.get(key)
+            if not hit:
+                continue
+            exp, w = hit
+            if exp >= now and w >= 512:
+                return int(w)
+    return None
+
+
+def clear_context_window_cache() -> None:
+    with _window_cache_lock:
+        _WINDOW_CACHE.clear()
+
+
+def is_local_model(
+    provider: str | None = None,
+    model: str | None = None,
+    *,
+    base_url: str | None = None,
+) -> bool:
+    """True when the model runs on-device (Ollama, llama.cpp, RMB, loopback)."""
+    p = (provider or "").strip().lower()
+    m = (model or "").strip().lower()
+    url = (base_url or "").strip().lower()
+    if p in _LOCAL_PROVIDERS:
+        return True
+    if m.endswith(".rmb4") or m.endswith(".mwi") or "rmb" in m:
+        return True
+    if ":8787" in url or url.rstrip("/").endswith(":8787") or "/rmb" in url:
+        return True
+    if _is_loopback_url(url):
+        return True
+    if _model_size_window(m) is not None and p in ("custom", "ollama", "llamacpp", "rmb", "local", ""):
+        return True
+    family = encoding_family(p, m)
+    if family == "local" and p not in _CLOUD_PROVIDERS:
+        return True
+    return False
+
+
+def _is_loopback_url(url: str) -> bool:
+    if not url:
+        return False
+    try:
+        from urllib.parse import urlsplit
+
+        host = (urlsplit(url).hostname or "").lower()
+    except Exception:
+        host = ""
+    return host in ("localhost", "0.0.0.0", "::1") or host.startswith("127.")
+
+
+def _model_size_window(model: str | None) -> int | None:
+    """n_ctx guess from a model's size suffix (e.g. 'qwen2.5:7b' → 16k)."""
+    ml = (model or "").lower()
+    for pat, win in _LOCAL_SIZE_WINDOWS:
+        if pat.search(ml):
+            return win
+    for pat, win in _LOCAL_SIZE_WINDOWS_EXTRA:
+        if pat.search(ml):
+            return win
+    return None
 
 _CJK_RE = re.compile(
     r"[\u3000-\u303f\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff"
@@ -155,10 +296,46 @@ def resolve_context_window(
     provider: str | None = None,
     model: str | None = None,
     *,
+    base_url: str | None = None,
     fallback: int = _DEFAULT_WINDOW,
 ) -> int:
-    """Best-effort context window for fill% after provider switch."""
-    blob = f"{provider or ''} {model or ''}".strip()
+    """Best-effort context window for fill% after provider switch.
+
+    Priority:
+      1. ``REMEDY_CONTEXT_WINDOW`` env override
+      2. Live cache from GET /v1/models (RMB advertises ``context_window``)
+      3. Local heuristics (size suffix / .rmb4 / loopback) — never 128k
+      4. Cloud model-name rules
+
+    Local providers (ollama / llama.cpp / RMB) are budgeted against a
+    conservative on-device window — never a cloud-scale guess. A model with a
+    size suffix (``qwen2.5:7b``, ``qwen25_coder_7b.rmb4``) is treated as local
+    even under a ``custom`` provider.
+    """
+    env_win = (os.environ.get("REMEDY_CONTEXT_WINDOW") or "").strip()
+    if env_win.isdigit():
+        return max(512, min(int(env_win), 1_000_000))
+
+    cached = get_cached_context_window(base_url, model)
+    if cached is not None:
+        return cached
+
+    p = (provider or "").strip().lower()
+    m = (model or "").strip()
+    ml = m.lower()
+    local = is_local_model(p, m, base_url=base_url)
+    if local:
+        size = _model_size_window(m)
+        if size is not None:
+            # RMB physical ctx is often 3–6k even on a 7B — prefer the lower of
+            # size-heuristic and a local default so the harness compresses early.
+            if ml.endswith(".rmb4") or ml.endswith(".mwi") or "rmb" in ml:
+                return min(size, 8_192)
+            return size
+        if ml.endswith(".rmb4") or ml.endswith(".mwi"):
+            return 6_144  # typical RMB agent profile window after auto_ctx
+        return _LOCAL_DEFAULT_WINDOW
+    blob = f"{p} {ml}".strip()
     if not blob:
         return fallback
     for pat, win in _WINDOW_RULES:

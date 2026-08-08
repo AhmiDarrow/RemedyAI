@@ -124,6 +124,50 @@ async def build_turn_context(runtime: Any) -> str:
         if block:
             parts.append(block)
 
+    # Machine-native working memory: project the middleman slice for the current
+    # query. Holds tool results + facts the brief / recent-memory do not, keyed
+    # by what this turn is about (not recency), budget-bounded for small windows.
+    with suppress(Exception):
+        from remedy.core.llm_binding import get_llm_binding
+        from remedy.nanoswarm.token_nanobot import resolve_context_window
+
+        _bind = get_llm_binding(runtime)
+        _win = int(resolve_context_window(_bind.provider, _bind.model))
+        # Local RMB: larger middleman slice (facts/tool results) for long coding sessions
+        _frac = 0.15
+        try:
+            from remedy.runtime.rmb.mode import is_rmb_provider
+
+            if is_rmb_provider(_bind.provider, getattr(_bind, "base_url", None)):
+                _frac = 0.22
+        except Exception:
+            pass
+        _budget = max(180, int(_win * _frac))
+        _query = str(getattr(runtime, "_last_user_text", "") or "")
+        _paths = []
+        _brief = getattr(runtime, "_session_brief", None)
+        if _brief is not None:
+            _paths = list(getattr(_brief, "key_paths", None) or [])[:8]
+        _block = _middleman_context_block(runtime, _query, _paths, _budget)
+        if _block:
+            parts.append(_block)
+
+    # RMB system addendum: harness + tools + endless session contract
+    with suppress(Exception):
+        from remedy.core.llm_binding import get_llm_binding
+        from remedy.runtime.rmb.mode import is_rmb_provider
+
+        _b = get_llm_binding(runtime)
+        if is_rmb_provider(_b.provider, getattr(_b, "base_url", None)):
+            parts.append(
+                "RMB local agent: You are the sole on-device model for this session. "
+                "No separate vision stack — image attachments are file paths; use tools "
+                "to inspect them. Context is managed automatically (Session Brief, prune, "
+                "offload) — do not discuss memory pressure or ask the user to compress. "
+                "Finish tool chains, keep working, prefer compact tool results and "
+                "concrete paths."
+            )
+
     recent: list[Any] = []
     with suppress(Exception):
         # Keep short — large memory dumps push weak models into pointless tool loops.
@@ -387,4 +431,120 @@ async def build_turn_context(runtime: Any) -> str:
                 "Skills loaded: (none yet — bundled defaults load on server start)."
             )
 
+    # Small-model context budget. A 4k–8k local window cannot carry the full
+    # always-on block (static instructions + skills catalog ≈3k tokens) plus any
+    # history or answer. The Memory Harness only ever prunes the *history*, never
+    # this untouchable head, so trim the head itself for constrained windows or
+    # the model is truncated mid-prompt on the very first turn.
+    try:
+        from remedy.core.llm_binding import get_llm_binding
+        from remedy.nanoswarm.token_nanobot import resolve_context_window
+
+        bind = get_llm_binding(runtime)
+        window = int(
+            resolve_context_window(
+                bind.provider, bind.model, base_url=bind.base_url
+            )
+        )
+        # Local/RMB: leave more room for tools + answer (head was 45% of a wrong
+        # 128k window before; with a real 4–6k window, 35% keeps tools alive).
+        from remedy.nanoswarm.token_nanobot import is_local_model
+
+        head_frac = (
+            0.35
+            if is_local_model(bind.provider, bind.model, base_url=bind.base_url)
+            else 0.45
+        )
+        budget = int(window * head_frac)
+        if budget >= 512 and budget < len("\n\n".join(parts)):
+            parts = _trim_context_parts(
+                parts, budget, provider=bind.provider, model=bind.model
+            )
+    except Exception:
+        pass
+
     return "\n\n".join(parts)
+
+
+def _middleman_context_block(
+    runtime: Any, query: str, paths: list[str], budget: int
+) -> str:
+    """Project the relevant middleman slice for this turn, or '' when empty."""
+    from remedy.memory.middleman import get_session_middleman
+
+    sid = str(getattr(runtime, "_session_id", None) or "")
+    if not sid:
+        return ""
+    proj = get_session_middleman(sid).project(
+        query,
+        budget_tokens=budget,
+        paths=paths or None,
+        session_id=sid,
+    )
+    if not proj:
+        return ""
+    return "Working memory (retrieved by query):\n" + proj
+
+
+def _trim_context_parts(
+    parts: list[str],
+    budget: int,
+    *,
+    provider: str | None = None,
+    model: str | None = None,
+) -> list[str]:
+    """Drop the most expendable always-on blocks until the head fits the window.
+
+    Keeps orientation / workspace / partner / brief and drops, in order: the
+    skills catalog, auto-suggested skill bodies, then the secondary instruction
+    blocks. Never removes the isolation banner or workspace root.
+    """
+    from remedy.nanoswarm.token_nanobot import estimate_text_tokens
+
+    def _est(text: str) -> int:
+        return int(
+            estimate_text_tokens(text, provider=provider or None, model=model or None)
+        )
+
+    # Lower priority = dropped first. Index-based so repeats are unambiguous.
+    def _priority(text: str) -> int:
+        if "Skills catalog" in text or "[Skill auto-suggest]" in text:
+            return 0
+        if text.startswith(
+            (
+                "Self-configuration:",
+                "Durable memory:",
+                "Owner's manual",
+                "Recent memory",
+                "Built-in tools",
+                "Working memory (retrieved by query):",
+            )
+        ):
+            return 1
+        return 2
+
+    out = list(parts)
+    while len(out) > 1:
+        total = _est("\n\n".join(out))
+        if total <= budget:
+            break
+        # Drop the single lowest-priority part (ties: largest first).
+        drop_idx = 0
+        drop_pri = 99
+        drop_size = -1
+        for i, t in enumerate(out):
+            pri = _priority(t)
+            size = len(t)
+            if pri < drop_pri or (pri == drop_pri and size > drop_size):
+                drop_idx, drop_pri, drop_size = i, pri, size
+        if drop_pri == 2:
+            break  # only must-keep blocks remain
+        out.pop(drop_idx)
+    # If a lone oversized secondary block still exceeds budget, hard-truncate it.
+    total = _est("\n\n".join(out))
+    if total > budget:
+        for i, t in enumerate(out):
+            if _priority(t) == 1 and len(out) > 1:
+                out.pop(i)
+                break
+    return out

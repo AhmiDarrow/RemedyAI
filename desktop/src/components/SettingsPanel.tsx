@@ -12,6 +12,7 @@ import {
   type VisionStatus,
   type NanoSwarmStatus,
 } from '../api/vision'
+import { getRmbStatus, type RmbStatus } from '../api/rmb'
 import {
   getXaiAuthStatus,
   startXaiLogin,
@@ -152,6 +153,7 @@ export function SettingsPanel({
   const [settingsSearch, setSettingsSearch] = useState('')
   const [forceSection, setForceSection] = useState<string | null>(null)
   const [visionSectionOpen, setVisionSectionOpen] = useState(false)
+  const [rmbSectionOpen, setRmbSectionOpen] = useState(false)
   const [toolProcess, setToolProcess] = useState<ToolProcessMode>(
     () => toolProcessMode || 'off',
   )
@@ -169,6 +171,9 @@ export function SettingsPanel({
   const [visionBusy, setVisionBusy] = useState(false)
   const [visionMsg, setVisionMsg] = useState('')
   const visionPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [rmb, setRmb] = useState<RmbStatus | null>(null)
+  const [rmbBusy, setRmbBusy] = useState(false)
+  const [rmbMsg, setRmbMsg] = useState('')
   const [connectedList, setConnectedList] = useState<ConnectedProvider[]>([])
   const [providerSearch, setProviderSearch] = useState('')
   const [enabledProviders, setEnabledProviders] = useState<string[] | null>(null)
@@ -179,6 +184,7 @@ export function SettingsPanel({
   const [messengerDrafts, setMessengerDrafts] = useState<MessengerDraftMap>({})
   const [assistantDraft, setAssistantDraft] = useState<AssistantDraft>({})
   const [settingsMode, setSettingsMode] = useState<SettingsMode>(() => loadSettingsMode())
+  const [customName, setCustomName] = useState('')
 
   const primaryProviders = useMemo(
     () => catalog.filter((p) => !p.advanced),
@@ -245,6 +251,17 @@ export function SettingsPanel({
     }
   }, [])
 
+  const refreshRmb = useCallback(async () => {
+    try {
+      const st = await getRmbStatus()
+      setRmb(st)
+      return st
+    } catch {
+      setRmb(null)
+      return null
+    }
+  }, [])
+
   const refreshVision = useCallback(async () => {
     try {
       const vs = await getVisionStatus()
@@ -306,6 +323,7 @@ export function SettingsPanel({
       setProvider(prov)
       setModel(s.llm_model || 'gpt-4o-mini')
       setBaseUrl(s.llm_base_url || 'https://api.openai.com/v1')
+      setCustomName((s.custom_llm_name || '').trim())
       setApiKeySet(s.llm_api_key_set)
       setProjectPath(s.project_path || '.')
       const p = (s.persona || 'balanced').toLowerCase()
@@ -461,6 +479,7 @@ export function SettingsPanel({
       stopXaiPoll()
       setXaiLoginBusy(false)
       setVisionSectionOpen(false)
+      setRmbSectionOpen(false)
       setSettingsSearch('')
     }
     return () => stopXaiPoll()
@@ -471,6 +490,12 @@ export function SettingsPanel({
     if (!open || !visionSectionOpen) return
     void refreshVision()
   }, [open, visionSectionOpen, refreshVision])
+
+  // Lazy-load RMB when section expanded (or always in simple mode when panel open briefly)
+  useEffect(() => {
+    if (!open || !rmbSectionOpen) return
+    void refreshRmb()
+  }, [open, rmbSectionOpen, refreshRmb])
 
   const matchSec = useCallback(
     (id: SettingsSectionId) => {
@@ -503,6 +528,7 @@ export function SettingsPanel({
             setForceSection(id)
             saveLastSettingsSection(id)
             if (id === 'vision') setVisionSectionOpen(true)
+            if (id === 'rmb') setRmbSectionOpen(true)
           }
         },
       }
@@ -618,6 +644,7 @@ export function SettingsPanel({
       llm_provider: provider,
       llm_model: model,
       llm_base_url: baseUrl,
+      custom_llm_name: provider === 'custom' ? customName.trim() : undefined,
       project_path: projectPath,
       browser_home_url: browserHomeUrl.trim() || 'https://github.com/AhmiDarrow/RemedyAI',
       persona,
@@ -929,6 +956,13 @@ export function SettingsPanel({
               setVisionMsg={setVisionMsg}
               refreshVision={refreshVision}
               startVisionInstallPoll={startVisionInstallPoll}
+              rmb={rmb}
+              rmbBusy={rmbBusy}
+              setRmbBusy={setRmbBusy}
+              rmbMsg={rmbMsg}
+              setRmbMsg={setRmbMsg}
+              refreshRmb={refreshRmb}
+              onSettingsSaved={onSettingsSaved}
               connectedList={connectedList}
               providerSearch={providerSearch}
               setProviderSearch={setProviderSearch}
@@ -955,6 +989,8 @@ export function SettingsPanel({
               activeMeta={activeMeta ?? FALLBACK_PROVIDERS[0]}
               showBaseUrl={showBaseUrl}
               providerModels={providerModels}
+              customName={customName}
+              setCustomName={setCustomName}
               handleProviderChange={handleProviderChange}
               handleBrowseProject={() => { void handleBrowseProject() }}
               themeId={themeId}

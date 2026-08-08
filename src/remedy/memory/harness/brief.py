@@ -198,7 +198,7 @@ def brief_to_context_block(brief: SessionBrief | None, *, max_chars: int = 2200)
     if brief is None:
         return ""
     lines: list[str] = [
-        "Session Brief (working memory — trust this over stale chat; re-read files if detail needed):"
+        "Session Brief (working memory — trust this over stale chat):"
     ]
     if brief.intent:
         lines.append(f"- Intent: {brief.intent}")

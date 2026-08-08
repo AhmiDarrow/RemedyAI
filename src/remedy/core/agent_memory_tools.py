@@ -69,6 +69,18 @@ def register_memory_tools(runtime: Any) -> None:
                     importance=0.75,
                 )
             )
+            # Also surface in the machine-native middleman (query-retrievable).
+            with suppress(Exception):
+                from remedy.memory.middleman import get_session_middleman
+
+                get_session_middleman(
+                    str(getattr(runtime, "_session_id", None) or "")
+                ).put(
+                    text,
+                    kind="fact",
+                    session_id=str(getattr(runtime, "_session_id", None) or ""),
+                    body_cap=1_000,
+                )
             # Also surface as a user fact when short
             if len(text) < 400:
                 with suppress(Exception):
@@ -222,6 +234,39 @@ def register_memory_tools(runtime: Any) -> None:
                     "description": "Optional focus for what to keep in the brief",
                 },
             },
+        },
+    )
+
+    async def memory_resolve(handle: str = "") -> str:
+        """Resolve a working-memory handle to its full body (lazy middleman pull)."""
+        h = (handle or "").strip()
+        if not h:
+            return "Provide a handle (remedy-mm://...) to resolve."
+        sid = str(getattr(runtime, "_session_id", None) or "")
+        try:
+            from remedy.memory.middleman import get_session_middleman
+
+            body = get_session_middleman(sid).get(h)
+        except Exception as e:
+            return f"memory_resolve failed: {e}"
+        if body is None:
+            return f"No working-memory item for handle: {h}"
+        return body[:6000]
+
+    runtime.tool_registry.register_builtin_handler(
+        "memory_resolve",
+        "Resolve a working-memory handle (remedy-mm://...) to its full body. "
+        "Use when a retrieved memory block references a handle you need in full.",
+        memory_resolve,
+        {
+            "type": "object",
+            "properties": {
+                "handle": {
+                    "type": "string",
+                    "description": "The remedy-mm:// handle from the working-memory block",
+                },
+            },
+            "required": ["handle"],
         },
     )
 

@@ -20,9 +20,9 @@ class LlmBinding:
     api_key: str
 
     def adapter(self) -> Any:
-        from remedy.core.providers import get_provider
+        from remedy.core.providers import select_provider
 
-        return get_provider(self.provider or "openai")
+        return select_provider(self.provider, self.base_url)
 
 
 _llm_binding: ContextVar[LlmBinding | None] = ContextVar(

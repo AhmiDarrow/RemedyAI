@@ -58,7 +58,16 @@ scripts/_inspect_*.ps1
 scripts/_test_*.py
 scripts/_verify_*.py
 desktop/tauri-dev-*.log
+desktop/tauri-local-build.json
 *.log
+
+# Ephemeral soak / red-team probe dumps (regenerated locally)
+docs/_soak*/
+docs/_*_results.json
+docs/_*_probe*.json
+docs/_open_issues_final.json
+docs/_redteam_live_results.json
+docs/_full_product_soak_results.json
 
 # Desktop build outputs (sidecar binaries, not source)
 desktop/bin/

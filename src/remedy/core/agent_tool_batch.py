@@ -312,7 +312,7 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
         if len(content_str) > cap:
             content_str = (
                 content_str[:cap]
-                + f"\n…[safety cap {cap} chars — re-run with a narrower query if needed]"
+                + f"\n…[safety cap {cap} chars — refine query if needed]"
             )
         if shadow_outcome == "soft_warn":
             content_str = (
@@ -576,6 +576,17 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
             or "APPROVAL_REQUIRED" in content_str
             or "APPROVAL_CHECK_FAILED" in content_str
         )
+        # Machine-native working memory: ingest the tool result so the middleman
+        # can retrieve it later by query (without keeping the full body in context).
+        with suppress(Exception):
+            from remedy.core.turn_context import turn_session_id as _tsid
+            from remedy.memory.middleman import ingest_tool_result
+
+            ingest_tool_result(
+                session_id=str(_tsid(runtime) or ""),
+                content=content_str,
+                tool=name or "",
+            )
         yield (
             "@@tool_result:"
             + json.dumps(

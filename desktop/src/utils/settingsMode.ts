@@ -28,7 +28,7 @@ export const ADVANCED_ONLY_SECTIONS = new Set([
   'access',
   'security-power',
   'tool-process',
-  'vision',
+  'vision', // image VLM — advanced; RMB chat host is Simple
   'memory-harness',
   'advanced',
   'mcp',
