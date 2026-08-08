@@ -95,6 +95,30 @@ def accumulate_tool_call_delta(
         existing["id"] = tc_id
 
 
+def want_sse_stream_parse(
+    body: dict[str, Any] | None,
+    *,
+    use_openai_sse: bool,
+    content_type: str = "",
+) -> bool:
+    """True when the HTTP body should be consumed as SSE deltas.
+
+    Local/RMB tool rounds force ``stream=False`` so tools complete reliably.
+    Those responses are non-stream JSON with ``choices[].message`` — not deltas.
+    ``apply_openai_sse_chunk`` only reads ``delta``, so we must not take the SSE
+    path when the request asked for a non-stream completion.
+    """
+    if isinstance(body, dict) and body.get("stream") is False:
+        return False
+    ct = (content_type or "").lower()
+    if "event-stream" in ct:
+        return True
+    # Explicit stream=True or default OpenAI-compat SSE adapters.
+    if isinstance(body, dict) and body.get("stream") is True:
+        return bool(use_openai_sse) or "event-stream" in ct
+    return bool(use_openai_sse) or "event-stream" in ct
+
+
 def apply_openai_sse_chunk(
     state: StreamRoundState,
     chunk: dict[str, Any],
@@ -129,6 +153,58 @@ def apply_openai_sse_chunk(
         state.reasoning_parts.append(reason_delta)
     for tc in delta.get("tool_calls") or []:
         accumulate_tool_call_delta(state.tool_call_acc, tc)
+    return live
+
+
+def apply_openai_completion_message(
+    state: StreamRoundState,
+    data: dict[str, Any],
+    *,
+    stream_live: bool = False,
+) -> str | None:
+    """Apply a non-stream OpenAI-compat completion (``choices[].message``).
+
+    Used when ``body[\"stream\"]`` is false (local tool rounds, disconnect
+    retry). Unlike :func:`apply_openai_sse_chunk`, this reads ``message`` not
+    ``delta`` so native ``tool_calls`` are not dropped.
+    """
+    choice = (data.get("choices") or [{}])[0]
+    fr = choice.get("finish_reason")
+    if fr:
+        state.finish_reason = str(fr)
+    msg = choice.get("message") or {}
+    # Some providers put the full message under delta in a final non-stream blob.
+    if not msg and isinstance(choice.get("delta"), dict):
+        msg = choice.get("delta") or {}
+    content = msg.get("content")
+    live: str | None = None
+    if isinstance(content, str) and content:
+        state.content_parts.append(content)
+        acc = "".join(state.content_parts)
+        if stream_live and not looks_like_pseudo_tools(acc):
+            state.produced_user_text = True
+            live = content
+        elif stream_live and looks_like_pseudo_tools(acc):
+            state.suppressed_tool_markup = True
+    reason = msg.get("reasoning_content") or msg.get("reasoning") or ""
+    if isinstance(reason, str) and reason.strip():
+        state.reasoning_parts.append(reason.strip())
+    raw_tcs = msg.get("tool_calls")
+    if isinstance(raw_tcs, list) and raw_tcs:
+        # Store as complete tool_calls (index-keyed) for tool_calls_list().
+        for i, tc in enumerate(raw_tcs):
+            if not isinstance(tc, dict):
+                continue
+            idx = tc.get("index", i)
+            try:
+                idx_i = int(idx)
+            except (TypeError, ValueError):
+                idx_i = i
+            state.tool_call_acc[idx_i] = {
+                "id": tc.get("id") or f"call_{idx_i}",
+                "type": tc.get("type") or "function",
+                "function": dict(tc.get("function") or {}),
+            }
     return live
 
 

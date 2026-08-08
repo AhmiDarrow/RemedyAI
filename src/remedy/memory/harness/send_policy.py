@@ -13,6 +13,37 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+def _evidence_eu_for_session(runtime: Any, sid: str) -> int:
+    """Per-session evidence inject watermark (parallel tabs must not share)."""
+    key = str(sid or "").strip() or "_"
+    by = getattr(runtime, "_evidence_inject_eu_by_session", None)
+    if isinstance(by, dict) and key in by:
+        try:
+            return int(by[key])
+        except (TypeError, ValueError):
+            return -1
+    # Legacy single attribute — only when no map yet for this sid.
+    try:
+        return int(getattr(runtime, "_evidence_inject_eu", -1) or -1)
+    except (TypeError, ValueError):
+        return -1
+
+
+def _set_evidence_eu_for_session(runtime: Any, sid: str, value: int) -> None:
+    key = str(sid or "").strip() or "_"
+    by = getattr(runtime, "_evidence_inject_eu_by_session", None)
+    if not isinstance(by, dict):
+        by = {}
+        try:
+            runtime._evidence_inject_eu_by_session = by
+        except Exception:
+            return
+    by[key] = int(value)
+    # Keep legacy mirror for single-tab paths / continuity reset.
+    with suppress(Exception):
+        runtime._evidence_inject_eu = int(value)
+
+
 def resolve_context_window_for_runtime(runtime: Any) -> int:
     """Best-effort true window for fill% (not a fixed 200k)."""
     provider = str(
@@ -711,12 +742,14 @@ def slim_messages_mid_turn(
 
             if int(getattr(runtime, "_turn_tier", 1) or 1) >= 2:
                 led = get_evidence_ledger(sid)
-                last_eu = int(getattr(runtime, "_evidence_inject_eu", -1) or -1)
+                last_eu = _evidence_eu_for_session(runtime, sid)
                 if led.evidence_units > last_eu:
                     eblock = led.pointer_block(limit=8)
                     if eblock:
                         messages.append({"role": "system", "content": eblock})
-                        runtime._evidence_inject_eu = led.evidence_units
+                        _set_evidence_eu_for_session(
+                            runtime, sid, led.evidence_units
+                        )
         return messages
 
     home = None
@@ -756,12 +789,12 @@ def slim_messages_mid_turn(
 
         if int(getattr(runtime, "_turn_tier", 1) or 1) >= 2:
             led = get_evidence_ledger(sid)
-            last_eu = int(getattr(runtime, "_evidence_inject_eu", -1) or -1)
+            last_eu = _evidence_eu_for_session(runtime, sid)
             if led.evidence_units > last_eu:
                 eblock = led.pointer_block(limit=10)
                 if eblock:
                     out = list(out) + [{"role": "system", "content": eblock}]
-                    runtime._evidence_inject_eu = led.evidence_units
+                    _set_evidence_eu_for_session(runtime, sid, led.evidence_units)
     runtime._last_send_messages = list(out)
     return out
 

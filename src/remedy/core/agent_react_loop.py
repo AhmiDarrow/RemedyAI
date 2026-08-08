@@ -256,7 +256,6 @@ async def call_llm_stream(runtime, message: str,
         tool_batches_in_epoch = 0
         stale_epochs = 0
         tool_batches_this_turn = 0
-        runtime._fingerprint_loop_hits = 0
         open_tasks_for_wall: list[str] = []
         with suppress(Exception):
             brief = getattr(runtime, "_session_brief", None)
@@ -853,13 +852,12 @@ async def call_llm_stream(runtime, message: str,
                     ):
                         led = get_evidence_ledger(sid_mm)
                         eblock = led.pointer_block(limit=8)
-                        last_eu = getattr(runtime, "_evidence_inject_eu", None)
-                        last_eu_i = -1 if last_eu is None else int(last_eu)
+                        last_eu_i = int(getattr(turn, "evidence_inject_eu", -1) or -1)
                         if eblock and led.evidence_units > last_eu_i:
                             messages.append(
                                 {"role": "system", "content": eblock}
                             )
-                            runtime._evidence_inject_eu = led.evidence_units
+                            turn.evidence_inject_eu = led.evidence_units
                     mark_model_call(sid_mm)
 
                 # Never send incomplete tool_calls/tool pairings (HTTP 400).
@@ -1199,19 +1197,17 @@ async def call_llm_stream(runtime, message: str,
                                 "This is not a tool-budget limit.\n"
                             )
                             return
-                        # Force-answer rebuild already attempted and still failed → stop.
-                        if force_answer_api_fail_once:
-                            yield (
-                                f"\n[LLM ERROR — HTTP {resp.status}]\n"
-                                f"{safe_err[:500]}\n[END LLM ERROR]\n\n"
-                                "Stopped after repeated provider errors. "
-                                "Check model/API key in Settings and try again "
-                                "(or say **continue** after switching models).\n"
-                            )
-                            return
-                        # Sticky force-answer attempt (tools cleared) failed → stop.
-                        if force_answer_sticky:
-                            force_answer_api_fail_once = True
+                        from remedy.core.react_turn import soft_api_recovery_action
+
+                        _soft_act = soft_api_recovery_action(
+                            force_answer_api_fail_once=force_answer_api_fail_once,
+                            force_answer_sticky=force_answer_sticky,
+                            api_soft_failures=api_soft_failures,
+                            max_api_soft_failures=max_api_soft_failures,
+                        )
+                        if _soft_act == "stop":
+                            if force_answer_sticky and not force_answer_api_fail_once:
+                                force_answer_api_fail_once = True
                             yield (
                                 f"\n[LLM ERROR — HTTP {resp.status}]\n"
                                 f"{safe_err[:500]}\n[END LLM ERROR]\n\n"
@@ -1222,7 +1218,7 @@ async def call_llm_stream(runtime, message: str,
                             return
                         api_soft_failures += 1
                         # Transient path: rebuild no-tool body and POST force-answer.
-                        if api_soft_failures <= max_api_soft_failures:
+                        if _soft_act == "force_answer_rebuild":
                             yield (
                                 f"\n[LLM notice — HTTP {resp.status}; "
                                 f"trying to finish from context "
@@ -1328,11 +1324,13 @@ async def call_llm_stream(runtime, message: str,
                     # Prefer real response type; DeepSeek/OpenRouter return event-stream.
                     # Local/RMB tool rounds force stream=False — parse as JSON message
                     # (apply_openai_sse_chunk only reads delta, not message).
-                    is_event_stream = "event-stream" in content_type
-                    _want_stream = bool(
-                        (body.get("stream", True) if isinstance(body, dict) else True)
-                    )
-                    if _want_stream and (use_openai_sse or is_event_stream):
+                    from remedy.core.react_stream import want_sse_stream_parse
+
+                    if want_sse_stream_parse(
+                        body if isinstance(body, dict) else None,
+                        use_openai_sse=use_openai_sse,
+                        content_type=content_type,
+                    ):
                         content_iter = resp.content.__aiter__()
                         # DeepSeek can pause a while mid-thought, but multi-minute
                         # dead air usually means a stuck provider — cut the round
@@ -2109,8 +2107,7 @@ async def call_llm_stream(runtime, message: str,
                                 "content": cached,
                             }
                         )
-                    loop_hits = int(getattr(runtime, "_fingerprint_loop_hits", 0) or 0) + 1
-                    runtime._fingerprint_loop_hits = loop_hits
+                    loop_hits = turn.note_fingerprint_loop()
                     unfinished_loop = turn_has_unfinished_work(
                         runtime,
                         session_id=session_id,
@@ -2487,7 +2484,11 @@ async def call_llm_stream(runtime, message: str,
                     from remedy.core.mission import MissionStore
 
                     home = getattr(getattr(runtime, "config", None), "home_dir", None)
-                    mid = str(getattr(runtime, "_session_id", "") or "") or None
+                    mid = str(
+                        getattr(turn, "session_id", None)
+                        or getattr(runtime, "_session_id", "")
+                        or ""
+                    ) or None
                     m = MissionStore(home).latest(mid)
                     if (
                         m is not None
@@ -2497,9 +2498,9 @@ async def call_llm_stream(runtime, message: str,
                         and m.steps
                         and all(s.status in ("done", "skipped") for s in m.steps)
                         and not force_answer
-                        and not getattr(runtime, "_mission_gate_nudge_done", False)
+                        and not turn.mission_gate_nudge_done
                     ):
-                        runtime._mission_gate_nudge_done = True
+                        turn.mission_gate_nudge_done = True
                         messages.append(
                             mission_verify_gate_message(m.verify_command)
                         )
