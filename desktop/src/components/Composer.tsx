@@ -10,11 +10,8 @@ import { searchFiles, listCommands } from '../api/messages'
 import type { CommandDefinition } from '../types'
 import { useComposerAttachments } from '../hooks/useComposerAttachments'
 import {
-  uploadAttachment,
-  uploadDroppedPayload,
   listenNativeFileDrop,
   takePendingFileDrops,
-  pendingMetaFromPayload,
   pickAttachFiles,
   formatBytes,
   type AttachmentMeta,
@@ -121,7 +118,6 @@ const FALLBACK_COMMANDS: CommandDefinition[] = [
   },
 ]
 
-const MAX_FILES = 12
 const PROMPT_HISTORY_KEY = 'remedy.composer.promptHistory'
 const PROMPT_HISTORY_MAX = 80
 /** Grow with content until this height, then scroll (px). */
@@ -255,21 +251,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const promptHistoryRef = useRef<string[]>(loadPromptHistory())
   const historyIndexRef = useRef<number>(-1) // -1 = drafting current (not browsing history)
   const draftBeforeHistoryRef = useRef<string>('')
-
-  const nameSizeKey = (name: string, size: number) =>
-    `${String(name || '').toLowerCase()}|${Number(size) || 0}`
-
-  /** Normalize Tauri payloads (defensive if camelCase ever appears). */
-  const normalizePayload = (raw: DroppedFilePayload | Record<string, unknown>): DroppedFilePayload => {
-    const r = raw as Record<string, unknown>
-    const filename = String(r.filename ?? r.fileName ?? 'file')
-    const content_type = String(
-      r.content_type ?? r.contentType ?? 'application/octet-stream',
-    )
-    const data_base64 = String(r.data_base64 ?? r.dataBase64 ?? '')
-    const size = Number(r.size ?? 0)
-    return { filename, content_type, data_base64, size }
-  }
 
   // Load full original prompt into the bar when the user clicks Edit.
   // Parent keeps editDraft until send/session change so remounts don't blank it.
