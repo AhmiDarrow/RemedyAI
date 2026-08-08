@@ -434,18 +434,41 @@ export function useComputerHost(
       await tickUiCommand()
       await tickJobs()
     })()
-    const helloIv = window.setInterval(() => {
-      void hello()
-    }, 4000)
-    const uiIv = window.setInterval(() => {
-      void tickUiCommand()
-    }, 250)
-    const jobIv = window.setInterval(() => {
-      void tickJobs()
-    }, 120)
+    // Back off when document is hidden or window unfocused to cut idle load.
+    let helloMs = 4000
+    let uiMs = 250
+    let jobMs = 120
+    let helloIv = 0
+    let uiIv = 0
+    let jobIv = 0
+
+    const reschedule = () => {
+      window.clearInterval(helloIv)
+      window.clearInterval(uiIv)
+      window.clearInterval(jobIv)
+      const hidden =
+        typeof document !== 'undefined' &&
+        (document.hidden || document.visibilityState === 'hidden')
+      helloMs = hidden ? 12_000 : 4000
+      uiMs = hidden ? 1000 : 250
+      jobMs = hidden ? 500 : 120
+      helloIv = window.setInterval(() => {
+        void hello()
+      }, helloMs)
+      uiIv = window.setInterval(() => {
+        void tickUiCommand()
+      }, uiMs)
+      jobIv = window.setInterval(() => {
+        void tickJobs()
+      }, jobMs)
+    }
+    reschedule()
+    const onVis = () => reschedule()
+    document.addEventListener('visibilitychange', onVis)
 
     return () => {
       cancelled = true
+      document.removeEventListener('visibilitychange', onVis)
       window.clearInterval(helloIv)
       window.clearInterval(uiIv)
       window.clearInterval(jobIv)

@@ -65,13 +65,20 @@ def _home_from_cfg(cfg: dict[str, Any] | None) -> Path:
     return (Path.home() / ".remedy").expanduser().resolve()
 
 
-def _purge_dir_by_mtime(dir_path: Path, *, max_age_days: int, patterns: tuple[str, ...] = ("*",)) -> int:
+def _purge_dir_by_mtime(
+    dir_path: Path,
+    *,
+    max_age_days: int,
+    patterns: tuple[str, ...] = ("*",),
+    recursive: bool = False,
+) -> int:
     if max_age_days <= 0 or not dir_path.is_dir():
         return 0
     cutoff = time.time() - (max_age_days * 86400)
     removed = 0
     for pat in patterns:
-        for p in dir_path.glob(pat):
+        iterator = dir_path.rglob(pat) if recursive else dir_path.glob(pat)
+        for p in iterator:
             try:
                 if not p.is_file():
                     continue
@@ -80,11 +87,25 @@ def _purge_dir_by_mtime(dir_path: Path, *, max_age_days: int, patterns: tuple[st
                     removed += 1
             except OSError as exc:
                 logger.debug("retention skip %s: %s", p, exc)
+    if recursive:
+        # Remove empty session subdirs under attachments/etc.
+        try:
+            for sub in sorted(dir_path.rglob("*"), reverse=True):
+                try:
+                    if sub.is_dir() and not any(sub.iterdir()):
+                        sub.rmdir()
+                except OSError:
+                    pass
+        except OSError as exc:
+            logger.debug("retention empty-dir cleanup: %s", exc)
     return removed
 
 
 def purge_attachments(home: Path, *, max_age_days: int) -> int:
-    return _purge_dir_by_mtime(home / "attachments", max_age_days=max_age_days)
+    # Files live under attachments/<session_id>/… — must recurse.
+    return _purge_dir_by_mtime(
+        home / "attachments", max_age_days=max_age_days, recursive=True
+    )
 
 
 def purge_computer_shots(home: Path, *, max_age_days: int) -> int:

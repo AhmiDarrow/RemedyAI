@@ -153,6 +153,9 @@ CREATE TABLE IF NOT EXISTS user_facts (
     FOREIGN KEY (user_id) REFERENCES user_profile(user_id)
 );
 
+CREATE INDEX IF NOT EXISTS idx_user_facts_user ON user_facts(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_facts_user_cat ON user_facts(user_id, category);
+
 CREATE TABLE IF NOT EXISTS chat_sessions (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL DEFAULT 'New Session',
@@ -470,12 +473,13 @@ class MemoryStore:
         Useful after bulk imports or if the external-content FTS index drifts.
         Returns the number of rows re-indexed.
         """
-        db = self._ensure_db()
-        # FTS5 external-content rebuild from the content table.
-        db.execute("INSERT INTO memory_fts(memory_fts) VALUES('rebuild')")
-        db.commit()
-        row = db.execute("SELECT COUNT(*) FROM memory_entries").fetchone()
-        return int(row[0]) if row else 0
+        with self._locked():
+            db = self._ensure_db()
+            # FTS5 external-content rebuild from the content table.
+            db.execute("INSERT INTO memory_fts(memory_fts) VALUES('rebuild')")
+            db.commit()
+            row = db.execute("SELECT COUNT(*) FROM memory_entries").fetchone()
+            return int(row[0]) if row else 0
 
     async def get(self, entry_id: str | UUID) -> MemoryEntry | None:
         db = self._ensure_db()
@@ -691,9 +695,12 @@ class MemoryStore:
     ) -> list[HandoffNote]:
         """Find handoff notes relevant to a query."""
         db = self._ensure_db()
-        like_q = f"%{query}%"
+        q = (query or "").strip()
+        safe = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        like_q = f"%{safe}%"
         rows = db.execute(
-            "SELECT * FROM handoff_notes WHERE title LIKE ? OR content LIKE ? "
+            "SELECT * FROM handoff_notes WHERE title LIKE ? ESCAPE '\\' "
+            "OR content LIKE ? ESCAPE '\\' "
             "ORDER BY created_at DESC LIMIT ?",
             (like_q, like_q, limit),
         ).fetchall()
@@ -738,39 +745,41 @@ class MemoryStore:
         ]
 
     async def ack_handoff(self, handoff_id: str | UUID) -> bool:
-        db = self._ensure_db()
-        cursor = db.execute(
-            "UPDATE handoff_notes SET acknowledged = 1 WHERE id = ?",
-            (str(handoff_id),),
-        )
-        db.commit()
-        return cursor.rowcount > 0
+        with self._locked():
+            db = self._ensure_db()
+            cursor = db.execute(
+                "UPDATE handoff_notes SET acknowledged = 1 WHERE id = ?",
+                (str(handoff_id),),
+            )
+            db.commit()
+            return cursor.rowcount > 0
 
     # -- session summaries ---------------------------------------------------
 
     async def save_session_summary(self, summary: SessionSummary) -> SessionSummary:
-        db = self._ensure_db()
-        db.execute(
-            """
-            INSERT OR REPLACE INTO session_summaries
-                (session_id, started_at, ended_at, tasks_completed, skills_created,
-                 skills_refined, key_decisions, open_items, summary)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                summary.session_id,
-                summary.started_at.isoformat(),
-                summary.ended_at.isoformat(),
-                summary.tasks_completed,
-                summary.skills_created,
-                summary.skills_refined,
-                json.dumps(summary.key_decisions),
-                json.dumps(summary.open_items),
-                summary.summary,
-            ),
-        )
-        db.commit()
-        return summary
+        with self._locked():
+            db = self._ensure_db()
+            db.execute(
+                """
+                INSERT OR REPLACE INTO session_summaries
+                    (session_id, started_at, ended_at, tasks_completed, skills_created,
+                     skills_refined, key_decisions, open_items, summary)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    summary.session_id,
+                    summary.started_at.isoformat(),
+                    summary.ended_at.isoformat(),
+                    summary.tasks_completed,
+                    summary.skills_created,
+                    summary.skills_refined,
+                    json.dumps(summary.key_decisions),
+                    json.dumps(summary.open_items),
+                    summary.summary,
+                ),
+            )
+            db.commit()
+            return summary
 
     async def get_session_summary(self, session_id: str) -> SessionSummary | None:
         db = self._ensure_db()
@@ -1013,7 +1022,8 @@ class MemoryStore:
     def purge_sessions_older_than_days(self, max_age_days: int) -> int:
         """Delete chat sessions whose updated_at is older than *max_age_days*.
 
-        Synchronous for startup retention. Cascades messages. Returns count removed.
+        Synchronous for startup retention. Cascades messages + disk artifacts.
+        Returns count removed.
         """
         if max_age_days <= 0:
             return 0
@@ -1021,6 +1031,7 @@ class MemoryStore:
 
         cutoff = (datetime.now(UTC) - timedelta(days=int(max_age_days))).isoformat()
         removed = 0
+        purged_ids: list[str] = []
         with self._locked():
             db = self._ensure_db()
             rows = db.execute(
@@ -1028,18 +1039,44 @@ class MemoryStore:
                 "(updated_at IS NULL AND created_at < ?)",
                 (cutoff, cutoff),
             ).fetchall()
-            for row in rows:
-                sid = row[0] if not isinstance(row, sqlite3.Row) else row["id"]
-                db.execute("DELETE FROM chat_messages WHERE session_id = ?", (sid,))
+            ids = [
+                str(row[0] if not isinstance(row, sqlite3.Row) else row["id"])
+                for row in rows
+            ]
+            if ids:
+                # Set-based deletes (faster than per-row for large histories).
+                placeholders = ",".join("?" * len(ids))
+                db.execute(
+                    f"DELETE FROM chat_messages WHERE session_id IN ({placeholders})",
+                    ids,
+                )
                 with contextlib.suppress(sqlite3.Error):
                     db.execute(
-                        "DELETE FROM session_summaries WHERE session_id = ?", (sid,)
+                        f"DELETE FROM session_summaries WHERE session_id IN ({placeholders})",
+                        ids,
                     )
-                cur = db.execute("DELETE FROM chat_sessions WHERE id = ?", (sid,))
-                if cur.rowcount:
-                    removed += 1
-            if removed:
-                db.commit()
+                cur = db.execute(
+                    f"DELETE FROM chat_sessions WHERE id IN ({placeholders})",
+                    ids,
+                )
+                removed = int(cur.rowcount or 0)
+                purged_ids = ids
+                if removed:
+                    db.commit()
+        # Disk cascade outside DB lock (attachments / plans / undo / middleman).
+        if purged_ids:
+            home = None
+            with contextlib.suppress(Exception):
+                home = self._db_path.expanduser().resolve().parent
+            for sid in purged_ids:
+                with contextlib.suppress(Exception):
+                    from remedy.core.session_reset import purge_session_disk_artifacts
+
+                    purge_session_disk_artifacts(sid, home)
+                with contextlib.suppress(Exception):
+                    from remedy.memory.middleman import forget_session_middleman
+
+                    forget_session_middleman(sid)
         return removed
 
     async def clear_chat_messages(self, session_id: str) -> int:

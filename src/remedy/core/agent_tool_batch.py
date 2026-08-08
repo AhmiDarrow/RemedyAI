@@ -69,14 +69,38 @@ _WRITE_TOOLS = frozenset({"file_write", "file_edit", "file_edit_batch"})
 
 
 def _write_path_key(name: str, args: dict[str, Any]) -> str | None:
-    """Lock key so concurrent writes never clobber the same (or batch) paths.
+    """Lock key so concurrent writes never clobber the same path.
 
-    All write tools share one wave-local key so ``file_edit`` cannot race
-    ``file_edit_batch`` (path keys alone miss batch multi-path edits).
+    Independent paths can run in parallel; intersecting paths share a key.
+    ``file_edit_batch`` locks each path it touches (serialized via multi-lock
+    in ``_run_one`` when multiple keys are needed — primary key is first path
+    plus a global barrier only when batch lists multiple targets).
     """
     if name not in _WRITE_TOOLS:
         return None
-    return "__all_writes__"
+    if name == "file_edit_batch":
+        edits = args.get("edits") if isinstance(args, dict) else None
+        paths: list[str] = []
+        if isinstance(edits, list):
+            for e in edits:
+                if isinstance(e, dict) and e.get("path"):
+                    paths.append(str(e.get("path") or "").strip().lower())
+        if not paths and isinstance(args, dict) and args.get("path"):
+            paths.append(str(args.get("path") or "").strip().lower())
+        if not paths:
+            return "__all_writes__"
+        # Single stable key for the whole batch set (sorted join) so two
+        # overlapping batches still serialize while disjoint path singles
+        # use per-path keys below.
+        if len(paths) > 1:
+            return "batch:" + "|".join(sorted(set(paths)))
+        return f"path:{paths[0]}"
+    path = ""
+    if isinstance(args, dict):
+        path = str(args.get("path") or args.get("file") or "").strip().lower()
+    if not path:
+        return "__all_writes__"
+    return f"path:{path}"
 
 
 async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
@@ -418,6 +442,26 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
         if runtime_cap > 0:
             parallel_cap = max(4, min(32, runtime_cap))
     for wave_start in range(0, len(to_run), parallel_cap):
+        # Cooperative abort between waves (Stop should not wait for all tools).
+        with suppress(Exception):
+            from remedy.core.turn_context import is_turn_aborted
+
+            if is_turn_aborted():
+                for fp in to_run[wave_start:]:
+                    if fp in result_cache:
+                        continue
+                    name = (
+                        ((fp_to_tc[fp].get("function") or {}).get("name") or "").strip()
+                    )
+                    content_str = format_tool_error(
+                        "turn aborted by user",
+                        code="TURN_ABORTED",
+                        tool_name=name or "unknown",
+                        suggestion="Resend or continue when ready.",
+                    )
+                    result_cache[fp] = content_str
+                    seen_fps.add(fp)
+                break
         wave = to_run[wave_start : wave_start + parallel_cap]
         wave_names: list[str] = []
         for fp in wave:

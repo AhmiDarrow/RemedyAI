@@ -64,8 +64,19 @@ def try_acquire_serve_lock(home: Path | str | None = None) -> tuple[bool, str]:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
     except OSError as e:
-        logger.warning("serve lock mkdir failed: %s — continuing", e)
-        return True, "lock dir unavailable; continuing"
+        # Fail closed — dual serve races messengers/retention writers.
+        # Tests can set REMEDY_SERVE_LOCK_FAIL_OPEN=1 for ephemeral FS.
+        import os as _os
+
+        if str(_os.environ.get("REMEDY_SERVE_LOCK_FAIL_OPEN") or "").strip() in (
+            "1",
+            "true",
+            "yes",
+        ):
+            logger.warning("serve lock mkdir failed: %s — fail-open (env)", e)
+            return True, "lock dir unavailable; continuing (fail-open)"
+        logger.error("serve lock mkdir failed: %s — refusing dual serve", e)
+        return False, f"lock dir unavailable ({e}); cannot start serve safely"
 
     # Stale reclaim
     if path.is_file():
@@ -114,8 +125,17 @@ def try_acquire_serve_lock(home: Path | str | None = None) -> tuple[bool, str]:
             "Quit the other instance first.",
         )
     except OSError as e:
-        logger.warning("serve lock acquire failed: %s — continuing", e)
-        return True, f"lock open failed; continuing ({e})"
+        import os as _os
+
+        if str(_os.environ.get("REMEDY_SERVE_LOCK_FAIL_OPEN") or "").strip() in (
+            "1",
+            "true",
+            "yes",
+        ):
+            logger.warning("serve lock acquire failed: %s — fail-open (env)", e)
+            return True, f"lock open failed; continuing ({e})"
+        logger.error("serve lock acquire failed: %s — refusing dual serve", e)
+        return False, f"lock open failed ({e}); cannot start serve safely"
 
 
 def heartbeat_serve_lock() -> None:
