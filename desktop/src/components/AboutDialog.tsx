@@ -7,6 +7,7 @@ export function AboutDialog({
   userName,
   onOpenHelp,
   onOpenSettings,
+  onOpenDiagnostics,
 }: {
   open: boolean
   onClose: () => void
@@ -14,6 +15,7 @@ export function AboutDialog({
   userName?: string
   onOpenHelp: (articleId?: string) => void
   onOpenSettings: () => void
+  onOpenDiagnostics?: () => void
 }) {
   if (!open) return null
 
@@ -131,6 +133,18 @@ export function AboutDialog({
           >
             Settings
           </button>
+          {onOpenDiagnostics ? (
+            <button
+              type="button"
+              className="ui-btn ui-btn-secondary"
+              onClick={() => {
+                onClose()
+                onOpenDiagnostics()
+              }}
+            >
+              Diagnostics
+            </button>
+          ) : null}
           <button type="button" className="ui-btn ui-btn-primary" onClick={onClose}>
             Close
           </button>
