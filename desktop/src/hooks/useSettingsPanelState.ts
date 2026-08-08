@@ -1,9 +1,9 @@
 /**
- * Settings panel mode, search, and section navigation state.
- * Keeps SettingsPanel focused on data load/save.
+ * Settings panel mode, search, and section open state.
+ * Extracted from SettingsPanel so load/save stays the main concern.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useState } from 'react'
 import {
   SETTINGS_SECTION_META,
   loadLastSettingsSection,
@@ -18,40 +18,84 @@ import {
 } from '../utils/settingsMode'
 import { sectionMatchesSearch } from '../components/SettingsSection'
 
-export function useSettingsPanelNav() {
-  const [mode, setMode] = useState<SettingsMode>(() => loadSettingsMode())
-  const [search, setSearch] = useState('')
-  const [section, setSection] = useState<SettingsSectionId>(
-    () => loadLastSettingsSection() || 'provider',
+export function useSettingsPanelState() {
+  const [settingsSearch, setSettingsSearch] = useState('')
+  const [forceSection, setForceSection] = useState<string | null>(null)
+  const [visionSectionOpen, setVisionSectionOpen] = useState(false)
+  const [rmbSectionOpen, setRmbSectionOpen] = useState(false)
+  const [settingsMode, setSettingsModeRaw] = useState<SettingsMode>(
+    () => loadSettingsMode(),
   )
 
-  useEffect(() => {
-    saveSettingsMode(mode)
-  }, [mode])
+  const setSettingsMode = useCallback((m: SettingsMode) => {
+    setSettingsModeRaw(m)
+    saveSettingsMode(m)
+  }, [])
 
-  useEffect(() => {
-    saveLastSettingsSection(section)
-  }, [section])
+  const matchSec = useCallback(
+    (id: SettingsSectionId) => {
+      const meta = SETTINGS_SECTION_META[id]
+      return sectionMatchesSearch(
+        settingsSearch,
+        meta.title,
+        meta.summary,
+        meta.keywords,
+      )
+    },
+    [settingsSearch],
+  )
 
-  const visibleSections = useMemo(() => {
-    return SETTINGS_SECTION_META.filter((s) => {
-      if (!isSectionVisibleInMode(s.id, mode)) return false
-      if (!search.trim()) return true
-      return sectionMatchesSearch(s, search)
-    })
-  }, [mode, search])
+  const sectionProps = useCallback(
+    (id: SettingsSectionId) => {
+      const modeHidden = !isSectionVisibleInMode(id, settingsMode)
+      const searchHidden = settingsSearch.trim().length > 0 && !matchSec(id)
+      return {
+        id,
+        title: SETTINGS_SECTION_META[id].title,
+        summary: SETTINGS_SECTION_META[id].summary,
+        keywords: SETTINGS_SECTION_META[id].keywords,
+        forceOpen:
+          forceSection === id
+          || (settingsSearch.trim().length > 0 && matchSec(id) && !modeHidden),
+        hidden: modeHidden || searchHidden,
+        onOpenChange: (isOpen: boolean) => {
+          if (isOpen) {
+            setForceSection(id)
+            saveLastSettingsSection(id)
+            if (id === 'vision') setVisionSectionOpen(true)
+            if (id === 'rmb') setRmbSectionOpen(true)
+          }
+        },
+      }
+    },
+    [forceSection, matchSec, settingsSearch, settingsMode],
+  )
 
-  const setModeAndPersist = useCallback((m: SettingsMode) => {
-    setMode(m)
+  /** Reset search / force when the panel closes; restore last section on open. */
+  const onPanelOpenChange = useCallback((open: boolean) => {
+    if (open) {
+      const last = loadLastSettingsSection()
+      if (last) setForceSection(last)
+    } else {
+      setVisionSectionOpen(false)
+      setRmbSectionOpen(false)
+      setSettingsSearch('')
+    }
   }, [])
 
   return {
-    mode,
-    setMode: setModeAndPersist,
-    search,
-    setSearch,
-    section,
-    setSection,
-    visibleSections,
+    settingsSearch,
+    setSettingsSearch,
+    forceSection,
+    setForceSection,
+    visionSectionOpen,
+    setVisionSectionOpen,
+    rmbSectionOpen,
+    setRmbSectionOpen,
+    settingsMode,
+    setSettingsMode,
+    matchSec,
+    sectionProps,
+    onPanelOpenChange,
   }
 }
