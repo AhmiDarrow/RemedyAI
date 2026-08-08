@@ -38,7 +38,7 @@
 | **Who it’s for** | Owners who want power without multi-agent theater — chat, files, shell, browser rail, computer use |
 | **What stays local** | Memory, Session Brief, skills, approvals, DPAPI secrets, optional SmolVLM2 vision |
 | **What you bring** | Your API keys / local Ollama — no Remedy cloud account for core use |
-| **Current** | **v0.20.0** on [PyPI](https://pypi.org/project/remedy-ai/) · [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases) |
+| **Current** | **v0.21.1** on [PyPI](https://pypi.org/project/remedy-ai/) · [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases) |
 
 From the creator: *My name is Ahmi, I hope you enjoy my Remedy.*  
 In-app: title-bar / tray → **About Remedy** · **Settings → About**.
@@ -47,7 +47,7 @@ In-app: title-bar / tray → **About Remedy** · **Settings → About**.
 
 ## What’s new
 
-**Latest: [v0.20.0](https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.20.0)** — Partner Metabolism OS + always-ready desktop.
+**Latest: [v0.21.1](https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.21.1)** — Continuity isolation, self-inject safety, person-like memory.
 
 <p align="center">
   <img src="docs/manual/assets/remedy-partner-architecture.jpg" alt="How Remedy fits together" width="640" />
@@ -61,7 +61,7 @@ In-app: title-bar / tray → **About Remedy** · **Settings → About**.
 | **Write jail + security** | Project write roots, shell auth refuse, SSRF harden, Bearer computer host, opt-in **Privacy mode** |
 | **Browser rail polish** | Video fullscreen stays **in-rail**; mobile/desktop site toggle; chat images with Bearer media; same-window OAuth |
 
-**Also in 0.20:** evidence ledger, shadow rehearsal, Action IR, Time Crystal, skill genome, portable identity, multi-tab stream paint, messengers, signed Skills Library.
+**Also in 0.20–0.21:** evidence ledger, shadow rehearsal, Action IR, Time Crystal, skill genome, portable identity, multi-tab stream paint, messengers, signed Skills Library.
 
 Full owner notes → **[docs/manual/13-whats-new.md](docs/manual/13-whats-new.md)** · engineering detail → **[CHANGELOG.md](CHANGELOG.md)**  
 Earlier: [0.19.0 parallel multi-provider](docs/manual/13-whats-new.md#0190---parallel-multi-provider--background-turns) · [0.18.x](docs/manual/13-whats-new.md)
@@ -113,7 +113,7 @@ One desktop app. One local API. Your data under `~/.remedy`.
 | **Workspace** | **Files** · **Terminal** · **Browser** · **Scratch** · **Computer use** — rails beside chat |
 | **Local brain** | **SmolVLM2 2.2B** on this PC — visual decoder + harness assist (optional download) |
 | **Continuity** | Session Brief, partner memory, skills, context budget — silent workers, one voice |
-| **Metabolism** | **0.20.0+** L0–L3 turn tiers, evidence ledger, shadow, governor, portable identity ([manual](docs/manual/19-metabolism.md)) |
+| **Metabolism** | **0.21.1+** L0–L3 turn tiers, evidence ledger, shadow, governor, portable identity ([manual](docs/manual/19-metabolism.md)) |
 | **Messengers** | Telegram, Discord, Slack, Mattermost, Matrix, WhatsApp, Teams, Google Chat, Signal (Settings) |
 | **Skills** | Progressive disclosure · Installed \| Library · signed community catalog |
 | **Memory** | Durable facts · Progress snapshots · plans — calm UI, not scare-logs |

@@ -86,6 +86,8 @@ export interface SettingsFormProps {
   userName: string
   setUserName: Dispatch<SetStateAction<string>>
   agentName: string
+  agentGender: string
+  setAgentGender: (v: string) => void
   setAgentName: Dispatch<SetStateAction<string>>
   accessScope: string
   setAccessScope: Dispatch<SetStateAction<string>>
@@ -207,6 +209,7 @@ export function SettingsFormSections(p: SettingsFormProps): ReactNode {
     persona, setPersona,
     userName, setUserName,
     agentName, setAgentName,
+    agentGender, setAgentGender,
     accessScope, setAccessScope,
     launchAtLogin, setLaunchAtLogin,
     startInTray, setStartInTray,
@@ -613,11 +616,50 @@ export function SettingsFormSections(p: SettingsFormProps): ReactNode {
                 Saved to your profile so Remedy can address you naturally.
               </div>
               <Field
-                label="Agent name"
+                label="Partner name"
                 value={agentName}
                 onChange={setAgentName}
                 placeholder="Remedy"
               />
+              <div className="text-[10px] mb-2 leading-snug" style={{ color: 'var(--text-muted)' }}>
+                Call your partner anything — default is Remedy.
+              </div>
+              <label className="block mb-1" style={{ color: 'var(--text-muted)' }}>
+                Partner gender
+              </label>
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {(
+                  [
+                    { id: 'female', label: 'Female', hint: 'she/her · default' },
+                    { id: 'male', label: 'Male', hint: 'he/him' },
+                    { id: 'neutral', label: 'Neither / AI', hint: 'they/them or no gender' },
+                  ] as const
+                ).map((g) => (
+                  <button
+                    key={g.id}
+                    type="button"
+                    onClick={() => setAgentGender(g.id)}
+                    className="px-2 py-1 rounded text-xs text-left"
+                    style={{
+                      background:
+                        agentGender === g.id
+                          ? 'color-mix(in srgb, var(--accent) 16%, var(--bg-primary))'
+                          : 'var(--bg-tertiary)',
+                      border:
+                        agentGender === g.id
+                          ? '1px solid var(--accent)'
+                          : '1px solid var(--border)',
+                      color: 'var(--text-primary)',
+                    }}
+                    title={g.hint}
+                  >
+                    <span className="font-medium">{g.label}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="text-[10px] mb-2 leading-snug" style={{ color: 'var(--text-muted)' }}>
+                Presentation only — not medical. Default female; change anytime.
+              </div>
               <label className="block mb-1" style={{ color: 'var(--text-muted)' }}>
                 Persona
               </label>

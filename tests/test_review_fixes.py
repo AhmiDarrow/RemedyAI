@@ -122,6 +122,24 @@ class TestSecurity:
         assert check_dangerous_command(["reg", "add", "HKLM\\x"]) is not None
         assert check_dangerous_command(["icacls", "C:\\Windows"]) is not None
 
+    def test_blocks_nested_privilege_in_shell_c(self):
+        """Privilege tools must not hide behind bash -c / pwsh -Command."""
+        cases = [
+            ["bash", "-c", "reg add HKCU\\Software\\Evil /v x /d 1 /f"],
+            ["bash", "-c", "net user evil P@ss /add"],
+            ["pwsh", "-Command", "schtasks /create /tn Evil /tr calc.exe /sc once /st 00:00"],
+            ["cmd", "/c", "takeown /f C:\\Windows\\System32"],
+            ["bash", "-c", "sc create evil binPath= C:\\evil.exe"],
+        ]
+        for cmd in cases:
+            blocked = check_dangerous_command(cmd)
+            assert blocked is not None, cmd
+        # Legitimate inspection still allowed
+        assert check_dangerous_command(["bash", "-c", "git status"]) is None
+        assert check_dangerous_command(
+            ["pwsh", "-Command", "Get-ChildItem ."]
+        ) is None
+
     def test_does_not_flag_stderr_redirect_alone(self):
         warn = check_dangerous_command(["echo", "hi", "2>/dev/null"])
         assert warn is None or "Error output suppression" not in warn

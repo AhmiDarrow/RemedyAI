@@ -374,3 +374,13 @@ def register_memory_tools(runtime: Any) -> None:
 
     register_partner_state_tools(runtime)
 
+    # --- Soul Field (personhood / unified recall / dream) ---
+    from remedy.core.agent_soul_tools import register_soul_tools
+
+    register_soul_tools(runtime)
+
+    # --- Build engine (machine construction / ledger / unit hops) ---
+    from remedy.core.agent_build_tools import register_build_tools
+
+    register_build_tools(runtime)
+

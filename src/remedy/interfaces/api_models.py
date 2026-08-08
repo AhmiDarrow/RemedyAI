@@ -166,6 +166,8 @@ class SettingsUpdateRequest(BaseModel):
     project_path: str | None = None
     name: str | None = None  # agent display name (what the AI is called)
     user_name: str | None = None  # human name (what Remedy calls the user)
+    # female (default) | male | neutral — partner presentation / pronouns
+    agent_gender: str | None = None
     persona: str | None = None
     setup_completed: bool | None = None
     access_scope: str | None = None

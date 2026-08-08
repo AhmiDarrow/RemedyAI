@@ -43,6 +43,29 @@ _turn_plan_mode: ContextVar[bool] = ContextVar("remedy_turn_plan_mode", default=
 _turn_tool_steps: ContextVar[list[dict[str, Any]] | None] = ContextVar(
     "remedy_turn_tool_steps", default=None
 )
+# Continuity objects for this turn only (Session Brief / PartnerState / work roots).
+# Live runtime mirrors still update under the turn lock for legacy paths, but tools
+# must read these ContextVars so concurrent tabs cannot stomp mid-stream.
+_turn_session_brief: ContextVar[Any] = ContextVar("remedy_turn_session_brief", default=None)
+_turn_partner_state: ContextVar[Any] = ContextVar("remedy_turn_partner_state", default=None)
+_turn_work_roots: ContextVar[list[str] | None] = ContextVar(
+    "remedy_turn_work_roots", default=None
+)
+# True only between begin_turn / end_turn for this coroutine.
+_turn_active: ContextVar[bool] = ContextVar("remedy_turn_active", default=False)
+
+# Ordered ContextVars set by begin_turn (end_turn resets by zip-order).
+_TURN_CONTEXT_VARS: tuple[ContextVar[Any], ...] = (
+    _turn_session_id,
+    _turn_abort,
+    _turn_workspace,
+    _turn_plan_mode,
+    _turn_tool_steps,
+    _turn_session_brief,
+    _turn_partner_state,
+    _turn_work_roots,
+    _turn_active,
+)
 
 
 # session_id -> list of abort events (overlapping streams rare but possible)
@@ -50,6 +73,11 @@ _registry: dict[str, list[asyncio.Event]] = {}
 # session_id -> live subprocesses for this turn (killed on abort)
 _session_procs: dict[str, list[Any]] = {}
 _lock = threading.Lock()
+
+
+def in_active_turn() -> bool:
+    """True while this coroutine is inside begin_turn … end_turn."""
+    return bool(_turn_active.get())
 
 
 def current_session_id(fallback: str | None = None) -> str | None:
@@ -63,18 +91,84 @@ def turn_session_id(runtime: Any = None, fallback: str | None = None) -> str | N
     Prefer this for approvals / telemetry so concurrent tabs do not steal
     each other's session-scoped fingerprints.
     """
+    if in_active_turn():
+        sid = _turn_session_id.get()
+        if sid:
+            return sid
+        # Anonymous turn with an active context — do not fall through to a
+        # sibling tab's live runtime._session_id.
+        if fallback and str(fallback).strip():
+            return str(fallback).strip()
+        return None
     sid = _turn_session_id.get()
     if sid:
         return sid
     if runtime is not None:
-        raw = getattr(runtime, "_session_id", None)
-        if raw is not None and str(raw).strip():
-            return str(raw).strip()
+        # Prefer live store to avoid property recursion on BasicRuntime.
+        d = getattr(runtime, "__dict__", None) or {}
+        if "_session_id_live" in d:
+            live = d.get("_session_id_live")
+        else:
+            live = getattr(runtime, "_session_id", None)
+        if live is not None and str(live).strip():
+            return str(live).strip()
     return fallback if fallback and str(fallback).strip() else None
 
 
 def current_turn_workspace() -> TurnWorkspace | None:
     return _turn_workspace.get()
+
+
+def turn_session_brief(runtime: Any = None) -> Any:
+    """Session Brief for this turn (ContextVar first)."""
+    if in_active_turn():
+        return _turn_session_brief.get()
+    if runtime is not None:
+        return runtime.__dict__.get(
+            "_session_brief_live", getattr(runtime, "_session_brief", None)
+        )
+    return _turn_session_brief.get()
+
+
+def set_turn_session_brief(brief: Any) -> None:
+    """Update this turn's Session Brief (no-op outside an active turn)."""
+    if in_active_turn():
+        _turn_session_brief.set(brief)
+
+
+def turn_partner_state(runtime: Any = None) -> Any:
+    """PartnerState for this turn (ContextVar first)."""
+    if in_active_turn():
+        return _turn_partner_state.get()
+    if runtime is not None:
+        return runtime.__dict__.get(
+            "_partner_state_live", getattr(runtime, "_partner_state", None)
+        )
+    return _turn_partner_state.get()
+
+
+def set_turn_partner_state(state: Any) -> None:
+    if in_active_turn():
+        _turn_partner_state.set(state)
+
+
+def turn_work_roots(runtime: Any = None) -> list[str]:
+    """Work roots for this turn (ContextVar first)."""
+    if in_active_turn():
+        roots = _turn_work_roots.get()
+        return list(roots) if roots is not None else []
+    if runtime is not None:
+        live = runtime.__dict__.get("_work_roots_live")
+        if live is None:
+            live = getattr(runtime, "_work_roots", None)
+        return list(live or [])
+    roots = _turn_work_roots.get()
+    return list(roots) if roots is not None else []
+
+
+def set_turn_work_roots(roots: list[str] | None) -> None:
+    if in_active_turn():
+        _turn_work_roots.set(list(roots or []))
 
 
 def is_turn_aborted() -> bool:
@@ -92,30 +186,45 @@ def begin_turn(
     project_raw: str | None = None,
     active_path: str | Any = "",
     plan_mode: bool = False,
-) -> tuple[Token, Token, Token, Token, Token]:
-    """Register abort + workspace + plan/tools for this turn.
+    session_brief: Any = None,
+    partner_state: Any = None,
+    work_roots: list[str] | None = None,
+) -> tuple[Token, ...]:
+    """Register abort + workspace + plan/tools + continuity for this turn.
 
-    Returns (session, abort, workspace, plan_mode, tool_steps) tokens.
+    Returns tokens in ``_TURN_CONTEXT_VARS`` order (pass to ``end_turn`` via ``*tokens``).
+    Continuity kwargs freeze Session Brief / PartnerState / work roots for the
+    full ReAct stream so a sibling tab cannot rebind mid-turn.
     """
     sid = str(session_id or "").strip() or None
     ev = asyncio.Event()
     path_s = str(active_path) if active_path is not None else ""
     ws = TurnWorkspace(project_raw=project_raw, active_path=path_s)
-    tok_s = _turn_session_id.set(sid)
-    tok_a = _turn_abort.set(ev)
-    tok_w = _turn_workspace.set(ws)
-    tok_p = _turn_plan_mode.set(bool(plan_mode))
-    tok_t = _turn_tool_steps.set([])
+    roots = list(work_roots) if work_roots is not None else []
+    values: tuple[Any, ...] = (
+        sid,
+        ev,
+        ws,
+        bool(plan_mode),
+        [],
+        session_brief,
+        partner_state,
+        roots,
+        True,
+    )
+    tokens: list[Token] = []
+    for var, val in zip(_TURN_CONTEXT_VARS, values, strict=True):
+        tokens.append(var.set(val))
     if sid:
         with _lock:
             _registry.setdefault(sid, []).append(ev)
-    return tok_s, tok_a, tok_w, tok_p, tok_t
+    return tuple(tokens)
 
 
 def current_plan_mode(runtime: Any = None) -> bool:
     """Plan mode for this coroutine turn (ContextVar first)."""
     # ContextVar always set by begin_turn; default False when outside a turn.
-    if _turn_tool_steps.get() is not None or _turn_session_id.get():
+    if in_active_turn() or _turn_tool_steps.get() is not None or _turn_session_id.get():
         return bool(_turn_plan_mode.get())
     if runtime is not None:
         return bool(getattr(runtime, "_plan_mode", False))
@@ -145,13 +254,9 @@ def bind_turn_workspace(project_raw: str | None, active_path: str | Any) -> Toke
 
 def end_turn(
     session_id: str | None,
-    tok_s: Token,
-    tok_a: Token,
-    tok_w: Token | None = None,
-    tok_p: Token | None = None,
-    tok_t: Token | None = None,
+    *tokens: Token | None,
 ) -> None:
-    """Unregister abort event and reset contextvars."""
+    """Unregister abort event and reset contextvars (zip-order with begin_turn)."""
     sid = str(session_id or "").strip() or None
     ev = _turn_abort.get()
     if sid and ev is not None:
@@ -164,19 +269,10 @@ def end_turn(
             # Drop any leftover proc handles for this session if no turns remain
             if sid not in _registry:
                 _session_procs.pop(sid, None)
-    with contextlib.suppress(Exception):
-        _turn_session_id.reset(tok_s)
-    with contextlib.suppress(Exception):
-        _turn_abort.reset(tok_a)
-    if tok_w is not None:
-        with contextlib.suppress(Exception):
-            _turn_workspace.reset(tok_w)
-    if tok_p is not None:
-        with contextlib.suppress(Exception):
-            _turn_plan_mode.reset(tok_p)
-    if tok_t is not None:
-        with contextlib.suppress(Exception):
-            _turn_tool_steps.reset(tok_t)
+    for var, tok in zip(_TURN_CONTEXT_VARS, tokens, strict=False):
+        if tok is not None:
+            with contextlib.suppress(Exception):
+                var.reset(tok)
 
 
 def register_turn_process(proc: Any) -> None:

@@ -21,7 +21,7 @@ project access scope).
 | **Product** | Windows desktop partner + local API (`127.0.0.1:7400`) |
 | **Data home** | `~/.remedy` (config, memory, skills, DPAPI secrets) |
 | **Models** | *Your* provider keys or Ollama — continuity stays on disk |
-| **Current** | **v0.20.0** — metabolism, always-ready tray, privacy mode, browser rail polish |
+| **Current** | **v0.21.1** — continuity isolation, self-inject safety, person-like memory, metabolism |
 | **Install** | [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases/latest) · PyPI `remedy-ai` |
 
 In-app: title-bar / tray → **About Remedy** · **Settings → About**.  
@@ -31,12 +31,12 @@ Creator note: *My name is Ahmi, I hope you enjoy my Remedy.*
 
 ## What’s new (start here)
 
-**v0.20.0** highlights:
+**v0.21.1** highlights:
 
-- Partner **metabolism** (L0–L3), evidence, shadow, write jail  
-- **✕ always → tray**; Quit from tray only  
-- Opt-in **Privacy mode**; browser **fullscreen in-rail**; chat media + OAuth polish  
-- Security gauntlet (SSRF, Bearer host, auth path refuse)
+- Multi-tab **turn-local continuity** (Session Brief / Partner State isolated)  
+- Self-inject **snapshot restore** (no wipe of unrelated dirty work)  
+- Nested shell **privilege hard-blocks**; webhook secret path fixed  
+- Partner **metabolism** (L0–L3), always-ready tray, privacy, browser rail (0.20 line)
 
 Full list: **[What’s new](13-whats-new)** · engineering: repo `CHANGELOG.md`.
 

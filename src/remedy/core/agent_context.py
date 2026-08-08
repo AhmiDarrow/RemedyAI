@@ -28,6 +28,65 @@ async def build_turn_context(runtime: Any) -> str:
         if iso:
             parts.append(iso)
 
+    # Soul Field — provider-invariant personhood (muscle vs soul).
+    # Inject early so every provider animates the same continuous partner.
+    with suppress(Exception):
+        from remedy.core.llm_binding import get_llm_binding
+        from remedy.core.muscle_profile import (
+            apply_muscle_to_runtime,
+            builder_system_addendum,
+        )
+        from remedy.memory.soul.inject import build_soul_context_block
+
+        home = getattr(getattr(runtime, "config", None), "home_dir", None)
+        bind = get_llm_binding(runtime)
+        muscle = apply_muscle_to_runtime(runtime)
+        user_name = ""
+        with suppress(Exception):
+            from remedy.interfaces.config import load_config
+
+            user_name = str(load_config().get("user_name") or "").strip()
+        soul_budget = 1800 if muscle.dense_memory else 1200
+        soul = build_soul_context_block(
+            home=home,
+            include_contract=True,
+            provider=str(getattr(bind, "provider", "") or ""),
+            model=str(getattr(bind, "model", "") or ""),
+            user_name=user_name,
+            max_chars=soul_budget,
+        )
+        if soul:
+            parts.append(soul)
+        # Capable muscle (Grok/Claude/GPT/…) — full builder organism contract
+        build_add = builder_system_addendum(muscle)
+        if build_add:
+            parts.append(build_add)
+        # Live build-engine phase (if this turn is a supervised construction)
+        with suppress(Exception):
+            from remedy.core.build_engine import get_build_state
+            from remedy.core.build_ledger import resume_hint
+
+            bst = get_build_state(runtime)
+            if bst is not None and bst.active:
+                parts.append(
+                    f"[Build engine live] phase={bst.phase} "
+                    f"explore={bst.explore_steps} write={bst.write_steps} "
+                    f"verify={bst.verify_steps} "
+                    f"verify_ok={bst.last_verify_ok} "
+                    f"oracle={bst.verify_command or 'MISSING'} "
+                    f"auto_verify={bst.auto_verify_ran} "
+                    f"paths={', '.join(bst.paths_touched[-6:]) or '—'}"
+                )
+            else:
+                # Mid-ship resume hint even when turn not yet classified as build
+                proj = ""
+                with suppress(Exception):
+                    proj = str(runtime.effective_project_path() or "")
+                home = getattr(getattr(runtime, "config", None), "home_dir", None)
+                hint = resume_hint(proj or None, home=home)
+                if hint:
+                    parts.append(hint)
+
     # Project workspace (default directory for this session)
     with suppress(Exception):
         parts.append(
@@ -94,6 +153,8 @@ async def build_turn_context(runtime: Any) -> str:
             )
             if block:
                 parts.append(block)
+            # Prefer profile display name on soul (already injected) — keep profile
+            # as source of truth for durable facts; soul carries dyadic residue.
             # Full-scope / no-focus reminder — optional focus, not a cage
             if runtime.project_path_is_unset() or runtime.access_scope() == "full":
                 parts.append(

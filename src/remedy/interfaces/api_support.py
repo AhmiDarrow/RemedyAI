@@ -885,6 +885,7 @@ def _apply_llm_to_runtime(
     api_key: str | None = None,
     persona: str | None = None,
     name: str | None = None,
+    agent_gender: str | None = None,
     project_path: str | None = None,
     access_scope: str | None = None,
     harness_mode: str | None = None,
@@ -905,6 +906,8 @@ def _apply_llm_to_runtime(
             "persona": persona,
             "name": name,
         }
+        if agent_gender is not None:
+            kwargs["agent_gender"] = agent_gender
         if project_path is not None:
             kwargs["project_path"] = project_path
         if access_scope is not None:

@@ -4,7 +4,91 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
-### Tool dispatch robustness
+## [0.21.1] - 2026-08-07
+
+Continuity isolation, self-inject safety, webhook auth, and person-like memory depth.
+Package / desktop surfaces already at **0.21.1**; this cut aligns docs + hardens the
+shared-runtime multi-tab path so any provider “muscle” keeps one continuous partner.
+
+### Soul Field (experimental personhood)
+
+- **Muscle vs soul:** chat providers are interchangeable muscle; local **Soul Field**
+  (`~/.remedy/soul/field.json`) carries identity vow, dyadic relational state,
+  episode residue, pledges/tensions, and organism self-lessons.
+- Injected every turn (provider-agnostic contract + residue); updated post-turn;
+  self-inject red/green folds into the organism self-model.
+- **Muscle profile:** Grok/Claude/GPT-class unlocks builder contract + up to 24
+  parallel tools; tiny/local stays lean.
+- **Dream cycle** densifies episodes → pledges/habits/crystal; tools
+  `soul_status` / `soul_recall` / `soul_dream`.
+- Intent pack **build** for ship/implement/scaffold phrasing.
+- **Local dream enrich** (optional loopback LLM), **soma** mood on partner status
+  + tray tooltip, **mission×soul** auto-arm, **portable soul** in identity export,
+  **self-inject focus=auto** targets continuity gaps.
+- Design note: `docs/SOUL_FIELD.md`.
+
+### Identity (name + gender)
+
+- Partner is **female by default** (`agent_gender = female`); user may choose
+  **male** or **neutral** (neither / AI) and any **partner name** (default Remedy).
+- Settings → You & Agent + Setup wizard; system prompt + Soul Field stay in sync.
+
+### Build engine (machine-native construction)
+
+- **Build engine** supervises construction turns: scout → implement → verify →
+  repair → done. Forces implement after serial explore thrash; forces verify after
+  writes; blocks monologue without tool_calls; keeps epoch walls open until green.
+- Frontier muscle (Grok/Claude/GPT) never loses tools on L1 strip for build asks.
+- Live phase inject in context; intent pack **build** aligned to the schedule.
+- **Auto-verify** after write waves (machine runs fingerprint tests; no model choice).
+- **Oracle-first**: no discoverable test command → fail closed (no DONE).
+- **Build ledger** on disk (`.remedy-build/ledger.json`) for mid-ship resume.
+- Tools: `build_status`, `build_resume`, `build_unit_hop` (structural reducer hop).
+- **Error-vector repair tickets** from red verify (failing nodes / path:line).
+- **Syntax gate** on .py/.json writes before full suite.
+- **Green gate** blocks final answers until verify is green + write_set clear.
+- **Scoped verify**: pytest only tests mapped to write_set (faster falsification).
+- **Oracle seed**: if no tests, machine writes smoke import tests + sets command.
+- **Mission bind**: each build turn attaches a durable mission + verify stickiness.
+- **Auto-verify cycle cap** prevents infinite red loops.
+- **Import dry-run** after .py writes (subprocess import before suite).
+- **Mutation cone**: reverse-import expansion for scoped re-verify + score.
+- **Live reducer hops**: `build_unit_hop use_llm=` + `build_live_project` (stateless
+  model, disk oracle, multi-unit materialize).
+- **Mutation score tool**: `build_mutation_score` reports import-cone seeds/paths
+  for the current write_set (feeds scoped verify).
+- **Frontiers A–H (machine construction OS)**:
+  - **A** Behavioral hop: `tests=` / PytestOracle on live_unit_hop
+  - **B** Spec compiler: `build_compile_spec` → locked BuildSpec DAG
+  - **C** Repair queue: error vector → ranked targets; auto on red verify
+  - **D** True mutants: `build_mutant_score` kill rate (not just import cone)
+  - **E** Snapshots: pre-hop snapshot + `build_snapshot` list/restore/bisect
+  - **F** Gate tower: `build_gate_tower` L0 syntax→L1 static→L2 import→L3 unit→L4 cone
+  - **G** Symbol index + AST-minimal `patch_symbol=` patches
+  - **H** TDD-as-OS: `build_tdd` writes failing tests before implement
+
+### Multi-tab continuity
+
+- **Turn-local Session Brief / PartnerState / work roots** via ContextVars — concurrent
+  streams no longer stomp each other's goals, brief, or partner graph mid-turn.
+- `ensure_partner_state` prefers turn session id so tools attach to the right tab.
+
+### Security
+
+- **Shell hard-blocks** now scan nested `bash -c` / `pwsh -Command` payloads for
+  privilege tools (`reg`, `net user`, `schtasks /create`, …).
+- **Generic webhook** (`/api/webhook/{source}`): middleware allows the path so
+  `X-Remedy-Webhook-Secret` reaches the handler; route still fails closed.
+- **Google Chat**: unauthenticated handshake only for explicit verification shapes —
+  not any body that happens to include `challenge`.
+
+### Self-inject
+
+- **Rollback** restores the pre-round snapshot (re-apply captured diff) instead of
+  `git checkout -- .` wiping unrelated dirty tracked work; drops only untracked
+  files created during the round.
+
+### Tool dispatch robustness (from unreleased)
 
 - **Unknown tool kwargs:** `ToolRegistry.execute` filters LLM-supplied extras
   against the handler signature so models can pass `description` / `target` /

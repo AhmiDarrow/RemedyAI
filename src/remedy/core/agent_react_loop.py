@@ -305,6 +305,12 @@ async def call_llm_stream(runtime, message: str,
             *history,
             {"role": "user", "content": user_content},
         ]
+        # Machine build protocol (hard schedule for construction turns)
+        with suppress(Exception):
+            proto = getattr(runtime, "_build_protocol_pending", None)
+            if proto:
+                messages.append({"role": "system", "content": str(proto)})
+                runtime._build_protocol_pending = None
         # Continuity / Memory Harness v2: enforce lean send-view + optional local brief
         with suppress(Exception):
             if runtime._harness_mode == "auto":
@@ -541,11 +547,24 @@ async def call_llm_stream(runtime, message: str,
                 tools = all_tools
                 run_until_done = True
 
+        # Machine build engine — supervise capable-muscle construction turns.
+        build_state = None
+        with suppress(Exception):
+            from remedy.core.build_engine import begin_build_turn, build_protocol_block
+
+            build_state = begin_build_turn(runtime, message or "")
+            if build_state is not None and build_state.active and all_tools:
+                tools = all_tools
+                run_until_done = True
+                # Inject machine protocol into the first LLM messages later
+                runtime._build_protocol_pending = build_protocol_block(build_state)
+
         # L1 lean: bias tools off for pure chat — but never strip mid-task
         # continuity (open brief tasks / recent tool history). That was a
         # correctness gap: "ok continue" after agency became tool-less.
         # Also keep tools when the *message itself* wants tools (e.g. "review
         # project") even if tier heuristic lag behind — fail-open for agency.
+        # Build engine turns never strip tools (machine schedule requires them).
         if (
             int(getattr(runtime, "_turn_tier", 1) or 1) == 1
             and not plan_mode
@@ -554,7 +573,14 @@ async def call_llm_stream(runtime, message: str,
             and not page_interaction
             and not clear_goals_only
         ):
-            open_work = bool(open_tasks_for_wall)
+            force_build_tools = False
+            with suppress(Exception):
+                from remedy.core.build_engine import should_force_tools_for_build
+
+                force_build_tools = should_force_tools_for_build(
+                    runtime, message or ""
+                )
+            open_work = bool(open_tasks_for_wall) or force_build_tools
             if not open_work:
                 with suppress(Exception):
                     from remedy.core.react_policy import (
@@ -570,6 +596,9 @@ async def call_llm_stream(runtime, message: str,
             if not open_work:
                 tools = None  # type: ignore[assignment]
                 run_until_done = False
+            elif force_build_tools and all_tools:
+                tools = all_tools
+                run_until_done = True
             # Keep all_tools for recovery if model later needs agency
 
         # Accumulated assistant text for critical verify at end
@@ -1732,6 +1761,55 @@ async def call_llm_stream(runtime, message: str,
                             }
                         )
                         continue
+                    # Build engine: monologue without tools is illegal mid-build.
+                    if (
+                        not tool_calls_list
+                        and all_tools
+                        and not force_answer_sticky
+                        and not is_final_step
+                    ):
+                        with suppress(Exception):
+                            from remedy.core.build_engine import (
+                                get_build_state,
+                                monologue_block_nudge,
+                            )
+
+                            bn = monologue_block_nudge(get_build_state(runtime))
+                            if bn is not None:
+                                _rearm_agency_tools()
+                                force_answer_sticky = False
+                                messages.append(bn)
+                                logger.info(
+                                    "Build engine monologue block (step %d)",
+                                    step + 1,
+                                )
+                                continue
+                    # Build engine GREEN GATE: refuse final answer without green verify
+                    if (
+                        not tool_calls_list
+                        and text_out
+                        and (force_answer or force_answer_sticky or is_final_step)
+                    ):
+                        with suppress(Exception):
+                            from remedy.core.build_engine import (
+                                build_blocks_final_answer,
+                                get_build_state,
+                                unfinished_green_gate_message,
+                            )
+
+                            bst_g = get_build_state(runtime)
+                            if build_blocks_final_answer(bst_g) and bst_g is not None:
+                                if "green_gate" not in bst_g.nudges_emitted:
+                                    bst_g.nudges_emitted.append("green_gate")
+                                _rearm_agency_tools()
+                                force_answer_sticky = False
+                                messages.append(unfinished_green_gate_message(bst_g))
+                                logger.info(
+                                    "Build green-gate blocked final (step %d phase=%s)",
+                                    step + 1,
+                                    bst_g.phase,
+                                )
+                                continue
                     # Agency fail-open (content path): "Activating skill now" etc.
                     # Must run *before* false-progress / final-answer acceptance —
                     # skill/tool promise claims get a dedicated re-arm nudge
@@ -2040,6 +2118,199 @@ async def call_llm_stream(runtime, message: str,
                 tool_batches_in_epoch += 1
                 if is_productive_tool_batch(batch_tool_msgs):
                     productive_in_epoch += 1
+                # Machine build engine: syntax gate + auto-verify + force nudges
+                with suppress(Exception):
+                    from remedy.core.build_engine import (
+                        get_build_state,
+                        next_machine_nudge,
+                        observe_tool_batch,
+                    )
+                    from remedy.core.build_ledger import merge_turn_into_ledger
+                    from remedy.core.build_oracle import (
+                        format_auto_verify_message,
+                        run_auto_verify,
+                        should_auto_verify,
+                    )
+                    from remedy.core.build_syntax import (
+                        check_paths_syntax,
+                        format_syntax_gate_message,
+                    )
+                    from remedy.core.turn_context import turn_session_id
+
+                    bst = get_build_state(runtime)
+                    if bst is not None and bst.active:
+                        observe_tool_batch(bst, fresh_calls, batch_tool_msgs)
+                        # Post-write syntax gate (py/json) before full suite
+                        if bst.write_set:
+                            syn = check_paths_syntax(list(bst.write_set)[-8:])
+                            bad = [r for r in syn if not r.get("ok")]
+                            bst.syntax_ok = not bad
+                            if bad:
+                                sm = format_syntax_gate_message(syn)
+                                if sm is not None:
+                                    messages.append(sm)
+                                    _rearm_agency_tools()
+                                    yield "@@status:Build syntax gate red\n"
+                            # Import-graph dry-run (faster than pytest for .py)
+                            if not bad:
+                                with suppress(Exception):
+                                    from remedy.core.build_import_graph import (
+                                        dry_run_imports_for_paths,
+                                        format_import_dry_run_message,
+                                        mutation_score_paths,
+                                    )
+
+                                    root_p = runtime.effective_project_path()
+                                    py_paths = [
+                                        p
+                                        for p in list(bst.write_set)[-8:]
+                                        if str(p).endswith(".py")
+                                    ]
+                                    if py_paths:
+                                        imp = dry_run_imports_for_paths(
+                                            py_paths, root_p
+                                        )
+                                        imsg = format_import_dry_run_message(imp)
+                                        if imsg is not None:
+                                            bst.syntax_ok = False  # block suite
+                                            messages.append(imsg)
+                                            _rearm_agency_tools()
+                                            yield "@@status:Build import dry-run red\n"
+                                        else:
+                                            # mutation score for next scoped verify
+                                            with suppress(Exception):
+                                                ms = mutation_score_paths(
+                                                    root_p, list(bst.write_set)
+                                                )
+                                                bst.last_mutation_score = ms  # type: ignore[attr-defined]
+                                                if ms.get("cone_mods"):
+                                                    yield (
+                                                        "@@status:Build mutation cone "
+                                                        f"{len(ms['cone_mods'])} mods "
+                                                        f"score={ms.get('mutation_score')}\n"
+                                                    )
+                        # Machine-owned falsification after write waves
+                        if should_auto_verify(bst) and bst.syntax_ok is not False:
+                            if not bst.verify_command:
+                                from remedy.core.build_oracle import (
+                                    discover_verify_command,
+                                )
+
+                                bst.verify_command = discover_verify_command(runtime)
+                                bst.oracle_ok = bool(bst.verify_command)
+                            av = await run_auto_verify(runtime, bst)
+                            # Surface oracle seed if machine planted smoke tests
+                            seed = getattr(bst, "_seed_message", None)
+                            if seed and isinstance(seed, dict):
+                                with suppress(Exception):
+                                    from remedy.core.build_seed_oracle import (
+                                        format_seed_oracle_message,
+                                    )
+
+                                    messages.append(format_seed_oracle_message(seed))
+                                bst._seed_message = None  # type: ignore[attr-defined]
+                            messages.append(
+                                format_auto_verify_message(av, state=bst)
+                            )
+                            if av.get("oracle_missing"):
+                                pass
+                            elif av.get("capped"):
+                                logger.info("Build auto-verify CAP cycles=%s", bst.auto_verify_cycles)
+                            elif av.get("ok"):
+                                logger.info(
+                                    "Build auto-verify GREEN cmd=%s scoped=%s",
+                                    av.get("command"),
+                                    av.get("scoped"),
+                                )
+                                # D: optional mutant kill sample after green (cheap)
+                                with suppress(Exception):
+                                    if (
+                                        "mutant_sampled" not in bst.nudges_emitted
+                                        and bst.write_set
+                                    ):
+                                        from remedy.core.build_mutant import (
+                                            format_mutant_message,
+                                            mutant_kill_score,
+                                        )
+
+                                        root_m = runtime.effective_project_path()
+                                        mk = mutant_kill_score(
+                                            root_m, list(bst.write_set)[-4:]
+                                        )
+                                        bst.last_mutant_kill = mk  # type: ignore[attr-defined]
+                                        if mk.get("total"):
+                                            bst.nudges_emitted.append("mutant_sampled")
+                                            messages.append(format_mutant_message(mk))
+                                            if mk.get("survived"):
+                                                yield (
+                                                    "@@status:Build mutants survived "
+                                                    f"{mk.get('survived')}\n"
+                                                )
+                            else:
+                                if "auto_verify_repair" not in bst.nudges_emitted:
+                                    bst.nudges_emitted.append("auto_verify_repair")
+                                # Allow another cycle after next writes
+                                bst.auto_verify_ran = False
+                                # C: schedule repair queue from error vector
+                                with suppress(Exception):
+                                    from remedy.core.build_repair_queue import (
+                                        format_repair_queue_message,
+                                        queue_from_error_vector,
+                                    )
+
+                                    q = queue_from_error_vector(
+                                        getattr(bst, "last_error_vector", None) or {},
+                                        write_set=list(bst.write_set or []),
+                                        root=runtime.effective_project_path(),
+                                    )
+                                    bst.repair_queue = q.to_public()  # type: ignore[attr-defined]
+                                    if q.targets:
+                                        messages.append(format_repair_queue_message(q))
+                                        yield (
+                                            "@@status:Build repair queue "
+                                            f"{len(q.targets)} targets\n"
+                                        )
+                                logger.info(
+                                    "Build auto-verify RED cmd=%s scoped=%s",
+                                    av.get("command"),
+                                    av.get("scoped"),
+                                )
+                            _rearm_agency_tools()
+                            yield (
+                                f"@@status:Build auto-verify "
+                                f"{'green' if av.get('ok') else ('cap' if av.get('capped') else 'red')}"
+                                f"{' scoped' if av.get('scoped') else ''}"
+                                f"{' seeded' if av.get('seeded') else ''}"
+                                f"{' (oracle missing)' if av.get('oracle_missing') else ''}\n"
+                            )
+                        elif bst.syntax_ok is not False:
+                            mnudge = next_machine_nudge(bst)
+                            if mnudge is not None:
+                                messages.append(mnudge)
+                                _rearm_agency_tools()
+                                logger.info(
+                                    "Build engine nudge phase=%s explore=%d write=%d verify=%d",
+                                    bst.phase,
+                                    bst.explore_steps,
+                                    bst.write_steps,
+                                    bst.verify_steps,
+                                )
+                        # Persist ledger every batch
+                        with suppress(Exception):
+                            home_b = getattr(
+                                getattr(runtime, "config", None), "home_dir", None
+                            )
+                            proj_b = str(
+                                getattr(bst, "project_path", None)
+                                or runtime.effective_project_path()
+                                or ""
+                            )
+                            merge_turn_into_ledger(
+                                bst,
+                                project_path=proj_b,
+                                session_id=str(turn_session_id(runtime) or ""),
+                                home=home_b,
+                            )
                 # CUA macro extraction from successful computer chains
                 with suppress(Exception):
                     from remedy.core.metabolism.cua_macros import get_cua_macros

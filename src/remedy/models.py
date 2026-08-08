@@ -355,7 +355,12 @@ class ModelDefinition(BaseModel):
 class AgentConfig(BaseModel):
     """Configuration for the Remedy agent runtime."""
 
-    name: str = Field(default="Remedy")
+    name: str = Field(default="Remedy", description="Agent display name (user-chosen)")
+    # female (default) | male | neutral — presentation / pronouns, not medical sex
+    agent_gender: str = Field(
+        default="female",
+        description="Partner gender presentation: female | male | neutral",
+    )
     persona: str = Field(default="default")
     home_dir: str = Field(default="~/.remedy")
     skills_dir: list[str] = Field(default_factory=list)

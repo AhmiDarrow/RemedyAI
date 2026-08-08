@@ -23,6 +23,21 @@ export interface ProviderHealthHint {
   }
 }
 
+/** Organism mood from Soul Field (status bar + tray tooltip). */
+export interface SomaStatus {
+  mood?: string
+  emoji?: string
+  label?: string
+  rapport?: number
+  trust?: number
+  last_stance?: string
+  open_threads?: number
+  episodes?: number
+  muscle_hint?: string
+  tray_tooltip?: string
+  ts?: number
+}
+
 export interface PartnerStatus {
   pending_approvals: number
   open_goals: number
@@ -35,6 +50,8 @@ export interface PartnerStatus {
   provider_health?: ProviderHealthHint
   /** Lean metabolism counters (tier/EU/DU) — never full organ lists. */
   metabolism?: Record<string, unknown>
+  /** Soul somatic signal (mood / bond). */
+  soma?: SomaStatus
 }
 
 export async function getPartnerStatus(

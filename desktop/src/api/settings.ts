@@ -19,6 +19,8 @@ export interface Settings {
   name: string
   /** What Remedy calls the human user */
   user_name?: string
+  /** Partner gender presentation: female (default) | male | neutral */
+  agent_gender?: string
   persona: string
   project_path: string
   access_scope?: string
@@ -183,6 +185,7 @@ export interface SettingsUpdate {
   project_path?: string
   name?: string
   user_name?: string
+  agent_gender?: string
   persona?: string
   setup_completed?: boolean
   access_scope?: string

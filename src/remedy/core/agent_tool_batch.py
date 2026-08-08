@@ -411,8 +411,14 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
             total=total_jobs,
         ), {}
 
-    for wave_start in range(0, len(to_run), _MAX_PARALLEL_TOOLS):
-        wave = to_run[wave_start : wave_start + _MAX_PARALLEL_TOOLS]
+    # Frontier muscle (Grok/Claude/…) can fan out more tools per wave.
+    parallel_cap = int(_MAX_PARALLEL_TOOLS)
+    with suppress(Exception):
+        runtime_cap = int(getattr(runtime, "_max_parallel_tools", 0) or 0)
+        if runtime_cap > 0:
+            parallel_cap = max(4, min(32, runtime_cap))
+    for wave_start in range(0, len(to_run), parallel_cap):
+        wave = to_run[wave_start : wave_start + parallel_cap]
         wave_names: list[str] = []
         for fp in wave:
             tc = fp_to_tc[fp]

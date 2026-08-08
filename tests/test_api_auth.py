@@ -283,3 +283,36 @@ def test_generic_webhook_accepts_bearer(auth_on, tmp_path):
     assert r.status_code == 200
     assert r.json()["status"] == "accepted"
     assert gw.n == 1
+
+
+def test_generic_webhook_accepts_secret_header_with_middleware(auth_on, tmp_path, monkeypatch):
+    """X-Remedy-Webhook-Secret must reach the handler when Bearer middleware is on."""
+
+    class _GW:
+        def __init__(self):
+            self.n = 0
+
+        async def enqueue(self, _event):
+            self.n += 1
+
+    monkeypatch.setenv("REMEDY_WEBHOOK_SECRET", "whsec-test-secret")
+    tok = ensure_local_api_token(tmp_path)
+    gw = _GW()
+    app = create_app(gateway=gw, api_key=tok)
+    client = TestClient(app)
+    # No Bearer — only webhook secret
+    r = client.post(
+        "/api/webhook/ci",
+        json={"source": "ci", "event": "push", "data": {"x": 1}},
+        headers={"X-Remedy-Webhook-Secret": "whsec-test-secret"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "accepted"
+    assert gw.n == 1
+    # Wrong secret still 401
+    r2 = client.post(
+        "/api/webhook/ci",
+        json={"source": "ci", "event": "push", "data": {"x": 1}},
+        headers={"X-Remedy-Webhook-Secret": "wrong"},
+    )
+    assert r2.status_code == 401

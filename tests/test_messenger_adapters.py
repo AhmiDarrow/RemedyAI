@@ -344,3 +344,67 @@ def test_google_chat_auth_length_mismatch_false_not_raise():
     assert ch.verify_inbound_auth("Bearer long-token-value") is True
     assert ch.verify_inbound_auth(None) is False
 
+
+def test_google_chat_webhook_challenge_does_not_skip_auth_on_message():
+    """MESSAGE bodies with a challenge key must still require Bearer auth."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from remedy.interfaces.routes.webhooks import register_webhook_routes
+    from remedy.models import ChannelKind
+
+    class _FakeGW:
+        def __init__(self):
+            self.events = []
+
+        def get_channel(self, kind):
+            if kind == ChannelKind.GOOGLE_CHAT:
+                return GoogleChatChannel(self, access_token="secret-token", allow_all=True)
+            return None
+
+        async def emit(self, event):
+            self.events.append(event)
+
+    app = FastAPI()
+    register_webhook_routes(app, gateway=_FakeGW())
+    client = TestClient(app)
+
+    # Explicit verification shape — allowed without auth
+    r0 = client.post(
+        "/api/webhooks/google_chat",
+        json={"type": "URL_VERIFICATION", "challenge": "abc"},
+    )
+    assert r0.status_code == 200
+    assert r0.json().get("challenge") == "abc"
+
+    # MESSAGE with challenge must not skip auth
+    r1 = client.post(
+        "/api/webhooks/google_chat",
+        json={
+            "type": "MESSAGE",
+            "challenge": "sneaky",
+            "message": {
+                "text": "hi",
+                "sender": {"name": "users/1", "displayName": "A", "type": "HUMAN"},
+                "space": {"name": "spaces/abc"},
+            },
+            "space": {"name": "spaces/abc"},
+        },
+    )
+    assert r1.status_code == 401
+
+    r2 = client.post(
+        "/api/webhooks/google_chat",
+        json={
+            "type": "MESSAGE",
+            "message": {
+                "text": "hi",
+                "sender": {"name": "users/1", "displayName": "A", "type": "HUMAN"},
+                "space": {"name": "spaces/abc"},
+            },
+            "space": {"name": "spaces/abc"},
+        },
+        headers={"Authorization": "Bearer secret-token"},
+    )
+    assert r2.status_code == 200
+
