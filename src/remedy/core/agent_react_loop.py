@@ -67,6 +67,8 @@ def _is_fatal_llm_api_error(status: int, body: str) -> bool:
     """True when retrying the same model/request cannot succeed.
 
     e.g. HTTP 404 model-not-found — soft-continue spam looks like a stuck agent.
+    Do **not** treat generic ``invalid_request_error`` 400s as fatal (context
+    length, tool schema, message format) — those need soft recovery, not a hard stop.
     """
     if status in (404, 410, 422):
         return True
@@ -74,25 +76,36 @@ def _is_fatal_llm_api_error(status: int, body: str) -> bool:
     # Wrong model name for this host (e.g. grok id on DeepSeek API)
     if "supported api model" in low or "supported models are" in low:
         return True
-    fatal_phrases = (
-        "does not exist",
+    model_fatal_phrases = (
         "model_not_found",
         "invalid model",
         "unknown model",
-        "not have access",
         "model is not available",
         "no such model",
         "unsupported model",
-        "invalid_request_error",  # often permanent model/route issues
+        "does not exist",
+        "not have access",
     )
-    if any(p in low for p in fatal_phrases) and (
-        "model" in low or status in (400, 403, 404)
+    # Model-ish permanent errors only when the body is about models.
+    if "model" in low and any(p in low for p in model_fatal_phrases):
+        return True
+    # OpenAI-style invalid_request_error is only fatal when clearly model-related.
+    if (
+        "invalid_request_error" in low
+        and "model" in low
+        and any(
+            p in low
+            for p in (
+                "model_not_found",
+                "invalid model",
+                "unknown model",
+                "does not exist",
+                "not found",
+                "unsupported",
+            )
+        )
     ):
         return True
-    # 401/403 without a chance to refresh (non-xAI handled elsewhere)
-    if status in (401, 403) and "expired" not in low:
-        # Still allow one soft path for generic auth; treat "does not have access" as fatal above
-        pass
     return False
 
 
