@@ -756,10 +756,11 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
 
         display_content = user_text
         if att_dicts:
+            _block = build_attachment_prompt_block(
+                att_dicts, home_dir=home_att
+            )
             display_content = (
-                f"{user_text}{build_attachment_prompt_block(att_dicts)}"
-                if user_text
-                else build_attachment_prompt_block(att_dicts).lstrip()
+                f"{user_text}{_block}" if user_text else _block.lstrip()
             )
             # Keep history readable but not huge — skip full snippets for images-only.
             if any(a.get("is_text") for a in att_dicts):
