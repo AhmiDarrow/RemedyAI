@@ -45,6 +45,11 @@ from remedy.core.react_policy import (
     strip_tool_markup,
     turn_has_unfinished_work,
 )
+from remedy.core.react_loop.recovery import (
+    fatal_model_error_message,
+    repeated_provider_error_message,
+    soft_retry_notice,
+)
 from remedy.core.react_loop.binding import (
     provider_bits as _provider_bits_fn,
     rearm_agency_tools as _rearm_agency_tools_fn,
@@ -1130,15 +1135,11 @@ async def call_llm_stream(runtime, message: str,
                         if _is_fatal_llm_api_error(resp.status, text):
                             model_name = str(_bind.model or "unknown")
                             prov = str(_bind.provider or "unknown")
-                            yield (
-                                f"\n[LLM ERROR — HTTP {resp.status}]\n"
-                                f"{safe_err[:500]}\n[END LLM ERROR]\n\n"
-                                f"**Cannot continue:** model `{model_name}` "
-                                f"(provider `{prov}`) is not available or this "
-                                f"account cannot use it.\n\n"
-                                "Pick a working model in the model picker / Settings "
-                                "(e.g. your previous Grok or DeepSeek id), then resend. "
-                                "This is not a tool-budget limit.\n"
+                            yield fatal_model_error_message(
+                                status=resp.status,
+                                safe_err=safe_err,
+                                model_name=model_name,
+                                provider=prov,
                             )
                             return
                         from remedy.core.react_turn import soft_api_recovery_action
@@ -1152,12 +1153,9 @@ async def call_llm_stream(runtime, message: str,
                         if _soft_act == "stop":
                             if force_answer_sticky and not force_answer_api_fail_once:
                                 force_answer_api_fail_once = True
-                            yield (
-                                f"\n[LLM ERROR — HTTP {resp.status}]\n"
-                                f"{safe_err[:500]}\n[END LLM ERROR]\n\n"
-                                "Stopped after repeated provider errors. "
-                                "Check model/API key in Settings and try again "
-                                "(or say **continue** after switching models).\n"
+                            yield repeated_provider_error_message(
+                                status=resp.status,
+                                safe_err=safe_err,
                             )
                             return
                         api_soft_failures += 1
