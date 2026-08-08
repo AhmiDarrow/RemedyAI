@@ -197,8 +197,16 @@ def public_settings_snapshot(cfg: dict[str, Any] | None = None) -> dict[str, Any
         ),
         "build_os_advanced": bool(raw.get("build_os_advanced", False)),
         "rmb_enabled": bool(raw.get("rmb_enabled", True)),
-        "retention_session_days": int(raw.get("retention_session_days") or 0),
-        "retention_attachment_days": int(raw.get("retention_attachment_days") or 0),
+        "retention_session_days": int(
+            raw.get("retention_session_days")
+            if raw.get("retention_session_days") is not None
+            else 180
+        ),
+        "retention_attachment_days": int(
+            raw.get("retention_attachment_days")
+            if raw.get("retention_attachment_days") is not None
+            else 90
+        ),
         "retention_computer_shot_days": int(
             raw.get("retention_computer_shot_days")
             if raw.get("retention_computer_shot_days") is not None

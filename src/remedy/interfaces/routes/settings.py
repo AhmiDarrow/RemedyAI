@@ -196,8 +196,16 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             ),
             "build_os_advanced": bool(cfg.get("build_os_advanced", False)),
             "rmb_enabled": bool(cfg.get("rmb_enabled", True)),
-            "retention_session_days": int(cfg.get("retention_session_days") or 0),
-            "retention_attachment_days": int(cfg.get("retention_attachment_days") or 0),
+            "retention_session_days": int(
+                cfg.get("retention_session_days")
+                if cfg.get("retention_session_days") is not None
+                else 180
+            ),
+            "retention_attachment_days": int(
+                cfg.get("retention_attachment_days")
+                if cfg.get("retention_attachment_days") is not None
+                else 90
+            ),
             "retention_computer_shot_days": int(
                 cfg.get("retention_computer_shot_days")
                 if cfg.get("retention_computer_shot_days") is not None

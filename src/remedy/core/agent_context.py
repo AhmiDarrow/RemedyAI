@@ -188,6 +188,31 @@ async def build_turn_context(runtime: Any) -> str:
         if block:
             parts.append(block)
 
+    # Continuity steering — open tasks / soul threads / mid-ship (anti-thrash)
+    with suppress(Exception):
+        from remedy.core.continuity_steering import continuity_steering_block
+
+        home_cs = getattr(getattr(runtime, "config", None), "home_dir", None)
+        cs = continuity_steering_block(runtime, home=home_cs, max_chars=900)
+        if cs:
+            parts.append(cs)
+
+    # Messenger origin — same partner, remote surface
+    with suppress(Exception):
+        origin = str(getattr(runtime, "_origin_channel", "") or "").strip()
+        if not origin:
+            # Session-bound messenger chats (msg:telegram:…)
+            sid = str(getattr(runtime, "_session_id", "") or "")
+            if sid.startswith("msg:") and ":" in sid[4:]:
+                origin = sid.split(":", 2)[1]
+        if origin:
+            parts.append(
+                f"[Messenger surface: {origin}] "
+                "You are the same Remedy as desktop chat for this person. "
+                "Keep replies concise for chat apps; still use tools when work needs them. "
+                "Do not introduce yourself as a new bot."
+            )
+
     # Machine-native working memory: project the middleman slice for the current
     # query. Holds tool results + facts the brief / recent-memory do not, keyed
     # by what this turn is about (not recency), budget-bounded for small windows.
