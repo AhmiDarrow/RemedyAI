@@ -297,6 +297,9 @@ export function useMessages(sessionId: string | null) {
     prevSessionForDetachRef.current = sessionId || null
     prevStreamingForDetachRef.current = false
     // Clear focused UI only — do not abort streamCtrl (job owns the controller).
+    // Hard-clear stream buffers (no flush) so a finishing background turn cannot
+    // inject partials into the newly focused session.
+    clearStreamAccum()
     streamingRef.current = false
     sendLockRef.current = false
     setStreaming(false)
@@ -310,8 +313,8 @@ export function useMessages(sessionId: string | null) {
     setTaskProgress(null)
     setStreamCtrl(null)
     streamCtrlRef.current = null
-    setQueue([])
-    queueRef.current = []
+    // Keep the send queue across tab switches so "after" / interrupt items with
+    // a sid are not silently dropped when the user leaves mid-turn.
     setHasOlder(false)
     clearChatMediaCache()
     void load({ force: true })
@@ -349,7 +352,7 @@ export function useMessages(sessionId: string | null) {
       }
     }
     // sessionId is intentional: every tab switch must rebind paint / history.
-  }, [load, sessionId])
+  }, [load, sessionId, clearStreamAccum])
 
   useEffect(() => {
     queueRef.current = queue
@@ -475,7 +478,13 @@ export function useMessages(sessionId: string | null) {
       const finishOk = async (meta?: { aborted?: boolean }) => {
         if (doneReceived) return
         doneReceived = true
-        resetStreamBuffers()
+        // Only flush RAF buffers for the focused turn — otherwise a detached
+        // job finish injects ghost partials into the visible session.
+        if (isFocusedTurn()) {
+          resetStreamBuffers()
+        } else {
+          clearStreamAccum()
+        }
         // Prefer per-job paint (survives detach + concurrent tabs) over hook refs.
         const paint = getJobPaint(targetId)
         const job = getStreamJob(targetId)
@@ -594,7 +603,11 @@ export function useMessages(sessionId: string | null) {
       const finishErr = async (errMsg: string) => {
         if (doneReceived) return
         doneReceived = true
-        resetStreamBuffers()
+        if (isFocusedTurn()) {
+          resetStreamBuffers()
+        } else {
+          clearStreamAccum()
+        }
         completeStreamJob(targetId, 'error', errMsg)
         if (isFocusedTurn()) {
           setStreaming(false)
@@ -1063,14 +1076,17 @@ export function useMessages(sessionId: string | null) {
   const beginEdit = useCallback(
     async (msgId: string, fallbackContent?: string): Promise<string | null> => {
       if (!sessionId || streamingRef.current) return null
+      // Snapshot for rollback if the API fails after optimistic truncate.
+      let preEdit: ChatMessage[] | null = null
       setMessages((prev) => {
+        preEdit = prev
         const idx = prev.findIndex((m) => m.id === msgId)
         if (idx < 0) return prev.filter((m) => !m.reverted)
         return prev.slice(0, idx)
       })
       try {
         const r = await editFromMessageApi(sessionId, msgId)
-        await load()
+        await load({ force: true })
         const text =
           typeof r.content === 'string' && r.content.length > 0
             ? r.content
@@ -1078,6 +1094,11 @@ export function useMessages(sessionId: string | null) {
         return text
       } catch (e: unknown) {
         console.warn('Edit failed:', e instanceof Error ? e.message : e)
+        if (preEdit) {
+          setMessages(preEdit)
+        } else {
+          await load({ force: true })
+        }
         return fallbackContent ?? null
       }
     },

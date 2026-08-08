@@ -113,6 +113,8 @@ export function SettingsPanel({
     null,
   )
   const scrollBodyRef = useRef<HTMLDivElement>(null)
+  /** Monotonic load id — ignore stale GET responses after re-open/save. */
+  const loadGenRef = useRef(0)
   const [saved, setSaved] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
 
@@ -302,6 +304,7 @@ export function SettingsPanel({
   useEffect(() => () => stopVisionPoll(), [stopVisionPoll])
 
   const load = useCallback(async () => {
+    const gen = ++loadGenRef.current
     setLoading(true)
     const t0 = performance.now()
     try {
@@ -311,6 +314,7 @@ export function SettingsPanel({
         listProviders(),
         listConnectedProviders().catch(() => null),
       ])
+      if (gen !== loadGenRef.current) return
       setCatalog(providers)
       if (connected?.providers) setConnectedList(connected.providers)
       if (s.enabled_providers !== undefined) {
@@ -436,6 +440,7 @@ export function SettingsPanel({
               start_in_tray?: boolean
               close_to_tray?: boolean
             }>('get_desktop_prefs')
+            if (gen !== loadGenRef.current) return
             setSkipQuitWarn(Boolean(prefs?.skip_quit_server_warning))
             // Shell prefs win for visibility toggles (match what launch uses).
             if (typeof prefs?.start_in_tray === 'boolean') {
@@ -443,6 +448,7 @@ export function SettingsPanel({
             }
             // close_to_tray is product-forced true on save; ignore shell opt-out.
           } catch {
+            if (gen !== loadGenRef.current) return
             try {
               setSkipQuitWarn(localStorage.getItem('remedy.skipQuitServerWarning') === '1')
             } catch {
@@ -453,12 +459,14 @@ export function SettingsPanel({
         (async () => {
           try {
             const osLogin = await invoke<boolean>('get_launch_at_login')
+            if (gen !== loadGenRef.current) return
             setLaunchAtLogin(Boolean(osLogin || s.launch_at_login))
           } catch {
             /* browser / missing permission */
           }
         })(),
       ])
+      if (gen !== loadGenRef.current) return
       console.debug(
         `[remedy:settings] secondary loaded in ${Math.round(performance.now() - t0)}ms`,
       )
@@ -466,7 +474,7 @@ export function SettingsPanel({
     } catch (e) {
       console.warn('[remedy:settings] load failed', e)
       // server not ready
-      setLoading(false)
+      if (gen === loadGenRef.current) setLoading(false)
     }
     // Intentionally stable: one load function; parent callbacks read from latest render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -643,6 +651,7 @@ export function SettingsPanel({
   }
 
   const handleSave = async () => {
+    if (loading || !settings || saving) return
     setSaving(true)
     setSaved(false)
     setErrorMessage('')
@@ -1117,11 +1126,16 @@ export function SettingsPanel({
           <button
             type="button"
             onClick={() => void handleSave()}
-            disabled={saving}
+            disabled={saving || loading || !settings}
             className="ui-btn ui-btn-primary flex-1"
             style={{ padding: '0.55rem 0.75rem' }}
+            title={
+              loading || !settings
+                ? 'Wait for settings to finish loading'
+                : undefined
+            }
           >
-            {saving ? 'Saving & reloading…' : 'Save settings'}
+            {saving ? 'Saving & reloading…' : loading ? 'Loading…' : 'Save settings'}
           </button>
           {saved && !errorMessage && !statusMessage && (
             <span className="text-xs font-semibold" style={{ color: 'var(--success)' }}>
