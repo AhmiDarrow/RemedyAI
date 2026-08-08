@@ -73,6 +73,8 @@ import { useComputerHost } from './hooks/useComputerHost'
 import { useSessionLlm, type ModelInfo } from './hooks/useSessionLlm'
 import { useAppOverlays } from './hooks/useAppOverlays'
 import { useAppBootstrap } from './hooks/useAppBootstrap'
+import { useWorkspaceChrome } from './hooks/useWorkspaceChrome'
+import { useChatSendFlow } from './hooks/useChatSendFlow'
 import { useSessionStreamJobs } from './sessions/useSessionStreamJobs'
 import { shouldConfirmNewTurn } from './sessions/concurrentTurns'
 import { ConcurrentTurnDialog } from './components/ConcurrentTurnDialog'
@@ -188,143 +190,12 @@ export default function App() {
     beginEdit,
     load: reloadMessages,
   } = useMessages(activeId)
-  /** Prefill for edit-and-resend; `key` forces re-apply even for identical text. */
-  const [editDraft, setEditDraft] = useState<{ text: string; key: number } | null>(null)
   /** Image viewer → composer attachment rail (markup becomes prompt attachment). */
   const composerRef = useRef<ComposerHandle>(null)
   const handleAttachMarkup = useCallback(async (file: File) => {
     await composerRef.current?.addFiles([file])
     composerRef.current?.focus()
   }, [])
-
-  const [wsLayout, setWsLayout] = useState<WorkspaceLayout>(() => loadWorkspaceLayout())
-  const [popout, setPopout] = useState<{
-    id: SlideId
-    fullscreen: boolean
-  } | null>(null)
-
-  const patchWs = useCallback((patch: Partial<WorkspaceLayout>) => {
-    setWsLayout((prev) => {
-      const next = { ...prev, ...patch }
-      // Single WebView2 embed: only one rail may host Browser at a time
-      if (next.left === 'browser' && next.right === 'browser') {
-        if (patch.left === 'browser') {
-          next.right = prev.right === 'browser' ? 'files' : prev.right
-        } else if (patch.right === 'browser') {
-          next.left = prev.left === 'browser' ? 'files' : prev.left
-        } else {
-          // layout restore / bulk patch — prefer left browser, move right
-          next.right = 'files'
-        }
-      }
-      saveWorkspaceLayout(next)
-      return next
-    })
-  }, [])
-
-  /**
-   * Open Browser workspace rail the same way Settings opens — user does not
-   * need the rail already visible. Agent computer-use calls this.
-   */
-  const openBrowserInRail = useCallback(() => {
-    setPanel(null)
-    setWsLayout((prev) => {
-      const next: WorkspaceLayout = {
-        ...prev,
-        // Prefer right rail (sessions stay left), mirror openSettingsInRail.
-        left: prev.left === 'browser' ? prev.left : prev.left,
-        right: 'browser',
-        rightOpen: true,
-        rightRail: 'open',
-        // Wider rail so WebView is readable (agent + human)
-        rightWidth: Math.max(prev.rightWidth || 0, 440),
-        leftOpen: prev.leftRail === 'open' || prev.leftOpen,
-      }
-      if (next.left === 'browser') {
-        next.left = 'sessions'
-        next.leftRail = 'open'
-        next.leftOpen = true
-      }
-      saveWorkspaceLayout(next)
-      return next
-    })
-    // After layout paint, ask BrowserSlide host to push bounds (via custom event)
-    window.setTimeout(() => {
-      window.dispatchEvent(new CustomEvent('remedy:browser-resync-bounds'))
-    }, 80)
-    window.setTimeout(() => {
-      window.dispatchEvent(new CustomEvent('remedy:browser-resync-bounds'))
-    }, 320)
-  }, [])
-
-  // Computer use: open Browser rail (SPA event + Rust host emit).
-  useEffect(() => {
-    const onComputerUi = (ev: Event) => {
-      const detail = (ev as CustomEvent<{ openBrowser?: boolean }>).detail
-      if (!detail?.openBrowser) return
-      openBrowserInRail()
-    }
-    window.addEventListener('remedy:computer-ui', onComputerUi)
-    let unlisten: (() => void) | undefined
-    void import('./api/tauri').then(async ({ isTauri, tauriListen }) => {
-      if (!isTauri()) return
-      try {
-        unlisten = await tauriListen('computer-open-browser', (ev) => {
-          openBrowserInRail()
-          // Sync address bar via DOM event for BrowserSlide
-          const payload = (ev as { payload?: { url?: string } })?.payload
-          const u = payload?.url
-          if (u) {
-            window.dispatchEvent(
-              new CustomEvent('remedy:browser-set-url', { detail: { url: u } }),
-            )
-          }
-        })
-        const unlistenUrl = await tauriListen('computer-browser-url', (ev) => {
-          const payload = (ev as { payload?: { url?: string } })?.payload
-          const u = payload?.url
-          if (u) {
-            window.dispatchEvent(
-              new CustomEvent('remedy:browser-set-url', { detail: { url: u } }),
-            )
-          }
-        })
-        const prev = unlisten
-        unlisten = () => {
-          prev?.()
-          unlistenUrl?.()
-        }
-      } catch {
-        /* older shell */
-      }
-    })
-    return () => {
-      window.removeEventListener('remedy:computer-ui', onComputerUi)
-      unlisten?.()
-    }
-  }, [openBrowserInRail])
-
-  const swapSides = useCallback(() => {
-    setWsLayout((prev) => {
-      const next: WorkspaceLayout = {
-        ...prev,
-        left: prev.right,
-        right: prev.left,
-        leftWidth: prev.rightWidth,
-        rightWidth: prev.leftWidth,
-        leftOpen: prev.rightOpen,
-        rightOpen: prev.leftOpen,
-        leftRail: prev.rightRail,
-        rightRail: prev.leftRail,
-      }
-      saveWorkspaceLayout(next)
-      return next
-    })
-  }, [])
-  // Don't carry an edit draft across session switches.
-  useEffect(() => {
-    setEditDraft(null)
-  }, [activeId])
 
   const {
     themeId,
@@ -376,6 +247,17 @@ export default function App() {
     [activeId],
   )
   const [panel, setPanel] = useState<'memory' | 'skills' | 'settings' | null>(null)
+  const {
+    wsLayout,
+    setWsLayout,
+    popout,
+    setPopout,
+    patchWs,
+    openBrowserInRail,
+    swapSides,
+  } = useWorkspaceChrome({ setPanel })
+  useComputerHost(true, openBrowserInRail)
+
   /**
    * Settings always open in the **right** workspace rail.
    * Never steals the left (sessions) rail; never uses the floating panel
@@ -414,20 +296,6 @@ export default function App() {
   const [agentDefs, setAgentDefs] = useState<{ name: string; description: string }[]>([])
   const { notify } = useNotifications()
   const { busyIds, runningCount } = useSessionStreamJobs()
-  const [concurrentConfirm, setConcurrentConfirm] = useState<{
-    text: string
-    attachments?: {
-      path: string
-      name?: string
-      mime?: string
-      size?: number
-      is_image?: boolean
-      is_text?: boolean
-    }[]
-    opts?: { mode?: 'after' | 'interrupt' }
-  } | null>(null)
-  const skipConcurrentConfirmRef = useRef(false)
-
   // Toast when a background (detached) turn finishes.
   useEffect(() => {
     return subscribeStreamJobs((ev) => {
@@ -457,7 +325,6 @@ export default function App() {
   } = useUpdateChecker({ ready: serverState === 'ready' })
   // Always run in Tauri — do not wait for serverState or the poller never starts
   // and navigate looks "offline" forever. Loopback host APIs need no SPA token.
-  useComputerHost(true, openBrowserInRail)
   const [showSetupWizard, setShowSetupWizard] = useState(false)
   const [showUpdateScreen, setShowUpdateScreen] = useState(false)
   const [userName, setUserName] = useState('')
@@ -998,324 +865,48 @@ export default function App() {
     }
   }, [refreshSessions, setActiveId, notify])
 
-  const handleCommand = useCallback(
-    async (command: string) => {
-      const stripped = command.trim().toLowerCase()
-      // Client-side session file export / import (download + file picker).
-      if (stripped === '/export' || stripped === '/export-session') {
-        const sid = activeId || (await create())?.id
-        if (!sid) return { text: 'No session available to export.' }
-        await handleExport(sid)
-        if (sid) {
-          addCommandMessage(command, 'Exported session as plain-text `.txt` (download started).')
-        }
-        return { text: 'Exported session as .txt', action: 'export_session' }
-      }
-      if (
-        stripped === '/import-session' ||
-        stripped === '/session-import' ||
-        stripped.startsWith('/import-session ') ||
-        stripped.startsWith('/session-import ')
-      ) {
-        const pathArg = command
-          .trim()
-          .replace(/^\/(import-session|session-import)\s*/i, '')
-          .trim()
-        if (pathArg) {
-          const sid = activeId || (await create())?.id
-          if (!sid) return { text: 'No session available.' }
-          const result = await runCommand(command, sid)
-          if (result.text) addCommandMessage(command, result.text)
-          if (result.session_id) {
-            await refreshSessions()
-            setActiveId(result.session_id)
-            setOpenTabs((prev) => new Set([...prev, result.session_id as string]))
-          } else if (result.action === 'import_session_done') {
-            await refreshSessions()
-          }
-          return result
-        }
-        await handleImport()
-        return { text: 'Import session…', action: 'import_session' }
-      }
-
-      // /reset needs an existing session — never create one just to wipe it.
-      if (stripped === '/reset' || stripped === '/clear') {
-        if (!activeId) {
-          return {
-            text: 'No active session to reset. Open a chat first, or use `/new`.',
-          }
-        }
-        // Quiet the stream first so abort does not race the wipe.
-        stop()
-        clearQueue()
-        const result = await runCommand(command, activeId)
-        const ok =
-          result.action === 'reset_session'
-          || (typeof result.cleared === 'number' && result.cleared >= 0
-            && !String(result.text || '').startsWith('Error executing')
-            && !String(result.text || '').toLowerCase().includes('could not reset')
-            && !String(result.text || '').toLowerCase().includes('unknown command'))
-
-        if (ok) {
-          // Instant empty feed — stay on this session id (no jump to /new).
-          clearLocalHistory()
-          try {
-            const { clearChatMediaCache } = await import('./utils/chatMedia')
-            clearChatMediaCache()
-          } catch {
-            /* ignore */
-          }
-          // Best-effort revalidate; load() swallows errors into loadError.
-          await reloadMessages({ force: true })
-          // Never leave "Cannot reach local API" up after a confirmed wipe —
-          // history is empty either way; confirmation bubble is enough.
-          clearLocalHistory()
-          try {
-            await refreshSessions()
-          } catch {
-            /* ignore */
-          }
-          const note =
-            result.text
-            || 'Session fully reset. Same tab — send a message to start as if new.'
-          addCommandMessage(command, note)
-          return { ...result, text: note, action: result.action || 'reset_session' }
-        }
-
-        // Failed — keep history; show the real error.
-        if (result.text) addCommandMessage(command, result.text)
-        return result
-      }
-
-      const sid = activeId || (await create())?.id
-      if (!sid) return { text: 'No session available.' }
-      const result = await runCommand(command, sid)
-      if (result.action === 'reset_session') {
-        stop()
-        clearQueue()
-        clearLocalHistory()
-        try {
-          await reloadMessages({ force: true })
-        } catch {
-          clearLocalHistory()
-        }
-        try {
-          await refreshSessions()
-        } catch {
-          /* */
-        }
-        if (result.text) addCommandMessage(command, result.text)
-        return result
-      }
-      if (result.text && sid) {
-        addCommandMessage(command, result.text)
-      }
-      if (result.action === 'new_session') {
-        await handleNewSession()
-      }
-      if (result.action === 'import_session_done' && result.session_id) {
-        await refreshSessions()
-        setActiveId(result.session_id)
-        setOpenTabs((prev) => new Set([...prev, result.session_id as string]))
-      }
-      return result
-    },
-    [
-      runCommand,
-      handleNewSession,
-      activeId,
-      create,
-      addCommandMessage,
-      handleExport,
-      handleImport,
-      refreshSessions,
-      setActiveId,
-      stop,
-      clearQueue,
-      clearLocalHistory,
-      reloadMessages,
-    ],
-  )
-
-  const handleSend = useCallback(
-    async (
-      text: string,
-      attachments?: {
-        path: string
-        name?: string
-        mime?: string
-        size?: number
-        is_image?: boolean
-        is_text?: boolean
-      }[],
-      opts?: { mode?: 'after' | 'interrupt' },
-    ) => {
-      // Clear edit prefill once the user sends (revised prompt is on its way).
-      setEditDraft(null)
-      if (text.startsWith('/') && !attachments?.length) {
-        await handleCommand(text)
-      } else {
-        let sid = activeId
-        if (!sid) {
-          const created = await create()
-          sid = created?.id ?? null
-          if (sid) setOpenTabs((prev) => new Set([...prev, sid!]))
-        }
-        if (!sid) {
-          notify('Chat not ready', {
-            body: 'Could not open a session — wait a second for the local server, then try New Session.',
-          })
-          return
-        }
-        // Ensure a model id is set before streaming (first paint race after boot).
-        // Never pull global settings into the status bar when a session is open —
-        // that flipped the second tab (e.g. SecretFolder) between providers.
-        let useModel = model
-        if (!useModel?.trim()) {
-          try {
-            const s = await getSettings()
-            if (s.llm_model) useModel = s.llm_model
-          } catch {
-            /* keep empty — server may still default */
-          }
-        }
-        // Optimistic auto-title from first prompt (server also renames placeholders).
-        const sess = sessions.find((s) => s.id === sid)
-        if (sess && isPlaceholderTitle(sess.title) && (text.trim() || attachments?.length)) {
-          const title = titleFromPrompt(
-            text.trim() || attachments?.[0]?.name || 'Attachments',
-          )
-          void rename(sid, title)
-        }
-        // Session log bug: user said "proceed out of plan mode" / "proceed with all
-        // fixes" while Plan was still on → only plan tools → felt stuck. Auto-leave
-        // Plan on build/proceed kicks so Build tools actually load.
-        let usePlan = planMode
-        if (usePlan && looksLikeBuildKick(text)) {
-          usePlan = false
-          setPlanMode(false)
-        }
-        // Concurrent turn guard: 3+ live jobs → confirm (other models/sessions).
-        const otherRunning = Math.max(
-          0,
-          runningCount - (streaming ? 1 : 0),
-        )
-        if (
-          !opts?.mode
-          && !skipConcurrentConfirmRef.current
-          && shouldConfirmNewTurn(otherRunning)
-          && !streaming
-        ) {
-          setConcurrentConfirm({ text, attachments, opts })
-          return
-        }
-        skipConcurrentConfirmRef.current = false
-        // Sticky multi-tab bind: map for *this* sid only (never the other tab).
-        const mapOv = sessionLlmMap[sid!]
-        const useProvider =
-          mapOv?.provider
-          || sess?.llm_provider
-          || barProvider
-          || llmProvider
-          || undefined
-        if (mapOv?.model) useModel = mapOv.model
-        else if (sess?.model && sess.llm_provider) useModel = sess.model
-        else if (barModel) useModel = barModel
-        // Persist bind before stream so list polls cannot re-seed empty.
-        if (sid && useProvider && useModel) {
-          setSessionBind(sid, String(useProvider), String(useModel))
-        }
-        // While streaming, send() queues (after) or interrupts based on opts.mode.
-        void send(text, useModel, sid, attachments, usePlan, {
-          ...opts,
-          provider: useProvider || undefined,
-        })
-        window.setTimeout(() => {
-          void refreshSessions()
-        }, 1200)
-      }
-    },
-    [
-      send,
-      model,
-      handleCommand,
-      activeId,
-      create,
-      sessions,
-      rename,
-      refreshSessions,
-      planMode,
-      setPlanMode,
-      notify,
-      runningCount,
-      streaming,
-      sessionLlmMap,
-      llmProvider,
-      barProvider,
-      barModel,
-      setSessionBind,
-    ],
-  )
-
-  const handleEditUserMessage = useCallback(
-    async (msgId: string, content: string) => {
-      if (!activeId || streaming) return
-      // Immediately put the full original prompt in the chat bar (don't wait on API).
-      const localText = content ?? ''
-      setEditDraft({ text: localText, key: Date.now() })
-      // Soft-delete this message + later ones on the server; refresh history.
-      const serverText = await beginEdit(msgId, localText)
-      // Prefer server content if it differs (authoritative), re-apply with new key.
-      if (serverText != null && serverText !== localText) {
-        setEditDraft({ text: serverText, key: Date.now() })
-      }
-    },
-    [activeId, streaming, beginEdit],
-  )
-
-  /** Regenerate: roll back to the preceding user turn and resend the same prompt. */
-  const handleRegenerate = useCallback(
-    async (assistantMsgId: string) => {
-      if (!activeId || streaming) return
-      const idx = messages.findIndex((m) => m.id === assistantMsgId)
-      if (idx < 0) return
-      let userIdx = -1
-      for (let i = idx - 1; i >= 0; i--) {
-        if (messages[i]?.role === 'user' && !messages[i]?.reverted) {
-          userIdx = i
-          break
-        }
-      }
-      if (userIdx < 0) return
-      const userMsg = messages[userIdx]!
-      const prompt = userMsg.content || ''
-      // Strip attachment display block for resend text if present
-      const clean = prompt.replace(/\n\n📎 Attachments:\n[\s\S]*$/, '').trim()
-      await beginEdit(userMsg.id, clean)
-      if (clean) {
-        const sid = activeId
-        send(clean, model, sid)
-      }
-    },
-    [activeId, streaming, messages, beginEdit, send, model],
-  )
-
-  // Notify only on streaming true→false edge for a turn we started (not history loads).
-  const wasStreamingRef = useRef(false)
-  useEffect(() => {
-    const was = wasStreamingRef.current
-    wasStreamingRef.current = streaming
-    if (was && !streaming && messages.length > 0) {
-      const last = messages[messages.length - 1]
-      if (last && last.role === 'assistant' && last.content) {
-        notify('Remedy', {
-          body: `Response ready — ${last.content.slice(0, 80)}...`,
-          silent: false,
-        })
-      }
-    }
-  }, [streaming, messages, notify])
+  const {
+    editDraft,
+    setEditDraft,
+    concurrentConfirm,
+    setConcurrentConfirm,
+    skipConcurrentConfirmRef,
+    handleCommand,
+    handleSend,
+    handleEditUserMessage,
+    handleRegenerate,
+  } = useChatSendFlow({
+    activeId,
+    setActiveId,
+    sessions,
+    create,
+    rename,
+    refreshSessions,
+    send,
+    runCommand,
+    addCommandMessage,
+    handleExport,
+    handleImport,
+    handleNewSession,
+    stop,
+    clearQueue,
+    clearLocalHistory,
+    reloadMessages,
+    beginEdit,
+    messages,
+    streaming,
+    model,
+    planMode,
+    setPlanMode,
+    notify,
+    runningCount,
+    sessionLlmMap,
+    llmProvider,
+    barProvider,
+    barModel,
+    setSessionBind,
+    setOpenTabs,
+  })
 
   const paletteCommands: CommandItem[] = useMemo(() => {
     const items: CommandItem[] = [

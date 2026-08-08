@@ -18,6 +18,11 @@ from remedy.core.react_loop.errors import (
     is_fatal_llm_api_error as _is_fatal_llm_api_error,
 )
 from remedy.core.react_loop.loop import call_llm_stream
+from remedy.core.react_loop.recovery import (
+    fatal_model_error_message,
+    repeated_provider_error_message,
+    soft_retry_notice,
+)
 
 __all__ = [
     "call_llm_stream",
@@ -26,4 +31,7 @@ __all__ = [
     "provider_bits",
     "resolve_and_apply_tools",
     "rearm_agency_tools",
+    "fatal_model_error_message",
+    "repeated_provider_error_message",
+    "soft_retry_notice",
 ]
