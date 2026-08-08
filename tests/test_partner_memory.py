@@ -96,8 +96,8 @@ def test_hot_block_fact_and_trait_caps():
     """Hot inject ranks at most MAX_HOT_FACTS / MAX_HOT_TRAITS items."""
     from remedy.memory.profile import UserTrait
 
-    assert MAX_HOT_FACTS == 12
-    assert MAX_HOT_TRAITS == 8
+    assert MAX_HOT_FACTS == 14
+    assert MAX_HOT_TRAITS == 10
     profile = UserProfile()
     for i in range(30):
         profile.facts.append(

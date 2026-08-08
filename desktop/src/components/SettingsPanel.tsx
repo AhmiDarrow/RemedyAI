@@ -132,6 +132,7 @@ export function SettingsPanel({
   const [persona, setPersona] = useState('balanced')
   const [userName, setUserName] = useState('')
   const [agentName, setAgentName] = useState('Remedy')
+  const [agentGender, setAgentGender] = useState('female')
   const [accessScope, setAccessScope] = useState('project')
   const [launchAtLogin, setLaunchAtLogin] = useState(false)
   const [startInTray, setStartInTray] = useState(false)
@@ -332,6 +333,12 @@ export function SettingsPanel({
       )
       setUserName((s.user_name || '').trim())
       setAgentName(s.name || 'Remedy')
+      {
+        const g = (s.agent_gender || 'female').toLowerCase()
+        setAgentGender(
+          g === 'male' || g === 'neutral' || g === 'female' ? g : 'female',
+        )
+      }
       setAccessScope(s.access_scope || 'project')
       setLaunchAtLogin(Boolean(s.launch_at_login))
       // Prefer shell desktop.json for tray prefs (authoritative at launch).
@@ -650,6 +657,7 @@ export function SettingsPanel({
       persona,
       user_name: userName.trim(),
       name: agentName.trim() || 'Remedy',
+      agent_gender: agentGender || 'female',
       access_scope: accessScope,
       launch_at_login: launchAtLogin,
       start_in_tray: startInTray,
@@ -901,6 +909,8 @@ export function SettingsPanel({
               setUserName={setUserName}
               agentName={agentName}
               setAgentName={setAgentName}
+              agentGender={agentGender}
+              setAgentGender={setAgentGender}
               accessScope={accessScope}
               setAccessScope={setAccessScope}
               launchAtLogin={launchAtLogin}

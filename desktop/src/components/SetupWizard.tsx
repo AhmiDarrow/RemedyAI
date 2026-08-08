@@ -58,6 +58,8 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
   const [projectPath, setProjectPath] = useState('')
   const [persona, setPersona] = useState('balanced')
   const [userName, setUserName] = useState('')
+  const [agentName, setAgentName] = useState('Remedy')
+  const [agentGender, setAgentGender] = useState<'female' | 'male' | 'neutral'>('female')
   const [launchAtLogin, setLaunchAtLogin] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -342,6 +344,8 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
       project_path: projectPath || undefined,
       persona: persona || undefined,
       user_name: userName.trim() || undefined,
+      name: agentName.trim() || 'Remedy',
+      agent_gender: agentGender || 'female',
       setup_completed: true,
       launch_at_login: launchAtLogin,
       start_in_tray: false,
@@ -361,6 +365,8 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
     projectPath,
     persona,
     userName,
+    agentName,
+    agentGender,
     launchAtLogin,
     enableVision,
     messengerEnabled,
@@ -984,6 +990,59 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                   className="w-full rounded-lg px-3 py-2.5 text-base outline-none"
                   style={inputStyles}
                 />
+              </div>
+              <div>
+                <label className="block mb-1.5 text-sm font-medium" style={labelStyles}>
+                  Partner name
+                </label>
+                <input
+                  value={agentName}
+                  onChange={(e) => setAgentName(e.target.value)}
+                  placeholder="Remedy"
+                  className="w-full rounded-lg px-3 py-2.5 text-base outline-none"
+                  style={inputStyles}
+                />
+                <p className="text-xs mt-1" style={mutedStyles}>
+                  Call your partner anything — default is Remedy.
+                </p>
+              </div>
+              <div>
+                <label className="block mb-1.5 text-sm font-medium" style={labelStyles}>
+                  Partner gender
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {(
+                    [
+                      { id: 'female' as const, label: 'Female', hint: 'she/her · default' },
+                      { id: 'male' as const, label: 'Male', hint: 'he/him' },
+                      { id: 'neutral' as const, label: 'Neither / AI', hint: 'they/them' },
+                    ]
+                  ).map((g) => (
+                    <button
+                      key={g.id}
+                      type="button"
+                      onClick={() => setAgentGender(g.id)}
+                      className="text-left px-3 py-2.5 rounded-lg transition-colors"
+                      style={{
+                        background:
+                          agentGender === g.id
+                            ? 'color-mix(in srgb, var(--accent) 14%, var(--bg-primary))'
+                            : 'var(--bg-tertiary)',
+                        border:
+                          agentGender === g.id
+                            ? '1.5px solid var(--accent)'
+                            : '1px solid var(--border)',
+                      }}
+                    >
+                      <div className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+                        {g.label}
+                      </div>
+                      <div className="text-xs mt-0.5" style={mutedStyles}>
+                        {g.hint}
+                      </div>
+                    </button>
+                  ))}
+                </div>
               </div>
               <div>
                 <label

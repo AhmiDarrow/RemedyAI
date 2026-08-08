@@ -126,29 +126,42 @@ def read_ledger(home: str | Path | None = None) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
-async def git_capture(repo: str | Path) -> dict[str, str]:
+async def _git_out(repo: Path, *args: str) -> tuple[int, str, str]:
+    proc = await asyncio.create_subprocess_exec(
+        "git",
+        "-C",
+        str(repo),
+        *args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    out_b, err_b = await proc.communicate()
+    return (
+        int(proc.returncode or 0),
+        (out_b or b"").decode("utf-8", "replace"),
+        (err_b or b"").decode("utf-8", "replace"),
+    )
+
+
+async def git_capture(repo: str | Path) -> dict[str, Any]:
     """Best-effort capture of dirty state for rollback.
 
-    Returns a dict of the current HEAD, tracked file diffs (full), a list of new
-    untracked files, and the list of tracked files changed in the working tree.
-    Never mutates the tree.
+    Returns HEAD, a full binary patch of **tracked** changes vs HEAD (staged +
+    unstaged), changed paths, and untracked files. Never mutates the tree.
     """
     repo = Path(repo)
+
     async def _git(*args: str) -> str:
-        proc = await asyncio.create_subprocess_exec(
-            "git", "-C", str(repo), *args,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        out, _ = await proc.communicate()
-        return (out or b"").decode("utf-8", "replace")
+        _code, out, _err = await _git_out(repo, *args)
+        return out
 
     head = (await _git("rev-parse", "HEAD")).strip()
-    diff = await _git("diff", "--binary")
-    changed_raw = await _git("diff", "--name-only")
-    changed = [l for l in changed_raw.splitlines() if l.strip()]
+    # Include staged + unstaged so restore can rebuild pre-round dirtiness.
+    diff = await _git("diff", "--binary", "HEAD")
+    changed_raw = await _git("diff", "--name-only", "HEAD")
+    changed = [line for line in changed_raw.splitlines() if line.strip()]
     untracked_raw = await _git("ls-files", "--others", "--exclude-standard")
-    untracked = [l for l in untracked_raw.splitlines() if l.strip()]
+    untracked = [line for line in untracked_raw.splitlines() if line.strip()]
     return {
         "head": head,
         "diff": diff,
@@ -157,16 +170,82 @@ async def git_capture(repo: str | Path) -> dict[str, str]:
     }
 
 
-async def git_restore(repo: str | Path, snapshot: dict[str, str]) -> str:
-    """Roll back tracked changes to the snapshot HEAD. Leaves untracked alone."""
+async def git_restore(repo: str | Path, snapshot: dict[str, Any]) -> str:
+    """Restore the tree to the pre-round snapshot without nuking unrelated dirt.
+
+    1. ``git reset --hard HEAD`` — discard tracked changes made during the round
+       (index + worktree) back to the current HEAD.
+    2. Re-apply the **captured** pre-round patch so sibling dirty work that was
+       already present when the round started returns (not wiped forever).
+    3. Delete untracked files that appeared *after* the snapshot (round debris);
+       pre-existing untracked files are left alone.
+    """
+    import tempfile
+
     repo = Path(repo)
-    proc = await asyncio.create_subprocess_exec(
-        "git", "-C", str(repo), "checkout", "--", ".",
-        stdout=asyncio.subprocess.DEVNULL,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    _, err = await proc.communicate()
-    return (err or b"").decode("utf-8", "replace").strip()
+    errors: list[str] = []
+
+    code, _out, err = await _git_out(repo, "reset", "--hard", "HEAD")
+    if code != 0 and err.strip():
+        errors.append(err.strip())
+
+    diff = str(snapshot.get("diff") or "")
+    if diff.strip():
+        # Apply via temp file so binary patches and large diffs work.
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="wb",
+                suffix=".patch",
+                delete=False,
+            ) as fh:
+                fh.write(diff.encode("utf-8", "replace"))
+                patch_path = fh.name
+            try:
+                code, _out, err = await _git_out(
+                    repo,
+                    "apply",
+                    "--binary",
+                    "--whitespace=nowarn",
+                    patch_path,
+                )
+                if code != 0:
+                    # Fallback: try 3-way for slightly drifted trees
+                    code2, _o2, err2 = await _git_out(
+                        repo,
+                        "apply",
+                        "--binary",
+                        "--3way",
+                        "--whitespace=nowarn",
+                        patch_path,
+                    )
+                    if code2 != 0:
+                        errors.append((err or err2 or "git apply failed").strip())
+            finally:
+                with suppress(Exception):
+                    Path(patch_path).unlink(missing_ok=True)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"patch restore failed: {exc}")
+
+    # Drop untracked files created during the round only
+    snap_untracked = {str(p).replace("\\", "/") for p in (snapshot.get("untracked") or [])}
+    _code, cur_raw, _err = await _git_out(repo, "ls-files", "--others", "--exclude-standard")
+    for rel in cur_raw.splitlines():
+        rel = rel.strip()
+        if not rel:
+            continue
+        norm = rel.replace("\\", "/")
+        if norm in snap_untracked:
+            continue
+        target = repo / rel
+        with suppress(Exception):
+            if target.is_file():
+                target.unlink()
+            elif target.is_dir():
+                import shutil
+
+                shutil.rmtree(target, ignore_errors=True)
+
+    return "; ".join(e for e in errors if e)
 
 
 # ---------------------------------------------------------------------------
@@ -275,6 +354,7 @@ async def apply_or_rollback(
                     round_.detail["rollback_reason"] = "spa_build_failed"
                     round_.detail["rollback_error"] = err or ""
                     round_.finished_utc = _now_utc()
+                    _record_soul_lesson(round_, home)
                     return round_
             if round_.tree in ("python", "both"):
                 request_sidecar_restart(
@@ -288,7 +368,28 @@ async def apply_or_rollback(
         round_.status = "rolled_back"
         round_.detail["rollback_error"] = err or ""
     round_.finished_utc = _now_utc()
+    _record_soul_lesson(round_, home)
     return round_
+
+
+def _record_soul_lesson(round_: SelfInjectRound, home: str | Path | None) -> None:
+    """Fold self-inject outcomes into the organism soul (personhood self-model)."""
+    with suppress(Exception):
+        from remedy.memory.soul.update import record_self_inject_lesson
+
+        gate_blob = ""
+        go = (round_.detail or {}).get("gate_output") or {}
+        if isinstance(go, dict) and go:
+            # Last gate output snippet
+            gate_blob = str(next(iter(go.values()), ""))[:400]
+        record_self_inject_lesson(
+            outcome=round_.outcome or round_.status,
+            tree=round_.tree,
+            summary=round_.summary or "",
+            round_id=round_.round_id,
+            gate_detail=gate_blob,
+            home=home,
+        )
 
 
 async def rebuild_spa(repo: str | Path, timeout: float = 600.0) -> bool:

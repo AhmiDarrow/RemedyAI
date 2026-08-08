@@ -379,8 +379,12 @@ def create_app(
         )
     # Messenger platform webhooks cannot send our Bearer token; they authenticate
     # via their own verify tokens / HMAC / JWT inside the route handlers.
+    # Generic CI-style ``/api/webhook/{source}`` is also public at the middleware
+    # layer so ``X-Remedy-Webhook-Secret`` can reach the route; the handler itself
+    # fails closed (Bearer **or** webhook secret required when auth is on).
     _AUTH_PUBLIC_PREFIXES = (
         "/api/webhooks/",
+        "/api/webhook/",
     )
     # Computer-use: host/jobs/ui require Bearer (same as the rest of the API).
     # Rust Desktop poller DPAPI-loads ``local_api_token`` and sends Authorization;

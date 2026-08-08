@@ -34,6 +34,7 @@ SETTABLE_KEYS = frozenset(
         "project_path",
         "name",
         "user_name",
+        "agent_gender",
         "persona",
         "setup_completed",
         "access_scope",
@@ -136,6 +137,10 @@ def public_settings_snapshot(cfg: dict[str, Any] | None = None) -> dict[str, Any
         "llm_ready": bool(provider_credentials_ready(raw) or key),
         "name": raw.get("name", "Remedy"),
         "user_name": str(raw.get("user_name") or "").strip(),
+        "agent_gender": str(raw.get("agent_gender") or "female").strip().lower()
+        if str(raw.get("agent_gender") or "female").strip().lower()
+        in ("female", "male", "neutral")
+        else "female",
         "persona": raw.get("persona", "default"),
         "project_path": raw.get("project_path") or "",
         "access_scope": raw.get("access_scope", "project"),
@@ -504,6 +509,33 @@ async def apply_settings_update(
             except Exception as exc:
                 logger.debug("sync user_name → profile: %s", exc)
 
+    if "agent_gender" in patch and patch["agent_gender"] is not None:
+        from remedy.core.agent_identity import normalize_agent_gender
+
+        g = normalize_agent_gender(str(patch["agent_gender"]))
+        patch["agent_gender"] = g
+        cfg["agent_gender"] = g
+
+    if "name" in patch and patch["name"] is not None:
+        from remedy.core.agent_identity import normalize_agent_name
+
+        aname = normalize_agent_name(str(patch["name"]))
+        patch["name"] = aname
+        cfg["name"] = aname
+
+    # Mirror identity into Soul Field whenever name/gender saved
+    if "name" in patch or "agent_gender" in patch:
+        try:
+            from remedy.core.agent_identity import sync_identity_to_soul
+
+            sync_identity_to_soul(
+                cfg.get("name"),
+                cfg.get("agent_gender"),
+                home=home_path or cfg.get("home_dir"),
+            )
+        except Exception as exc:
+            logger.debug("sync identity → soul: %s", exc)
+
     cfg = scrub_config_secrets(cfg)
     cfg["llm_api_key"] = ""
     cfg.pop("provider_keys", None)
@@ -520,7 +552,8 @@ async def apply_settings_update(
         base_url=base_url,
         api_key=api_key_for_runtime or None,
         persona=patch.get("persona"),
-        name=patch.get("name"),
+        name=patch.get("name") or cfg.get("name"),
+        agent_gender=patch.get("agent_gender") or cfg.get("agent_gender"),
         project_path=patch.get("project_path", cfg.get("project_path")),
         access_scope=cfg.get("access_scope"),
         harness_mode=cfg.get("harness_mode"),
@@ -575,6 +608,8 @@ async def apply_settings_update(
         "thinking_level",
         "approval_mode",
         "user_name",
+        "name",
+        "agent_gender",
         "tool_process",
         "web_tools_enabled",
         "http_bootstrap",

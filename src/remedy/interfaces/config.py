@@ -1053,8 +1053,12 @@ def config_to_agent_config(config: dict[str, Any]) -> AgentConfig:
     if tl not in ("off", "low", "medium", "high"):
         tl = "high"
 
+    _ag = str(config.get("agent_gender") or "female").strip().lower()
+    if _ag not in ("female", "male", "neutral"):
+        _ag = "female"
     return AgentConfig(
-        name=config.get("name", "Remedy"),
+        name=config.get("name", "Remedy") or "Remedy",
+        agent_gender=_ag,
         persona=config.get("persona", "default"),
         home_dir=config.get("home_dir", "~/.remedy"),
         skills_dir=config.get("skills_dir", []),
@@ -1113,7 +1117,9 @@ def generate_default_config(
 # Owner's manual (desktop F1) and LICENSE / COMMERCIAL.md describe free-tier terms.
 
 name = "Remedy"
-# What Remedy calls you (desktop Settings → You & Agent)
+# Partner presentation: female (default) | male | neutral
+agent_gender = "female"
+# What your partner calls you (desktop Settings → You & Agent)
 # user_name = "You"
 persona = "default"
 home_dir = "{home_dir.as_posix()}"

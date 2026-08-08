@@ -620,12 +620,95 @@ def check_host_self_kill(command: list[str] | str) -> str | None:
     return None
 
 
+# Shell wrappers whose first argv is not the real binary (inner payload is).
+_SHELL_WRAPPERS = frozenset(
+    {
+        "bash",
+        "sh",
+        "zsh",
+        "dash",
+        "cmd",
+        "powershell",
+        "pwsh",
+        "env",
+        "nice",
+        "nohup",
+        "sudo",
+        "doas",
+        "xargs",
+    }
+)
+
+# Privilege / system tools that must hard-block even when nested in `bash -c` /
+# `pwsh -Command` strings (argv[0] is the shell, not `reg` / `net` / …).
+_NESTED_PRIVILEGE_RE = re.compile(
+    r"(?i)(?:^|[\s;&|`(]|"
+    r"(?:&&|\|\|)\s*)"
+    r"(?:"
+    r"reg(?:\.exe)?\s+(?:add|delete|import|save|load|unload|copy|export|query\s+/s)|"
+    r"takeown(?:\.exe)?\b|"
+    r"icacls(?:\.exe)?\b|"
+    r"net(?:\.exe)?\s+(?:user|localgroup|accounts)\b|"
+    r"net(?:\.exe)?\s+share\b|"
+    r"wmic(?:\.exe)?\b|"
+    r"sc(?:\.exe)?\s+(?:create|delete|config|start|stop|failure)\b|"
+    r"schtasks(?:\.exe)?\s+/create\b|"
+    r"vssadmin(?:\.exe)?\b|"
+    r"bcdedit(?:\.exe)?\b|"
+    r"wevtutil(?:\.exe)?\b|"
+    r"diskpart(?:\.exe)?\b|"
+    r"cipher(?:\.exe)?\s+/w\b|"
+    r"format(?:\.exe)?\s+[a-z]:|"
+    r"shutdown(?:\.exe)?\b|"
+    r"reboot\b|"
+    r"mkfs(?:\.\w+)?\b|"
+    r"\bdd\b\s+if=|"
+    r"fdisk\b|"
+    r"useradd\b|usermod\b|groupadd\b|passwd\b|"
+    r"chmod\s+[0-7]{3,4}\s+/|chown\s+\S+\s+/"
+    r")"
+)
+
+
+def _inner_shell_payloads(command: list[str]) -> list[str]:
+    """Extract script strings after -c / -Command / /c from shell wrappers."""
+    if not command or len(command) < 2:
+        return []
+    out: list[str] = []
+    i = 1
+    while i < len(command):
+        arg = str(command[i]).strip()
+        low = arg.lower()
+        # -c, -Command, -EncodedCommand, /c, /k
+        if low in ("-c", "/c", "/k", "-command", "-encodedcommand", "-enc", "-e", "-ec"):
+            if i + 1 < len(command):
+                out.append(str(command[i + 1]))
+                i += 2
+                continue
+        if low.startswith("-command:") or low.startswith("-c:"):
+            out.append(arg.split(":", 1)[1])
+        i += 1
+    return out
+
+
+def _dangerous_base_name(token: str) -> str | None:
+    base = Path(str(token)).name.lower()
+    if base.endswith(".exe"):
+        base = base[:-4]
+    if base in _DANGEROUS_COMMANDS:
+        return base
+    return None
+
+
 def check_dangerous_command(command: list[str]) -> str | None:
     """Hard security gate for destructive / privilege operations.
 
     Returns a warning string if the command must be blocked, else None.
     Soft risks (Start-Process, $(), simple del) are intentionally not hard-blocked
     so normal Windows/dev inspection works; approval mode still covers bash_exec.
+
+    Also scans nested payloads for ``bash -c`` / ``pwsh -Command`` so privilege
+    tools cannot hide behind a shell wrapper (argv[0] alone is insufficient).
     """
     if not command:
         return None
@@ -637,10 +720,24 @@ def check_dangerous_command(command: list[str]) -> str | None:
     if base in _DANGEROUS_COMMANDS:
         return f"Dangerous command: {base}"
 
-    full = " ".join(str(a) for a in command).lower()
+    full = " ".join(str(a) for a in command)
+    full_l = full.lower()
     for pattern, reason in _HARD_DANGEROUS_PATTERNS:
-        if pattern.search(full):
-            return f"{reason}: {full[:100]}"
+        if pattern.search(full_l):
+            return f"{reason}: {full_l[:100]}"
+
+    # Nested privilege tools inside shell wrappers / full payload text
+    if base in _SHELL_WRAPPERS or _NESTED_PRIVILEGE_RE.search(full):
+        if _NESTED_PRIVILEGE_RE.search(full):
+            return f"Dangerous nested command: {full[:100]}"
+        for payload in _inner_shell_payloads(command):
+            if _NESTED_PRIVILEGE_RE.search(payload):
+                return f"Dangerous nested command: {payload[:100]}"
+            # Also treat a bare first token of a simple payload
+            first = (payload.strip().split(None, 1) or [""])[0]
+            dang = _dangerous_base_name(first)
+            if dang:
+                return f"Dangerous nested command: {dang}"
 
     # Self-preservation (Tauri app.exe / remedy serve) — hard block
     host_kill = check_host_self_kill(command)

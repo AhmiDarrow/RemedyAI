@@ -17,15 +17,15 @@ from typing import Any
 
 from remedy.memory.profile import UserFact, UserProfile
 
-# Injection budget (chars) — keep models sharp
-DEFAULT_MAX_CHARS = 1100
+# Injection budget (chars) — denser personhood without drowning small models
+DEFAULT_MAX_CHARS = 1400
 MIN_INJECT_CONFIDENCE = 0.55
 AUTO_ACCEPT_CONFIDENCE = 0.85
 MAX_FACT_LEN = 280
-MAX_AUTO_FACTS_PER_PASS = 5
+MAX_AUTO_FACTS_PER_PASS = 6
 # Hot-path inject caps (ranked facts / traits in every-turn block)
-MAX_HOT_FACTS = 12
-MAX_HOT_TRAITS = 8
+MAX_HOT_FACTS = 14
+MAX_HOT_TRAITS = 10
 
 # Explicit preference / identity patterns (user lines only)
 # Confidence ≥ AUTO_ACCEPT_CONFIDENCE (0.85) is auto-stored.
@@ -94,6 +94,55 @@ _PREF_PATTERNS: list[tuple[re.Pattern[str], str, float]] = [
         ),
         "preference",
         0.8,
+    ),
+    # Relational / life-context — personhood density (not just coding prefs)
+    (
+        re.compile(
+            r"i (?:hate|love|can'?t stand|enjoy)\s+(.+?)(?:[.!?\n]|$)",
+            re.I,
+        ),
+        "preference",
+        0.86,
+    ),
+    (
+        re.compile(
+            r"(?:i(?:'m| am)|we(?:'re| are))\s+(?:a |an )?([^.!?\n]{4,80}(?:engineer|developer|founder|designer|student|parent)[^.!?\n]{0,40})",
+            re.I,
+        ),
+        "identity",
+        0.88,
+    ),
+    (
+        re.compile(
+            r"(?:my (?:wife|husband|partner|kids?|dog|cat|team|company|boss))\s+([^.!?\n]{3,80})",
+            re.I,
+        ),
+        "personal",
+        0.84,
+    ),
+    (
+        re.compile(
+            r"(?:i live in|i'?m (?:based|from)|timezone is)\s+([A-Za-z0-9_, /\-]{2,60})",
+            re.I,
+        ),
+        "identity",
+        0.87,
+    ),
+    (
+        re.compile(
+            r"(?:when you (?:talk|reply|answer|help)|please (?:be|stay))\s+(.+?)(?:[.!?\n]|$)",
+            re.I,
+        ),
+        "preference",
+        0.89,
+    ),
+    (
+        re.compile(
+            r"(?:we always|from now on we|our rule is)\s+(.+?)(?:[.!?\n]|$)",
+            re.I,
+        ),
+        "constraint",
+        0.9,
     ),
 ]
 

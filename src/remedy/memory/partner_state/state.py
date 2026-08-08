@@ -744,14 +744,26 @@ class PartnerState:
 def ensure_partner_state(runtime: Any) -> PartnerState:
     """Get or create PartnerState on runtime (process registry by session).
 
-    Never return another session's PartnerState when ``runtime._session_id``
-    has changed (shared BasicRuntime across desktop tabs).
+    Never return another session's PartnerState when the turn's session id
+    has changed (shared BasicRuntime across desktop tabs). Prefer turn
+    ContextVar session id so concurrent streams stay isolated.
     """
-    sid = str(
-        getattr(runtime, "_session_id", None)
-        or getattr(getattr(runtime, "config", None), "session_id", None)
-        or ""
-    )
+    sid = ""
+    with suppress(Exception):
+        from remedy.core.turn_context import turn_session_id
+
+        sid = str(turn_session_id(runtime) or "").strip()
+    if not sid:
+        # Live store (avoid property that may re-enter turn helpers)
+        d = getattr(runtime, "__dict__", None) or {}
+        if "_session_id_live" in d:
+            sid = str(d.get("_session_id_live") or "").strip()
+        else:
+            sid = str(
+                getattr(runtime, "_session_id", None)
+                or getattr(getattr(runtime, "config", None), "session_id", None)
+                or ""
+            ).strip()
     key = sid or f"anon-{id(runtime)}"
 
     existing = getattr(runtime, "_partner_state", None)

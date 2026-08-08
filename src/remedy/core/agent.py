@@ -90,7 +90,11 @@ class BasicRuntime(AgentRuntime):
     def __init__(self, config: AgentConfig, memory: MemoryStore | None = None) -> None:
         super().__init__(config, memory=memory)
         self.tool_registry = ToolRegistry()
-        self._system_prompt = _build_system_prompt(getattr(config, "persona", None))
+        self._system_prompt = _build_system_prompt(
+            getattr(config, "persona", None),
+            name=getattr(config, "name", None),
+            gender=getattr(config, "agent_gender", None),
+        )
         self._llm_api_key: str = config.llm_api_key
         self._llm_model: str = config.llm_model
         self._llm_base_url: str = config.llm_base_url or "https://api.openai.com/v1"
@@ -161,11 +165,100 @@ class BasicRuntime(AgentRuntime):
             from remedy.core.approvals import APPROVALS
 
             APPROVALS.set_mode(self._approval_mode)
-        # Memory Harness L2 working state — per-session map + current-turn mirror
-        self._session_brief = None  # type: ignore[assignment]
+        # Memory Harness L2 working state — per-session map + current-turn mirror.
+        # Live stores sit behind properties so concurrent stream turns prefer
+        # turn ContextVars (see turn_context.begin_turn).
+        self.__dict__["_session_id_live"] = getattr(self, "_session_id", None)
+        self.__dict__["_session_brief_live"] = None
+        self.__dict__["_partner_state_live"] = None
+        self.__dict__["_work_roots_live"] = []
         self._session_briefs: dict[str, Any] = {}
         self._register_workspace_tools()
         self._register_memory_tools()
+
+    # -- turn-local continuity (properties) ---------------------------------
+
+    @property
+    def _session_id(self) -> str | None:  # type: ignore[override]
+        try:
+            from remedy.core.turn_context import in_active_turn, current_session_id
+
+            if in_active_turn():
+                return current_session_id()
+        except Exception:
+            pass
+        return self.__dict__.get("_session_id_live")
+
+    @_session_id.setter
+    def _session_id(self, value: str | None) -> None:
+        self.__dict__["_session_id_live"] = value
+
+    @property
+    def _session_brief(self) -> Any:
+        try:
+            from remedy.core.turn_context import in_active_turn, turn_session_brief
+
+            if in_active_turn():
+                return turn_session_brief()
+        except Exception:
+            pass
+        return self.__dict__.get("_session_brief_live")
+
+    @_session_brief.setter
+    def _session_brief(self, value: Any) -> None:
+        self.__dict__["_session_brief_live"] = value
+        try:
+            from remedy.core.turn_context import in_active_turn, set_turn_session_brief
+
+            if in_active_turn():
+                set_turn_session_brief(value)
+        except Exception:
+            pass
+
+    @property
+    def _partner_state(self) -> Any:
+        try:
+            from remedy.core.turn_context import in_active_turn, turn_partner_state
+
+            if in_active_turn():
+                return turn_partner_state()
+        except Exception:
+            pass
+        return self.__dict__.get("_partner_state_live")
+
+    @_partner_state.setter
+    def _partner_state(self, value: Any) -> None:
+        self.__dict__["_partner_state_live"] = value
+        try:
+            from remedy.core.turn_context import in_active_turn, set_turn_partner_state
+
+            if in_active_turn():
+                set_turn_partner_state(value)
+        except Exception:
+            pass
+
+    @property
+    def _work_roots(self) -> list[str]:
+        try:
+            from remedy.core.turn_context import in_active_turn, turn_work_roots
+
+            if in_active_turn():
+                return turn_work_roots()
+        except Exception:
+            pass
+        return list(self.__dict__.get("_work_roots_live") or [])
+
+    @_work_roots.setter
+    def _work_roots(self, value: list[str] | None) -> None:
+        roots = list(value or [])
+        self.__dict__["_work_roots_live"] = roots
+        try:
+            from remedy.core.turn_context import in_active_turn, set_turn_work_roots
+
+            if in_active_turn():
+                set_turn_work_roots(roots)
+        except Exception:
+            pass
 
     def project_path_is_unset(self) -> bool:
         """True when no real project folder is configured (→ full access).
@@ -360,6 +453,7 @@ class BasicRuntime(AgentRuntime):
         api_key: str | None = None,
         persona: str | None = None,
         name: str | None = None,
+        agent_gender: str | None = None,
         project_path: str | None = None,
         access_scope: str | None = None,
         harness_mode: str | None = None,
@@ -368,7 +462,7 @@ class BasicRuntime(AgentRuntime):
         thinking_level: str | None = None,
         approval_mode: str | None = None,
     ) -> None:
-        """Hot-apply LLM / persona / project settings without restarting."""
+        """Hot-apply LLM / persona / identity / project settings without restarting."""
         if thinking_level is not None:
             tl = str(thinking_level).strip().lower()
             self._thinking_level = tl if tl in ("off", "low", "medium", "high") else "high"
@@ -472,11 +566,47 @@ class BasicRuntime(AgentRuntime):
             if hasattr(self, "config") and self.config is not None:
                 with suppress(Exception):
                     self.config.persona = p
-            self._system_prompt = _build_system_prompt(p)
         if name is not None and name.strip():
             if hasattr(self, "config") and self.config is not None:
                 with suppress(Exception):
                     self.config.name = name.strip()
+        if agent_gender is not None:
+            with suppress(Exception):
+                from remedy.core.agent_identity import normalize_agent_gender
+
+                g_set = normalize_agent_gender(agent_gender)
+                if hasattr(self, "config") and self.config is not None:
+                    self.config.agent_gender = g_set
+        # Rebuild system prompt when persona/name/gender change
+        if (
+            persona is not None
+            or (name is not None and str(name).strip())
+            or agent_gender is not None
+        ):
+            with suppress(Exception):
+                from remedy.core.agent_identity import (
+                    normalize_agent_gender,
+                    normalize_agent_name,
+                    sync_identity_to_soul,
+                )
+
+                cfg = getattr(self, "config", None)
+                n = normalize_agent_name(
+                    name if name is not None else getattr(cfg, "name", None)
+                )
+                g = normalize_agent_gender(
+                    agent_gender
+                    if agent_gender is not None
+                    else getattr(cfg, "agent_gender", None)
+                )
+                p = (
+                    (persona.strip().lower() if persona and persona.strip() else None)
+                    or getattr(cfg, "persona", None)
+                    or "default"
+                )
+                self._system_prompt = _build_system_prompt(p, name=n, gender=g)
+                home = getattr(cfg, "home_dir", None)
+                sync_identity_to_soul(n, g, home=home)
         if project_path is not None:
             # Empty string clears project → home root + full access.
             self.set_project_path(project_path if project_path.strip() else None, as_default=True)
@@ -761,6 +891,11 @@ class BasicRuntime(AgentRuntime):
             # Capture under lock — concurrent set_project_path cannot race us.
             turn_project_raw = getattr(self, "_project_path_raw", None)
             turn_active_path = getattr(self, "_active_project_path", None) or ""
+            # Freeze continuity objects for this turn (sibling tabs rebind live
+            # mirrors under the same lock; ContextVars keep our stream isolated).
+            turn_brief = self.__dict__.get("_session_brief_live")
+            turn_partner = self.__dict__.get("_partner_state_live")
+            turn_roots = list(self.__dict__.get("_work_roots_live") or [])
 
             prov = (provider or "").strip() or None
             mod = (model or "").strip() or None
@@ -803,11 +938,14 @@ class BasicRuntime(AgentRuntime):
         if session_id:
             self._session_id = session_id
 
-        tok_s, tok_a, tok_w, tok_p, tok_t = begin_turn(
+        turn_tokens = begin_turn(
             session_id,
             project_raw=turn_project_raw,
             active_path=turn_active_path,
             plan_mode=bool(plan_mode),
+            session_brief=turn_brief,
+            partner_state=turn_partner,
+            work_roots=turn_roots,
         )
         # Legacy mirrors for code that still reads runtime attrs (prefer ContextVar).
         self._plan_mode = bool(plan_mode)
@@ -851,7 +989,37 @@ class BasicRuntime(AgentRuntime):
         finally:
             self._streaming_sessions.discard(sid_key)
             steps_snap = list(current_turn_tool_steps(self))
-            end_turn(session_id, tok_s, tok_a, tok_w, tok_p, tok_t)
+            # Write turn-local continuity back into session caches / live store
+            # so the next turn for this session resumes the same brief/partner.
+            with suppress(Exception):
+                from remedy.core.session_continuity import (
+                    _brief_by_session,
+                    _partner_by_session,
+                    _work_roots_by_session,
+                )
+                from remedy.core.turn_context import (
+                    turn_partner_state,
+                    turn_session_brief,
+                    turn_work_roots,
+                )
+
+                sid_end = str(session_id or "").strip()
+                brief_end = turn_session_brief(self)
+                partner_end = turn_partner_state(self)
+                roots_end = turn_work_roots(self)
+                if sid_end:
+                    if brief_end is not None:
+                        _brief_by_session[sid_end] = brief_end
+                    if partner_end is not None:
+                        _partner_by_session[sid_end] = partner_end
+                    _work_roots_by_session[sid_end] = list(roots_end or [])
+                # Only refresh live mirrors when no other stream owns a different tab
+                live_sid = str(self.__dict__.get("_session_id_live") or "").strip()
+                if not live_sid or live_sid == sid_end:
+                    self.__dict__["_session_brief_live"] = brief_end
+                    self.__dict__["_partner_state_live"] = partner_end
+                    self.__dict__["_work_roots_live"] = list(roots_end or [])
+            end_turn(session_id, *turn_tokens)
             with suppress(Exception):
                 reset_llm_binding(llm_tok)
             self._plan_mode = False

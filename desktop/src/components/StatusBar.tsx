@@ -339,8 +339,23 @@ export function StatusBar({
             const bits: string[] = []
             if (p.pending_approvals > 0) bits.push(`${p.pending_approvals} approve`)
             if (p.open_goals > 0) bits.push(`${p.open_goals} goals`)
+            // Somatic / organism mood (Soul Field)
+            const soma = p.soma
+            if (soma?.label) {
+              const emoji = soma.emoji ? `${soma.emoji} ` : ''
+              bits.push(`${emoji}${soma.label}`)
+            }
             setAlerts(bits.join(' · '))
             setAccessScope(String(p.access_scope || ''))
+            // Tray tooltip mirrors organism mood when running under Tauri
+            if (soma?.tray_tooltip) {
+              try {
+                const { invoke } = await import('@tauri-apps/api/core')
+                await invoke('set_tray_tooltip', { tooltip: soma.tray_tooltip })
+              } catch {
+                /* webui / no tray */
+              }
+            }
             const ph = p.provider_health
             if (ph?.flaky || ph?.suggest_switch) {
               setProviderHealthTip(

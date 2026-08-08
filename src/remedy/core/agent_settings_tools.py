@@ -50,6 +50,7 @@ def register_settings_tools(runtime: Any) -> None:
         llm_api_key: str | None = None,
         name: str | None = None,
         user_name: str | None = None,
+        agent_gender: str | None = None,
         persona: str | None = None,
         project_path: str | None = None,
         force_project_switch: bool | str = False,
@@ -151,6 +152,7 @@ def register_settings_tools(runtime: Any) -> None:
             "llm_api_key": llm_api_key,
             "name": name,
             "user_name": user_name,
+            "agent_gender": agent_gender,
             "persona": persona,
             "project_path": project_path,
             "access_scope": access_scope,
@@ -352,7 +354,15 @@ def register_settings_tools(runtime: Any) -> None:
                     "type": "string",
                     "description": "Stored in secure key store, never in config.toml",
                 },
-                "name": {"type": "string", "description": "Agent display name"},
+                "name": {
+                    "type": "string",
+                    "description": "Partner display name (default Remedy)",
+                },
+                "agent_gender": {
+                    "type": "string",
+                    "enum": ["female", "male", "neutral"],
+                    "description": "Partner gender presentation (default female)",
+                },
                 "user_name": {
                     "type": "string",
                     "description": "What Remedy calls the human",
