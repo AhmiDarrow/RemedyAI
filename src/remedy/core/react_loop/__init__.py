@@ -1,7 +1,8 @@
-"""Compatibility shim — prefer ``remedy.core.react_loop``.
+"""ReAct multi-epoch stream loop package.
 
-Historically ``agent_react_loop`` held the full ReAct stream. Implementation
-now lives under ``react_loop/``; this module re-exports the public surface.
+Public API:
+  * call_llm_stream — main agent LLM + tools loop
+  * is_fatal_llm_api_error / _is_fatal_llm_api_error — hard-stop classifier
 """
 
 from __future__ import annotations
