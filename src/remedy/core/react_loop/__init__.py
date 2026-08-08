@@ -18,11 +18,13 @@ from remedy.core.react_loop.errors import (
     is_fatal_llm_api_error as _is_fatal_llm_api_error,
 )
 from remedy.core.react_loop.loop import call_llm_stream
+from remedy.core.react_loop.build_request import build_step_request_body
 from remedy.core.react_loop.recovery import (
     fatal_model_error_message,
     repeated_provider_error_message,
     soft_retry_notice,
 )
+from remedy.core.react_loop.stream_consume import consume_llm_http_response
 
 __all__ = [
     "call_llm_stream",
@@ -34,4 +36,6 @@ __all__ = [
     "fatal_model_error_message",
     "repeated_provider_error_message",
     "soft_retry_notice",
+    "build_step_request_body",
+    "consume_llm_http_response",
 ]
