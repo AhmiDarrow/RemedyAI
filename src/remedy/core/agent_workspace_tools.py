@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import re
-from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -15,87 +13,36 @@ from remedy.core.react_policy import (
     HARD_SAFETY_CHARS as _HARD_SAFETY_CHARS,
 )
 from remedy.core.security import check_dangerous_command
-
-# Agent scaffold dumps that should never land in product trees.
-_JUNK_WRITE_NAME_RE = re.compile(
-    r"(?i)"
-    r"(?:^|[/\\])_ref_[^/\\]+$"
-    r"|(?:^|[/\\])_ex_[a-z0-9]+(?:\.[^/\\]+)?$"
-    r"|(?:^|[/\\])_write_[^/\\]+\.py$"
-    r"|(?:^|[/\\])_patch_[^/\\]+\.py$"
-    r"|(?:^|[/\\])_vault_tail\.txt$"
+from remedy.core.workspace_tools.guards import (
+    FULL_WRITE_PREFER_EDIT_BYTES as _FULL_WRITE_PREFER_EDIT_BYTES,
+    HISTORY_STUB_MARKERS as _HISTORY_STUB_MARKERS,
+    TINY_REWRITE_ABS as _TINY_REWRITE_ABS,
+    TINY_REWRITE_RATIO as _TINY_REWRITE_RATIO,
+    junk_write_guard,
+    normalize_edits_arg as _normalize_edits_arg,
+    note_path,
+    parent_hint,
+    reserved_guard,
+    track_read,
 )
-
-# Existing files this large should use file_edit unless force_full_write.
-_FULL_WRITE_PREFER_EDIT_BYTES = 4_000
-# Tiny absolute/relative size change via full rewrite → refuse (use file_edit).
-_TINY_REWRITE_ABS = 120
-_TINY_REWRITE_RATIO = 0.02
-
-# Provider-history stubs must never be written back to disk (agent echo bug).
-_HISTORY_STUB_MARKERS = (
-    "[file_write content omitted",
-    "omitted from provider history",
-    "_history_summarized",
-    "<<NOT_SOURCE_CODE",
-    "DO_NOT_file_write_this_string",
-    "history_stub kind=",
-)
-
-
-def _normalize_edits_arg(edits: Any) -> str:
-    """Accept JSON string or already-parsed list/dict for edits= parameters."""
-    import json as _json
-
-    if edits is None:
-        return ""
-    if isinstance(edits, (list, dict)):
-        return _json.dumps(edits, ensure_ascii=False)
-    return str(edits)
-
 
 def register_workspace_tools(runtime: Any) -> None:
     """Register file/shell tools jailed to the project workspace."""
 
     def _parent_hint(path: str) -> str:
-        p = (path or ".").strip() or "."
-        if p in (".", "./", ""):
-            return "."
-        parent = Path(p).parent.as_posix()
-        return parent if parent not in ("", ".") else "."
+        return parent_hint(path)
 
     def _reserved_guard(path: str) -> str | None:
-        from remedy.core.win_paths import check_tool_path_safe
-
-        return check_tool_path_safe(path)
+        return reserved_guard(path)
 
     def _junk_write_guard(path: str) -> str | None:
-        p = (path or "").strip().replace("\\", "/")
-        if not p:
-            return None
-        if _JUNK_WRITE_NAME_RE.search(p):
-            return (
-                f"refusing junk scaffold path {path!r}: do not write _ref_*, "
-                "_ex_*, _write_*.py, or _patch_*.py into the project. "
-                "Read reference sources from their real location; edit the "
-                "real target with file_edit / file_write."
-            )
-        return None
+        return junk_write_guard(path)
 
     def _note_path(target: Path) -> None:
-        with suppress(Exception):
-            from remedy.core.work_roots import note_work_path
-
-            note_work_path(runtime, target)
+        note_path(runtime, target)
 
     def _track_read(target: Path) -> None:
-        with suppress(Exception):
-            key = str(target.resolve()).lower()
-            reads = getattr(runtime, "_files_read_this_turn", None)
-            if not isinstance(reads, set):
-                reads = set()
-                runtime._files_read_this_turn = reads
-            reads.add(key)
+        track_read(runtime, target)
 
     async def file_read(
         path: str = ".",
