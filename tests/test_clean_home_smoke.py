@@ -60,9 +60,9 @@ def test_clean_home_context_snapshot_and_policy(clean_home):
         context_window=100_000,
     )
     assert snap.token_estimate >= 1
-    assert snap.intent in ("tool", "chat", "memory", "skill", "plan")
-    # Tool-biased prompt should pick tool policy
-    assert snap.policy_id in ("tool", "chat", "memory", "skill", "plan")
+    assert snap.intent in ("tool", "task", "chat", "memory", "skill", "plan")
+    # Implement-ish prompts may land on tool or task policy
+    assert snap.policy_id in ("tool", "task", "chat", "memory", "skill", "plan")
     pub = snap.to_public()
     assert "fill_pct" in pub
 

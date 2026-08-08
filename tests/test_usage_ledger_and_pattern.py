@@ -72,7 +72,8 @@ def test_local_models_get_conservative_window():
         "qwen25_coder_7b.rmb4",
         base_url="http://127.0.0.1:8787/v1",
     )
-    assert 4_096 <= rmb_win <= 16_384
+    # RMB coder lattices may advertise 8–32k (product defaults moved up for long sessions).
+    assert 4_096 <= rmb_win <= 32_768
     # Live discovery from GET /v1/models overrides heuristics.
     cache_context_window("http://127.0.0.1:8787/v1", "qwen25_coder_7b.rmb4", 6144)
     assert (

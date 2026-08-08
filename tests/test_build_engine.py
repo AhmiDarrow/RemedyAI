@@ -101,7 +101,10 @@ def test_monologue_block():
     n = monologue_block_nudge(st)
     assert n is not None
     assert "MONOLOGUE" in n["content"] or "tool_calls" in n["content"]
-    assert monologue_block_nudge(st) is None  # once
+    # Up to 3 blocks for local re-essay; fourth is None
+    assert monologue_block_nudge(st) is not None
+    assert monologue_block_nudge(st) is not None
+    assert monologue_block_nudge(st) is None
 
 
 def test_force_tools_for_build():
