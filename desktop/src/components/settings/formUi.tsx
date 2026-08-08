@@ -262,3 +262,34 @@ export function FormSegmented<T extends string>({
 export function FormRow({ children }: { children: ReactNode }) {
   return <div className="flex flex-wrap items-center gap-1.5 mb-2">{children}</div>
 }
+
+/** Compact key/value status surface for RMB / vision panels. */
+export function FormStatusCard({ children }: { children: ReactNode }) {
+  return (
+    <div
+      className="rounded-md px-2 py-1.5 mb-2 text-[10px] space-y-0.5"
+      style={{
+        background: 'var(--bg-tertiary)',
+        border: '1px solid var(--border)',
+        color: 'var(--text-secondary)',
+      }}
+    >
+      {children}
+    </div>
+  )
+}
+
+export function FormStatusRow({
+  label,
+  children,
+}: {
+  label: string
+  children: ReactNode
+}) {
+  return (
+    <div className="flex justify-between gap-2">
+      <span style={{ color: 'var(--text-muted)' }}>{label}</span>
+      <span className="text-right min-w-0 truncate max-w-[65%]">{children}</span>
+    </div>
+  )
+}
