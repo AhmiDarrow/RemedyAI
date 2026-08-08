@@ -188,7 +188,12 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             "http_bootstrap": _effective_http_bootstrap(cfg),
             # Opt-in: tighter tool caps + email/phone scrub on LLM egress (default off = fast)
             "privacy_mode": bool(cfg.get("privacy_mode", False)),
-            "soul_field_enabled": bool(cfg.get("soul_field_enabled", False)),
+            # Align with feature_maturity defaults (soul on unless explicitly off).
+            "soul_field_enabled": (
+                bool(cfg["soul_field_enabled"])
+                if "soul_field_enabled" in cfg
+                else True
+            ),
             "build_os_advanced": bool(cfg.get("build_os_advanced", False)),
             "rmb_enabled": bool(cfg.get("rmb_enabled", True)),
             "retention_session_days": int(cfg.get("retention_session_days") or 0),
