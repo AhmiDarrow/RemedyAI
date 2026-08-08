@@ -816,6 +816,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <div class="endpoint"><span class="method">GET</span><span class="path">/api/skills</span> — list skills</div>
             <p class="section-header">Other</p>
             <div class="endpoint"><span class="method">GET</span><span class="path">/api/status</span> — system status</div>
+            <div class="endpoint"><span class="method">GET</span><span class="path">/api/diagnostics</span> — health diagnostics (Remedy, RMB, hardware, providers)</div>
             <div class="endpoint"><span class="method">GET</span><span class="path">/api/session-summaries</span> — legacy summaries</div>
             <div class="endpoint"><span class="method">GET</span><span class="path">/api/handoffs</span> — handoff notes</div>
             <div class="endpoint"><span class="method">POST</span><span class="path">/api/webhook/{source}</span> — receive webhook</div>

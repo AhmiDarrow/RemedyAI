@@ -164,3 +164,24 @@ def register_status_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
         }
         return StatusResponse(**payload)
 
+    @app.get("/api/diagnostics")
+    async def get_diagnostics(
+        probe_providers: bool = Query(
+            default=False,
+            description="Also measure local provider HTTP latency (loopback only)",
+        ),
+    ):
+        """Health diagnostics snapshot for the desktop Diagnostics screen.
+
+        Aggregates Remedy API, RMB host, vision, hardware, computer host, and
+        provider connectivity. Cheap by default (no remote provider chat probes).
+        """
+        from remedy.interfaces.diagnostics import collect_diagnostics
+
+        return await collect_diagnostics(
+            runtime=runtime,
+            gateway=gateway,
+            memory=memory,
+            probe_providers=bool(probe_providers),
+        )
+
