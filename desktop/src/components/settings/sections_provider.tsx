@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import type { ConnectedProvider } from '../../api/providers'
 import type { SettingsFormProps } from './formTypes'
 import { SettingsSection } from '../SettingsSection'
-import { FormHint } from './formUi'
+import { FormHint, FormLabel, FormLinkButton, FormNotice, FormSelect } from './formUi'
 import { Field } from './shared'
 import { openExternalUrl } from '../../api/auth'
 
@@ -51,331 +51,313 @@ export function SettingsSections_provider(p: SettingsFormProps): ReactNode {
 
   return (
     <>
-            <SettingsSection
-              {...sectionProps('provider')}
-              defaultOpen
-            >
-              <FormHint>
-                Free options: <strong style={{ color: 'var(--text-secondary)' }}>Demo</strong> (no signup),
-                Gemini / Groq / OpenRouter / Mistral (free key), or Ollama (local).
-              </FormHint>
-              <label className="block mb-1 text-[0.68rem] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>Type</label>
-              <select
-                value={provider}
-                onChange={(e) => handleProviderChange(e.target.value)}
-                className="ui-select w-full mb-2"
-              >
-                {primaryProviders.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.badge ? `${p.name} · ${p.badge}` : p.name}
-                  </option>
-                ))}
-                {showAdvanced && advancedProviders.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </select>
-              {!showAdvanced && advancedProviders.length > 0 && (
-                <button
-                  type="button"
-                  className="mb-2 text-[10px] underline"
-                  style={{ color: 'var(--text-muted)' }}
-                  onClick={() => setShowAdvanced(true)}
-                >
-                  Show advanced (custom endpoint)…
-                </button>
-              )}
-              {provider === 'demo' && (
-                <div
-                  className="text-[10px] rounded px-2 py-1.5 mb-2 leading-snug"
-                  style={{ color: 'var(--text-muted)', border: '1px solid var(--border)' }}
-                >
-                  Demo is guest chat only (Codestral, Gemini Flash Lite, GPT-OSS). Image/video
-                  and other gateway models are hidden — they need a real key or are not chat.
-                  Add Gemini/Groq free key or Ollama for serious free use.
-                </div>
-              )}
-              {activeMeta?.key_docs_url && provider !== 'demo' && (
-                <button
-                  type="button"
-                  className="mb-2 text-[10px] underline block"
-                  style={{ color: 'var(--accent)' }}
-                  onClick={() => void openExternalUrl(String(activeMeta.key_docs_url))}
-                >
-                  {provider === 'ollama' ? 'Download Ollama…' : 'Get free API key / docs…'}
-                </button>
-              )}
+      <SettingsSection
+        {...sectionProps('provider')}
+        defaultOpen
+      >
+        <FormHint>
+          Free options: <strong style={{ color: 'var(--text-secondary)' }}>Demo</strong> (no signup),
+          Gemini / Groq / OpenRouter / Mistral (free key), or Ollama (local).
+        </FormHint>
+        <FormLabel>Type</FormLabel>
+        <FormSelect value={provider} onChange={handleProviderChange}>
+          {primaryProviders.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.badge ? `${p.name} · ${p.badge}` : p.name}
+            </option>
+          ))}
+          {showAdvanced && advancedProviders.map((p) => (
+            <option key={p.id} value={p.id}>{p.name}</option>
+          ))}
+        </FormSelect>
+        {!showAdvanced && advancedProviders.length > 0 && (
+          <FormLinkButton onClick={() => setShowAdvanced(true)}>
+            Show advanced (custom endpoint)…
+          </FormLinkButton>
+        )}
+        {provider === 'demo' && (
+          <FormNotice>
+            Demo is guest chat only (Codestral, Gemini Flash Lite, GPT-OSS). Image/video
+            and other gateway models are hidden — they need a real key or are not chat.
+            Add Gemini/Groq free key or Ollama for serious free use.
+          </FormNotice>
+        )}
+        {activeMeta?.key_docs_url && provider !== 'demo' && (
+          <FormLinkButton
+            accent
+            onClick={() => void openExternalUrl(String(activeMeta.key_docs_url))}
+          >
+            {provider === 'ollama' ? 'Download Ollama…' : 'Get free API key / docs…'}
+          </FormLinkButton>
+        )}
 
-              {provider === 'custom' && (
-                <Field
-                  label="Name"
-                  value={customName}
-                  onChange={(v) => setCustomName?.(v)}
-                  placeholder="e.g. LM Studio / llama.cpp"
-                />
-              )}
-              {showBaseUrl && (
-                <Field label="Base URL" value={baseUrl} onChange={setBaseUrl} />
-              )}
-              <label className="block mb-1 text-[0.68rem] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>Model</label>
-              <select
-                value={model}
-                onChange={(e) => setModel(e.target.value)}
-                className="ui-select w-full mb-2"
-              >
-                {providerModels.length === 0 && <option value={model}>{model}</option>}
-                {providerModels.every((m) => m.id !== model) && model && (
-                  <option value={model}>{model} (current)</option>
-                )}
-                {providerModels.map((m) => (
-                  <option key={m.id} value={m.id}>{m.name}</option>
-                ))}
-              </select>
-              <div className="mb-2 text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                Models for <strong>{activeMeta?.name || provider}</strong>
-                {showBaseUrl ? ' · custom base URL enabled' : ''}.
+        {provider === 'custom' && (
+          <Field
+            label="Name"
+            value={customName}
+            onChange={(v) => setCustomName?.(v)}
+            placeholder="e.g. LM Studio / llama.cpp"
+          />
+        )}
+        {showBaseUrl && (
+          <Field label="Base URL" value={baseUrl} onChange={setBaseUrl} />
+        )}
+        <FormLabel>Model</FormLabel>
+        <FormSelect value={model} onChange={setModel}>
+          {providerModels.length === 0 && <option value={model}>{model}</option>}
+          {providerModels.every((m) => m.id !== model) && model && (
+            <option value={model}>{model} (current)</option>
+          )}
+          {providerModels.map((m) => (
+            <option key={m.id} value={m.id}>{m.name}</option>
+          ))}
+        </FormSelect>
+        <FormHint>
+          Models for <strong>{activeMeta?.name || provider}</strong>
+          {showBaseUrl ? ' · custom base URL enabled' : ''}.
+        </FormHint>
+
+        {provider === 'xai' && (
+          <div
+            className="mb-2 p-2 rounded space-y-2"
+            style={{ border: '1px solid var(--border)', background: 'var(--bg-tertiary)' }}
+          >
+            <div className="font-medium" style={{ color: 'var(--text-primary)' }}>
+              Sign in with xAI
+            </div>
+            <FormHint>
+              Use your SuperGrok / X Premium+ account (recommended), or a console API key below.
+            </FormHint>
+            {xaiAuth?.connected ? (
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px]" style={{ color: 'var(--success)' }}>
+                  Connected ({xaiAuth.auth_method === 'oauth' ? 'OAuth' : 'API key'})
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void handleXaiLogout()}
+                  className="px-2 py-1 rounded text-[11px]"
+                  style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
+                >
+                  Sign out
+                </button>
               </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => void handleXaiSignIn()}
+                disabled={xaiLoginBusy}
+                className="w-full py-1.5 rounded text-xs font-semibold"
+                style={{
+                  background: xaiLoginBusy ? 'var(--bg-secondary)' : 'var(--accent)',
+                  color: '#fff',
+                  cursor: xaiLoginBusy ? 'wait' : 'pointer',
+                }}
+              >
+                {xaiLoginBusy ? 'Waiting for approval…' : 'Sign in with xAI'}
+              </button>
+            )}
+            {xaiUserCode && (
+              <div className="text-[11px] space-y-1" style={{ color: 'var(--text-secondary)' }}>
+                <div>
+                  Code: <code style={{ color: 'var(--accent)' }}>{xaiUserCode}</code>
+                </div>
+                {xaiVerifyUrl && (
+                  <button
+                    type="button"
+                    className="underline text-left"
+                    style={{ color: 'var(--accent)' }}
+                    onClick={() => void openExternalUrl(xaiVerifyUrl)}
+                  >
+                    Open verification page
+                  </button>
+                )}
+              </div>
+            )}
+            {xaiLoginMsg && (
+              <FormHint>
+                {xaiLoginMsg}
+              </FormHint>
+            )}
+          </div>
+        )}
 
-              {provider === 'xai' && (
+        <Field
+          label={
+            provider === 'xai'
+              ? apiKeySet
+                ? 'API key (optional — change?)'
+                : 'API key (optional)'
+              : apiKeySet
+                ? 'API Key (set - change?)'
+                : 'API Key'
+          }
+          value={apiKey}
+          onChange={setApiKey}
+          placeholder={
+            provider === 'xai'
+              ? apiKeySet
+                ? '(leave blank to keep current)'
+                : 'xai-… from console.x.ai'
+              : apiKeySet
+                ? '(leave blank to keep current)'
+                : 'sk-...'
+          }
+          password
+        />
+      </SettingsSection>
+
+      {/* Provider catalog — enable for main-screen picker */}
+      <SettingsSection
+        {...sectionProps('provider-catalog')}
+      >
+        <FormHint>
+          Connected providers with a key, OAuth, Demo, or local Ollama appear in the
+          main status bar. Disable to hide without deleting credentials.
+        </FormHint>
+        <input
+          type="search"
+          value={providerSearch}
+          onChange={(e) => setProviderSearch(e.target.value)}
+          placeholder="Search providers…"
+          className="ui-input mb-2"
+        />
+        <div className="max-h-48 overflow-y-auto space-y-1">
+          {(connectedList.length ? connectedList : catalog)
+            .filter((p) => {
+              const q = providerSearch.trim().toLowerCase()
+              if (!q) return true
+              return (
+                p.id.includes(q)
+                || p.name.toLowerCase().includes(q)
+                || (p.models || []).some(
+                  (m) => m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q),
+                )
+              )
+            })
+            .map((p) => {
+              const conn = 'connected' in p ? Boolean((p as ConnectedProvider).connected) : true
+              const isEnabled =
+                enabledProviders === null
+                  ? true
+                  : enabledProviders.includes(p.id)
+              const models = p.models || []
+              const modelAllow = enabledModels[p.id]
+              const expanded = catalogExpand === p.id
+              return (
                 <div
-                  className="mb-2 p-2 rounded space-y-2"
-                  style={{ border: '1px solid var(--border)', background: 'var(--bg-tertiary)' }}
+                  key={p.id}
+                  className="rounded px-2 py-1.5"
+                  style={{
+                    background: 'var(--bg-secondary)',
+                    border: '1px solid var(--border)',
+                    opacity: conn ? 1 : 0.65,
+                  }}
                 >
-                  <div className="font-medium" style={{ color: 'var(--text-primary)' }}>
-                    Sign in with xAI
-                  </div>
-                  <FormHint>
-                    Use your SuperGrok / X Premium+ account (recommended), or a console API key below.
-                  </FormHint>
-                  {xaiAuth?.connected ? (
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-[11px]" style={{ color: 'var(--success)' }}>
-                        Connected ({xaiAuth.auth_method === 'oauth' ? 'OAuth' : 'API key'})
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => void handleXaiLogout()}
-                        className="px-2 py-1 rounded text-[11px]"
-                        style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
-                      >
-                        Sign out
-                      </button>
-                    </div>
-                  ) : (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={isEnabled}
+                      onChange={(e) => {
+                        const on = e.target.checked
+                        setEnabledProviders((prev) => {
+                          const base =
+                            prev
+                            ?? (connectedList.length
+                              ? connectedList.map((x) => x.id)
+                              : catalog.map((x) => x.id))
+                          if (on) return [...new Set([...base, p.id])]
+                          return base.filter((id) => id !== p.id)
+                        })
+                      }}
+                    />
                     <button
                       type="button"
-                      onClick={() => void handleXaiSignIn()}
-                      disabled={xaiLoginBusy}
-                      className="w-full py-1.5 rounded text-xs font-semibold"
-                      style={{
-                        background: xaiLoginBusy ? 'var(--bg-secondary)' : 'var(--accent)',
-                        color: '#fff',
-                        cursor: xaiLoginBusy ? 'wait' : 'pointer',
-                      }}
+                      className="flex-1 min-w-0 text-left"
+                      onClick={() =>
+                        setCatalogExpand((cur) => (cur === p.id ? null : p.id))
+                      }
                     >
-                      {xaiLoginBusy ? 'Waiting for approval…' : 'Sign in with xAI'}
+                      <span className="font-medium">{p.name}</span>
+                      <span className="block text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                        {conn ? 'connected' : 'not connected'}
+                        {' · '}
+                        {models.length} models
+                        {modelAllow ? ` · ${modelAllow.length} enabled` : ''}
+                        {expanded ? ' · hide models' : ' · models'}
+                      </span>
                     </button>
-                  )}
-                  {xaiUserCode && (
-                    <div className="text-[11px] space-y-1" style={{ color: 'var(--text-secondary)' }}>
-                      <div>
-                        Code: <code style={{ color: 'var(--accent)' }}>{xaiUserCode}</code>
-                      </div>
-                      {xaiVerifyUrl && (
-                        <button
-                          type="button"
-                          className="underline text-left"
-                          style={{ color: 'var(--accent)' }}
-                          onClick={() => void openExternalUrl(xaiVerifyUrl)}
-                        >
-                          Open verification page
-                        </button>
-                      )}
-                    </div>
-                  )}
-                  {xaiLoginMsg && (
-                    <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                      {xaiLoginMsg}
+                  </div>
+                  {expanded && models.length > 0 && (
+                    <div className="mt-1.5 ml-5 space-y-0.5 max-h-28 overflow-y-auto">
+                      {models.map((m) => {
+                        const mid = m.id
+                        const checked =
+                          !modelAllow || modelAllow.length === 0
+                            ? true
+                            : modelAllow.includes(mid)
+                        return (
+                          <label
+                            key={mid}
+                            className="flex items-center gap-1.5 text-[10px]"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(e) => {
+                                const on = e.target.checked
+                                setEnabledModels((prev) => {
+                                  const allIds = models.map((x) => x.id)
+                                  const cur =
+                                    prev[p.id] && prev[p.id]!.length > 0
+                                      ? [...prev[p.id]!]
+                                      : [...allIds]
+                                  let next: string[]
+                                  if (on) next = [...new Set([...cur, mid])]
+                                  else next = cur.filter((id) => id !== mid)
+                                  // empty list means "all" — store full set minus unchecked
+                                  const out = { ...prev }
+                                  if (next.length === allIds.length) {
+                                    delete out[p.id]
+                                  } else {
+                                    out[p.id] = next
+                                  }
+                                  return out
+                                })
+                              }}
+                            />
+                            <span className="truncate">{m.name || mid}</span>
+                          </label>
+                        )
+                      })}
                     </div>
                   )}
                 </div>
-              )}
+              )
+            })}
+        </div>
+        <div className="mt-2 flex items-center gap-2">
+          <label className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+            Skills active budget
+          </label>
+          <input
+            type="number"
+            min={10}
+            max={500}
+            value={skillsBudget}
+            onChange={(e) => setSkillsBudget(Number(e.target.value) || 80)}
+            className="w-16 rounded px-1 py-0.5 text-xs outline-none"
+            style={{
+              background: 'var(--bg-tertiary)',
+              border: '1px solid var(--border)',
+              color: 'var(--text-primary)',
+            }}
+            title="Soft cap for skills in the hot catalog (100+ library scale)"
+          />
+        </div>
+      </SettingsSection>
 
-              <Field
-                label={
-                  provider === 'xai'
-                    ? apiKeySet
-                      ? 'API key (optional — change?)'
-                      : 'API key (optional)'
-                    : apiKeySet
-                      ? 'API Key (set - change?)'
-                      : 'API Key'
-                }
-                value={apiKey}
-                onChange={setApiKey}
-                placeholder={
-                  provider === 'xai'
-                    ? apiKeySet
-                      ? '(leave blank to keep current)'
-                      : 'xai-… from console.x.ai'
-                    : apiKeySet
-                      ? '(leave blank to keep current)'
-                      : 'sk-...'
-                }
-                password
-              />
-            </SettingsSection>
-
-            {/* Provider catalog — enable for main-screen picker */}
-            <SettingsSection
-              {...sectionProps('provider-catalog')}
-            >
-              <div className="text-[10px] mb-2" style={{ color: 'var(--text-muted)' }}>
-                Connected providers with a key, OAuth, Demo, or local Ollama appear in the
-                main status bar. Disable to hide without deleting credentials.
-              </div>
-              <input
-                type="search"
-                value={providerSearch}
-                onChange={(e) => setProviderSearch(e.target.value)}
-                placeholder="Search providers…"
-                className="ui-select w-full mb-2"
-              />
-              <div className="max-h-48 overflow-y-auto space-y-1">
-                {(connectedList.length ? connectedList : catalog)
-                  .filter((p) => {
-                    const q = providerSearch.trim().toLowerCase()
-                    if (!q) return true
-                    return (
-                      p.id.includes(q)
-                      || p.name.toLowerCase().includes(q)
-                      || (p.models || []).some(
-                        (m) => m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q),
-                      )
-                    )
-                  })
-                  .map((p) => {
-                    const conn = 'connected' in p ? Boolean((p as ConnectedProvider).connected) : true
-                    const isEnabled =
-                      enabledProviders === null
-                        ? true
-                        : enabledProviders.includes(p.id)
-                    const models = p.models || []
-                    const modelAllow = enabledModels[p.id]
-                    const expanded = catalogExpand === p.id
-                    return (
-                      <div
-                        key={p.id}
-                        className="rounded px-2 py-1.5"
-                        style={{
-                          background: 'var(--bg-secondary)',
-                          border: '1px solid var(--border)',
-                          opacity: conn ? 1 : 0.65,
-                        }}
-                      >
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="checkbox"
-                            checked={isEnabled}
-                            onChange={(e) => {
-                              const on = e.target.checked
-                              setEnabledProviders((prev) => {
-                                const base =
-                                  prev
-                                  ?? (connectedList.length
-                                    ? connectedList.map((x) => x.id)
-                                    : catalog.map((x) => x.id))
-                                if (on) return [...new Set([...base, p.id])]
-                                return base.filter((id) => id !== p.id)
-                              })
-                            }}
-                          />
-                          <button
-                            type="button"
-                            className="flex-1 min-w-0 text-left"
-                            onClick={() =>
-                              setCatalogExpand((cur) => (cur === p.id ? null : p.id))
-                            }
-                          >
-                            <span className="font-medium">{p.name}</span>
-                            <span className="block text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                              {conn ? 'connected' : 'not connected'}
-                              {' · '}
-                              {models.length} models
-                              {modelAllow ? ` · ${modelAllow.length} enabled` : ''}
-                              {expanded ? ' · hide models' : ' · models'}
-                            </span>
-                          </button>
-                        </div>
-                        {expanded && models.length > 0 && (
-                          <div className="mt-1.5 ml-5 space-y-0.5 max-h-28 overflow-y-auto">
-                            {models.map((m) => {
-                              const mid = m.id
-                              const checked =
-                                !modelAllow || modelAllow.length === 0
-                                  ? true
-                                  : modelAllow.includes(mid)
-                              return (
-                                <label
-                                  key={mid}
-                                  className="flex items-center gap-1.5 text-[10px]"
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={checked}
-                                    onChange={(e) => {
-                                      const on = e.target.checked
-                                      setEnabledModels((prev) => {
-                                        const allIds = models.map((x) => x.id)
-                                        const cur =
-                                          prev[p.id] && prev[p.id]!.length > 0
-                                            ? [...prev[p.id]!]
-                                            : [...allIds]
-                                        let next: string[]
-                                        if (on) next = [...new Set([...cur, mid])]
-                                        else next = cur.filter((id) => id !== mid)
-                                        // empty list means "all" — store full set minus unchecked
-                                        const out = { ...prev }
-                                        if (next.length === allIds.length) {
-                                          delete out[p.id]
-                                        } else {
-                                          out[p.id] = next
-                                        }
-                                        return out
-                                      })
-                                    }}
-                                  />
-                                  <span className="truncate">{m.name || mid}</span>
-                                </label>
-                              )
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })}
-              </div>
-              <div className="mt-2 flex items-center gap-2">
-                <label className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                  Skills active budget
-                </label>
-                <input
-                  type="number"
-                  min={10}
-                  max={500}
-                  value={skillsBudget}
-                  onChange={(e) => setSkillsBudget(Number(e.target.value) || 80)}
-                  className="w-16 rounded px-1 py-0.5 text-xs outline-none"
-                  style={{
-                    background: 'var(--bg-tertiary)',
-                    border: '1px solid var(--border)',
-                    color: 'var(--text-primary)',
-                  }}
-                  title="Soft cap for skills in the hot catalog (100+ library scale)"
-                />
-              </div>
-            </SettingsSection>
-
-            {/* You + Agent */}
+      {/* You + Agent */}
     </>
   )
 }

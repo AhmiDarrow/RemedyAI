@@ -10,11 +10,19 @@ export function FormHint({ children }: { children: ReactNode }) {
   )
 }
 
-export function FormLabel({ children, htmlFor }: { children: ReactNode; htmlFor?: string }) {
+export function FormLabel({
+  children,
+  htmlFor,
+  className = '',
+}: {
+  children: ReactNode
+  htmlFor?: string
+  className?: string
+}) {
   return (
     <label
       htmlFor={htmlFor}
-      className="block mb-1 text-[0.68rem] font-semibold uppercase tracking-wide"
+      className={`block mb-1 text-[0.68rem] font-semibold uppercase tracking-wide ${className}`.trim()}
       style={{ color: 'var(--text-muted)' }}
     >
       {children}
@@ -22,11 +30,49 @@ export function FormLabel({ children, htmlFor }: { children: ReactNode; htmlFor?
   )
 }
 
+export function FormInput({
+  value,
+  onChange,
+  type = 'text',
+  placeholder,
+  className = '',
+  disabled,
+  title,
+  id,
+  spellCheck,
+  mono,
+}: {
+  value: string
+  onChange: (v: string) => void
+  type?: string
+  placeholder?: string
+  className?: string
+  disabled?: boolean
+  title?: string
+  id?: string
+  spellCheck?: boolean
+  mono?: boolean
+}) {
+  return (
+    <input
+      id={id}
+      type={type}
+      value={value}
+      disabled={disabled}
+      title={title}
+      placeholder={placeholder}
+      spellCheck={spellCheck}
+      onChange={(e) => onChange(e.target.value)}
+      className={`ui-input ${mono ? 'font-mono' : ''} ${className}`.trim()}
+    />
+  )
+}
+
 export function FormSelect({
   value,
   onChange,
   children,
-  className = '',
+  className = 'mb-2',
   disabled,
   title,
   id,
@@ -46,7 +92,7 @@ export function FormSelect({
       disabled={disabled}
       title={title}
       onChange={(e) => onChange(e.target.value)}
-      className={`ui-select w-full mb-2 ${className}`.trim()}
+      className={`ui-select w-full ${className}`.trim()}
     >
       {children}
     </select>
@@ -112,14 +158,20 @@ export function FormNotice({
     tone === 'accent'
       ? 'color-mix(in srgb, var(--accent) 8%, transparent)'
       : tone === 'warn'
-        ? 'color-mix(in srgb, var(--warning) 10%, transparent)'
+        ? 'color-mix(in srgb, var(--warning) 12%, var(--bg-tertiary))'
         : tone === 'error'
           ? 'color-mix(in srgb, var(--error) 10%, transparent)'
           : 'color-mix(in srgb, var(--bg-tertiary) 50%, transparent)'
+  const color =
+    tone === 'warn'
+      ? 'var(--warning)'
+      : tone === 'error'
+        ? 'var(--error)'
+        : 'var(--text-muted)'
   return (
     <div
       className="text-[10px] rounded-lg px-2.5 py-1.5 mb-2 leading-snug"
-      style={{ color: 'var(--text-muted)', border: `1px solid ${border}`, background: bg }}
+      style={{ color, border: `1px solid ${border}`, background: bg }}
     >
       {children}
     </div>
