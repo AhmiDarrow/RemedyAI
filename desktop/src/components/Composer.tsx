@@ -215,6 +215,39 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   }, [slashCommandsProp])
   /** When set, Enter/send updates this queue item instead of enqueueing a new one. */
   const [editingQueueId, setEditingQueueId] = useState<string | null>(null)
+
+  const resolveSession = useCallback(async (): Promise<string | null> => {
+    if (sessionId) return sessionId
+    if (ensureSession) return ensureSession()
+    return null
+  }, [sessionId, ensureSession])
+
+  // Attachment rail must init before any use of `attachments` / attachmentsRef.
+  const {
+    attachments,
+    setAttachments,
+    attachmentsRef,
+    dragOver,
+    setDragOver,
+    uploading,
+    setUploading,
+    uploadError,
+    setUploadError,
+    attachNotice,
+    setAttachNotice,
+    addFiles,
+    addNativePayloads,
+    removeAttachment,
+    clearDragOver,
+    armDragOver,
+    dragDepth,
+    flashAttached,
+    inflightDropKeysRef,
+  } = useComposerAttachments({
+    ensureSessionId: resolveSession,
+    disabled,
+  })
+
   const hasImageAttachments = attachments.some((a) => a.is_image)
   const modelHasVision = chatModelSupportsVision(llmProvider, llmModel)
 
@@ -239,12 +272,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const composerRootRef = useRef<HTMLDivElement>(null)
   const suggestTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const submittingRef = useRef(false)
-  /**
-   * In-flight keys only (name|size) while a drop/pick is uploading.
-   * Prevents poll + ready event double-fire from creating 2 chips — NOT a permanent
-   * blocklist. Cleared when upload finishes or the chip is removed so the same
-   * file can always be re-attached.
-   */
   /** Last applied edit key — re-apply when parent issues a new edit, including remount. */
   const lastEditKeyRef = useRef<number | null>(null)
   /** Shell-style prompt history: newest first in storage; index navigates with ↑/↓. */
@@ -279,7 +306,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         if (a.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(a.previewUrl)
       }
     }
-  }, [])
+  }, [attachmentsRef])
 
   const detectAtQuery = useCallback((text: string, cursorPos: number) => {
     const before = text.slice(0, cursorPos)
@@ -319,37 +346,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     },
     [input],
   )
-
-  const resolveSession = useCallback(async (): Promise<string | null> => {
-    if (sessionId) return sessionId
-    if (ensureSession) return ensureSession()
-    return null
-  }, [sessionId, ensureSession])
-
-  const {
-    attachments,
-    setAttachments,
-    attachmentsRef,
-    dragOver,
-    setDragOver,
-    uploading,
-    setUploading,
-    uploadError,
-    setUploadError,
-    attachNotice,
-    setAttachNotice,
-    addFiles,
-    addNativePayloads,
-    removeAttachment,
-    clearDragOver,
-    armDragOver,
-    dragDepth,
-    flashAttached,
-    inflightDropKeysRef,
-  } = useComposerAttachments({
-    ensureSessionId: resolveSession,
-    disabled,
-  })
 
   useImperativeHandle(
     ref,
