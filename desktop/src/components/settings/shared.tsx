@@ -1,4 +1,5 @@
 /** Shared Settings UI primitives and constants. */
+/* oxlint-disable react/only-export-components -- shared constants + helpers for form sections */
 
 export const PERSONAS = [
   { id: 'balanced', name: 'Balanced', description: 'Helpful and adaptable to the task' },
