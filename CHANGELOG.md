@@ -4,6 +4,19 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Continuity · builder · organism · retention (advance 1–6)
+
+- **Continuity steering:** open tasks, constraints, soul threads, and mid-ship
+  build resume inject every turn so models do not monologue past unfinished work.
+- **Builder loop:** stronger false-done verify (claim shipped without tools);
+  build ledger resume hints name the next phase (scout/plan/build/verify).
+- **Multi-tab:** stream client aborts + retries once on HTTP 409 (same-session busy).
+- **Chat media / computer:** prior image path + session-scoped job cancel retained.
+- **Honest defaults:** session retention **180d**, attachments **90d** (0 still disables);
+  Soul Field default on + Settings toggle; encrypt status honesty retained.
+- **Messengers:** post-turn soul/soma continuity after remote replies; messenger
+  surface inject (“same partner”, concise tools-capable replies).
+
 ### UI polish batch (1–10 backlog)
 
 - Design system primitives expanded (`.ui-select`, toast, empty state, sticky save).

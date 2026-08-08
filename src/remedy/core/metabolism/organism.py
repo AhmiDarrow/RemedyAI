@@ -104,7 +104,7 @@ def organism_pulse_block(
                 bits.append("gov=" + ",".join(gov_acts[:4]))
             lines.append("Metabolism: " + " · ".join(bits))
 
-    # --- Forge (creation muscle) when building ---
+    # --- Forge (creation muscle) when building or mid-ship ledger open ---
     forge = forge_pulse(
         user_text=user_text,
         tier=int(tier),
@@ -115,6 +115,14 @@ def organism_pulse_block(
     )
     if forge:
         lines.append(forge)
+    else:
+        # Still surface mid-ship resume when ledger open (even on quiet turns)
+        with suppress(Exception):
+            from remedy.core.build_ledger import resume_hint
+
+            rh = resume_hint(project_path or None, home=home)
+            if rh and int(tier) >= 1:
+                lines.append(rh)
 
     # --- Immune (anti-false-done) ---
     immune = immune_pulse(
