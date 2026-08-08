@@ -466,10 +466,14 @@ def start_rmb_server(
     if is_running(home_dir, force=True, require_http=True):
         mark_used()
         _set_vision_suspended(home_dir, True)
+        st0 = merge_state(load_rmb_json(home_dir))
+        with contextlib.suppress(Exception):
+            sync_context_window_cache(st0)
         return {
             "ok": True,
             "already_running": True,
-            "base_url": merge_state(load_rmb_json(home_dir)).get("base_url"),
+            "base_url": st0.get("base_url"),
+            "ctx_size": int(st0.get("ctx_size") or 0) or None,
             "vision_suspended": True,
         }
 
@@ -920,14 +924,90 @@ def get_rmb_status(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     }
 
 
+# Knobs that are baked into the llama-server process argv — changing them on
+# disk alone does nothing until the process is restarted with the new flags.
+_RMB_PROCESS_KEYS = frozenset(
+    {
+        "ctx_size",
+        "model_path",
+        "model_id",
+        "runtime_binary",
+        "runtime_id",
+        "n_gpu_layers",
+        "port",
+        "host",
+        "flash_attn",
+        "threads",
+        "parallel",
+        "profile",
+    }
+)
+
+
+def _norm_rmb_val(key: str, val: Any) -> Any:
+    """Normalize for process-diff comparison."""
+    if key in ("ctx_size", "port", "threads", "parallel", "n_gpu_layers"):
+        try:
+            return int(val) if val is not None and str(val).strip() != "" else val
+        except (TypeError, ValueError):
+            return val
+    if key == "flash_attn":
+        return bool(val)
+    if key in ("model_path", "runtime_binary", "host", "model_id", "runtime_id", "profile"):
+        return str(val or "").strip()
+    return val
+
+
+def sync_context_window_cache(state: dict[str, Any]) -> int:
+    """Push configured ctx_size into token budget cache so next turn uses it."""
+    ctx = 0
+    try:
+        ctx = int(state.get("ctx_size") or 0)
+    except (TypeError, ValueError):
+        ctx = 0
+    if ctx < 2048:
+        return 0
+    try:
+        from remedy.nanoswarm.token_nanobot import (
+            cache_context_window,
+            clear_context_window_cache,
+        )
+
+        # Drop stale 8k guesses so resolve_context_window cannot prefer them
+        clear_context_window_cache()
+        base = str(state.get("base_url") or f"http://{DEFAULT_HOST}:{DEFAULT_CHAT_PORT}/v1")
+        mid = str(state.get("model_id") or "")
+        mpath = str(state.get("model_path") or "")
+        mname = Path(mpath).name if mpath else ""
+        if mname.lower().endswith(".gguf"):
+            mname = mname[:-5]
+        for model_key in (mid, mname, Path(mpath).stem if mpath else "", None):
+            if model_key is not None and not str(model_key).strip():
+                continue
+            cache_context_window(base, model_key, ctx)
+            cache_context_window(None, model_key, ctx)
+        cache_context_window(base, None, ctx)
+    except Exception:
+        logger.debug("RMB: context window cache sync failed", exc_info=True)
+    return ctx
+
+
 def apply_rmb_settings(
     patch: dict[str, Any],
     *,
     home_dir: str | Path | None = None,
     cfg: dict[str, Any] | None = None,
+    live: bool = True,
+    wait_s: float = 120.0,
 ) -> dict[str, Any]:
-    """Merge Settings patch into rmb.json (+ optional config.rmb)."""
-    state = merge_state(load_rmb_json(home_dir))
+    """Merge Settings patch into rmb.json (+ optional config.rmb).
+
+    When *live* is True (default), process-affecting knobs (ctx_size, model,
+    GPU layers, port, …) **restart** the managed llama-server so the next chat
+    turn uses the new physical n_ctx — not a stale process still on 8k.
+    """
+    before = merge_state(load_rmb_json(home_dir))
+    state = dict(before)
     for key in (
         "enabled",
         "auto_start",
@@ -949,66 +1029,225 @@ def apply_rmb_settings(
         # Allow clearing path fields with ""
         if patch[key] is None and key not in ("model_path", "runtime_binary"):
             continue
-        state[key] = patch[key] if patch[key] is not None else ""
+        if key == "ctx_size" and patch[key] is not None:
+            try:
+                state[key] = max(2048, min(131072, int(patch[key])))
+            except (TypeError, ValueError):
+                continue
+        elif key == "port" and patch[key] is not None:
+            try:
+                state[key] = max(1, min(65535, int(patch[key])))
+            except (TypeError, ValueError):
+                continue
+        elif key == "n_gpu_layers" and patch[key] is not None:
+            try:
+                state[key] = int(patch[key])
+            except (TypeError, ValueError):
+                continue
+        else:
+            state[key] = patch[key] if patch[key] is not None else ""
     if "profile" in patch and patch["profile"] in RMB_PROFILES:
         prof = RMB_PROFILES[str(patch["profile"])]
         if "ctx_size" not in patch:
             state["ctx_size"] = prof.get("ctx_size", state.get("ctx_size"))
         if "n_gpu_layers" not in patch:
             state["n_gpu_layers"] = prof.get("n_gpu_layers", state.get("n_gpu_layers"))
+    # Keep base_url in sync with host/port
+    host = str(state.get("host") or DEFAULT_HOST)
+    try:
+        port = int(state.get("port") or DEFAULT_CHAT_PORT)
+    except (TypeError, ValueError):
+        port = DEFAULT_CHAT_PORT
+    state["host"] = host
+    state["port"] = port
+    state["base_url"] = f"http://{host}:{port}/v1"
     state = merge_state(state)
     save_rmb_json(state, home_dir)
+
+    # Which process knobs actually differ after merge (includes profile side-effects)?
+    changed_process: list[str] = []
+    for key in _RMB_PROCESS_KEYS:
+        if _norm_rmb_val(key, before.get(key)) != _norm_rmb_val(key, state.get(key)):
+            changed_process.append(key)
+
+    enabled_now = bool(state.get("enabled"))
+    enabled_before = bool(before.get("enabled"))
+    was_running = False
+    with contextlib.suppress(Exception):
+        was_running = bool(is_running(home_dir, force=True, require_http=False)) or bool(
+            managed_process_alive()
+        )
+
+    # Budget cache always tracks configured ctx (even before restart completes)
+    live_ctx = sync_context_window_cache(state)
+
+    # Mirror into config.toml
     try:
+        from remedy.interfaces.api_support import (
+            _find_config_path,
+            _write_config,
+            invalidate_config_cache,
+            load_config,
+        )
+
+        invalidate_config_cache()
         if cfg is not None:
             cfg = dict(cfg)
-            cfg["rmb"] = {
-                "enabled": state.get("enabled"),
-                "auto_start": state.get("auto_start"),
-                "base_url": state.get("base_url"),
-                "model_id": state.get("model_id"),
-                "profile": state.get("profile"),
-                "ctx_size": state.get("ctx_size"),
-            }
-            if state.get("enabled") and patch.get("use_as_chat_provider"):
-                cfg["llm_provider"] = "rmb"
-                cfg["llm_base_url"] = state.get("base_url")
-                mid = str(state.get("model_id") or DEFAULT_RMB_MODEL_ID)
-                cfg["llm_model"] = get_model_spec(mid).filename.replace(".gguf", "")
-                cfg["harness_mode"] = cfg.get("harness_mode") or "auto"
-                cfg["harness_min_context_pct"] = 0.55
-                cfg["harness_max_context_pct"] = 0.78
-                vision = (
-                    dict(cfg.get("vision") or {})
-                    if isinstance(cfg.get("vision"), dict)
-                    else {}
-                )
-                vision["force_decode"] = False
-                vision["auto_start"] = False
-                cfg["vision"] = vision
-            from remedy.interfaces.api_support import _find_config_path, _write_config
-
-            path = _find_config_path()
-            if path is not None:
-                from remedy.interfaces.api_support import load_config
-
-                disk = load_config()
-                if isinstance(disk, dict):
-                    disk["rmb"] = cfg["rmb"]
-                    if state.get("enabled") and patch.get("use_as_chat_provider"):
-                        disk["llm_provider"] = cfg["llm_provider"]
-                        disk["llm_base_url"] = cfg["llm_base_url"]
-                        disk["llm_model"] = cfg["llm_model"]
-                        disk["harness_min_context_pct"] = 0.55
-                        disk["harness_max_context_pct"] = 0.78
-                        v = (
-                            dict(disk.get("vision") or {})
-                            if isinstance(disk.get("vision"), dict)
-                            else {}
+        else:
+            disk0 = load_config()
+            cfg = dict(disk0) if isinstance(disk0, dict) else {}
+        cfg["rmb"] = {
+            "enabled": state.get("enabled"),
+            "auto_start": state.get("auto_start"),
+            "base_url": state.get("base_url"),
+            "model_id": state.get("model_id"),
+            "profile": state.get("profile"),
+            "ctx_size": state.get("ctx_size"),
+        }
+        if state.get("enabled") and patch.get("use_as_chat_provider"):
+            cfg["llm_provider"] = "rmb"
+            cfg["llm_base_url"] = state.get("base_url")
+            mid = str(state.get("model_id") or DEFAULT_RMB_MODEL_ID)
+            cfg["llm_model"] = get_model_spec(mid).filename.replace(".gguf", "")
+            cfg["harness_mode"] = cfg.get("harness_mode") or "auto"
+            cfg["harness_min_context_pct"] = 0.55
+            cfg["harness_max_context_pct"] = 0.78
+            # Local agent must write/run tools without click-gating every step
+            cfg["approval_mode"] = "auto"
+            vision = (
+                dict(cfg.get("vision") or {})
+                if isinstance(cfg.get("vision"), dict)
+                else {}
+            )
+            vision["force_decode"] = False
+            vision["auto_start"] = False
+            cfg["vision"] = vision
+        path = _find_config_path()
+        if path is not None:
+            disk = load_config()
+            if isinstance(disk, dict):
+                disk["rmb"] = cfg["rmb"]
+                if state.get("enabled") and patch.get("use_as_chat_provider"):
+                    disk["llm_provider"] = cfg["llm_provider"]
+                    disk["llm_base_url"] = cfg["llm_base_url"]
+                    disk["llm_model"] = cfg["llm_model"]
+                    disk["harness_min_context_pct"] = 0.55
+                    disk["harness_max_context_pct"] = 0.78
+                    disk["approval_mode"] = "auto"
+                    v = (
+                        dict(disk.get("vision") or {})
+                        if isinstance(disk.get("vision"), dict)
+                        else {}
+                    )
+                    v["force_decode"] = False
+                    v["auto_start"] = False
+                    disk["vision"] = v
+                # When chat is already RMB, keep model/base_url + harness aligned
+                # with live host so next turn doesn't use stale config.
+                elif str(disk.get("llm_provider") or "").lower() == "rmb":
+                    disk["llm_base_url"] = state.get("base_url")
+                    mid = str(state.get("model_id") or DEFAULT_RMB_MODEL_ID)
+                    if state.get("model_path"):
+                        stem = Path(str(state["model_path"])).stem
+                        if stem:
+                            disk["llm_model"] = stem
+                    else:
+                        disk["llm_model"] = get_model_spec(mid).filename.replace(
+                            ".gguf", ""
                         )
-                        v["force_decode"] = False
-                        v["auto_start"] = False
-                        disk["vision"] = v
-                    _write_config(path, disk)
+                    disk["harness_min_context_pct"] = 0.55
+                    disk["harness_max_context_pct"] = 0.78
+                    # Full local power: don't leave ask-mode blocking every write
+                    if str(disk.get("approval_mode") or "ask").lower() == "ask":
+                        disk["approval_mode"] = "auto"
+                    cfg["llm_provider"] = "rmb"
+                    cfg["llm_base_url"] = disk["llm_base_url"]
+                    cfg["llm_model"] = disk["llm_model"]
+                _write_config(path, disk)
+                invalidate_config_cache()
+                # Hot-apply approvals process mode
+                with contextlib.suppress(Exception):
+                    from remedy.core.approvals import APPROVALS
+
+                    if str(disk.get("approval_mode") or "").lower() == "auto":
+                        APPROVALS.set_mode("auto")
     except Exception:
         logger.debug("config mirror failed", exc_info=True)
-    return get_rmb_status(cfg)
+
+    live_meta: dict[str, Any] = {
+        "live": bool(live),
+        "process_keys_changed": changed_process,
+        "restarted": False,
+        "stopped": False,
+        "started": False,
+        "was_running": was_running,
+        "ctx_size_config": live_ctx or int(state.get("ctx_size") or 0),
+        "ctx_size_live": None,
+        "live_error": None,
+    }
+
+    if live:
+        try:
+            # Disable → stop immediately
+            if enabled_before and not enabled_now:
+                stop_rmb_server(home_dir=home_dir, resume_vision=True)
+                live_meta["stopped"] = True
+            # Process knobs changed while enabled (or still running)
+            elif enabled_now and changed_process and was_running:
+                logger.info(
+                    "RMB live apply: restarting for %s",
+                    ",".join(changed_process),
+                )
+                stop_rmb_server(home_dir=home_dir, resume_vision=False)
+                live_meta["stopped"] = True
+                start = start_rmb_server(home_dir=home_dir, wait_s=float(wait_s))
+                live_meta["started"] = bool(start.get("ok"))
+                live_meta["restarted"] = True
+                if start.get("ok"):
+                    live_meta["ctx_size_live"] = start.get("ctx_size")
+                    sync_context_window_cache(
+                        {**state, "ctx_size": start.get("ctx_size") or state.get("ctx_size")}
+                    )
+                else:
+                    live_meta["live_error"] = start.get("error") or "restart failed"
+            # Enabled but not running: start so settings take effect now
+            elif enabled_now and (not was_running) and (
+                changed_process
+                or patch.get("enabled") is True
+                or patch.get("use_as_chat_provider")
+            ):
+                start = start_rmb_server(home_dir=home_dir, wait_s=float(wait_s))
+                live_meta["started"] = bool(start.get("ok") or start.get("starting"))
+                if start.get("ok"):
+                    live_meta["ctx_size_live"] = start.get("ctx_size")
+                    sync_context_window_cache(
+                        {**state, "ctx_size": start.get("ctx_size") or state.get("ctx_size")}
+                    )
+                elif not start.get("starting"):
+                    live_meta["live_error"] = start.get("error")
+            # Ctx-only cache bump when process already matches (no restart needed)
+            elif not changed_process and live_ctx:
+                live_meta["ctx_size_live"] = live_ctx
+        except Exception as exc:
+            logger.exception("RMB live apply failed")
+            live_meta["live_error"] = str(exc)
+
+    status = get_rmb_status(cfg)
+    status["live_apply"] = live_meta
+    # Surface a clear note for the UI when restart happened
+    if live_meta.get("restarted"):
+        if live_meta.get("started"):
+            status["live_note"] = (
+                f"RMB restarted live — ctx_size={live_meta.get('ctx_size_live') or live_meta.get('ctx_size_config')} "
+                f"(changed: {', '.join(changed_process) or 'settings'})"
+            )
+        else:
+            status["live_note"] = (
+                "Settings saved but RMB restart failed: "
+                f"{live_meta.get('live_error') or 'unknown'}"
+            )
+    elif live_meta.get("started"):
+        status["live_note"] = "RMB started with current settings"
+    elif live_meta.get("stopped") and not enabled_now:
+        status["live_note"] = "RMB stopped (disabled in settings)"
+    return status

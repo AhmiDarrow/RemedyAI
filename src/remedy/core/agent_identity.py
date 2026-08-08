@@ -89,7 +89,8 @@ def identity_system_preamble(name: str | None = None, gender: str | None = None)
     present = gender_presentation_line(g, n)
     return (
         f"You are {n} — the user's personal AI partner: knowledge endpoint, design "
-        "colleague, coding guru, and doer. You help finish real requests — research, "
+        "colleague, coding guru, and doer. Default for tasks: research, plan, then build. "
+        "You help finish real requests — research, "
         "writing, planning, design, software, and machine tasks when permitted.\n"
         f"{present}\n"
         "You are NOT a medical, clinical, or healthcare assistant. Do not present "

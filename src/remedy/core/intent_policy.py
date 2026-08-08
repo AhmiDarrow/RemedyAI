@@ -26,12 +26,41 @@ _PACKS: dict[str, dict[str, Any]] = {
         "prefer_tools": True,
         "suggest_tools": ["soul_recall", "soul_status", "memory_search"],
     },
+    "task": {
+        "id": "task",
+        "system": (
+            "[Default task loop] RESEARCH → PLAN → BUILD until done.\n"
+            "1) RESEARCH: batch list_dir / file_read / repo_search / memory_search "
+            "(and web when needed) in one step — gather ground truth.\n"
+            "2) PLAN: set brief open_tasks or mission_start checklist (short, concrete).\n"
+            "3) BUILD: file_write / file_edit, then verify (bash_exec / mission_verify); "
+            "repair until green. Never monologue a plan and stop. Never claim done "
+            "without a tool result or verify signal."
+        ),
+        "prefer_tools": True,
+        "suggest_tools": [
+            "list_dir",
+            "file_read",
+            "repo_search",
+            "memory_search",
+            "file_write",
+            "file_edit",
+            "bash_exec",
+            "mission_start",
+            "mission_verify",
+            "job_run",
+            "spread_run",
+        ],
+        "change_safety": True,
+    },
     "build": {
         "id": "build",
         "system": (
             "[Continuity · Build engine] User wants software built or shipped. "
-            "Machine schedule: SCOUT (parallel file_read/list_dir/repo_search in ONE "
-            "step) → IMPLEMENT (file_write / multi-hunk file_edit) → VERIFY "
+            "Default loop: RESEARCH → PLAN → BUILD.\n"
+            "RESEARCH = SCOUT (parallel file_read/list_dir/repo_search in ONE step). "
+            "PLAN = short checklist (brief/mission). "
+            "BUILD = IMPLEMENT (file_write / multi-hunk file_edit) → VERIFY "
             "(bash_exec tests / job_run kind=verify / mission_verify) → REPAIR until "
             "green → DONE. Never monologue a plan without tool_calls. Never claim "
             "done without verify. spread_run for multi-module surveys; mission_start "
@@ -88,17 +117,14 @@ _PACKS: dict[str, dict[str, Any]] = {
         "id": "tool",
         "system": (
             "[Continuity] User wants work done on the machine or project. "
-            "Prefer tools over monologue: file_edit (multi-hunk via edits=) for "
-            "precise edits, repo_search for discovery (absolute path= when multi-tree), "
-            "file_write for new files, bash_exec with timeout_seconds/workdir for builds. "
-            "Speed: batch independent file_read/list_dir/repo_search in ONE step "
-            "(many tool_calls together); do not re-read paths already in this turn. "
-            "When ≥2 independent modules/paths, use spread_run (parallel silent workers) "
-            "instead of long serial list_dir loops. "
-            "Use job_run explore/verify/diff for a single survey. "
-            "Prefer installed skill_activate; if continuity shows [Library] a pack is "
-            "not installed — tell the user, do not invent its body. "
-            "Keep going until finished."
+            "Default: RESEARCH → PLAN → BUILD.\n"
+            "RESEARCH with tools first (repo_search, file_read, list_dir — batch "
+            "independent calls in ONE step). PLAN briefly (open tasks / mission). "
+            "BUILD with file_edit (multi-hunk via edits=) / file_write / bash_exec "
+            "(timeout_seconds/workdir). "
+            "When ≥2 independent modules/paths, use spread_run. "
+            "Prefer installed skill_activate; if [Library] pack is not installed — "
+            "tell the user, do not invent its body. Run until finished."
         ),
         "prefer_tools": True,
         "suggest_tools": [
@@ -182,7 +208,11 @@ def policy_for_intent(intent: str, *, user_text: str = "") -> dict[str, Any]:
             return dict(_PACKS["memory"])
         if any(w in ut for w in ("skill", "/skills", "procedure")):
             return dict(_PACKS["skill"])
-        if any(w in ut for w in ("plan", "roadmap", "break down")):
+        if any(w in ut for w in ("plan only", "just plan", "roadmap only", "don't implement", "do not implement")):
+            return dict(_PACKS["plan"])
+        if any(w in ut for w in ("plan", "roadmap", "break down")) and not any(
+            w in ut for w in ("build", "implement", "create", "fix", "write")
+        ):
             return dict(_PACKS["plan"])
         if any(
             w in ut
@@ -196,6 +226,7 @@ def policy_for_intent(intent: str, *, user_text: str = "") -> dict[str, Any]:
                 "write a",
                 "make me",
                 "develop",
+                "calculator",
             )
         ):
             return dict(_PACKS["build"])
@@ -208,15 +239,46 @@ def policy_for_intent(intent: str, *, user_text: str = "") -> dict[str, Any]:
                 "create file",
                 "edit ",
                 "refactor",
+                "review",
+                "investigate",
+                "research",
+                "set up",
+                "setup",
+                "add ",
+                "update ",
+                "change ",
             )
         ):
-            return dict(_PACKS["tool"])
+            # Generic work request → full task loop (research → plan → build)
+            return dict(_PACKS["task"])
         if any(w in ut for w in ("soul", "who are you", "what do you remember feeling")):
             return dict(_PACKS["memory"])
-    if key in ("tool", "build") and any(
+        # Non-trivial request with verbs/paths → task loop, not empty chat
+        if len(ut) > 40 and any(
+            w in ut
+            for w in (
+                "please",
+                "need",
+                "want",
+                "can you",
+                "could you",
+                "should",
+                ".py",
+                ".ts",
+                ".js",
+                "project",
+                "file",
+                "folder",
+            )
+        ):
+            return dict(_PACKS["task"])
+    if key in ("tool", "build", "task") and any(
         p in ut for p in ("alone", "on your own", "without me", "end-to-end", "end to end")
     ):
         return dict(_PACKS["autonomous"])
+    # Router said "tool" without more specific pack — still use RPB task framing
+    if key == "tool":
+        return dict(_PACKS["task"])
     return pack
 
 

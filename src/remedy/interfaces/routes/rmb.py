@@ -74,16 +74,69 @@ def register_rmb_routes(app: FastAPI, *, runtime=None, gateway=None, memory=None
 
     @app.post("/api/rmb/settings")
     async def rmb_settings(body: RmbSettingsPatch) -> dict[str, Any]:
+        """Save RMB settings and apply them to the *live* process when needed.
+
+        ctx_size / model / GPU layers / port require a llama-server restart —
+        disk-only saves left the old n_ctx running (e.g. still 8192 after 32768).
+        """
         import asyncio
 
+        from remedy.interfaces.api_support import _apply_llm_to_runtime, load_config as _lc
+        from remedy.runtime.rmb.catalog import DEFAULT_RMB_MODEL_ID, get_model_spec
+        from remedy.runtime.rmb.config import load_rmb_json, merge_state
         from remedy.runtime.rmb.service import apply_rmb_settings
 
         cfg = load_config()
         home = cfg.get("home_dir") if isinstance(cfg, dict) else None
         patch = body.model_dump(exclude_none=True)
-        return await asyncio.to_thread(
-            apply_rmb_settings, patch, home_dir=home, cfg=cfg
+        # Settings that affect the running server — always live-apply (restart)
+        result = await asyncio.to_thread(
+            apply_rmb_settings,
+            patch,
+            home_dir=home,
+            cfg=cfg,
+            live=True,
+            wait_s=120.0,
         )
+        # Hot-apply chat binding when provider is already RMB (or use_as_chat)
+        try:
+            disk = _lc()
+            rstate = merge_state(load_rmb_json(home))
+            prov = str(
+                (disk or {}).get("llm_provider")
+                if isinstance(disk, dict)
+                else ""
+            ).lower()
+            want_rmb = prov == "rmb" or bool(patch.get("use_as_chat_provider"))
+            if want_rmb and runtime is not None:
+                base = str(
+                    rstate.get("base_url") or "http://127.0.0.1:8787/v1"
+                )
+                mid = str(rstate.get("model_id") or DEFAULT_RMB_MODEL_ID)
+                model = ""
+                if rstate.get("model_path"):
+                    from pathlib import Path as _P
+
+                    model = _P(str(rstate["model_path"])).stem
+                if not model:
+                    model = get_model_spec(mid).filename.replace(".gguf", "")
+                _apply_llm_to_runtime(
+                    runtime,
+                    provider="rmb",
+                    model=model,
+                    base_url=base,
+                    api_key="rmb",
+                    harness_mode="auto",
+                    harness_min_context_pct=0.55,
+                    harness_max_context_pct=0.78,
+                )
+                result["runtime_applied"] = True
+            else:
+                result["runtime_applied"] = False
+        except Exception:
+            logger.exception("RMB settings live runtime reconfigure failed")
+            result["runtime_applied"] = False
+        return result
 
     @app.post("/api/rmb/use")
     async def rmb_use_as_provider() -> dict[str, Any]:

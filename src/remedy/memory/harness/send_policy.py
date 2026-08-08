@@ -239,13 +239,28 @@ def apply_auto_harness_send_policy(
     window = resolve_context_window_for_runtime(runtime)
     min_pct = float(getattr(runtime, "_harness_min_pct", 0.75) or 0.75)
     max_pct = float(getattr(runtime, "_harness_max_pct", 0.92) or 0.92)
+    # Local/RMB fixed windows: compress much earlier so endless coding never
+    # waits until fill% is already past physical n_ctx (tools count too).
+    with suppress(Exception):
+        from remedy.nanoswarm.token_nanobot import is_local_model
+        from remedy.runtime.rmb.mode import harness_pcts_for_local_agent, is_rmb_provider
+
+        if is_local_model(provider, model) or is_rmb_provider(provider):
+            lo, hi = harness_pcts_for_local_agent()
+            min_pct = min(float(min_pct), float(lo))
+            max_pct = min(float(max_pct), float(hi))
+            # Sub-16k: even earlier soft gate (tools + one file read fill fast)
+            if int(window or 0) and int(window) <= 16384:
+                min_pct = min(min_pct, 0.42)
+                max_pct = min(max_pct, 0.68)
+            meta["local_early_harness"] = True
     # Governor: compress earlier when stuck/waste — lower soft threshold.
     with suppress(Exception):
         from remedy.core.metabolism.governor import get_governor
 
         gov = get_governor(sid)
         if gov.compress_earlier:
-            min_pct = max(0.45, float(min_pct) - 0.12)
+            min_pct = max(0.35, float(min_pct) - 0.12)
             max_pct = max(min_pct + 0.05, float(max_pct) - 0.05)
             meta["governor_compress_earlier"] = True
 

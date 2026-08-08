@@ -200,7 +200,11 @@ def tools_for_binding(
     tools: list[dict[str, Any]] | None,
     runtime: Any | None = None,
 ) -> list[dict[str, Any]] | None:
-    """Return tools, pre-slimmed when the current LLM binding is local/RMB."""
+    """Return tools, pre-slimmed when the current LLM binding is local/RMB.
+
+    Window-aware: 8k hosts get a tight coding pack; 32k still slims aggressively
+    so multi-step builds never spend half the window on tool JSON alone.
+    """
     if not tools:
         return tools
     try:
@@ -209,6 +213,34 @@ def tools_for_binding(
 
         bind = get_llm_binding(runtime)
         if is_local_model(bind.provider, bind.model, base_url=bind.base_url):
+            try:
+                from remedy.core.endless_context import (
+                    resolve_local_window,
+                    slim_tools_pack,
+                    tool_pack_for_window,
+                    CODING_TOOL_PACK,
+                    EXPAND_TOOL_PACK,
+                )
+
+                win = resolve_local_window(
+                    provider=bind.provider,
+                    model=bind.model,
+                    base_url=bind.base_url,
+                )
+                max_tools, desc_chars, max_props = tool_pack_for_window(win)
+                # Prefer coding tools first; expand if window allows
+                names = list(CODING_TOOL_PACK) + list(EXPAND_TOOL_PACK)
+                packed = slim_tools_pack(
+                    tools,
+                    names=tuple(names),
+                    max_tools=max_tools,
+                    desc_chars=desc_chars,
+                    max_props=max_props,
+                )
+                if packed:
+                    return packed
+            except Exception:
+                pass
             return slim_tools_for_local(tools)
     except Exception:
         pass
