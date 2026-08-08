@@ -6,7 +6,6 @@ import asyncio
 import logging
 import os
 from collections.abc import AsyncIterator
-from contextlib import suppress
 from typing import Any
 
 from remedy.core.react_stream import (
@@ -143,5 +142,3 @@ async def consume_llm_http_response(
             if isinstance(raw_tcs, list):
                 round_state.tool_call_acc = dict(enumerate(raw_tcs))
         collected.update(parsed)
-        # Non-stream path: no incremental yields (finalize later).
-        _ = suppress  # keep import used if needed later
