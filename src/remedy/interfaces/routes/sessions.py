@@ -399,6 +399,47 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                     session_id, model=model, llm_provider=provider
                 )
 
+        # RMB is a single local host — status-bar model picks must reload GGUF
+        # (not just rename the session's model string while 7B stays loaded).
+        rmb_live = None
+        if str(provider or "").lower() == "rmb" and model:
+            try:
+                import asyncio
+
+                from remedy.runtime.rmb.service import apply_rmb_chat_model
+
+                home = cfg.get("home_dir") if isinstance(cfg, dict) else None
+                rmb_live = await asyncio.to_thread(
+                    apply_rmb_chat_model,
+                    str(model),
+                    home_dir=home,
+                    cfg=cfg if isinstance(cfg, dict) else None,
+                    live=True,
+                    wait_s=120.0,
+                )
+                live_path = (rmb_live or {}).get("model_path")
+                if live_path:
+                    from pathlib import Path as _P
+
+                    stem = _P(str(live_path)).stem
+                    if stem:
+                        model = stem
+                        if memory is not None:
+                            with contextlib.suppress(Exception):
+                                await memory.update_chat_session(
+                                    session_id, model=model, llm_provider=provider
+                                )
+                        last_by = dict(cfg.get("last_model_by_provider") or {})
+                        last_by["rmb"] = model
+                        cfg["last_model_by_provider"] = last_by
+                        if req.make_default:
+                            cfg["llm_model"] = model
+                        with contextlib.suppress(Exception):
+                            _write_config(config_path, cfg)
+            except Exception as exc:
+                logger.warning("session RMB model switch failed: %s", exc)
+                rmb_live = {"ok": False, "error": str(exc)}
+
         remeasure = None
         with contextlib.suppress(Exception):
             from remedy.nanoswarm.token_nanobot import get_token_nanobot
@@ -411,6 +452,24 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
 
             window = resolve_context_window(provider, model)
 
+        toast = (
+            f"Now using {provider} · {model}"
+            + (f" · window {window}" if window else "")
+            + (" · remeasured history" if remeasure else "")
+        )
+        if rmb_live is not None:
+            live_err = (rmb_live.get("live_apply") or {}).get("live_error") or rmb_live.get(
+                "error"
+            )
+            if live_err:
+                toast = f"RMB model switch failed: {live_err}"
+            elif rmb_live.get("live_note"):
+                toast = f"{toast} · {rmb_live.get('live_note')}"
+            elif (rmb_live.get("live_apply") or {}).get("restarted") or (
+                rmb_live.get("live_apply") or {}
+            ).get("started"):
+                toast = f"{toast} · RMB host reloaded"
+
         return {
             "status": "ok",
             "session_id": session_id,
@@ -420,10 +479,16 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             "make_default": req.make_default,
             "remeasure": remeasure,
             "context_window": window,
-            "toast": (
-                f"Now using {provider} · {model}"
-                + (f" · window {window}" if window else "")
-                + (" · remeasured history" if remeasure else "")
+            "toast": toast,
+            "rmb_live": (
+                {
+                    "model_id": rmb_live.get("model_id"),
+                    "model_path": rmb_live.get("model_path"),
+                    "live_error": (rmb_live.get("live_apply") or {}).get("live_error")
+                    or rmb_live.get("error"),
+                }
+                if rmb_live is not None
+                else None
             ),
         }
 

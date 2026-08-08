@@ -214,8 +214,26 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
                   const model_id = e.target.value
                   setRmbBusy(true)
                   try {
-                    await patchRmbSettings({ model_id, enabled: true })
-                    setRmbMsg(`Model: ${model_id}`)
+                    // Clear sticky model_path so 7B→14B re-resolves (backend also clears)
+                    const r = await patchRmbSettings({
+                      model_id,
+                      model_path: '',
+                      enabled: true,
+                    })
+                    const liveErr = r?.live_apply?.live_error
+                    const note = r?.live_note
+                    if (liveErr) {
+                      setRmbMsg(`Model ${model_id}: ${liveErr}`)
+                    } else if (note) {
+                      setRmbMsg(note)
+                    } else {
+                      const file = (r?.model_path || '').replace(/^.*[\\/]/, '')
+                      setRmbMsg(
+                        file
+                          ? `Model: ${model_id} → ${file}`
+                          : `Model: ${model_id} (GGUF not found yet — place file or pick path)`,
+                      )
+                    }
                     await refreshRmb()
                   } catch (err) {
                     setRmbMsg(String(err))

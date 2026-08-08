@@ -117,3 +117,48 @@ def get_model_spec(model_id: str | None) -> RmbModelSpec:
     if mid not in RMB_MODELS:
         return RMB_MODELS[DEFAULT_RMB_MODEL_ID]
     return RMB_MODELS[mid]
+
+
+def catalog_id_from_hint(hint: str | None) -> str | None:
+    """Map catalog id, GGUF filename, stem, or status-bar model id → catalog id.
+
+    Status bar uses stems like ``Qwen2.5-Coder-14B-Instruct-Q4_K_M``;
+    Settings catalog uses ``qwen25-coder-14b``.
+    """
+    raw = (hint or "").strip()
+    if not raw:
+        return None
+    h = raw.lower().replace("\\", "/").split("/")[-1]
+    if h.endswith(".gguf"):
+        h = h[:-5]
+    # Exact catalog id
+    if h in RMB_MODELS:
+        return h
+    # Exact filename stem
+    for mid, spec in RMB_MODELS.items():
+        stem = spec.filename.lower().replace(".gguf", "")
+        if h == stem or h == spec.filename.lower():
+            return mid
+    # Fuzzy: size label + family (coder vs instruct) from free-form names
+    # e.g. Qwen2.5-Coder-14B-Instruct-heretic.i1-Q4_K_M
+    import re
+
+    size_m = re.search(r"(?:^|[^0-9])(7b|14b|32b|72b)(?:[^0-9]|$)", h, re.I)
+    size = (size_m.group(1) if size_m else "").lower()
+    wants_coder = "coder" in h
+    if not size:
+        return None
+    candidates = [
+        mid
+        for mid, spec in RMB_MODELS.items()
+        if (spec.size_label or "").lower() == size
+        and (("coder" in mid) == wants_coder or ("coder" in spec.filename.lower()) == wants_coder)
+    ]
+    if len(candidates) == 1:
+        return candidates[0]
+    # Prefer coder when name has coder
+    if wants_coder:
+        for mid in candidates:
+            if "coder" in mid:
+                return mid
+    return candidates[0] if candidates else None
