@@ -58,15 +58,23 @@ _vision_atexit_registered = False
 
 
 def _shutdown_vision_decoder() -> None:
-    """Stop local llama-server on process exit (API / sidecar)."""
+    """Stop local llama-server processes on process exit (vision + RMB).
+
+    Never resume Smol during teardown (would orphan llama-server).
+    """
+    home = None
+    with suppress(Exception):
+        cfg = load_config()
+        if isinstance(cfg, dict) and cfg.get("home_dir"):
+            home = cfg.get("home_dir")
+    with suppress(Exception):
+        from remedy.runtime.rmb.service import stop_rmb_server
+
+        # Stop RMB first, without restarting vision
+        stop_rmb_server(home_dir=home, resume_vision=False)
     with suppress(Exception):
         from remedy.vision.runtime import shutdown_vision_for_exit
 
-        home = None
-        with suppress(Exception):
-            cfg = load_config()
-            if isinstance(cfg, dict) and cfg.get("home_dir"):
-                home = cfg.get("home_dir")
         shutdown_vision_for_exit(home_dir=home)
 
 
@@ -113,6 +121,45 @@ def create_app(
             cfg0 = load_config()
 
             def _bg_autostart() -> None:
+                # RMB first when enabled: exclusive GPU host unloads Smol before load.
+                rmb_ok = False
+                try:
+                    from remedy.runtime.rmb.config import load_rmb_json, merge_state
+                    from remedy.runtime.rmb.service import start_rmb_server
+
+                    home0 = (
+                        cfg0.get("home_dir") if isinstance(cfg0, dict) else None
+                    )
+                    st = merge_state(load_rmb_json(home0))
+                    rmb_wanted = bool(st.get("enabled") and st.get("auto_start", True))
+                    if rmb_wanted:
+                        rr = start_rmb_server(home_dir=home0, wait_s=120.0)
+                        rmb_ok = bool(rr.get("ok"))
+                        if rmb_ok:
+                            logger.info(
+                                "RMB local agent host auto-started "
+                                "(SmolVLM suspended)"
+                            )
+                        else:
+                            logger.info(
+                                "RMB auto-start: %s", rr.get("error") or rr
+                            )
+                except Exception:
+                    logger.exception("RMB auto-start background task failed")
+                # Vision only if RMB did not take the host (failed start may clear skip)
+                try:
+                    from remedy.runtime.rmb.mode import should_skip_vision_stack
+
+                    if rmb_ok or should_skip_vision_stack(
+                        cfg0 if isinstance(cfg0, dict) else None
+                    ):
+                        logger.info(
+                            "Skipping SmolVLM autostart — RMB exclusive host"
+                        )
+                        return
+                except Exception:
+                    if rmb_ok:
+                        return
                 try:
                     r = maybe_autostart_local_model(cfg0)
                     if r.get("ok"):

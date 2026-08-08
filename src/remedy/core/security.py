@@ -31,7 +31,12 @@ def get_home_dir() -> Path:
 
 MAX_FILENAME_LENGTH = 255
 MAX_PATH_DEPTH = 32
-VALID_PATH_RE = re.compile(r"^[a-zA-Z0-9_\-./\\ ]+$")
+# Windows-legal filename characters. Path traversal is blocked separately via
+# relative_to; this gate only keeps out Windows-illegal / shell-injection
+# chars (``<>:"|?*``) and control bytes. Legit punctuation in real folder
+# names — ``'``, ``( )``, ``[ ]``, ``+``, ``,`` — must pass (e.g.
+# "owner's-manual").
+VALID_PATH_RE = re.compile(r'^[^<>:"|?*\x00-\x1f\x7f]+$')
 VALID_SKILL_NAME_RE = re.compile(r"^[a-zA-Z0-9_\-]+$")
 VALID_TAG_RE = re.compile(r"^[a-zA-Z0-9_\- ]{1,50}$")
 VALID_CHARACTER_ID_RE = re.compile(

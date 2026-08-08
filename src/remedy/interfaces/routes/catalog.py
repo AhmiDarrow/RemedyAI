@@ -265,15 +265,35 @@ def register_catalog_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
                             mid = m.get("id", m.get("name", ""))
                             if not mid:
                                 continue
-                            found.append(
-                                {
-                                    "id": mid,
-                                    "name": mid,
-                                    "provider": configured_provider,
-                                    "default": False,
-                                    "source": "endpoint",
-                                }
+                            entry = {
+                                "id": mid,
+                                "name": mid,
+                                "provider": configured_provider,
+                                "default": False,
+                                "source": "endpoint",
+                            }
+                            # RMB / local hosts advertise real n_ctx — cache for
+                            # Memory Harness + local max_tokens budgeting.
+                            ctx = (
+                                m.get("context_window")
+                                or m.get("context_length")
+                                or m.get("max_model_len")
+                                or m.get("n_ctx")
                             )
+                            if ctx is None and isinstance(m.get("meta"), dict):
+                                ctx = m["meta"].get("context_window")
+                            if ctx is not None:
+                                try:
+                                    ctx_i = int(ctx)
+                                    entry["context_window"] = ctx_i
+                                    from remedy.nanoswarm.token_nanobot import (
+                                        cache_context_window,
+                                    )
+
+                                    cache_context_window(base_url, mid, ctx_i)
+                                except (TypeError, ValueError):
+                                    pass
+                            found.append(entry)
             except Exception as exc:
                 logger.info(
                     "Model discovery failed for %s (%s): %s: %s",

@@ -252,6 +252,12 @@ def ensure_idle_watcher(home_dir: str | Path | None = None) -> None:
             return
         _idle_thread_started = True
 
+    # Also start MDL idle watcher so non-resident tiers auto-stop.
+    with contextlib.suppress(Exception):
+        from remedy.runtime.mdl_runtime import ensure_idle_watcher as _mdl_watcher
+
+        _mdl_watcher(resident_first=False)
+
     def _loop() -> None:
         while True:
             try:
@@ -287,8 +293,30 @@ def start_server(
 
     Auto-activates the prebundled pinned SmolVLM2 stack when
     ``vision.json`` is missing or points at missing files — no network.
+
+    Hard skip when RMB owns the local host (running or vision_suspended).
     """
     global _proc
+    # Exclusive with RMB: never load SmolVLM while RMB chat server is up
+    try:
+        from remedy.runtime.rmb.mode import should_skip_vision_stack
+
+        cfg_hint: dict[str, Any] | None = None
+        if home_dir is not None:
+            cfg_hint = {"home_dir": str(home_dir)}
+        if should_skip_vision_stack(cfg_hint):
+            logger.info(
+                "Skipping SmolVLM start_server — RMB exclusive host "
+                "(running or vision_suspended)"
+            )
+            return {
+                "ok": False,
+                "skipped": True,
+                "reason": "rmb_exclusive_host",
+                "error": "SmolVLM disabled while RMB is running",
+            }
+    except Exception:
+        pass
     state = load_vision_json(home_dir)
     # Ignore retired local model pins left in vision.json (e.g. qwen2.5-vl-3b).
     # Prefer soft-migrate to the product default rather than KeyError spam in logs.
@@ -399,6 +427,24 @@ def start_server(
     creationflags = 0
     if os.name == "nt":
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+    # Re-check exclusive host immediately before spawn (RMB may have started mid-path)
+    try:
+        from remedy.runtime.rmb.mode import should_skip_vision_stack
+
+        cfg_hint2: dict[str, Any] | None = None
+        if home_dir is not None:
+            cfg_hint2 = {"home_dir": str(home_dir)}
+        if should_skip_vision_stack(cfg_hint2):
+            logger.info("Aborting SmolVLM spawn — RMB exclusive host re-check")
+            return {
+                "ok": False,
+                "skipped": True,
+                "reason": "rmb_exclusive_host",
+                "error": "SmolVLM disabled while RMB is running",
+            }
+    except Exception:
+        pass
 
     logger.info("Starting vision llama-server: %s", " ".join(cmd))
     try:

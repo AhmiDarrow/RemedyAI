@@ -362,6 +362,18 @@ class TestSafePath:
         with pytest.raises(SecurityError):
             safe_path("file<script>.txt", base_dir=base)
 
+    def test_apostrophe_folder_name_allowed(self, tmp_path):
+        base = tmp_path / "box"
+        base.mkdir()
+        result = safe_path("owner's-manual/chapter-00-overview.md", base_dir=base)
+        assert result == (base / "owner's-manual/chapter-00-overview.md").resolve()
+
+    def test_punctuation_folder_name_allowed(self, tmp_path):
+        base = tmp_path / "box"
+        base.mkdir()
+        result = safe_path("notes (backup)[1] + extra, v2.md", base_dir=base)
+        assert result == (base / "notes (backup)[1] + extra, v2.md").resolve()
+
     def test_home_dir_default(self):
         result = safe_path("session_notes/test.md")
         assert result.parent.name == "session_notes"

@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from remedy.core.errors import SecurityError, format_tool_error
-from remedy.core.providers import ProviderAdapter, get_provider
+from remedy.core.providers import ProviderAdapter, select_provider
 from remedy.core.react_policy import (
     MAX_PARALLEL_TOOLS as _MAX_PARALLEL_TOOLS,
 )
@@ -95,7 +95,9 @@ class BasicRuntime(AgentRuntime):
         self._llm_model: str = config.llm_model
         self._llm_base_url: str = config.llm_base_url or "https://api.openai.com/v1"
         self._llm_provider: str = getattr(config, "llm_provider", "openai") or "openai"
-        self._provider: ProviderAdapter = get_provider(self._llm_provider)
+        self._provider: ProviderAdapter = select_provider(
+            self._llm_provider, self._llm_base_url
+        )
         # Sessions actively streaming (not a single global bool).
         self._streaming_sessions: set[str] = set()
         # Serialize LLM bind + stream: one shared provider binding per process.
@@ -120,12 +122,34 @@ class BasicRuntime(AgentRuntime):
             str(getattr(config, "harness_mode", None) or "auto").strip().lower()
         )
         # Stay hands-off until context is genuinely full (was 0.35/0.70 — too early).
-        self._harness_min_pct: float = float(
-            getattr(config, "harness_min_context_pct", None) or 0.75
-        )
-        self._harness_max_pct: float = float(
-            getattr(config, "harness_max_context_pct", None) or 0.92
-        )
+        # RMB local agent: always use earlier thresholds (config cloud defaults 0.75/0.92
+        # must not override when chat is RMB).
+        _min_def, _max_def = 0.75, 0.92
+        _rmb_agent = False
+        with suppress(Exception):
+            from remedy.runtime.rmb.mode import (
+                harness_pcts_for_local_agent,
+                is_local_agent_mode,
+                is_rmb_provider,
+            )
+
+            _prov = str(getattr(config, "llm_provider", "") or "")
+            _url = str(getattr(config, "llm_base_url", "") or "")
+            _rmb_agent = is_local_agent_mode(
+                {"llm_provider": _prov, "llm_base_url": _url}
+            ) or is_rmb_provider(_prov, _url)
+            if _rmb_agent:
+                _min_def, _max_def = harness_pcts_for_local_agent()
+        if _rmb_agent:
+            self._harness_min_pct = float(_min_def)
+            self._harness_max_pct = float(_max_def)
+        else:
+            self._harness_min_pct = float(
+                getattr(config, "harness_min_context_pct", None) or _min_def
+            )
+            self._harness_max_pct = float(
+                getattr(config, "harness_max_context_pct", None) or _max_def
+            )
         # Default high — medium/off were throttling max_tokens and truncating reasoning.
         tl = str(getattr(config, "thinking_level", None) or "high").strip().lower()
         self._thinking_level: str = (
@@ -137,8 +161,9 @@ class BasicRuntime(AgentRuntime):
             from remedy.core.approvals import APPROVALS
 
             APPROVALS.set_mode(self._approval_mode)
-        # Memory Harness L2 working state (per agent instance / session)
+        # Memory Harness L2 working state — per-session map + current-turn mirror
         self._session_brief = None  # type: ignore[assignment]
+        self._session_briefs: dict[str, Any] = {}
         self._register_workspace_tools()
         self._register_memory_tools()
 
@@ -372,7 +397,7 @@ class BasicRuntime(AgentRuntime):
             new_p = provider.strip().lower()
             _prov_changed = new_p != old_provider
             self._llm_provider = new_p
-            self._provider = get_provider(self._llm_provider)
+            self._provider = select_provider(self._llm_provider, self._llm_base_url)
             if hasattr(self, "config") and self.config is not None:
                 with suppress(Exception):
                     self.config.llm_provider = self._llm_provider
@@ -385,9 +410,35 @@ class BasicRuntime(AgentRuntime):
                     self.config.llm_model = self._llm_model
         if base_url is not None and base_url.strip():
             self._llm_base_url = base_url.strip()
+            self._provider = select_provider(self._llm_provider, self._llm_base_url)
             if hasattr(self, "config") and self.config is not None:
                 with suppress(Exception):
                     self.config.llm_base_url = self._llm_base_url
+        # Retune harness when provider *or* base_url changes effective local/RMB mode
+        _url_changed = base_url is not None and bool(str(base_url).strip())
+        if _prov_changed or _url_changed or harness_min_context_pct is not None:
+            with suppress(Exception):
+                from remedy.runtime.rmb.mode import (
+                    harness_pcts_for_local_agent,
+                    is_rmb_provider,
+                )
+
+                if is_rmb_provider(
+                    getattr(self, "_llm_provider", None),
+                    getattr(self, "_llm_base_url", None),
+                ):
+                    # Explicit reconfigure values win when provided; else RMB defaults
+                    if harness_min_context_pct is None:
+                        lo, hi = harness_pcts_for_local_agent()
+                        self._harness_min_pct = lo
+                        self._harness_max_pct = hi
+                elif harness_min_context_pct is None and harness_max_context_pct is None:
+                    self._harness_min_pct = float(
+                        getattr(self.config, "harness_min_context_pct", None) or 0.75
+                    )
+                    self._harness_max_pct = float(
+                        getattr(self.config, "harness_max_context_pct", None) or 0.92
+                    )
         if _prov_changed:
             with suppress(Exception):
                 from remedy.nanoswarm import get_swarm

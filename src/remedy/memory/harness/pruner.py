@@ -31,7 +31,7 @@ def prune_messages_for_send(
     provider: str | None = None,
     model: str | None = None,
     collapse_completed_tools: bool = False,
-    keep_recent_tool_pairs: int = 4,
+    keep_recent_tool_pairs: int = 8,
     protect_tool_call_ids: set[str] | frozenset[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Return a pruned *copy* of messages for the provider request.
@@ -68,7 +68,7 @@ def prune_messages_for_send(
             if role == "tool":
                 m["content"] = (
                     content[:max_tool_chars]
-                    + "\n…[harness truncated tool output — re-read file or re-run if needed]"
+                    + "\n…[harness truncated tool output — outcome retained in history]"
                 )
             elif role == "assistant":
                 m["content"] = content[:max_tool_chars] + "\n…[truncated]"
@@ -147,8 +147,8 @@ def _outcome_line(content: str, *, name: str = "") -> str:
         bits.append(f"… {last}")
     body = " · ".join(bits)
     return (
-        f"{body}\n…[tool span collapsed — outcome retained; "
-        f"re-read path or re-run tool if full output needed]"
+        f"{body}\n…[tool span collapsed — outcome retained in history. "
+        f"Do not re-run unless path or request changed]"
     )
 
 

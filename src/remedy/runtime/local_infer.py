@@ -1,12 +1,14 @@
-"""Text completions against the shared local llama-server (same Qwen as vision).
+"""Text completions against the MDL tiered local llama-server cluster.
 
 Used by nano Router (and later Helper). Never grants tools — text only.
+MDL (Machine Density Language) routes tasks to appropriate model depth tiers.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request
@@ -79,11 +81,16 @@ def local_text_complete(
         return {"ok": False, "text": "", "error": str(e)}
 
     try:
-        from remedy.vision.runtime import mark_used
+        from remedy.runtime.mdl_runtime import mark_tier_used
 
-        mark_used()
+        mark_tier_used("full")
     except Exception:
-        pass
+        try:
+            from remedy.vision.runtime import mark_used
+
+            mark_used()
+        except Exception:
+            pass
 
     try:
         choice = (payload.get("choices") or [{}])[0]
@@ -104,6 +111,89 @@ def local_text_complete(
 _handlers_ready = False
 
 
+def _resolve_mdl_url(
+    task_kind: str,
+    base_url: str = "",
+    prompt: str = "",
+) -> tuple[str, str]:
+    """Resolve the base_url for a task using MDL routing.
+
+    Falls back to the provided base_url (legacy single-server mode) if MDL
+    tiers are not configured or not running.
+
+    Returns (base_url, tier_name).
+    """
+    # RMB owns local inference — never route to SmolVLM tiers
+    try:
+        from remedy.interfaces.config import load_config
+        from remedy.runtime.rmb.mode import is_local_agent_mode, rmb_chat_base_url
+
+        cfg = load_config() or {}
+        if is_local_agent_mode(cfg):
+            return rmb_chat_base_url(cfg), "rmb"
+    except Exception:
+        pass
+    try:
+        from remedy.runtime.mdl import route_task
+        from remedy.runtime.mdl_runtime import ensure_tier, is_tier_running
+
+        routing = route_task(task_kind, prompt)
+        tier = routing.tier
+
+        if is_tier_running(tier):
+            return routing.base_url, tier
+
+        if tier == "full":
+            return base_url, "full"
+
+        # Tier not running — try to start it using vision.json state
+        try:
+            from remedy.vision.config import load_vision_json
+
+            vstate = load_vision_json()
+            model_path = vstate.get("model_path")
+            mmproj = vstate.get("mmproj_path")
+            rb = vstate.get("runtime_binary")
+
+            if not rb or not Path(rb).is_file():
+                from remedy.vision.install import runtime_binary_path
+                rb_path = runtime_binary_path()
+                rb = str(rb_path) if rb_path else None
+
+            if model_path and rb:
+                started = ensure_tier(
+                    tier,
+                    model_path=str(model_path),
+                    mmproj_path=str(mmproj) if mmproj else None,
+                    runtime_binary=str(rb),
+                )
+                if started.get("ok"):
+                    return routing.base_url, tier
+        except Exception:
+            logger.debug("MDL tier start failed, falling back", exc_info=True)
+
+        if is_tier_running("light"):
+            from remedy.runtime.mdl import get_tier_base_url
+            return get_tier_base_url("light"), "light"
+    except Exception:
+        logger.debug("MDL routing unavailable, using legacy base_url", exc_info=True)
+
+    return base_url, "legacy"
+
+
+def _ensemble_confidence(result: dict[str, Any]) -> float:
+    """Estimate confidence of a classify/label result, 0-1."""
+    if not result.get("ok"):
+        return 0.0
+    text = str(result.get("text") or "").strip()
+    if not text:
+        return 0.0
+    # Short, single-word responses are high confidence
+    if 1 <= len(text.split()) <= 3 and len(text) < 30:
+        return 0.85
+    return 0.3  # long/rambling response = low confidence
+
+
 def ensure_handlers_registered() -> None:
     """Register vision_decode + nano_classify on the shared job queue (idempotent)."""
     global _handlers_ready
@@ -117,9 +207,11 @@ def ensure_handlers_registered() -> None:
         from remedy.vision.decoder import decode_image
 
         p = job.payload or {}
+        prompt = str(p.get("extra_question") or "")
+        url, _ = _resolve_mdl_url("vision_decode", str(p.get("base_url") or ""), prompt)
         return decode_image(
             p.get("path") or "",
-            base_url=str(p.get("base_url") or ""),
+            base_url=url,
             timeout_s=float(p.get("timeout_s") or 90),
             max_image_bytes=int(p.get("max_image_bytes") or 4 * 1024 * 1024),
             extra_question=p.get("extra_question"),
@@ -128,9 +220,13 @@ def ensure_handlers_registered() -> None:
     def _nano_classify(job: LocalJob) -> Any:
         p = job.payload or {}
         prompt = str(p.get("prompt") or "")
-        return local_text_complete(
+        base = str(p.get("base_url") or "")
+
+        # Speculative: try LIGHT tier first, escalate if confidence low
+        url, tier = _resolve_mdl_url("nano_classify", base, prompt)
+        result = local_text_complete(
             prompt,
-            base_url=str(p.get("base_url") or ""),
+            base_url=url,
             max_tokens=int(p.get("max_tokens") or 8),
             temperature=0.0,
             timeout_s=float(p.get("timeout_s") or 15),
@@ -140,25 +236,82 @@ def ensure_handlers_registered() -> None:
             ),
         )
 
-    def _brief_update(job: LocalJob) -> Any:
-        """Session Brief refresh on local SmolVLM2 (Memory Harness background)."""
-        from remedy.memory.harness.local_brief import process_brief_update_job
+        if tier == "light":
+            confidence = _ensemble_confidence(result)
+            if confidence < 0.70 and result.get("ok"):
+                logger.debug("Low confidence (%.2f) on LIGHT tier, escalating", confidence)
+                from remedy.runtime.mdl import route_task, escalate_routing
 
+                routing = route_task("nano_classify", prompt)
+                escalated = escalate_routing(routing)
+                # Ensure escalated tier is running
+                try:
+                    from remedy.runtime.mdl_runtime import ensure_tier
+                    from remedy.vision.config import load_vision_json
+                    from remedy.vision.install import runtime_binary_path
+
+                    vstate = load_vision_json()
+                    model_path = vstate.get("model_path")
+                    mmproj = vstate.get("mmproj_path")
+                    rb = vstate.get("runtime_binary")
+
+                    if not rb or not Path(rb).is_file():
+                        rb_path = runtime_binary_path()
+                        rb = str(rb_path) if rb_path else None
+
+                    if model_path and rb:
+                        ensure_tier(
+                            escalated.tier,
+                            model_path=str(model_path),
+                            mmproj_path=str(mmproj) if mmproj else None,
+                            runtime_binary=str(rb),
+                        )
+                except Exception:
+                    pass  # fall through, return LIGHT result
+
+                if escalated.tier != "light":
+                    result = local_text_complete(
+                        prompt,
+                        base_url=escalated.base_url,
+                        max_tokens=int(p.get("max_tokens") or 8),
+                        temperature=0.0,
+                        timeout_s=float(p.get("timeout_s") or 15),
+                        system=str(
+                            p.get("system")
+                            or "Reply with exactly one label word. No punctuation."
+                        ),
+                    )
+
+        return result
+
+    def _brief_update(job: LocalJob) -> Any:
+        from remedy.runtime.mdl import route_task
+        routing = route_task("brief_update")
+        # Inject MDL base_url into job payload so process_brief_update_job can use it
+        p = job.payload or {}
+        p["mdl_base_url"] = routing.base_url
+        job.payload = p
+
+        from remedy.memory.harness.local_brief import process_brief_update_job
         return process_brief_update_job(job)
 
     def _continuity_core(job: LocalJob) -> Any:
-        """Partner State Continuity Core (graph + brief maintenance)."""
-        from remedy.memory.partner_state.continuity import process_continuity_core_job
+        from remedy.runtime.mdl import route_task
+        routing = route_task("continuity_core")
+        p = job.payload or {}
+        p["mdl_base_url"] = routing.base_url
+        job.payload = p
 
+        from remedy.memory.partner_state.continuity import process_continuity_core_job
         return process_continuity_core_job(job)
 
     def _text_job(job: LocalJob) -> Any:
-        """Generic local text complete (spread_plan, worker_summarize)."""
         p = job.payload or {}
         prompt = str(p.get("prompt") or "")
+        url, _ = _resolve_mdl_url("text", str(p.get("base_url") or ""), prompt)
         return local_text_complete(
             prompt,
-            base_url=str(p.get("base_url") or ""),
+            base_url=url,
             max_tokens=int(p.get("max_tokens") or 64),
             temperature=float(p.get("temperature") or 0.0),
             timeout_s=float(p.get("timeout_s") or 20),
@@ -169,13 +322,14 @@ def ensure_handlers_registered() -> None:
     q.register("nano_classify", _nano_classify)
     q.register("brief_update", _brief_update)
     q.register("continuity_core", _continuity_core)
+
     def _library_rerank(job: LocalJob) -> Any:
-        """Optional next-turn library pick (config skills.library_suggest.local_rerank)."""
         p = job.payload or {}
         prompt = str(p.get("prompt") or "")
+        url, _ = _resolve_mdl_url("library_rerank", str(p.get("base_url") or ""), prompt)
         return local_text_complete(
             prompt,
-            base_url=str(p.get("base_url") or ""),
+            base_url=url,
             max_tokens=int(p.get("max_tokens") or 24),
             temperature=0.0,
             timeout_s=float(p.get("timeout_s") or 12),

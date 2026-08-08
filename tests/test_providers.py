@@ -8,9 +8,12 @@ from remedy.core.providers import (
     AnthropicProvider,
     DeepSeekProvider,
     GoogleProvider,
+    LlamaCppProvider,
     OpenAIProvider,
+    RmbProvider,
     get_provider,
     get_provider_for_base_url,
+    select_provider,
 )
 
 
@@ -52,6 +55,47 @@ class TestProviderRegistry:
 
         p = get_provider_for_base_url("https://api.openai.com/v1")
         assert isinstance(p, OpenAIProvider)
+
+        # Local path: Ollama / 11434 URLs resolve to the llama.cpp adapter.
+        p = get_provider_for_base_url("http://127.0.0.1:11434/v1")
+        assert isinstance(p, LlamaCppProvider)
+        assert isinstance(p, OpenAIProvider)  # still OpenAI-compatible
+
+    def test_ollama_and_llamacpp_both_use_local_adapter(self):
+        assert isinstance(get_provider("ollama"), LlamaCppProvider)
+        assert isinstance(get_provider("llamacpp"), LlamaCppProvider)
+
+    def test_loopback_base_url_resolves_to_local_adapter(self):
+        """localhost / KoboldCpp endpoints must drop cloud max_tokens."""
+        for url in (
+            "http://localhost:5001/v1/",
+            "http://127.0.0.1:5001/v1",
+            "http://localhost:5001/api/v1/chat/completions",
+        ):
+            p = get_provider_for_base_url(url)
+            assert isinstance(p, LlamaCppProvider), url
+
+    def test_select_provider_custom_with_loopback_url(self):
+        """Config provider='custom' + localhost base → LlamaCppProvider."""
+        p = select_provider("custom", "http://localhost:5001/v1/")
+        assert isinstance(p, LlamaCppProvider)
+
+    def test_select_provider_custom_with_cloud_url(self):
+        """custom + non-loopback URL keeps the OpenAI-compatible adapter."""
+        p = select_provider("custom", "https://llm-proxy.example.com/v1")
+        assert isinstance(p, OpenAIProvider)
+        assert not isinstance(p, LlamaCppProvider)
+
+    def test_select_provider_known_name_loopback_uses_local(self):
+        """Any catalog name on loopback must use local max_tokens (not cloud caps)."""
+        p = select_provider("deepseek", "http://localhost:5001/v1/")
+        assert isinstance(p, LlamaCppProvider)
+        # Non-loopback keeps named cloud adapter
+        p2 = select_provider("deepseek", "https://api.deepseek.com")
+        assert isinstance(p2, DeepSeekProvider)
+
+    def test_select_provider_custom_without_url(self):
+        assert isinstance(select_provider("custom", ""), OpenAIProvider)
 
 
 class TestOpenAIProvider:
@@ -160,6 +204,60 @@ class TestOpenAIProvider:
 
         data = {"choices": [{}]}
         assert p.extract_finish_reason(data) is None
+
+
+class TestLlamaCppProvider:
+    """Local llama.cpp / RMB adapter — moderate max_tokens, no cloud-only fields."""
+
+    def _body(self, tools=None, model="llama3.2"):
+        p = LlamaCppProvider()
+        return p.build_body(
+            model,
+            [{"role": "user", "content": "hello"}],
+            tools=tools,
+            stream=True,
+            thinking_level="high",
+        )
+
+    def test_max_tokens_moderate_not_cloud_scale(self):
+        body = self._body()
+        # Must send a real budget but never cloud-scale (128k).
+        assert "max_tokens" in body
+        assert 256 <= int(body["max_tokens"]) <= 2048
+
+    def test_max_tokens_moderate_with_tools(self):
+        tools = [{
+            "type": "function",
+            "function": {"name": "search", "description": "Search", "parameters": {}},
+        }]
+        body = self._body(tools=tools)
+        assert 256 <= int(body["max_tokens"]) <= 2048
+        assert float(body.get("temperature", 1)) <= 0.2
+
+    def test_reasoning_effort_never_sent(self):
+        # Even a local model whose name suggests a reasoner must not trigger it.
+        body = self._body(model="qwen-reasoner")
+        assert "reasoning_effort" not in body
+
+    def test_still_openai_compatible_stream(self):
+        p = LlamaCppProvider()
+        assert p.uses_openai_sse is True
+        assert p.provider_name == "llamacpp"
+
+    def test_rmb_url_selects_rmb_provider(self):
+        p = get_provider_for_base_url("http://127.0.0.1:8787/v1")
+        assert isinstance(p, RmbProvider)
+        p2 = select_provider("custom", "http://127.0.0.1:8787/v1")
+        assert isinstance(p2, RmbProvider)
+        body = p2.build_body(
+            "Qwen2.5-Coder-7B-Instruct-Q4_K_M",
+            [{"role": "user", "content": "hi"}],
+            tools=None,
+            stream=False,
+        )
+        assert 256 <= int(body["max_tokens"]) <= 3072
+        # No legacy RMB4 continuous payload
+        assert "rmb" not in body or body.get("rmb") is None
 
 
 class TestAnthropicProvider:

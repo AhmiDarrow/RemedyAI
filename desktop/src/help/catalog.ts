@@ -192,11 +192,19 @@ const META: HelpArticleMeta[] = [
     summary: 'Local image→text for text-only models (SmolVLM2 2.2B).',
   },
   {
+    id: '20-rmb-local-agent',
+    title: 'RMB local agent',
+    category: 'Configuration',
+    order: 14.5,
+    tags: ['rmb', 'local', 'llama', 'coding', 'tools', 'gguf', 'agent', 'offline'],
+    summary: 'Built-in local agent host (llama.cpp) for coding and tool use.',
+  },
+  {
     id: '15-free-providers',
     title: 'Free providers & demo',
     category: 'Configuration',
     order: 15,
-    tags: ['free', 'demo', 'gemini', 'groq', 'ollama', 'openrouter', 'no signup'],
+    tags: ['free', 'demo', 'gemini', 'groq', 'ollama', 'openrouter', 'no signup', 'rmb'],
     summary: 'Demo mode, free API keys, and local Ollama — use Remedy without paying.',
   },
 ]

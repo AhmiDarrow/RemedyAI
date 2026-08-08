@@ -62,6 +62,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [showAdvanced, setShowAdvanced] = useState(false)
+  const [customName, setCustomName] = useState('')
   const [ollamaHint, setOllamaHint] = useState('')
   const [xaiConnected, setXaiConnected] = useState(false)
   const [xaiLoginBusy, setXaiLoginBusy] = useState(false)
@@ -153,6 +154,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
           if (meta?.advanced) setShowAdvanced(true)
           if (s.llm_model) setModel(s.llm_model)
           if (s.llm_base_url) setBaseUrl(s.llm_base_url)
+          if (s.custom_llm_name) setCustomName((s.custom_llm_name || '').trim())
         } else {
           // Default zero-setup demo when nothing configured
           const demo = providers.find((p) => p.id === 'demo')
@@ -335,6 +337,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
       llm_provider: provider,
       llm_model: model,
       llm_base_url: baseUrl,
+      custom_llm_name: provider === 'custom' ? customName.trim() : undefined,
       llm_api_key: apiKey || undefined,
       project_path: projectPath || undefined,
       persona: persona || undefined,
@@ -354,6 +357,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
     provider,
     model,
     baseUrl,
+    customName,
     projectPath,
     persona,
     userName,
@@ -917,6 +921,26 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                     value={baseUrl}
                     onChange={(e) => setBaseUrl(e.target.value)}
                     className="w-full rounded-lg px-3 py-2.5 text-sm outline-none font-mono"
+                    style={inputStyles}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--accent)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--border)')}
+                  />
+                </div>
+              )}
+              {provider === 'custom' && (
+                <div>
+                  <label
+                    className="block mb-1.5 text-sm font-medium"
+                    style={labelStyles}
+                  >
+                    Name (shown in the status bar)
+                  </label>
+                  <input
+                    type="text"
+                    value={customName}
+                    onChange={(e) => setCustomName(e.target.value)}
+                    placeholder="e.g. LM Studio / llama.cpp"
+                    className="w-full rounded-lg px-3 py-2.5 text-sm outline-none"
                     style={inputStyles}
                     onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--accent)')}
                     onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--border)')}

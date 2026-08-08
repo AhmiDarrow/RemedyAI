@@ -234,6 +234,26 @@ export const FALLBACK_PROVIDERS: ProviderInfo[] = [
     key_docs_url: 'https://ollama.com/download',
   },
   {
+    id: 'rmb',
+    name: 'RMB (local agent)',
+    base_url: 'http://127.0.0.1:8787/v1',
+    models: [
+      { id: 'Qwen2.5-Coder-7B-Instruct-Q4_K_M', name: 'Qwen2.5 Coder 7B' },
+      { id: 'Qwen2.5-Coder-14B-Instruct-Q4_K_M', name: 'Qwen2.5 Coder 14B' },
+      { id: 'default', name: 'Default (loaded model)' },
+    ],
+    default_model: 'Qwen2.5-Coder-7B-Instruct-Q4_K_M',
+    auth: ['none'],
+    oauth: false,
+    env_keys: [],
+    show_base_url: true,
+    advanced: false,
+    free_tier: 'local',
+    badge: 'Local · Agent',
+    limits_blurb:
+      'Built-in local agent host (llama.cpp) for coding + tools. Manage in Settings → RMB.',
+  },
+  {
     id: 'custom',
     name: 'Custom / OpenAI-compatible',
     base_url: 'http://127.0.0.1:5001/api/v1',
@@ -243,7 +263,8 @@ export const FALLBACK_PROVIDERS: ProviderInfo[] = [
     oauth: false,
     env_keys: [],
     show_base_url: true,
-    advanced: true,
+    // Always primary (not behind Advanced) — LM Studio / llama.cpp / local hosts.
+    advanced: false,
   },
 ]
 

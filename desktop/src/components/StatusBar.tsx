@@ -1,5 +1,5 @@
 import { getServerUrl } from '../api/client'
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { getLatestCheckpoint, getPartnerStatus } from '../api/partner'
 import { getVisionStatus, type VisionStatus } from '../api/vision'
 import type { ConnectedProvider } from '../api/providers'
@@ -250,12 +250,19 @@ export function StatusBar({
   const [vision, setVision] = useState<VisionStatus | null>(null)
 
   // Display provider: only treat as Demo when the *model id* is a curated guest id
-  // AND the parent still says another provider (cross-wire). Never invent a flip.
+  // AND the parent still says another provider (cross-wire). Never flip a real
+  // connected provider (e.g. custom OpenAI-compatible) just because its model
+  // name happens to match the demo allowlist.
   const effectiveProvider = useMemo(() => {
     const p = (provider || '').trim()
-    if (isDemoModelAllowed(model) && p && p !== 'demo') return 'demo'
-    return p
-  }, [provider, model])
+    if (!p || p === 'demo') return p
+    if (!isDemoModelAllowed(model)) return p
+    // If the provider is a real connected provider, keep its name — don't
+    // override to 'demo' just because the model id overlaps the allowlist.
+    const isConnected = connectedProviders.some((cp) => cp.id === p)
+    if (isConnected) return p
+    return 'demo'
+  }, [provider, model, connectedProviders])
 
   const modelOpts = useMemo(
     () => modelOptionsForProvider(effectiveProvider, connectedProviders, models),
@@ -274,26 +281,11 @@ export function StatusBar({
     [effectiveProvider, model, connectedProviders, models],
   )
 
-  // One-way cross-wire repair only: demo model id on a non-demo provider → Demo.
-  // Never auto-change model (safeModel) or snap xAI ↔ Demo from polling races.
-  const mismatchFixRef = useRef('')
-  useEffect(() => {
-    if (!onProviderModelChange || streaming) return
-    if (!isDemoModelAllowed(model)) {
-      mismatchFixRef.current = ''
-      return
-    }
-    const p = (provider || '').trim()
-    if (!p || p === 'demo') {
-      mismatchFixRef.current = ''
-      return
-    }
-    const key = `${p}|${model}->demo`
-    if (mismatchFixRef.current === key) return
-    mismatchFixRef.current = key
-    onProviderModelChange('demo', model)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot cross-wire only
-  }, [provider, model, streaming])
+  // effectiveProvider handles display-only coercion to 'demo' when the model
+  // overlaps the demo allowlist.  Do NOT mutate parent state from a side effect
+  // — that fires before connectedProviders loads (empty array on first render)
+  // and permanently overwrites a real connected provider to 'demo' even after
+  // the live provider list arrives.
   const [hasCheckpoint, setHasCheckpoint] = useState(false)
 
   useEffect(() => {

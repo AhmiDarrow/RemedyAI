@@ -160,6 +160,9 @@ class SettingsUpdateRequest(BaseModel):
     llm_model: str | None = None
     llm_base_url: str | None = None
     llm_api_key: str | None = None
+    # User-set display name for the custom OpenAI-compatible endpoint (llama.cpp,
+    # LM Studio, etc.). Shown in Settings and the status bar; empty → default label.
+    custom_llm_name: str | None = None
     project_path: str | None = None
     name: str | None = None  # agent display name (what the AI is called)
     user_name: str | None = None  # human name (what Remedy calls the user)

@@ -89,7 +89,7 @@ def compression_nudge_message(
             text = (
                 "[Memory Harness] Context is high but a tool/code chain is in progress. "
                 "Continue the current task using tools. Older tool output was slimmed; "
-                "re-read files if you need full detail. Do not stop mid-task to compress."
+                "Continue with task. Do not stop mid-task to compress."
             )
         else:
             text = (

@@ -585,6 +585,28 @@ def builtin_service_specs() -> list[LocalNeedSpec]:
             ],
             binaries=[BinarySpec(id="ollama", names=["ollama"], env=["OLLAMA_BIN"])],
         ),
+        # External RMB host (not bundled in Remedy) — OpenAI /v1 on :8787.
+        LocalNeedSpec(
+            skill="rmb",
+            services=[
+                HttpServiceSpec(
+                    id="rmb",
+                    ports=[8787],
+                    path="/ready",
+                    env_url=["RMB_URL", "REMEDY_RMB_URL", "RMB_BASE_URL"],
+                    config_url_keys=["rmb_url", "llm_base_url"],
+                    env_home=["RMB_HOME", "REMEDY_MUSCLE_BRIDGE"],
+                    config_home_keys=["rmb_home"],
+                    dir_names=[
+                        "Remedy Muscle Bridge",
+                        "RMB",
+                        "rmb",
+                    ],
+                    entry_files=["run_host.py"],
+                    start_template='python "{root}/run_host.py"',
+                )
+            ],
+        ),
     ]
 
 

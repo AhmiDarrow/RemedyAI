@@ -26,9 +26,79 @@ class TestCatalogSprintC:
         assert xai["show_base_url"] is False
         assert xai["oauth"] is True
 
-    def test_custom_is_advanced(self):
+    def test_custom_is_primary_option(self):
         custom = next(p for p in public_provider_catalog() if p["id"] == "custom")
-        assert custom["advanced"] is True
+        assert custom["advanced"] is False
+        assert custom["show_base_url"] is True
+
+    def test_custom_name_from_config(self):
+        items = public_provider_catalog({"custom_llm_name": "  LM Studio  "})
+        custom = next(p for p in items if p["id"] == "custom")
+        assert custom["name"] == "LM Studio"
+
+    def test_custom_name_default_when_unset(self):
+        items = public_provider_catalog({"custom_llm_name": ""})
+        custom = next(p for p in items if p["id"] == "custom")
+        assert custom["name"] == "Custom / OpenAI-compatible"
+
+
+class TestCustomEndpointRoundTrip:
+    """PUT /api/settings stores custom_llm_name; GET + providers reflect it."""
+
+    def test_custom_name_round_trip(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        from fastapi.testclient import TestClient
+
+        from remedy.interfaces.api import create_app
+
+        monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+        client = TestClient(create_app())
+
+        r = client.put(
+            "/api/settings",
+            json={
+                "llm_provider": "custom",
+                "llm_base_url": "http://127.0.0.1:5001/api/v1",
+                "custom_llm_name": "  LM Studio local  ",
+                "setup_completed": True,
+            },
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["custom_llm_name"] == "LM Studio local"
+
+        r = client.get("/api/settings")
+        assert r.status_code == 200, r.text
+        assert r.json()["custom_llm_name"] == "LM Studio local"
+
+        r = client.get("/api/providers")
+        assert r.status_code == 200, r.text
+        custom = next(p for p in r.json()["providers"] if p["id"] == "custom")
+        assert custom["name"] == "LM Studio local"
+        assert custom["advanced"] is False
+
+    def test_custom_name_cleared_to_default(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        from fastapi.testclient import TestClient
+
+        from remedy.interfaces.api import create_app
+
+        monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+        client = TestClient(create_app())
+
+        r = client.put(
+            "/api/settings",
+            json={
+                "llm_provider": "custom",
+                "custom_llm_name": "Temp Name",
+                "setup_completed": True,
+            },
+        )
+        assert r.status_code == 200, r.text
+        r = client.put("/api/settings", json={"custom_llm_name": ""})
+        assert r.status_code == 200, r.text
+        assert r.json()["custom_llm_name"] == ""
+
+        r = client.get("/api/providers")
+        custom = next(p for p in r.json()["providers"] if p["id"] == "custom")
+        assert custom["name"] == "Custom / OpenAI-compatible"
 
     def test_adapters_registered(self):
         assert get_provider("xai").provider_name == "xai"

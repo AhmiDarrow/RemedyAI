@@ -540,13 +540,48 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
             {"id": "codellama", "name": "Code Llama"},
         ],
     },
+    "rmb": {
+        "label": "RMB (local agent)",
+        "base_url": "http://127.0.0.1:8787/v1",
+        "auth": ["none"],
+        "env_keys": [],
+        "show_base_url": True,
+        "free_tier": "local",
+        "badge": "Local · Agent",
+        "limits_blurb": (
+            "Remedy Muscle Bridge — built-in local chat host (llama.cpp) optimized "
+            "for coding and tool use. Manage under Settings → RMB. Fully private on this PC."
+        ),
+        "privacy_note": "Chat stays on this PC. Powered by llama.cpp under the RMB brand.",
+        "key_docs_url": "",
+        "models": [
+            {"id": "Qwen2.5-Coder-7B-Instruct-Q4_K_M", "name": "Qwen2.5 Coder 7B"},
+            {"id": "Qwen2.5-Coder-14B-Instruct-Q4_K_M", "name": "Qwen2.5 Coder 14B"},
+            {"id": "default", "name": "Default (loaded model)"},
+        ],
+    },
+    "llamacpp": {
+        "label": "llama.cpp (manual URL)",
+        "base_url": "http://127.0.0.1:8080/v1",
+        "auth": ["none"],
+        "env_keys": [],
+        "show_base_url": True,
+        "free_tier": "local",
+        "badge": "Local",
+        "advanced": True,
+        "limits_blurb": "Point at any OpenAI-compatible llama-server. Prefer Settings → RMB for managed local agent.",
+        "models": [
+            {"id": "default", "name": "Default"},
+        ],
+    },
     "custom": {
+        # Display name is user-settable via `custom_llm_name` (shown in Settings +
+        # status bar). Falls back to this label when unset.
         "label": "Custom / OpenAI-compatible",
         "base_url": "http://127.0.0.1:5001/api/v1",
         "auth": ["api_key"],
         "env_keys": [],
         "show_base_url": True,
-        "advanced": True,  # hide under Advanced in desktop UI
         "free_tier": "none",
         "models": [
             {"id": "default", "name": "Default (custom endpoint)"},
@@ -585,6 +620,12 @@ FREE_PROVIDER_OPTIONS: list[dict[str, Any]] = [
         "tier": "free_key",
         "title": "Mistral",
         "blurb": "Free Experiment plan key.",
+    },
+    {
+        "id": "rmb",
+        "tier": "local",
+        "title": "RMB (local agent)",
+        "blurb": "Built-in llama.cpp host for coding + tools — private, no API key.",
     },
     {
         "id": "ollama",
@@ -712,6 +753,8 @@ def infer_provider_from_base_url(base_url: str) -> str | None:
         return "google"
     if "11434" in u or "ollama" in u:
         return "ollama"
+    if ":8787" in u or u.rstrip("/").endswith(":8787") or "/rmb" in u:
+        return "rmb"
     return None
 
 
@@ -1369,19 +1412,33 @@ def provider_credentials_ready(config: dict[str, Any] | None = None) -> bool:
     return bool(key)
 
 
-def public_provider_catalog() -> list[dict[str, Any]]:
-    """Catalog entries for GET /api/providers and desktop UI."""
+def public_provider_catalog(config: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    """Catalog entries for GET /api/providers and desktop UI.
+
+    ``config`` (optional) lets the caller inject the user-set custom endpoint name
+    (``custom_llm_name``) so Settings + the status bar show the friendly label.
+    When omitted, the name is loaded lazily from config for the custom entry only.
+    """
     items: list[dict[str, Any]] = []
     for pid, meta in PROVIDER_CATALOG.items():
         auth_modes = list(meta.get("auth") or ["api_key"])
-        if pid in ("ollama", "demo"):
+        if pid in ("ollama", "demo", "rmb", "llamacpp"):
             auth_modes = ["none"]
         models = list(meta.get("models") or [])
         default_model = str(models[0]["id"]) if models else "default"
+        name = meta.get("label") or pid
+        if pid == "custom":
+            custom_name = str((config or {}).get("custom_llm_name") or "").strip()
+            if config is None:
+                try:
+                    custom_name = str(load_config().get("custom_llm_name") or "").strip()
+                except Exception:
+                    custom_name = ""
+            name = custom_name or name
         items.append(
             {
                 "id": pid,
-                "name": meta.get("label") or pid,
+                "name": name,
                 "base_url": meta.get("base_url"),
                 "models": models,
                 "default_model": default_model,
