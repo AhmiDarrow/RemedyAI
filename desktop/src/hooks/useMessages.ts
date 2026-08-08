@@ -434,19 +434,24 @@ export function useMessages(sessionId: string | null) {
         created_at: new Date().toISOString(),
         reverted: false,
       }
-      setMessages((prev) => [...prev, userMsg])
 
-      setStreaming(true)
-      clearStreamAccum()
-      setPartialText('')
-      setPartialThinking('')
-      setActiveTools([])
-      setProcessSteps([])
-      processStepsRef.current = []
-      setTaskProgress(null)
-      setRunUsage(emptyUsage(model || null, null))
-      setStreamStalled(false)
-      setStallSeconds(0)
+      // Only paint optimistic UI for the focused session. Queued / background
+      // turns for another sid must not inject bubbles or streaming chrome here.
+      const isFocusedTurn = () => sessionIdRef.current === targetId
+      if (isFocusedTurn()) {
+        setMessages((prev) => [...prev, userMsg])
+        setStreaming(true)
+        clearStreamAccum()
+        setPartialText('')
+        setPartialThinking('')
+        setActiveTools([])
+        setProcessSteps([])
+        processStepsRef.current = []
+        setTaskProgress(null)
+        setRunUsage(emptyUsage(model || null, null))
+        setStreamStalled(false)
+        setStallSeconds(0)
+      }
       lastStreamActivityRef.current = Date.now()
       lastSentPromptRef.current = {
         text: text.trim() || '(see attached files)',
@@ -458,8 +463,6 @@ export function useMessages(sessionId: string | null) {
       }
 
       let doneReceived = false
-
-      const isFocusedTurn = () => sessionIdRef.current === targetId
 
       const bumpActivity = () => {
         lastStreamActivityRef.current = Date.now()

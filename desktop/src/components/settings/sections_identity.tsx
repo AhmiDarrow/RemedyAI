@@ -388,7 +388,7 @@ export function SettingsSections_identity(p: SettingsFormProps): ReactNode {
                 checked={httpBootstrap}
                 onChange={setHttpBootstrap}
                 label="Allow browser token bootstrap"
-                description="On (default): browser Web UI can get the local token on loopback. Off: desktop IPC only (still full power in the app). Override anytime with REMEDY_HTTP_BOOTSTRAP."
+                description="Desktop default is off (IPC-only). On: browser Web UI can get the local token on loopback. Override anytime with REMEDY_HTTP_BOOTSTRAP."
               />
             </SettingsSection>
 

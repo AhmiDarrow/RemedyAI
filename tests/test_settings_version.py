@@ -17,6 +17,9 @@ def test_settings_returns_package_version():
     assert data.get("version"), data
     assert data["version"] == __version__
     assert data["version"] != "0.9.0"
+    # Partner gender must round-trip; missing field caused silent reset to female.
+    assert "agent_gender" in data
+    assert data["agent_gender"] in ("female", "male", "neutral")
 
 
 def test_updates_check_returns_current_version():
