@@ -636,6 +636,35 @@ async def apply_settings_update(
     cfg.pop("provider_keys", None)
     _api_support._write_config(config_path, cfg)
 
+    # When chat is RMB, status-bar / settings model picks must reload the GGUF
+    # host — llm_model alone only changes the reported name, not the weights.
+    rmb_live: dict[str, Any] | None = None
+    if llm_touched and str(provider or "").lower() == "rmb" and model:
+        try:
+            from remedy.runtime.rmb.service import apply_rmb_chat_model
+
+            rmb_live = apply_rmb_chat_model(
+                str(model),
+                home_dir=cfg.get("home_dir") if isinstance(cfg, dict) else None,
+                cfg=cfg if isinstance(cfg, dict) else None,
+                live=True,
+                wait_s=120.0,
+            )
+            # Prefer resolved stem for runtime if host reloaded a different file
+            live_path = (rmb_live or {}).get("model_path")
+            if live_path:
+                from pathlib import Path as _P
+
+                stem = _P(str(live_path)).stem
+                if stem:
+                    model = stem
+                    cfg["llm_model"] = stem
+                    with contextlib.suppress(Exception):
+                        _api_support._write_config(config_path, cfg)
+        except Exception as exc:
+            logger.warning("RMB model switch from settings failed: %s", exc)
+            rmb_live = {"ok": False, "error": str(exc)}
+
     if isinstance(model_discovery_cache, dict):
         model_discovery_cache.clear()
 
@@ -692,6 +721,19 @@ async def apply_settings_update(
         "config_path": str(config_path),
         "message": f"Applied settings: {', '.join(changes)}",
     }
+    if rmb_live is not None:
+        out["rmb_live"] = {
+            "ok": bool(
+                (rmb_live.get("live_apply") or {}).get("started")
+                or (rmb_live.get("live_apply") or {}).get("restarted")
+                or rmb_live.get("ok", True)
+            ),
+            "model_id": rmb_live.get("model_id"),
+            "model_path": rmb_live.get("model_path"),
+            "live_note": rmb_live.get("live_note"),
+            "live_error": (rmb_live.get("live_apply") or {}).get("live_error")
+            or rmb_live.get("error"),
+        }
     for k in (
         "llm_provider",
         "llm_model",
