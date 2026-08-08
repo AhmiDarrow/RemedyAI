@@ -20,6 +20,15 @@ import { openExternalUrl } from '../../api/auth'
 import type { SettingsMode } from '../../utils/settingsMode'
 import { SettingsSection } from '../SettingsSection'
 import { AssistantConnectDialog } from './AssistantConnectDialog'
+import {
+  FormActionButton,
+  FormHint,
+  FormLabel,
+  FormLinkButton,
+  FormNotice,
+  FormSelect,
+  FormToggle,
+} from './formUi'
 
 export type AssistantDraft = {
   enabled?: boolean
@@ -100,12 +109,6 @@ const ACCOUNT_PROVIDERS = [
 ] as const
 
 type ProviderId = (typeof ACCOUNT_PROVIDERS)[number]['id']
-
-const inputStyle = {
-  borderColor: 'var(--border)',
-  background: 'var(--bg-input, var(--bg-elevated))',
-  color: 'var(--text-primary)',
-} as const
 
 function shortErr(e: unknown): string {
   const raw = e instanceof Error ? e.message : String(e)
@@ -267,201 +270,146 @@ export function AssistantSection({
   return (
     <>
       <SettingsSection {...sectionProps} summary={summary}>
-        <div className="flex flex-wrap items-center gap-2 mb-2 text-[11px]">
-          <label className="flex items-center gap-1.5 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={enabled}
-              onChange={(e) => setDraft((p) => ({ ...p, enabled: e.target.checked }))}
-              style={{ accentColor: 'var(--accent)' }}
-            />
-            <span style={{ color: 'var(--text-primary)' }}>On</span>
-          </label>
-        </div>
+        <FormToggle
+          checked={enabled}
+          onChange={(on) => setDraft((p) => ({ ...p, enabled: on }))}
+          label="Personal assistant"
+          description="Mail, calendar, and brief tools when an account is connected."
+        />
 
-        <div className="mb-2 text-[10px]" style={{ color: 'var(--text-secondary)' }}>
-          {assistant?.needs_reaccept ? (
-            <div
-              className="mb-1.5 rounded-md px-2 py-1.5 text-[10px] leading-snug flex flex-wrap items-center gap-2"
-              role="status"
-              style={{
-                color: 'var(--remedy-warning, #b8860b)',
-                background: 'color-mix(in srgb, var(--remedy-warning, #b8860b) 12%, transparent)',
-                border: '1px solid color-mix(in srgb, var(--remedy-warning, #b8860b) 35%, transparent)',
-              }}
-            >
+        {assistant?.needs_reaccept ? (
+          <FormNotice tone="warn">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="flex-1 min-w-[10rem]">
                 {assistant.consent_reason
                   || 'Privacy terms or account scopes were updated — re-accept before Connect or account tools.'}
               </span>
-              <button
-                type="button"
-                className="px-2 py-0.5 rounded font-semibold"
-                style={{
-                  background: 'var(--accent)',
-                  color: '#fff',
-                  border: 'none',
-                  cursor: 'pointer',
-                }}
+              <FormActionButton
+                variant="primary"
                 onClick={() => {
                   setMsg('')
                   setDialogOpen(true)
                 }}
               >
                 Review &amp; accept
-              </button>
+              </FormActionButton>
             </div>
-          ) : null}
-          {googleConnected && google?.tokens_encoding_warning ? (
-            <div
-              className="mb-1.5 rounded-md px-2 py-1.5 text-[10px] leading-snug"
-              role="status"
-              style={{
-                color: 'var(--remedy-warning, #b8860b)',
-                background: 'color-mix(in srgb, var(--remedy-warning, #b8860b) 12%, transparent)',
-                border: '1px solid color-mix(in srgb, var(--remedy-warning, #b8860b) 35%, transparent)',
-              }}
-            >
-              {google.tokens_encoding_warning}
-            </div>
-          ) : null}
-          {googleConnected && google?.apis_warning ? (
-            <div
-              className="mb-1.5 rounded-md px-2 py-1.5 text-[10px] leading-snug"
-              role="status"
-              style={{
-                color: 'var(--remedy-warning, #b8860b)',
-                background: 'color-mix(in srgb, var(--remedy-warning, #b8860b) 12%, transparent)',
-                border: '1px solid color-mix(in srgb, var(--remedy-warning, #b8860b) 35%, transparent)',
-              }}
-            >
-              {google.apis_warning}
-              {google.apis?.enable_gmail_url ? (
-                <div className="mt-1">
-                  Enable Gmail API in Google Cloud Console, then retry tools.
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-          {googleConnected ? (
-            <div className="flex flex-wrap items-center gap-2">
-              <span style={{ color: 'var(--text-primary)' }}>
-                {google?.email || 'Connected'}
-                {google?.tokens_encoding === 'dpapi' ? ' · sealed' : ''}
-              </span>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => {
-                  void handleDisconnect()
-                }}
-                className="text-[10px] underline p-0 border-0 bg-transparent cursor-pointer"
-                style={{ color: 'var(--text-muted)' }}
-              >
-                Disconnect
-              </button>
-            </div>
-          ) : (
-            <div className="flex flex-wrap items-center gap-1.5">
-              <select
-                value={provider}
-                onChange={(e) => setProvider(e.target.value as ProviderId)}
-                disabled={busy}
-                className="rounded-lg border px-2 py-1 text-[10px] outline-none min-w-[9.5rem]"
-                style={inputStyle}
-              >
-                {ACCOUNT_PROVIDERS.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.label}
-                    {!p.ready ? ' · soon' : ''}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={handleConnectClick}
-                className="rounded-lg px-2.5 py-1 text-[10px] font-medium"
-                style={{
-                  background: 'var(--accent)',
-                  color: 'var(--accent-fg, #fff)',
-                }}
-              >
-                {busy ? '…' : 'Connect'}
-              </button>
-            </div>
-          )}
-          {msg ? (
-            <div className="mt-1" style={{ color: 'var(--text-muted)' }}>
-              {msg}
-            </div>
-          ) : null}
-        </div>
+          </FormNotice>
+        ) : null}
 
-        <div className="mb-2 text-[10px]" style={{ color: 'var(--text-secondary)' }}>
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <span className="font-medium" style={{ color: 'var(--text-primary)' }}>
-              Brief
+        {googleConnected && google?.tokens_encoding_warning ? (
+          <FormNotice tone="warn">{google.tokens_encoding_warning}</FormNotice>
+        ) : null}
+
+        {googleConnected && google?.apis_warning ? (
+          <FormNotice tone="warn">
+            {google.apis_warning}
+            {google.apis?.enable_gmail_url ? (
+              <div className="mt-1">
+                Enable Gmail API in Google Cloud Console, then retry tools.
+              </div>
+            ) : null}
+          </FormNotice>
+        ) : null}
+
+        <FormLabel>Account</FormLabel>
+        {googleConnected ? (
+          <div className="flex flex-wrap items-center gap-2 mb-2">
+            <span className="text-xs" style={{ color: 'var(--text-primary)' }}>
+              {google?.email || 'Connected'}
+              {google?.tokens_encoding === 'dpapi' ? ' · sealed' : ''}
             </span>
-            <label className="flex items-center gap-1 cursor-pointer">
+            <FormLinkButton
+              onClick={() => {
+                void handleDisconnect()
+              }}
+            >
+              {busy ? '…' : 'Disconnect'}
+            </FormLinkButton>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-1.5 mb-2">
+            <FormSelect
+              value={provider}
+              onChange={(v) => setProvider(v as ProviderId)}
+              disabled={busy}
+              className="mb-0 min-w-[9.5rem] flex-1"
+              size="sm"
+            >
+              {ACCOUNT_PROVIDERS.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label}
+                  {!p.ready ? ' · soon' : ''}
+                </option>
+              ))}
+            </FormSelect>
+            <FormActionButton
+              variant="primary"
+              disabled={busy}
+              onClick={handleConnectClick}
+            >
+              {busy ? '…' : 'Connect'}
+            </FormActionButton>
+          </div>
+        )}
+        {msg ? <FormHint>{msg}</FormHint> : null}
+
+        <FormLabel className="mt-2">Morning brief</FormLabel>
+        <div
+          className="flex flex-wrap items-center gap-x-3 gap-y-1.5 mb-2 text-[10px]"
+          style={{ color: 'var(--text-secondary)' }}
+        >
+          <label className="flex items-center gap-1 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={Boolean(brief.enabled)}
+              onChange={(e) => patchBrief('enabled', e.target.checked)}
+              style={{ accentColor: 'var(--accent)' }}
+            />
+            On
+          </label>
+          <label className="flex items-center gap-1">
+            <input
+              type="number"
+              min={0}
+              max={23}
+              className="ui-input ui-input-sm w-10"
+              value={Number(brief.hour_local ?? 7)}
+              onChange={(e) => patchBrief('hour_local', Number(e.target.value))}
+              aria-label="Brief hour (local)"
+            />
+            h
+          </label>
+          {(
+            [
+              ['include_calendar', 'Cal'],
+              ['include_mail', 'Mail'],
+              ['include_goals', 'Goals'],
+              ['include_budget', 'Budget'],
+            ] as const
+          ).map(([key, label]) => (
+            <label key={key} className="flex items-center gap-1 cursor-pointer">
               <input
                 type="checkbox"
-                checked={Boolean(brief.enabled)}
-                onChange={(e) => patchBrief('enabled', e.target.checked)}
+                checked={Boolean(brief[key])}
+                onChange={(e) => patchBrief(key, e.target.checked)}
                 style={{ accentColor: 'var(--accent)' }}
               />
-              On
+              {label}
             </label>
-            <label className="flex items-center gap-1">
-              <input
-                type="number"
-                min={0}
-                max={23}
-                className="w-9 rounded border px-1 py-0.5 text-[10px]"
-                style={inputStyle}
-                value={Number(brief.hour_local ?? 7)}
-                onChange={(e) => patchBrief('hour_local', Number(e.target.value))}
-              />
-              h
-            </label>
-            {(
-              [
-                ['include_calendar', 'Cal'],
-                ['include_mail', 'Mail'],
-                ['include_goals', 'Goals'],
-                ['include_budget', 'Budget'],
-              ] as const
-            ).map(([key, label]) => (
-              <label key={key} className="flex items-center gap-1 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={Boolean(brief[key])}
-                  onChange={(e) => patchBrief(key, e.target.checked)}
-                  style={{ accentColor: 'var(--accent)' }}
-                />
-                {label}
-              </label>
-            ))}
-          </div>
+          ))}
         </div>
 
-        <label className="flex items-start gap-2 cursor-pointer text-[10px]">
-          <input
-            type="checkbox"
-            className="mt-0.5"
-            checked={disclaimerAccepted}
-            onChange={(e) =>
-              setDraft((p) => ({ ...p, money_disclaimer_accepted: e.target.checked }))
-            }
-            style={{ accentColor: 'var(--accent)' }}
-          />
-          <span style={{ color: 'var(--text-secondary)' }}>
-            Budget tools — organize only, not financial advice
-            {advanced && (assistant?.has_budget || (assistant?.debt_count ?? 0) > 0)
-              ? ` · ${assistant?.debt_count ?? 0} debts`
-              : ''}
-          </span>
-        </label>
+        <FormToggle
+          checked={disclaimerAccepted}
+          onChange={(on) => setDraft((p) => ({ ...p, money_disclaimer_accepted: on }))}
+          label="Budget tools — organize only, not financial advice"
+          description={
+            advanced && (assistant?.has_budget || (assistant?.debt_count ?? 0) > 0)
+              ? `${assistant?.debt_count ?? 0} debts tracked`
+              : undefined
+          }
+        />
       </SettingsSection>
 
       <AssistantConnectDialog

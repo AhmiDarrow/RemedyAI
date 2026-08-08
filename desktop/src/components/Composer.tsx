@@ -1080,6 +1080,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
               style={{ color: 'var(--text-muted)' }}
             >
               Queue · {queue.length}
+              {sessionId ? ' · this chat' : ''}
             </span>
             {onClearQueue && (
               <button

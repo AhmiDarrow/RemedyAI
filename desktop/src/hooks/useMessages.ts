@@ -358,20 +358,29 @@ export function useMessages(sessionId: string | null) {
     queueRef.current = queue
   }, [queue])
 
-  const drainQueue = useCallback(async () => {
+  /**
+   * Drain the next queued send for a session.
+   * Prefer items for `forSid` (the turn that just finished / focused tab);
+   * never jump to another session's queue while this one still has work.
+   */
+  const drainQueue = useCallback(async (forSid?: string | null) => {
     if (drainingRef.current || streamingRef.current || sendLockRef.current) return
-    const next = queueRef.current[0]
-    if (!next) return
+    const preferred = forSid || sessionIdRef.current
+    const idx = queueRef.current.findIndex(
+      (q) => !preferred || !q.sid || q.sid === preferred,
+    )
+    if (idx < 0) return
+    const next = queueRef.current[idx]
     drainingRef.current = true
-    setQueue((q) => q.slice(1))
-    queueRef.current = queueRef.current.slice(1)
+    setQueue((q) => q.filter((_, i) => i !== idx))
+    queueRef.current = queueRef.current.filter((_, i) => i !== idx)
     try {
       const fn = sendTurnRef.current
       if (fn) {
         await fn(
           next.text,
           next.model,
-          next.sid,
+          next.sid || preferred || undefined,
           next.attachments,
           next.planMode,
           next.provider,
@@ -554,8 +563,9 @@ export function useMessages(sessionId: string | null) {
         }
         // Drop results if the user already switched sessions.
         if (sessionIdRef.current !== targetId) {
+          // Drain that session's queue in the background (does not steal focus).
           window.setTimeout(() => {
-            void drainQueue()
+            void drainQueue(targetId)
           }, 40)
           return
         }
@@ -564,7 +574,7 @@ export function useMessages(sessionId: string | null) {
           setProcessSteps([])
           processStepsRef.current = []
           window.setTimeout(() => {
-            void drainQueue()
+            void drainQueue(targetId)
           }, 40)
           return
         }
@@ -594,9 +604,9 @@ export function useMessages(sessionId: string | null) {
         }
         setProcessSteps([])
         processStepsRef.current = []
-        // Drain next queued prompt after a tick so React can settle.
+        // Drain next queued prompt for this session after a tick.
         window.setTimeout(() => {
-          void drainQueue()
+          void drainQueue(targetId)
         }, 40)
       }
 
@@ -644,7 +654,7 @@ export function useMessages(sessionId: string | null) {
           ])
         }
         window.setTimeout(() => {
-          void drainQueue()
+          void drainQueue(targetId)
         }, 40)
       }
 
@@ -911,7 +921,7 @@ export function useMessages(sessionId: string | null) {
           setQueue((q) => [item, ...q.filter((x) => x.id !== item.id)])
           queueRef.current = [item, ...queueRef.current.filter((x) => x.id !== item.id)]
           window.setTimeout(() => {
-            void drainQueue()
+            void drainQueue(targetId)
           }, 50)
           return
         }
@@ -1016,9 +1026,9 @@ export function useMessages(sessionId: string | null) {
     thinkingAccumRef.current = ''
     setProcessSteps([])
     processStepsRef.current = []
-    // Drain any prompts queued "after" the stopped turn.
+    // Drain any prompts queued "after" the stopped turn for this session.
     window.setTimeout(() => {
-      void drainQueue()
+      void drainQueue(sessionIdRef.current)
     }, 40)
   }, [streamCtrl, resetStreamBuffers, drainQueue])
 
@@ -1046,8 +1056,15 @@ export function useMessages(sessionId: string | null) {
   }, [])
 
   const clearQueue = useCallback(() => {
-    setQueue([])
-    queueRef.current = []
+    // Clear only the focused session's queue — other tabs keep their items.
+    const sid = sessionIdRef.current
+    if (!sid) {
+      setQueue([])
+      queueRef.current = []
+      return
+    }
+    setQueue((q) => q.filter((x) => x.sid && x.sid !== sid))
+    queueRef.current = queueRef.current.filter((x) => x.sid && x.sid !== sid)
   }, [])
 
   const updateQueued = useCallback((id: string, patch: Partial<QueuedSend>) => {
@@ -1173,6 +1190,11 @@ export function useMessages(sessionId: string | null) {
 
   const clearLibrarySuggest = useCallback(() => setLibrarySuggest(null), [])
 
+  // Composer only shows queue items for the focused session.
+  const visibleQueue = queue.filter(
+    (q) => !sessionId || !q.sid || q.sid === sessionId,
+  )
+
   return {
     messages,
     loading,
@@ -1191,7 +1213,7 @@ export function useMessages(sessionId: string | null) {
     processSteps,
     taskProgress,
     runUsage,
-    queue,
+    queue: visibleQueue,
     librarySuggest,
     clearLibrarySuggest,
     send,
