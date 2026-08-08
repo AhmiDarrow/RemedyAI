@@ -40,7 +40,10 @@ export function getServerUrl(): string {
   return resolveServerUrl()
 }
 
-/** @deprecated Prefer getServerUrl(); kept for any external imports. */
+/**
+ * @deprecated Prefer getServerUrl() — this snapshot is fixed at module load.
+ * New call sites must use getServerUrl() for multi-port / late inject.
+ */
 const SERVER_URL = resolveServerUrl()
 
 let _apiToken: string | null = null
@@ -259,7 +262,7 @@ export async function apiFetch<T = unknown>(
       throw new ApiError(
         0,
         unreachable
-          ? `Cannot reach local API at ${SERVER_URL} (${path}). `
+          ? `Cannot reach local API at ${getServerUrl()} (${path}). `
             + 'Is the server running? If setup just opened, wait a second and retry. '
             + 'Use Retry on the splash if the local server failed to start.'
           : msg || `Network error (${path})`,
@@ -285,7 +288,7 @@ export async function apiFetch<T = unknown>(
         throw new ApiError(
           0,
           msg.includes('Failed to fetch')
-            ? `Cannot reach local API at ${SERVER_URL} (${path}). Is the server running?`
+            ? `Cannot reach local API at ${getServerUrl()} (${path}). Is the server running?`
             : msg || `Network error (${path})`,
         )
       }
@@ -310,12 +313,14 @@ export async function apiFetch<T = unknown>(
  * Prefers ultra-light `/api/ping` (no DB); falls back to `/api/status`.
  */
 export async function healthCheck(timeout = 2000): Promise<boolean> {
+  // Always re-resolve origin (multi-port / late inject).
+  const origin = getServerUrl()
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), timeout)
   try {
     // Ping first — must stay responsive even if heavier handlers are busy.
     try {
-      const ping = await fetch(`${SERVER_URL}/api/ping`, {
+      const ping = await fetch(`${origin}/api/ping`, {
         signal: controller.signal,
         headers: { Accept: 'application/json' },
       })
@@ -324,7 +329,7 @@ export async function healthCheck(timeout = 2000): Promise<boolean> {
       /* fall through to /api/status for older sidecars */
     }
     if (controller.signal.aborted) return false
-    const res = await fetch(`${SERVER_URL}/api/status`, {
+    const res = await fetch(`${origin}/api/status`, {
       signal: controller.signal,
       headers: { Accept: 'application/json' },
     })

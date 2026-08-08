@@ -185,6 +185,13 @@ export function useSessions() {
       projectPathCache.current = null
     }, []),
     remove: useCallback(async (id: string) => {
+      // Stop in-flight client/server turn before deleting the session row.
+      try {
+        const { stopStreamJob } = await import('../sessions/streamJobs')
+        await stopStreamJob(id)
+      } catch {
+        /* */
+      }
       await deleteSession(id)
       setSessions((prev) => prev.filter((s) => s.id !== id))
       setActiveId((cur) => (cur === id ? null : cur))

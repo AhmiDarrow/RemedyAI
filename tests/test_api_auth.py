@@ -105,7 +105,9 @@ def test_status_public(auth_on, tmp_path):
     assert r.status_code == 200
 
 
-def test_bootstrap_loopback(auth_on, tmp_path):
+def test_bootstrap_loopback(auth_on, tmp_path, monkeypatch):
+    # Bootstrap defaults off for desktop/sidecar; enable for this unit test.
+    monkeypatch.setenv("REMEDY_HTTP_BOOTSTRAP", "1")
     tok = ensure_local_api_token(tmp_path)
     app = create_app(api_key=tok)
     client = TestClient(app)

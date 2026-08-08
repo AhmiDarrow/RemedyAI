@@ -4,7 +4,7 @@
  * desktop refreshes the sidebar and active thread without polling alone.
  */
 
-import { authHeaders, ensureApiToken, getServerUrl } from './client'
+import { authHeaders, clearApiToken, ensureApiToken, getServerUrl } from './client'
 
 function eventsUrl(): string {
   if (typeof window !== 'undefined') {
@@ -57,6 +57,15 @@ export function subscribeSessionEvents(handlers: SessionEventsHandlers): () => v
           signal: ac.signal,
         })
         if (!res.ok || !res.body) {
+          // Mirror apiFetch / streamMessage: re-bootstrap token on 401.
+          if (res.status === 401 || res.status === 403) {
+            try {
+              clearApiToken()
+              await ensureApiToken()
+            } catch {
+              /* continue backoff */
+            }
+          }
           handlers.onError?.(new Error(`session events HTTP ${res.status}`))
           await sleep(backoffMs)
           backoffMs = Math.min(30_000, Math.floor(backoffMs * 1.6))

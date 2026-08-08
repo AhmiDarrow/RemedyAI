@@ -224,10 +224,27 @@ def extract_path_candidates(command: str) -> list[str]:
     return found
 
 
+# Interpreter / script launches can write anywhere once running — treat as
+# opaque mutations when project-bound (S-WS-01 residual).
+_SCRIPT_LAUNCH_RE = re.compile(
+    r"(?ix)"
+    r"(?:"
+    r"\b(?:python|python3|py)\s+(?!-c\b)[^\n|&;]+"
+    r"|\b(?:node|nodejs)\s+(?!-e\b)[^\n|&;]+"
+    r"|\b(?:ruby|perl|php|lua|bash|sh|zsh|pwsh|powershell)(?:\.exe)?\s+"
+    r"(?:-[Ff]ile\s+|[^\n|&;-][^\n|&;]*)"
+    r"|\b(?:cmd)(?:\.exe)?\s+/[Cc]\s+"
+    r"|(?:^|[\s;&|(])(?:\.\\|\./|/|[A-Za-z]:\\)[^\s|&;]+\.(?:py|js|mjs|cjs|ps1|bat|cmd|exe|vbs)\b"
+    r")"
+)
+
+
 def looks_like_mutation(command: str) -> bool:
     """True when the command is likely to create/modify/delete files."""
     c = command or ""
     if _MUTATION_HINT_RE.search(c):
+        return True
+    if _SCRIPT_LAUNCH_RE.search(c):
         return True
     return bool(_REDIRECT_WRITE_RE.search(c))
 

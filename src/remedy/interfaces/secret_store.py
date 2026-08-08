@@ -22,6 +22,7 @@ import json
 import logging
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -34,6 +35,9 @@ STORE_FILENAME = "provider_keys.json"
 # Harden (icacls on Windows) is ~80–120ms per path. Only do it when creating
 # the auth dir or writing the store — never on every secrets read.
 _hardened_paths: set[str] = set()
+
+# Serialize load-merge-save so concurrent settings applies cannot drop keys.
+_provider_keys_lock = threading.RLock()
 
 # mtime-cached decrypted key map (process-local).
 _keys_cache: dict[str, Any] = {"path": None, "mtime": None, "size": None, "data": None}
@@ -387,14 +391,15 @@ def set_provider_secret(
     provider = str(provider or "").strip().lower()
     if not provider:
         raise ValueError("provider is required")
-    keys = load_provider_keys(home)
-    val = (api_key or "").strip()
-    if val:
-        keys[provider] = val
-    else:
-        keys.pop(provider, None)
-    save_provider_keys(keys, home=home)
-    return keys
+    with _provider_keys_lock:
+        keys = load_provider_keys(home)
+        val = (api_key or "").strip()
+        if val:
+            keys[provider] = val
+        else:
+            keys.pop(provider, None)
+        save_provider_keys(keys, home=home)
+        return keys
 
 
 def get_provider_secret(

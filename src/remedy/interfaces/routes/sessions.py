@@ -260,6 +260,10 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
 
             home = load_config().get("home_dir")
             cascade = purge_session_disk_artifacts(sid, home)
+        with contextlib.suppress(Exception):
+            from remedy.memory.middleman import forget_session_middleman
+
+            forget_session_middleman(sid)
         return {
             "status": "deleted",
             "session_id": sid,
@@ -433,15 +437,40 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         if memory is None:
             raise HTTPException(503, "Memory store not available")
         msgs = await memory.get_chat_messages(session_id, limit=limit, offset=offset)
+        # Cap payload size for list views (stream/export keep full bodies).
+        _CONTENT_CAP = 32_000
+        _TOOL_CAP = 8_000
+
+        def _trunc(s: object, n: int) -> object:
+            if not isinstance(s, str) or len(s) <= n:
+                return s
+            return s[:n] + f"\n…[truncated {len(s) - n} chars]"
+
+        def _trunc_tool_results(trs: object) -> object:
+            if not isinstance(trs, list):
+                return trs
+            out: list = []
+            for tr in trs:
+                if isinstance(tr, dict):
+                    item = dict(tr)
+                    if "output" in item:
+                        item["output"] = _trunc(item.get("output"), _TOOL_CAP)
+                    out.append(item)
+                else:
+                    out.append(_trunc(tr, _TOOL_CAP))
+            return out
+
         return {
             "messages": [
                 {
                     "id": str(m.id),
                     "role": m.role.value,
-                    "content": m.content,
-                    "thinking": m.thinking,
+                    "content": _trunc(m.content, _CONTENT_CAP),
+                    "thinking": _trunc(m.thinking, _CONTENT_CAP // 2)
+                    if m.thinking
+                    else m.thinking,
                     "tool_calls": m.tool_calls,
-                    "tool_results": m.tool_results,
+                    "tool_results": _trunc_tool_results(m.tool_results),
                     "model": m.model,
                     "agent": m.agent,
                     "tokens": m.tokens,
@@ -684,6 +713,23 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
     async def stream_message(session_id: str, req: SendMessageRequest):
         if runtime is None:
             raise HTTPException(503, "Runtime not available")
+
+        # Serialize same-session streams (multi-tab / double-submit safety).
+        # Multi-session parallelism remains allowed.
+        is_busy = False
+        with contextlib.suppress(Exception):
+            if hasattr(runtime, "is_session_streaming"):
+                is_busy = bool(runtime.is_session_streaming(session_id))
+            else:
+                from remedy.core.turn_context import is_session_streaming
+
+                is_busy = is_session_streaming(session_id)
+        if is_busy:
+            raise HTTPException(
+                409,
+                "Session already has a generation in progress. "
+                "Stop the current turn first, then send again.",
+            )
 
         request_id = str(uuid4())
         att_dicts = [a.model_dump() for a in (req.attachments or [])]

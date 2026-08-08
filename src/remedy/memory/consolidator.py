@@ -84,6 +84,17 @@ class MemoryConsolidator:
         )
         saved = await self.store.upsert(consolidated)
 
+        # Demote sources after successful consolidate (stop unbounded growth).
+        for e in session_entries:
+            try:
+                e.importance = min(float(e.importance or 0.5), 0.25)
+                e.metadata = dict(e.metadata or {})
+                e.metadata["consolidated_into"] = str(saved.id)
+                e.metadata["demoted"] = True
+                await self.store.upsert(e)
+            except Exception:
+                pass
+
         # Partner Memory: distill preference-like highlights from session text
         try:
             blob = "\n".join(
@@ -97,22 +108,31 @@ class MemoryConsolidator:
 
     async def boost_importance(self, threshold: int = 3) -> int:
         """Boost importance on entries referenced multiple times."""
-        db = self.store._ensure_db()
-        rows = db.execute(
-            "SELECT id, importance FROM memory_entries "
-            "WHERE json_extract(metadata, '$.reference_count') >= ?",
-            (threshold,),
-        ).fetchall()
-        count = 0
-        for row in rows:
-            new_imp = min(1.0, row["importance"] + 0.15)
-            db.execute(
-                "UPDATE memory_entries SET importance = ? WHERE id = ?",
-                (new_imp, row["id"]),
-            )
-            count += 1
-        db.commit()
-        return count
+        lock = getattr(self.store, "_locked", None)
+        if callable(lock):
+            ctx = lock()
+        else:
+            from contextlib import nullcontext
+
+            ctx = nullcontext()
+        with ctx:
+            db = self.store._ensure_db()
+            rows = db.execute(
+                "SELECT id, importance FROM memory_entries "
+                "WHERE json_extract(metadata, '$.reference_count') >= ?",
+                (threshold,),
+            ).fetchall()
+            count = 0
+            for row in rows:
+                new_imp = min(1.0, row["importance"] + 0.15)
+                db.execute(
+                    "UPDATE memory_entries SET importance = ? WHERE id = ?",
+                    (new_imp, row["id"]),
+                )
+                count += 1
+            if count:
+                db.commit()
+            return count
 
     async def deduplicate(self, similarity_threshold: float = 0.8) -> int:
         """Find and merge near-duplicate entries based on title/content similarity."""
