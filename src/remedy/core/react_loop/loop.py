@@ -45,6 +45,8 @@ from remedy.core.react_policy import (
     strip_tool_markup,
     turn_has_unfinished_work,
 )
+from remedy.core.react_loop.build_request import build_step_request_body
+from remedy.core.react_loop.stream_consume import consume_llm_http_response
 from remedy.core.react_loop.recovery import (
     fatal_model_error_message,
     repeated_provider_error_message,
@@ -818,85 +820,15 @@ async def call_llm_stream(runtime, message: str,
                 # Anthropic currently uses a single JSON response (stream=False).
                 _bind = get_llm_binding(runtime)
                 _adapter = _bind.adapter()
-                # Local auto-optimize uses step index for tool_choice=required
-                with suppress(Exception):
-                    _adapter._local_step_index = int(step)
-                    runtime._local_step_index = int(step)
-                # Early implement steps: write-first tool pack (no bash skip-write)
-                with suppress(Exception):
-                    from remedy.core.local_agent_optimize import (
-                        filter_tools_write_first,
-                        is_local_binding,
-                    )
-
-                    if is_local_binding(
-                        _bind.provider, _bind.model, _bind.base_url
-                    ) and step_tools:
-                        step_tools = filter_tools_write_first(
-                            step_tools,
-                            user_message=str(message or ""),
-                            step_index=int(step),
-                        )
-                headers = _adapter.auth_headers(_bind.api_key)
-                endpoint = _adapter.chat_endpoint(_bind.base_url)
-                use_openai_sse = bool(
-                    getattr(_adapter, "uses_openai_sse", True)
-                )
-                # Local: prefer low thinking — high monologue burns n_ctx + disconnects
-                _think = getattr(runtime, "_thinking_level", "high")
-                with suppress(Exception):
-                    from remedy.core.local_agent_optimize import is_local_binding
-
-                    if is_local_binding(
-                        _bind.provider, _bind.model, _bind.base_url
-                    ):
-                        _think = "low"
-                body = _adapter.build_body(
-                    model=_bind.model,
+                body, headers, endpoint, use_openai_sse = build_step_request_body(
+                    runtime=runtime,
+                    bind=_bind,
+                    adapter=_adapter,
                     messages=messages,
-                    tools=step_tools,
-                    stream=use_openai_sse,
-                    thinking_level=_think,
+                    step_tools=step_tools,
+                    step=int(step),
+                    user_message=str(message or ""),
                 )
-                with suppress(Exception):
-                    from remedy.core.local_agent_optimize import (
-                        apply_local_body_optimize,
-                    )
-
-                    body = apply_local_body_optimize(
-                        body if isinstance(body, dict) else {},
-                        provider=_bind.provider,
-                        model=_bind.model,
-                        base_url=_bind.base_url,
-                        user_message=str(message or ""),
-                        step_index=int(step),
-                    )
-                # Trust boundary: fail closed — never POST unsanitized tool bodies.
-                try:
-                    _local_agent = False
-                    with suppress(Exception):
-                        from remedy.runtime.rmb.mode import is_rmb_provider
-
-                        _local_agent = is_rmb_provider(
-                            _bind.provider, getattr(_bind, "base_url", None)
-                        ) or str(_bind.provider or "").lower() in (
-                            "ollama",
-                            "llamacpp",
-                        )
-                    body = sanitize_chat_body(
-                        body if isinstance(body, dict) else {},
-                        local_agent=_local_agent,
-                    )
-                except Exception as sanitize_exc:
-                    logger.error(
-                        "provider sanitize failed (aborting LLM call): %s",
-                        sanitize_exc,
-                    )
-                    raise RuntimeError(
-                        "Refusing to send chat to provider: sanitization failed. "
-                        "Retry the turn; if it persists, check tool results for "
-                        "unexpected shapes."
-                    ) from sanitize_exc
 
                 collected: dict[str, Any] = {"content": None, "tool_calls": None}
                 round_state = StreamRoundState()
@@ -1256,142 +1188,19 @@ async def call_llm_stream(runtime, message: str,
                     # Buffer when tools are enabled — DeepSeek-class models
                     # often dump DSML tool markup as content if we stream live.
                     stream_live = step_tools is None
-
-                    headers_map = getattr(resp, "headers", None) or {}
-                    content_type = str(
-                        headers_map.get("Content-Type")
-                        or headers_map.get("content-type")
-                        or ""
-                    ).lower()
-                    # Prefer real response type; DeepSeek/OpenRouter return event-stream.
-                    # Local/RMB tool rounds force stream=False — parse as JSON message
-                    # (apply_openai_sse_chunk only reads delta, not message).
-                    from remedy.core.react_stream import want_sse_stream_parse
-
-                    if want_sse_stream_parse(
-                        body if isinstance(body, dict) else None,
+                    async for _tok, _user_flag in consume_llm_http_response(
+                        resp,
+                        round_state=round_state,
+                        collected=collected,
+                        adapter=_adapter,
+                        bind=_bind,
+                        body=body if isinstance(body, dict) else None,
                         use_openai_sse=use_openai_sse,
-                        content_type=content_type,
+                        stream_live=stream_live,
                     ):
-                        content_iter = resp.content.__aiter__()
-                        # DeepSeek can pause a while mid-thought, but multi-minute
-                        # dead air usually means a stuck provider — cut the round
-                        # so the turn can recover (nudge / finish) instead of
-                        # looking frozen for 15 minutes. Override with
-                        # REMEDY_SSE_IDLE_SECONDS if needed.
-                        import os as _os
-
-                        try:
-                            sse_idle_timeout = float(
-                                _os.environ.get("REMEDY_SSE_IDLE_SECONDS", "180")
-                            )
-                        except ValueError:
-                            sse_idle_timeout = 180.0
-                        sse_idle_timeout = max(60.0, min(sse_idle_timeout, 900.0))
-                        while True:
-                            try:
-                                line = await asyncio.wait_for(
-                                    content_iter.__anext__(),
-                                    timeout=sse_idle_timeout,
-                                )
-                            except StopAsyncIteration:
-                                break
-                            except TimeoutError:
-                                logger.warning(
-                                    "SSE stream idle >%.0fs; ending this model round "
-                                    "(provider likely stuck; will continue/promote reasoning if any)",
-                                    sse_idle_timeout,
-                                )
-                                # Surface a short note so the UI is not silent.
-                                with suppress(Exception):
-                                    if (
-                                        not round_state.content_parts
-                                        and not round_state.reasoning_parts
-                                    ):
-                                        yield (
-                                            "\n\n_(Provider stream idle — "
-                                            "ending this model round.)_\n"
-                                        )
-                                break
-                            line_text = line.decode("utf-8").strip()
-                            if line_text == "data: [DONE]":
-                                break
-                            chunk = parse_sse_data_line(line_text)
-                            if chunk is None:
-                                continue
-                            # Provider usage — keep *last* snapshot per HTTP stream.
-                            # (Do not ledger on every intermediate SSE chunk.)
-                            try:
-                                from remedy.core.usage import usage_from_provider_payload
-
-                                u = usage_from_provider_payload(
-                                    chunk,
-                                    model=_bind.model,
-                                    provider=_bind.provider,
-                                )
-                                if u:
-                                    # Prefer later snapshot if multiple chunks carry usage.
-                                    prev = round_state.last_usage
-                                    if prev and prev.get("source") == "provider":
-                                        from remedy.core.usage import merge_usage
-
-                                        round_state.last_usage = merge_usage(prev, u)
-                                    else:
-                                        round_state.last_usage = u
-                            except Exception:
-                                pass
-                            r_before = len(''.join(round_state.reasoning_parts))
-                            live = apply_openai_sse_chunk(
-                                round_state, chunk, stream_live=stream_live
-                            )
-                            r_after = ''.join(round_state.reasoning_parts)
-                            if len(r_after) > r_before:
-                                yield f'@@thinking:{r_after[r_before:]}'
-                            if live:
-                                produced_user_text = True
-                                yield live
-                    else:
-                        data = await resp.json()
-                        try:
-                            from remedy.core.usage import usage_from_provider_payload
-
-                            u = usage_from_provider_payload(
-                                data,
-                                model=_bind.model,
-                                provider=_bind.provider,
-                            )
-                            if u:
-                                round_state.last_usage = u
-                        except Exception:
-                            pass
-                        # Non-stream JSON: prefer message.tool_calls path (not SSE deltas).
-                        from remedy.core.react_stream import (
-                            apply_openai_completion_message,
-                        )
-
-                        apply_openai_completion_message(
-                            round_state, data, stream_live=stream_live
-                        )
-                        # Keep adapter extract for provider-specific shapes + collected.
-                        parsed = _adapter.extract_response(data)
-                        if not round_state.content_parts and parsed.get("content"):
-                            round_state.content_parts.append(parsed["content"])
-                        reason = (
-                            parsed.get("reasoning_content")
-                            or parsed.get("reasoning")
-                            or ""
-                        )
-                        if (
-                            isinstance(reason, str)
-                            and reason.strip()
-                            and not round_state.reasoning_parts
-                        ):
-                            round_state.reasoning_parts.append(reason.strip())
-                        if not round_state.tool_call_acc and parsed.get("tool_calls"):
-                            raw_tcs = parsed.get("tool_calls")
-                            if isinstance(raw_tcs, list):
-                                round_state.tool_call_acc = dict(enumerate(raw_tcs))
-                        collected = {**collected, **parsed}
+                        if _user_flag:
+                            produced_user_text = True
+                        yield _tok
 
                     content_parts = round_state.content_parts
                     reasoning_parts = round_state.reasoning_parts

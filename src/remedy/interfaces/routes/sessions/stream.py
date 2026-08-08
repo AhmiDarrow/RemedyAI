@@ -101,51 +101,11 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
         if memory:
             from remedy.models import ChatMessage, ChatSession
 
-            def _looks_like_path_title(text: str) -> bool:
-                t = (text or "").strip()
-                if not t:
-                    return False
-                if re.match(r"^[A-Za-z]:[\\/]", t):
-                    return True
-                if t.startswith("\\\\") or t.startswith("/Users/") or t.startswith("/home/"):
-                    return True
-                if "\\" in t and re.search(
-                    r"\.(png|jpe?g|gif|webp|bmp|heic|pdf|docx?)$", t, re.I
-                ):
-                    return True
-                return bool(re.match(r"^Screenshot\b", t, re.I) and re.search(r"\.(png|jpe?g|gif|webp)$", t, re.I))
-
-            def _title_from_attachment_name(name: str, *, max_len: int = 52) -> str:
-                raw = (name or "").strip().replace("/", "\\")
-                if not raw:
-                    return "Attachment"
-                base = raw.rsplit("\\", 1)[-1]
-                pretty = re.sub(
-                    r"\.(png|jpe?g|gif|webp|bmp|heic)$", "", base, flags=re.I
-                )
-                t = re.sub(r"[_-]+", " ", pretty)
-                t = " ".join(t.split()).strip() or "Image"
-                if re.match(r"^Screenshot\b", t, re.I):
-                    t = re.sub(r"\s+\d{4}.*$", "", t).strip() or "Screenshot"
-                if len(t) > max_len:
-                    t = t[: max_len - 1].rstrip() + "…"
-                return t
-
-            def _title_from_prompt(text: str, *, max_len: int = 52) -> str:
-                t = " ".join((text or "").strip().split())
-                if not t:
-                    return "New Session"
-                # Drop attachment display blocks from title.
-                if "📎" in t:
-                    t = t.split("📎", 1)[0].strip() or t
-                if t.startswith("(") and "see attached" in t.lower():
-                    name = (att_dicts[0].get("name") if att_dicts else "") or "Attachments"
-                    t = _title_from_attachment_name(str(name), max_len=max_len)
-                elif _looks_like_path_title(t):
-                    t = _title_from_attachment_name(t, max_len=max_len)
-                if len(t) > max_len:
-                    t = t[: max_len - 1].rstrip() + "…"
-                return t or "New Session"
+            from remedy.interfaces.routes.sessions.titles import (
+                looks_like_path_title as _looks_like_path_title,
+                title_from_attachment_name as _title_from_attachment_name,
+                title_from_prompt as _title_from_prompt,
+            )
 
             from remedy.core.session_llm import (
                 resolve_session_llm_bind,
@@ -166,7 +126,7 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                 )
                 await memory.create_chat_session(ChatSession(
                     id=session_id,
-                    title=_title_from_prompt(str(title_src)),
+                    title=_title_from_prompt(str(title_src), att_dicts=att_dicts),
                     model=fields.get("model") or req.model,
                     llm_provider=fields.get("llm_provider"),
                     agent=req.agent,
@@ -196,7 +156,8 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                         user_text
                         or str(
                             att_dicts[0].get("name") if att_dicts else "Attachments"
-                        )
+                        ),
+                        att_dicts=att_dicts,
                     )
                     # Prefer real user text over another path-ish attachment name
                     if user_text.strip() and not _looks_like_path_title(new_title):
@@ -557,74 +518,6 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                 default_registry.histogram(
                     "remedy_chat_duration_seconds", path="session_stream"
                 ).observe(time.perf_counter() - t0)
-
-        return StreamingResponse(
-            event_stream(),
-            media_type="text/event-stream",
-            headers=sse_headers(),
-        )
-
-    # -- legacy chat stream (maintained for backward compatibility) ----------
-    @app.post("/api/chat/stream")
-    async def chat_stream(req: ChatRequest):
-        if runtime is None:
-            raise HTTPException(503, "Runtime not available")
-
-        request_id = str(uuid4())
-        session_id = req.session_id or str(uuid4())
-
-        async def event_stream():
-            from remedy.core.metrics import default_registry
-
-            t0 = time.perf_counter()
-            status = "ok"
-            yield (
-                f"event: start\ndata: {json.dumps({'type': 'start', 'request_id': request_id, 'session_id': session_id})}\n\n"
-            )
-
-            try:
-                # Honor per-session LLM (same as /messages/stream).
-                sess_provider = None
-                sess_model = getattr(req, "model", None)
-                if memory is not None:
-                    with contextlib.suppress(Exception):
-                        ex = await memory.get_chat_session(session_id)
-                        if ex is not None:
-                            sess_provider = getattr(ex, "llm_provider", None)
-                            if not sess_model:
-                                sess_model = getattr(ex, "model", None)
-                _sync_runtime_llm_from_config(
-                    runtime,
-                    model_override=sess_model,
-                    provider_override=sess_provider,
-                    llm_only=True,
-                )
-                async for token in runtime.stream_response(
-                    req.message,
-                    session_id=session_id,
-                    model=sess_model,
-                    provider=sess_provider,
-                ):
-                    yield await _sse_stream_text(token, event="token")
-            except Exception as e:
-                status = "error"
-                try:
-                    from remedy.core.metabolism.redact import redact_text
-
-                    safe_msg = redact_text(str(e))[:800]
-                except Exception:
-                    safe_msg = "Stream error (details redacted)"
-                if not safe_msg.strip():
-                    safe_msg = "Stream error"
-                yield f"event: error\ndata: {json.dumps({'type': 'error', 'message': safe_msg})}\n\n"
-
-            yield f"event: done\ndata: {json.dumps({'type': 'done', 'request_id': request_id})}\n\n"
-            default_registry.counter(
-                "remedy_chat_requests_total", path="chat_stream", status=status
-            ).inc()
-            default_registry.histogram(
-                "remedy_chat_duration_seconds", path="chat_stream"
-            ).observe(time.perf_counter() - t0)
 
         return StreamingResponse(
             event_stream(),
