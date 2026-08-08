@@ -243,37 +243,12 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const composerRootRef = useRef<HTMLDivElement>(null)
   const suggestTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const submittingRef = useRef(false)
-  const dragDepth = useRef(0)
-  const dragClearTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const attachmentsRef = useRef<AttachmentMeta[]>([])
-  attachmentsRef.current = attachments
-
-  const clearDragOver = useCallback(() => {
-    dragDepth.current = 0
-    setDragOver(false)
-    if (dragClearTimer.current) {
-      clearTimeout(dragClearTimer.current)
-      dragClearTimer.current = null
-    }
-  }, [])
-
-  const armDragOver = useCallback(() => {
-    setDragOver(true)
-    // Safety: OS/WebView often skip dragleave → overlay stuck after drop/cancel.
-    if (dragClearTimer.current) clearTimeout(dragClearTimer.current)
-    dragClearTimer.current = setTimeout(() => {
-      dragDepth.current = 0
-      setDragOver(false)
-      dragClearTimer.current = null
-    }, 2500)
-  }, [])
   /**
    * In-flight keys only (name|size) while a drop/pick is uploading.
    * Prevents poll + ready event double-fire from creating 2 chips — NOT a permanent
    * blocklist. Cleared when upload finishes or the chip is removed so the same
    * file can always be re-attached.
    */
-  const inflightDropKeysRef = useRef<Set<string>>(new Set())
   /** Last applied edit key — re-apply when parent issues a new edit, including remount. */
   const lastEditKeyRef = useRef<number | null>(null)
   /** Shell-style prompt history: newest first in storage; index navigates with ↑/↓. */
@@ -295,15 +270,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     const size = Number(r.size ?? 0)
     return { filename, content_type, data_base64, size }
   }
-
-  const flashAttached = useCallback((n: number) => {
-    if (n <= 0) return
-    setAttachNotice(n === 1 ? '1 file attached to this message' : `${n} files attached to this message`)
-    window.setTimeout(() => setAttachNotice(''), 2500)
-    requestAnimationFrame(() => {
-      attachRailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-    })
-  }, [])
 
   // Load full original prompt into the bar when the user clicks Edit.
   // Parent keeps editDraft until send/session change so remounts don't blank it.
@@ -382,6 +348,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const {
     attachments,
     setAttachments,
+    attachmentsRef,
     dragOver,
     setDragOver,
     uploading,
@@ -390,51 +357,17 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     setUploadError,
     attachNotice,
     setAttachNotice,
+    addFiles,
+    addNativePayloads,
+    removeAttachment,
+    clearDragOver,
+    armDragOver,
+    dragDepth,
+    flashAttached,
   } = useComposerAttachments({
     ensureSessionId: resolveSession,
+    disabled,
   })
-
-  const addFiles = useCallback(
-    async (files: FileList | File[]) => {
-      const list = Array.from(files).filter(Boolean)
-      // Markup attach from image viewer is allowed while streaming (queued send).
-      if (!list.length || disabled) return
-
-      setUploadError('')
-      setAttachNotice('')
-      const sid = await resolveSession()
-      if (!sid) {
-        setUploadError('Could not create a session for the upload.')
-        return
-      }
-
-      const room = MAX_FILES - attachmentsRef.current.length
-      if (room <= 0) {
-        setUploadError(`Max ${MAX_FILES} attachments per message.`)
-        return
-      }
-
-      setUploading(true)
-      try {
-        const next: AttachmentMeta[] = []
-        for (const file of list.slice(0, room)) {
-          try {
-            const meta = await uploadAttachment(sid, file)
-            next.push(meta)
-          } catch (e: unknown) {
-            setUploadError(e instanceof Error ? e.message : 'Upload failed')
-          }
-        }
-        if (next.length) {
-          setAttachments((prev) => [...prev, ...next])
-          flashAttached(next.length)
-        }
-      } finally {
-        setUploading(false)
-      }
-    },
-    [disabled, resolveSession, flashAttached],
-  )
 
   useImperativeHandle(
     ref,
@@ -443,118 +376,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       focus: () => textareaRef.current?.focus(),
     }),
     [addFiles],
-  )
-
-  /**
-   * Native drop payloads → chips + upload (same as 📎).
-   * Dedupes poll + event + path fallback so one drop ≠ three chips.
-   */
-  const addNativePayloads = useCallback(
-    async (payloads: DroppedFilePayload[]) => {
-      // Attachments may be staged while a turn is streaming (queued with next send).
-      if (!payloads.length || disabled) return
-
-      const normalized = payloads.map(normalizePayload).filter((p) => p.data_base64)
-
-      // Skip only if already on the rail or mid-upload (poll + ready double-fire).
-      // Removing a chip always allows re-attach of the same file.
-      const unique = normalized.filter((p) => {
-        const key = nameSizeKey(p.filename, p.size)
-        if (inflightDropKeysRef.current.has(key)) return false
-        const already = attachmentsRef.current.some(
-          (a) => nameSizeKey(a.name, a.size) === key,
-        )
-        return !already
-      })
-      if (!unique.length) {
-        // Only show hint when user is not mid double-fire with chips already present.
-        const onRail = normalized.some((p) =>
-          attachmentsRef.current.some(
-            (a) => nameSizeKey(a.name, a.size) === nameSizeKey(p.filename, p.size),
-          ),
-        )
-        if (onRail) {
-          setUploadError('Already on this message — remove the chip to re-attach the same file.')
-          window.setTimeout(() => setUploadError(''), 3500)
-        }
-        return
-      }
-
-      setUploadError('')
-      setAttachNotice('')
-      clearDragOver()
-
-      const room = MAX_FILES - attachmentsRef.current.length
-      if (room <= 0) {
-        setUploadError(`Max ${MAX_FILES} attachments per message.`)
-        return
-      }
-      const batch = unique.slice(0, room)
-      const batchKeys = batch.map((p) => nameSizeKey(p.filename, p.size))
-      for (const k of batchKeys) inflightDropKeysRef.current.add(k)
-
-      // Instant UI chips (before server round-trip).
-      const optimistic = batch.map(pendingMetaFromPayload)
-      setAttachments((prev) => [...prev, ...optimistic])
-      flashAttached(batch.length)
-      setUploading(true)
-
-      const releaseInflight = () => {
-        for (const k of batchKeys) inflightDropKeysRef.current.delete(k)
-      }
-
-      const sid = await resolveSession()
-      if (!sid) {
-        setUploadError('Could not create a session for the upload.')
-        releaseInflight()
-        setAttachments((prev) =>
-          prev.filter((a) => !a.id.startsWith('pending-') || !batch.some((b) => b.filename === a.name)),
-        )
-        setUploading(false)
-        return
-      }
-
-      try {
-        const uploaded: AttachmentMeta[] = []
-        for (const p of batch) {
-          try {
-            uploaded.push(await uploadDroppedPayload(sid, p))
-          } catch (e: unknown) {
-            setUploadError(e instanceof Error ? e.message : 'Upload failed')
-          }
-        }
-        if (uploaded.length) {
-          setAttachments((prev) => {
-            // Remove only the optimistic chips for this batch, keep others.
-            const pendingNames = new Set(batch.map((b) => b.filename))
-            const withoutOptimistic = prev.filter(
-              (a) => !(a.id.startsWith('pending-') && pendingNames.has(a.name)),
-            )
-            // Also drop accidental duplicates of the same name+size from races.
-            const merged = [...withoutOptimistic, ...uploaded]
-            const seen = new Set<string>()
-            return merged.filter((a) => {
-              const k = nameSizeKey(a.name, a.size)
-              if (seen.has(k)) return false
-              seen.add(k)
-              return true
-            })
-          })
-        } else {
-          const pendingNames = new Set(batch.map((b) => b.filename))
-          setAttachments((prev) =>
-            prev.filter(
-              (a) => !(a.id.startsWith('pending-') && pendingNames.has(a.name)),
-            ),
-          )
-          setUploadError((prev) => prev || 'Upload failed — files not stored for the agent.')
-        }
-      } finally {
-        releaseInflight()
-        setUploading(false)
-      }
-    },
-    [disabled, resolveSession, flashAttached, clearDragOver],
   )
 
   // Primary: poll Rust pending queue. Secondary: events only for drag highlight.
@@ -666,18 +487,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     }
   }, [queue, editingQueueId])
 
-  const removeAttachment = useCallback((idx: number) => {
-    setAttachments((prev) => {
-      const copy = [...prev]
-      const [gone] = copy.splice(idx, 1)
-      if (gone) {
-        // Free in-flight lock so the same file can be re-attached immediately.
-        inflightDropKeysRef.current.delete(nameSizeKey(gone.name, gone.size))
-      }
-      if (gone?.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(gone.previewUrl)
-      return copy
-    })
-  }, [])
 
   const applyHistoryEntry = useCallback((text: string) => {
     setInput(text)
