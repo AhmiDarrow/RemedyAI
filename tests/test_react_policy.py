@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 from remedy.core.react_policy import (
-    _DEFAULT_SYSTEM_PROMPT,
+    _DEFAULT_SYSTEM_BODY,
     AGENCY_REARM_NUDGE,
     RECOVERY_NUDGE,
     SPEED_BATCH_NUDGE,
@@ -393,9 +393,9 @@ def test_tool_call_fingerprint_stable() -> None:
 
 
 def test_system_prompt_has_recovery_contract() -> None:
-    assert "Recovery" in _DEFAULT_SYSTEM_PROMPT
-    assert "list_dir" in _DEFAULT_SYSTEM_PROMPT
-    assert "Suggestion" in _DEFAULT_SYSTEM_PROMPT
+    assert "Recovery" in _DEFAULT_SYSTEM_BODY
+    assert "list_dir" in _DEFAULT_SYSTEM_BODY
+    assert "Suggestion" in _DEFAULT_SYSTEM_BODY
 
 
 def test_tool_content_is_error_variants() -> None:

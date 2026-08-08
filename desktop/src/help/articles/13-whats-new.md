@@ -2,11 +2,29 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current series: **v0.20.0**.
+Current series: **v0.21.1**.
 
 ## Contents
 
-- [0.20.0](#0200---partner-metabolism--always-ready) · [0.19.0](#0190---parallel-multi-provider--background-turns) · [0.18.6](#0186---os-chrome--browser-embed) · older below
+- [0.21.1](#0211---continuity--self-inject-safety) · [0.20.0](#0200---partner-metabolism--always-ready) · [0.19.0](#0190---parallel-multi-provider--background-turns) · [0.18.6](#0186---os-chrome--browser-embed) · older below
+
+## 0.21.1 - Continuity + self-inject safety
+
+One continuous partner across tabs and providers — stronger isolation and safer
+self-improvement. Full detail: `CHANGELOG.md` · PyPI **`remedy-ai==0.21.1`** ·
+GitHub tag **v0.21.1**.
+
+- **Soul Field (experimental)** — providers are muscle; local soul carries
+  identity, relationship residue, and open episodes so Remedy feels continuous
+  across models (`docs/SOUL_FIELD.md`).
+- **Turn-local continuity** — Session Brief, Partner State, and work roots freeze
+  per stream so multi-tab work cannot cross-wire mid-turn.
+- **Self-inject rollback** — restores the pre-round git snapshot (keeps unrelated
+  dirty tracked files); only round-created untracked debris is removed.
+- **Shell privilege nest** — `bash -c` / `pwsh -Command` payloads hard-block
+  `reg` / `net user` / `schtasks /create` and kin.
+- **Webhooks** — generic `X-Remedy-Webhook-Secret` works with Bearer middleware;
+  Google Chat challenge skip is verification-shaped only.
 
 ## 0.20.0 - Partner metabolism + always-ready
 

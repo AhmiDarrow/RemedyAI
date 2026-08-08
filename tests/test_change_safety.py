@@ -14,12 +14,18 @@ def test_snippet_mentions_skill_and_smoke():
 
 
 def test_tool_policy_includes_change_safety():
+    # "implement" routes to the build pack (also change-safety tagged)
     pack = policy_for_intent("chat", user_text="please implement a fix for login")
-    assert pack["id"] == "tool"
+    assert pack["id"] == "build"
     assert pack.get("change_safety") is True
     block = format_policy_block(pack)
     assert "Change-safety" in block or "change-safety" in block
-    assert "skill_activate" in block
+    # Tool pack still tagged for fix/debug wording
+    tool = policy_for_intent("chat", user_text="please fix the login bug")
+    assert tool["id"] == "tool"
+    assert tool.get("change_safety") is True
+    tool_block = format_policy_block(tool)
+    assert "skill_activate" in tool_block
 
 
 def test_autonomous_policy_includes_change_safety():
