@@ -33,5 +33,29 @@ export default defineConfig(({ mode }) => {
         '/api': apiOrigin,
       },
     },
+    build: {
+      // First-paint split: heavy editors / terminal stay out of the main chat chunk.
+      rolldownOptions: {
+        output: {
+          codeSplitting: {
+            groups: [
+              {
+                name: 'codemirror',
+                test: /node_modules[\\/](@codemirror|@uiw[\\/]react-codemirror)/,
+              },
+              {
+                name: 'markdown',
+                test: /node_modules[\\/](react-markdown|remark-gfm|rehype-highlight|highlight\.js)/,
+              },
+              {
+                name: 'xterm',
+                test: /node_modules[\\/]@xterm/,
+              },
+            ],
+          },
+        },
+      },
+      chunkSizeWarningLimit: 800,
+    },
   }
 })
