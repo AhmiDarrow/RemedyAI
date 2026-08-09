@@ -16,8 +16,8 @@ _MUTATE_TOOLS = frozenset({"file_write", "file_edit"})
 
 def _discover_c_verify_command(root: Any) -> str:
     """gcc compile+run for a simple C project (hello.c / main.c / single .c)."""
-    from pathlib import Path
     import os
+    from pathlib import Path
 
     p = Path(root)
     if not p.is_dir():
@@ -376,14 +376,10 @@ def should_auto_verify(state: Any) -> bool:
     if auto_ran:
         # Re-run only after *source* mutations post-green or red repair growth
         if source_pending and not green_ok:
-            if writes > last_green_ws or writes > verifies:
-                return True
-            return False
+            return bool(writes > last_green_ws or writes > verifies)
         if source_pending and green_ok:
             # New source after green → re-verify once
-            if writes > last_green_ws:
-                return True
-            return False
+            return writes > last_green_ws
         if write_set and not green_ok:
             if "auto_verify_repair" in getattr(state, "nudges_emitted", []):
                 if writes > verifies:
@@ -406,9 +402,7 @@ def should_auto_verify(state: Any) -> bool:
     if writes >= 1 and not getattr(state, "verify_command", None):
         return True
     # C write present and never verified this turn
-    if has_c and writes >= 1 and verifies == 0:
-        return True
-    return False
+    return bool(has_c and writes >= 1 and verifies == 0)
 
 
 def format_auto_verify_message(

@@ -17,7 +17,7 @@ if "SettingsSections_provider" in text:
         ["git", "show", "HEAD:desktop/src/components/settings/FormSections.tsx"],
         cwd=root.parents[3],
     )
-    # parents: settings -> components -> src -> desktop -> Old-Remedy? 
+    # parents: settings -> components -> src -> desktop -> Old-Remedy?
     # root = .../desktop/src/components/settings
     # parents[0]=components [1]=src [2]=desktop [3]=Old-Remedy
     text = raw.decode("utf-8")

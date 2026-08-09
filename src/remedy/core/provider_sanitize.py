@@ -704,7 +704,7 @@ def sanitize_chat_body(
     """
     out = dict(body)
     cap = tool_content_max
-    if cap is None and local_agent and not (privacy is True):
+    if cap is None and local_agent and privacy is not True:
         cap = TOOL_CONTENT_MAX_LOCAL
     if "messages" in out:
         out["messages"] = sanitize_messages_for_provider(

@@ -19,10 +19,7 @@ def materialize_tdd_tests(
 ) -> dict[str, Any]:
     """Write unit test stubs to disk (expected RED until implement)."""
     try:
-        if root is None:
-            root = Path(runtime.effective_project_path())
-        else:
-            root = Path(root)
+        root = Path(runtime.effective_project_path()) if root is None else Path(root)
         if root.is_file():
             root = root.parent
     except Exception as e:
@@ -103,7 +100,6 @@ def tdd_bootstrap(
     from remedy.core.build_spec_compiler import (
         compile_goal_to_spec,
         save_locked_spec,
-        units_from_public,
     )
 
     try:

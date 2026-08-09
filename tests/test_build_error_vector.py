@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from remedy.core.build_engine import (
     BuildTurnState,
     build_blocks_final_answer,

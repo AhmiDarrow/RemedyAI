@@ -31,14 +31,12 @@ import type { ThemeId } from '../themes'
 import type { UpdateInfo } from '../api/updates'
 import type { ModelInfo } from '../App'
 import type { Density } from '../utils/chatPrefs'
-import type { SettingsMode } from '../utils/settingsMode'
 import {
   normalizeToolProcess,
 
   type ToolProcessMode,
 } from '../utils/toolLabels'
 import { demoModelOptions } from '../utils/demoModels'
-import type { SettingsSectionId } from '../utils/settingsSearch'
 import { PERSONAS, pickProjectFolder } from './settings/shared'
 import { SettingsFormSections } from './settings/FormSections'
 import {
@@ -179,15 +177,10 @@ export function SettingsPanel({
   const {
     settingsSearch,
     setSettingsSearch,
-    forceSection,
-    setForceSection,
     visionSectionOpen,
-    setVisionSectionOpen,
     rmbSectionOpen,
-    setRmbSectionOpen,
     settingsMode,
     setSettingsMode,
-    matchSec,
     sectionProps,
     onPanelOpenChange,
   } = useSettingsPanelState()

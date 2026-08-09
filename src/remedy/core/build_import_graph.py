@@ -44,10 +44,7 @@ def _path_to_mod(rel: str) -> str | None:
     rel = rel.replace("\\", "/").strip("/")
     if not rel.endswith(".py"):
         return None
-    if rel.endswith("/__init__.py"):
-        rel = rel[: -len("/__init__.py")]
-    else:
-        rel = rel[: -len(".py")]
+    rel = rel[:-len("/__init__.py")] if rel.endswith("/__init__.py") else rel[:-len(".py")]
     parts = [p for p in rel.split("/") if p and p != "."]
     if parts and parts[0] == "src":
         parts = parts[1:]

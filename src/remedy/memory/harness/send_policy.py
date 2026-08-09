@@ -134,10 +134,7 @@ def _safe_insert_before_last(
     content: str | dict[str, Any],
 ) -> None:
     """Insert a system (or raw) message before the final turn; never IndexError."""
-    if isinstance(content, dict):
-        msg = content
-    else:
-        msg = {"role": "system", "content": str(content)}
+    msg = content if isinstance(content, dict) else {"role": "system", "content": str(content)}
     if len(messages) >= 2:
         messages.insert(-1, msg)
     elif messages:

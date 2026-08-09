@@ -47,7 +47,6 @@ def test_sticky_path_ignored_when_size_mismatches(tmp_path):
         "model_path": str(seven),
     }
     # Point models_dir via REMEDY_HOME layout used by config
-    monkey_home = tmp_path
     # service models_dir uses rmb_home(home_dir)/models
     from remedy.runtime.rmb import config as rmb_config
 
@@ -64,9 +63,9 @@ def test_sticky_path_ignored_when_size_mismatches(tmp_path):
 def test_apply_model_id_clears_sticky_and_reresolves(tmp_path, monkeypatch):
     monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
     home = str(tmp_path)
-    models = Path(home) / "rmb" / "models"
+    Path(home) / "rmb" / "models"
     # rmb_home may be under REMEDY_HOME or ~/.remedy — write into both resolve roots
-    from remedy.runtime.rmb.config import models_dir, rmb_home
+    from remedy.runtime.rmb.config import models_dir
 
     md = models_dir(home)
     md.mkdir(parents=True, exist_ok=True)
@@ -111,7 +110,7 @@ def test_apply_model_id_clears_sticky_and_reresolves(tmp_path, monkeypatch):
         lambda **k: {"ok": True},
     )
 
-    out = apply_rmb_settings(
+    apply_rmb_settings(
         {"model_id": "qwen25-coder-14b", "enabled": True},
         home_dir=home,
         live=True,

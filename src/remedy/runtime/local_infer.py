@@ -240,7 +240,7 @@ def ensure_handlers_registered() -> None:
             confidence = _ensemble_confidence(result)
             if confidence < 0.70 and result.get("ok"):
                 logger.debug("Low confidence (%.2f) on LIGHT tier, escalating", confidence)
-                from remedy.runtime.mdl import route_task, escalate_routing
+                from remedy.runtime.mdl import escalate_routing, route_task
 
                 routing = route_task("nano_classify", prompt)
                 escalated = escalate_routing(routing)

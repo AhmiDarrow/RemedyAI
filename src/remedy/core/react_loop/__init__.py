@@ -13,12 +13,14 @@ from remedy.core.react_loop.binding import (
     rearm_agency_tools,
     resolve_and_apply_tools,
 )
+from remedy.core.react_loop.build_request import build_step_request_body
 from remedy.core.react_loop.errors import (
     is_fatal_llm_api_error,
+)
+from remedy.core.react_loop.errors import (
     is_fatal_llm_api_error as _is_fatal_llm_api_error,
 )
 from remedy.core.react_loop.loop import call_llm_stream
-from remedy.core.react_loop.build_request import build_step_request_body
 from remedy.core.react_loop.recovery import (
     fatal_model_error_message,
     repeated_provider_error_message,

@@ -278,9 +278,10 @@ def _memory_key_material(cfg: dict[str, Any] | None = None) -> str:
         key_path.parent.mkdir(parents=True, exist_ok=True)
         # Best-effort DPAPI envelope for the key file on Windows
         try:
-            from remedy.interfaces.secret_store import _dpapi_available, _dpapi_protect
             import base64
             import json
+
+            from remedy.interfaces.secret_store import _dpapi_available, _dpapi_protect
 
             if _dpapi_available():
                 blob = base64.b64encode(_dpapi_protect(key.encode("utf-8"))).decode("ascii")

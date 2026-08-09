@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from types import SimpleNamespace
 
 from remedy.core.build_import_graph import (
@@ -11,7 +10,6 @@ from remedy.core.build_import_graph import (
     import_cone,
     mutation_score_paths,
     parse_imports_from_source,
-    paths_to_mods,
 )
 from remedy.core.build_live_hop import disk_oracle, live_unit_hop
 from remedy.core.builds.reducer import Signature, UnitSpec

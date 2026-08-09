@@ -15,6 +15,8 @@ each other over time.
 
 from __future__ import annotations
 
+from remedy.memory.soul.continuity_metrics import measure_continuity, primary_self_inject_focus
+from remedy.memory.soul.dream import dream_cycle
 from remedy.memory.soul.field import (
     EpisodeResidue,
     RelationalField,
@@ -22,8 +24,6 @@ from remedy.memory.soul.field import (
     load_soul_field,
     save_soul_field,
 )
-from remedy.memory.soul.continuity_metrics import measure_continuity, primary_self_inject_focus
-from remedy.memory.soul.dream import dream_cycle
 from remedy.memory.soul.inject import build_soul_context_block, provider_muscle_contract
 from remedy.memory.soul.missions_bridge import arm_soul_missions
 from remedy.memory.soul.portable import import_soul_file, soul_export_payload

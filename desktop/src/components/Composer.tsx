@@ -14,8 +14,6 @@ import {
   takePendingFileDrops,
   pickAttachFiles,
   formatBytes,
-  type AttachmentMeta,
-  type DroppedFilePayload,
 } from '../api/attachments'
 import { isTauri } from '../api/tauri'
 import {
@@ -228,9 +226,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     setAttachments,
     attachmentsRef,
     dragOver,
-    setDragOver,
     uploading,
-    setUploading,
     uploadError,
     setUploadError,
     attachNotice,
@@ -241,7 +237,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     clearDragOver,
     armDragOver,
     dragDepth,
-    flashAttached,
     inflightDropKeysRef,
   } = useComposerAttachments({
     ensureSessionId: resolveSession,

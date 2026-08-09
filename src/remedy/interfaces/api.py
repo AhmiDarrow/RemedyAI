@@ -17,6 +17,7 @@ import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
+from typing import Any
 
 import yaml
 from fastapi import (
@@ -285,10 +286,8 @@ def create_app(
             yield
         finally:
             if _self_inject_task is not None:
-                try:
+                with suppress(Exception):
                     _self_inject_task.cancel()
-                except Exception:
-                    pass
             if gateway is not None and getattr(gateway, "running", False):
                 try:
                     await gateway.stop()

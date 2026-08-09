@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from remedy.runtime.mdl import MDL_TIERS, get_tier_base_url, list_tiers
+from remedy.runtime.mdl import MDL_TIERS, get_tier_base_url
 
 logger = logging.getLogger(__name__)
 
@@ -50,8 +50,9 @@ def _port_open(host: str, port: int, timeout: float = 0.15) -> bool:
 
 
 def _health(base_url: str, timeout: float = 0.5) -> bool:
-    from remedy.core.security import is_loopback_service_url, urlopen_no_redirect
     from urllib.request import Request
+
+    from remedy.core.security import is_loopback_service_url, urlopen_no_redirect
 
     base = (base_url or "").rstrip("/")
     if not base or not is_loopback_service_url(base):

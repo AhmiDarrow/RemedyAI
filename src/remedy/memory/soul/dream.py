@@ -16,7 +16,6 @@ from typing import Any
 
 from remedy.memory.soul.field import (
     SoulField,
-    clear_soul_cache,
     load_soul_field,
     looks_like_secret_soul,
     save_soul_field,

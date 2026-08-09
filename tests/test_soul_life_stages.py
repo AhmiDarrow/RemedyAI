@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from remedy.memory.soul.continuity_metrics import measure_continuity, primary_self_inject_focus
 from remedy.memory.soul.dream import reset_dream_cooldown
 from remedy.memory.soul.field import clear_soul_cache, load_soul_field
@@ -104,10 +102,10 @@ def test_identity_payload_includes_soul(tmp_path):
         session_id="id1",
         home=tmp_path,
     )
-    from remedy.core.metabolism.identity_export import collect_default_payload
-
     # Point home so soul is under tmp
     import os
+
+    from remedy.core.metabolism.identity_export import collect_default_payload
 
     os.environ["REMEDY_HOME"] = str(tmp_path)
     try:

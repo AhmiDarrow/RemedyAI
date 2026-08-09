@@ -13,17 +13,18 @@ from remedy.core.react_policy import (
 from remedy.core.react_policy import (
     HARD_SAFETY_CHARS as _HARD_SAFETY_CHARS,
 )
-from remedy.core.security import check_dangerous_command
 from remedy.core.workspace_tools.guards import (
     FULL_WRITE_PREFER_EDIT_BYTES as _FULL_WRITE_PREFER_EDIT_BYTES,
-    TINY_REWRITE_ABS as _TINY_REWRITE_ABS,
-    TINY_REWRITE_RATIO as _TINY_REWRITE_RATIO,
+)
+from remedy.core.workspace_tools.guards import (
     junk_write_guard,
-    normalize_edits_arg as _normalize_edits_arg,
     note_path,
     parent_hint,
     reserved_guard,
     track_read,
+)
+from remedy.core.workspace_tools.guards import (
+    normalize_edits_arg as _normalize_edits_arg,
 )
 
 

@@ -73,7 +73,7 @@ def register_ship_tools(runtime: Any) -> None:
             )
             try:
                 out_b, err_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 with __import__("contextlib").suppress(Exception):
                     proc.kill()
                 return 124, "", f"timeout after {timeout}s"
@@ -115,7 +115,7 @@ def register_ship_tools(runtime: Any) -> None:
             )
             try:
                 out_b, err_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 with __import__("contextlib").suppress(Exception):
                     proc.kill()
                 return 124, "", f"timeout after {timeout}s"

@@ -11,7 +11,6 @@ from remedy.core.local_agent_optimize import (
     looks_like_tutorial_monologue,
     message_wants_implement,
     slim_system_for_local,
-    tutorial_monologue_nudge,
 )
 from remedy.core.react_stream import build_runtime_system_block
 
@@ -110,7 +109,6 @@ def test_apply_local_body_sets_required_tools():
 
 def test_looks_like_tutorial_monologue_from_export():
     """Regression: local Qwen create-app session dumped RPB essays, zero tools."""
-    from remedy.core.local_agent_optimize import looks_like_tutorial_monologue
 
     essay = """
 Ahmi, to create a standalone PDF viewer and editor named RemedyPDF, we need to follow these steps:

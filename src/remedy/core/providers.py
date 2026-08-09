@@ -928,11 +928,11 @@ class RmbProvider(LlamaCppProvider):
     def _local_completion_budget(self, model: str | None = None) -> int:
         """Prefer live RMB ctx_size when known (endless sessions need accurate fill%)."""
         try:
-            from remedy.runtime.rmb.config import load_rmb_json, merge_state
             from remedy.nanoswarm.token_nanobot import (
                 cache_context_window,
                 get_cached_context_window,
             )
+            from remedy.runtime.rmb.config import load_rmb_json, merge_state
 
             st = merge_state(load_rmb_json())
             ctx = int(st.get("ctx_size") or 0)

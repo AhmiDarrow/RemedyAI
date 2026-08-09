@@ -185,9 +185,7 @@ def is_local_model(
     if _model_size_window(m) is not None and p in ("custom", "ollama", "llamacpp", "rmb", "local", ""):
         return True
     family = encoding_family(p, m)
-    if family == "local" and p not in _CLOUD_PROVIDERS:
-        return True
-    return False
+    return bool(family == "local" and p not in _CLOUD_PROVIDERS)
 
 
 def _is_loopback_url(url: str) -> bool:
@@ -329,8 +327,8 @@ def resolve_context_window(
     # Prefer it over size heuristics so harness + endless_context budget correctly.
     if local or p == "rmb":
         try:
-            from remedy.runtime.rmb.mode import is_rmb_provider
             from remedy.runtime.rmb.config import load_rmb_json, merge_state
+            from remedy.runtime.rmb.mode import is_rmb_provider
 
             if p == "rmb" or is_rmb_provider(p, base_url):
                 st = merge_state(load_rmb_json())

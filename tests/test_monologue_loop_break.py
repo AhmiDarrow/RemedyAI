@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from remedy.core.local_agent_optimize import (
-    monologue_fingerprint,
-    text_has_internal_repetition,
     looks_like_intent_monologue,
+    monologue_fingerprint,
     project_listing_snapshot,
+    text_has_internal_repetition,
 )
 
 

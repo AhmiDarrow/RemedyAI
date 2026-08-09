@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
+import argparse
 import asyncio
-import contextlib
 import os
-import time
 from pathlib import Path
-from typing import Any
 
 from rich.panel import Panel
 
@@ -20,6 +18,7 @@ from remedy.interfaces.config import (
 )
 from remedy.interfaces.wizard import ensure_setup_before_launch
 from remedy.memory.store import MemoryStore
+
 
 def _cmd_serve(args) -> None:
     import sys
@@ -35,7 +34,6 @@ def _cmd_serve(args) -> None:
         heartbeat_serve_lock,
         try_acquire_serve_lock,
     )
-    from remedy.memory.store import MemoryStore
 
     home = Path(args.home).expanduser()
     home.mkdir(parents=True, exist_ok=True)
@@ -285,7 +283,6 @@ def _cmd_chat(args) -> None:
 
     from remedy.core.agent import BasicRuntime
     from remedy.gateway.router import Gateway
-    from remedy.memory.store import MemoryStore
     from remedy.models import ChannelKind, EventKind, GatewayEvent
 
     home = Path(args.home).expanduser()

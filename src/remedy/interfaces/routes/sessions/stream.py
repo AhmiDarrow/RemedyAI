@@ -5,32 +5,24 @@ import asyncio
 import contextlib
 import json
 import logging
-import re
 import time
-from pathlib import Path
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 
 from remedy.interfaces.api_models import (
-    AttachmentUploadRequest,
-    BulkSessionProjectRequest,
-    ChatRequest,
-    CreateSessionRequest,
     SendMessageRequest,
-    SessionLlmRequest,
-    UpdateSessionRequest,
-)
-from remedy.interfaces.routes.sessions.stream_tokens import (
-    parse_tool_call_token,
-    sse_event,
 )
 from remedy.interfaces.api_support import (
     _sse_stream_text,
     _sync_runtime_llm_from_config,
     load_config,
     sse_headers,
+)
+from remedy.interfaces.routes.sessions.stream_tokens import (
+    parse_tool_call_token,
+    sse_event,
 )
 from remedy.models import (
     ChatMessageRole,
@@ -103,18 +95,17 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                 )
 
         if memory:
-            from remedy.models import ChatMessage, ChatSession
-
-            from remedy.interfaces.routes.sessions.titles import (
-                looks_like_path_title as _looks_like_path_title,
-                title_from_attachment_name as _title_from_attachment_name,
-                title_from_prompt as _title_from_prompt,
-            )
-
             from remedy.core.session_llm import (
                 resolve_session_llm_bind,
                 session_llm_update_fields,
             )
+            from remedy.interfaces.routes.sessions.titles import (
+                looks_like_path_title as _looks_like_path_title,
+            )
+            from remedy.interfaces.routes.sessions.titles import (
+                title_from_prompt as _title_from_prompt,
+            )
+            from remedy.models import ChatMessage, ChatSession
 
             existing = await memory.get_chat_session(session_id)
             sp, sm = resolve_session_llm_bind(
