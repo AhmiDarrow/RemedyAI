@@ -59,6 +59,8 @@ export function SettingsSections_provider(p: SettingsFormProps): ReactNode {
     setSleevEnabled,
     sleevGatewayUrl = '',
     setSleevGatewayUrl,
+    sleevAllowRemoteGateway = false,
+    setSleevAllowRemoteGateway,
     sleevStatus = null,
   } = p
 
@@ -66,6 +68,16 @@ export function SettingsSections_provider(p: SettingsFormProps): ReactNode {
   const sleevGateway =
     (sleevGatewayUrl || '').trim()
     || String(sleevStatus?.gateway_url || 'http://127.0.0.1:17321')
+  const sleevGatewayLooksRemote = (() => {
+    const u = (sleevGatewayUrl || '').trim().toLowerCase()
+    if (!u) return false
+    try {
+      const host = new URL(u.includes('://') ? u : `http://${u}`).hostname
+      return !['localhost', '127.0.0.1', '0.0.0.0', '::1'].includes(host)
+    } catch {
+      return false
+    }
+  })()
 
   return (
     <>
@@ -246,12 +258,36 @@ export function SettingsSections_provider(p: SettingsFormProps): ReactNode {
               : ''}
           </FormHint>
           {showAdvanced && setSleevGatewayUrl && (
-            <Field
-              label="Sleev gateway URL (optional)"
-              value={sleevGatewayUrl}
-              onChange={setSleevGatewayUrl}
-              placeholder="http://127.0.0.1:17321"
-            />
+            <>
+              <Field
+                label="Sleev gateway URL (optional)"
+                value={sleevGatewayUrl}
+                onChange={setSleevGatewayUrl}
+                placeholder="http://127.0.0.1:17321"
+              />
+              <FormHint>
+                Loopback only by default (127.0.0.1 / localhost). A LAN or remote
+                URL forwards your provider API keys to that host — enable the
+                toggle below only if you trust it.
+              </FormHint>
+              {setSleevAllowRemoteGateway && (
+                <FormToggle
+                  label={
+                    sleevAllowRemoteGateway
+                      ? 'Allow remote Sleev gateway (API keys leave this PC)'
+                      : 'Allow non-loopback Sleev gateway…'
+                  }
+                  checked={Boolean(sleevAllowRemoteGateway)}
+                  onChange={(on) => setSleevAllowRemoteGateway(on)}
+                />
+              )}
+              {sleevGatewayLooksRemote && !sleevAllowRemoteGateway && (
+                <FormNotice>
+                  Gateway host is not loopback. Save will be refused until you
+                  enable “Allow non-loopback Sleev gateway”.
+                </FormNotice>
+              )}
+            </>
           )}
           <FormLinkButton
             accent

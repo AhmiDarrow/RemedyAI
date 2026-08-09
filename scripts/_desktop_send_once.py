@@ -30,8 +30,15 @@ kernel32 = ctypes.windll.kernel32
 
 
 def tok() -> str:
-    p = HOME / "auth" / "local_api_token"
-    return p.read_text(encoding="utf-8").strip() if p.is_file() else ""
+    try:
+        scripts = REPO / "scripts"
+        if str(scripts) not in sys.path:
+            sys.path.insert(0, str(scripts))
+        from lib_local_token import resolve_local_api_token
+
+        return resolve_local_api_token(home=HOME, base=API)
+    except Exception:
+        return ""
 
 
 def api(method: str, path: str, body=None, timeout=30.0):

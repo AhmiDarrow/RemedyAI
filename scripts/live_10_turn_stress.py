@@ -22,7 +22,6 @@ from pathlib import Path
 
 BASE = os.environ.get("REMEDY_API", "http://127.0.0.1:7400").rstrip("/")
 HOME = Path(os.environ.get("REMEDY_HOME", Path.home() / ".remedy")).expanduser()
-TOKEN = (HOME / "auth" / "local_api_token").read_text(encoding="utf-8").strip()
 REPO = Path(__file__).resolve().parents[1]
 TURNS = int(os.environ.get("STRESS_TURNS", "20"))
 
@@ -30,6 +29,9 @@ sys.path.insert(0, str(REPO / "scripts"))
 import contextlib
 
 from lib_host_poller import host_connected, start_host_poller, stop_host_poller  # noqa: E402
+from lib_local_token import resolve_local_api_token  # noqa: E402
+
+TOKEN = resolve_local_api_token(home=HOME, base=BASE)
 
 PASS = FAIL = 0
 LATENCIES: dict[str, list[float]] = {}

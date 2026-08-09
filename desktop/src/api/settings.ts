@@ -56,11 +56,18 @@ export interface Settings {
   sleev_enabled?: boolean
   /** Optional gateway override; empty = auto-discover (127.0.0.1:17321). */
   sleev_gateway_url?: string
+  /**
+   * Owner opt-in: allow non-loopback Sleev gateway (LAN/remote).
+   * Default false — otherwise provider API keys leave this machine.
+   */
+  sleev_allow_remote_gateway?: boolean
   /** Live Sleev install / gateway status from the server. */
   sleev?: {
     enabled?: boolean
     installed?: boolean
     gateway_url?: string
+    gateway_is_loopback?: boolean
+    allow_remote_gateway?: boolean
     harness?: string
     account_label?: string
     docs_url?: string
@@ -224,6 +231,7 @@ export interface SettingsUpdate {
   /** Route cloud chat through local Sleev gateway */
   sleev_enabled?: boolean
   sleev_gateway_url?: string
+  sleev_allow_remote_gateway?: boolean
   soul_field_enabled?: boolean
   build_os_advanced?: boolean
   rmb_enabled?: boolean

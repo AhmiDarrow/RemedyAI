@@ -7,19 +7,22 @@ from pathlib import Path
 
 import pytest
 
+from remedy.core.providers import get_provider
 from remedy.core.sleev import (
     SLEEV_DEFAULT_GATEWAY,
     SLEEV_HARNESS_ID,
     apply_sleev_routing,
     discover_sleev_gateway_url,
+    is_loopback_url,
     is_sleev_enabled,
+    is_sleev_remote_gateway_allowed,
     prepare_llm_http,
     should_route_via_sleev,
     sleev_headers,
     sleev_status,
     upstream_base_url,
+    validate_sleev_gateway_url,
 )
-from remedy.core.providers import get_provider
 
 
 def test_sleev_disabled_by_default():
@@ -126,9 +129,84 @@ def test_discover_from_install_config(tmp_path: Path, monkeypatch: pytest.Monkey
     assert url == "http://127.0.0.1:19999"
 
 
-def test_discover_explicit_override():
-    url = discover_sleev_gateway_url({"sleev_gateway_url": "http://10.0.0.5:17321/v1"})
-    assert url == "http://10.0.0.5:17321"
+def test_discover_explicit_override_loopback():
+    url = discover_sleev_gateway_url(
+        {"sleev_gateway_url": "http://127.0.0.1:19998/v1"}
+    )
+    assert url == "http://127.0.0.1:19998"
+
+
+def test_discover_remote_requires_allow():
+    """Non-loopback gateways fall back unless owner opts in (B-SLEEV-01)."""
+    denied = discover_sleev_gateway_url(
+        {"sleev_gateway_url": "http://10.0.0.5:17321/v1"}
+    )
+    assert denied == SLEEV_DEFAULT_GATEWAY
+    assert is_loopback_url(denied)
+
+    allowed = discover_sleev_gateway_url(
+        {
+            "sleev_gateway_url": "http://10.0.0.5:17321/v1",
+            "sleev_allow_remote_gateway": True,
+        }
+    )
+    assert allowed == "http://10.0.0.5:17321"
+
+
+def test_is_loopback_strict_no_mdns():
+    """``*.local`` is not loopback (B-SLEEV-02)."""
+    assert is_loopback_url("http://127.0.0.1:17321") is True
+    assert is_loopback_url("http://localhost:17321") is True
+    assert is_loopback_url("https://evil.local/v1") is False
+    assert is_loopback_url("http://nas.local:5000") is False
+
+
+def test_validate_sleev_gateway_url():
+    ok, err = validate_sleev_gateway_url("http://127.0.0.1:17321")
+    assert err is None and ok == "http://127.0.0.1:17321"
+    bad, err2 = validate_sleev_gateway_url("http://10.0.0.5:17321")
+    assert err2 is not None and "loopback" in err2
+    assert bad == "http://10.0.0.5:17321"
+    ok2, err3 = validate_sleev_gateway_url(
+        "http://10.0.0.5:17321", allow_remote=True
+    )
+    assert err3 is None and ok2 == "http://10.0.0.5:17321"
+    empty, err4 = validate_sleev_gateway_url("")
+    assert empty == "" and err4 is None
+
+
+def test_apply_does_not_route_to_remote_without_allow():
+    base, headers = apply_sleev_routing(
+        provider="xai",
+        base_url="https://api.x.ai/v1",
+        headers={"Authorization": "Bearer secret"},
+        cfg={
+            "sleev_enabled": True,
+            "sleev_gateway_url": "http://evil.example:17321",
+        },
+    )
+    # discover falls back to loopback default; routing still works locally
+    assert "evil.example" not in base
+    assert base == SLEEV_DEFAULT_GATEWAY
+    assert headers.get("Authorization") == "Bearer secret"
+    assert headers.get("sleev-harness") == "remedy"
+
+
+def test_remote_allowed_routes():
+    base, headers = apply_sleev_routing(
+        provider="xai",
+        base_url="https://api.x.ai/v1",
+        headers={"Authorization": "Bearer secret"},
+        cfg={
+            "sleev_enabled": True,
+            "sleev_gateway_url": "http://10.0.0.5:17321",
+            "sleev_allow_remote_gateway": True,
+        },
+    )
+    assert base == "http://10.0.0.5:17321"
+    assert is_sleev_remote_gateway_allowed(
+        {"sleev_allow_remote_gateway": True}
+    )
 
 
 def test_upstream_ignores_sleev_gateway():
@@ -144,6 +222,8 @@ def test_sleev_status_shape():
     assert st["harness"] == SLEEV_HARNESS_ID
     assert "gateway_url" in st
     assert st["gateway_url"]  # non-empty default
+    assert st["gateway_is_loopback"] is True
+    assert st["allow_remote_gateway"] is False
 
 
 def test_default_gateway_constant():
@@ -196,14 +276,51 @@ def test_openrouter_not_routed_to_openai_default():
     assert "poe.com" in headers2.get("sleev-base-url", "")
 
 
+def test_settings_rejects_remote_gateway_without_allow(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    import asyncio
+
+    from remedy.interfaces.settings_apply import apply_settings_update
+
+    # Isolate from the developer's real ~/.remedy (may already allow remote).
+    home = tmp_path / "remedy-home"
+    home.mkdir()
+    monkeypatch.setenv("REMEDY_HOME", str(home))
+    monkeypatch.delenv("REMEDY_SLEEV_ALLOW_REMOTE", raising=False)
+    monkeypatch.delenv("REMEDY_API_AUTH", raising=False)
+
+    async def _run() -> None:
+        with pytest.raises(ValueError, match="loopback"):
+            await apply_settings_update(
+                {"sleev_gateway_url": "http://10.0.0.5:17321"}
+            )
+        out = await apply_settings_update(
+            {
+                "sleev_allow_remote_gateway": True,
+                "sleev_gateway_url": "http://10.0.0.5:17321",
+            }
+        )
+        assert out.get("status") == "saved"
+        assert "sleev_gateway_url" in (out.get("changes") or [])
+
+    asyncio.run(_run())
+
+
 def test_cfg_from_runtime_prefers_attrs():
-    from remedy.core.sleev import cfg_from_runtime, prepare_llm_http
     from types import SimpleNamespace
+
+    from remedy.core.sleev import cfg_from_runtime, prepare_llm_http
 
     runtime = SimpleNamespace(
         _sleev_enabled=True,
         _sleev_gateway_url="http://127.0.0.1:17321",
-        config=SimpleNamespace(sleev_enabled=True, sleev_gateway_url=""),
+        _sleev_allow_remote_gateway=False,
+        config=SimpleNamespace(
+            sleev_enabled=True,
+            sleev_gateway_url="",
+            sleev_allow_remote_gateway=False,
+        ),
     )
     cfg = cfg_from_runtime(runtime)
     assert cfg is not None

@@ -201,6 +201,9 @@ class SettingsUpdateRequest(BaseModel):
     sleev_enabled: bool | None = None
     # Optional override (default: auto-discover Sleev install → 127.0.0.1:17321)
     sleev_gateway_url: str | None = None
+    # Owner opt-in: allow non-loopback Sleev gateway (LAN/remote). Default off —
+    # otherwise a non-local URL would receive provider API keys.
+    sleev_allow_remote_gateway: bool | None = None
     # Maturity gates (experimental / advanced organs)
     soul_field_enabled: bool | None = None  # experimental personhood inject + tools
     build_os_advanced: bool | None = None  # Build OS frontiers A–H tools

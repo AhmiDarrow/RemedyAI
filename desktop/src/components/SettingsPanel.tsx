@@ -137,6 +137,7 @@ export function SettingsPanel({
   /** Route cloud LLM traffic through local Sleev gateway (token compression). */
   const [sleevEnabled, setSleevEnabled] = useState(false)
   const [sleevGatewayUrl, setSleevGatewayUrl] = useState('')
+  const [sleevAllowRemoteGateway, setSleevAllowRemoteGateway] = useState(false)
   const [sleevStatus, setSleevStatus] = useState<Settings['sleev'] | null>(null)
   /** Soul Field personhood — default on (matches server maturity default). */
   const [soulFieldEnabled, setSoulFieldEnabled] = useState(true)
@@ -396,6 +397,7 @@ export function SettingsPanel({
       setPrivacyMode(Boolean(s.privacy_mode))
       setSleevEnabled(Boolean(s.sleev_enabled))
       setSleevGatewayUrl(String(s.sleev_gateway_url || ''))
+      setSleevAllowRemoteGateway(Boolean(s.sleev_allow_remote_gateway))
       setSleevStatus(s.sleev ?? null)
       setSoulFieldEnabled(
         s.soul_field_enabled === undefined ? true : Boolean(s.soul_field_enabled),
@@ -647,6 +649,7 @@ export function SettingsPanel({
       privacy_mode: privacyMode,
       sleev_enabled: sleevEnabled,
       sleev_gateway_url: sleevGatewayUrl.trim(),
+      sleev_allow_remote_gateway: sleevAllowRemoteGateway,
       soul_field_enabled: soulFieldEnabled,
       approval_mode: approvalMode,
       allow_skill_creation: allowSkillCreation,
@@ -972,6 +975,8 @@ export function SettingsPanel({
               setSleevEnabled={setSleevEnabled}
               sleevGatewayUrl={sleevGatewayUrl}
               setSleevGatewayUrl={setSleevGatewayUrl}
+              sleevAllowRemoteGateway={sleevAllowRemoteGateway}
+              setSleevAllowRemoteGateway={setSleevAllowRemoteGateway}
               sleevStatus={sleevStatus}
               soulFieldEnabled={soulFieldEnabled}
               setSoulFieldEnabled={setSoulFieldEnabled}

@@ -29,6 +29,7 @@ export type SettingsFormFields = {
   privacyMode: boolean
   sleevEnabled: boolean
   sleevGatewayUrl: string
+  sleevAllowRemoteGateway: boolean
   soulFieldEnabled: boolean
   approvalMode: 'ask' | 'auto'
   harnessMode: string
@@ -69,6 +70,7 @@ export function applySettingsSnapshot(
     setPrivacyMode: (v: boolean) => void
     setSleevEnabled?: (v: boolean) => void
     setSleevGatewayUrl?: (v: string) => void
+    setSleevAllowRemoteGateway?: (v: boolean) => void
     setSoulFieldEnabled: (v: boolean) => void
     setApprovalMode: (v: 'ask' | 'auto') => void
     setHarnessMode: (v: string) => void
@@ -109,6 +111,7 @@ export function applySettingsSnapshot(
   set.setPrivacyMode(Boolean(s.privacy_mode))
   set.setSleevEnabled?.(Boolean(s.sleev_enabled))
   set.setSleevGatewayUrl?.(String(s.sleev_gateway_url || ''))
+  set.setSleevAllowRemoteGateway?.(Boolean(s.sleev_allow_remote_gateway))
   set.setSoulFieldEnabled(s.soul_field_enabled !== false)
   const am = String(s.approval_mode || 'ask').toLowerCase()
   set.setApprovalMode(am === 'auto' ? 'auto' : 'ask')
@@ -159,6 +162,7 @@ export function buildSettingsUpdate(fields: SettingsFormFields): SettingsUpdate 
     privacy_mode: fields.privacyMode,
     sleev_enabled: fields.sleevEnabled,
     sleev_gateway_url: fields.sleevGatewayUrl || '',
+    sleev_allow_remote_gateway: fields.sleevAllowRemoteGateway,
     soul_field_enabled: fields.soulFieldEnabled,
     approval_mode: fields.approvalMode,
     harness_mode: fields.harnessMode,

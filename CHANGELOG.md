@@ -4,15 +4,24 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
-### Sleev gateway + UI
+## [0.22.1] - 2026-08-09
+
+### Sleev gateway + security harden
 
 - **Sleev routing:** optional local token-compression gateway (`sleev_enabled`).
   Cloud chat (xAI, DeepSeek, OpenAI, …) goes through `http://127.0.0.1:17321`
   with `sleev-harness: remedy`; Ollama/RMB/Demo stay direct.
 - **Configure via chat:** `update_settings(setup="configure sleev")` or
   `sleev_enabled=true`; `get_settings` reports install/gateway status.
-- **Theme menu:** portaled above the composer so Streaming/Stop no longer
-  paint through the theme list (status bar stacking fix).
+- **Sleev gateway loopback lock:** non-loopback `sleev_gateway_url` is refused
+  unless `sleev_allow_remote_gateway=true` (Settings Advanced + agent field).
+  Prevents prompt-injected API-key redirect off-machine.
+- **Strict loopback:** `*.local` mDNS is no longer treated as loopback for Sleev.
+- **Theme menu:** portaled above the composer so Streaming/Stop no longer paint
+  through the theme list (status bar stacking fix).
+- **Live scripts DPAPI token:** soak/stress scripts use
+  `lib_local_token.resolve_local_api_token` (product DPAPI decode + bootstrap)
+  instead of stuffing sealed JSON into `Authorization`.
 
 ## [0.22.0] - 2026-08-09
 

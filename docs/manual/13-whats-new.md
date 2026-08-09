@@ -2,11 +2,26 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current series: **v0.22.0**.
+Current series: **v0.22.1**.
 
 ## Contents
 
-- [0.22.0](#0220---living-organism--builder-continuity) · [0.21.1](#0211---continuity--self-inject-safety) · [0.20.0](#0200---partner-metabolism--always-ready) · [0.19.0](#0190---parallel-multi-provider--background-turns) · older below
+- [0.22.1](#0221---sleev--gateway-lock) · [0.22.0](#0220---living-organism--builder-continuity) · [0.21.1](#0211---continuity--self-inject-safety) · [0.20.0](#0200---partner-metabolism--always-ready) · [0.19.0](#0190---parallel-multi-provider--background-turns) · older below
+
+## 0.22.1 - Sleev + gateway lock
+
+Optional **Sleev** token-compression gateway for long cloud sessions, with a
+hard **loopback lock** so provider keys cannot be redirected off-machine without
+an explicit owner opt-in. Full detail: `CHANGELOG.md` · PyPI **`remedy-ai==0.22.1`**
+· GitHub tag **v0.22.1**.
+
+- **Sleev routing** — Settings → Provider (or *“configure Sleev”* in chat); Ollama /
+  RMB / Demo stay direct.
+- **Loopback by default** — non-local gateway URLs need **Allow non-loopback Sleev
+  gateway** (Advanced).
+- **Theme menu stacking** — theme picker no longer paints under Streaming/Stop.
+- **Soak scripts** — local API token loads through DPAPI decode (no sealed JSON
+  in `Authorization` headers).
 
 ## 0.22.0 - Living organism + builder continuity
 

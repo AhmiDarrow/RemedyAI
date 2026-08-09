@@ -104,6 +104,9 @@ class BasicRuntime(AgentRuntime):
         self._sleev_gateway_url: str = str(
             getattr(config, "sleev_gateway_url", "") or ""
         ).strip()
+        self._sleev_allow_remote_gateway: bool = bool(
+            getattr(config, "sleev_allow_remote_gateway", False)
+        )
         self._provider: ProviderAdapter = select_provider(
             self._llm_provider, self._llm_base_url
         )
