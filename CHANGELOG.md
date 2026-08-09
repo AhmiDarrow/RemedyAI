@@ -4,6 +4,15 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.22.2] - 2026-08-09
+
+### Fixes
+
+- **Sleev dead-gateway fail-open:** if the Sleev proxy is unreachable (e.g.
+  remote `10.x` host down), Remedy no longer spins on “waiting for local
+  model” / RMB — it fails open to the real provider for the rest of the turn
+  and uses a short connect timeout to the gateway.
+
 ## [0.22.1] - 2026-08-09
 
 ### Sleev gateway + security harden

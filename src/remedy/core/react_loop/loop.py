@@ -183,7 +183,18 @@ async def call_llm_stream(runtime, message: str,
 
         # Long agent runs: high wall-clock + read idle so multi-step work
         # (and long thinking streams) are not killed mid-flight.
-        timeout = aiohttp.ClientTimeout(total=3_600, sock_read=900, connect=60)
+        # Sleev gateway: short connect so a dead proxy fails open quickly
+        # instead of hanging the UI for a full minute per attempt.
+        _connect_s = 60
+        with suppress(Exception):
+            from remedy.core.sleev import cfg_from_runtime as _scf
+            from remedy.core.sleev import is_sleev_endpoint as _ise
+
+            if _ise(endpoint, _scf(runtime)):
+                _connect_s = 12
+        timeout = aiohttp.ClientTimeout(
+            total=3_600, sock_read=900, connect=_connect_s
+        )
         connector = aiohttp.TCPConnector(
             limit=24,
             ttl_dns_cache=300,
@@ -1381,19 +1392,75 @@ async def call_llm_stream(runtime, message: str,
                         "LLM stream disconnect — non-stream retry (%s)",
                         _stream_exc,
                     )
-                    yield (
-                        "@@status:Connection dropped — waiting for local model, "
-                        "then retrying (no user action needed)…\n"
-                    )
-                    # Partner: wait for RMB if mid-load, do NOT crush max_tokens
+                    # Sleev dead gateway must not spin forever on RMB wait.
+                    # Fail-open to the real provider base URL for the rest of the turn.
+                    _via_sleev = False
                     with suppress(Exception):
-                        import asyncio as _aio
-
-                        from remedy.runtime.rmb.service import wait_rmb_ready
-
-                        await _aio.to_thread(
-                            wait_rmb_ready, None, timeout_s=60.0
+                        from remedy.core.sleev import (
+                            cfg_from_runtime as _sleev_cfg,
                         )
+                        from remedy.core.sleev import (
+                            is_sleev_endpoint as _is_sleev_ep,
+                        )
+
+                        _scfg = _sleev_cfg(runtime)
+                        _via_sleev = _is_sleev_ep(endpoint, _scfg)
+                    _exc_s = str(_stream_exc or "")
+                    if (
+                        _via_sleev
+                        or "17321" in _exc_s
+                        or (
+                            "sleev" in _exc_s.lower()
+                        )
+                    ):
+                        with suppress(Exception):
+                            runtime._sleev_force_direct = True
+                        with suppress(Exception):
+                            from remedy.core.sleev import prepare_llm_http
+
+                            endpoint, headers = prepare_llm_http(
+                                provider=_bind.provider,
+                                base_url=_bind.base_url,
+                                api_key=_bind.api_key,
+                                adapter=_adapter,
+                                runtime=runtime,
+                                force_direct=True,
+                            )
+                        yield (
+                            "@@status:Sleev gateway unreachable — talking to the "
+                            "provider directly (no user action needed)…\n"
+                        )
+                    else:
+                        _is_local_bind = False
+                        with suppress(Exception):
+                            from remedy.core.local_agent_optimize import (
+                                is_local_binding as _ilb_disc,
+                            )
+
+                            _is_local_bind = bool(
+                                _ilb_disc(
+                                    _bind.provider, _bind.model, _bind.base_url
+                                )
+                            )
+                        if _is_local_bind:
+                            yield (
+                                "@@status:Connection dropped — waiting for local "
+                                "model, then retrying (no user action needed)…\n"
+                            )
+                            # Partner: wait for RMB if mid-load only when local.
+                            with suppress(Exception):
+                                import asyncio as _aio
+
+                                from remedy.runtime.rmb.service import wait_rmb_ready
+
+                                await _aio.to_thread(
+                                    wait_rmb_ready, None, timeout_s=60.0
+                                )
+                        else:
+                            yield (
+                                "@@status:Connection dropped — retrying "
+                                "(no user action needed)…\n"
+                            )
                     body = dict(body)
                     body["stream"] = False
                     with suppress(Exception):

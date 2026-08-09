@@ -467,6 +467,38 @@ def apply_sleev_routing(
     return gw, hdrs
 
 
+def is_sleev_endpoint(
+    endpoint: str | None,
+    cfg: dict[str, Any] | None = None,
+) -> bool:
+    """True when *endpoint* points at the configured Sleev gateway host:port."""
+    if not endpoint:
+        return False
+    try:
+        ep = urlparse(str(endpoint))
+        gw = urlparse(discover_sleev_gateway_url(cfg))
+    except Exception:
+        return False
+    eh = (ep.hostname or "").lower()
+    gh = (gw.hostname or "").lower()
+    if not eh or eh != gh:
+        return False
+    ep_port = ep.port or (443 if ep.scheme == "https" else 80)
+    gw_port = gw.port or (443 if gw.scheme == "https" else 80)
+    return int(ep_port) == int(gw_port)
+
+
+def strip_sleev_headers(headers: dict[str, str] | None) -> dict[str, str]:
+    """Remove Sleev routing headers from a header map (for fail-open direct)."""
+    out: dict[str, str] = {}
+    for k, v in dict(headers or {}).items():
+        lk = str(k).lower()
+        if lk.startswith("sleev-") or lk.startswith("x-sleev-"):
+            continue
+        out[k] = v
+    return out
+
+
 def prepare_llm_http(
     *,
     provider: str | None,
@@ -475,21 +507,36 @@ def prepare_llm_http(
     adapter: Any,
     cfg: dict[str, Any] | None = None,
     runtime: Any | None = None,
+    force_direct: bool = False,
 ) -> tuple[str, dict[str, str]]:
     """Build ``(endpoint, headers)`` for a chat completion call (Sleev-aware).
 
     Prefer ``runtime`` (or explicit ``cfg``) so hot Settings toggles apply without
     re-reading config.toml on every ReAct step.
+
+    When *force_direct* is True, or ``runtime._sleev_force_direct`` is set (set
+    after a Sleev gateway disconnect), skip Sleev and hit the provider base URL
+    directly so a dead gateway cannot hang chat.
     """
     if cfg is None and runtime is not None:
         cfg = cfg_from_runtime(runtime)
+    if not force_direct and runtime is not None:
+        force_direct = bool(getattr(runtime, "_sleev_force_direct", False))
     headers = adapter.auth_headers(api_key or "")
-    effective_base, headers = apply_sleev_routing(
-        provider=provider,
-        base_url=base_url or getattr(adapter, "default_base_url", "") or "",
-        headers=headers,
-        cfg=cfg,
-    )
+    raw_base = base_url or getattr(adapter, "default_base_url", "") or ""
+    if force_direct:
+        # Prefer catalog-correct upstream (not a stale Sleev URL left in base).
+        effective_base = upstream_base_url(provider, raw_base, cfg=cfg) or str(
+            raw_base or ""
+        )
+        headers = strip_sleev_headers(headers)
+    else:
+        effective_base, headers = apply_sleev_routing(
+            provider=provider,
+            base_url=raw_base,
+            headers=headers,
+            cfg=cfg,
+        )
     if not effective_base:
         effective_base = str(getattr(adapter, "default_base_url", "") or "")
     endpoint = adapter.chat_endpoint(effective_base)
