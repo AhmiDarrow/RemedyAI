@@ -305,7 +305,7 @@ def register_auth_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
     @app.get("/api/providers/free")
     async def list_free_providers():
         """Curated free / local / demo options for Setup and Settings."""
-        from remedy.interfaces.config import free_options_public
+        from remedy.interfaces.provider_catalog import free_options_public
 
         return {"options": free_options_public()}
 

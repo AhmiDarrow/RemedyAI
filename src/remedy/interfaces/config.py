@@ -1257,3 +1257,6 @@ def apply_env_provider_bootstrap(config: dict[str, Any] | None = None) -> dict[s
         return cfg
 
     return cfg
+
+# Public re-exports (catalog lives in provider_catalog; keep import path stable)
+from remedy.interfaces.provider_catalog import free_options_public as free_options_public  # noqa: E402,F401
