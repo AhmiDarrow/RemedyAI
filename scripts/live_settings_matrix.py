@@ -15,7 +15,12 @@ from pathlib import Path
 
 BASE = os.environ.get("REMEDY_API", "http://127.0.0.1:7400").rstrip("/")
 HOME = Path(os.environ.get("REMEDY_HOME", Path.home() / ".remedy")).expanduser()
-TOKEN = (HOME / "auth" / "local_api_token").read_text(encoding="utf-8").strip()
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+from lib_local_token import resolve_local_api_token  # noqa: E402
+
+TOKEN = resolve_local_api_token(home=HOME, base=BASE)
 
 PASS = FAIL = 0
 

@@ -47,19 +47,25 @@ _LOCAL_ONLY_PROVIDERS = frozenset(
     }
 )
 
-
-def _local_hosts() -> frozenset[str]:
-    return frozenset({"localhost", "127.0.0.1", "0.0.0.0", "::1", "[::1]"})
+# Strict loopback only — never treat mDNS ``*.local`` as loopback (API keys must
+# not be forwarded to an arbitrary LAN host without an explicit owner opt-in).
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "0.0.0.0", "::1", "[::1]"})
 
 
 def is_loopback_url(url: str | None) -> bool:
+    """True only for literal loopback / unspecified bind hosts.
+
+    ``*.local`` mDNS names are **not** loopback (B-SLEEV-02). Use
+    :func:`is_sleev_remote_gateway_allowed` before accepting a non-loopback
+    Sleev gateway (B-SLEEV-01).
+    """
     if not url:
         return False
     try:
         host = (urlparse(str(url)).hostname or "").lower()
     except Exception:
         return False
-    return host in _local_hosts() or host.endswith(".local")
+    return host in _LOOPBACK_HOSTS
 
 
 def sleev_config_paths() -> list[Path]:
@@ -99,21 +105,100 @@ def read_sleev_install_config() -> dict[str, Any] | None:
     return None
 
 
+def is_sleev_remote_gateway_allowed(cfg: dict[str, Any] | None = None) -> bool:
+    """Owner opt-in for non-loopback Sleev gateways (LAN / remote).
+
+    Default **False** so API keys cannot be redirected off-machine by a
+    prompt-injected ``update_settings(sleev_gateway_url=…)`` alone.
+    """
+    if cfg is not None and "sleev_allow_remote_gateway" in cfg:
+        return bool(cfg.get("sleev_allow_remote_gateway"))
+    env = str(os.environ.get("REMEDY_SLEEV_ALLOW_REMOTE") or "").strip().lower()
+    if env in ("1", "true", "yes", "on"):
+        return True
+    if env in ("0", "false", "no", "off"):
+        return False
+    return False
+
+
+def validate_sleev_gateway_url(
+    url: str | None,
+    *,
+    allow_remote: bool = False,
+) -> tuple[str, str | None]:
+    """Normalize a gateway URL and return ``(url, error_or_none)``.
+
+    Empty string is valid (auto-discover). Non-loopback requires *allow_remote*.
+    """
+    raw = str(url or "").strip()
+    if not raw:
+        return "", None
+    try:
+        root = normalize_gateway_root(raw)
+    except Exception:
+        root = raw.rstrip("/")
+    if not root:
+        return "", None
+    # Require an http(s) scheme so we never treat bare host:port oddly.
+    try:
+        parsed = urlparse(root if "://" in root else f"http://{root}")
+    except Exception:
+        return raw, "sleev_gateway_url is not a valid URL"
+    if parsed.scheme not in ("http", "https"):
+        return root, "sleev_gateway_url must be http or https"
+    if not (parsed.hostname or "").strip():
+        return root, "sleev_gateway_url needs a host"
+    check = root if "://" in root else f"http://{root}"
+    if is_loopback_url(check):
+        return normalize_gateway_root(check), None
+    if allow_remote:
+        return normalize_gateway_root(check), None
+    return normalize_gateway_root(check), (
+        "sleev_gateway_url must be loopback (127.0.0.1 / localhost / ::1) "
+        "unless sleev_allow_remote_gateway=true — otherwise provider API keys "
+        "would leave this machine"
+    )
+
+
+def _coerce_gateway_to_safe(
+    url: str,
+    *,
+    allow_remote: bool,
+    source: str,
+) -> str:
+    """Return *url* if allowed; otherwise log and fall back to default loopback."""
+    root = normalize_gateway_root(url)
+    if is_loopback_url(root) or allow_remote:
+        return root
+    logger.warning(
+        "Rejected non-loopback Sleev gateway (%s=%s) without "
+        "sleev_allow_remote_gateway; using %s",
+        source,
+        root,
+        SLEEV_DEFAULT_GATEWAY,
+    )
+    return SLEEV_DEFAULT_GATEWAY
+
+
 def discover_sleev_gateway_url(cfg: dict[str, Any] | None = None) -> str:
-    """Resolve the local Sleev gateway base URL (no trailing slash, no /v1).
+    """Resolve the Sleev gateway base URL (no trailing slash, no /v1).
 
     Priority:
       1. Explicit ``cfg['sleev_gateway_url']`` or ``REMEDY_SLEEV_GATEWAY``
       2. Sleev install config (proxy.host / proxy.port)
       3. Default ``http://127.0.0.1:17321``
+
+    Non-loopback hosts are refused unless ``sleev_allow_remote_gateway`` /
+    ``REMEDY_SLEEV_ALLOW_REMOTE`` is set (B-SLEEV-01).
     """
+    allow_remote = is_sleev_remote_gateway_allowed(cfg)
     raw = ""
     if cfg:
         raw = str(cfg.get("sleev_gateway_url") or "").strip()
     if not raw:
         raw = str(os.environ.get("REMEDY_SLEEV_GATEWAY") or "").strip()
     if raw:
-        return _normalize_gateway_root(raw)
+        return _coerce_gateway_to_safe(raw, allow_remote=allow_remote, source="config")
 
     install = read_sleev_install_config() or {}
     proxy = install.get("proxy") if isinstance(install.get("proxy"), dict) else {}
@@ -122,7 +207,13 @@ def discover_sleev_gateway_url(cfg: dict[str, Any] | None = None) -> str:
         port = int(proxy.get("port") or SLEEV_DEFAULT_PORT)
     except (TypeError, ValueError):
         port = SLEEV_DEFAULT_PORT
-    return _normalize_gateway_root(f"http://{host}:{port}")
+    # Install may list 0.0.0.0 (bind-all) — connect via 127.0.0.1 instead.
+    if host in ("0.0.0.0", "::", "[::]"):
+        host = SLEEV_DEFAULT_HOST
+    candidate = _normalize_gateway_root(f"http://{host}:{port}")
+    return _coerce_gateway_to_safe(
+        candidate, allow_remote=allow_remote, source="sleev-install"
+    )
 
 
 def normalize_gateway_root(url: str) -> str:
@@ -150,18 +241,29 @@ def cfg_from_runtime(runtime: Any | None = None) -> dict[str, Any] | None:
             if src is None:
                 continue
             if hasattr(src, "sleev_enabled"):
-                cfg["sleev_enabled"] = bool(getattr(src, "sleev_enabled"))
+                cfg["sleev_enabled"] = bool(src.sleev_enabled)
             if hasattr(src, "sleev_gateway_url"):
-                gw = str(getattr(src, "sleev_gateway_url") or "").strip()
+                gw = str(src.sleev_gateway_url or "").strip()
                 if gw:
                     cfg["sleev_gateway_url"] = gw
+            if hasattr(src, "sleev_allow_remote_gateway"):
+                cfg["sleev_allow_remote_gateway"] = bool(
+                    src.sleev_allow_remote_gateway
+                )
         # Also accept private attrs set on runtime without AgentConfig
         if "sleev_enabled" not in cfg and hasattr(runtime, "_sleev_enabled"):
-            cfg["sleev_enabled"] = bool(getattr(runtime, "_sleev_enabled"))
+            cfg["sleev_enabled"] = bool(runtime._sleev_enabled)
         if "sleev_gateway_url" not in cfg and hasattr(runtime, "_sleev_gateway_url"):
-            gw = str(getattr(runtime, "_sleev_gateway_url") or "").strip()
+            gw = str(runtime._sleev_gateway_url or "").strip()
             if gw:
                 cfg["sleev_gateway_url"] = gw
+        if (
+            "sleev_allow_remote_gateway" not in cfg
+            and hasattr(runtime, "_sleev_allow_remote_gateway")
+        ):
+            cfg["sleev_allow_remote_gateway"] = bool(
+                runtime._sleev_allow_remote_gateway
+            )
         if cfg:
             return cfg
     try:
@@ -343,6 +445,13 @@ def apply_sleev_routing(
         return base, hdrs
 
     gw = discover_sleev_gateway_url(cfg)
+    # Defense in depth: never rewrite to a non-loopback host without opt-in.
+    if not is_loopback_url(gw) and not is_sleev_remote_gateway_allowed(cfg):
+        logger.warning(
+            "Sleev route aborted: gateway %s is not loopback and remote not allowed",
+            gw,
+        )
+        return base, hdrs
     extra = sleev_headers(provider, base_url=base, cfg=cfg)
     # Do not overwrite Authorization / Content-Type / x-api-key.
     for k, v in extra.items():
@@ -352,7 +461,7 @@ def apply_sleev_routing(
         "Sleev route provider=%s gateway=%s headers=%s",
         provider,
         gw,
-        {k: v for k, v in extra.items()},
+        dict(extra),
     )
     return gw, hdrs
 
@@ -395,10 +504,13 @@ def sleev_status(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     if isinstance(install, dict):
         auth = install.get("auth") if isinstance(install.get("auth"), dict) else {}
         auth_label = str(auth.get("email") or auth.get("label") or "").strip()
+    allow_remote = is_sleev_remote_gateway_allowed(cfg)
     return {
         "enabled": enabled,
         "installed": install is not None,
         "gateway_url": gateway,
+        "gateway_is_loopback": is_loopback_url(gateway),
+        "allow_remote_gateway": allow_remote,
         "harness": SLEEV_HARNESS_ID,
         "account_label": auth_label,
         "docs_url": "https://sleev.ai/docs/harness-setup",

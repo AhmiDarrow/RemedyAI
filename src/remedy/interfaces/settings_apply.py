@@ -81,6 +81,7 @@ SETTABLE_KEYS = frozenset(
         "privacy_mode",
         "sleev_enabled",
         "sleev_gateway_url",
+        "sleev_allow_remote_gateway",
         "soul_field_enabled",
         "build_os_advanced",
         "rmb_enabled",
@@ -194,6 +195,7 @@ def public_settings_snapshot(cfg: dict[str, Any] | None = None) -> dict[str, Any
         "privacy_mode": bool(raw.get("privacy_mode", False)),
         "sleev_enabled": bool(raw.get("sleev_enabled", False)),
         "sleev_gateway_url": str(raw.get("sleev_gateway_url") or "").strip(),
+        "sleev_allow_remote_gateway": bool(raw.get("sleev_allow_remote_gateway", False)),
         "soul_field_enabled": bool(
             raw.get("soul_field_enabled")
             if "soul_field_enabled" in raw
@@ -453,16 +455,27 @@ async def apply_settings_update(
     if "sleev_enabled" in patch and patch["sleev_enabled"] is not None:
         patch["sleev_enabled"] = _as_bool(patch["sleev_enabled"])
 
+    if (
+        "sleev_allow_remote_gateway" in patch
+        and patch["sleev_allow_remote_gateway"] is not None
+    ):
+        patch["sleev_allow_remote_gateway"] = _as_bool(patch["sleev_allow_remote_gateway"])
+
     if "sleev_gateway_url" in patch and patch["sleev_gateway_url"] is not None:
         url = str(patch["sleev_gateway_url"] or "").strip()
         # Empty = auto-discover from Sleev install / default port.
+        allow_remote = bool(
+            patch.get(
+                "sleev_allow_remote_gateway",
+                cfg.get("sleev_allow_remote_gateway", False),
+            )
+        )
         if url:
-            try:
-                from remedy.core.sleev import normalize_gateway_root
+            from remedy.core.sleev import validate_sleev_gateway_url
 
-                url = normalize_gateway_root(url)
-            except Exception:
-                url = url.rstrip("/")
+            url, err = validate_sleev_gateway_url(url, allow_remote=allow_remote)
+            if err:
+                raise ValueError(err)
         patch["sleev_gateway_url"] = url
 
     for _flag in (
@@ -727,6 +740,7 @@ async def apply_settings_update(
             "privacy_mode",
             "sleev_enabled",
             "sleev_gateway_url",
+            "sleev_allow_remote_gateway",
             "tool_process",
             "sarcasm_mode",
             "allow_skill_creation",
@@ -738,6 +752,9 @@ async def apply_settings_update(
         with contextlib.suppress(Exception):
             runtime._sleev_enabled = bool(cfg.get("sleev_enabled", False))
             runtime._sleev_gateway_url = str(cfg.get("sleev_gateway_url") or "").strip()
+            runtime._sleev_allow_remote_gateway = bool(
+                cfg.get("sleev_allow_remote_gateway", False)
+            )
 
     changes = list(patch.keys())
     if vision_enabled is not None or vision_model_id is not None or vision_force_decode is not None:
@@ -792,6 +809,7 @@ async def apply_settings_update(
         "privacy_mode",
         "sleev_enabled",
         "sleev_gateway_url",
+        "sleev_allow_remote_gateway",
         "vision_enabled",
         "vision_model_id",
         "vision_force_decode",

@@ -109,17 +109,18 @@ Severity key: **Critical** remote unauth compromise · **High** significant data
 
 | ID | Sev | Surface | Finding | Evidence | Recommendation |
 |----|-----|---------|---------|----------|----------------|
-| **S-AUTH-01** | **High** | CLI | **`remedy gateway` → `_serve_api` calls `create_app()` without `api_key`.** Auth middleware only installs when `api_key` is truthy → fully open loopback API. | `src/remedy/gateway/cli.py` ~225–233; `api.py` `if api_key:` | Always call `ensure_local_api_token` + pass `api_key=`; deprecate/alias path to main `remedy serve`. Add regression test. |
+| **S-AUTH-01** | **High → Fixed** | CLI | **Was:** `remedy gateway` served without `api_key`. **Now:** `ensure_local_api_token` + Bearer (see `gateway/cli.py`, `test_api_auth`). | Regression covered | Keep alias path on main `remedy serve`. |
 | **S-MSG-01** | **High → Fixed 2026-07-30** | Teams webhook | **Was:** JWT claims only (no signature). **Now:** RS256 + Bot Framework/Azure AD JWKS (stdlib, 6h cache). `REMEDY_TEAMS_SKIP_JWKS=1` for claim-only debug. | `jwt_rs256.py`, `teams.verify_inbound_auth` | Keep allowlist; optional network warm-up on channel start. |
-| **S-DATA-01** | **High** | At rest | **`memory.db` is unencrypted.** Full chat + tool traces readable by same OS user or offline disk as that user. | `memory/store.py`; manual 04 | Document as product truth; optional SQLCipher + DPAPI key; retention + “strip tool bodies.” |
+| **S-DATA-01** | **High** | At rest | **`memory.db` is unencrypted by default.** Optional `memory_encrypt` / SQLCipher when available. Full chat + tool traces readable by same OS user. | `memory/store.py`; manual 04 | Document as product truth; prefer SQLCipher + DPAPI key when available. |
 | **S-WS-01** | **High → Fixed 2026-07-30** | Shell vs jail | **Was:** `bash_exec` only jailed *cwd*; PowerShell could `Set-Content` into sibling trees. **Now:** `shell_write_jail.check_shell_write_jail` blocks mutation commands targeting paths outside write roots; `update_settings(project_path=)` refuses mid-session retarget without `force_project_switch`. | `shell_write_jail.py`, `agent_workspace_tools.bash_exec`, `agent_settings_tools` | Keep tests in `test_project_write_jail.py`; restart serve to load. |
+| **S-SLEEV-01** | **Med → Fixed 2026-08-09** | Sleev | **Was:** any `sleev_gateway_url` accepted (LAN/remote could receive provider keys). **Now:** loopback-only unless `sleev_allow_remote_gateway=true`; `*.local` not treated as loopback. | `sleev.py`, Settings Advanced, `test_sleev` | Keep opt-in for trusted LAN gateways only. |
 
 ### 3.2 Medium
 
 | ID | Sev | Surface | Finding | Recommendation |
 |----|-----|---------|---------|----------------|
-| **S-AUTH-02** | Med | Bootstrap | HTTP `local-bootstrap` **defaults ON** — any same-user loopback client can obtain Bearer. | Default off for desktop-only; keep IPC; explicit enable for WebUI. |
-| **S-AUTH-03** | Med | Token file | `local_api_token` plaintext + ACL only (unlike provider DPAPI). | DPAPI-seal like other secrets. |
+| **S-AUTH-02** | Med | Bootstrap | HTTP `local-bootstrap` **defaults ON** for plain `remedy serve` (WebUI); desktop sidecar defaults **off** (IPC). | Keep IPC default for packaged desktop. |
+| **S-AUTH-03** | Med → **Mitigated** | Token file | **Was:** plaintext. **Now:** DPAPI envelope on Windows (legacy plain upgraded on write). | `local_auth.py` | Soak scripts must use `lib_local_token` (fixed 2026-08-09). |
 | **S-AUTH-04** | Med → **Fixed 2026-07-30** | Computer host | **Was:** host/jobs/ui unauth on loopback (job theft). **Now:** Bearer required; Rust poller DPAPI-loads token; a11y remains job_id loopback-only. | See `REDTEAM_2026-07-30.md`. |
 | **S-COMP-01** | Med | a11y | a11y push loopback-exempt + permissive CORS/PNA patterns; `job_id` as weak shared secret. | Bearer or one-time nonce; tighten CORS; higher entropy job ids. |
 | **S-PROV-01** | Med → **Mitigated 2026-07-30** | Cloud LLM | Secret scrub always on. **Privacy mode** (opt-in, default off): email/phone/SSN scrub + tighter tool caps. | `provider_sanitize.privacy_mode` / Settings | Default stays lightning-fast. |
@@ -141,7 +142,7 @@ Severity key: **Critical** remote unauth compromise · **High** significant data
 | ID | Sev | Finding | Recommendation |
 |----|-----|---------|----------------|
 | **S-AUTH-05** | Low | OpenAPI `/docs` public when server reachable | Disable in packaged desktop builds |
-| **S-AUTH-06** | Low | `hmac.compare_digest` unequal length may 500 | Safe compare wrapper → always 401 |
+| **S-AUTH-06** | Low → **Fixed** | `hmac.compare_digest` unequal length may 500 | Safe compare wrapper → always 401 (`api.py` `_ct_eq`) |
 | **S-COMP-02** | Low | Screenshots under `computer/shots/` may accumulate | TTL purge |
 | **S-DESK-02** | Low | `shell:allow-open` any http(s) URL | Host allowlist / confirm |
 | **S-DESK-03** | Low | Sidecar discovery by size near install dir | Prefer fixed resource path + signature |

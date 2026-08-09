@@ -94,9 +94,17 @@ from `get_settings` (`sleev.installed`, `sleev.gateway_url`).
 ```toml
 sleev_enabled = true
 # sleev_gateway_url = ""   # empty = auto-discover Sleev install
+# sleev_allow_remote_gateway = false  # true only for trusted LAN/remote gateway
 ```
 
-Env overrides: `REMEDY_SLEEV_ENABLED=1`, `REMEDY_SLEEV_GATEWAY=http://127.0.0.1:17321`.
+**Security:** the gateway must be **loopback** (`127.0.0.1` / `localhost`) by
+default. A non-local URL would receive your provider API keys. Advanced Settings
+has **Allow non-loopback Sleev gateway** (`sleev_allow_remote_gateway`) for a
+trusted LAN host only.
+
+Env overrides: `REMEDY_SLEEV_ENABLED=1`,
+`REMEDY_SLEEV_GATEWAY=http://127.0.0.1:17321`,
+`REMEDY_SLEEV_ALLOW_REMOTE=1` (remote gateway opt-in).
 
 See also Sleev’s [Harness Setup](https://sleev.ai/docs/harness-setup) and [Quickstart](https://sleev.ai/docs/quickstart).
 

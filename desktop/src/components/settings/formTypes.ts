@@ -75,10 +75,14 @@ export interface SettingsFormProps {
   setSleevEnabled?: Dispatch<SetStateAction<boolean>>
   sleevGatewayUrl?: string
   setSleevGatewayUrl?: Dispatch<SetStateAction<string>>
+  sleevAllowRemoteGateway?: boolean
+  setSleevAllowRemoteGateway?: Dispatch<SetStateAction<boolean>>
   sleevStatus?: {
     enabled?: boolean
     installed?: boolean
     gateway_url?: string
+    gateway_is_loopback?: boolean
+    allow_remote_gateway?: boolean
     harness?: string
     account_label?: string
     docs_url?: string
