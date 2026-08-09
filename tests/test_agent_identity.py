@@ -6,7 +6,6 @@ from remedy.core.agent_identity import (
     DEFAULT_GENDER,
     DEFAULT_NAME,
     gender_presentation_line,
-    identity_system_preamble,
     normalize_agent_gender,
     normalize_agent_name,
     pronouns_for,

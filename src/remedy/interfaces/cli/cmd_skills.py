@@ -2,18 +2,24 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+
+from rich.panel import Panel
+from rich.table import Table
 
 from remedy.core.learning.reflection import ExecutionTrace, TraceStep
 from remedy.core.learning_loop import LearningLoop
 from remedy.execution.sandbox import SubprocessSandbox
 from remedy.interfaces.cli.util import _print_exec_result, _print_skills, console
 from remedy.interfaces.config import config_to_agent_config, resolve_config
-from remedy.models import AgentConfig, ToolCall, ToolSource
+from remedy.memory.store import MemoryStore
+from remedy.models import ToolCall, ToolSource
 from remedy.skills.executor import SkillExecutor
 from remedy.skills.exporter import SkillExporter
 from remedy.skills.registry import SkillRegistry
 from remedy.skills.validator import SkillValidator
+
 
 async def _cmd_skill(args) -> None:
     registry = SkillRegistry()

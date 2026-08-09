@@ -2,19 +2,23 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
+import os
+import time
 from pathlib import Path
 from typing import Any
 
+from rich.panel import Panel
 from rich.table import Table
 
 from remedy.interfaces.cli.util import console
 from remedy.interfaces.config import (
-    config_to_agent_config,
     create_default_config,
     resolve_config,
 )
+
 
 def _cmd_auth(args) -> None:
     """Provider auth: login / logout / status / apikey (xAI device-code OAuth)."""

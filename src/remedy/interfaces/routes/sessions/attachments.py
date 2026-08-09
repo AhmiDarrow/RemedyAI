@@ -1,35 +1,18 @@
 """Session API routes package."""
 from __future__ import annotations
 
-import asyncio
 import contextlib
-import json
 import logging
-import re
-import time
 from pathlib import Path
-from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
 
 from remedy.interfaces.api_models import (
     AttachmentUploadRequest,
-    BulkSessionProjectRequest,
-    ChatRequest,
-    CreateSessionRequest,
-    SendMessageRequest,
-    SessionLlmRequest,
-    UpdateSessionRequest,
 )
 from remedy.interfaces.api_support import (
-    _sse_stream_text,
-    _sync_runtime_llm_from_config,
     load_config,
-    sse_headers,
-)
-from remedy.models import (
-    ChatMessageRole,
 )
 
 logger = logging.getLogger(__name__)

@@ -170,9 +170,9 @@ def resolve_local_window(
     """Authoritative fixed window for local/RMB budgeting."""
     # 1. rmb.json is the user's configured physical window when chat is RMB
     try:
-        from remedy.runtime.rmb.mode import is_rmb_provider
-        from remedy.runtime.rmb.config import load_rmb_json, merge_state
         from remedy.nanoswarm.token_nanobot import cache_context_window
+        from remedy.runtime.rmb.config import load_rmb_json, merge_state
+        from remedy.runtime.rmb.mode import is_rmb_provider
 
         if is_rmb_provider(provider, base_url) or (provider or "").lower() == "rmb":
             st = merge_state(load_rmb_json())

@@ -9,7 +9,6 @@ Mark: pytest -m live  (or run directly).
 
 from __future__ import annotations
 
-import asyncio
 import os
 import shutil
 import subprocess

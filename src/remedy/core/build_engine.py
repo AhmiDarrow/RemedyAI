@@ -166,9 +166,7 @@ def _is_filesystem_path(path: str) -> bool:
         return True
     if "/" in p or "\\" in p:
         return True
-    if re.search(r"\.[A-Za-z0-9]{1,8}$", p):
-        return True
-    return False
+    return bool(re.search(r"\.[A-Za-z0-9]{1,8}$", p))
 
 
 def _is_source_path(path: str) -> bool:
@@ -178,10 +176,7 @@ def _is_source_path(path: str) -> bool:
     # Ignore tmp / probe scripts
     if "/.remedy-build/" in p or p.startswith("_") or "/_dump" in p:
         return False
-    for suf in _SOURCE_WRITE_SUFFIXES:
-        if p.endswith(suf):
-            return True
-    return False
+    return any(p.endswith(suf) for suf in _SOURCE_WRITE_SUFFIXES)
 
 
 @dataclass
@@ -291,9 +286,7 @@ class BuildTurnState:
         needs_release = bool(
             re.search(r"\b(release|publish|tag\b|gh\s+release)\b", goal)
         )
-        if needs_release and not self.ship_released:
-            return False
-        return True
+        return not (needs_release and not self.ship_released)
 
     def advance_after_green(self) -> None:
         """After green verify: ship phase if required, else done."""
@@ -366,31 +359,7 @@ def looks_like_build_request(message: str) -> bool:
     if len(msg) > 280 and ("```" in msg or msg.count("\n") >= 4):
         return True
     # Imperative short tasks with path/file cues
-    if len(msg) > 24 and any(
-        x in low
-        for x in (
-            ".py",
-            ".ts",
-            ".js",
-            ".rs",
-            ".go",
-            ".c",
-            ".cpp",
-            ".h",
-            "src/",
-            "test",
-            "please ",
-            "need you to",
-            "can you",
-            "could you",
-            "gcc",
-            "compile",
-            "file_write",
-            "program",
-        )
-    ):
-        return True
-    return False
+    return bool(len(msg) > 24 and any(x in low for x in (".py", ".ts", ".js", ".rs", ".go", ".c", ".cpp", ".h", "src/", "test", "please ", "need you to", "can you", "could you", "gcc", "compile", "file_write", "program")))
 
 
 # Alias — product language is research → plan → build (tasks, not only “builds”)
@@ -901,9 +870,7 @@ def build_blocks_final_answer(state: BuildTurnState | None) -> bool:
         return True
     if state.source_writes_pending() and state.last_verify_ok is not True:
         return True
-    if state.syntax_ok is False:
-        return True
-    return False
+    return state.syntax_ok is False
 
 
 def unfinished_green_gate_message(state: BuildTurnState) -> dict[str, str]:

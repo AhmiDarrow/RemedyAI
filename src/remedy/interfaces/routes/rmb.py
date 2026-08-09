@@ -81,7 +81,8 @@ def register_rmb_routes(app: FastAPI, *, runtime=None, gateway=None, memory=None
         """
         import asyncio
 
-        from remedy.interfaces.api_support import _apply_llm_to_runtime, load_config as _lc
+        from remedy.interfaces.api_support import _apply_llm_to_runtime
+        from remedy.interfaces.api_support import load_config as _lc
         from remedy.runtime.rmb.catalog import DEFAULT_RMB_MODEL_ID, get_model_spec
         from remedy.runtime.rmb.config import load_rmb_json, merge_state
         from remedy.runtime.rmb.service import apply_rmb_settings

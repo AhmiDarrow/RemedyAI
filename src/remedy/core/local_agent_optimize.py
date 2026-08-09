@@ -95,10 +95,10 @@ def needs_agent_harness(
     """True when Remedy must *drive* the model (local/RMB muscle).
 
     Product split (2026-08-09):
-    - **Local / RMB / Ollama / llama.cpp** → harness ON  
+    - **Local / RMB / Ollama / llama.cpp** → harness ON
       mid-turn fit, force tool_choice, monologue breakers, write-first packs,
       bootstrap, tight context. Small models cannot be trusted to self-steer.
-    - **Frontier / hosted** (Grok, Claude, OpenAI, …) → harness OFF (light rails)  
+    - **Frontier / hosted** (Grok, Claude, OpenAI, …) → harness OFF (light rails)
       full context, keep tools, no monologue thrash, no force-required spam.
       Trust the model to complete the task; only safety + recovery rails.
 
@@ -186,10 +186,8 @@ def message_wants_build_work(
         history
     ):
         return True
-    if history_suggests_unfinished_build(history) and len(t) < 80:
-        # Short follow-ups during a build session
-        return True
-    return False
+    # Short follow-ups during a build session
+    return bool(history_suggests_unfinished_build(history) and len(t) < 80)
 
 
 def looks_like_intent_monologue(text: str | None) -> bool:
@@ -229,9 +227,7 @@ def text_has_internal_repetition(text: str | None) -> bool:
     if len(parts) < 2:
         # Also catch paragraph repeats without punctuation
         chunks = [c.strip().lower() for c in t.split("\n\n") if len(c.strip()) > 50]
-        if len(chunks) >= 2 and chunks[0] == chunks[1]:
-            return True
-        return False
+        return bool(len(chunks) >= 2 and chunks[0] == chunks[1])
     seen: set[str] = set()
     for p in parts:
         if p in seen:
@@ -354,9 +350,7 @@ def looks_like_tutorial_monologue(text: str | None) -> bool:
         )
     ):
         return True
-    if marker_hits >= 2 and len(t) > 400:
-        return True
-    return False
+    return bool(marker_hits >= 2 and len(t) > 400)
 
 
 def continue_build_nudge(*, project_path: str | None = None) -> dict[str, str]:

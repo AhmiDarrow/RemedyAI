@@ -10,9 +10,7 @@ import { TerminalSlide } from './components/slides/TerminalSlide'
 import { BrowserSlide } from './components/slides/BrowserSlide'
 import { ScratchSlide } from './components/slides/ScratchSlide'
 import {
-  loadWorkspaceLayout,
   saveWorkspaceLayout,
-  type WorkspaceLayout,
 } from './workspace/layoutPrefs'
 import { SLIDE_META, type SlideId } from './workspace/types'
 import { PlanBanner } from './components/PlanBanner'
@@ -76,17 +74,14 @@ import { useAppBootstrap } from './hooks/useAppBootstrap'
 import { useWorkspaceChrome } from './hooks/useWorkspaceChrome'
 import { useChatSendFlow } from './hooks/useChatSendFlow'
 import { useSessionStreamJobs } from './sessions/useSessionStreamJobs'
-import { shouldConfirmNewTurn } from './sessions/concurrentTurns'
 import { ConcurrentTurnDialog } from './components/ConcurrentTurnDialog'
 import { getStreamJob, subscribeStreamJobs } from './sessions/streamJobs'
-import { listAgents, listCommands, exportSession, importSession } from './api/messages'
-import { apiFetch, getServerUrl } from './api/client'
+import { exportSession, importSession } from './api/messages'
+import { getServerUrl } from './api/client'
 import { getSettings, updateSettings } from './api/settings'
-import { listConnectedProviders, setSessionLlm as applySessionLlm } from './api/providers'
-import { isPlaceholderTitle, titleFromPrompt } from './utils/sessionTitle'
+import { setSessionLlm as applySessionLlm } from './api/providers'
 import { tauriInvoke, tauriListen } from './api/tauri'
 import { normalizeToolProcess, type ToolProcessMode } from './utils/toolLabels'
-import { looksLikeBuildKick } from './utils/buildKick'
 import { HOTKEYS } from './hotkeys'
 import type { ShortcutDef } from './hooks/useKeyboardShortcuts'
 
@@ -212,7 +207,6 @@ export default function App() {
     llmProvider,
     setLlmProvider,
     models,
-    setModels,
     connectedProviders,
     setConnectedProviders,
     sessionLlmMap,
@@ -220,7 +214,6 @@ export default function App() {
     barProvider,
     barModel,
     switchToast,
-    setSwitchToast,
     refreshModels,
     onProviderModelChange,
     onModelChange,
@@ -338,7 +331,6 @@ export default function App() {
     helpOpen,
     setHelpOpen,
     helpArticleId,
-    setHelpArticleId,
     usageOpen,
     setUsageOpen,
     diagnosticsOpen,

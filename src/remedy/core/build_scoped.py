@@ -26,10 +26,7 @@ def _project_root(runtime: Any) -> Path | None:
 def _rel_to_project(path: str, root: Path) -> str | None:
     try:
         p = Path(path)
-        if not p.is_absolute():
-            cand = (root / p).resolve()
-        else:
-            cand = p.resolve()
+        cand = (root / p).resolve() if not p.is_absolute() else p.resolve()
         rel = cand.relative_to(root.resolve())
         return rel.as_posix()
     except Exception:

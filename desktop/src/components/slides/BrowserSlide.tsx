@@ -573,7 +573,7 @@ export function BrowserSlide() {
     if (!isTauri() || autoStarted.current) return
     let cancelled = false
     let attempts = 0
-    let retryTimer: ReturnType<typeof setTimeout> | null = null
+    let retryTimer: number | null = null
     const tick = async () => {
       if (cancelled || autoStarted.current) return
       attempts += 1

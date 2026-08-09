@@ -13,7 +13,6 @@ from typing import Any
 
 from remedy.core.builds.reducer import BuildSpec, Signature, UnitSpec
 
-
 _VERB_HINTS = re.compile(
     r"\b(implement|build|add|create|write|ship|scaffold|make|fix|fix)\b",
     re.I,
@@ -76,10 +75,7 @@ def compile_goal_to_spec(
     elif modules:
         for i, m in enumerate(modules[:8]):
             m = m.replace("\\", "/").rstrip("/")
-            if not m.endswith(".py"):
-                rel = m.replace(".", "/") + ".py"
-            else:
-                rel = m
+            rel = m.replace(".", "/") + ".py" if not m.endswith(".py") else m
             if default_package and not rel.startswith(("src/", default_package)):
                 rel = f"{default_package.rstrip('/')}/{Path(rel).name}"
             sym = _safe_ident(funcs[i] if i < len(funcs) else Path(rel).stem)

@@ -12,12 +12,12 @@ from remedy.interfaces.routes.memory import register_memory_routes
 from remedy.interfaces.routes.misc import register_misc_routes
 from remedy.interfaces.routes.nanoswarm import register_nanoswarm_routes
 from remedy.interfaces.routes.partner import register_partner_routes
+from remedy.interfaces.routes.rmb import register_rmb_routes
 from remedy.interfaces.routes.sessions import register_sessions_routes
 from remedy.interfaces.routes.settings import register_settings_routes
 from remedy.interfaces.routes.skills_library import register_skills_library_routes
 from remedy.interfaces.routes.status import register_status_routes
 from remedy.interfaces.routes.usage import register_usage_routes
-from remedy.interfaces.routes.rmb import register_rmb_routes
 from remedy.interfaces.routes.vision import register_vision_routes
 from remedy.interfaces.routes.webhooks import register_webhook_routes
 from remedy.interfaces.routes.workspace import register_workspace_routes

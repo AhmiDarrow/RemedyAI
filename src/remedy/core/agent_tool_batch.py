@@ -197,11 +197,7 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
                 # fall through and execute
             elif args.get("_stream_truncated") or args.get("_invalid_json"):
                 with suppress(Exception):
-                    setattr(
-                        runtime,
-                        "_remedy_write_budget",
-                        max(int(getattr(runtime, "_remedy_write_budget", 0) or 0), 8192),
-                    )
+                    runtime._remedy_write_budget = max(int(getattr(runtime, "_remedy_write_budget", 0) or 0), 8192)
                 if tname in ("file_edit", "file_edit_batch"):
                     content_str = format_tool_error(
                         "file_edit JSON was cut off mid-stream (edit too large). "

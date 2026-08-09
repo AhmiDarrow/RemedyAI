@@ -321,13 +321,9 @@ def resolve_config(
 
 # Provider catalog lives in provider_catalog.py (imported for compatibility).
 from remedy.interfaces.provider_catalog import (  # noqa: E402
-    DEMO_BASE_URL,
     DEMO_DUMMY_API_KEY,
-    FREE_PROVIDER_OPTIONS,
     PROVIDER_CATALOG,
-    free_options_public,
 )
-
 
 # Providers that keep a closed model catalog (foreign model ids are snapped).
 _CLOSED_PROVIDERS = frozenset(

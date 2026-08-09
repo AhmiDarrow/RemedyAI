@@ -6,8 +6,8 @@ from pathlib import Path
 
 from remedy.interfaces.attachments import (
     build_attachment_prompt_block,
-    chat_media_display_path,
     build_multimodal_user_content,
+    chat_media_display_path,
     filter_jailed_attachments,
     inject_text_file_snippets,
     is_image,

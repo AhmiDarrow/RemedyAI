@@ -93,9 +93,7 @@ def http_bootstrap_enabled() -> bool:
     except Exception:
         pass
     # Packaged desktop: safer default (IPC). Dev CLI serve: WebUI convenience.
-    if _desktop_sidecar_context():
-        return False
-    return True
+    return not _desktop_sidecar_context()
 
 
 def token_path(home: Path | str | None = None) -> Path:

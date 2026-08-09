@@ -22,9 +22,8 @@ model file (mmap sharing keeps physical RAM low).
 
 from __future__ import annotations
 
-import contextlib
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -121,7 +120,7 @@ def route_task(task_kind: str, prompt: str = "") -> MdlRouting:
 
     if tier_name == "speculative":
         light = MDL_TIERS["light"]
-        medium = MDL_TIERS["medium"]
+        MDL_TIERS["medium"]
         return MdlRouting(
             tier="light",
             base_url=f"http://127.0.0.1:{light.port}/v1",

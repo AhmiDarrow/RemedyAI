@@ -123,7 +123,7 @@ def recall_unified(
             return "Soul recall (no query hits — field snapshot):\n" + block
         return "Nothing recalled yet. Talk, build, and remember — the field densifies over turns."
 
-    lines = [f"**Unified recall**" + (f" for “{q[:80]}”" if q else "") + ":"]
+    lines = ["**Unified recall**" + (f" for “{q[:80]}”" if q else "") + ":"]
     for s, src, line in ranked:
         lines.append(f"- ({src} · {s:.2f}) {line[:220]}")
     return "\n".join(lines)

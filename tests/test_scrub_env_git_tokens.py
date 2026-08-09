@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-
 from remedy.execution.sandbox import scrub_subprocess_env
 
 

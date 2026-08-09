@@ -210,7 +210,6 @@ async def test_tool_result_ui_preview_exact_boundary_no_cap_note() -> None:
 @pytest.mark.asyncio
 async def test_tool_result_ui_preview_cap_applies_per_tool() -> None:
     """Each tool_result in a multi-call wave is independently UI-capped."""
-    from remedy.core.agent_tool_batch import UI_TOOL_RESULT_PREVIEW_CHARS
 
     rt = BasicRuntime(AgentConfig(llm_api_key=""))
     rt._turn_tier = 2

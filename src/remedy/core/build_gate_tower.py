@@ -19,7 +19,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-
 LEVELS = ("L0_syntax", "L1_static", "L2_import", "L3_unit", "L4_cone")
 
 

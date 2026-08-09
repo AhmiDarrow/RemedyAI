@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from rich.panel import Panel
@@ -12,9 +13,12 @@ from remedy.interfaces.cli.util import (
     console,
 )
 from remedy.memory.consolidator import MemoryConsolidator
+from remedy.memory.handoff import HandoffNote
 from remedy.memory.repair import MemoryRepair
 from remedy.memory.store import MemoryStore
-from remedy.models import MemoryEntry, MemoryEntryType
+from remedy.models import AgentConfig, MemoryEntry, MemoryEntryType
+from remedy.skills.registry import SkillRegistry
+
 
 async def _cmd_memory(args, db_path: Path) -> None:
     async with MemoryStore(db_path) as store:

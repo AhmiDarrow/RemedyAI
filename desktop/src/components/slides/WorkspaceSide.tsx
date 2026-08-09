@@ -1,4 +1,4 @@
-import { useEffect, useState, type MouseEvent, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { isTauri, tauriListen } from '../../api/tauri'
 import { ALL_SLIDES, SLIDE_META, type SlideId } from '../../workspace/types'
@@ -228,13 +228,13 @@ export function WorkspaceSide({
     )
   }
 
-  const startResize = (e: MouseEvent) => {
+  const startResize = (e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
     const startX = e.clientX
     const startW = width
     setResizing(true)
-    const move = (ev: MouseEvent) => {
+    const move = (ev: globalThis.MouseEvent) => {
       const dx = side === 'left' ? ev.clientX - startX : startX - ev.clientX
       onWidth(clampRailWidth(startW + dx, startW))
     }

@@ -307,7 +307,6 @@ def register_build_tools(runtime: Any) -> None:
 
     async def build_gate_tower() -> str:
         """F: Run gate tower L0→L4 on current write_set."""
-        from pathlib import Path
 
         from remedy.core.build_engine import get_build_state
         from remedy.core.build_gate_tower import run_gate_tower
