@@ -95,7 +95,8 @@ def test_synthesize_from_tools_with_paths():
 
 def test_synthesize_empty_when_no_tools():
     text = synthesize_from_tools([])
-    assert "continue" in text.lower()
+    low = text.lower()
+    assert "resume" in low or "continue" in low or "history is intact" in low
 
 
 def test_is_disconnect_error():

@@ -68,6 +68,9 @@ module-name = "remedy"
 minversion = "7.0"
 addopts = ["-v", "--tb=short", "--strict-markers"]
 testpaths = ["tests"]
+markers = [
+    "live: requires live RMB/local host (skipped when host down)",
+]
 
 [tool.ruff]
 target-version = "py312"

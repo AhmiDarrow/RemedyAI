@@ -1,6 +1,15 @@
 /** Cohesive form controls for Settings — pairs with ui-* / seg-btn design tokens. */
 
-import type { CSSProperties, ReactNode } from 'react'
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+  type SelectHTMLAttributes,
+} from 'react'
+import { createPortal } from 'react-dom'
 
 export function FormHint({ children, className = '' }: { children: ReactNode; className?: string }) {
   return (
@@ -73,7 +82,327 @@ export function FormInput({
   )
 }
 
+export type FormSelectOption = { value: string; label: string; disabled?: boolean }
+
+/**
+ * Settings select that opens a fixed portal menu so options are never clipped
+ * by the rail panel's overflow (native &lt;select&gt; lists go off-window on WebView2).
+ *
+ * Prefer the `options` prop (reliable). Children `&lt;option&gt;` still work as a
+ * fallback via tree walk, but React 19 / production builds can hide props.
+ */
 export function FormSelect({
+  value,
+  onChange,
+  children,
+  options: optionsProp,
+  className = 'mb-2',
+  disabled,
+  title,
+  id,
+  size = 'md',
+}: {
+  value: string
+  onChange: (v: string) => void
+  children?: ReactNode
+  /** Preferred — explicit list so portal menu always has real values. */
+  options?: FormSelectOption[]
+  className?: string
+  disabled?: boolean
+  title?: string
+  id?: string
+  size?: 'md' | 'sm'
+}) {
+  return (
+    <PortalSelect
+      id={id}
+      value={value}
+      disabled={disabled}
+      title={title}
+      onChange={onChange}
+      size={size}
+      className={className}
+      optionsProp={optionsProp}
+    >
+      {children}
+    </PortalSelect>
+  )
+}
+
+type Opt = FormSelectOption
+
+function childText(node: unknown): string {
+  if (node == null || typeof node === 'boolean') return ''
+  if (typeof node === 'string' || typeof node === 'number') return String(node)
+  if (Array.isArray(node)) return node.map(childText).join('')
+  if (typeof node === 'object' && node !== null && 'props' in node) {
+    const p = (node as { props?: { children?: unknown } }).props
+    return childText(p?.children)
+  }
+  return ''
+}
+
+function collectOptions(node: ReactNode, out: Opt[] = []): Opt[] {
+  if (node == null || typeof node === 'boolean') return out
+  if (Array.isArray(node)) {
+    for (const n of node) collectOptions(n, out)
+    return out
+  }
+  if (typeof node === 'object' && node !== null && 'props' in node) {
+    const el = node as {
+      type?: unknown
+      props?: Record<string, unknown> & { value?: unknown; children?: unknown }
+    }
+    const t = el.type
+    const typeName =
+      typeof t === 'string'
+        ? t
+        : typeof t === 'function'
+          ? (t as { name?: string; displayName?: string }).displayName
+            || (t as { name?: string }).name
+            || ''
+          : ''
+    const isOption =
+      t === 'option'
+      || (typeof t === 'string' && t.toLowerCase() === 'option')
+      || typeName === 'option'
+    if (isOption && el.props) {
+      // React may put value on props.value; also accept defaultValue
+      const rawVal =
+        el.props.value !== undefined && el.props.value !== null
+          ? el.props.value
+          : el.props.defaultValue
+      const val = rawVal != null ? String(rawVal) : ''
+      const label = childText(el.props.children).trim() || val
+      out.push({
+        value: val,
+        label,
+        disabled: Boolean(el.props.disabled),
+      })
+      return out
+    }
+    if (el.props?.children != null) collectOptions(el.props.children as ReactNode, out)
+  }
+  return out
+}
+
+function pathsEqual(a: string, b: string): boolean {
+  if (a === b) return true
+  const na = a.replace(/\//g, '\\').toLowerCase()
+  const nb = b.replace(/\//g, '\\').toLowerCase()
+  return na === nb
+}
+
+function PortalSelect({
+  value,
+  onChange,
+  children,
+  optionsProp,
+  className = '',
+  disabled,
+  title,
+  id,
+  size = 'md',
+}: {
+  value: string
+  onChange: (v: string) => void
+  children?: ReactNode
+  optionsProp?: Opt[]
+  className?: string
+  disabled?: boolean
+  title?: string
+  id?: string
+  size?: 'md' | 'sm'
+}) {
+  const [open, setOpen] = useState(false)
+  const btnRef = useRef<HTMLButtonElement | null>(null)
+  const menuRef = useRef<HTMLDivElement | null>(null)
+  const [pos, setPos] = useState<{
+    top: number
+    left: number
+    width: number
+    maxH: number
+    openUp: boolean
+  } | null>(null)
+
+  const fromChildren = collectOptions(children)
+  const options =
+    optionsProp && optionsProp.length > 0 ? optionsProp : fromChildren
+  const selected =
+    options.find((o) => pathsEqual(o.value, value))
+    || (value
+      ? { value, label: value.replace(/^.*[\\/]/, '') || value }
+      : options.find((o) => o.value === '') || options[0])
+  const label = selected?.label || value || '—'
+
+  const place = () => {
+    const el = btnRef.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    const spaceBelow = window.innerHeight - r.bottom - 8
+    const spaceAbove = r.top - 8
+    const openUp = spaceBelow < 180 && spaceAbove > spaceBelow
+    const maxH = Math.max(120, Math.min(320, openUp ? spaceAbove : spaceBelow))
+    setPos({
+      top: openUp ? r.top : r.bottom + 4,
+      left: r.left,
+      width: Math.max(r.width, 160),
+      maxH,
+      openUp,
+    })
+  }
+
+  useLayoutEffect(() => {
+    if (!open) return
+    place()
+    const onWin = () => place()
+    window.addEventListener('resize', onWin)
+    window.addEventListener('scroll', onWin, true)
+    return () => {
+      window.removeEventListener('resize', onWin)
+      window.removeEventListener('scroll', onWin, true)
+    }
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (btnRef.current?.contains(t) || menuRef.current?.contains(t)) return
+      setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  const menu =
+    open && pos
+      ? createPortal(
+          <div
+            ref={menuRef}
+            role="listbox"
+            className="settings-portal-select-menu"
+            style={{
+              position: 'fixed',
+              zIndex: 600,
+              left: pos.left,
+              width: pos.width,
+              maxHeight: pos.maxH,
+              ...(pos.openUp
+                ? { bottom: window.innerHeight - pos.top + 4, top: 'auto' }
+                : { top: pos.top }),
+              overflowY: 'auto',
+              background: 'var(--bg-secondary)',
+              border: '1px solid var(--border)',
+              borderRadius: 8,
+              boxShadow: '0 12px 36px rgba(0,0,0,0.35)',
+              padding: '4px 0',
+            }}
+          >
+            {options.length === 0 ? (
+              <div className="px-3 py-2 text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                No options
+              </div>
+            ) : (
+              options.map((o, idx) => {
+                const on = pathsEqual(o.value, value)
+                return (
+                  <button
+                    key={`${idx}:${o.value}`}
+                    type="button"
+                    role="option"
+                    aria-selected={on}
+                    disabled={o.disabled}
+                    data-value={o.value}
+                    className="w-full text-left px-3 py-1.5 text-[11px] truncate"
+                    style={{
+                      background: on
+                        ? 'color-mix(in srgb, var(--accent) 18%, transparent)'
+                        : 'transparent',
+                      color: o.disabled ? 'var(--text-muted)' : 'var(--text-primary)',
+                      border: 'none',
+                      cursor: o.disabled ? 'not-allowed' : 'pointer',
+                      fontWeight: on ? 600 : 500,
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!on && !o.disabled) {
+                        e.currentTarget.style.background =
+                          'color-mix(in srgb, var(--bg-tertiary) 90%, transparent)'
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = on
+                        ? 'color-mix(in srgb, var(--accent) 18%, transparent)'
+                        : 'transparent'
+                    }}
+                    onClick={() => {
+                      if (o.disabled) return
+                      // Always pass explicit value from the option object
+                      onChange(o.value)
+                      setOpen(false)
+                    }}
+                    title={o.label}
+                  >
+                    {o.label}
+                  </button>
+                )
+              })
+            )}
+          </div>,
+          document.body,
+        )
+      : null
+
+  return (
+    <div className={`relative w-full ${className}`.trim()}>
+      <button
+        ref={btnRef}
+        id={id}
+        type="button"
+        disabled={disabled}
+        title={title}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        className={`ui-select w-full text-left flex items-center gap-1 ${
+          size === 'sm' ? 'ui-select-sm' : ''
+        }`}
+        style={{ cursor: disabled ? 'not-allowed' : 'pointer' }}
+        onClick={() => {
+          if (disabled) return
+          setOpen((o) => !o)
+        }}
+      >
+        <span className="truncate flex-1 min-w-0">{label}</span>
+        <span className="shrink-0 opacity-60 text-[10px]" aria-hidden>
+          ▾
+        </span>
+      </button>
+      {/* Keep a hidden native select for form semantics / tests */}
+      <select
+        value={value}
+        disabled={disabled}
+        tabIndex={-1}
+        aria-hidden
+        className="sr-only"
+        style={{ position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none' }}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        {children}
+      </select>
+      {menu}
+    </div>
+  )
+}
+
+/** Native select escape hatch when portal is not wanted. */
+export function FormSelectNative({
   value,
   onChange,
   children,
@@ -82,6 +411,7 @@ export function FormSelect({
   title,
   id,
   size = 'md',
+  ...rest
 }: {
   value: string
   onChange: (v: string) => void
@@ -91,7 +421,7 @@ export function FormSelect({
   title?: string
   id?: string
   size?: 'md' | 'sm'
-}) {
+} & Omit<SelectHTMLAttributes<HTMLSelectElement>, 'value' | 'onChange' | 'size'>) {
   return (
     <select
       id={id}
@@ -100,6 +430,7 @@ export function FormSelect({
       title={title}
       onChange={(e) => onChange(e.target.value)}
       className={`ui-select w-full ${size === 'sm' ? 'ui-select-sm' : ''} ${className}`.trim()}
+      {...rest}
     >
       {children}
     </select>

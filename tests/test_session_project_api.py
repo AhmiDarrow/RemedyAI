@@ -60,11 +60,12 @@ def test_create_empty_project_stays_root_even_with_global_default(
         "access_scope": "project",
     }
     (tmp_path / ".remedy").mkdir(exist_ok=True)
+    # Modularized: load_config is used from sessions.crud (not the package root).
     monkeypatch.setattr(
-        "remedy.interfaces.routes.sessions.load_config",
+        "remedy.interfaces.routes.sessions.crud.load_config",
         lambda: dict(raw_cfg),
     )
-    # sessions module may import load_config from api_support
+    # Legacy / shared import path used by other session helpers
     monkeypatch.setattr(
         "remedy.interfaces.api_support.load_config",
         lambda: dict(raw_cfg),

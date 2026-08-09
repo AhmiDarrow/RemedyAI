@@ -190,6 +190,71 @@ def register_auth_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
                 if len(filtered) >= 2 or len(models) <= 1:
                     models = filtered
                 # else: keep full catalog; live /api/models is still authoritative
+
+            # RMB: inject discovered GGUFs so status-bar model picker can load them
+            if pid == "rmb":
+                try:
+                    from pathlib import Path as _Path
+
+                    from remedy.runtime.rmb.service import get_rmb_status
+
+                    st = get_rmb_status(cfg if isinstance(cfg, dict) else None)
+                    seen_ids: set[str] = set()
+                    disc_models: list[dict[str, Any]] = []
+                    for g in st.get("discovered_ggufs") or []:
+                        if not isinstance(g, dict):
+                            continue
+                        path = str(g.get("path") or "").strip()
+                        name = str(g.get("name") or (_Path(path).name if path else ""))
+                        mid = str(g.get("id") or _Path(name).stem or name).strip()
+                        if not mid or mid in seen_ids:
+                            continue
+                        seen_ids.add(mid)
+                        sz = g.get("size_gb")
+                        label = name if name else mid
+                        if sz is not None:
+                            label = f"{label} ({sz} GB)"
+                        disc_models.append({"id": mid, "name": label})
+                    # Currently loaded weights first
+                    mp = str(st.get("model_path") or "").strip()
+                    if mp:
+                        stem = _Path(mp).stem
+                        if stem and stem not in seen_ids:
+                            disc_models.insert(
+                                0,
+                                {
+                                    "id": stem,
+                                    "name": f"{_Path(mp).name} (loaded)",
+                                },
+                            )
+                            seen_ids.add(stem)
+                        elif stem:
+                            # Move loaded to front
+                            disc_models = [
+                                m for m in disc_models if str(m.get("id")) == stem
+                            ] + [
+                                m for m in disc_models if str(m.get("id")) != stem
+                            ]
+                    if disc_models:
+                        # Discovered first, then catalog ids not already present
+                        catalog_rest = [
+                            m
+                            for m in models
+                            if str(m.get("id") or "") not in seen_ids
+                            and str(m.get("id") or "") != "default"
+                        ]
+                        models = disc_models + catalog_rest
+                    # Mark connected when runtime or models exist on disk
+                    if not connected and (
+                        st.get("runtime_present")
+                        or st.get("model_present")
+                        or disc_models
+                    ):
+                        connected = True
+                        reason = "rmb_local"
+                except Exception:
+                    pass
+
             last_model = last_by.get(pid) or meta.get("default_model")
             # Never keep a demo-only id as last_model for a non-demo provider
             if pid != "demo" and last_model:

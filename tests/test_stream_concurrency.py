@@ -220,7 +220,8 @@ async def test_parallel_abort_registry_isolated() -> None:
             assert is_session_streaming("iso-2")
             n = abort_session("iso-1")
             assert n == 1
-            assert is_session_streaming("iso-1")  # event still registered until end_turn
+            # Abort clears registry immediately so UI Stop unblocks 409 resend
+            assert is_session_streaming("iso-1") is False
             assert is_session_streaming("iso-2")
             # Current ContextVar is iso-2 — must NOT be aborted.
             assert is_turn_aborted() is False

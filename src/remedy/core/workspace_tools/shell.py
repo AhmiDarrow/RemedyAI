@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,49 @@ from remedy.core.workspace_tools.guards import (
     reserved_guard,
     track_read,
 )
+
+
+def _normalize_shell_command_for_host(command: str) -> str:
+    """Rewrite model-emitted bashisms for the host shell (esp. Windows cmd).
+
+    Models often generate ``mkdir -p a/b c/d`` and ``cd X && mkdir -p …`` which
+    break under PowerShell/cmd without -p. Prefer file_write for files; shell
+    still needs mkdir for dirs when the model insists.
+    """
+    import os
+    import re
+
+    cmd = (command or "").strip()
+    if not cmd:
+        return cmd
+    if os.name != "nt":
+        return cmd
+
+    def _mkdir_p_replacement(paths_blob: str) -> str:
+        # Split on whitespace but keep quoted segments
+        parts: list[str] = []
+        for m in re.finditer(r'"[^"]+"|\'[^\']+\'|\S+', paths_blob.strip()):
+            p = m.group(0).strip().strip("\"'")
+            if not p or p.startswith("-"):
+                continue
+            # Trailing \ required so IF NOT EXIST treats path as a directory
+            win_p = p.replace("/", "\\").rstrip("\\")
+            parts.append(f'if not exist "{win_p}\\" mkdir "{win_p}"')
+        return " & ".join(parts) if parts else "echo no_paths"
+
+    # Global replace of `mkdir -p PATH…` segments (including after &&)
+    def _sub_mkdir(m: re.Match[str]) -> str:
+        return _mkdir_p_replacement(m.group(1))
+
+    cmd2 = re.sub(
+        r"\bmkdir\s+-p\s+((?:\"[^\"]+\"|'[^']+'|[^\s&|;]+(?:\s+(?!&&)[^\s&|;]+)*)+)",
+        _sub_mkdir,
+        cmd,
+        flags=re.IGNORECASE,
+    )
+    # `cd /d` is fine on cmd; bare unix `cd path &&` already works on cmd
+    # Normalize forward slashes in cd targets when simple: leave as-is (cmd accepts /)
+    return cmd2
 
 
 def register_shell_tools(runtime: Any) -> None:
@@ -214,6 +258,8 @@ def register_shell_tools(runtime: Any) -> None:
                 ),
             )
 
+        # Translate common bashisms so Windows cmd can run model commands
+        command = _normalize_shell_command_for_host(command)
         argv = [*win_shell_prefix(), command]
         sandbox = SubprocessSandbox(allowed_paths=roots or [root, cwd])
         env = path_env_with_local_bins(cwd)
@@ -260,13 +306,141 @@ def register_shell_tools(runtime: Any) -> None:
                     )
         return "\n".join(parts)
 
+    async def run_python_file(
+        path: str = "",
+        args: str = "",
+        timeout_seconds: float = 120.0,
+        workdir: str = "",
+    ) -> str:
+        """Run a .py file with the project Python (prefer over python -c blobs).
+
+        *path* relative to project or absolute. Optional *args* is a single
+        argv string split with shlex. Temp helpers should live under
+        ``.remedy-build/tmp/``.
+        """
+        import os
+        import shlex
+        import sys
+        from pathlib import Path as _P
+
+        from remedy.core.project_fingerprint import path_env_with_local_bins
+        from remedy.execution.sandbox import SubprocessSandbox
+
+        rel = (path or "").strip()
+        if not rel:
+            return format_tool_error(
+                "path= required",
+                code="EMPTY_PATH",
+                tool_name="run_python_file",
+                suggestion="Pass path to a .py file (prefer .remedy-build/tmp/ for helpers).",
+            )
+        bad = _reserved_guard(rel)
+        if bad:
+            return format_tool_error(
+                bad,
+                code="RESERVED_NAME",
+                tool_name="run_python_file",
+                suggestion="Use a normal .py path under the project.",
+            )
+        try:
+            target = runtime.resolve_tool_path(rel, for_write=False)
+        except Exception as e:
+            return format_tool_error(
+                f"invalid path: {e}",
+                code="BAD_PATH",
+                tool_name="run_python_file",
+                suggestion="Use a path under the project folder.",
+            )
+        if not target.is_file():
+            return format_tool_error(
+                f"not a file: {target}",
+                code="NOT_FOUND",
+                tool_name="run_python_file",
+                suggestion="file_write the script first (prefer .remedy-build/tmp/).",
+            )
+        if target.suffix.lower() not in (".py", ".pyw"):
+            return format_tool_error(
+                f"not a Python file: {target.name}",
+                code="NOT_PYTHON",
+                tool_name="run_python_file",
+                suggestion="Pass a .py path, or use bash_exec for other runners.",
+            )
+        root = runtime.effective_project_path()
+        cwd = root
+        wd_raw = (workdir or "").strip()
+        if wd_raw:
+            try:
+                cwd = runtime.resolve_tool_path(wd_raw, for_write=True)
+                if cwd.is_file():
+                    cwd = cwd.parent
+            except Exception as e:
+                return format_tool_error(
+                    f"invalid workdir: {e}",
+                    code="BAD_WORKDIR",
+                    tool_name="run_python_file",
+                    suggestion="Pass workdir under the project.",
+                )
+        else:
+            # Default cwd = project root (not script dir) for package imports
+            try:
+                cwd = _P(root) if root else target.parent
+                if cwd.is_file():
+                    cwd = cwd.parent
+            except Exception:
+                cwd = target.parent
+        try:
+            timeout = float(timeout_seconds if timeout_seconds is not None else 120.0)
+        except (TypeError, ValueError):
+            timeout = 120.0
+        timeout = max(5.0, min(600.0, timeout))
+        extra: list[str] = []
+        if (args or "").strip():
+            try:
+                extra = shlex.split(args, posix=os.name != "nt")
+            except Exception:
+                extra = args.split()
+
+        argv = [sys.executable, str(target), *extra]
+        try:
+            roots = list(runtime.write_roots() or [])
+        except Exception:
+            roots = [root]
+        sandbox = SubprocessSandbox(allowed_paths=roots or [root, cwd])
+        env = path_env_with_local_bins(cwd)
+        result = await sandbox.execute(
+            argv, workdir=cwd, timeout_seconds=timeout, env=env
+        )
+        parts = [
+            f"exit_code={result.exit_code}",
+            f"cwd={cwd}",
+            f"python={sys.executable}",
+            f"script={target}",
+            f"timeout_s={timeout}",
+        ]
+        if result.stdout:
+            out = result.stdout
+            if len(out) > _HARD_SAFETY_CHARS:
+                out = out[:_HARD_SAFETY_CHARS] + f"\n…[stdout safety cap {_HARD_SAFETY_CHARS}]"
+            parts.append(out)
+        if result.stderr:
+            err = result.stderr
+            if len(err) > _HARD_SAFETY_CHARS:
+                err = err[:_HARD_SAFETY_CHARS] + f"\n…[stderr safety cap {_HARD_SAFETY_CHARS}]"
+            parts.append(f"stderr:\n{err}")
+        if result.exit_code != 0:
+            parts.append(
+                "Suggestion: fix the script with file_edit, or raise timeout_seconds. "
+                "Prefer .remedy-build/tmp/ for one-off helpers (not repo root)."
+            )
+        return "\n".join(parts)
 
     runtime.tool_registry.register_builtin_handler(
         "bash_exec",
         "Run a shell command. Default cwd = focus folder (or home). "
         "Optional workdir= absolute/relative path; timeout_seconds= 5–600 (default 60). "
         "Local .venv/node_modules/.bin and repo-root tools are on PATH. "
-        "Do NOT use for simple text file create/edit — use file_write instead.",
+        "Prefer run_python_file for .py scripts; prefer file_write over echo redirects. "
+        "Temp helper scripts → .remedy-build/tmp/ only.",
         bash_exec,
         {
             "type": "object",
@@ -290,6 +464,33 @@ def register_shell_tools(runtime: Any) -> None:
                 },
             },
             "required": ["command"],
+        },
+    )
+    runtime.tool_registry.register_builtin_handler(
+        "run_python_file",
+        "Run a .py file with project Python (prefer over python -c). "
+        "path= required; args= optional argv string; workdir= optional. "
+        "Temp helpers should live under .remedy-build/tmp/.",
+        run_python_file,
+        {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Path to .py file"},
+                "args": {
+                    "type": "string",
+                    "description": "Optional arguments string (shlex-split)",
+                },
+                "timeout_seconds": {
+                    "type": "number",
+                    "description": "Timeout seconds (default 120, max 600)",
+                    "default": 120,
+                },
+                "workdir": {
+                    "type": "string",
+                    "description": "Optional working directory",
+                },
+            },
+            "required": ["path"],
         },
     )
 

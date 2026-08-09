@@ -92,6 +92,34 @@ def ledger_dir_for_project(
     return d
 
 
+def build_tmp_dir(
+    project_path: str | Path | None = None,
+    *,
+    home: str | Path | None = None,
+) -> Path:
+    """Return ``{project}/.remedy-build/tmp`` (created) for one-off helper scripts."""
+    d = ledger_dir_for_project(project_path, home=home) / "tmp"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def build_tmp_script_path(
+    name: str,
+    project_path: str | Path | None = None,
+    *,
+    home: str | Path | None = None,
+) -> Path:
+    """Safe path under ``.remedy-build/tmp/`` for temp agent scripts."""
+    raw = (name or "helper.py").strip().replace("\\", "/").split("/")[-1]
+    if not raw or raw in (".", ".."):
+        raw = "helper.py"
+    # Force a simple filename
+    safe = "".join(c if c.isalnum() or c in "._-" else "_" for c in raw)[:80]
+    if not safe.endswith((".py", ".ps1", ".sh", ".cmd", ".bat")):
+        safe = safe + ".py"
+    return build_tmp_dir(project_path, home=home) / safe
+
+
 def ledger_path(
     project_path: str | Path | None = None,
     *,
@@ -159,11 +187,29 @@ def merge_turn_into_ledger(
     summ = str(getattr(state, "last_verify_summary", "") or "")
     if summ:
         entry.last_verify_summary = summ[:2000]
+    # Files only — never shell command blobs (ledger path hygiene)
     paths = list(getattr(state, "paths_touched", None) or [])
+    with suppress(Exception):
+        from remedy.core.build_engine import _is_filesystem_path
+
+        paths = [p for p in paths if _is_filesystem_path(str(p))]
     for p in paths:
         if p and p not in entry.paths_touched:
+            # Drop accidental shell-looking leftovers from older ledgers
+            sp = str(p)
+            if sp.startswith(("git ", "gh ", "pytest", "python ")):
+                continue
+            if " && " in sp or "\n" in sp:
+                continue
             entry.paths_touched.append(p)
-    entry.paths_touched = entry.paths_touched[-40:]
+    entry.paths_touched = [
+        p
+        for p in entry.paths_touched
+        if p
+        and not str(p).startswith(("git ", "gh ", "pytest", "python "))
+        and " && " not in str(p)
+        and "\n" not in str(p)
+    ][-40:]
     entry.explore_steps = max(entry.explore_steps, int(getattr(state, "explore_steps", 0) or 0))
     entry.write_steps = max(entry.write_steps, int(getattr(state, "write_steps", 0) or 0))
     entry.verify_steps = max(entry.verify_steps, int(getattr(state, "verify_steps", 0) or 0))
@@ -241,6 +287,12 @@ def resume_hint(project_path: str | Path | None = None, *, home: str | Path | No
             lines.append("Next: REPAIR failing verify, then re-run verify.")
         else:
             lines.append("Next: run verify_command if not green; only then mark done.")
+    elif phase in ("ship",):
+        lines.append(
+            "Next: SHIP only — git_status → git_push → gh_release if needed. "
+            "Do not re-run tests unless source changed. "
+            "Temp scripts under .remedy-build/tmp/."
+        )
     else:
         lines.append("Continue from this state — do not restart the whole build.")
     return "\n".join(lines)

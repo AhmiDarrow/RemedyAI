@@ -32,6 +32,18 @@ def _safe_modname(rel: str) -> str | None:
     return ".".join(parts)
 
 
+_C_SUFFIXES = (".c", ".h", ".cpp", ".cc", ".cxx", ".hpp", ".hh")
+
+
+def _write_suffixes(write_set: list[str]) -> set[str]:
+    out: set[str] = set()
+    for w in write_set or []:
+        s = str(w).replace("\\", "/").lower()
+        if "." in s.rsplit("/", 1)[-1]:
+            out.add("." + s.rsplit(".", 1)[-1])
+    return out
+
+
 def seed_python_smoke_oracle(
     runtime: Any,
     write_set: list[str],
@@ -41,6 +53,10 @@ def seed_python_smoke_oracle(
     """Create tests/test_remedy_build_smoke.py importing write_set modules.
 
     Returns {ok, path, command, imports, error}.
+
+    Never plants a no-op ``assert True`` placeholder — that marked C-only
+    builds green without compile/run (e2e 2026-08-09). Non-Python write sets
+    must use stack-native verify (gcc, cargo, …) instead.
     """
     try:
         root = Path(runtime.effective_project_path())
@@ -51,6 +67,18 @@ def seed_python_smoke_oracle(
 
     if not root.is_dir():
         return {"ok": False, "error": "project root not a directory", "command": "", "path": ""}
+
+    suffixes = _write_suffixes(list(write_set or []))
+    has_py = ".py" in suffixes
+    has_c = bool(suffixes.intersection({".c", ".h", ".cpp", ".cc", ".cxx", ".hpp", ".hh"}))
+    if has_c and not has_py:
+        return {
+            "ok": False,
+            "error": "c_project_skip_python_seed",
+            "command": "",
+            "path": "",
+            "reason": "c_only",
+        }
 
     imports: list[str] = []
     for w in write_set or []:
@@ -70,6 +98,16 @@ def seed_python_smoke_oracle(
             imports.append(mod)
         if len(imports) >= 8:
             break
+
+    # No importable Python modules → do not plant a fake-green placeholder
+    if not imports:
+        return {
+            "ok": False,
+            "error": "no_importable_python_modules",
+            "command": "",
+            "path": "",
+            "reason": "no_imports",
+        }
 
     tests_dir = root / "tests"
     try:
@@ -93,22 +131,14 @@ def seed_python_smoke_oracle(
         "import pytest",
         "",
     ]
-    if not imports:
-        lines += [
-            "def test_remedy_build_smoke_placeholder():",
-            '    """Project has writes but no importable module paths yet."""',
-            "    assert True",
-            "",
-        ]
-    else:
-        lines.append("@pytest.mark.parametrize(\"modname\", [")
-        for m in imports:
-            lines.append(f'    "{m}",')
-        lines.append("])")
-        lines.append("def test_import_mutated_module(modname: str) -> None:")
-        lines.append('    """Smoke: mutated modules must import without error."""')
-        lines.append("    importlib.import_module(modname)")
-        lines.append("")
+    lines.append('@pytest.mark.parametrize("modname", [')
+    for m in imports:
+        lines.append(f'    "{m}",')
+    lines.append("])")
+    lines.append("def test_import_mutated_module(modname: str) -> None:")
+    lines.append('    """Smoke: mutated modules must import without error."""')
+    lines.append("    importlib.import_module(modname)")
+    lines.append("")
 
     body = "\n".join(lines)
     try:

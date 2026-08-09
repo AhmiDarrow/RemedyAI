@@ -330,14 +330,14 @@ def _shrink_to_token_budget(
             if m.get("role") == "tool" and str(m.get("tool_call_id") or "") in protect_ids:
                 protect_tools.add(i)
 
-    # Phase 1: trim unprotected tools only
-    if _apply_cap("tool", protect_tools, (8000, 4000, 2000, 800, 200)):
+    # Phase 1: trim unprotected tools only (ladders raised — 2k caps neutered agents)
+    if _apply_cap("tool", protect_tools, (64_000, 32_000, 16_000, 8_000, 4_000)):
         return msgs
 
     # Phase 2: if still over, lightly trim older assistants (never last 2)
     asst_idxs = [i for i, m in enumerate(msgs) if m.get("role") == "assistant"]
     protect_asst = set(asst_idxs[-2:]) if asst_idxs else set()
-    if _apply_cap("assistant", protect_asst, (4000, 1500, 400)):
+    if _apply_cap("assistant", protect_asst, (16_000, 8_000, 2_000)):
         return msgs
     # Final truth for caller metrics path (messages already as lean as we allow)
     return msgs

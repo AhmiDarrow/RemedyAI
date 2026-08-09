@@ -47,6 +47,38 @@ def _thinking_nudge(level: str) -> str:
     return _THINKING_NUDGES.get((level or "medium").lower(), "")
 
 
+def coalesce_system_messages_first(
+    messages: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    """Jinja chat templates (Qwen3 / Qwopus / etc.) require system msgs first.
+
+    Harness often injects mid-stream system notes; llama-server --jinja then
+    400s with \"System message must be at the beginning\". Merge all system
+    content into one leading system message; preserve non-system order.
+    """
+    if not messages:
+        return []
+    systems: list[str] = []
+    rest: list[dict[str, Any]] = []
+    for m in messages:
+        if not isinstance(m, dict):
+            continue
+        role = str(m.get("role") or "").lower()
+        if role == "system":
+            c = m.get("content")
+            if isinstance(c, str) and c.strip():
+                systems.append(c.strip())
+            elif c is not None and not isinstance(c, str):
+                systems.append(str(c))
+            continue
+        rest.append(m)
+    out: list[dict[str, Any]] = []
+    if systems:
+        out.append({"role": "system", "content": "\n\n".join(systems)})
+    out.extend(rest)
+    return out
+
+
 def _prepend_system_nudge(
     messages: list[dict[str, Any]], nudge: str
 ) -> list[dict[str, Any]]:
@@ -687,9 +719,9 @@ class LlamaCppProvider(OpenAIProvider):
     """
 
     provider_name = "llamacpp"
-    # Agent coding defaults — enough for a multi-step tool turn or file edit.
-    LOCAL_DEFAULT_MAX_TOKENS = 1024
-    LOCAL_MAX_TOKENS_CEILING = 2048
+    # Agent coding defaults — enough for a multi-step tool turn or file_write/edit.
+    LOCAL_DEFAULT_MAX_TOKENS = 3072
+    LOCAL_MAX_TOKENS_CEILING = 12288
     default_base_url = "http://127.0.0.1:8080/v1"
 
     def provider_max_output_tokens(self, model: str | None = None) -> int:
@@ -774,6 +806,8 @@ class LlamaCppProvider(OpenAIProvider):
         max_tokens: int | None = None,
         thinking_level: str | None = None,
     ) -> dict[str, Any]:
+        # Jinja templates (Qwen3 family etc.): system must lead before any fit
+        messages = coalesce_system_messages_first(messages)
         # Endless local context: hard-fit messages+tools into fixed n_ctx
         # *before* estimating completion — tools alone can be multi-k tokens.
         win = self._window_for_budget(model)
@@ -796,6 +830,8 @@ class LlamaCppProvider(OpenAIProvider):
                 model=model,
                 coding_bias=True,
             )
+            # fit may re-inject system mid-list — re-coalesce for jinja hosts
+            fit_msgs = coalesce_system_messages_first(fit_msgs)
         except Exception:
             fit_msgs, fit_tools = messages, tools
 
@@ -846,6 +882,7 @@ class LlamaCppProvider(OpenAIProvider):
                 base_url=getattr(self, "default_base_url", None),
                 user_message=um,
                 step_index=int(getattr(self, "_local_step_index", 0) or 0),
+                history=fit_msgs if isinstance(fit_msgs, list) else None,
             )
         except Exception:
             pass
@@ -861,13 +898,32 @@ class RmbProvider(LlamaCppProvider):
 
     UI brand: RMB. Engine: llama.cpp. Port 8787 by default.
     Optimized for coding + multi-step tools and long sessions (harness + n_ctx).
+
+    Automatically uses the **currently loaded GGUF stem** as the model id and
+    coalesces system messages for Jinja templates — no user knobs required.
     """
 
     provider_name = "rmb"
-    # Coding agents need headroom for multi-file patches + tool JSON
-    LOCAL_DEFAULT_MAX_TOKENS = 1536
-    LOCAL_MAX_TOKENS_CEILING = 3072
+    # Coding agents need headroom for multi-file patches + full file_write/edit JSON
+    # (too-low ceiling truncates tool args → TOOL_ARGS_TRUNCATED / HISTORY_STUB loops).
+    LOCAL_DEFAULT_MAX_TOKENS = 4096
+    LOCAL_MAX_TOKENS_CEILING = 12288
     default_base_url = "http://127.0.0.1:8787/v1"
+
+    def _live_gguf_stem(self) -> str | None:
+        try:
+            from pathlib import Path
+
+            from remedy.runtime.rmb.config import load_rmb_json, merge_state
+
+            st = merge_state(load_rmb_json())
+            mp = str(st.get("model_path") or "").strip()
+            if mp:
+                return Path(mp).stem
+            mid = str(st.get("model_id") or "").strip()
+            return mid or None
+        except Exception:
+            return None
 
     def _local_completion_budget(self, model: str | None = None) -> int:
         """Prefer live RMB ctx_size when known (endless sessions need accurate fill%)."""
@@ -924,22 +980,44 @@ class RmbProvider(LlamaCppProvider):
         max_tokens: int | None = None,
         thinking_level: str | None = None,
     ) -> dict[str, Any]:
-        # Non-blocking wake — never wait 90s on the chat hot path
+        # Wake if down; if already starting/loading, leave wait to the ReAct
+        # 503 path (wait_rmb_ready) so build_body stays non-blocking.
+        # force=True bypasses the short running-cache so a just-died host
+        # is not reported healthy for ~1.5s after child exit.
         try:
-            from remedy.runtime.rmb.service import is_running, wake_rmb_async
+            from remedy.runtime.rmb.service import (
+                ensure_rmb_watchdog,
+                is_loading,
+                is_running,
+                is_starting,
+                loading_stalled,
+                wake_rmb_async,
+            )
 
-            if not is_running(require_http=True):
-                wake_rmb_async()
+            ensure_rmb_watchdog()
+            if not is_running(force=True, require_http=True):
+                if loading_stalled():
+                    # Wedged mid-load — fire async restart (wait_rmb_ready will sync)
+                    wake_rmb_async()
+                elif not is_starting() and not is_loading():
+                    wake_rmb_async()
         except Exception:
             pass
+        # Always use the Loaded GGUF stem — status bar / session may lag
+        live = self._live_gguf_stem()
+        use_model = live or model
         body = super().build_body(
-            model,
+            use_model,
             messages,
             tools,
             stream,
             max_tokens=max_tokens,
             thinking_level=thinking_level,
         )
+        body["model"] = use_model
+        # Jinja templates (Qwen3 / Qwopus): system messages must lead
+        if isinstance(body.get("messages"), list):
+            body["messages"] = coalesce_system_messages_first(body["messages"])
         # super already ran endless fit + local optimize
         if body.get("tools"):
             body["temperature"] = min(float(body.get("temperature") or 0.1), 0.1)

@@ -69,7 +69,9 @@ def save_rmb_json(state: dict[str, Any], home_dir: str | Path | None = None) -> 
 def default_state() -> dict[str, Any]:
     return {
         "enabled": False,
-        "auto_start": True,
+        # Off by default — user starts RMB explicitly (Settings / Use as provider).
+        # Serve must not load a GGUF host just because Remedy API came up.
+        "auto_start": False,
         "host": DEFAULT_HOST,
         "port": DEFAULT_CHAT_PORT,
         "base_url": f"http://{DEFAULT_HOST}:{DEFAULT_CHAT_PORT}/v1",

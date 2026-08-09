@@ -233,9 +233,20 @@ def _rewrite_write_tool_args(parsed: Any, tool_name: str) -> Any:
     if name in _WRITE_BODY_TOOLS:
         content = out.get("content")
         if isinstance(content, str) and len(content) > FILE_WRITE_CONTENT_HISTORY_MAX:
-            out["content"] = _summarize_large_string(content, kind="file_write content")
-            out["_content_chars"] = len(content)
+            # Partner rule: NEVER put a copy-pasteable stub in ``content``.
+            # Models re-emitted <<NOT_SOURCE_CODE history_stub…>> as file_write
+            # bodies (HISTORY_STUB ×N fail loop). Omit body; keep path + size only.
+            n = len(content)
+            out.pop("content", None)
+            out["content"] = ""  # empty, not a stub string
+            out["_content_chars"] = n
             out["_history_summarized"] = True
+            out["_body_omitted"] = True
+            out["history_note"] = (
+                f"file body omitted from chat history ({n} chars already on disk). "
+                "Do NOT re-file_write a history stub. "
+                "file_read the path if you need the source; else file_edit or write NEW code."
+            )
         return out
 
     if name in _EDIT_BODY_TOOLS:
@@ -321,15 +332,100 @@ def _scrub_tool_args_obj(obj: Any, *, depth: int = 0) -> Any:
     return obj
 
 
-def coerce_tool_arguments_json(args: Any) -> str:
+def _unescape_json_string_fragment(fragment: str) -> str:
+    """Decode a JSON string body that may be missing its closing quote."""
+    try:
+        return json.loads('"' + fragment + '"')
+    except Exception:
+        return (
+            fragment.replace("\\n", "\n")
+            .replace("\\r", "\r")
+            .replace("\\t", "\t")
+            .replace('\\"', '"')
+            .replace("\\\\", "\\")
+        )
+
+
+def _extract_path_from_tool_json(raw: str) -> str | None:
+    """Pull path/file from truncated or partial tool-call JSON."""
+    s = raw or ""
+    m = re.search(
+        r'"(?:path|file|filepath|filename|target)"\s*:\s*"((?:\\.|[^"\\])*)"',
+        s,
+    )
+    if m:
+        try:
+            return str(json.loads(f'"{m.group(1)}"')).strip() or None
+        except Exception:
+            return m.group(1).replace("\\/", "/").replace("\\\\", "\\").strip() or None
+    # Bare: path: src/foo.py  or  "src/core/app.py" alone
+    m2 = re.search(
+        r'(?i)(?:path|file)\s*[:=]\s*["\']?([A-Za-z]:[^"\s,}]+\.\w{1,8}|[\w./\\-]+\.\w{1,8})',
+        s,
+    )
+    if m2:
+        return m2.group(1).strip().strip("'\"") or None
+    m3 = re.search(
+        r'["\']((?:src|tests|docs|lib|app)[/\\][^"\']+\.\w{1,8})["\']',
+        s,
+    )
+    if m3:
+        return m3.group(1).strip() or None
+    return None
+
+
+def _try_repair_file_write_json(raw: str) -> dict[str, Any] | None:
+    """Best-effort recover path+content from truncated file_write tool JSON.
+
+    Local models often hit max_tokens mid-string inside ``content``. If we can
+    still extract a path and a usable content prefix, write that rather than
+    spinning HISTORY_STUB failures.
+    """
+    s = (raw or "").strip()
+    path = _extract_path_from_tool_json(s)
+    if not path:
+        return None
+
+    m_c = re.search(r'"content"\s*:\s*"', s)
+    if not m_c:
+        # path-only salvage (useful for file_read / list_dir after truncate)
+        return {"path": path, "_repaired_truncated": True, "_path_only": True}
+    body_raw = s[m_c.end() :]
+    # Walk escapes to find closing quote (if any)
+    i = 0
+    out_chars: list[str] = []
+    closed = False
+    while i < len(body_raw):
+        ch = body_raw[i]
+        if ch == "\\" and i + 1 < len(body_raw):
+            out_chars.append(body_raw[i : i + 2])
+            i += 2
+            continue
+        if ch == '"':
+            closed = True
+            break
+        out_chars.append(ch)
+        i += 1
+    fragment = "".join(out_chars)
+    content = _unescape_json_string_fragment(fragment)
+    if not isinstance(content, str) or len(content.strip()) < 1:
+        return {"path": path, "_repaired_truncated": True, "_path_only": True}
+    # Avoid writing near-empty stubs from 1-2 char truncations
+    if len(content) < 8 and not closed:
+        return {"path": path, "content": content, "_repaired_truncated": True, "_repaired_closed": False}
+    return {
+        "path": path.strip(),
+        "content": content,
+        "_repaired_truncated": True,
+        "_repaired_closed": closed,
+    }
+
+
+def coerce_tool_arguments_json(args: Any, *, tool_name: str = "") -> str:
     """Return valid JSON for tool **execution** — full fidelity, no clipping.
 
-    Used by :func:`normalize_tool_calls` before ``file_write`` / ``file_edit``
-    run. Must **not** summarize, mid-clip nested strings, or redact body text:
-    those corrupt source files on disk (history-stub / 8k ellipsis bug).
-
-    Incomplete stream blobs become ``{_invalid_json: true, ...}`` so callers
-    can refuse instead of writing garbage.
+    Used by :func:`normalize_tool_calls` before tools run. Incomplete stream
+    blobs: repair path (+ content for writes); path-only is enough for reads.
     """
     if args is None:
         return "{}"
@@ -347,12 +443,72 @@ def coerce_tool_arguments_json(args: Any) -> str:
         json.loads(s)
         return s
     except json.JSONDecodeError:
+        repaired = _try_repair_file_write_json(s)
+        tname = (tool_name or "").strip().lower()
+        if repaired is not None:
+            # file_read / list_dir: path alone is a complete, executable call
+            if tname in (
+                "file_read",
+                "list_dir",
+                "repo_search",
+                "bash_exec",
+            ) or repaired.get("_path_only"):
+                if tname in ("file_read", "list_dir", "repo_search") or (
+                    repaired.get("_path_only") and tname not in ("file_write", "file_edit")
+                ):
+                    slim = {"path": repaired["path"]}
+                    if tname == "bash_exec" and "command" in s:
+                        # leave invalid if no command — don't invent
+                        pass
+                    else:
+                        try:
+                            return json.dumps(slim, ensure_ascii=False)
+                        except Exception:
+                            pass
+            if tname in ("file_write", "file_edit", "file_edit_batch", "") and not repaired.get(
+                "_path_only"
+            ):
+                try:
+                    return json.dumps(
+                        {k: v for k, v in repaired.items() if not str(k).startswith("_") or k in ("path", "content")},
+                        ensure_ascii=False,
+                    )
+                except Exception:
+                    pass
+            # file_write with path but truncated content still salvageable
+            if tname == "file_write" and repaired.get("content"):
+                try:
+                    return json.dumps(
+                        {
+                            "path": repaired["path"],
+                            "content": repaired["content"],
+                            "force_full_write": True,
+                            "_repaired_truncated": True,
+                        },
+                        ensure_ascii=False,
+                    )
+                except Exception:
+                    pass
+            # Generic path-bearing tools: prefer path-only execute over hard fail
+            if repaired.get("path") and tname not in (
+                "file_write",
+                "file_edit",
+                "file_edit_batch",
+            ):
+                try:
+                    return json.dumps({"path": repaired["path"]}, ensure_ascii=False)
+                except Exception:
+                    pass
         preview = s[:400]
         return json.dumps(
             {
                 "_invalid_json": True,
-                "note": "tool arguments were truncated or invalid; use tool results instead",
+                "_stream_truncated": True,
+                "note": (
+                    "tool arguments JSON was cut off mid-stream (output budget)."
+                ),
                 "preview": preview,
+                "path": (_extract_path_from_tool_json(s) or ""),
             },
             ensure_ascii=False,
         )

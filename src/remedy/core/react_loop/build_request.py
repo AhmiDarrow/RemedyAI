@@ -50,31 +50,58 @@ def build_step_request_body(
     endpoint = adapter.chat_endpoint(bind.base_url)
     use_openai_sse = bool(getattr(adapter, "uses_openai_sse", True))
 
+    # Local/RMB: always low thinking — UI "Think High" burns the budget on
+    # monologue and starves tool JSON (partner build failure mode).
     think = getattr(runtime, "_thinking_level", "high")
     with suppress(Exception):
         from remedy.core.local_agent_optimize import is_local_binding
 
         if is_local_binding(bind.provider, bind.model, bind.base_url):
             think = "low"
+            # Sticky for any later rebuilds in this process
+            runtime._thinking_level = "low"
+
+    # Local: never stream tool rounds — stream disconnects kill the turn
+    # (Server disconnected / WinError 64 pattern after every monologue nudge).
+    _stream = use_openai_sse
+    with suppress(Exception):
+        from remedy.core.local_agent_optimize import is_local_binding
+
+        if is_local_binding(bind.provider, bind.model, bind.base_url):
+            _stream = False
+            use_openai_sse = False
 
     body = adapter.build_body(
         model=bind.model,
         messages=messages,
         tools=tools,
-        stream=use_openai_sse,
+        stream=_stream,
         thinking_level=think,
     )
     with suppress(Exception):
         from remedy.core.local_agent_optimize import apply_local_body_optimize
 
+        body = body if isinstance(body, dict) else {}
+        with suppress(Exception):
+            sticky = int(getattr(runtime, "_remedy_write_budget", 0) or 0)
+            if sticky > 0:
+                body = dict(body)
+                body["_remedy_write_budget"] = sticky
         body = apply_local_body_optimize(
-            body if isinstance(body, dict) else {},
+            body,
             provider=bind.provider,
             model=bind.model,
             base_url=bind.base_url,
             user_message=str(user_message or ""),
             step_index=int(step),
+            history=messages if isinstance(messages, list) else None,
         )
+        # Monologue-loop breaker flag from ReAct
+        if getattr(runtime, "_force_tool_choice", False) and isinstance(body, dict):
+            if body.get("tools"):
+                body["tool_choice"] = "required"
+                body["stream"] = False
+                body["temperature"] = 0.05
 
     try:
         local_agent = False

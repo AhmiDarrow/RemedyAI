@@ -1,5 +1,8 @@
 /** About Remedy dialog — extracted from App.tsx. */
 
+import { useEffect } from 'react'
+import { browserStackHold } from '../utils/browserStack'
+
 export function AboutDialog({
   open,
   onClose,
@@ -17,6 +20,19 @@ export function AboutDialog({
   onOpenSettings: () => void
   onOpenDiagnostics?: () => void
 }) {
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    const release = browserStackHold('about-dialog')
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      release()
+    }
+  }, [open, onClose])
+
   if (!open) return null
 
   return (

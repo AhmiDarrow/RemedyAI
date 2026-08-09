@@ -98,7 +98,8 @@ def register_rmb_routes(app: FastAPI, *, runtime=None, gateway=None, memory=None
             live=True,
             wait_s=120.0,
         )
-        # Hot-apply chat binding when provider is already RMB (or use_as_chat)
+        # Hot-apply chat binding when provider is already RMB (or use_as_chat).
+        # Always use GGUF stem so Provider / status bar match Loaded GGUF.
         try:
             disk = _lc()
             rstate = merge_state(load_rmb_json(home))
@@ -108,18 +109,25 @@ def register_rmb_routes(app: FastAPI, *, runtime=None, gateway=None, memory=None
                 else ""
             ).lower()
             want_rmb = prov == "rmb" or bool(patch.get("use_as_chat_provider"))
-            if want_rmb and runtime is not None:
+            model = ""
+            if rstate.get("model_path"):
+                from pathlib import Path as _P
+
+                model = _P(str(rstate["model_path"])).stem
+            if not model:
+                mid = str(rstate.get("model_id") or DEFAULT_RMB_MODEL_ID)
+                from remedy.runtime.rmb.catalog import RMB_MODELS
+
+                if mid in RMB_MODELS:
+                    model = get_model_spec(mid).filename.replace(".gguf", "")
+                else:
+                    model = mid
+            result["chat_model"] = model
+            result["llm_model"] = model
+            if want_rmb and runtime is not None and model:
                 base = str(
                     rstate.get("base_url") or "http://127.0.0.1:8787/v1"
                 )
-                mid = str(rstate.get("model_id") or DEFAULT_RMB_MODEL_ID)
-                model = ""
-                if rstate.get("model_path"):
-                    from pathlib import Path as _P
-
-                    model = _P(str(rstate["model_path"])).stem
-                if not model:
-                    model = get_model_spec(mid).filename.replace(".gguf", "")
                 _apply_llm_to_runtime(
                     runtime,
                     provider="rmb",
@@ -162,24 +170,36 @@ def register_rmb_routes(app: FastAPI, *, runtime=None, gateway=None, memory=None
         start = await asyncio.to_thread(start_rmb_server, home_dir=home, wait_s=120.0)
         # Hot-apply so the next message uses RMB without restart
         try:
+            from pathlib import Path as _P
+
+            from remedy.runtime.rmb.catalog import RMB_MODELS
+
             rstate = merge_state(load_rmb_json(home))
             base = str(rstate.get("base_url") or "http://127.0.0.1:8787/v1")
-            mid = str(rstate.get("model_id") or DEFAULT_RMB_MODEL_ID)
-            model = get_model_spec(mid).filename.replace(".gguf", "")
+            model = ""
+            if rstate.get("model_path"):
+                model = _P(str(rstate["model_path"])).stem
+            if not model:
+                mid = str(rstate.get("model_id") or DEFAULT_RMB_MODEL_ID)
+                if mid in RMB_MODELS:
+                    model = get_model_spec(mid).filename.replace(".gguf", "")
+                else:
+                    model = mid
             disk = load_config()
             api_key = "rmb"
             if isinstance(disk, dict) and disk.get("llm_api_key"):
                 api_key = str(disk.get("llm_api_key") or "rmb")
-            _apply_llm_to_runtime(
-                runtime,
-                provider="rmb",
-                model=model,
-                base_url=base,
-                api_key=api_key,
-                harness_mode="auto",
-                harness_min_context_pct=0.55,
-                harness_max_context_pct=0.78,
-            )
+            if runtime is not None and model:
+                _apply_llm_to_runtime(
+                    runtime,
+                    provider="rmb",
+                    model=model,
+                    base_url=base,
+                    api_key=api_key,
+                    harness_mode="auto",
+                    harness_min_context_pct=0.55,
+                    harness_max_context_pct=0.78,
+                )
         except Exception:
             logger.exception("RMB use-as-provider live reconfigure failed")
         return {"status": st, "start": start, "runtime_applied": runtime is not None}

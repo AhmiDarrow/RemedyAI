@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   getPartnerStatus,
   resolveApproval,
@@ -15,6 +15,16 @@ export function ApprovalBanner({ sessionId, onResolved }: ApprovalBannerProps) {
   const [items, setItems] = useState<PendingApproval[]>([])
   const [busyId, setBusyId] = useState<string | null>(null)
   const [message, setMessage] = useState('')
+  const msgTimer = useRef<number | null>(null)
+
+  const flashMsg = (msg: string, ms: number) => {
+    setMessage(msg)
+    if (msgTimer.current != null) window.clearTimeout(msgTimer.current)
+    msgTimer.current = window.setTimeout(() => {
+      msgTimer.current = null
+      setMessage((cur) => (cur === msg ? '' : cur))
+    }, ms)
+  }
 
   const refresh = useCallback(async () => {
     try {
@@ -28,7 +38,10 @@ export function ApprovalBanner({ sessionId, onResolved }: ApprovalBannerProps) {
   useEffect(() => {
     void refresh()
     const id = window.setInterval(() => void refresh(), 4000)
-    return () => window.clearInterval(id)
+    return () => {
+      window.clearInterval(id)
+      if (msgTimer.current != null) window.clearTimeout(msgTimer.current)
+    }
   }, [refresh, sessionId])
 
   const act = async (item: PendingApproval, approve: boolean) => {
@@ -36,11 +49,13 @@ export function ApprovalBanner({ sessionId, onResolved }: ApprovalBannerProps) {
     setMessage('')
     try {
       const res = await resolveApproval(item.id, approve, 'session')
-      setMessage(res.hint || (approve ? 'Approved' : 'Denied'))
+      const msg = res.hint || (approve ? 'Approved' : 'Denied')
+      flashMsg(msg, 2800)
       await refresh()
       onResolved?.(approve, item.command)
     } catch (e: unknown) {
-      setMessage(e instanceof Error ? e.message : 'Failed')
+      const err = e instanceof Error ? e.message : 'Failed'
+      flashMsg(err, 4500)
     } finally {
       setBusyId(null)
     }
