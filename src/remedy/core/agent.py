@@ -99,6 +99,11 @@ class BasicRuntime(AgentRuntime):
         self._llm_model: str = config.llm_model
         self._llm_base_url: str = config.llm_base_url or "https://api.openai.com/v1"
         self._llm_provider: str = getattr(config, "llm_provider", "openai") or "openai"
+        # Sleev gateway flags (hot-reloaded from Settings; read by prepare_llm_http).
+        self._sleev_enabled: bool = bool(getattr(config, "sleev_enabled", False))
+        self._sleev_gateway_url: str = str(
+            getattr(config, "sleev_gateway_url", "") or ""
+        ).strip()
         self._provider: ProviderAdapter = select_provider(
             self._llm_provider, self._llm_base_url
         )

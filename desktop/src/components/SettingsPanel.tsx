@@ -134,6 +134,10 @@ export function SettingsPanel({
   // Desktop default is off (IPC-only); GET /settings overwrites with effective value.
   const [httpBootstrap, setHttpBootstrap] = useState(false)
   const [privacyMode, setPrivacyMode] = useState(false)
+  /** Route cloud LLM traffic through local Sleev gateway (token compression). */
+  const [sleevEnabled, setSleevEnabled] = useState(false)
+  const [sleevGatewayUrl, setSleevGatewayUrl] = useState('')
+  const [sleevStatus, setSleevStatus] = useState<Settings['sleev'] | null>(null)
   /** Soul Field personhood — default on (matches server maturity default). */
   const [soulFieldEnabled, setSoulFieldEnabled] = useState(true)
   const [approvalMode, setApprovalMode] = useState<'ask' | 'auto'>('ask')
@@ -390,6 +394,9 @@ export function SettingsPanel({
       setWebToolsEnabled(Boolean(s.web_tools_enabled))
       setHttpBootstrap(s.http_bootstrap !== false)
       setPrivacyMode(Boolean(s.privacy_mode))
+      setSleevEnabled(Boolean(s.sleev_enabled))
+      setSleevGatewayUrl(String(s.sleev_gateway_url || ''))
+      setSleevStatus(s.sleev ?? null)
       setSoulFieldEnabled(
         s.soul_field_enabled === undefined ? true : Boolean(s.soul_field_enabled),
       )
@@ -638,6 +645,8 @@ export function SettingsPanel({
       web_tools_enabled: webToolsEnabled,
       http_bootstrap: httpBootstrap,
       privacy_mode: privacyMode,
+      sleev_enabled: sleevEnabled,
+      sleev_gateway_url: sleevGatewayUrl.trim(),
       soul_field_enabled: soulFieldEnabled,
       approval_mode: approvalMode,
       allow_skill_creation: allowSkillCreation,
@@ -959,6 +968,11 @@ export function SettingsPanel({
               setHttpBootstrap={setHttpBootstrap}
               privacyMode={privacyMode}
               setPrivacyMode={setPrivacyMode}
+              sleevEnabled={sleevEnabled}
+              setSleevEnabled={setSleevEnabled}
+              sleevGatewayUrl={sleevGatewayUrl}
+              setSleevGatewayUrl={setSleevGatewayUrl}
+              sleevStatus={sleevStatus}
               soulFieldEnabled={soulFieldEnabled}
               setSoulFieldEnabled={setSoulFieldEnabled}
               approvalMode={approvalMode}

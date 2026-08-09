@@ -188,6 +188,9 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             "http_bootstrap": _effective_http_bootstrap(cfg),
             # Opt-in: tighter tool caps + email/phone scrub on LLM egress (default off = fast)
             "privacy_mode": bool(cfg.get("privacy_mode", False)),
+            # Route cloud chat through local Sleev gateway (token compression).
+            "sleev_enabled": bool(cfg.get("sleev_enabled", False)),
+            "sleev_gateway_url": str(cfg.get("sleev_gateway_url") or "").strip(),
             # Align with feature_maturity defaults (soul on unless explicitly off).
             "soul_field_enabled": (
                 bool(cfg["soul_field_enabled"])
@@ -310,6 +313,19 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             out["vision_force_decode"] = False
         if xai_auth is not None:
             out["xai_auth"] = xai_auth
+        try:
+            from remedy.core.sleev import sleev_status
+
+            out["sleev"] = sleev_status(cfg if isinstance(cfg, dict) else None)
+        except Exception as exc:
+            logger.debug("settings sleev status failed: %s", exc)
+            out["sleev"] = {
+                "enabled": bool(cfg.get("sleev_enabled", False)),
+                "installed": False,
+                "gateway_url": str(cfg.get("sleev_gateway_url") or "").strip()
+                or "http://127.0.0.1:17321",
+                "harness": "remedy",
+            }
         ms = (_time.perf_counter() - t0) * 1000
         if ms >= 250:
             logger.warning("GET /api/settings slow (%.0fms) provider=%s", ms, provider)

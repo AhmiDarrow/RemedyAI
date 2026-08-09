@@ -102,6 +102,16 @@ def make_runtime_llm_model(runtime: Any, *, max_tokens: int = 4096) -> Any:
             adapter = bind.adapter()
             headers = adapter.auth_headers(bind.api_key)
             endpoint = adapter.chat_endpoint(bind.base_url)
+            with suppress(Exception):
+                from remedy.core.sleev import prepare_llm_http
+
+                endpoint, headers = prepare_llm_http(
+                    provider=bind.provider,
+                    base_url=bind.base_url,
+                    api_key=bind.api_key,
+                    adapter=adapter,
+                    runtime=runtime,
+                )
             body = adapter.build_body(
                 model=bind.model,
                 messages=[

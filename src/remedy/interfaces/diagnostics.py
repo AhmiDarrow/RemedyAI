@@ -609,6 +609,19 @@ def _providers_section(cfg: dict[str, Any]) -> dict[str, Any]:
         "base_url": str(cfg.get("llm_base_url") or ""),
     }
 
+    sleev_info: dict[str, Any] = {}
+    try:
+        from remedy.core.sleev import sleev_status
+
+        sleev_info = sleev_status(cfg if isinstance(cfg, dict) else None)
+        active["sleev_enabled"] = bool(sleev_info.get("enabled"))
+        active["sleev_gateway"] = str(sleev_info.get("gateway_url") or "")
+    except Exception:
+        sleev_info = {
+            "enabled": bool((cfg or {}).get("sleev_enabled")),
+            "installed": False,
+        }
+
     remote = [i for i in items if i.get("connected") and not i.get("local")]
     local = [i for i in items if i.get("connected") and i.get("local")]
 
@@ -620,6 +633,7 @@ def _providers_section(cfg: dict[str, Any]) -> dict[str, Any]:
         "providers": items,
         "usage_7d": usage_7d,
         "ollama": ollama if isinstance(ollama, dict) else {},
+        "sleev": sleev_info,
     }
 
 
@@ -651,6 +665,16 @@ def _derive_issues(payload: dict[str, Any]) -> list[dict[str, Any]]:
                 "area": "rmb",
                 "message": "RMB host not running",
                 "hint": "Start RMB from Settings → Local models",
+            }
+        )
+    sleev = payload.get("sleev") or {}
+    if sleev.get("enabled") and not sleev.get("installed"):
+        issues.append(
+            {
+                "severity": "warn",
+                "area": "sleev",
+                "message": "Sleev routing on but Sleev CLI not detected",
+                "hint": "Install with npm install -g sleev, run sleev, or turn off Settings → Provider → Sleev",
             }
         )
     hw = payload.get("hardware") or {}

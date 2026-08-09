@@ -169,6 +169,17 @@ async def call_llm_stream(runtime, message: str,
         _adapter = _bind.adapter()
         headers = _adapter.auth_headers(_bind.api_key)
         endpoint = _adapter.chat_endpoint(_bind.base_url)
+        # Sleev route (overwritten each step by build_step_request_body too).
+        with suppress(Exception):
+            from remedy.core.sleev import prepare_llm_http
+
+            endpoint, headers = prepare_llm_http(
+                provider=_bind.provider,
+                base_url=_bind.base_url,
+                api_key=_bind.api_key,
+                adapter=_adapter,
+                runtime=runtime,
+            )
 
         # Long agent runs: high wall-clock + read idle so multi-step work
         # (and long thinking streams) are not killed mid-flight.
@@ -1007,6 +1018,16 @@ async def call_llm_stream(runtime, message: str,
                                     set_llm_binding(_bind)
                                     _adapter = _bind.adapter()
                                     headers = _adapter.auth_headers(_bind.api_key)
+                                    with suppress(Exception):
+                                        from remedy.core.sleev import prepare_llm_http
+
+                                        endpoint, headers = prepare_llm_http(
+                                            provider=_bind.provider,
+                                            base_url=_bind.base_url,
+                                            api_key=_bind.api_key,
+                                            adapter=_adapter,
+                                            runtime=runtime,
+                                        )
                                     logger.warning(
                                         "xAI credentials refreshed after HTTP %s; retrying",
                                         resp.status,
@@ -2672,6 +2693,16 @@ async def call_llm_stream(runtime, message: str,
             _adapter = _bind.adapter()
             headers = _adapter.auth_headers(_bind.api_key)
             endpoint = _adapter.chat_endpoint(_bind.base_url)
+            with suppress(Exception):
+                from remedy.core.sleev import prepare_llm_http
+
+                endpoint, headers = prepare_llm_http(
+                    provider=_bind.provider,
+                    base_url=_bind.base_url,
+                    api_key=_bind.api_key,
+                    adapter=_adapter,
+                    runtime=runtime,
+                )
             use_openai_sse = bool(
                 getattr(_adapter, "uses_openai_sse", True)
             )
@@ -2848,6 +2879,16 @@ async def call_llm_stream(runtime, message: str,
                                 )
                             _ep = _ad2.chat_endpoint(_b2.base_url)
                             _hdr = _ad2.auth_headers(_b2.api_key)
+                            with suppress(Exception):
+                                from remedy.core.sleev import prepare_llm_http
+
+                                _ep, _hdr = prepare_llm_http(
+                                    provider=_b2.provider,
+                                    base_url=_b2.base_url,
+                                    api_key=_b2.api_key,
+                                    adapter=_ad2,
+                                    runtime=runtime,
+                                )
                             async with (
                                 _ah.ClientSession() as _sess,
                                 _sess.post(

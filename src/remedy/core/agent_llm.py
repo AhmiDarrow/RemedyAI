@@ -269,6 +269,18 @@ async def post_chat(
     adapter = bind.adapter()
     headers = adapter.auth_headers(bind.api_key)
     endpoint = adapter.chat_endpoint(bind.base_url)
+    try:
+        from remedy.core.sleev import prepare_llm_http
+
+        endpoint, headers = prepare_llm_http(
+            provider=bind.provider,
+            base_url=bind.base_url,
+            api_key=bind.api_key,
+            adapter=adapter,
+            runtime=runtime,
+        )
+    except Exception:
+        pass
     _local = False
     try:
         from remedy.runtime.rmb.mode import is_rmb_provider
@@ -330,6 +342,18 @@ async def post_chat(
                         set_llm_binding(bind)
                         adapter = bind.adapter()
                         headers = adapter.auth_headers(bind.api_key)
+                        try:
+                            from remedy.core.sleev import prepare_llm_http
+
+                            endpoint, headers = prepare_llm_http(
+                                provider=bind.provider,
+                                base_url=bind.base_url,
+                                api_key=bind.api_key,
+                                adapter=adapter,
+                                runtime=runtime,
+                            )
+                        except Exception:
+                            pass
                         async with session.post(
                             endpoint,
                             headers=headers,

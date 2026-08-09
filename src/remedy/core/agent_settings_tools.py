@@ -6,6 +6,7 @@ Examples the model should handle via these tools (not only UI instructions):
   - "call me Ahmi"
   - "set up vision"
   - "switch to deepseek flash"
+  - "configure Sleev" / "enable Sleev" / "save tokens with Sleev"
 """
 
 from __future__ import annotations
@@ -65,6 +66,8 @@ def register_settings_tools(runtime: Any) -> None:
         vision_force_decode: bool | str | None = None,
         harness_mode: str | None = None,
         browser_home_url: str | None = None,
+        sleev_enabled: bool | str | None = None,
+        sleev_gateway_url: str | None = None,
         sarcasm_mode: bool | str | None = None,
         allow_skill_creation: bool | str | None = None,
         skills_active_budget: int | None = None,
@@ -117,15 +120,26 @@ def register_settings_tools(runtime: Any) -> None:
                     patch["vision_enabled"] = "disable" not in low and "off" not in low
                     if patch.get("vision_enabled"):
                         patch["vision_model_id"] = "smolvlm2-2.2b"
+                elif "sleev" in low or "sleeve" in low or (
+                    "token" in low and "compress" in low
+                ):
+                    # "configure sleev", "turn off sleev", "save tokens"…
+                    off = any(
+                        w in low
+                        for w in ("disable", "off", "stop", "without", "no sleev")
+                    )
+                    patch["sleev_enabled"] = not off
                 else:
                     return format_tool_error(
                         f"Unknown setup phrase: {setup!r}. "
                         "Pass explicit fields (e.g. web_tools_enabled=true, "
-                        "approval_mode=auto, user_name=…, llm_provider=…).",
+                        "sleev_enabled=true, approval_mode=auto, user_name=…, "
+                        "llm_provider=…).",
                         code="UNKNOWN_SETUP",
                         tool_name="update_settings",
                         suggestion=(
-                            "Call get_settings first, then update_settings with explicit keys."
+                            "Call get_settings first, then update_settings with explicit keys. "
+                            "For Sleev: setup='configure sleev' or sleev_enabled=true."
                         ),
                     )
 
@@ -166,6 +180,8 @@ def register_settings_tools(runtime: Any) -> None:
             "vision_force_decode": vision_force_decode,
             "harness_mode": harness_mode,
             "browser_home_url": browser_home_url,
+            "sleev_enabled": sleev_enabled,
+            "sleev_gateway_url": sleev_gateway_url,
             "sarcasm_mode": sarcasm_mode,
             "allow_skill_creation": allow_skill_creation,
             "skills_active_budget": skills_active_budget,
@@ -190,7 +206,8 @@ def register_settings_tools(runtime: Any) -> None:
         if not patch:
             return format_tool_error(
                 "No settings provided. Example: update_settings(web_tools_enabled=true) "
-                "or update_settings(setup=\"web tools\") or "
+                "or update_settings(setup=\"configure sleev\") or "
+                "update_settings(sleev_enabled=true) or "
                 "update_settings(user_name=\"Ahmi\", approval_mode=\"auto\").",
                 code="EMPTY_PATCH",
                 tool_name="update_settings",
@@ -307,8 +324,9 @@ def register_settings_tools(runtime: Any) -> None:
     reg = runtime.tool_registry
     reg.register_builtin_handler(
         "get_settings",
-        "Read current Remedy settings (provider, model, web tools, approval mode, "
-        "vision, persona, project path, etc.). No secrets. Use before/after configure.",
+        "Read current Remedy settings (provider, model, Sleev routing, web tools, "
+        "approval mode, vision, persona, project path, etc.). Includes sleev status "
+        "(installed / gateway). No secrets. Use before/after configure.",
         get_settings,
         {"type": "object", "properties": {}},
     )
@@ -316,11 +334,14 @@ def register_settings_tools(runtime: Any) -> None:
         "update_settings",
         "Configure Remedy for the user — persist settings immediately. "
         "USE THIS when the user asks to set up / enable / change / configure anything "
-        "(web tools, approval mode, model, vision, name, project folder, messengers, …). "
+        "(Sleev token savings, web tools, approval mode, model, vision, name, "
+        "project folder, messengers, …). "
         "Do not only tell them to open Settings. "
-        "Examples: setup='web tools'; web_tools_enabled=true; approval_mode='auto'; "
-        "user_name='Ahmi'; llm_provider='deepseek'; llm_model='deepseek-v4-flash'; "
-        "vision_enabled=true; access_scope='full'. "
+        "Examples: setup='configure sleev'; sleev_enabled=true; setup='web tools'; "
+        "approval_mode='auto'; user_name='Ahmi'; llm_provider='deepseek'; "
+        "llm_model='deepseek-v4-flash'; vision_enabled=true; access_scope='full'. "
+        "After enabling Sleev, note it only routes cloud providers (xAI/DeepSeek/…); "
+        "Ollama/RMB stay direct. User needs `sleev` CLI installed + gateway running. "
         "project_path changes while a focus folder is bound require "
         "force_project_switch=true AND user approval (no silent retarget).",
         update_settings,
@@ -330,8 +351,9 @@ def register_settings_tools(runtime: Any) -> None:
                 "setup": {
                     "type": "string",
                     "description": (
-                        "Short phrase shortcut: 'web tools', 'auto approval', "
-                        "'vision', 'thinking medium', 'full access', 'finish setup', …"
+                        "Short phrase shortcut: 'configure sleev', 'sleev off', "
+                        "'web tools', 'auto approval', 'vision', 'thinking medium', "
+                        "'full access', 'finish setup', …"
                     ),
                 },
                 "force_project_switch": {
@@ -395,6 +417,20 @@ def register_settings_tools(runtime: Any) -> None:
                 "vision_force_decode": {"type": "boolean"},
                 "harness_mode": {"type": "string"},
                 "browser_home_url": {"type": "string"},
+                "sleev_enabled": {
+                    "type": "boolean",
+                    "description": (
+                        "Route cloud LLM chat through local Sleev gateway "
+                        "(token compression). Requires sleev CLI + gateway."
+                    ),
+                },
+                "sleev_gateway_url": {
+                    "type": "string",
+                    "description": (
+                        "Optional Sleev gateway base (empty = auto-discover "
+                        "127.0.0.1:17321)"
+                    ),
+                },
                 "sarcasm_mode": {"type": "boolean"},
                 "allow_skill_creation": {"type": "boolean"},
                 "skills_active_budget": {"type": "integer"},

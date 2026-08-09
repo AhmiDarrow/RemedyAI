@@ -730,6 +730,8 @@ def config_to_agent_config(config: dict[str, Any]) -> AgentConfig:
             "gpt-4o-mini",
         ),
         llm_base_url=llm_base_url,
+        sleev_enabled=bool(config.get("sleev_enabled", False)),
+        sleev_gateway_url=str(config.get("sleev_gateway_url") or "").strip(),
         project_path=config.get("project_path") or os.environ.get("REMEDY_PROJECT_PATH") or None,
         # Partner trust / agency — must come from config.toml (status-bar thumbs).
         # Previously omitted → always defaulted to approval_mode="ask" at startup
@@ -795,6 +797,12 @@ llm_base_url = "https://api.openai.com/v1"
 # llm_api_key - prefer secure store (desktop Settings) or REMEDY_LLM_API_KEY env:
 # llm_api_key = "sk-..."
 # XAI_API_KEY auto-selects xAI on first run when present
+
+# Sleev (https://sleev.ai) — local gateway that compresses agent context before
+# it hits your provider. Same keys/models; saves tokens on long sessions.
+# Install: npm install -g sleev && sleev  (gateway default http://127.0.0.1:17321)
+# sleev_enabled = false
+# sleev_gateway_url = ""   # empty = auto-discover from Sleev install
 
 # Search paths for bundled + user skills
 skills_dir = []

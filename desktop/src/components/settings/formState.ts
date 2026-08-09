@@ -27,6 +27,8 @@ export type SettingsFormFields = {
   webToolsEnabled: boolean
   httpBootstrap: boolean
   privacyMode: boolean
+  sleevEnabled: boolean
+  sleevGatewayUrl: string
   soulFieldEnabled: boolean
   approvalMode: 'ask' | 'auto'
   harnessMode: string
@@ -65,6 +67,8 @@ export function applySettingsSnapshot(
     setWebToolsEnabled: (v: boolean) => void
     setHttpBootstrap: (v: boolean) => void
     setPrivacyMode: (v: boolean) => void
+    setSleevEnabled?: (v: boolean) => void
+    setSleevGatewayUrl?: (v: string) => void
     setSoulFieldEnabled: (v: boolean) => void
     setApprovalMode: (v: 'ask' | 'auto') => void
     setHarnessMode: (v: string) => void
@@ -103,6 +107,8 @@ export function applySettingsSnapshot(
   set.setWebToolsEnabled(Boolean(s.web_tools_enabled))
   set.setHttpBootstrap(Boolean(s.http_bootstrap))
   set.setPrivacyMode(Boolean(s.privacy_mode))
+  set.setSleevEnabled?.(Boolean(s.sleev_enabled))
+  set.setSleevGatewayUrl?.(String(s.sleev_gateway_url || ''))
   set.setSoulFieldEnabled(s.soul_field_enabled !== false)
   const am = String(s.approval_mode || 'ask').toLowerCase()
   set.setApprovalMode(am === 'auto' ? 'auto' : 'ask')
@@ -151,6 +157,8 @@ export function buildSettingsUpdate(fields: SettingsFormFields): SettingsUpdate 
     web_tools_enabled: fields.webToolsEnabled,
     http_bootstrap: fields.httpBootstrap,
     privacy_mode: fields.privacyMode,
+    sleev_enabled: fields.sleevEnabled,
+    sleev_gateway_url: fields.sleevGatewayUrl || '',
     soul_field_enabled: fields.soulFieldEnabled,
     approval_mode: fields.approvalMode,
     harness_mode: fields.harnessMode,

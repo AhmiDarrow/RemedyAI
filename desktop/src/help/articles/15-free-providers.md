@@ -14,6 +14,8 @@ Setup keeps free paths simple — not a wall of logos:
 
 Paid providers (OpenAI, Anthropic, xAI, DeepSeek, …) sit in the main **Provider** list.
 
+**Tip:** For paid cloud providers, enable **Sleev** under Settings → Provider. It routes chat through a local compression gateway so long agent sessions burn fewer tokens (same keys/models). See [Providers & auth → Sleev](03-providers-and-auth#sleev-token-compression-gateway).
+
 ## Demo (no signup)
 
 - Provider id: `demo`
