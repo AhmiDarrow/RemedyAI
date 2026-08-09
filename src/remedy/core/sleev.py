@@ -201,7 +201,8 @@ def discover_sleev_gateway_url(cfg: dict[str, Any] | None = None) -> str:
         return _coerce_gateway_to_safe(raw, allow_remote=allow_remote, source="config")
 
     install = read_sleev_install_config() or {}
-    proxy = install.get("proxy") if isinstance(install.get("proxy"), dict) else {}
+    proxy_raw = install.get("proxy")
+    proxy: dict[str, Any] = proxy_raw if isinstance(proxy_raw, dict) else {}
     host = str(proxy.get("host") or SLEEV_DEFAULT_HOST).strip() or SLEEV_DEFAULT_HOST
     try:
         port = int(proxy.get("port") or SLEEV_DEFAULT_PORT)
@@ -502,7 +503,8 @@ def sleev_status(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     enabled = is_sleev_enabled(cfg)
     auth_label = ""
     if isinstance(install, dict):
-        auth = install.get("auth") if isinstance(install.get("auth"), dict) else {}
+        auth_raw = install.get("auth")
+        auth: dict[str, Any] = auth_raw if isinstance(auth_raw, dict) else {}
         auth_label = str(auth.get("email") or auth.get("label") or "").strip()
     allow_remote = is_sleev_remote_gateway_allowed(cfg)
     return {
