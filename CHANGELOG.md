@@ -4,6 +4,17 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.22.3] - 2026-08-09
+
+### Fixes
+
+- **Silent mid-turn ends:** disconnect / Stop / stream errors now leave a
+  durable assistant message in the chat (not only a status banner that
+  vanishes). Mentions Sleev when the proxy was the failure.
+- **Post-tool / non-stream recovery:** after a Sleev blip, recovery posts go
+  **direct to the provider** (not back to a dead proxy); RMB wait only when
+  the binding is local.
+
 ## [0.22.2] - 2026-08-09
 
 ### Fixes
