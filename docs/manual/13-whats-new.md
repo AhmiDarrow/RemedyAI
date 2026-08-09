@@ -2,11 +2,17 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current series: **v0.22.1**.
+Current series: **v0.22.2**.
 
 ## Contents
 
-- [0.22.1](#0221---sleev--gateway-lock) · [0.22.0](#0220---living-organism--builder-continuity) · [0.21.1](#0211---continuity--self-inject-safety) · [0.20.0](#0200---partner-metabolism--always-ready) · [0.19.0](#0190---parallel-multi-provider--background-turns) · older below
+- [0.22.2](#0222---sleev-fail-open) · [0.22.1](#0221---sleev--gateway-lock) · [0.22.0](#0220---living-organism--builder-continuity) · [0.21.1](#0211---continuity--self-inject-safety) · [0.20.0](#0200---partner-metabolism--always-ready) · [0.19.0](#0190---parallel-multi-provider--background-turns) · older below
+
+## 0.22.2 - Sleev fail-open
+
+If the Sleev proxy is down (or a remote gateway is unreachable), Remedy **falls
+open** to your normal provider instead of looping on “waiting for local model.”
+PyPI **`remedy-ai==0.22.2`** · tag **v0.22.2**.
 
 ## 0.22.1 - Sleev + gateway lock
 

@@ -307,6 +307,74 @@ def test_settings_rejects_remote_gateway_without_allow(
     asyncio.run(_run())
 
 
+def test_force_direct_skips_sleev_gateway():
+    """Dead Sleev must not stick — force_direct hits the provider base URL."""
+    adapter = get_provider("xai")
+    cfg = {
+        "sleev_enabled": True,
+        "sleev_gateway_url": "http://10.0.0.5:17321",
+        "sleev_allow_remote_gateway": True,
+    }
+    ep_via, hdr_via = prepare_llm_http(
+        provider="xai",
+        base_url="https://api.x.ai/v1",
+        api_key="xai-test",
+        adapter=adapter,
+        cfg=cfg,
+    )
+    assert "10.0.0.5" in ep_via
+    assert hdr_via.get("sleev-harness") == SLEEV_HARNESS_ID
+
+    ep_dir, hdr_dir = prepare_llm_http(
+        provider="xai",
+        base_url="https://api.x.ai/v1",
+        api_key="xai-test",
+        adapter=adapter,
+        cfg=cfg,
+        force_direct=True,
+    )
+    assert "api.x.ai" in ep_dir
+    assert "10.0.0.5" not in ep_dir
+    assert "sleev-harness" not in hdr_dir
+    assert "sleev-base-url" not in hdr_dir
+
+
+def test_runtime_force_direct_flag():
+    from types import SimpleNamespace
+
+    adapter = get_provider("deepseek")
+    runtime = SimpleNamespace(
+        _sleev_enabled=True,
+        _sleev_gateway_url="http://10.0.0.5:17321",
+        _sleev_allow_remote_gateway=True,
+        _sleev_force_direct=True,
+        config=SimpleNamespace(
+            sleev_enabled=True,
+            sleev_gateway_url="http://10.0.0.5:17321",
+            sleev_allow_remote_gateway=True,
+        ),
+    )
+    ep, headers = prepare_llm_http(
+        provider="deepseek",
+        base_url="https://api.deepseek.com/v1",
+        api_key="sk",
+        adapter=adapter,
+        runtime=runtime,
+    )
+    assert "deepseek.com" in ep
+    assert "10.0.0.5" not in ep
+    assert "sleev-harness" not in headers
+
+
+def test_is_sleev_endpoint():
+    from remedy.core.sleev import is_sleev_endpoint
+
+    cfg = {"sleev_gateway_url": "http://127.0.0.1:17321"}
+    assert is_sleev_endpoint("http://127.0.0.1:17321/chat/completions", cfg)
+    assert not is_sleev_endpoint("https://api.x.ai/v1/chat/completions", cfg)
+    assert not is_sleev_endpoint("http://127.0.0.1:8787/v1/chat/completions", cfg)
+
+
 def test_cfg_from_runtime_prefers_attrs():
     from types import SimpleNamespace
 
