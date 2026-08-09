@@ -378,6 +378,17 @@ class AgentConfig(BaseModel):
     llm_api_key: str = Field(default="", description="API key for LLM calls")
     llm_model: str = Field(default="gpt-4o-mini", description="LLM model name")
     llm_base_url: str = Field(default="https://api.openai.com/v1", description="LLM API base URL")
+    sleev_enabled: bool = Field(
+        default=False,
+        description=(
+            "When true, route cloud LLM chat through the local Sleev gateway "
+            "(token compression). Local providers (Ollama/RMB/demo) are never routed."
+        ),
+    )
+    sleev_gateway_url: str = Field(
+        default="",
+        description="Optional Sleev gateway base (empty = auto-discover / 127.0.0.1:17321)",
+    )
     project_path: str | None = Field(
         default=None,
         description="Default project/workspace directory for agent file tools and shell cwd",

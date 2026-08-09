@@ -196,6 +196,11 @@ class SettingsUpdateRequest(BaseModel):
     http_bootstrap: bool | None = None
     # Opt-in: tighter tool caps + email/phone scrub before cloud LLM (default off = fast)
     privacy_mode: bool | None = None
+    # Route cloud LLM traffic through local Sleev gateway (token compression).
+    # Keys/models stay with the selected provider; only the request host changes.
+    sleev_enabled: bool | None = None
+    # Optional override (default: auto-discover Sleev install → 127.0.0.1:17321)
+    sleev_gateway_url: str | None = None
     # Maturity gates (experimental / advanced organs)
     soul_field_enabled: bool | None = None  # experimental personhood inject + tools
     build_os_advanced: bool | None = None  # Build OS frontiers A–H tools

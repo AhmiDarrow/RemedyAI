@@ -10,6 +10,7 @@ import {
   FormLinkButton,
   FormNotice,
   FormSelect,
+  FormToggle,
 } from './formUi'
 import { Field } from './shared'
 import { openExternalUrl } from '../../api/auth'
@@ -54,7 +55,17 @@ export function SettingsSections_provider(p: SettingsFormProps): ReactNode {
     customName = '',
     setCustomName,
     handleProviderChange,
+    sleevEnabled = false,
+    setSleevEnabled,
+    sleevGatewayUrl = '',
+    setSleevGatewayUrl,
+    sleevStatus = null,
   } = p
+
+  const sleevInstalled = Boolean(sleevStatus?.installed)
+  const sleevGateway =
+    (sleevGatewayUrl || '').trim()
+    || String(sleevStatus?.gateway_url || 'http://127.0.0.1:17321')
 
   return (
     <>
@@ -202,6 +213,53 @@ export function SettingsSections_provider(p: SettingsFormProps): ReactNode {
           }
           password
         />
+
+        {/* Sleev — local context-compression gateway (saves provider tokens) */}
+        <div
+          className="mt-3 p-2 rounded space-y-2"
+          style={{ border: '1px solid var(--border)', background: 'var(--bg-tertiary)' }}
+        >
+          <div className="font-medium" style={{ color: 'var(--text-primary)' }}>
+            Sleev · save tokens
+          </div>
+          <FormHint>
+            Routes cloud chat (xAI, DeepSeek, OpenAI, …) through the local{' '}
+            <strong style={{ color: 'var(--text-secondary)' }}>Sleev</strong> gateway so
+            long sessions compress stale context before it hits your provider bill.
+            Same API keys and models — Ollama / RMB / Demo stay direct.
+          </FormHint>
+          <FormToggle
+            label={
+              sleevEnabled
+                ? 'Sleev routing on'
+                : 'Route cloud providers via Sleev'
+            }
+            checked={Boolean(sleevEnabled)}
+            onChange={(on) => setSleevEnabled?.(on)}
+          />
+          <FormHint>
+            {sleevInstalled
+              ? `Sleev detected · gateway ${sleevGateway}`
+              : 'Sleev not detected on this machine. Install: npm install -g sleev · then run sleev'}
+            {sleevStatus?.account_label
+              ? ` · signed in as ${sleevStatus.account_label}`
+              : ''}
+          </FormHint>
+          {showAdvanced && setSleevGatewayUrl && (
+            <Field
+              label="Sleev gateway URL (optional)"
+              value={sleevGatewayUrl}
+              onChange={setSleevGatewayUrl}
+              placeholder="http://127.0.0.1:17321"
+            />
+          )}
+          <FormLinkButton
+            accent
+            onClick={() => void openExternalUrl('https://sleev.ai/docs/quickstart')}
+          >
+            Sleev docs…
+          </FormLinkButton>
+        </div>
       </SettingsSection>
 
       {/* Provider catalog — enable for main-screen picker */}

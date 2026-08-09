@@ -48,6 +48,17 @@ def build_step_request_body(
 
     headers = adapter.auth_headers(bind.api_key)
     endpoint = adapter.chat_endpoint(bind.base_url)
+    # Optional Sleev gateway: same keys/models, compressed context upstream.
+    with suppress(Exception):
+        from remedy.core.sleev import prepare_llm_http
+
+        endpoint, headers = prepare_llm_http(
+            provider=bind.provider,
+            base_url=bind.base_url,
+            api_key=bind.api_key,
+            adapter=adapter,
+            runtime=runtime,
+        )
     use_openai_sse = bool(getattr(adapter, "uses_openai_sse", True))
 
     # Local/RMB: always low thinking — UI "Think High" burns the budget on

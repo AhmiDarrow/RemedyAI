@@ -52,6 +52,20 @@ export interface Settings {
    * Default false keeps the lightning path (secret scrub only).
    */
   privacy_mode?: boolean
+  /** Route cloud chat through local Sleev gateway (token compression). */
+  sleev_enabled?: boolean
+  /** Optional gateway override; empty = auto-discover (127.0.0.1:17321). */
+  sleev_gateway_url?: string
+  /** Live Sleev install / gateway status from the server. */
+  sleev?: {
+    enabled?: boolean
+    installed?: boolean
+    gateway_url?: string
+    harness?: string
+    account_label?: string
+    docs_url?: string
+    home_url?: string
+  }
   /** Soul Field personhood — default on (organism / continuity). */
   soul_field_enabled?: boolean
   build_os_advanced?: boolean
@@ -207,6 +221,9 @@ export interface SettingsUpdate {
   web_tools_enabled?: boolean
   http_bootstrap?: boolean
   privacy_mode?: boolean
+  /** Route cloud chat through local Sleev gateway */
+  sleev_enabled?: boolean
+  sleev_gateway_url?: string
   soul_field_enabled?: boolean
   build_os_advanced?: boolean
   rmb_enabled?: boolean

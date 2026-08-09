@@ -392,7 +392,9 @@ html.theme-animating body * {
 .chat-middle-composer {
   flex: 0 0 auto;
   position: relative;
-  z-index: 5;
+  /* Below status-bar dock so status controls are not covered; theme menu
+     portals to body at z-index 550 so it always paints above composer. */
+  z-index: 4;
 }
 
 /* Session column header */
@@ -1504,12 +1506,20 @@ body {
   background: color-mix(in srgb, var(--bg-tertiary) 55%, transparent);
 }
 
-/* Status bar dock */
+/* Status bar dock — above composer chrome (composer z-index 4) so selects /
+   Theme control are never trapped under the floating composer shell. */
 [data-remedy-status-bar] {
+  position: relative;
+  z-index: 30;
   border-top: 1px solid color-mix(in srgb, var(--border) 80%, transparent) !important;
   background: color-mix(in srgb, var(--bg-secondary) 96%, var(--bg-primary)) !important;
   box-shadow: 0 -1px 0 color-mix(in srgb, var(--text-primary) 3%, transparent);
   backdrop-filter: blur(8px);
+}
+/* Portaled theme menu (body) — keep class for tests / future CSS hooks */
+.remedy-theme-menu {
+  /* z-index set inline (550); solid surface so Streaming stop never shows through */
+  isolation: isolate;
 }
 [data-remedy-status-bar] select {
   border-radius: 0.4rem !important;
