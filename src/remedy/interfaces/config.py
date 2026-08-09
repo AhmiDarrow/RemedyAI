@@ -323,6 +323,7 @@ def resolve_config(
 from remedy.interfaces.provider_catalog import (  # noqa: E402
     DEMO_DUMMY_API_KEY,
     PROVIDER_CATALOG,
+    free_options_public,
 )
 
 # Providers that keep a closed model catalog (foreign model ids are snapped).
