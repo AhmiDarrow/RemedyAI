@@ -130,6 +130,16 @@ files = [
 exclude = [
     "src/remedy/core/agent.py",  # orchestrator; type gradually
     "src/remedy/core/agent_react_loop.py",  # large stream loop; type gradually
+    "src/remedy/core/react_loop/loop.py",  # large ReAct stream; type gradually
+    "src/remedy/core/react_loop/tool_batch.py",
+    "src/remedy/core/react_turn.py",
+    "src/remedy/core/agent_llm.py",
+    "src/remedy/core/agent_build_tools.py",
+    "src/remedy/core/build_mutant.py",
+    "src/remedy/core/build_oracle.py",
+    "src/remedy/core/build_scoped.py",
+    "src/remedy/core/retention.py",
+    "src/remedy/core/self_inject.py",
     "src/remedy/core/learning_loop.py",
     "src/remedy/core/learning",
     # Win32-only ctypes/os.startfile — mypy on Linux CI has no windll/WINFUNCTYPE.
