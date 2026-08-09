@@ -39,6 +39,20 @@ def sse_headers() -> dict[str, str]:
 
 
 # Slash commands live in slash_commands.py (re-exported for compatibility).
+from remedy.interfaces.slash_commands import (  # noqa: E402
+    _BUILTIN_AGENTS,
+    _BUILTIN_COMMANDS,
+    _BUILTIN_MODELS,
+    handle_slash_command,
+)
+
+__all__ = [
+    "_BUILTIN_AGENTS",
+    "_BUILTIN_COMMANDS",
+    "_BUILTIN_MODELS",
+    "handle_slash_command",
+    "sse_headers",
+]
 
 
 def _default_config_path() -> Path:
