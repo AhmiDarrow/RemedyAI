@@ -7,7 +7,6 @@ It plants a smoke oracle that imports mutated modules, then runs it.
 from __future__ import annotations
 
 import re
-from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -84,10 +83,7 @@ def seed_python_smoke_oracle(
     for w in write_set or []:
         try:
             p = Path(w)
-            if not p.is_absolute():
-                p = (root / p).resolve()
-            else:
-                p = p.resolve()
+            p = (root / p).resolve() if not p.is_absolute() else p.resolve()
             rel = p.relative_to(root.resolve()).as_posix()
         except Exception:
             rel = str(w).replace("\\", "/")

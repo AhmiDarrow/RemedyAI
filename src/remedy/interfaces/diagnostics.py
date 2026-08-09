@@ -103,7 +103,7 @@ def _process_stats() -> dict[str, Any]:
             import ctypes
             from ctypes import wintypes
 
-            class PROCESS_MEMORY_COUNTERS(ctypes.Structure):
+            class ProcessMemoryCounters(ctypes.Structure):  # WinAPI layout
                 _fields_ = [
                     ("cb", wintypes.DWORD),
                     ("PageFaultCount", wintypes.DWORD),
@@ -117,11 +117,13 @@ def _process_stats() -> dict[str, Any]:
                     ("PeakPagefileUsage", ctypes.c_size_t),
                 ]
 
-            GetCurrentProcess = ctypes.windll.kernel32.GetCurrentProcess
-            GetProcessMemoryInfo = ctypes.windll.psapi.GetProcessMemoryInfo
-            counters = PROCESS_MEMORY_COUNTERS()
-            counters.cb = ctypes.sizeof(PROCESS_MEMORY_COUNTERS)
-            if GetProcessMemoryInfo(GetCurrentProcess(), ctypes.byref(counters), counters.cb):
+            get_current_process = ctypes.windll.kernel32.GetCurrentProcess
+            get_process_memory_info = ctypes.windll.psapi.GetProcessMemoryInfo
+            counters = ProcessMemoryCounters()
+            counters.cb = ctypes.sizeof(ProcessMemoryCounters)
+            if get_process_memory_info(
+                get_current_process(), ctypes.byref(counters), counters.cb
+            ):
                 out["rss_mb"] = _mb(counters.WorkingSetSize)
         except Exception:
             pass

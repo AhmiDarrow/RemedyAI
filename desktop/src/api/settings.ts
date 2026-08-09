@@ -27,6 +27,8 @@ export interface Settings {
   launch_at_login?: boolean
   start_in_tray?: boolean
   close_to_tray?: boolean
+  /** Skip quit-server warning dialog */
+  skip_quit_server_warning?: boolean
   harness_mode?: string
   harness_min_context_pct?: number
   harness_max_context_pct?: number

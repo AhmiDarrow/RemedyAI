@@ -15,7 +15,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-
 _SKIP = frozenset(
     {".venv", "venv", "node_modules", ".git", "__pycache__", "dist", "build", ".remedy-build"}
 )

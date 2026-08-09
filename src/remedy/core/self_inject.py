@@ -25,7 +25,7 @@ import time
 import uuid
 from contextlib import suppress
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -86,7 +86,7 @@ class SelfInjectRound:
 
 
 def _now_utc() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 # ---------------------------------------------------------------------------
@@ -110,14 +110,13 @@ def read_ledger(home: str | Path | None = None) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     if not path.exists():
         return out
-    with suppress(Exception):
-        with open(path, encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                with suppress(Exception):
-                    out.append(json.loads(line))
+    with suppress(Exception), open(path, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            with suppress(Exception):
+                out.append(json.loads(line))
     return out
 
 
@@ -302,7 +301,7 @@ async def run_gate(
     round_.status = "gating"
     round_.gate_cmds = [_verify_cmd_for(t, repo) for t in trees]
     all_green = True
-    for t, cmd in zip(trees, round_.gate_cmds):
+    for _t, cmd in zip(trees, round_.gate_cmds, strict=False):
         code, out, err = await _run_one(cmd, repo, timeout)
         round_.gate_exit_codes[cmd] = code
         ok = code == 0
@@ -497,7 +496,6 @@ def _idle_seconds() -> float | None:
     None (the caller treats unknown as 'not idle').
     """
     try:
-        import datetime as _dt
 
         log_root = _home_dir(None) / "logs"
         best = 0.0

@@ -7,10 +7,8 @@ Fatal-error helpers live in ``react_loop.errors``. Prefer importing from
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
-import re
 import time
 from collections.abc import AsyncIterator
 from contextlib import suppress
@@ -20,6 +18,29 @@ import aiohttp
 
 from remedy.core.agent_tool_batch import execute_tool_calls
 from remedy.core.provider_sanitize import sanitize_chat_body
+from remedy.core.react_loop.binding import (
+    provider_bits as _provider_bits_fn,
+)
+from remedy.core.react_loop.binding import (
+    rearm_agency_tools as _rearm_agency_tools_fn,
+)
+from remedy.core.react_loop.binding import (
+    resolve_and_apply_tools as _resolve_and_apply_tools_fn,
+)
+from remedy.core.react_loop.build_request import build_step_request_body
+from remedy.core.react_loop.errors import (
+    is_fatal_llm_api_error as _is_fatal_llm_api_error,
+)
+from remedy.core.react_loop.recovery import (
+    fatal_model_error_message,
+    repeated_provider_error_message,
+)
+from remedy.core.react_loop.stream_consume import consume_llm_http_response
+from remedy.core.react_loop.tool_batch import (
+    apply_build_engine_after_batch,
+    inject_phase_nudge,
+    record_tool_batch_stats,
+)
 from remedy.core.react_policy import (
     TOOL_RESULT_CHAR_CAP as _TOOL_RESULT_CHAR_CAP,
 )
@@ -34,7 +55,6 @@ from remedy.core.react_policy import (
     batch_has_empty_search,
     batch_has_tool_errors,
     epoch_continue_message,
-    is_productive_tool_batch,
     is_serial_explore_batch,
     looks_like_false_progress,
     looks_like_leaked_scratchpad,
@@ -46,39 +66,15 @@ from remedy.core.react_policy import (
     strip_tool_markup,
     turn_has_unfinished_work,
 )
-from remedy.core.react_loop.build_request import build_step_request_body
-from remedy.core.react_loop.tool_batch import (
-    apply_build_engine_after_batch,
-    inject_phase_nudge,
-    record_tool_batch_stats,
-)
-from remedy.core.react_loop.stream_consume import consume_llm_http_response
-from remedy.core.react_loop.recovery import (
-    fatal_model_error_message,
-    repeated_provider_error_message,
-    soft_retry_notice,
-)
-from remedy.core.react_loop.binding import (
-    provider_bits as _provider_bits_fn,
-    rearm_agency_tools as _rearm_agency_tools_fn,
-    resolve_and_apply_tools as _resolve_and_apply_tools_fn,
-)
-from remedy.core.react_loop.errors import (
-    is_fatal_llm_api_error as _is_fatal_llm_api_error,
-)
 from remedy.core.react_stream import (
     StreamRoundState,
-    apply_openai_sse_chunk,
     build_assistant_api_message,
-    build_runtime_system_block,
     ensure_tool_call_pairings,
     filter_fresh_tool_calls,
     finalize_round_text,
     normalize_tool_calls,
-    parse_sse_data_line,
     repair_reasoning_content_in_messages,
     repair_tool_arguments_in_messages,
-    should_enable_tools,
     strip_broken_tool_call_turns,
 )
 
@@ -102,11 +98,11 @@ async def call_llm_stream(runtime, message: str,
     When *plan_mode* is True, only planning tools run (no shell/file writes).
     """
     try:
-        from remedy.core.llm_binding import LlmBinding, get_llm_binding, set_llm_binding
         from remedy.core.agent_react_preamble import (
             prepare_turn_preamble,
             yield_preamble_events,
         )
+        from remedy.core.llm_binding import LlmBinding, get_llm_binding, set_llm_binding
 
         prep = await prepare_turn_preamble(
             runtime,
@@ -145,8 +141,6 @@ async def call_llm_stream(runtime, message: str,
         pure_action_kick = prep.pure_action_kick
         open_only_browse = prep.browse.open_only_browse
         page_interaction = prep.browse.page_interaction
-        vision_mode = prep.vision_mode
-        decode_brief = prep.decode_brief
 
         seen_fps: set[str] = set()
         result_cache: dict[str, str] = {}
@@ -162,7 +156,6 @@ async def call_llm_stream(runtime, message: str,
         mono_fp_hits = 0
         mono_explore_injected = False
         # Local 7B tutorial essays (RPB markdown / pip install / fenced code) — not work.
-        tutorial_monologue_nudge_count = 0
         # Reject monologue finals after a tool-heavy turn (auth/DSML recovery bug).
         scratchpad_nudge_count = 0
         tools_executed_this_turn = 0
@@ -191,8 +184,8 @@ async def call_llm_stream(runtime, message: str,
         # "Done." spam (simple C e2e). Cap hard; green path never continues.
         max_length_continuations = 16
         with suppress(Exception):
-            from remedy.core.local_agent_optimize import is_local_binding
             from remedy.core.llm_binding import get_llm_binding as _glb
+            from remedy.core.local_agent_optimize import is_local_binding
 
             _b0 = _glb(runtime)
             if is_local_binding(_b0.provider, _b0.model, _b0.base_url):
@@ -232,13 +225,9 @@ async def call_llm_stream(runtime, message: str,
         # Single source of truth (REACT_MAX_STALE_EPOCHS default 8 — not 2)
         from remedy.core.react_turn import (
             TurnState,
-            apply_tools_decision,
             effective_stale_epochs,
-            extract_tool_names,
-            extract_write_paths,
             is_disconnect_error,
             mid_turn_fit_messages,
-            resolve_tools,
             synthesize_from_tools,
         )
 
@@ -1150,10 +1139,11 @@ async def call_llm_stream(runtime, message: str,
                                 )
                                 ready = False
                                 with suppress(Exception):
+                                    import asyncio as _aio
+
                                     from remedy.runtime.rmb.service import (
                                         wait_rmb_ready,
                                     )
-                                    import asyncio as _aio
 
                                     # Poll off the event loop so we don't block
                                     # other requests for 2 minutes.
@@ -1172,6 +1162,8 @@ async def call_llm_stream(runtime, message: str,
                         with suppress(Exception):
                             from remedy.core.local_agent_optimize import (
                                 is_local_binding as _ilb2,
+                            )
+                            from remedy.core.local_agent_optimize import (
                                 message_wants_build_work as _mwb2,
                             )
 
@@ -1190,8 +1182,9 @@ async def call_llm_stream(runtime, message: str,
                                 f"({api_soft_failures}/6)…\n"
                             )
                             with suppress(Exception):
-                                from remedy.runtime.rmb.service import wait_rmb_ready
                                 import asyncio as _aio
+
+                                from remedy.runtime.rmb.service import wait_rmb_ready
 
                                 await _aio.to_thread(
                                     wait_rmb_ready, None, timeout_s=45.0
@@ -1373,8 +1366,9 @@ async def call_llm_stream(runtime, message: str,
                     )
                     # Partner: wait for RMB if mid-load, do NOT crush max_tokens
                     with suppress(Exception):
-                        from remedy.runtime.rmb.service import wait_rmb_ready
                         import asyncio as _aio
+
+                        from remedy.runtime.rmb.service import wait_rmb_ready
 
                         await _aio.to_thread(
                             wait_rmb_ready, None, timeout_s=60.0
@@ -1675,10 +1669,10 @@ async def call_llm_stream(runtime, message: str,
                         _local_build = False
                         with suppress(Exception):
                             from remedy.core.local_agent_optimize import (
-                                is_local_binding,
-                                message_wants_build_work,
                                 continue_build_nudge,
                                 filter_tools_write_first,
+                                is_local_binding,
+                                message_wants_build_work,
                             )
 
                             _local_build = is_local_binding(
@@ -2045,11 +2039,11 @@ async def call_llm_stream(runtime, message: str,
                     ):
                         with suppress(Exception):
                             from remedy.core.local_agent_optimize import (
+                                continue_build_nudge,
+                                filter_tools_write_first,
                                 is_local_binding,
                                 message_wants_build_work,
                                 project_listing_snapshot,
-                                continue_build_nudge,
-                                filter_tools_write_first,
                             )
 
                             if is_local_binding(
@@ -2196,10 +2190,10 @@ async def call_llm_stream(runtime, message: str,
                         _block_local_end = False
                         with suppress(Exception):
                             from remedy.core.local_agent_optimize import (
-                                is_local_binding,
-                                message_wants_build_work,
                                 continue_build_nudge,
                                 filter_tools_write_first,
+                                is_local_binding,
+                                message_wants_build_work,
                             )
 
                             if (
@@ -2799,6 +2793,8 @@ async def call_llm_stream(runtime, message: str,
         try:
             from remedy.core.react_turn import (
                 is_disconnect_error as _is_disc,
+            )
+            from remedy.core.react_turn import (
                 synthesize_from_tools as _synth,
             )
 
@@ -2812,16 +2808,18 @@ async def call_llm_stream(runtime, message: str,
                 if _is_disc(e) or True:
                     for _attempt in range(3):
                         try:
-                            from remedy.runtime.rmb.service import wait_rmb_ready
                             import asyncio as _aio
+
+                            from remedy.runtime.rmb.service import wait_rmb_ready
 
                             _wr = await _aio.to_thread(
                                 wait_rmb_ready, None, timeout_s=90.0
                             )
                             if not _wr.get("ok"):
                                 continue
-                            from remedy.core.llm_binding import get_llm_binding
                             import aiohttp as _ah
+
+                            from remedy.core.llm_binding import get_llm_binding
 
                             _b2 = get_llm_binding(runtime)
                             _ad2 = _b2.adapter()
@@ -2850,13 +2848,15 @@ async def call_llm_stream(runtime, message: str,
                                 )
                             _ep = _ad2.chat_endpoint(_b2.base_url)
                             _hdr = _ad2.auth_headers(_b2.api_key)
-                            async with _ah.ClientSession() as _sess:
-                                async with _sess.post(
+                            async with (
+                                _ah.ClientSession() as _sess,
+                                _sess.post(
                                     _ep,
                                     headers=_hdr,
                                     json=_body2,
                                     timeout=_ah.ClientTimeout(total=180),
-                                ) as _resp:
+                                ) as _resp,
+                            ):
                                     if _resp.status == 200:
                                         _data = await _resp.json()
                                         _txt = (
@@ -2899,8 +2899,9 @@ async def call_llm_stream(runtime, message: str,
         # Disconnect with zero tools: hard-restart RMB then stop cleanly
         if is_disconnect_error(e):
             with suppress(Exception):
-                from remedy.runtime.rmb.service import wait_rmb_ready
                 import asyncio as _aio
+
+                from remedy.runtime.rmb.service import wait_rmb_ready
 
                 yield "@@status:Model connection lost — restarting RMB…\n"
                 await _aio.to_thread(wait_rmb_ready, None, timeout_s=90.0)

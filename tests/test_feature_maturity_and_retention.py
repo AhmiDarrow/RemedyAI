@@ -91,7 +91,6 @@ def test_purge_attachments_by_age(tmp_path: Path) -> None:
     old.write_bytes(b"x")
     new.write_bytes(b"y")
     # Make old very old
-    import os
     import time
 
     old_ts = time.time() - (40 * 86400)
@@ -110,7 +109,6 @@ def test_run_retention_pass_logs_and_shots(tmp_path: Path) -> None:
     shot = home / "computer" / "shots" / "x.png"
     log.write_text("a", encoding="utf-8")
     shot.write_bytes(b"png")
-    import os
     import time
 
     old_ts = time.time() - (100 * 86400)

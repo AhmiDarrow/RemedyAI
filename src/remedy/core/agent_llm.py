@@ -220,11 +220,11 @@ def tools_for_binding(
         if is_local_model(bind.provider, bind.model, base_url=bind.base_url):
             try:
                 from remedy.core.endless_context import (
+                    CODING_TOOL_PACK,
+                    EXPAND_TOOL_PACK,
                     resolve_local_window,
                     slim_tools_pack,
                     tool_pack_for_window,
-                    CODING_TOOL_PACK,
-                    EXPAND_TOOL_PACK,
                 )
 
                 win = resolve_local_window(

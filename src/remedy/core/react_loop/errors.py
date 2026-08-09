@@ -30,23 +30,7 @@ def is_fatal_llm_api_error(status: int, body: str) -> bool:
     if "model" in low and any(p in low for p in model_fatal_phrases):
         return True
     # OpenAI-style invalid_request_error is only fatal when clearly model-related.
-    if (
-        "invalid_request_error" in low
-        and "model" in low
-        and any(
-            p in low
-            for p in (
-                "model_not_found",
-                "invalid model",
-                "unknown model",
-                "does not exist",
-                "not found",
-                "unsupported",
-            )
-        )
-    ):
-        return True
-    return False
+    return bool("invalid_request_error" in low and "model" in low and any(p in low for p in ("model_not_found", "invalid model", "unknown model", "does not exist", "not found", "unsupported")))
 
 
 # Back-compat alias used by older tests / imports

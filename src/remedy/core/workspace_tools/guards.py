@@ -57,9 +57,7 @@ def looks_like_history_stub_text(text: str | None) -> bool:
         return True
     if any(m in s for m in HISTORY_STUB_MARKERS):
         return True
-    if s.strip().startswith("[") and "omitted from provider history" in s:
-        return True
-    return False
+    return bool(s.strip().startswith("[") and "omitted from provider history" in s)
 
 
 # Source-like extensions where empty / spam rewrites destroy the tree.

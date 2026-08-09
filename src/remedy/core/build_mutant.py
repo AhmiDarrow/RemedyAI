@@ -201,7 +201,7 @@ def mutant_kill_score(
                             shutil.copy2(sib, dest)
 
         # Ensure src layout package inits
-        for init in tmp_root.rglob("__init__.py"):
+        for _init in tmp_root.rglob("__init__.py"):
             pass
         # create missing __init__.py along package paths
         for p in list(tmp_root.rglob("*.py")):

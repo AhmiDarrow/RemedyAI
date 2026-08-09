@@ -10,7 +10,6 @@ import hashlib
 import json
 import shutil
 import time
-from contextlib import suppress
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any

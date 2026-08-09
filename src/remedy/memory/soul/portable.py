@@ -8,14 +8,12 @@ from __future__ import annotations
 
 import json
 import time
-from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
 from remedy.memory.soul.field import (
     SoulField,
     clear_soul_cache,
-    field_path,
     load_soul_field,
     looks_like_secret_soul,
     save_soul_field,

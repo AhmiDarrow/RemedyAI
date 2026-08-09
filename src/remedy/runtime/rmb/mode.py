@@ -43,9 +43,7 @@ def is_rmb_base_url(base_url: str | None) -> bool:
         return True
     # Bare ":8787" forms without parseable port
     low = u.lower()
-    if ":8787/" in low or low.rstrip("/").endswith(":8787"):
-        return True
-    return False
+    return bool(":8787/" in low or low.rstrip("/").endswith(":8787"))
 
 
 def is_rmb_provider(provider: str | None, base_url: str | None = None) -> bool:
@@ -56,9 +54,7 @@ def is_rmb_provider(provider: str | None, base_url: str | None = None) -> bool:
     # llamacpp only counts as RMB when pointed at the managed chat port
     if p in ("llamacpp", "custom", "local", "openai") and is_rmb_base_url(base_url):
         return True
-    if is_rmb_base_url(base_url):
-        return True
-    return False
+    return bool(is_rmb_base_url(base_url))
 
 
 def is_local_agent_mode(
@@ -142,11 +138,7 @@ def should_skip_vision_stack(cfg: dict[str, Any] | None = None) -> bool:
             return True
     except Exception:
         pass
-    if rmb_server_running(
-        cfg.get("home_dir") if isinstance(cfg, dict) else None
-    ):
-        return True
-    return False
+    return bool(rmb_server_running(cfg.get("home_dir") if isinstance(cfg, dict) else None))
 
 
 def force_path_only_images(

@@ -186,7 +186,7 @@ class BasicRuntime(AgentRuntime):
     @property
     def _session_id(self) -> str | None:  # type: ignore[override]
         try:
-            from remedy.core.turn_context import in_active_turn, current_session_id
+            from remedy.core.turn_context import current_session_id, in_active_turn
 
             if in_active_turn():
                 return current_session_id()

@@ -6,6 +6,7 @@ tables can grow without bloating the shared API support module.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from typing import Any
 

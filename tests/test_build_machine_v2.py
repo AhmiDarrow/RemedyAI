@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -132,7 +131,7 @@ async def test_run_auto_verify_oracle_missing():
     # discover will try cwd; force empty
     st.verify_command = ""
     # Mock discover to empty by using a path with no markers
-    result = await run_auto_verify(rt, st, command="")
+    await run_auto_verify(rt, st, command="")
     # May or may not find pytest in remedy repo when effective path is .
     # Force missing:
     st2 = BuildTurnState(active=True)

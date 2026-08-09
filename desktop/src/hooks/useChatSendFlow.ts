@@ -34,14 +34,16 @@ export function useChatSendFlow(opts: {
     title?: string,
     bind?: { provider?: string; model?: string },
   ) => Promise<
-    { id: string; llm_provider?: string; model?: string } | null | undefined
+    | { id: string; llm_provider?: string | null; model?: string | null }
+    | null
+    | undefined
   >
   rename: (id: string, title: string) => void | Promise<unknown>
   refreshSessions: () => Promise<unknown>
   send: (
     text: string,
     model?: string,
-    sessionId?: string | null,
+    sessionId?: string,
     attachments?: AttachmentMeta[],
     planMode?: boolean,
     opts?: { mode?: 'after' | 'interrupt'; provider?: string },
@@ -62,7 +64,7 @@ export function useChatSendFlow(opts: {
     msgId: string,
     content?: string,
   ) => Promise<string | null | undefined>
-  messages: Array<{ id: string; role: string; content?: string }>
+  messages: Array<{ id: string; role: string; content?: string; reverted?: boolean }>
   streaming: boolean
   model: string
   planMode: boolean
@@ -150,11 +152,13 @@ export function useChatSendFlow(opts: {
           const sid = activeId || (await create())?.id
           if (!sid) return { text: 'No session available.' }
           const result = await runCommand(command, sid)
-          if (result.text) addCommandMessage(command, result.text)
-          if (result.session_id) {
+          if (result.text) addCommandMessage(command, String(result.text))
+          const resultSid =
+            typeof result.session_id === 'string' ? result.session_id : ''
+          if (resultSid) {
             await refreshSessions()
-            setActiveId(result.session_id)
-            setOpenTabs((prev) => new Set([...prev, result.session_id as string]))
+            setActiveId(resultSid)
+            setOpenTabs((prev) => new Set([...prev, resultSid]))
           } else if (result.action === 'import_session_done') {
             await refreshSessions()
           }
@@ -202,14 +206,14 @@ export function useChatSendFlow(opts: {
             /* ignore */
           }
           const note =
-            result.text
+            (typeof result.text === 'string' && result.text)
             || 'Session fully reset. Same tab — send a message to start as if new.'
           addCommandMessage(command, note)
           return { ...result, text: note, action: result.action || 'reset_session' }
         }
 
         // Failed — keep history; show the real error.
-        if (result.text) addCommandMessage(command, result.text)
+        if (result.text) addCommandMessage(command, String(result.text))
         return result
       }
 
@@ -230,19 +234,21 @@ export function useChatSendFlow(opts: {
         } catch {
           /* */
         }
-        if (result.text) addCommandMessage(command, result.text)
+        if (result.text) addCommandMessage(command, String(result.text))
         return result
       }
       if (result.text && sid) {
-        addCommandMessage(command, result.text)
+        addCommandMessage(command, String(result.text))
       }
       if (result.action === 'new_session') {
         await handleNewSession()
       }
-      if (result.action === 'import_session_done' && result.session_id) {
+      const importSid =
+        typeof result.session_id === 'string' ? result.session_id : ''
+      if (result.action === 'import_session_done' && importSid) {
         await refreshSessions()
-        setActiveId(result.session_id)
-        setOpenTabs((prev) => new Set([...prev, result.session_id as string]))
+        setActiveId(importSid)
+        setOpenTabs((prev) => new Set([...prev, importSid]))
       }
       return result
     },
@@ -407,7 +413,7 @@ export function useChatSendFlow(opts: {
       if (idx < 0) return
       let userIdx = -1
       for (let i = idx - 1; i >= 0; i--) {
-        if (messages[i]?.role === 'user' && !messages[i]?.reverted) {
+        if (messages[i]?.role === 'user' && !(messages[i] as { reverted?: boolean })?.reverted) {
           userIdx = i
           break
         }

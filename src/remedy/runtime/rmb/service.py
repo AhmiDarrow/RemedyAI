@@ -806,8 +806,9 @@ def _gguf_matches_model_id(path: Path, model_id: str) -> bool:
     Sticky model_path must not win when the user selected a different catalog
     size (e.g. 7B path still set after switching to 14B).
     """
-    from remedy.runtime.rmb.catalog import RMB_MODELS, catalog_id_from_hint
     import re
+
+    from remedy.runtime.rmb.catalog import RMB_MODELS, catalog_id_from_hint
 
     mid = (model_id or "").strip()
     if not mid:
@@ -1253,9 +1254,9 @@ def _resume_smolvlm_if_wanted(home_dir: str | Path | None = None) -> dict[str, A
     out: dict[str, Any] = {"resumed": False}
     try:
         from remedy.interfaces.api_support import load_config
+        from remedy.runtime.rmb.mode import is_local_agent_mode
         from remedy.vision.config import vision_section_from_config
         from remedy.vision.service import ensure_server
-        from remedy.runtime.rmb.mode import is_local_agent_mode
 
         cfg = load_config() or {}
         if home_dir and isinstance(cfg, dict):
