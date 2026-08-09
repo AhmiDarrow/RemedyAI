@@ -26,10 +26,15 @@ def _api_base() -> str:
 
 def _token() -> str:
     home = Path(os.environ.get("REMEDY_HOME", Path.home() / ".remedy")).expanduser()
-    p = home / "auth" / "local_api_token"
-    if p.is_file():
-        return p.read_text(encoding="utf-8").strip()
-    return ""
+    try:
+        scripts = Path(__file__).resolve().parent
+        if str(scripts) not in sys.path:
+            sys.path.insert(0, str(scripts))
+        from lib_local_token import resolve_local_api_token
+
+        return resolve_local_api_token(home=home, base=_api_base())
+    except Exception:
+        return ""
 
 
 def host_connected(timeout: float = 3.0) -> bool:

@@ -49,11 +49,16 @@ def wait_for_api(timeout_s: float = 120.0) -> bool:
     import urllib.error
     import urllib.request
 
-    token_path = Path.home() / ".remedy" / "auth" / "local_api_token"
-    if not token_path.is_file():
-        print("no API token file", flush=True)
+    try:
+        scripts = Path(__file__).resolve().parent
+        if str(scripts) not in sys.path:
+            sys.path.insert(0, str(scripts))
+        from lib_local_token import resolve_local_api_token
+
+        token = resolve_local_api_token(base="http://127.0.0.1:7400")
+    except Exception as exc:
+        print(f"no usable API token: {exc}", flush=True)
         return False
-    token = token_path.read_text(encoding="utf-8").strip()
     deadline = time.time() + timeout_s
     while time.time() < deadline:
         try:

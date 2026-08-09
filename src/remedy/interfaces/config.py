@@ -323,7 +323,6 @@ def resolve_config(
 from remedy.interfaces.provider_catalog import (  # noqa: E402
     DEMO_DUMMY_API_KEY,
     PROVIDER_CATALOG,
-    free_options_public,
 )
 
 # Providers that keep a closed model catalog (foreign model ids are snapped).
@@ -732,6 +731,7 @@ def config_to_agent_config(config: dict[str, Any]) -> AgentConfig:
         llm_base_url=llm_base_url,
         sleev_enabled=bool(config.get("sleev_enabled", False)),
         sleev_gateway_url=str(config.get("sleev_gateway_url") or "").strip(),
+        sleev_allow_remote_gateway=bool(config.get("sleev_allow_remote_gateway", False)),
         project_path=config.get("project_path") or os.environ.get("REMEDY_PROJECT_PATH") or None,
         # Partner trust / agency — must come from config.toml (status-bar thumbs).
         # Previously omitted → always defaulted to approval_mode="ask" at startup
@@ -803,6 +803,7 @@ llm_base_url = "https://api.openai.com/v1"
 # Install: npm install -g sleev && sleev  (gateway default http://127.0.0.1:17321)
 # sleev_enabled = false
 # sleev_gateway_url = ""   # empty = auto-discover from Sleev install
+# sleev_allow_remote_gateway = false  # true only for LAN/remote gateway (API keys leave machine)
 
 # Search paths for bundled + user skills
 skills_dir = []
@@ -1267,4 +1268,3 @@ def apply_env_provider_bootstrap(config: dict[str, Any] | None = None) -> dict[s
     return cfg
 
 # Public re-exports (catalog lives in provider_catalog; keep import path stable)
-from remedy.interfaces.provider_catalog import free_options_public as free_options_public  # noqa: E402,F401

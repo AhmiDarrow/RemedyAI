@@ -68,6 +68,7 @@ def register_settings_tools(runtime: Any) -> None:
         browser_home_url: str | None = None,
         sleev_enabled: bool | str | None = None,
         sleev_gateway_url: str | None = None,
+        sleev_allow_remote_gateway: bool | str | None = None,
         sarcasm_mode: bool | str | None = None,
         allow_skill_creation: bool | str | None = None,
         skills_active_budget: int | None = None,
@@ -182,6 +183,7 @@ def register_settings_tools(runtime: Any) -> None:
             "browser_home_url": browser_home_url,
             "sleev_enabled": sleev_enabled,
             "sleev_gateway_url": sleev_gateway_url,
+            "sleev_allow_remote_gateway": sleev_allow_remote_gateway,
             "sarcasm_mode": sarcasm_mode,
             "allow_skill_creation": allow_skill_creation,
             "skills_active_budget": skills_active_budget,
@@ -428,7 +430,15 @@ def register_settings_tools(runtime: Any) -> None:
                     "type": "string",
                     "description": (
                         "Optional Sleev gateway base (empty = auto-discover "
-                        "127.0.0.1:17321)"
+                        "127.0.0.1:17321). Non-loopback requires "
+                        "sleev_allow_remote_gateway=true."
+                    ),
+                },
+                "sleev_allow_remote_gateway": {
+                    "type": "boolean",
+                    "description": (
+                        "Owner opt-in: allow LAN/remote Sleev gateway. Default false "
+                        "so provider API keys stay on loopback."
                     ),
                 },
                 "sarcasm_mode": {"type": "boolean"},

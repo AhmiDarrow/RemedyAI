@@ -42,9 +42,15 @@ class Fail(Exception):
 
 
 def load_token() -> str:
-    if not TOKEN_PATH.is_file():
-        raise Fail(f"missing token {TOKEN_PATH}")
-    return TOKEN_PATH.read_text(encoding="utf-8").strip()
+    scripts_dir = Path(__file__).resolve().parent
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+    from lib_local_token import resolve_local_api_token
+
+    try:
+        return resolve_local_api_token(home=HOME, base=BASE)
+    except Exception as exc:
+        raise Fail(f"token resolve failed ({TOKEN_PATH}): {exc}") from exc
 
 
 def req(

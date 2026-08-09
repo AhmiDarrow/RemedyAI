@@ -389,6 +389,13 @@ class AgentConfig(BaseModel):
         default="",
         description="Optional Sleev gateway base (empty = auto-discover / 127.0.0.1:17321)",
     )
+    sleev_allow_remote_gateway: bool = Field(
+        default=False,
+        description=(
+            "Allow non-loopback Sleev gateway URLs (LAN/remote). Default false so "
+            "provider API keys cannot be redirected off-machine without owner opt-in."
+        ),
+    )
     project_path: str | None = Field(
         default=None,
         description="Default project/workspace directory for agent file tools and shell cwd",
