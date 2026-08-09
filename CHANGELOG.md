@@ -4,6 +4,16 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Sleev gateway + UI
+
+- **Sleev routing:** optional local token-compression gateway (`sleev_enabled`).
+  Cloud chat (xAI, DeepSeek, OpenAI, …) goes through `http://127.0.0.1:17321`
+  with `sleev-harness: remedy`; Ollama/RMB/Demo stay direct.
+- **Configure via chat:** `update_settings(setup="configure sleev")` or
+  `sleev_enabled=true`; `get_settings` reports install/gateway status.
+- **Theme menu:** portaled above the composer so Streaming/Stop no longer
+  paint through the theme list (status bar stacking fix).
+
 ## [0.22.0] - 2026-08-09
 
 ### Partner reliability (build · ship · RMB)

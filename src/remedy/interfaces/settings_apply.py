@@ -79,6 +79,8 @@ SETTABLE_KEYS = frozenset(
         "web_tools_enabled",
         "http_bootstrap",
         "privacy_mode",
+        "sleev_enabled",
+        "sleev_gateway_url",
         "soul_field_enabled",
         "build_os_advanced",
         "rmb_enabled",
@@ -162,7 +164,7 @@ def public_settings_snapshot(cfg: dict[str, Any] | None = None) -> dict[str, Any
     vision = raw.get("vision") if isinstance(raw.get("vision"), dict) else {}
     from remedy.vision.catalog import DEFAULT_MODEL_ID
 
-    return {
+    out: dict[str, Any] = {
         "llm_provider": provider,
         "llm_model": model,
         "llm_base_url": base_url,
@@ -190,6 +192,8 @@ def public_settings_snapshot(cfg: dict[str, Any] | None = None) -> dict[str, Any
         "web_tools_enabled": bool(raw.get("web_tools_enabled", False)),
         "http_bootstrap": bool(raw.get("http_bootstrap", True)),
         "privacy_mode": bool(raw.get("privacy_mode", False)),
+        "sleev_enabled": bool(raw.get("sleev_enabled", False)),
+        "sleev_gateway_url": str(raw.get("sleev_gateway_url") or "").strip(),
         "soul_field_enabled": bool(
             raw.get("soul_field_enabled")
             if "soul_field_enabled" in raw
@@ -237,6 +241,20 @@ def public_settings_snapshot(cfg: dict[str, Any] | None = None) -> dict[str, Any
         "setup_completed": bool(raw.get("setup_completed", False)),
         "config_path": str(_find_config_path() or _default_config_path()),
     }
+    # Live Sleev install/gateway so agent can configure + report status.
+    try:
+        from remedy.core.sleev import sleev_status
+
+        out["sleev"] = sleev_status(raw)
+    except Exception:
+        out["sleev"] = {
+            "enabled": bool(raw.get("sleev_enabled", False)),
+            "installed": False,
+            "gateway_url": str(raw.get("sleev_gateway_url") or "").strip()
+            or "http://127.0.0.1:17321",
+            "harness": "remedy",
+        }
+    return out
 
 
 async def apply_settings_update(
@@ -431,6 +449,21 @@ async def apply_settings_update(
             clear_privacy_mode_cache()
         except Exception:
             pass
+
+    if "sleev_enabled" in patch and patch["sleev_enabled"] is not None:
+        patch["sleev_enabled"] = _as_bool(patch["sleev_enabled"])
+
+    if "sleev_gateway_url" in patch and patch["sleev_gateway_url"] is not None:
+        url = str(patch["sleev_gateway_url"] or "").strip()
+        # Empty = auto-discover from Sleev install / default port.
+        if url:
+            try:
+                from remedy.core.sleev import normalize_gateway_root
+
+                url = normalize_gateway_root(url)
+            except Exception:
+                url = url.rstrip("/")
+        patch["sleev_gateway_url"] = url
 
     for _flag in (
         "soul_field_enabled",
@@ -692,6 +725,8 @@ async def apply_settings_update(
             "web_tools_enabled",
             "http_bootstrap",
             "privacy_mode",
+            "sleev_enabled",
+            "sleev_gateway_url",
             "tool_process",
             "sarcasm_mode",
             "allow_skill_creation",
@@ -699,6 +734,10 @@ async def apply_settings_update(
             if attr in cfg:
                 with contextlib.suppress(Exception):
                     setattr(runtime.config, attr, cfg[attr])
+        # Mirror on runtime for prepare_llm_http(runtime=…) without AgentConfig
+        with contextlib.suppress(Exception):
+            runtime._sleev_enabled = bool(cfg.get("sleev_enabled", False))
+            runtime._sleev_gateway_url = str(cfg.get("sleev_gateway_url") or "").strip()
 
     changes = list(patch.keys())
     if vision_enabled is not None or vision_model_id is not None or vision_force_decode is not None:
@@ -751,6 +790,8 @@ async def apply_settings_update(
         "web_tools_enabled",
         "http_bootstrap",
         "privacy_mode",
+        "sleev_enabled",
+        "sleev_gateway_url",
         "vision_enabled",
         "vision_model_id",
         "vision_force_decode",
@@ -798,6 +839,20 @@ SETUP_ALIASES: dict[str, dict[str, Any]] = {
     "privacy mode": {"privacy_mode": True},
     "privacy mode on": {"privacy_mode": True},
     "privacy mode off": {"privacy_mode": False},
+    # Sleev local token-compression gateway (https://sleev.ai)
+    "sleev": {"sleev_enabled": True},
+    "sleeve": {"sleev_enabled": True},  # common misspelling
+    "sleev on": {"sleev_enabled": True},
+    "enable sleev": {"sleev_enabled": True},
+    "configure sleev": {"sleev_enabled": True},
+    "setup sleev": {"sleev_enabled": True},
+    "set up sleev": {"sleev_enabled": True},
+    "route via sleev": {"sleev_enabled": True},
+    "sleev routing": {"sleev_enabled": True},
+    "save tokens": {"sleev_enabled": True},
+    "token compression": {"sleev_enabled": True},
+    "sleev off": {"sleev_enabled": False},
+    "disable sleev": {"sleev_enabled": False},
     "thinking low": {"thinking_level": "low"},
     "thinking medium": {"thinking_level": "medium"},
     "thinking high": {"thinking_level": "high"},

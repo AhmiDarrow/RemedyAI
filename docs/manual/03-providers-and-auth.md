@@ -71,6 +71,35 @@ Settings → Provider → **Show advanced** → **Custom**:
 - Optional API key.  
 - Type the model name if it is not in the list.
 
+## Sleev (token compression gateway)
+
+[Sleev](https://sleev.ai) is a **local** gateway that sits between Remedy and your cloud provider. It compresses stale session history before tokens leave your machine, which typically cuts long-session spend without changing models or API keys.
+
+**Setup**
+
+1. Install and sign in: `npm install -g sleev` then run `sleev` (gateway default `http://127.0.0.1:17321`).  
+2. In Remedy **Settings → Provider**, enable **Route cloud providers via Sleev**.  
+3. Keep your normal provider (xAI, DeepSeek, OpenAI, …) and keys — Remedy sends `sleev-harness: remedy` plus either `sleev-provider` (built-ins) or `sleev-base-url` (xAI / DeepSeek / others).
+
+**Not routed through Sleev:** Ollama, RMB, llama.cpp, and Demo (local / guest).
+
+**Ask Remedy to do it**
+
+In chat: *“Configure Sleev”* / *“Enable Sleev”* / *“Turn off Sleev”* — Remedy uses
+`update_settings` (phrase or `sleev_enabled=true`) and can report install status
+from `get_settings` (`sleev.installed`, `sleev.gateway_url`).
+
+**CLI / config**
+
+```toml
+sleev_enabled = true
+# sleev_gateway_url = ""   # empty = auto-discover Sleev install
+```
+
+Env overrides: `REMEDY_SLEEV_ENABLED=1`, `REMEDY_SLEEV_GATEWAY=http://127.0.0.1:17321`.
+
+See also Sleev’s [Harness Setup](https://sleev.ai/docs/harness-setup) and [Quickstart](https://sleev.ai/docs/quickstart).
+
 ## Switching providers
 
 - Changing provider normalizes model/URL so incompatible pairs are not persisted.  

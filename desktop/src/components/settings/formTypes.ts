@@ -70,6 +70,20 @@ export interface SettingsFormProps {
   setHttpBootstrap: Dispatch<SetStateAction<boolean>>
   privacyMode: boolean
   setPrivacyMode: Dispatch<SetStateAction<boolean>>
+  /** Route cloud LLM traffic through local Sleev gateway */
+  sleevEnabled?: boolean
+  setSleevEnabled?: Dispatch<SetStateAction<boolean>>
+  sleevGatewayUrl?: string
+  setSleevGatewayUrl?: Dispatch<SetStateAction<string>>
+  sleevStatus?: {
+    enabled?: boolean
+    installed?: boolean
+    gateway_url?: string
+    harness?: string
+    account_label?: string
+    docs_url?: string
+    home_url?: string
+  } | null
   soulFieldEnabled: boolean
   setSoulFieldEnabled: Dispatch<SetStateAction<boolean>>
   approvalMode: 'ask' | 'auto'
