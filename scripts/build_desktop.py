@@ -336,7 +336,8 @@ def build(cache_clean: bool = False, ci: bool = False):
         "multipart",
         "--hidden-import",
         "remedy.interfaces.xai_auth",
-        str(ROOT / "src" / "remedy" / "interfaces" / "cli.py"),
+        # CLI is a package after modular split (cli/__init__.py + main)
+        str(ROOT / "src" / "remedy" / "interfaces" / "cli" / "__main__.py"),
     ])
 
     print(f"Running: {' '.join(cmd)}")
