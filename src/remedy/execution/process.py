@@ -173,8 +173,10 @@ def kill_process_tree(proc: Any) -> None:
 def win_shell_prefix() -> list[str]:
     """Argv prefix for running a shell command string on Windows without a window.
 
-    Prefers PowerShell with -WindowStyle Hidden; falls back to cmd.exe
-    (still under CREATE_NO_WINDOW when spawned via this module).
+    Prefer **cmd.exe** for agent bash_exec: local models emit bash/cmd-style
+    commands (``mkdir -p``, ``&&``, ``cd path && …``). PowerShell treats
+    ``mkdir -p a b`` as unknown parameters and fails partner builds
+    (RemedyPDF 2026-08-08: ``mkdir: A positional parameter cannot be found…``).
     """
     import shutil
 
@@ -182,15 +184,5 @@ def win_shell_prefix() -> list[str]:
         sh = shutil.which("bash") or shutil.which("sh") or "/bin/sh"
         return [sh, "-c"]
 
-    pwsh = shutil.which("pwsh") or shutil.which("powershell")
-    if pwsh:
-        return [
-            pwsh,
-            "-NoProfile",
-            "-NonInteractive",
-            "-WindowStyle",
-            "Hidden",
-            "-Command",
-        ]
     cmd = shutil.which("cmd") or "cmd.exe"
     return [cmd, "/c"]

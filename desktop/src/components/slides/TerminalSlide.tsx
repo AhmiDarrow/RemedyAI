@@ -6,9 +6,32 @@ import { apiFetch } from '../../api/client'
 import { isTauri, tauriInvoke } from '../../api/tauri'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 
+/** Read app theme tokens so xterm matches light/dark forest/etc. */
+function readTerminalTheme(): {
+  background: string
+  foreground: string
+  cursor: string
+  cursorAccent: string
+  selectionBackground: string
+} {
+  const cs = getComputedStyle(document.documentElement)
+  const bg = cs.getPropertyValue('--bg-primary').trim() || '#0b0f14'
+  const fg = cs.getPropertyValue('--text-primary').trim() || '#e6edf3'
+  const accent = cs.getPropertyValue('--accent').trim() || '#c4b5fd'
+  const tertiary = cs.getPropertyValue('--bg-tertiary').trim() || '#3b3266'
+  return {
+    background: bg,
+    foreground: fg,
+    cursor: accent,
+    cursorAccent: bg,
+    selectionBackground: tertiary,
+  }
+}
+
 /**
  * In-app PowerShell via ConPTY + xterm.
  * Waits until the host has a real size before spawning (avoids 0×0 PTY fails).
+ * Restarts the shell when the session project path changes.
  */
 export function TerminalSlide({ sessionId }: { sessionId?: string | null }) {
   const hostRef = useRef<HTMLDivElement | null>(null)
@@ -16,21 +39,35 @@ export function TerminalSlide({ sessionId }: { sessionId?: string | null }) {
   const fitRef = useRef<FitAddon | null>(null)
   const ptyIdRef = useRef<string | null>(null)
   const cwdRef = useRef('')
+  const startedRef = useRef(false)
+  /** Bumped on each start/restart so a slow open cannot clobber a newer shell. */
+  const ptyGenRef = useRef(0)
   const [status, setStatus] = useState('Starting PowerShell…')
   const [cwd, setCwd] = useState('')
+  const [hostBg, setHostBg] = useState(() => {
+    try {
+      return readTerminalTheme().background
+    } catch {
+      return '#0b0f14'
+    }
+  })
 
+  // Resolve session project path for PTY cwd
   useEffect(() => {
     let cancelled = false
     void (async () => {
       try {
         const q = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ''
         const data = await apiFetch<{ project_path?: string }>(`/workspace${q}`)
-        if (!cancelled && data.project_path) {
-          setCwd(data.project_path)
-          cwdRef.current = data.project_path
-        }
+        if (cancelled) return
+        const next = (data.project_path || '').trim()
+        setCwd(next)
+        cwdRef.current = next
       } catch {
-        /* empty cwd → process default */
+        if (!cancelled) {
+          setCwd('')
+          cwdRef.current = ''
+        }
       }
     })()
     return () => {
@@ -44,13 +81,15 @@ export function TerminalSlide({ sessionId }: { sessionId?: string | null }) {
       setStatus('Not available outside desktop')
       return
     }
+    const gen = ++ptyGenRef.current
     try {
       // Close previous session if any
       const prev = ptyIdRef.current
       if (prev) {
         await tauriInvoke('pty_close', { id: prev }).catch(() => {})
-        ptyIdRef.current = null
+        if (gen === ptyGenRef.current) ptyIdRef.current = null
       }
+      if (gen !== ptyGenRef.current) return
       fit.fit()
       let cols = term.cols
       let rows = term.rows
@@ -58,6 +97,7 @@ export function TerminalSlide({ sessionId }: { sessionId?: string | null }) {
         // Host still measuring — retry shortly
         setStatus('Waiting for panel size…')
         await new Promise((r) => window.setTimeout(r, 120))
+        if (gen !== ptyGenRef.current) return
         fit.fit()
         cols = Math.max(term.cols, 80)
         rows = Math.max(term.rows, 24)
@@ -68,19 +108,29 @@ export function TerminalSlide({ sessionId }: { sessionId?: string | null }) {
         cols,
         rows,
       })
+      if (gen !== ptyGenRef.current) {
+        // A newer start won — discard this shell immediately
+        await tauriInvoke('pty_close', { id }).catch(() => {})
+        return
+      }
       ptyIdRef.current = id
       setStatus(workdir ? `PowerShell · ${workdir}` : 'PowerShell')
       term.focus()
     } catch (e: unknown) {
+      if (gen !== ptyGenRef.current) return
       const msg = e instanceof Error ? e.message : String(e)
       term.writeln(`\r\nFailed to start PowerShell: ${msg}\r\n`)
       setStatus(`Error: ${msg}`)
     }
   }, [])
 
+  // Mount xterm once
   useEffect(() => {
     const el = hostRef.current
     if (!el) return
+
+    const theme = readTerminalTheme()
+    setHostBg(theme.background)
 
     const term = new Terminal({
       cursorBlink: true,
@@ -88,13 +138,7 @@ export function TerminalSlide({ sessionId }: { sessionId?: string | null }) {
       cursorWidth: 2,
       fontSize: 13,
       fontFamily: 'Consolas, "Cascadia Mono", "Courier New", monospace',
-      theme: {
-        background: '#0b0f14',
-        foreground: '#e6edf3',
-        cursor: '#c4b5fd',
-        cursorAccent: '#0b0f14',
-        selectionBackground: '#3b3266',
-      },
+      theme,
       allowProposedApi: true,
       rightClickSelectsWord: false,
     })
@@ -199,13 +243,13 @@ export function TerminalSlide({ sessionId }: { sessionId?: string | null }) {
     let unData: UnlistenFn | undefined
     let unExit: UnlistenFn | undefined
     let cancelled = false
-    let started = false
+    startedRef.current = false
 
     const tryStart = async () => {
-      if (cancelled || started || !isTauri()) return
+      if (cancelled || startedRef.current || !isTauri()) return
       // Need a non-trivial host size
       if (el.clientWidth < 40 || el.clientHeight < 40) return
-      started = true
+      startedRef.current = true
       try {
         unData = await listen<{ id: string; data: string }>('pty-data', (ev) => {
           if (ev.payload.id === ptyIdRef.current) {
@@ -234,13 +278,13 @@ export function TerminalSlide({ sessionId }: { sessionId?: string | null }) {
         return
       }
       // Retry until layout has size (panel open animation / rail expand)
-      for (let i = 0; i < 20 && !cancelled && !started; i++) {
+      for (let i = 0; i < 20 && !cancelled && !startedRef.current; i++) {
         await tryStart()
-        if (!started) await new Promise((r) => window.setTimeout(r, 100))
+        if (!startedRef.current) await new Promise((r) => window.setTimeout(r, 100))
       }
-      if (!started && !cancelled) {
+      if (!startedRef.current && !cancelled) {
         // Force start with defaults
-        started = true
+        startedRef.current = true
         await startPty(term, fit, cwdRef.current)
       }
     })()
@@ -255,7 +299,7 @@ export function TerminalSlide({ sessionId }: { sessionId?: string | null }) {
             cols: term.cols,
             rows: term.rows,
           }).catch(() => {})
-        } else if (!started && !cancelled) {
+        } else if (!startedRef.current && !cancelled) {
           void tryStart()
         }
       } catch {
@@ -264,8 +308,24 @@ export function TerminalSlide({ sessionId }: { sessionId?: string | null }) {
     })
     ro.observe(el)
 
+    // Keep xterm colors in sync when the app theme changes
+    const themeObs = new MutationObserver(() => {
+      try {
+        const next = readTerminalTheme()
+        term.options.theme = next
+        setHostBg(next.background)
+      } catch {
+        /* */
+      }
+    })
+    themeObs.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme', 'class', 'style'],
+    })
+
     return () => {
       cancelled = true
+      themeObs.disconnect()
       onData.dispose()
       ro.disconnect()
       el.removeEventListener('mousedown', focusTerm)
@@ -278,11 +338,40 @@ export function TerminalSlide({ sessionId }: { sessionId?: string | null }) {
         void tauriInvoke('pty_close', { id }).catch(() => {})
       }
       ptyIdRef.current = null
+      startedRef.current = false
+      ptyGenRef.current += 1 // invalidate any in-flight pty_open
       term.dispose()
       termRef.current = null
       fitRef.current = null
     }
   }, [startPty])
+
+  // When session project path changes after shell is up, restart in the new cwd
+  const lastCwdForPty = useRef<string | null>(null)
+  useEffect(() => {
+    const term = termRef.current
+    const fit = fitRef.current
+    if (!term || !fit || !isTauri()) return
+    // Skip first empty→value race on mount (tryStart already uses cwdRef)
+    if (!startedRef.current) {
+      lastCwdForPty.current = cwd
+      return
+    }
+    if (lastCwdForPty.current === cwd) return
+    lastCwdForPty.current = cwd
+    let cancelled = false
+    void (async () => {
+      term.writeln(
+        cwd
+          ? `\r\n[session project → ${cwd}]\r\nRestarting shell…\r\n`
+          : '\r\n[session project cleared]\r\nRestarting shell…\r\n',
+      )
+      if (!cancelled) await startPty(term, fit, cwd)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [cwd, startPty])
 
   const restart = async () => {
     const term = termRef.current
@@ -293,24 +382,65 @@ export function TerminalSlide({ sessionId }: { sessionId?: string | null }) {
     await startPty(term, fit, cwd || cwdRef.current)
   }
 
+  const clearScreen = () => {
+    const term = termRef.current
+    if (!term) return
+    term.clear()
+    term.focus()
+  }
+
+  const copyCwd = async () => {
+    const p = cwd || cwdRef.current
+    if (!p) return
+    try {
+      await navigator.clipboard.writeText(p)
+      setStatus(`Copied · ${p}`)
+      window.setTimeout(() => {
+        setStatus(p ? `PowerShell · ${p}` : 'PowerShell')
+      }, 1800)
+    } catch {
+      /* ignore */
+    }
+  }
+
   return (
     <div className="flex flex-col h-full min-h-0 max-h-full overflow-hidden text-xs">
       <div
         className="px-2 py-1 border-b flex gap-1 items-center shrink-0"
-        style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+        style={{
+          borderColor: 'var(--border)',
+          color: 'var(--text-muted)',
+          background: 'var(--bg-secondary)',
+        }}
       >
-        <span className="truncate flex-1 font-mono" title={cwd || undefined}>
-          {status}
-        </span>
         <button
           type="button"
-          className="px-2 py-0.5 rounded font-sans"
+          className="truncate flex-1 min-w-0 text-left font-mono rounded px-0.5"
+          style={{ color: 'var(--text-muted)', background: 'transparent', border: 'none' }}
+          title={cwd ? `${cwd} — click to copy cwd` : status}
+          onClick={() => void copyCwd()}
+        >
+          {status}
+        </button>
+        <button
+          type="button"
+          className="workspace-chrome-btn shrink-0"
+          onClick={clearScreen}
+          title="Clear terminal display"
+          aria-label="Clear terminal"
+        >
+          ⌫
+        </button>
+        <button
+          type="button"
+          className="px-2 py-0.5 rounded font-sans shrink-0"
           style={{
             background: 'var(--bg-primary)',
             border: '1px solid var(--border)',
             color: 'var(--text-secondary)',
           }}
           onClick={() => void restart()}
+          title="Restart PowerShell in session project folder"
         >
           Restart
         </button>
@@ -318,7 +448,7 @@ export function TerminalSlide({ sessionId }: { sessionId?: string | null }) {
       <div
         ref={hostRef}
         className="flex-1 min-h-0 w-full max-h-full cursor-text overflow-hidden"
-        style={{ background: '#0b0f14', position: 'relative' }}
+        style={{ background: hostBg, position: 'relative' }}
         title="Click to focus · Ctrl+Shift+C/V copy/paste · right-click paste · Esc exits fullscreen"
         onMouseDown={() => termRef.current?.focus()}
       />

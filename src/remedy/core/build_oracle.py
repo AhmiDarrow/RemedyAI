@@ -14,13 +14,54 @@ from typing import Any
 _MUTATE_TOOLS = frozenset({"file_write", "file_edit"})
 
 
+def _discover_c_verify_command(root: Any) -> str:
+    """gcc compile+run for a simple C project (hello.c / main.c / single .c)."""
+    from pathlib import Path
+    import os
+
+    p = Path(root)
+    if not p.is_dir():
+        return ""
+    candidates: list[Path] = []
+    for name in ("hello.c", "main.c", "app.c", "program.c"):
+        c = p / name
+        if c.is_file():
+            candidates.append(c)
+            break
+    if not candidates:
+        c_files = sorted(p.glob("*.c"))
+        if len(c_files) == 1:
+            candidates = c_files
+        elif c_files:
+            # Prefer a file that looks like an entrypoint
+            for c in c_files:
+                try:
+                    text = c.read_text(encoding="utf-8", errors="replace")[:4000]
+                except OSError:
+                    text = ""
+                if "int main" in text or "main(" in text:
+                    candidates = [c]
+                    break
+            if not candidates:
+                candidates = [c_files[0]]
+    if not candidates:
+        return ""
+    src = candidates[0]
+    stem = src.stem
+    rel = src.name
+    if os.name == "nt":
+        # cmd.exe-friendly chain; PATH must include gcc (Mingw/scoop)
+        return f"gcc -o {stem}.exe {rel} && {stem}.exe"
+    return f"gcc -o {stem} {rel} && ./{stem}"
+
+
 def discover_verify_command(runtime: Any, *, path: str = "") -> str:
     """Return best-effort verify command for the active project (may be empty)."""
     cmd = ""
+    root = None
     with suppress(Exception):
         from remedy.core.project_fingerprint import fingerprint_path
 
-        root = None
         if (path or "").strip():
             with suppress(Exception):
                 root = runtime.resolve_tool_path(path)  # type: ignore[attr-defined]
@@ -37,18 +78,45 @@ def discover_verify_command(runtime: Any, *, path: str = "") -> str:
         with suppress(Exception):
             from pathlib import Path
 
-            root = runtime.effective_project_path()
+            if root is None:
+                root = runtime.effective_project_path()
             p = Path(root)
             if (p / "pyproject.toml").exists() or (p / "pytest.ini").exists() or (
                 p / "tests"
             ).is_dir():
-                cmd = "pytest -q"
-            elif (p / "package.json").exists():
+                # Prefer real Python markers; empty tests/ from a bad seed does not count
+                if (p / "pyproject.toml").exists() or (p / "pytest.ini").exists():
+                    cmd = "pytest -q"
+                else:
+                    # tests/ only — use pytest only if non-seed tests exist
+                    real_tests = [
+                        t
+                        for t in (p / "tests").rglob("test_*.py")
+                        if t.name != "test_remedy_build_smoke.py"
+                    ]
+                    if real_tests or list((p / "tests").rglob("*_test.py")):
+                        cmd = "pytest -q"
+            if not cmd and (p / "package.json").exists():
                 cmd = "npm test"
-            elif (p / "Cargo.toml").exists():
+            if not cmd and (p / "Cargo.toml").exists():
                 cmd = "cargo test"
-            elif (p / "go.mod").exists():
+            if not cmd and (p / "go.mod").exists():
                 cmd = "go test ./..."
+            if not cmd:
+                # Simple C program tasks (hello.c etc.)
+                cmd = _discover_c_verify_command(p)
+    # Even when fingerprint suggested something, C-only trees need gcc
+    if not cmd or cmd.startswith("pytest"):
+        with suppress(Exception):
+            from pathlib import Path
+
+            p = Path(root if root is not None else runtime.effective_project_path())
+            c_files = list(p.glob("*.c"))
+            py_markers = (p / "pyproject.toml").exists() or (p / "setup.py").exists()
+            if c_files and not py_markers:
+                c_cmd = _discover_c_verify_command(p)
+                if c_cmd:
+                    cmd = c_cmd
     return cmd
 
 
@@ -91,21 +159,37 @@ async def run_auto_verify(
 
     # Boundary: auto-seed smoke oracle when missing and we have writes
     if not cmd and getattr(state, "write_set", None):
+        # Prefer native C verify before planting Python smoke
         with suppress(Exception):
-            from remedy.core.build_seed_oracle import seed_python_smoke_oracle
+            from pathlib import Path
 
-            if not getattr(state, "oracle_seeded", False):
-                seed = seed_python_smoke_oracle(
-                    runtime,
-                    list(state.write_set or []),
-                    home=getattr(getattr(runtime, "config", None), "home_dir", None),
-                )
-                if seed.get("ok") and seed.get("command"):
-                    cmd = str(seed["command"])
+            root = runtime.effective_project_path()
+            c_cmd = _discover_c_verify_command(Path(root))
+            writes = [str(w).lower() for w in (state.write_set or [])]
+            if c_cmd and any(w.endswith((".c", ".cpp", ".cc")) for w in writes):
+                cmd = c_cmd
+                if hasattr(state, "verify_command"):
                     state.verify_command = cmd
+                if hasattr(state, "oracle_ok"):
                     state.oracle_ok = True
-                    state.oracle_seeded = True
-                    state._seed_message = seed  # type: ignore[attr-defined]
+        if not cmd:
+            with suppress(Exception):
+                from remedy.core.build_seed_oracle import seed_python_smoke_oracle
+
+                if not getattr(state, "oracle_seeded", False):
+                    seed = seed_python_smoke_oracle(
+                        runtime,
+                        list(state.write_set or []),
+                        home=getattr(
+                            getattr(runtime, "config", None), "home_dir", None
+                        ),
+                    )
+                    if seed.get("ok") and seed.get("command"):
+                        cmd = str(seed["command"])
+                        state.verify_command = cmd
+                        state.oracle_ok = True
+                        state.oracle_seeded = True
+                        state._seed_message = seed  # type: ignore[attr-defined]
 
     if not cmd:
         if hasattr(state, "oracle_ok"):
@@ -234,7 +318,11 @@ async def run_auto_verify(
 
 
 def should_auto_verify(state: Any) -> bool:
-    """True when writes crossed threshold and machine should run falsification."""
+    """True when writes crossed threshold and machine should run falsification.
+
+    Cooldown after green: only re-fire when *source* files were written past
+    ``write_steps_at_last_green`` (docs/tmp/yml thrash does not re-verify).
+    """
     if state is None or not getattr(state, "active", False):
         return False
     cycles = int(getattr(state, "auto_verify_cycles", 0) or 0)
@@ -244,13 +332,60 @@ def should_auto_verify(state: Any) -> bool:
     writes = int(getattr(state, "write_steps", 0) or 0)
     need = int(getattr(state, "require_verify_after_writes", 2) or 2)
     verifies = int(getattr(state, "verify_steps", 0) or 0)
+    write_set = list(getattr(state, "write_set", None) or [])
+    has_c = any(
+        str(w).lower().endswith((".c", ".cpp", ".cc", ".cxx", ".h", ".hpp"))
+        for w in write_set
+    )
+    # C/C++ partner tasks: verify after the first source write (compile+run)
+    if has_c:
+        need = 1
+
+    # Source-write helpers (BuildTurnState methods if present)
+    source_pending: list[str] = []
+    with suppress(Exception):
+        if hasattr(state, "source_writes_pending"):
+            source_pending = list(state.source_writes_pending() or [])
+        else:
+            from remedy.core.build_engine import _is_source_path
+
+            source_pending = [p for p in write_set if _is_source_path(p)]
+
+    last_green_ws = int(getattr(state, "write_steps_at_last_green", 0) or 0)
+    green_ok = getattr(state, "last_verify_ok", None) is True
+    auto_ran = bool(getattr(state, "auto_verify_ran", False))
+
+    # Hard rule: no source mutation this turn → never auto-verify
+    # (stops continue/proceed thrash re-running npm test for ~30–60s silence)
+    if writes <= 0 and not source_pending:
+        return False
+    if not write_set and not source_pending and writes <= last_green_ws and green_ok:
+        return False
+
+    # Cooldown: green + no new source writes → never re-auto-verify
+    if green_ok and not source_pending and writes <= last_green_ws:
+        return False
+    if green_ok and auto_ran and not source_pending:
+        return False
+    # Ship / done phase: do not thrash tests while pushing or after green
+    phase = str(getattr(state, "phase", "") or "")
+    if phase in ("ship", "done") and green_ok and not source_pending:
+        return False
+
     # Fresh writes after last auto-verify
-    if getattr(state, "auto_verify_ran", False):
-        # Re-run when write_set non-empty after a red, or new mutations cleared green
-        if getattr(state, "write_set", None) and getattr(state, "last_verify_ok", None) is not True:
-            # Avoid infinite loop same cycle — require write_steps growth
+    if auto_ran:
+        # Re-run only after *source* mutations post-green or red repair growth
+        if source_pending and not green_ok:
+            if writes > last_green_ws or writes > verifies:
+                return True
+            return False
+        if source_pending and green_ok:
+            # New source after green → re-verify once
+            if writes > last_green_ws:
+                return True
+            return False
+        if write_set and not green_ok:
             if "auto_verify_repair" in getattr(state, "nudges_emitted", []):
-                # Allow re-verify after repair writes: clear flag when write_set grew
                 if writes > verifies:
                     return True
             return False
@@ -260,8 +395,18 @@ def should_auto_verify(state: Any) -> bool:
     if writes >= need and getattr(state, "last_verify_ok", None) is False:
         if "auto_verify_repair" not in getattr(state, "nudges_emitted", []):
             return True
+    # Source mutated after green was invalidated (auto_ran cleared)
+    if (
+        source_pending
+        and writes > last_green_ws
+        and getattr(state, "last_verify_ok", None) is not True
+    ):
+        return True
     # Oracle seed path: have writes but no command yet
     if writes >= 1 and not getattr(state, "verify_command", None):
+        return True
+    # C write present and never verified this turn
+    if has_c and writes >= 1 and verifies == 0:
         return True
     return False
 

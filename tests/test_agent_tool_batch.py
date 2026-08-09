@@ -116,84 +116,95 @@ async def test_tool_result_ui_preview_redacts_secrets() -> None:
 @pytest.mark.asyncio
 async def test_tool_result_ui_preview_char_cap() -> None:
     """UI preview is hard-capped; model tool content keeps the fat body."""
+    import remedy.core.agent_tool_batch as atb
     from remedy.core.agent_tool_batch import UI_TOOL_RESULT_PREVIEW_CHARS
 
-    assert UI_TOOL_RESULT_PREVIEW_CHARS == 8_000
-    rt = BasicRuntime(AgentConfig(llm_api_key=""))
-    rt._turn_tier = 2  # L2 model cap 12k > UI 8k
-    fat = "x" * 40_000
+    assert UI_TOOL_RESULT_PREVIEW_CHARS >= 8_000
+    # Patch a small cap so CI does not allocate multi-MB tool results
+    old_cap = atb.UI_TOOL_RESULT_PREVIEW_CHARS
+    atb.UI_TOOL_RESULT_PREVIEW_CHARS = 4_000
+    try:
+        rt = BasicRuntime(AgentConfig(llm_api_key=""))
+        rt._turn_tier = 2
+        fat = "x" * 8_000
 
-    async def huge(**_kwargs):
-        return fat
+        async def huge(**_kwargs):
+            return fat
 
-    rt.tool_registry.register_builtin_handler(
-        "file_read",
-        "read",
-        huge,
-        parameters={"type": "object", "properties": {"path": {"type": "string"}}},
-    )
-    calls = [
-        {
-            "id": "fat1",
-            "type": "function",
-            "function": {"name": "file_read", "arguments": '{"path":"big"}'},
-        },
-    ]
-    ui_events: list[str] = []
-    tool_msgs: list[dict] = []
-    async for event, msg in execute_tool_calls(
-        rt, calls, seen_fps=set(), result_cache={}
-    ):
-        if event.startswith("@@tool_result:"):
-            ui_events.append(event)
-        if msg.get("role") == "tool":
-            tool_msgs.append(msg)
-    assert ui_events
-    payload = json.loads(ui_events[0].split(":", 1)[1])
-    assert len(payload["preview"]) <= UI_TOOL_RESULT_PREVIEW_CHARS + 80
-    assert "UI safety cap" in payload["preview"]
-    # Model path keeps the larger tier/safety body — not the tiny UI preview
-    assert len(tool_msgs[0]["content"]) > UI_TOOL_RESULT_PREVIEW_CHARS
-    # SSE JSON envelope itself stays bounded (DOM blow-up guard)
-    assert len(ui_events[0]) < UI_TOOL_RESULT_PREVIEW_CHARS + 400
+        rt.tool_registry.register_builtin_handler(
+            "file_read",
+            "read",
+            huge,
+            parameters={"type": "object", "properties": {"path": {"type": "string"}}},
+        )
+        calls = [
+            {
+                "id": "fat1",
+                "type": "function",
+                "function": {"name": "file_read", "arguments": '{"path":"big"}'},
+            },
+        ]
+        ui_events: list[str] = []
+        tool_msgs: list[dict] = []
+        async for event, msg in execute_tool_calls(
+            rt, calls, seen_fps=set(), result_cache={}
+        ):
+            if event.startswith("@@tool_result:"):
+                ui_events.append(event)
+            if msg.get("role") == "tool":
+                tool_msgs.append(msg)
+        assert ui_events
+        payload = json.loads(ui_events[0].split(":", 1)[1])
+        assert len(payload["preview"]) <= 4_000 + 80
+        assert "UI safety cap" in payload["preview"]
+        # Model path keeps the larger body — not the tiny UI preview
+        assert len(tool_msgs[0]["content"]) > 4_000
+        assert len(ui_events[0]) < 4_000 + 400
+    finally:
+        atb.UI_TOOL_RESULT_PREVIEW_CHARS = old_cap
 
 
 @pytest.mark.asyncio
 async def test_tool_result_ui_preview_exact_boundary_no_cap_note() -> None:
-    """At exactly UI_TOOL_RESULT_PREVIEW_CHARS, preview is not truncated."""
-    from remedy.core.agent_tool_batch import UI_TOOL_RESULT_PREVIEW_CHARS
+    """At exactly the UI preview cap, preview is not truncated."""
+    import remedy.core.agent_tool_batch as atb
 
-    rt = BasicRuntime(AgentConfig(llm_api_key=""))
-    rt._turn_tier = 2
-    exact = "e" * UI_TOOL_RESULT_PREVIEW_CHARS
+    old_cap = atb.UI_TOOL_RESULT_PREVIEW_CHARS
+    atb.UI_TOOL_RESULT_PREVIEW_CHARS = 4_000
+    try:
+        rt = BasicRuntime(AgentConfig(llm_api_key=""))
+        rt._turn_tier = 2
+        exact = "e" * 4_000
 
-    async def exact_body(**_kwargs):
-        return exact
+        async def exact_body(**_kwargs):
+            return exact
 
-    rt.tool_registry.register_builtin_handler(
-        "file_read",
-        "read",
-        exact_body,
-        parameters={"type": "object", "properties": {"path": {"type": "string"}}},
-    )
-    ui_events: list[str] = []
-    async for event, _msg in execute_tool_calls(
-        rt,
-        [
-            {
-                "id": "exact1",
-                "type": "function",
-                "function": {"name": "file_read", "arguments": '{"path":"e"}'},
-            }
-        ],
-        seen_fps=set(),
-        result_cache={},
-    ):
-        if event.startswith("@@tool_result:"):
-            ui_events.append(event)
-    payload = json.loads(ui_events[0].split(":", 1)[1])
-    assert payload["preview"] == exact
-    assert "UI safety cap" not in payload["preview"]
+        rt.tool_registry.register_builtin_handler(
+            "file_read",
+            "read",
+            exact_body,
+            parameters={"type": "object", "properties": {"path": {"type": "string"}}},
+        )
+        ui_events: list[str] = []
+        async for event, _msg in execute_tool_calls(
+            rt,
+            [
+                {
+                    "id": "exact1",
+                    "type": "function",
+                    "function": {"name": "file_read", "arguments": '{"path":"e"}'},
+                }
+            ],
+            seen_fps=set(),
+            result_cache={},
+        ):
+            if event.startswith("@@tool_result:"):
+                ui_events.append(event)
+        payload = json.loads(ui_events[0].split(":", 1)[1])
+        assert payload["preview"] == exact
+        assert "UI safety cap" not in payload["preview"]
+    finally:
+        atb.UI_TOOL_RESULT_PREVIEW_CHARS = old_cap
 
 
 @pytest.mark.asyncio
@@ -203,35 +214,43 @@ async def test_tool_result_ui_preview_cap_applies_per_tool() -> None:
 
     rt = BasicRuntime(AgentConfig(llm_api_key=""))
     rt._turn_tier = 2
-    fat = "y" * 25_000
+    # Monkeypatch cap low so we don't allocate multi-MB tool results in CI
+    import remedy.core.agent_tool_batch as atb
 
-    async def huge(**_kwargs):
-        return fat
+    old_cap = atb.UI_TOOL_RESULT_PREVIEW_CHARS
+    atb.UI_TOOL_RESULT_PREVIEW_CHARS = 4_000
+    try:
+        fat = "y" * 8_000
 
-    rt.tool_registry.register_builtin_handler(
-        "file_read",
-        "read",
-        huge,
-        parameters={"type": "object", "properties": {"path": {"type": "string"}}},
-    )
-    calls = [
-        {
-            "id": f"m{i}",
-            "type": "function",
-            "function": {"name": "file_read", "arguments": f'{{"path":"p{i}"}}'},
-        }
-        for i in range(3)
-    ]
-    previews: list[str] = []
-    async for event, _msg in execute_tool_calls(
-        rt, calls, seen_fps=set(), result_cache={}
-    ):
-        if event.startswith("@@tool_result:"):
-            previews.append(json.loads(event.split(":", 1)[1])["preview"])
-    assert len(previews) == 3
-    for p in previews:
-        assert len(p) <= UI_TOOL_RESULT_PREVIEW_CHARS + 80
-        assert "UI safety cap" in p
+        async def huge(**_kwargs):
+            return fat
+
+        rt.tool_registry.register_builtin_handler(
+            "file_read",
+            "read",
+            huge,
+            parameters={"type": "object", "properties": {"path": {"type": "string"}}},
+        )
+        calls = [
+            {
+                "id": f"m{i}",
+                "type": "function",
+                "function": {"name": "file_read", "arguments": f'{{"path":"p{i}"}}'},
+            }
+            for i in range(3)
+        ]
+        previews: list[str] = []
+        async for event, _msg in execute_tool_calls(
+            rt, calls, seen_fps=set(), result_cache={}
+        ):
+            if event.startswith("@@tool_result:"):
+                previews.append(json.loads(event.split(":", 1)[1])["preview"])
+        assert len(previews) == 3
+        for p in previews:
+            assert len(p) <= 4_000 + 80
+            assert "UI safety cap" in p
+    finally:
+        atb.UI_TOOL_RESULT_PREVIEW_CHARS = old_cap
 
 
 @pytest.mark.asyncio

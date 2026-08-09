@@ -365,7 +365,9 @@ def normalize_tool_calls(tool_calls_list: list[dict[str, Any]]) -> list[dict[str
         name = (fn.get("name") or "").strip()
         if not name:
             continue
-        args_s = coerce_tool_arguments_json(fn.get("arguments"))
+        args_s = coerce_tool_arguments_json(
+            fn.get("arguments"), tool_name=name
+        )
         call_id = (tc.get("id") or "").strip() or f"call_{uuid4().hex[:24]}"
         out.append(
             {

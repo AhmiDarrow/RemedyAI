@@ -332,12 +332,18 @@ def kill_session_processes(session_id: str) -> int:
 
 
 def abort_session(session_id: str) -> int:
-    """Signal all in-flight turns and kill their shell children. Returns events notified."""
+    """Signal all in-flight turns and kill their shell children. Returns events notified.
+
+    Immediately drops the session from the live registry so a new stream is not
+    blocked with HTTP 409 after Stop (stuck LLM/tool turns may take a moment to
+    unwind ``end_turn``).
+    """
     sid = str(session_id or "").strip()
     if not sid:
         return 0
     with _lock:
-        events = list(_registry.get(sid) or [])
+        # Pop so is_session_streaming is False right away (not only after end_turn).
+        events = list(_registry.pop(sid, []) or [])
     for ev in events:
         with contextlib.suppress(Exception):
             ev.set()
@@ -355,8 +361,11 @@ def abort_session(session_id: str) -> int:
 
 
 def is_session_streaming(session_id: str) -> bool:
+    """True when a non-aborted turn is registered for this session."""
     sid = str(session_id or "").strip()
     if not sid:
         return False
     with _lock:
-        return bool(_registry.get(sid))
+        events = list(_registry.get(sid) or [])
+    # Aborted events (is_set) must not block a new stream with 409.
+    return any(not ev.is_set() for ev in events)

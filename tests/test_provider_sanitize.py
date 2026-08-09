@@ -232,8 +232,15 @@ def test_file_write_large_content_summarized_not_half_clipped():
     parsed = json.loads(out)
     assert parsed.get("path") == "src/Big.tsx"
     content = parsed.get("content") or ""
-    assert "NOT_SOURCE_CODE" in content or "history_stub" in content
-    assert "DO_NOT_file_write" in content
+    # Partner rule: empty body + metadata (not a copy-pasteable stub string)
+    note = str(parsed.get("history_note") or "") + content
+    assert (
+        parsed.get("_history_summarized")
+        or parsed.get("_body_omitted")
+        or "history_stub" in note
+        or "omitted" in note.lower()
+        or "NOT_SOURCE_CODE" in content
+    )
     assert parsed.get("_content_chars") == len(body)
     # Must not be a bare mid-file clip of the original
     assert not content.startswith("line\nline\nline")
@@ -292,7 +299,14 @@ def test_sanitize_message_still_stubs_file_write_for_provider():
     )
     out_args = json.loads(m["tool_calls"][0]["function"]["arguments"])
     content = out_args.get("content") or ""
-    assert "history_stub" in content or "NOT_SOURCE_CODE" in content
+    note = str(out_args.get("history_note") or "") + content
+    assert (
+        out_args.get("_history_summarized")
+        or out_args.get("_body_omitted")
+        or "history_stub" in note
+        or "omitted" in note.lower()
+        or "NOT_SOURCE_CODE" in content
+    )
     assert out_args.get("_content_chars") == len(body)
     # Original message must remain full fidelity (sanitize copies)
     orig = json.loads(args)

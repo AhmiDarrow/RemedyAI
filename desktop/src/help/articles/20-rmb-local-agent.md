@@ -30,8 +30,11 @@ second product personality.
 1. Open **Settings → Remedy Muscle Bridge** (local models).
 2. Drop a GGUF into `~/.remedy/rmb/models/` or pick a catalog / path.
 3. Choose **profile** (agent / turbo / quality), context size, GPU layers.
-4. **Start RMB**, then **Use as chat provider** if you want chat on that host.
-5. Start a **new message** so the session binds to the new provider.
+4. **Start RMB** (required — RMB does **not** auto-start when the API/serve
+   process comes up). Optionally enable **auto-start** only if you want the host
+   to load with every Remedy launch.
+5. **Use as chat provider** if you want chat on that host.
+6. Start a **new message** so the session binds to the new provider.
 
 Refresh status after install or path changes. Restart RMB after changing
 model, context, or GPU layer settings.

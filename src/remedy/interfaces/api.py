@@ -149,15 +149,23 @@ def create_app(
                     rmb_wanted = bool(
                         rmb_enabled(cfg0 if isinstance(cfg0, dict) else None)
                         and st.get("enabled")
-                        and st.get("auto_start", True)
+                        and st.get("auto_start", False)
                     )
                     if rmb_wanted:
+                        from remedy.runtime.rmb.service import (
+                            adopt_existing_host,
+                            ensure_rmb_watchdog,
+                        )
+
+                        ensure_rmb_watchdog(home0)
+                        with suppress(Exception):
+                            adopt_existing_host(home0)
                         rr = start_rmb_server(home_dir=home0, wait_s=120.0)
                         rmb_ok = bool(rr.get("ok"))
                         if rmb_ok:
                             logger.info(
                                 "RMB local agent host auto-started "
-                                "(SmolVLM suspended)"
+                                "(SmolVLM suspended) watchdog=on"
                             )
                         else:
                             logger.info(

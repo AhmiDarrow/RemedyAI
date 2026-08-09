@@ -156,6 +156,11 @@ class BasicRuntime(AgentRuntime):
             )
         # Default high — medium/off were throttling max_tokens and truncating reasoning.
         tl = str(getattr(config, "thinking_level", None) or "high").strip().lower()
+        # Local/RMB: never default to high thinking (monologue tax)
+        with suppress(Exception):
+            prov = str(getattr(config, "llm_provider", None) or "").lower()
+            if prov in ("rmb", "llamacpp", "ollama", "local"):
+                tl = "low"
         self._thinking_level: str = (
             tl if tl in ("off", "low", "medium", "high") else "high"
         )
@@ -742,6 +747,26 @@ class BasicRuntime(AgentRuntime):
                 ),
                 duration_ms=(_time.perf_counter() - t0) * 1000,
             )
+        except TypeError as e:
+            # Missing path= etc. — soft error, never kill the turn
+            default_registry.counter("remedy_tool_errors_total", tool=name).inc()
+            default_registry.histogram(
+                "remedy_tool_duration_seconds", tool=name
+            ).observe(_time.perf_counter() - t0)
+            return ToolResult(
+                call_id=tool_call.id,
+                success=False,
+                error=format_tool_error(
+                    str(e),
+                    code="TOOL_ARGS",
+                    tool_name=name,
+                    suggestion=(
+                        "Pass required args (file_write needs path= and content=; "
+                        "file_edit needs path=, old_string=, new_string=)."
+                    ),
+                ),
+                duration_ms=(_time.perf_counter() - t0) * 1000,
+            )
         except Exception as e:
             logger.exception("Tool %s failed", name)
             default_registry.counter("remedy_tool_errors_total", tool=name).inc()
@@ -940,6 +965,8 @@ class BasicRuntime(AgentRuntime):
 
         llm_tok = set_llm_binding(bind)
         self._last_auto_checkpoint_n = 0
+        # Per-turn build green flag (set by auto-verify; drives short summary path)
+        self._build_verify_green = False
         sid_key = str(session_id or "").strip() or "_anon"
         if session_id:
             self._session_id = session_id

@@ -19,12 +19,15 @@ from remedy.core.security import check_dangerous_command
 def scrub_subprocess_env(env: dict[str, str] | None = None) -> dict[str, str]:
     """Copy env for child processes without provider keys / injection vectors.
 
-    Owner power is unchanged (tools still run); secrets are not leaked into
-    skill scripts or shell children.
+    Owner power is unchanged (tools still run); LLM provider secrets stay out of
+    shell children. **GitHub/git auth must survive** so ``git push`` / ``gh``
+    work under full access (partner 2026-08-09: blanket TOKEN scrub killed
+    GH_TOKEN/GITHUB_TOKEN and made push look like a security policy block).
     """
     import os as _os
 
     safe_env = dict(env) if env is not None else dict(_os.environ)
+    # LLM / cloud provider secrets only — not every *TOKEN* in the environment
     drop_prefixes = (
         "REMEDY_",
         "OPENAI_",
@@ -35,6 +38,13 @@ def scrub_subprocess_env(env: dict[str, str] | None = None) -> dict[str, str]:
         "GOOGLE_",
         "AWS_",
         "AZURE_",
+        "COHERE_",
+        "MISTRAL_",
+        "GROQ_",
+        "TOGETHER_",
+        "FIREWORKS_",
+        "PERPLEXITY_",
+        "OPENROUTER_",
     )
     drop_exact = {
         "LD_PRELOAD",
@@ -45,15 +55,85 @@ def scrub_subprocess_env(env: dict[str, str] | None = None) -> dict[str, str]:
         "OPENAI_API_KEY",
         "ANTHROPIC_API_KEY",
         "XAI_API_KEY",
+        "ANTHROPIC_AUTH_TOKEN",
+        "OPENAI_ORG_ID",
     }
+    # Keep VCS / package-registry / SSH agent credentials for owner pushes
+    keep_exact = {
+        "GH_TOKEN",
+        "GITHUB_TOKEN",
+        "GH_ENTERPRISE_TOKEN",
+        "GH_HOST",
+        "GH_REPO",
+        "GH_PAGER",
+        "GIT_ASKPASS",
+        "GIT_TERMINAL_PROMPT",
+        "GIT_SSH",
+        "GIT_SSH_COMMAND",
+        "GIT_AUTHOR_NAME",
+        "GIT_AUTHOR_EMAIL",
+        "GIT_COMMITTER_NAME",
+        "GIT_COMMITTER_EMAIL",
+        "GIT_CONFIG_GLOBAL",
+        "GIT_CONFIG_SYSTEM",
+        "GIT_EDITOR",
+        "GIT_PAGER",
+        "GIT_SEQUENCE_EDITOR",
+        "SSH_AUTH_SOCK",
+        "SSH_AGENT_PID",
+        "SSH_CONNECTION",
+        "GPG_TTY",
+        "NPM_TOKEN",
+        "NODE_AUTH_TOKEN",
+        "TWINE_USERNAME",
+        "TWINE_PASSWORD",
+        "CARGO_REGISTRY_TOKEN",
+        "PYPI_TOKEN",
+        "TERM",
+        "TEMP",
+        "TMP",
+        "TMPDIR",
+        "PATH",
+        "PATHEXT",
+        "SYSTEMROOT",
+        "WINDIR",
+        "USERPROFILE",
+        "HOME",
+        "HOMEDRIVE",
+        "HOMEPATH",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "USERNAME",
+        "USERDOMAIN",
+        "COMPUTERNAME",
+        "NUMBER_OF_PROCESSORS",
+        "PROCESSOR_ARCHITECTURE",
+        "COMSPEC",
+        "OS",
+    }
+    keep_prefixes = (
+        "GIT_",
+        "GH_",
+        "SSH_",
+        "GPG_",
+        "NPM_",
+        "NODE_",
+    )
     for key in list(safe_env):
         upper = key.upper()
+        if upper in keep_exact or any(upper.startswith(p) for p in keep_prefixes):
+            continue
         if upper in drop_exact or any(upper.startswith(p) for p in drop_prefixes):
             safe_env.pop(key, None)
-        elif (
-            ("API_KEY" in upper or "SECRET" in upper or "TOKEN" in upper)
-            and upper not in ("TERM", "TEMP", "TMP", "TMPDIR")
-        ):
+            continue
+        # Only strip LLM-shaped secrets, not every *TOKEN* (that broke GH_TOKEN)
+        if upper.endswith("_API_KEY") or upper.endswith("_SECRET_KEY"):
+            safe_env.pop(key, None)
+            continue
+        if "API_KEY" in upper and not upper.startswith("GIT"):
+            safe_env.pop(key, None)
+            continue
+        if upper.endswith("_SECRET") or "CLIENT_SECRET" in upper:
             safe_env.pop(key, None)
     return safe_env
 

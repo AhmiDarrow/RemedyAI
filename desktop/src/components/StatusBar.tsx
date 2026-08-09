@@ -123,13 +123,25 @@ function modelOptionsForProvider(
 
   const seen = new Set<string>()
   let list: { id: string; name: string }[] = []
-  for (const m of [...live, ...fromConn]) {
+  // RMB: prefer connected/discovered GGUFs first (live /models is often a full path)
+  const ordered =
+    pid === 'rmb' ? [...fromConn, ...live] : [...live, ...fromConn]
+  for (const m of ordered) {
     if (!m.id || seen.has(m.id)) continue
     // Drop guest-demo ids that leaked into non-demo providers
     // Drop demo-tagged names that leaked onto non-demo providers (parens or suffix).
     if (isDemoModelAllowed(m.id) || /\(demo\)|\bdemo\s*$/i.test(m.name || '')) continue
-    seen.add(m.id)
-    list.push(m)
+    // Normalize RMB full paths → stem ids for a clean picker
+    let id = m.id
+    let name = m.name || m.id
+    if (pid === 'rmb' && (id.includes('\\') || id.includes('/') || id.toLowerCase().endsWith('.gguf'))) {
+      const base = id.replace(/^.*[\\/]/, '').replace(/\.gguf$/i, '')
+      id = base
+      name = m.name?.includes('.gguf') ? m.name.replace(/^.*[\\/]/, '') : base
+    }
+    if (seen.has(id)) continue
+    seen.add(id)
+    list.push({ id, name })
   }
   if (list.length === 0) {
     list = PROVIDER_FALLBACK_MODELS[pid] || []
@@ -144,8 +156,15 @@ function pickModelForProvider(
   models: ModelInfo[],
 ): string {
   const opts = modelOptionsForProvider(provider, connected, models)
-  if (preferred && opts.some((m) => m.id === preferred)) return preferred
-  return opts[0]?.id || preferred || ''
+  const pref = (preferred || '').trim()
+  if (!pref) return opts[0]?.id || ''
+  // Exact match
+  if (opts.some((m) => m.id === pref)) return pref
+  // RMB: match stem if preferred is a path or longer name
+  const stem = pref.replace(/^.*[\\/]/, '').replace(/\.gguf$/i, '')
+  if (opts.some((m) => m.id === stem)) return stem
+  // Always keep preferred visible even if not in list yet
+  return pref
 }
 
 const INSTALL_PHASES = new Set([
@@ -531,7 +550,13 @@ export function StatusBar({
           className="flex items-center gap-1.5 flex-shrink-0"
           title={status === 'connected' ? `Remedy ${version || ''}`.trim() : 'Server offline'}
         >
-          <span className="inline-block w-2 h-2 rounded-full" style={{ background: dotColor }} />
+          <span
+            className={`inline-block w-2 h-2 rounded-full${
+              status === 'disconnected' ? ' status-offline-dot' : ''
+            }`}
+            style={{ background: dotColor }}
+            aria-hidden
+          />
           <span className="font-medium" style={{ color: 'var(--text-secondary)' }}>
             {status === 'connected'
               ? version
@@ -545,12 +570,14 @@ export function StatusBar({
 
         {streaming && (
           <span
-            className="px-1.5 py-0.5 rounded font-medium flex-shrink-0"
+            className="status-streaming-pill px-1.5 py-0.5 rounded font-medium flex-shrink-0 inline-flex items-center gap-1.5"
             style={{
               color: 'var(--accent)',
               background: 'color-mix(in srgb, var(--accent) 12%, transparent)',
             }}
+            title="Agent is generating a reply"
           >
+            <span className="live-stream-dot" aria-hidden />
             Streaming
           </span>
         )}
@@ -854,10 +881,16 @@ export function StatusBar({
                   background: 'var(--bg-tertiary)',
                   color: 'var(--text-primary)',
                   border: '1px solid var(--border)',
-                  maxWidth: 160,
+                  maxWidth: 200,
                   opacity: streaming ? 0.6 : 1,
                 }}
               >
+                {/* Keep current selection visible even if list is still loading */}
+                {safeModel
+                  && !modelOpts.some((m) => m.id === safeModel)
+                  && (
+                    <option value={safeModel}>{safeModel}</option>
+                  )}
                 {modelOpts.map((m) => (
                   <option key={m.id} value={m.id}>
                     {m.name}

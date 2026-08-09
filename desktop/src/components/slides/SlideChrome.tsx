@@ -14,6 +14,9 @@ export function SlideRail({
   return (
     <div
       className="slide-rail flex flex-col items-center border-r shrink-0"
+      data-side={side}
+      role="toolbar"
+      aria-label={side === 'left' ? 'Left workspace rail' : 'Right workspace rail'}
       style={{
         width: 36,
         borderRightWidth: side === 'left' ? 1 : 0,
@@ -32,6 +35,7 @@ export function SlideRail({
             type="button"
             title={m.label}
             aria-pressed={on}
+            aria-current={on ? 'page' : undefined}
             className={`slide-rail-btn flex items-center justify-center${on ? ' is-active' : ''}`}
             data-label={m.label}
             aria-label={m.label}
@@ -88,15 +92,24 @@ export function SlideFrame({
         }}
       >
         <div
-          className="slide-frame-chrome flex items-center gap-1 px-2 py-1.5 shrink-0 text-xs font-semibold"
-          style={{ color: 'var(--text-primary)' }}
+          className="slide-frame-chrome flex items-center gap-1 px-2 py-1.5 shrink-0 text-xs font-semibold border-b"
+          data-workspace-panel-header
+          style={{
+            color: 'var(--text-primary)',
+            borderColor: 'var(--border)',
+            background: 'var(--bg-secondary)',
+          }}
         >
-          <span className="truncate flex-1">{meta.label}</span>
+          <span className="truncate flex-1" title={meta.label}>
+            {meta.label}
+          </span>
           {meta.popout && onPopout && (
             <button
               type="button"
-              className="px-1 opacity-70 hover:opacity-100"
-              title="Pop out"
+              className="px-1.5 py-0.5 rounded opacity-70 hover:opacity-100"
+              style={{ color: 'var(--text-secondary)' }}
+              title="Pop out to floating window"
+              aria-label={`Pop out ${meta.label}`}
               onClick={onPopout}
             >
               ↗
@@ -105,8 +118,10 @@ export function SlideFrame({
           {meta.popout && onFullscreen && (
             <button
               type="button"
-              className="px-1 opacity-70 hover:opacity-100"
-              title="Fullscreen"
+              className="px-1.5 py-0.5 rounded opacity-70 hover:opacity-100"
+              style={{ color: 'var(--text-secondary)' }}
+              title="Fullscreen panel"
+              aria-label={`Fullscreen ${meta.label}`}
               onClick={onFullscreen}
             >
               ⛶
@@ -115,8 +130,10 @@ export function SlideFrame({
           {onClose && (
             <button
               type="button"
-              className="px-1 opacity-70 hover:opacity-100"
+              className="px-1.5 py-0.5 rounded opacity-70 hover:opacity-100"
+              style={{ color: 'var(--text-secondary)' }}
               title="Hide panel"
+              aria-label={`Hide ${meta.label}`}
               onClick={onClose}
             >
               ×

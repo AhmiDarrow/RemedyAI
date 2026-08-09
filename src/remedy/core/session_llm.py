@@ -48,9 +48,31 @@ def resolve_session_llm_bind(
         sess_p = (getattr(session, "llm_provider", None) or "").strip().lower() or None
         sess_m = (getattr(session, "model", None) or "").strip() or None
 
+    def _rmb_live_stem() -> str | None:
+        """Currently loaded GGUF stem — source of truth when provider is RMB."""
+        try:
+            from pathlib import Path
+
+            from remedy.runtime.rmb.config import load_rmb_json, merge_state
+
+            st = merge_state(load_rmb_json())
+            mp = str(st.get("model_path") or "").strip()
+            if mp:
+                return Path(mp).stem
+            mid = str(st.get("model_id") or "").strip()
+            return mid or None
+        except Exception:
+            return None
+
     # Explicit client pair wins (status bar / picker just set both).
     if req_p and req_m:
-        return _normalize_pair(req_p, req_m)
+        p, m = _normalize_pair(req_p, req_m)
+        # RMB: always address the host with the live GGUF stem
+        if (p or "").lower() == "rmb":
+            live = _rmb_live_stem()
+            if live:
+                return p, live
+        return p, m
 
     # Sticky session pair — do not let a lone model string (stale UI / global
     # picker) override a stored provider+model (Grok tab while Settings is DeepSeek).
@@ -58,14 +80,34 @@ def resolve_session_llm_bind(
         if req_p and req_p != sess_p:
             # Explicit provider change (status bar) without full pair.
             mid = req_m or sess_m
-            return _normalize_pair(req_p, mid)
+            p, m = _normalize_pair(req_p, mid)
+            if (p or "").lower() == "rmb":
+                live = _rmb_live_stem()
+                if live:
+                    return p, live
+            return p, m
         if req_m and not req_p:
             owner = infer_provider_from_model(req_m)
             if owner is None or owner == sess_p:
-                return _normalize_pair(sess_p, req_m)
+                p, m = _normalize_pair(sess_p, req_m)
+                if (p or "").lower() == "rmb":
+                    live = _rmb_live_stem()
+                    if live:
+                        return p, live
+                return p, m
             # Foreign model id without provider → ignore; keep sticky bind.
-            return _normalize_pair(sess_p, sess_m)
-        return _normalize_pair(sess_p, sess_m)
+            p, m = _normalize_pair(sess_p, sess_m)
+            if (p or "").lower() == "rmb":
+                live = _rmb_live_stem()
+                if live:
+                    return p, live
+            return p, m
+        p, m = _normalize_pair(sess_p, sess_m)
+        if (p or "").lower() == "rmb":
+            live = _rmb_live_stem()
+            if live:
+                return p, live
+        return p, m
 
     # Session has provider only
     if sess_p:

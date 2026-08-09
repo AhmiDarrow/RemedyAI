@@ -22,6 +22,31 @@ _IMPLEMENT_RE = re.compile(
     r")\b"
 )
 
+
+# "keep going" / resume — same product bar as implement (must use tools).
+_CONTINUE_RE = re.compile(
+    r"(?is)^\s*("
+    r"keep\s+going|continue|resume|carry\s+on|go\s+on|proceed|"
+    r"finish\s+(?:it|this|the\s+(?:task|job|build|app))|"
+    r"don'?t\s+stop|do\s+it|ship\s+it|make\s+progress|"
+    r"try\s+again|retry|pick\s+up(?:\s+where)?|"
+    r"next\s+step|keep\s+(?:building|working|coding)"
+    r")\b"
+)
+
+# Intent monologue without tools: "I'll build X… Let me start by laying out…"
+_INTENT_MONOLOGUE_RE = re.compile(
+    r"(?is)("
+    r"i(?:'ll| will)\s+build\b|"
+    r"let\s+me\s+start\s+by\b|"
+    r"laying\s+out\s+the\s+architecture\b|"
+    r"creating\s+the\s+core\s+project\s+structure\b|"
+    r"i(?:'ll| will)\s+(?:begin|start)\s+(?:by|with)\b|"
+    r"cross[- ]platform\b.*\b(packaging|viewer|editor)\b|"
+    r"here(?:'s| is)\s+(?:the\s+)?(?:plan|architecture)\b"
+    r")"
+)
+
 _LOCAL_CONTRACT = """[Local agent mode — auto-optimized]
 You run on a fixed on-device window. Tasks use RESEARCH → PLAN → BUILD **via tools only**.
 1. Call tools immediately. First step must include tool_calls (not markdown).
@@ -62,11 +87,196 @@ def is_local_binding(
         return p in ("rmb", "ollama", "llamacpp", "local")
 
 
-def message_wants_implement(message: str | None) -> bool:
+def needs_agent_harness(
+    provider: str | None = None,
+    model: str | None = None,
+    base_url: str | None = None,
+) -> bool:
+    """True when Remedy must *drive* the model (local/RMB muscle).
+
+    Product split (2026-08-09):
+    - **Local / RMB / Ollama / llama.cpp** → harness ON  
+      mid-turn fit, force tool_choice, monologue breakers, write-first packs,
+      bootstrap, tight context. Small models cannot be trusted to self-steer.
+    - **Frontier / hosted** (Grok, Claude, OpenAI, …) → harness OFF (light rails)  
+      full context, keep tools, no monologue thrash, no force-required spam.
+      Trust the model to complete the task; only safety + recovery rails.
+
+    Alias of :func:`is_local_binding` so call sites read as policy, not plumbing.
+    """
+    return is_local_binding(provider, model, base_url)
+
+
+def is_frontier_binding(
+    provider: str | None = None,
+    model: str | None = None,
+    base_url: str | None = None,
+) -> bool:
+    """True for hosted frontier chat — let them be smart."""
+    return not needs_agent_harness(provider, model, base_url)
+
+
+def message_wants_continue_work(message: str | None) -> bool:
+    """True for short resume phrases: keep going / continue / finish it."""
     t = (message or "").strip()
-    if len(t) < 3:
+    if not t or len(t) > 220:
+        # Long messages use implement keywords instead
+        return bool(_CONTINUE_RE.search(t[:220])) if t else False
+    return bool(_CONTINUE_RE.search(t))
+
+
+def message_wants_implement(message: str | None) -> bool:
+    """True when the user wants code/files on disk *or* is resuming that work.
+
+    Partner rule: "keep going" on a build session is implement intent.
+    """
+    t = (message or "").strip()
+    if len(t) < 2:
         return False
+    if message_wants_continue_work(t):
+        return True
     return bool(_IMPLEMENT_RE.search(t))
+
+
+def history_suggests_unfinished_build(history: list[dict[str, Any]] | None) -> bool:
+    """Recent turn already used tools or promised build work → continue = build."""
+    if not history:
+        return False
+    # Look at last ~12 messages
+    recent = history[-12:]
+    for m in recent:
+        if not isinstance(m, dict):
+            continue
+        if m.get("tool_calls"):
+            return True
+        role = str(m.get("role") or "").lower()
+        if role == "tool":
+            return True
+        content = m.get("content")
+        if not isinstance(content, str):
+            continue
+        low = content.lower()
+        if role == "assistant" and (
+            _INTENT_MONOLOGUE_RE.search(content)
+            or "file_write" in low
+            or "bash_exec" in low
+            or "i'll build" in low
+            or "let me start" in low
+        ):
+            return True
+        if role == "tool" or "name 'suppress'" in low or "error" in low[:80]:
+            if any(
+                k in low
+                for k in ("bash_exec", "file_write", "file_edit", "suppress", "failed")
+            ):
+                return True
+    return False
+
+
+def message_wants_build_work(
+    message: str | None,
+    history: list[dict[str, Any]] | None = None,
+) -> bool:
+    """Implement keywords, continue phrases, or resume of unfinished build."""
+    if message_wants_implement(message):
+        return True
+    # Bare "ok" / "yes" after a build monologue still means keep building
+    t = (message or "").strip().lower()
+    if t in ("ok", "okay", "yes", "yep", "yeah", "do it", "go", "sure") and history_suggests_unfinished_build(
+        history
+    ):
+        return True
+    if history_suggests_unfinished_build(history) and len(t) < 80:
+        # Short follow-ups during a build session
+        return True
+    return False
+
+
+def looks_like_intent_monologue(text: str | None) -> bool:
+    """True when the model promises to build/architect without tool_calls."""
+    t = (text or "").strip()
+    if len(t) < 40:
+        return False
+    return bool(_INTENT_MONOLOGUE_RE.search(t))
+
+
+def monologue_fingerprint(text: str | None) -> str:
+    """Normalize monologue text for loop detection (ignore whitespace noise)."""
+    import re as _re
+
+    t = (text or "").strip().lower()
+    t = _re.sub(r"\s+", " ", t)
+    # Collapse repeated identical sentences (model stutter in one blob)
+    parts = [p.strip() for p in _re.split(r"(?<=[.!?])\s+", t) if p.strip()]
+    if len(parts) >= 2:
+        # If first sentence repeats, keep once
+        uniq: list[str] = []
+        for p in parts:
+            if not uniq or p != uniq[-1]:
+                uniq.append(p)
+        t = " ".join(uniq)
+    return t[:400]
+
+
+def text_has_internal_repetition(text: str | None) -> bool:
+    """True when the same sentence appears 2+ times in one reply (loop stutter)."""
+    t = (text or "").strip()
+    if len(t) < 80:
+        return False
+    import re as _re
+
+    parts = [p.strip().lower() for p in _re.split(r"(?<=[.!?])\s+", t) if len(p.strip()) > 40]
+    if len(parts) < 2:
+        # Also catch paragraph repeats without punctuation
+        chunks = [c.strip().lower() for c in t.split("\n\n") if len(c.strip()) > 50]
+        if len(chunks) >= 2 and chunks[0] == chunks[1]:
+            return True
+        return False
+    seen: set[str] = set()
+    for p in parts:
+        if p in seen:
+            return True
+        seen.add(p)
+    return False
+
+
+def project_listing_snapshot(project_path: str | None, *, max_entries: int = 40) -> str:
+    """Real list_dir-style text for inject when model only monologues 'explore'."""
+    from pathlib import Path as _P
+
+    root = _P(project_path or "").expanduser()
+    if not root.is_dir():
+        return f"(project path not found: {project_path})"
+    lines: list[str] = [f"Project root: {root}"]
+    try:
+        entries = sorted(root.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
+    except OSError as e:
+        return f"(cannot list {root}: {e})"
+    n = 0
+    for p in entries:
+        if p.name.startswith("."):
+            continue
+        kind = "dir" if p.is_dir() else "file"
+        lines.append(f"  {kind} {p.name}")
+        n += 1
+        if n >= max_entries:
+            lines.append("  …")
+            break
+    # One level into src/ if present
+    src = root / "src"
+    if src.is_dir():
+        lines.append("src/:")
+        try:
+            for p in sorted(src.rglob("*"))[:30]:
+                if p.is_file():
+                    try:
+                        rel = p.relative_to(root).as_posix()
+                    except ValueError:
+                        rel = str(p)
+                    lines.append(f"  file {rel}")
+        except OSError:
+            pass
+    return "\n".join(lines)
 
 
 def local_system_contract() -> str:
@@ -103,8 +313,17 @@ def looks_like_tutorial_monologue(text: str | None) -> bool:
 
     Session export: create PDF viewer → multi-turn RESEARCH/PLAN/BUILD markdown
     with fenced code and pip install, zero file_write. Must never be accepted.
+
+    Also: short intent monologues ("I'll build X… laying out architecture")
+    that leave the partner with zero files on disk (screenshot 2026-08-08).
     """
     t = (text or "").strip()
+    if not t:
+        return False
+    # Intent-only promise (can be short) — still not work
+    if looks_like_intent_monologue(t) and len(t) < 900 and "```" not in t:
+        # Pure promise + architecture talk, no fenced work product
+        return True
     if len(t) < 180:
         return False
     low = t.lower()
@@ -138,6 +357,25 @@ def looks_like_tutorial_monologue(text: str | None) -> bool:
     if marker_hits >= 2 and len(t) > 400:
         return True
     return False
+
+
+def continue_build_nudge(*, project_path: str | None = None) -> dict[str, str]:
+    """Hard user message after intent monologue on keep-going / build turns."""
+    root = (project_path or "").strip().replace("\\", "/")
+    example = f'{root.rstrip("/")}/README.md' if root else "PROJECT_ROOT/README.md"
+    return {
+        "role": "user",
+        "content": (
+            "[Partner · CONTINUE BUILD — tools required] You promised work but made "
+            "**zero** tool_calls. That is not allowed. Your next message MUST be native "
+            "function calls only (no architecture essay):\n"
+            f"1) list_dir on the project root (or file_write `{example}` if empty)\n"
+            "2) file_write / file_edit for real source files under the workspace\n"
+            "3) bash_exec only after files exist (verify, not plan)\n"
+            "Illegal: 'I'll build…', 'let me start by laying out…', RESEARCH/PLAN markdown.\n"
+            "Start **now** with tool_calls."
+        ),
+    }
 
 
 def tutorial_monologue_nudge(*, project_path: str | None = None) -> dict[str, str]:
@@ -235,22 +473,40 @@ def force_tool_choice_required(
     tools: list | None,
     user_message: str | None = None,
     step_index: int = 0,
+    history: list[dict[str, Any]] | None = None,
 ) -> bool:
     """True when llama.cpp should get tool_choice=required (not monologue)."""
     if not tools:
         return False
     if not is_local_binding(provider, model, base_url):
         return False
-    # First few steps of an implement turn — force tools
-    if step_index <= 3 and message_wants_implement(user_message or ""):
+    msg = user_message or ""
+    build = message_wants_build_work(msg, history)
+    # Keep-going / implement: force tools for the whole build turn
+    # (monologue loops often happen after step 8 when this used to drop)
+    if build and step_index <= 64:
         return True
     # Anytime tools are armed and step is early, bias required for RMB
     if step_index == 0 and (provider or "").lower() in ("rmb", "llamacpp", "ollama"):
-        # Only force if message looks like work (not hi/thanks)
-        msg = (user_message or "").strip().lower()
-        if msg and msg not in ("hi", "hey", "hello", "thanks", "ok", "okay"):
-            if message_wants_implement(msg) or len(msg) > 40:
+        # Only force if message looks like work (not pure greeting)
+        low = msg.strip().lower()
+        if low and low not in ("hi", "hey", "hello", "thanks", "thank you"):
+            if build or message_wants_implement(msg) or len(low) > 40:
                 return True
+    return False
+
+
+def tools_include_writes(tools: list | None) -> bool:
+    """True when file_write / file_edit / batch are in the armed tool list."""
+    if not tools:
+        return False
+    for t in tools:
+        if not isinstance(t, dict):
+            continue
+        fn = t.get("function") if isinstance(t.get("function"), dict) else t
+        name = str((fn or {}).get("name") or t.get("name") or "").strip().lower()
+        if name in ("file_write", "file_edit", "file_edit_batch"):
+            return True
     return False
 
 
@@ -259,14 +515,20 @@ def local_completion_cap(
     *,
     tools_present: bool,
     force_tools: bool,
+    write_tools: bool = False,
 ) -> int:
-    """Smaller n_predict when we need a tool call, not a 1k-token essay."""
+    """n_predict budget for local hosts.
+
+    Partner rule: must be large enough for real ``file_write`` / ``file_edit``
+    JSON. Late build steps still need headroom even when force_tools is off.
+    """
     win = max(2048, int(window or 8192))
-    if force_tools and tools_present:
-        # Enough for a multi-arg file_write JSON, not a blog post
-        return max(384, min(1024, win // 24))
+    # Write tools always get the high band (edit/write bodies are huge as JSON)
+    if write_tools or (force_tools and tools_present):
+        # 32k ctx → 12k; hard floor 4k so mid-stream file_edit does not die
+        return max(4096, min(12288, win // 3))
     if tools_present:
-        return max(512, min(1536, win // 16))
+        return max(2048, min(6144, win // 5))
     return max(512, min(2048, win // 10))
 
 
@@ -278,6 +540,7 @@ def apply_local_body_optimize(
     base_url: str | None = None,
     user_message: str | None = None,
     step_index: int = 0,
+    history: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Mutate/return chat body optimized for local hosts."""
     if not isinstance(body, dict):
@@ -293,7 +556,12 @@ def apply_local_body_optimize(
         tools=tools,
         user_message=user_message,
         step_index=step_index,
+        history=history,
     )
+    writes = tools_include_writes(tools)
+    # Late-step builds still need tool_choice when write tools are armed
+    if writes and message_wants_build_work(user_message or "", history):
+        force = True
     try:
         from remedy.core.endless_context import resolve_local_window
 
@@ -302,18 +570,81 @@ def apply_local_body_optimize(
         )
     except Exception:
         win = 8192
-    cap = local_completion_cap(win, tools_present=bool(tools), force_tools=force)
+    # Sticky bump after TOOL_ARGS_TRUNCATED (set by tool batch)
+    sticky = 0
+    try:
+        sticky = int(out.get("_remedy_write_budget") or 0)
+    except (TypeError, ValueError):
+        sticky = 0
+    # After machine green verify: force tiny summary budget, no tools
+    green_summary = False
+    try:
+        for m in reversed(history or []):
+            if not isinstance(m, dict):
+                continue
+            c = str(m.get("content") or "")
+            if (
+                "GREEN · stop building" in c
+                or "Machine verify passed" in c
+                or "AUTO VERIFY · GREEN" in c
+                or "Verify is GREEN" in c
+            ):
+                green_summary = True
+                break
+            # only scan recent tail
+            if m.get("role") == "assistant" and len(c) > 400:
+                break
+    except Exception:
+        green_summary = False
+    # Also honor body already tool-less after green strip upstream
+    if not green_summary and not out.get("tools") and not tools:
+        try:
+            for m in reversed((history or [])[-6:]):
+                if isinstance(m, dict) and "GREEN" in str(m.get("content") or ""):
+                    green_summary = True
+                    break
+        except Exception:
+            pass
+    if green_summary:
+        tools = None
+        out.pop("tools", None)
+        out.pop("tool_choice", None)
+        force = False
+        writes = False
+
+    cap = local_completion_cap(
+        win,
+        tools_present=bool(tools),
+        force_tools=force,
+        write_tools=writes,
+    )
+    if green_summary:
+        cap = min(cap, 512)
+    if sticky > cap and not green_summary:
+        cap = sticky
     try:
         cur = int(out.get("max_tokens") or cap)
-        out["max_tokens"] = min(cur, cap)
+        # Never *shrink* a write-tool budget below the write floor
+        if writes and not green_summary:
+            out["max_tokens"] = max(cur, cap)
+        else:
+            out["max_tokens"] = min(cur, cap) if cur > 0 else cap
+            if not green_summary:
+                out["max_tokens"] = max(int(out["max_tokens"]), min(cap, 2048))
+            else:
+                out["max_tokens"] = min(int(out["max_tokens"]), 512)
     except (TypeError, ValueError):
         out["max_tokens"] = cap
+    out.pop("_remedy_write_budget", None)
     if tools:
         out["temperature"] = 0.05 if force else min(float(out.get("temperature") or 0.2), 0.15)
         # Non-stream JSON first: llama.cpp is flaky streaming with tool_choice=required.
         # On implement turns, force tools — "auto" lets 7B dump tutorial monologues.
         out["stream"] = False
         out["tool_choice"] = "required" if force else "auto"
+    elif green_summary:
+        out["stream"] = False
+        out["temperature"] = 0.1
     # Local models: never send cloud thinking knobs
     out.pop("reasoning_effort", None)
     out.pop("thinking", None)
@@ -355,16 +686,46 @@ def simple_python_calculator_source() -> str:
     )
 
 
+def _extract_print_phrase(message: str) -> str | None:
+    """Pull `prints exactly: X` / `print \"X\"` from a simple create request."""
+    import re
+
+    m = re.search(
+        r"(?is)prints?\s+(?:exactly\s+)?[:\"]\s*([^\n\"']+)",
+        message or "",
+    )
+    if m:
+        return m.group(1).strip().strip("`'\" ")
+    m = re.search(r'(?is)print\(\s*["\']([^"\']+)["\']\s*\)', message or "")
+    if m:
+        return m.group(1).strip()
+    return None
+
+
+def _extract_simple_filename(message: str) -> str | None:
+    """hello.py / main.c style basename from the user message."""
+    import re
+
+    m = re.search(
+        r"(?i)\b([A-Za-z_][\w\-]*\.(?:py|c|cpp|rs|go|js|ts))\b",
+        message or "",
+    )
+    if m:
+        return m.group(1)
+    return None
+
+
 async def maybe_bootstrap_local_create(
     runtime: Any,
     message: str,
 ) -> str | None:
-    """If local + create-calculator-style request, write the file deterministically.
+    """Deterministic finish for *narrow* local create asks only.
 
-    Qwen-class local models often monologue or skip ``file_write``. For clear
-    create-app asks with an absolute path under write roots, Remedy writes a
-    minimal working program itself so the user is not stuck. Returns a short
-    user-facing confirmation or None to continue the normal ReAct loop.
+    Partner rule (2026-08-08): do **not** short-circuit the ReAct loop for
+    general \"write hello.py\" / PDF apps — that wrote the wrong file
+    (always calculator.py) and skipped tools. Only bootstrap when the user
+    clearly wants a **calculator**, or a one-file print program with an
+    explicit filename + print phrase.
     """
     if not message_wants_implement(message):
         return None
@@ -377,37 +738,53 @@ async def maybe_bootstrap_local_create(
     except Exception:
         return None
 
+    low = (message or "").lower()
+    wants_calc = any(
+        k in low for k in ("calculator", "calc app", "add/sub", "tkinter calculator")
+    )
+    print_phrase = _extract_print_phrase(message or "")
+    fname = _extract_simple_filename(message or "")
+    # One-file print program: "write hello.py that prints exactly: hello partner"
+    wants_hello = bool(
+        print_phrase
+        and fname
+        and fname.endswith(".py")
+        and any(k in low for k in ("write", "create", "make", "build"))
+        and "pdf" not in low
+        and "remedypdf" not in low
+    )
+    if not wants_calc and not wants_hello:
+        return None
+
     path = extract_create_path(message)
     if not path:
-        # Default into project
         try:
             root = str(runtime.effective_project_path() or "").replace("\\", "/")
-            if root:
+            if root and wants_calc:
                 path = f"{root.rstrip('/')}/calculator.py"
+            elif root and fname:
+                path = f"{root.rstrip('/')}/{fname}"
         except Exception:
             path = None
     if not path:
         return None
 
-    # Only auto-bootstrap obvious calculator/create-python tasks
-    low = (message or "").lower()
-    if not any(k in low for k in ("calculator", "calc", "add/sub", "add(", "tkinter")):
-        if not (low.count("create") and low.endswith(".py") or ".py" in low and "create" in low):
-            # Still allow explicit create + .py path
-            if not (".py" in low and any(k in low for k in ("create", "write", "make", "build"))):
-                return None
-
     ensure_local_power_approvals()
-    content = simple_python_calculator_source()
-    if "calculator" not in low and "calc" not in low:
-        # generic python stub
+    if wants_calc:
+        content = simple_python_calculator_source()
+        label = "working Python calculator (add/sub/mul/div)"
+    else:
+        phrase = print_phrase or "hello partner"
+        # Escape for Python string
+        safe = phrase.replace("\\", "\\\\").replace('"', '\\"')
         content = (
-            '"""Generated by Remedy local agent bootstrap."""\n\n'
-            "def main():\n"
-            '    print("hello from Remedy")\n\n'
-            'if __name__ == "__main__":\n'
-            "    main()\n"
+            f'"""Generated by Remedy — simple print program."""\n\n'
+            f"def main() -> None:\n"
+            f'    print("{safe}")\n\n'
+            f'if __name__ == "__main__":\n'
+            f"    main()\n"
         )
+        label = f'Python program that prints "{phrase}"'
 
     try:
         from pathlib import Path as _P
@@ -422,8 +799,8 @@ async def maybe_bootstrap_local_create(
             f"hit: {exc}. I'll continue with tools."
         )
 
-    # Best-effort compile check
     compile_note = ""
+    run_note = ""
     try:
         import py_compile
 
@@ -431,15 +808,27 @@ async def maybe_bootstrap_local_create(
         compile_note = " Syntax check (py_compile) passed."
     except Exception as exc:
         compile_note = f" (py_compile warning: {exc})"
+    if wants_hello and print_phrase:
+        try:
+            import subprocess
+            import sys as _sys
+
+            r = subprocess.run(
+                [_sys.executable, str(resolved)],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                cwd=str(resolved.parent),
+            )
+            out = (r.stdout or "").strip()
+            if print_phrase in out:
+                run_note = f"\nVerified run output: `{out}`"
+        except Exception:
+            pass
 
     return (
-        f"Created `{resolved.as_posix()}` with a working Python calculator "
-        f"(add/sub/mul/div + main printing add(2, 3)).{compile_note}\n\n"
-        "Run it with:\n"
-        f"`python \"{resolved}\"`\n\n"
-        "Local agent bootstrap wrote this file so the job completes even when the "
-        "on-device model monologues instead of calling tools. Ask me to extend it "
-        "(GUI, tests, more ops) and I'll keep going."
+        f"Created `{resolved.as_posix()}` — {label}.{compile_note}{run_note}\n\n"
+        f"Run: `python \"{resolved}\"`\n"
     )
 
 
@@ -502,7 +891,10 @@ def inject_local_messages(
             insert_at,
             {"role": "system", "content": local_system_contract()},
         )
-    if message_wants_implement(user_message) and "[Local create contract]" not in blob:
+    wants_build = message_wants_implement(user_message) or message_wants_continue_work(
+        user_message
+    )
+    if wants_build and "[Local create contract]" not in blob:
         # Insert just before last user message
         idx = len(out)
         for i in range(len(out) - 1, -1, -1):

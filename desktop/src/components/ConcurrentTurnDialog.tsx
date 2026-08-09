@@ -1,6 +1,8 @@
 /** Confirm starting another turn when several are already live. */
 
+import { useEffect } from 'react'
 import { concurrentTurnConfirmMessage } from '../sessions/concurrentTurns'
+import { browserStackHold } from '../utils/browserStack'
 
 interface ConcurrentTurnDialogProps {
   open: boolean
@@ -15,6 +17,22 @@ export function ConcurrentTurnDialog({
   onContinue,
   onCancel,
 }: ConcurrentTurnDialogProps) {
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        onCancel()
+      }
+    }
+    window.addEventListener('keydown', onKey, true)
+    const release = browserStackHold('concurrent-turn-dialog')
+    return () => {
+      window.removeEventListener('keydown', onKey, true)
+      release()
+    }
+  }, [open, onCancel])
+
   if (!open) return null
   return (
     <div
@@ -39,7 +57,7 @@ export function ConcurrentTurnDialog({
           <button type="button" className="ui-btn ui-btn-secondary" onClick={onCancel}>
             Cancel
           </button>
-          <button type="button" className="ui-btn ui-btn-primary" onClick={onContinue}>
+          <button type="button" className="ui-btn ui-btn-primary" autoFocus onClick={onContinue}>
             Continue
           </button>
         </div>

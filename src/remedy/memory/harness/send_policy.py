@@ -495,7 +495,9 @@ def apply_auto_harness_send_policy(
     tokens_before = est
     # Strong still protects a real recent window (was 3 — too thin for code chains).
     keep = _chain_keep(messages, 6 if chain else 5)
-    hard_cap = max(4_000, (tool_result_char_cap or 64_000) // 4)
+    # Full-power: do not slash tool bodies to 2k–4k mid-build
+    _trc = int(tool_result_char_cap or 0)
+    hard_cap = 128_000 if _trc <= 0 else max(16_000, _trc // 2)
     budget = max(2048, int(window * max(0.45, min_pct - 0.15)))
     messages[:] = prune_messages_for_send(
         messages,
@@ -759,7 +761,13 @@ def slim_messages_mid_turn(
     # Stronger when above soft threshold — but keep a wide recent tool window
     strong = fill >= min_pct
     keep = _chain_keep(messages, 6 if strong else 8)
-    hard_cap = max(4_000, (tool_result_char_cap or 64_000) // 4) if strong else 0
+    _trc = int(tool_result_char_cap or 0)
+    if not strong:
+        hard_cap = 0
+    elif _trc <= 0:
+        hard_cap = 128_000
+    else:
+        hard_cap = max(16_000, _trc // 2)
     # Mid-turn budget slightly looser than turn-start strong so chains can finish
     budget = max(2048, int(window * (0.50 if strong else 0.58)))
     protect_ids = _protect_ids_from_runtime(runtime)

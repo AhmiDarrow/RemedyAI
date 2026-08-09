@@ -352,6 +352,7 @@ export async function setSessionLlm(
   context_window?: number | null
   toast?: string
 }> {
+  const isRmb = (provider || '').toLowerCase() === 'rmb'
   return apiFetch(`/sessions/${sessionId}/llm`, {
     method: 'PUT',
     body: JSON.stringify({
@@ -359,5 +360,7 @@ export async function setSessionLlm(
       model: model || null,
       make_default: makeDefault,
     }),
+    // RMB may restart llama-server with a new GGUF
+    timeout: isRmb ? 180_000 : 30_000,
   })
 }

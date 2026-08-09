@@ -384,3 +384,11 @@ def register_memory_tools(runtime: Any) -> None:
 
     register_build_tools(runtime)
 
+    # --- Ship tools (git_status / git_push / gh_release after green) ---
+    try:
+        from remedy.core.agent_ship_tools import register_ship_tools
+
+        register_ship_tools(runtime)
+    except Exception:
+        pass
+

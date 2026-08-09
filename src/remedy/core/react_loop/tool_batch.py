@@ -162,30 +162,27 @@ async def apply_build_engine_after_batch(
                         av.get("command"),
                         av.get("scoped"),
                     )
-                    # D: optional mutant kill sample after green (cheap)
+                    # Mark turn green so the loop can short-summary without re-tooling
                     with suppress(Exception):
-                        if (
-                            "mutant_sampled" not in bst.nudges_emitted
-                            and bst.write_set
-                        ):
-                            from remedy.core.build_mutant import (
-                                format_mutant_message,
-                                mutant_kill_score,
-                            )
+                        runtime._build_verify_green = True  # type: ignore[attr-defined]
+                    from remedy.core.build_engine import (
+                        format_ship_report_line,
+                        green_continue_message,
+                    )
 
-                            root_m = runtime.effective_project_path()
-                            mk = mutant_kill_score(
-                                root_m, list(bst.write_set)[-4:]
-                            )
-                            bst.last_mutant_kill = mk  # type: ignore[attr-defined]
-                            if mk.get("total"):
-                                bst.nudges_emitted.append("mutant_sampled")
-                                messages.append(format_mutant_message(mk))
-                                if mk.get("survived"):
-                                    yield (
-                                        "@@status:Build mutants survived "
-                                        f"{mk.get('survived')}\n"
-                                    )
+                    # Ship goals: continue push/release; else short summary only
+                    gmsg = green_continue_message(
+                        bst, command=str(av.get("command") or "")
+                    )
+                    messages.append(gmsg)
+                    if bst.ship_required and not bst.ship_complete():
+                        rearm_agency()
+                        yield "@@status:Build green — continue ship\n"
+                    ship_line = format_ship_report_line(bst)
+                    if ship_line:
+                        yield ship_line
+                    # D: optional mutant kill sample after green (cheap) — skip on local
+                    # to avoid another long tool wave after done.
                 else:
                     if "auto_verify_repair" not in bst.nudges_emitted:
                         bst.nudges_emitted.append("auto_verify_repair")
@@ -215,7 +212,12 @@ async def apply_build_engine_after_batch(
                         av.get("command"),
                         av.get("scoped"),
                     )
-                rearm_agency()
+                    rearm_agency()
+                # Green: do not rearm tools (summary-only). Red/cap: already rearmed above.
+                if not av.get("ok") and not av.get("capped"):
+                    pass  # rearmed in red branch
+                elif av.get("capped") or av.get("oracle_missing"):
+                    rearm_agency()
                 yield (
                     f"@@status:Build auto-verify "
                     f"{'green' if av.get('ok') else ('cap' if av.get('capped') else 'red')}"

@@ -30,6 +30,17 @@ export function EmptyState({
       role="status"
     >
       <div
+        className="ui-empty-glyph"
+        style={{
+          color,
+          background: `color-mix(in srgb, ${color} 12%, transparent)`,
+          border: `1px solid color-mix(in srgb, ${color} 28%, transparent)`,
+        }}
+        aria-hidden
+      >
+        {tone === 'error' ? '!' : tone === 'accent' ? '✦' : '·'}
+      </div>
+      <div
         className="text-sm font-semibold tracking-tight"
         style={{ color: tone === 'muted' ? 'var(--text-primary)' : color }}
       >
@@ -37,7 +48,7 @@ export function EmptyState({
       </div>
       {description ? (
         <div
-          className="text-xs leading-relaxed max-w-[16rem]"
+          className="text-xs leading-relaxed max-w-[18rem]"
           style={{ color: 'var(--text-muted)' }}
         >
           {description}

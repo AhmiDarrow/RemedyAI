@@ -1575,11 +1575,75 @@ body {
   border-color: color-mix(in srgb, var(--accent) 40%, transparent) !important;
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 12%, transparent);
 }
+/* Icons-only mode: remember last selection without full "open" weight */
+.slide-rail-btn.is-selected:not(.is-active) {
+  color: var(--accent) !important;
+  background: color-mix(in srgb, var(--accent) 10%, transparent) !important;
+  border-color: color-mix(in srgb, var(--accent) 22%, transparent) !important;
+}
+.slide-rail-btn:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 70%, transparent);
+  outline-offset: 1px;
+}
 
 /* Slide frame chrome */
 .slide-frame-chrome {
   border-bottom: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
   background: color-mix(in srgb, var(--bg-secondary) 90%, transparent);
+}
+
+/* Panel header action chips */
+.workspace-chrome-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.5rem;
+  height: 1.4rem;
+  padding: 0 0.3rem;
+  border-radius: 0.35rem;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  opacity: 0.78;
+  cursor: pointer;
+  font-size: 0.75rem;
+  line-height: 1;
+  transition: opacity 0.12s ease, background 0.12s ease, border-color 0.12s ease;
+}
+.workspace-chrome-btn:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--bg-tertiary) 70%, transparent);
+  border-color: color-mix(in srgb, var(--border) 80%, transparent);
+  color: var(--text-primary);
+}
+.workspace-chrome-btn:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 70%, transparent);
+  outline-offset: 1px;
+}
+
+/* Thin edge rail hover affordance */
+.workspace-thin-rail:hover {
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-tertiary)) !important;
+  color: var(--accent) !important;
+}
+
+/* File browser rows */
+.files-row {
+  border-radius: 0.35rem;
+  transition: background 0.1s ease;
+}
+.files-row:hover,
+.files-row:focus-within {
+  background: color-mix(in srgb, var(--bg-tertiary) 55%, transparent);
+}
+.files-row.is-focused {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  outline: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+body.is-rail-resizing iframe,
+body.is-rail-resizing [data-browser-embed-host] {
+  pointer-events: none !important;
 }
 
 /* Command palette / dialogs — slightly softer */
@@ -1925,6 +1989,11 @@ body {
   z-index: 30;
   pointer-events: none;
 }
+/* Right rail: fly tooltips to the left so they stay on-screen */
+.slide-rail[data-side='right'] .slide-rail-btn[data-label]:hover::after {
+  left: auto;
+  right: calc(100% + 6px);
+}
 .slide-rail {
   position: relative;
   overflow: visible !important;
@@ -1933,15 +2002,35 @@ body {
   position: relative;
 }
 .slide-resize-handle {
-  width: 4px;
+  width: 5px;
   cursor: col-resize;
   flex-shrink: 0;
   background: transparent;
   transition: background 0.12s ease;
+  position: relative;
+  z-index: 4;
+}
+.slide-resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: color-mix(in srgb, var(--border) 70%, transparent);
+  opacity: 0.6;
+  transition: opacity 0.12s ease, background 0.12s ease, width 0.12s ease;
+}
+.slide-resize-handle:hover::after,
+.slide-resize-handle.is-active::after {
+  width: 2px;
+  opacity: 1;
+  background: color-mix(in srgb, var(--accent) 70%, transparent);
 }
 .slide-resize-handle:hover,
-.slide-resize-handle:active {
-  background: color-mix(in srgb, var(--accent) 55%, transparent);
+.slide-resize-handle.is-active {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
 }
 .ui-input {
   width: 100%;
@@ -2150,6 +2239,167 @@ body {
 }
 @media (prefers-reduced-motion: reduce) {
   .chat-skeleton-row {
+    animation: none;
+  }
+}
+
+/* ---- Full polish pass (2026-08) ---- */
+
+/* Empty states */
+.ui-empty-glyph {
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 700;
+  margin-bottom: 0.15rem;
+}
+.ui-empty-state {
+  animation: ui-empty-in 0.22s ease-out;
+}
+@keyframes ui-empty-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ui-empty-state {
+    animation: none;
+  }
+}
+
+/* Titlebar app menu */
+.titlebar-menu-item {
+  background: transparent;
+  color: var(--text-primary);
+  transition: background 0.1s ease, color 0.1s ease;
+}
+.titlebar-menu-item:hover,
+.titlebar-menu-item:focus-visible {
+  background: color-mix(in srgb, var(--bg-tertiary) 90%, transparent);
+  outline: none;
+}
+.titlebar-menu-item.is-accent {
+  color: var(--accent);
+}
+.titlebar-menu-item.is-danger {
+  color: var(--error);
+}
+.titlebar-menu-item.is-danger:hover {
+  background: color-mix(in srgb, var(--error) 12%, transparent);
+}
+.titlebar-menu-shortcut {
+  color: var(--text-muted);
+  font-size: 0.62rem;
+  font-family: ui-monospace, 'Cascadia Code', monospace;
+}
+
+/* Chat tabs */
+.tab-bar-item {
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.tab-bar-item:hover:not(.is-active) {
+  background: color-mix(in srgb, var(--bg-tertiary) 55%, transparent);
+  color: var(--text-secondary) !important;
+}
+.tab-bar-item.is-active {
+  font-weight: 600;
+}
+.tab-bar-new {
+  transition: color 0.12s ease, background 0.12s ease;
+}
+.tab-bar-new:hover {
+  color: var(--accent) !important;
+  background: color-mix(in srgb, var(--accent) 10%, transparent) !important;
+}
+
+/* Status streaming pill */
+.status-streaming-pill .live-stream-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  display: inline-block;
+}
+
+/* Firefox scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text-muted) 45%, var(--border)) transparent;
+}
+
+/* Panel body subtle edge */
+.workspace-panel-body {
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text-primary) 3%, transparent);
+}
+
+/* Settings / dialog form inputs — shared focus ring when missing local styles */
+input[type='text']:focus-visible,
+input[type='search']:focus-visible,
+input[type='password']:focus-visible,
+input[type='number']:focus-visible,
+input[type='url']:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+}
+
+/* Disabled opacity consistency */
+button:disabled,
+input:disabled,
+select:disabled,
+textarea:disabled {
+  cursor: not-allowed;
+}
+
+/* Soften harsh pure-black popouts already themed */
+[data-popout-overlay] {
+  backdrop-filter: none;
+}
+
+/* Help / long docs prose in rails */
+.prose-rail {
+  line-height: 1.55;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}
+.prose-rail h1,
+.prose-rail h2,
+.prose-rail h3 {
+  color: var(--text-primary);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.prose-rail a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.prose-rail code {
+  font-size: 0.78em;
+  padding: 0.1em 0.3em;
+  border-radius: 0.3rem;
+  background: color-mix(in srgb, var(--bg-tertiary) 80%, transparent);
+}
+
+/* Connection status pulse when offline */
+@keyframes remedy-offline-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+[data-remedy-status-bar] .status-offline-dot {
+  animation: remedy-offline-pulse 1.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-remedy-status-bar] .status-offline-dot {
     animation: none;
   }
 }

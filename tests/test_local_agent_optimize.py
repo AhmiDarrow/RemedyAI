@@ -102,7 +102,9 @@ def test_apply_local_body_sets_required_tools():
     # Implement turns must force tools — "auto" was accepting tutorial monologues.
     assert out["tool_choice"] == "required"
     assert out.get("stream") is False
-    assert int(out["max_tokens"]) <= 1024
+    # Full-context local: allow larger write budgets (old hard 1024 was a thrash wall)
+    assert int(out["max_tokens"]) >= 1024
+    assert int(out["max_tokens"]) <= 32_768
     assert float(out["temperature"]) <= 0.15
 
 
